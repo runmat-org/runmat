@@ -1,5 +1,6 @@
 use futures::{executor::block_on, FutureExt};
 use runmat_accelerate::simple_provider::InProcessProvider;
+use runmat_accelerate_api::allocation::{WeakAllocationLease, WeakGpuTensorHandle};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle,
     HostNumericTensorView, HostTensorView, ProviderPrecision, ThreadProviderGuard,
@@ -12,9 +13,23 @@ struct Provider {
     inner: InProcessProvider,
     mode: AtomicUsize,
     repmats: AtomicUsize,
-    right: Mutex<Option<GpuTensorHandle>>,
-    first: Mutex<Option<GpuTensorHandle>>,
-    freed: Mutex<Vec<u64>>,
+    right: Mutex<Option<WeakGpuTensorHandle>>,
+    first: Mutex<Option<WeakGpuTensorHandle>>,
+    outputs: Mutex<Vec<WeakAllocationLease>>,
+}
+impl Provider {
+    fn observe(&self, output: GpuTensorHandle) -> GpuTensorHandle {
+        self.outputs
+            .lock()
+            .unwrap()
+            .push(output.allocation_lease().downgrade());
+        output
+    }
+    fn assert_retired(&self, count: usize) {
+        let outputs = self.outputs.lock().unwrap();
+        assert_eq!(outputs.len(), count);
+        assert!(outputs.iter().all(|lease| lease.acquire().is_none()));
+    }
 }
 impl AccelProvider for Provider {
     fn device_id(&self) -> u32 {
@@ -27,23 +42,23 @@ impl AccelProvider for Provider {
         self.inner.precision()
     }
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.inner.upload(view)
+        self.inner.upload(view).map(|output| self.observe(output))
     }
     fn upload_numeric_raw(
         &self,
         view: &HostNumericTensorView<'_>,
     ) -> anyhow::Result<GpuTensorHandle> {
-        self.inner.upload_numeric(view)
+        self.inner
+            .upload_numeric_raw(view)
+            .map(|output| self.observe(output))
     }
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.inner.download(handle)
     }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.freed.lock().unwrap().push(handle.buffer_id);
-        self.inner.free(handle)
-    }
     fn fill_like(&self, handle: &GpuTensorHandle, value: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.inner.fill_like(handle, value)
+        self.inner
+            .fill_like(handle, value)
+            .map(|output| self.observe(output))
     }
     fn repmat(
         &self,
@@ -52,13 +67,13 @@ impl AccelProvider for Provider {
     ) -> anyhow::Result<GpuTensorHandle> {
         let index = self.repmats.fetch_add(1, Ordering::SeqCst);
         match (self.mode.load(Ordering::SeqCst), index) {
-            (1, 0) => Ok(self.right.lock().unwrap().as_ref().unwrap().clone()),
+            (1, 0) => Ok(self.right.lock().unwrap().as_ref().unwrap().acquire()?),
             (1, _) => Err(anyhow::anyhow!("second expansion failed")),
-            (2, 1) => Ok(self.first.lock().unwrap().as_ref().unwrap().clone()),
+            (2, 1) => Ok(self.first.lock().unwrap().as_ref().unwrap().acquire()?),
             _ => {
-                let expanded = self.inner.repmat(handle, repetitions)?;
+                let expanded = self.observe(self.inner.repmat(handle, repetitions)?);
                 if index == 0 {
-                    *self.first.lock().unwrap() = Some(expanded.clone());
+                    *self.first.lock().unwrap() = Some(expanded.downgrade());
                 }
                 Ok(expanded)
             }
@@ -66,11 +81,9 @@ impl AccelProvider for Provider {
     }
     fn elem_add<'a>(
         &'a self,
-        left: &'a GpuTensorHandle,
-        right: &'a GpuTensorHandle,
+        _left: &'a GpuTensorHandle,
+        _right: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        runmat_accelerate_api::set_handle_logical(left, true);
-        runmat_accelerate_api::set_handle_logical(right, true);
         Box::pin(futures::future::pending())
     }
     fn elem_div<'a>(
@@ -93,8 +106,6 @@ impl AccelProvider for Provider {
         right: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, runmat_accelerate_api::PowerResultDomain> {
         if self.mode.load(Ordering::SeqCst) == 3 {
-            runmat_accelerate_api::set_handle_logical(left, true);
-            runmat_accelerate_api::set_handle_logical(right, true);
             Box::pin(futures::future::pending())
         } else {
             self.inner.classify_real_power(left, right)
@@ -119,7 +130,7 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
         repmats: AtomicUsize::new(0),
         right: Mutex::new(None),
         first: Mutex::new(None),
-        freed: Mutex::new(vec![]),
+        outputs: Mutex::new(vec![]),
     });
     let _provider = ThreadProviderGuard::set(Some(provider));
     for (name, mode) in ["plus"]
@@ -128,7 +139,7 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
     {
         provider.mode.store(mode, Ordering::SeqCst);
         provider.repmats.store(0, Ordering::SeqCst);
-        provider.freed.lock().unwrap().clear();
+        provider.outputs.lock().unwrap().clear();
         let left = provider
             .inner
             .upload(&HostTensorView {
@@ -143,7 +154,12 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
                 shape: &[1, 3],
             })
             .unwrap();
-        *provider.right.lock().unwrap() = Some(right.clone());
+        *provider.right.lock().unwrap() = Some(right.downgrade());
+        let physical = [
+            left.allocation_lease().downgrade(),
+            right.allocation_lease().downgrade(),
+        ];
+        let descriptors = [left.wire_descriptor(), right.wire_descriptor()];
         let args = [
             Value::GpuTensor(left.clone()),
             Value::GpuTensor(right.clone()),
@@ -157,27 +173,30 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
         } else {
             assert!(block_on(execution).is_err());
         }
-        let freed = provider.freed.lock().unwrap().clone();
+        provider.assert_retired(match mode {
+            0 => 2,
+            1 => 0,
+            _ => 1,
+        });
         assert_eq!(
-            freed.len(),
-            match mode {
-                0 => 2,
-                1 => 0,
-                _ => 1,
-            }
+            [left.wire_descriptor(), right.wire_descriptor()],
+            descriptors
         );
-        assert!(!freed.contains(&left.buffer_id) && !freed.contains(&right.buffer_id));
         for handle in [&left, &right] {
             assert!(!runmat_accelerate_api::handle_is_logical(handle));
             assert!(block_on(provider.inner.download(handle)).is_ok());
-            provider.inner.free(handle).unwrap();
         }
+        drop(args);
+        assert!(physical.iter().all(|lease| lease.acquire().is_some()));
+        drop(left);
+        drop(right);
+        assert!(physical.iter().all(|lease| lease.acquire().is_none()));
     }
     // Power's typed hook supports broadcast directly. Cancellation during
     // either the domain probe or the actual kernel must restore both inputs.
     for mode in [0, 3] {
         provider.mode.store(mode, Ordering::SeqCst);
-        provider.freed.lock().unwrap().clear();
+        provider.outputs.lock().unwrap().clear();
         let left = provider
             .inner
             .upload(&HostTensorView {
@@ -192,6 +211,11 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
                 shape: &[2, 1],
             })
             .unwrap();
+        let physical = [
+            left.allocation_lease().downgrade(),
+            right.allocation_lease().downgrade(),
+        ];
+        let descriptors = [left.wire_descriptor(), right.wire_descriptor()];
         let args = [
             Value::GpuTensor(left.clone()),
             Value::GpuTensor(right.clone()),
@@ -201,12 +225,19 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
         ));
         assert!(execution.as_mut().now_or_never().is_none());
         drop(execution);
-        assert!(provider.freed.lock().unwrap().is_empty());
+        provider.assert_retired(0);
+        assert_eq!(
+            [left.wire_descriptor(), right.wire_descriptor()],
+            descriptors
+        );
         for handle in [&left, &right] {
             assert!(!runmat_accelerate_api::handle_is_logical(handle));
             assert!(block_on(provider.inner.download(handle)).is_ok());
-            provider.inner.free(handle).unwrap();
         }
+        drop(args);
+        drop(left);
+        drop(right);
+        assert!(physical.iter().all(|lease| lease.acquire().is_none()));
     }
     provider.mode.store(0, Ordering::SeqCst);
     // A mixed resident power call owns either a scalar fill or uploaded host
@@ -216,7 +247,7 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
             Value::Num(2.0),
             Value::Tensor(runmat_value::Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
         ] {
-            provider.freed.lock().unwrap().clear();
+            provider.outputs.lock().unwrap().clear();
             let resident = provider
                 .inner
                 .upload(&HostTensorView {
@@ -224,6 +255,8 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
                     shape: &[1, 2],
                 })
                 .unwrap();
+            let physical = resident.allocation_lease().downgrade();
+            let descriptor = resident.wire_descriptor();
             let args = if resident_first {
                 vec![Value::GpuTensor(resident.clone()), host]
             } else {
@@ -234,22 +267,23 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
             ));
             assert!(execution.as_mut().now_or_never().is_none());
             drop(execution);
-            let freed = provider.freed.lock().unwrap().clone();
-            assert_eq!(freed.len(), 1);
-            assert!(!freed.contains(&resident.buffer_id));
+            provider.assert_retired(1);
+            assert_eq!(resident.wire_descriptor(), descriptor);
             assert!(!runmat_accelerate_api::handle_is_logical(&resident));
             assert_eq!(
                 block_on(provider.inner.download(&resident)).unwrap().data,
                 vec![4.0, 9.0]
             );
-            provider.inner.free(&resident).unwrap();
+            drop(args);
+            drop(resident);
+            assert!(physical.acquire().is_none());
         }
     }
     // Exact integer-scalar temporaries cross the same asynchronous provider
     // boundary, both for arithmetic and for either direction of division.
     for (name, resident_first) in [("plus", true), ("rdivide", true), ("rdivide", false)] {
         use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView};
-        provider.freed.lock().unwrap().clear();
+        provider.outputs.lock().unwrap().clear();
         let resident = provider
             .inner
             .upload_numeric(&HostNumericTensorView {
@@ -258,6 +292,8 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
                 storage: GpuTensorStorage::Real,
             })
             .unwrap();
+        let physical = resident.allocation_lease().downgrade();
+        let descriptor = resident.wire_descriptor();
         let args = if resident_first {
             vec![Value::GpuTensor(resident.clone()), Value::Num(2.0)]
         } else {
@@ -268,10 +304,16 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
         ));
         assert!(execution.as_mut().now_or_never().is_none(), "{name}");
         drop(execution);
-        let freed = provider.freed.lock().unwrap().clone();
-        assert_eq!(freed.len(), 1, "{name}");
-        assert_ne!(freed[0], resident.buffer_id);
+        provider.assert_retired(1);
+        assert_eq!(resident.wire_descriptor(), descriptor);
         assert!(!runmat_accelerate_api::handle_is_logical(&resident));
-        provider.inner.free(&resident).unwrap();
+        let downloaded = block_on(provider.inner.download_numeric(&resident)).unwrap();
+        assert_eq!(downloaded.shape, vec![1, 2]);
+        assert!(
+            matches!(downloaded.data, runmat_accelerate_api::HostNumericDataOwned::U64(ref values) if values == &[7, 9])
+        );
+        drop(args);
+        drop(resident);
+        assert!(physical.acquire().is_none());
     }
 }

@@ -1,5 +1,7 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::GpuTensorHandle;
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+};
 use runmat_value::Value;
 
 const FORMS: &[(&str, usize)] = &[
@@ -18,12 +20,16 @@ const FORMS: &[(&str, usize)] = &[
 
 #[test]
 fn excess_outputs_reject_before_resident_operand_access() {
-    let unavailable = Value::GpuTensor(GpuTensorHandle {
-        shape: vec![2, 3],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(vec![2, 3], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    assert!(!runmat_accelerate_api::registered_providers()
+        .iter()
+        .any(|provider| provider.device_id() == allocation.handle.device_id()));
+    let caller = allocation.handle.clone();
+    let descriptor = caller.wire_descriptor();
+    let unavailable = Value::GpuTensor(allocation.handle);
     for &(name, inputs) in FORMS {
         let entry = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
         let identifier = format!("RunMat:{name}:TooManyOutputs");
@@ -39,7 +45,13 @@ fn excess_outputs_reject_before_resident_operand_access() {
         ))
         .expect_err("output admission must precede provider lookup/download");
         assert_eq!(error.identifier(), Some(identifier.as_str()), "{name}");
+        assert_eq!(caller.wire_descriptor(), descriptor);
+        assert_eq!(allocation.probe.retirements(), 0);
     }
+    drop(unavailable);
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(caller);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

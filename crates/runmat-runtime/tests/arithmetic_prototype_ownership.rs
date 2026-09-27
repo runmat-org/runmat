@@ -1,5 +1,6 @@
 use futures::executor::block_on;
 use runmat_accelerate::simple_provider::InProcessProvider;
+use runmat_accelerate_api::allocation::{WeakAllocationLease, WeakGpuTensorHandle};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle,
     HostNumericTensorView, HostTensorView, ProviderPrecision, ThreadProviderGuard,
@@ -10,8 +11,8 @@ use std::sync::{Mutex, OnceLock};
 
 struct Provider {
     inner: InProcessProvider,
-    borrowed: Mutex<Option<GpuTensorHandle>>,
-    frees: AtomicUsize,
+    borrowed: Mutex<Option<WeakGpuTensorHandle>>,
+    outputs: Mutex<Vec<WeakAllocationLease>>,
     uploads: AtomicUsize,
     hooks: AtomicUsize,
     mode: AtomicUsize,
@@ -31,27 +32,29 @@ impl AccelProvider for Provider {
     }
     fn upload_numeric_raw(
         &self,
-        view: &HostNumericTensorView<'_>,
+        _view: &HostNumericTensorView<'_>,
     ) -> anyhow::Result<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         if self.mode.load(Ordering::SeqCst) == 2 {
-            let mut fresh = self.inner.upload_numeric(view)?;
-            fresh.shape = vec![99, 1];
+            let fresh = self.inner.upload(&HostTensorView {
+                data: &[0.0; 99],
+                shape: &[99, 1],
+            })?;
+            self.outputs
+                .lock()
+                .unwrap()
+                .push(fresh.allocation_lease().downgrade());
             return Ok(fresh);
         }
-        let mut alias = self.borrowed.lock().unwrap().as_ref().unwrap().clone();
-        runmat_accelerate_api::set_handle_logical(&alias, true);
+        let alias = self.borrowed.lock().unwrap().as_ref().unwrap().acquire()?;
         if self.mode.load(Ordering::SeqCst) == 1 {
-            alias.shape = vec![99, 1];
+            // A genuinely admitted wrong-shape view of the protected allocation.
+            return Ok(alias.with_view(alias.view().clone().with_shape(vec![2, 1]))?);
         }
         Ok(alias)
     }
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.inner.download(handle)
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.frees.fetch_add(1, Ordering::SeqCst);
-        self.inner.free(handle)
     }
     fn elem_add<'a>(
         &'a self,
@@ -69,7 +72,7 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
     let provider = PROVIDER.get_or_init(|| Provider {
         inner: InProcessProvider::new(),
         borrowed: Mutex::new(None),
-        frees: AtomicUsize::new(0),
+        outputs: Mutex::default(),
         uploads: AtomicUsize::new(0),
         hooks: AtomicUsize::new(0),
         mode: AtomicUsize::new(0),
@@ -83,7 +86,9 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
             shape: &[1, 2],
         })
         .unwrap();
-    *provider.borrowed.lock().unwrap() = Some(prototype.clone());
+    *provider.borrowed.lock().unwrap() = Some(prototype.downgrade());
+    let physical = prototype.allocation_lease().downgrade();
+    let descriptor = prototype.wire_descriptor();
     let args = [
         Value::GpuTensor(prototype.clone()),
         Value::GpuTensor(prototype.clone()),
@@ -97,7 +102,7 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
     assert_eq!(provider.hooks.load(Ordering::SeqCst), 0);
     for mode in 0..3 {
         provider.mode.store(mode, Ordering::SeqCst);
-        let before = provider.frees.load(Ordering::SeqCst);
+        let before = provider.outputs.lock().unwrap().len();
         let args = [
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
@@ -109,9 +114,16 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
         ))
         .is_err());
         assert_eq!(
-            provider.frees.load(Ordering::SeqCst) - before,
+            provider.outputs.lock().unwrap().len() - before,
             usize::from(mode == 2)
         );
+        assert!(provider
+            .outputs
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|lease| lease.acquire().is_none()));
+        assert_eq!(prototype.wire_descriptor(), descriptor);
         assert!(!runmat_accelerate_api::handle_is_logical(&prototype));
         assert_eq!(
             block_on(provider.inner.download(&prototype)).unwrap().data,
@@ -143,7 +155,7 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
     for mode in 0..3 {
         provider.mode.store(mode, Ordering::SeqCst);
         for resident_first in [false, true] {
-            let before = provider.frees.load(Ordering::SeqCst);
+            let before = provider.outputs.lock().unwrap().len();
             let host = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
             let resident = Value::GpuTensor(prototype.clone());
             let args = if resident_first {
@@ -156,9 +168,16 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
             ))
             .is_err());
             assert_eq!(
-                provider.frees.load(Ordering::SeqCst) - before,
+                provider.outputs.lock().unwrap().len() - before,
                 usize::from(mode == 2)
             );
+            assert!(provider
+                .outputs
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|lease| lease.acquire().is_none()));
+            assert_eq!(prototype.wire_descriptor(), descriptor);
             assert!(!runmat_accelerate_api::handle_is_logical(&prototype));
             assert_eq!(
                 block_on(provider.inner.download(&prototype)).unwrap().data,
@@ -166,6 +185,8 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
             );
         }
     }
-    provider.inner.free(&prototype).unwrap();
+    drop(args);
+    drop(prototype);
+    assert!(physical.acquire().is_none());
     *provider.borrowed.lock().unwrap() = None;
 }

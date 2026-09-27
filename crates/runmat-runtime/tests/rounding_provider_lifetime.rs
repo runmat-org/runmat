@@ -1,5 +1,6 @@
 use futures::{executor::block_on, task::noop_waker};
 use runmat_accelerate::simple_provider::InProcessProvider;
+use runmat_accelerate_api::allocation::WeakAllocationLease;
 use runmat_accelerate_api::{
     AccelProvider, AccelProviderFuture, GpuTensorHandle, HostTensorView, ProviderPrecision,
     ThreadProviderGuard,
@@ -17,13 +18,16 @@ enum Fault {
     Pending,
     Failed,
     Alias,
-    MissingStorage,
+    // An operational handle cannot omit immutable storage facts. Return a
+    // real allocation with an invalid output shape; wire forgery is tested at
+    // the live-acquisition boundary below.
+    WrongShape,
 }
 #[derive(Default)]
 struct State {
     fault: Fault,
     calls: usize,
-    freed: Vec<u64>,
+    outputs: Vec<WeakAllocationLease>,
 }
 struct Provider {
     inner: InProcessProvider,
@@ -32,7 +36,7 @@ struct Provider {
 impl Provider {
     fn binary<'a>(
         &'a self,
-        left: &'a GpuTensorHandle,
+        _left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
@@ -41,20 +45,22 @@ impl Provider {
                 state.calls += 1;
                 state.fault
             };
-            runmat_accelerate_api::set_handle_logical(left, true);
-            runmat_accelerate_api::set_handle_logical(right, true);
             match fault {
                 Fault::Pending => std::future::pending().await,
                 Fault::Failed => anyhow::bail!("injected remainder failure"),
                 Fault::Alias => Ok(right.clone()),
-                Fault::MissingStorage => {
-                    let mut output = self.inner.upload_integer(
+                Fault::WrongShape => {
+                    let output = self.inner.upload_integer(
                         &runmat_accelerate_api::HostIntegerTensorView {
                             data: runmat_accelerate_api::HostIntegerDataView::I64(&[1, 1]),
-                            shape: &[1, 2],
+                            shape: &[2, 1],
                         },
                     )?;
-                    output.descriptor.storage = None;
+                    self.state
+                        .lock()
+                        .unwrap()
+                        .outputs
+                        .push(output.allocation_lease().downgrade());
                     Ok(output)
                 }
             }
@@ -70,17 +76,20 @@ impl Provider {
                 state.calls += 1;
                 state.fault
             };
-            runmat_accelerate_api::set_handle_logical(input, true);
             match fault {
                 Fault::Pending => std::future::pending().await,
                 Fault::Failed => anyhow::bail!("injected rounding failure"),
                 Fault::Alias => Ok(input.clone()),
-                Fault::MissingStorage => {
-                    let mut output = self.inner.upload(&HostTensorView {
+                Fault::WrongShape => {
+                    let output = self.inner.upload(&HostTensorView {
                         data: &[1.0, 4.0],
-                        shape: &[1, 2],
+                        shape: &[2, 1],
                     })?;
-                    output.descriptor.storage = None;
+                    self.state
+                        .lock()
+                        .unwrap()
+                        .outputs
+                        .push(output.allocation_lease().downgrade());
                     Ok(output)
                 }
             }
@@ -119,10 +128,6 @@ impl AccelProvider for Provider {
     }
     fn precision(&self) -> ProviderPrecision {
         self.inner.precision()
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.state.lock().unwrap().freed.push(handle.buffer_id);
-        self.inner.free(handle)
     }
     fn unary_ceil<'a>(
         &'a self,
@@ -182,7 +187,7 @@ fn rounding_dispatch_preserves_borrowed_metadata_and_releases_invalid_outputs() 
             Fault::Pending,
             Fault::Failed,
             Fault::Alias,
-            Fault::MissingStorage,
+            Fault::WrongShape,
         ] {
             *provider.state.lock().unwrap() = State {
                 fault,
@@ -195,6 +200,8 @@ fn rounding_dispatch_preserves_borrowed_metadata_and_releases_invalid_outputs() 
                     shape: &[1, 2],
                 })
                 .unwrap();
+            let physical = input.allocation_lease().downgrade();
+            let descriptor = input.wire_descriptor();
             let mut args = vec![Value::GpuTensor(input.clone())];
             args.extend(controls.clone());
             let error = block_on(runmat_runtime::call_builtin_async_with_outputs(
@@ -216,27 +223,71 @@ fn rounding_dispatch_preserves_borrowed_metadata_and_releases_invalid_outputs() 
             } else {
                 assert!(matches!(result, Poll::Ready(Err(_))), "{name}");
             }
+            drop(result);
             drop(call);
+            assert_eq!(input.wire_descriptor(), descriptor);
             assert!(!runmat_accelerate_api::handle_is_logical(&input), "{name}");
             let state = provider.state.lock().unwrap();
             assert_eq!(
                 state.calls, 1,
                 "{name}: no retry after a real provider failure"
             );
-            assert!(!state.freed.contains(&input.buffer_id), "{name}");
             assert_eq!(
-                state.freed.len(),
-                usize::from(matches!(fault, Fault::MissingStorage)),
+                state.outputs.len(),
+                usize::from(matches!(fault, Fault::WrongShape)),
                 "{name}"
             );
+            assert!(state.outputs.iter().all(|lease| lease.acquire().is_none()));
             drop(state);
             assert_eq!(
                 block_on(provider.inner.download(&input)).unwrap().data,
                 vec![1.25, 4.75]
             );
-            provider.inner.free(&input).unwrap();
+            drop(args);
+            assert!(physical.acquire().is_some());
+            drop(input);
+            assert!(physical.acquire().is_none());
         }
     }
+}
+
+#[test]
+fn rounding_storage_forgery_is_rejected_before_live_handle_acquisition() {
+    use runmat_accelerate_api::allocation::{AllocationAcquisitionError, GpuPhysicalDescriptor};
+    use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
+
+    let provider = InProcessProvider::new();
+    let input = provider
+        .upload(&HostTensorView {
+            data: &[1.25, 4.75],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    let physical = input.allocation_lease().downgrade();
+    let descriptor = input.wire_descriptor();
+    let mut forged = descriptor.clone();
+    forged.physical = GpuPhysicalDescriptor::new(
+        NumericElementType::F64,
+        GpuTensorStorage::ComplexInterleaved,
+        2,
+        32,
+        32,
+    )
+    .unwrap();
+    assert!(matches!(
+        provider.acquire_live(&forged),
+        Err(AllocationAcquisitionError::PhysicalMismatch)
+    ));
+    assert!(input
+        .with_view(input.view().clone().with_logical(true))
+        .is_err());
+    assert_eq!(input.wire_descriptor(), descriptor);
+    assert_eq!(
+        block_on(provider.download(&input)).unwrap().data,
+        vec![1.25, 4.75]
+    );
+    drop(input);
+    assert!(physical.acquire().is_none());
 }
 
 fn exercise_remainder_lifetimes(provider: &'static Provider) {
@@ -247,7 +298,7 @@ fn exercise_remainder_lifetimes(provider: &'static Provider) {
                 Fault::Pending,
                 Fault::Failed,
                 Fault::Alias,
-                Fault::MissingStorage,
+                Fault::WrongShape,
             ] {
                 *provider.state.lock().unwrap() = State {
                     fault,
@@ -287,6 +338,11 @@ fn exercise_remainder_lifetimes(provider: &'static Provider) {
                         })
                         .unwrap()
                 };
+                let physical = [
+                    left.allocation_lease().downgrade(),
+                    right.allocation_lease().downgrade(),
+                ];
+                let descriptors = [left.wire_descriptor(), right.wire_descriptor()];
                 let args = [
                     Value::GpuTensor(left.clone()),
                     Value::GpuTensor(right.clone()),
@@ -300,17 +356,21 @@ fn exercise_remainder_lifetimes(provider: &'static Provider) {
                 } else {
                     assert!(matches!(result, Poll::Ready(Err(_))), "{name}");
                 }
+                drop(result);
                 drop(call);
+                assert_eq!(
+                    [left.wire_descriptor(), right.wire_descriptor()],
+                    descriptors
+                );
                 assert!(!runmat_accelerate_api::handle_is_logical(&left));
                 assert!(!runmat_accelerate_api::handle_is_logical(&right));
                 let state = provider.state.lock().unwrap();
                 assert_eq!(state.calls, 1);
-                assert!(!state.freed.contains(&left.buffer_id));
-                assert!(!state.freed.contains(&right.buffer_id));
                 assert_eq!(
-                    state.freed.len(),
-                    usize::from(matches!(fault, Fault::MissingStorage))
+                    state.outputs.len(),
+                    usize::from(matches!(fault, Fault::WrongShape))
                 );
+                assert!(state.outputs.iter().all(|lease| lease.acquire().is_none()));
                 drop(state);
                 if floating {
                     block_on(provider.inner.download(&left)).unwrap();
@@ -319,8 +379,11 @@ fn exercise_remainder_lifetimes(provider: &'static Provider) {
                     block_on(provider.inner.download_integer(&left)).unwrap();
                     block_on(provider.inner.download_integer(&right)).unwrap();
                 }
-                provider.inner.free(&left).unwrap();
-                provider.inner.free(&right).unwrap();
+                drop(args);
+                assert!(physical.iter().all(|lease| lease.acquire().is_some()));
+                drop(left);
+                drop(right);
+                assert!(physical.iter().all(|lease| lease.acquire().is_none()));
             }
         }
     }
