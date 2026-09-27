@@ -46,6 +46,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
+            if ctx.inputs.len() != 1 {
+                return Err(FusionError::Message(
+                    "unary fusion requires exactly one data operand",
+                ));
+            }
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             Ok(format!("({input})"))
         },
