@@ -32,6 +32,12 @@ const POST_PROCESS_MAXIMUM_RESIDENT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const DERIVED_OUTPUT_RECORD_OVERHEAD_BYTES: u64 = 64 * 1024;
 const CANONICAL_NUMERIC_BYTES_UPPER_BOUND: u64 = 9;
 
+mod history;
+pub use history::{
+    build_observation_history_checkpoint_resource_plan,
+    observation_history_checkpoint_payload_bytes_upper_bound,
+};
+
 pub struct ObservationPartitionResourcePlanning<'a> {
     pub source: &'a ObservationEvaluationRequest,
     pub request: &'a ObservationPartitionEvaluationRequest,
@@ -316,104 +322,6 @@ pub fn observation_reduction_payload_bytes_upper_bound(
     derived_output_payload_bytes_upper_bound(inputs, 1, value_count.max(1))
 }
 
-pub fn build_observation_history_checkpoint_resource_plan(
-    request: &ObservationHistoryCheckpointRequest,
-    previous: Option<&ObservationHistoryCheckpoint>,
-    sample: &ObservationResult,
-    inputs: PreparedInputResourceFacts,
-    output: PreparedOutputResourceFacts,
-    output_set: PreparedOutputSetResourceFacts,
-) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    request
-        .validate_advance_inputs(previous, sample)
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let observation = request
-        .plan
-        .observations
-        .iter()
-        .find(|observation| observation.spec.observation_id == request.observation_id)
-        .ok_or_else(|| {
-            ResourcePlanningError::Invalid(
-                "history resource request names no resolved observation".into(),
-            )
-        })?;
-    let previous_retained = previous.map_or(0, |checkpoint| checkpoint.samples().len());
-    let retained_sample_count = previous_retained
-        .checked_add(1)
-        .map(|count| count.min(observation.sample_bounds.maximum_retained_samples))
-        .ok_or(ResourcePlanningError::Overflow(
-            "retained history sample count",
-        ))?;
-    let output_payload_upper_bound =
-        observation_history_checkpoint_payload_bytes_upper_bound(request, previous, &inputs)?;
-    validate_projected_output(&output, output_payload_upper_bound, "observation history")?;
-    let workspace = checked_add(
-        byte_len(
-            &sample
-                .canonical_bytes()
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-        )?,
-        previous.map_or(Ok(0), observation_history_checkpoint_payload_bytes)?,
-        "history transition workspace",
-    )?;
-    build_resource_plan(FeaResourcePlanningInput {
-        estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
-        phase: FeaResourcePhase::StructuralObservationHistoryCheckpoint(request.identity),
-        demand: FeaResourceDemand::StructuralObservationHistoryCheckpoint(
-            ObservationHistoryCheckpointResourceDemand {
-                topology_digest: sample.topology_digest,
-                predecessor_present: previous.is_some(),
-                predecessor_sample_count: Count(
-                    previous.map_or(0, |value| value.manifest().observed_sample_count),
-                ),
-                retained_sample_count: Count(count(
-                    retained_sample_count,
-                    "retained history samples",
-                )?),
-                inputs,
-                transition_workspace_bytes_upper_bound: ByteCount(workspace),
-                output,
-            },
-        ),
-        output_set: Some(output_set),
-        worker: post_process_worker(),
-        accuracy_ceiling: post_process_ceiling(),
-    })
-}
-
-pub fn observation_history_checkpoint_payload_bytes_upper_bound(
-    request: &ObservationHistoryCheckpointRequest,
-    previous: Option<&ObservationHistoryCheckpoint>,
-    inputs: &PreparedInputResourceFacts,
-) -> Result<u64, ResourcePlanningError> {
-    let observation = request
-        .plan
-        .observations
-        .iter()
-        .find(|observation| observation.spec.observation_id == request.observation_id)
-        .ok_or_else(|| {
-            ResourcePlanningError::Invalid(
-                "history resource request names no resolved observation".into(),
-            )
-        })?;
-    let retained_sample_count = previous
-        .map_or(0, |checkpoint| checkpoint.samples().len())
-        .checked_add(1)
-        .map(|count| count.min(observation.sample_bounds.maximum_retained_samples))
-        .ok_or(ResourcePlanningError::Overflow(
-            "retained history sample count",
-        ))?;
-    derived_output_payload_bytes_upper_bound(
-        inputs,
-        checked_add(
-            count(retained_sample_count, "retained history samples")?,
-            1,
-            "history output records",
-        )?,
-        0,
-    )
-}
-
 pub fn build_observation_assembly_resource_plan(
     source: &ObservationEvaluationRequest,
     request: &ObservationAssemblyRequest,
@@ -674,29 +582,6 @@ fn reduction_accumulator_value_count(
             )
         }
     }
-}
-
-fn observation_history_checkpoint_payload_bytes(
-    checkpoint: &ObservationHistoryCheckpoint,
-) -> Result<u64, ResourcePlanningError> {
-    let manifest = checkpoint
-        .manifest()
-        .canonical_bytes()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    checkpoint
-        .samples()
-        .iter()
-        .try_fold(byte_len(&manifest)?, |total, sample| {
-            checked_add(
-                total,
-                byte_len(
-                    &sample
-                        .canonical_bytes()
-                        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-                )?,
-                "history checkpoint payload bytes",
-            )
-        })
 }
 
 pub(super) fn post_process_worker() -> WorkerResourcePolicy {

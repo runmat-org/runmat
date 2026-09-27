@@ -10,7 +10,8 @@ use super::super::contract::{
     ResolvedObservationPlanIdentity,
 };
 use super::checkpoint::{
-    extend_observed_prefix_digest, initial_observed_prefix_digest, ObservationHistoryCheckpoint,
+    extend_execution_prefix_digest, extend_observed_prefix_digest, initial_execution_prefix_digest,
+    initial_observed_prefix_digest, ObservationHistoryCheckpoint,
     ObservationHistoryCheckpointIdentity, ObservationHistoryStream,
 };
 use super::contract::{
@@ -33,6 +34,8 @@ pub struct BoundedObservationHistory {
     stream: ObservationHistoryStream,
     retained_prefix_digest: Digest,
     observed_prefix_digest: Digest,
+    retained_execution_prefix_digest: Digest,
+    observed_execution_prefix_digest: Digest,
     samples: VecDeque<ObservationHistorySample>,
 }
 
@@ -67,6 +70,7 @@ impl BoundedObservationHistory {
             maximum_retained_samples,
         )?;
         let initial_prefix = initial_observed_prefix_digest(stream.identity)?;
+        let initial_execution_prefix = initial_execution_prefix_digest(stream.identity)?;
         Ok(Self {
             plan_identity: plan.identity,
             topology_digest: plan.topology_digest,
@@ -78,6 +82,8 @@ impl BoundedObservationHistory {
             stream,
             retained_prefix_digest: initial_prefix,
             observed_prefix_digest: initial_prefix,
+            retained_execution_prefix_digest: initial_execution_prefix,
+            observed_execution_prefix_digest: initial_execution_prefix,
             // This is an upper bound, not an allocation forecast. Dynamic sampling can permit
             // many more samples than a completed solve actually contains; reserving the bound
             // eagerly can exhaust memory before the first observed sample is recovered.
@@ -100,6 +106,10 @@ impl BoundedObservationHistory {
         history.observed_sample_count = checkpoint.manifest().observed_sample_count;
         history.retained_prefix_digest = checkpoint.manifest().retained_prefix_digest;
         history.observed_prefix_digest = checkpoint.manifest().observed_prefix_digest;
+        history.retained_execution_prefix_digest =
+            checkpoint.manifest().retained_execution_prefix_digest;
+        history.observed_execution_prefix_digest =
+            checkpoint.manifest().observed_execution_prefix_digest;
         history.samples = checkpoint.samples().iter().cloned().collect();
         Ok(history)
     }
@@ -119,6 +129,10 @@ impl BoundedObservationHistory {
             self.observed_sample_count,
             self.retained_prefix_digest,
             self.observed_prefix_digest,
+            (
+                self.retained_execution_prefix_digest,
+                self.observed_execution_prefix_digest,
+            ),
             self.samples.iter().cloned().collect(),
         )
     }
@@ -203,12 +217,22 @@ impl BoundedObservationHistory {
                 })?;
                 self.retained_prefix_digest =
                     extend_observed_prefix_digest(self.retained_prefix_digest, evicted.identity)?;
+                self.retained_execution_prefix_digest = extend_execution_prefix_digest(
+                    self.retained_execution_prefix_digest,
+                    evicted.identity,
+                    evicted.result.partition_evidence.identity,
+                )?;
             } else {
                 return Err(ObservationError::Limit("history retained sample count"));
             }
         }
         self.observed_prefix_digest =
             extend_observed_prefix_digest(self.observed_prefix_digest, sample.identity)?;
+        self.observed_execution_prefix_digest = extend_execution_prefix_digest(
+            self.observed_execution_prefix_digest,
+            sample.identity,
+            sample.result.partition_evidence.identity,
+        )?;
         self.observed_sample_count = self
             .observed_sample_count
             .checked_add(1)

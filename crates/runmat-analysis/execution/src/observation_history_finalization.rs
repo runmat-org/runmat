@@ -116,8 +116,7 @@ pub fn prepare_observation_history_finalization_task(
             .observed_sample_count
             .checked_sub(1)
             .ok_or_else(|| invalid("empty checkpoint"))?,
-        terminal_sample.coordinate,
-        terminal_sample.result.logical_identity,
+        &terminal_sample.result,
     )?;
     if source_request.identity.digest() != checkpoint_request.logical_identity {
         return Err(AnalysisBridgeError::Identity(

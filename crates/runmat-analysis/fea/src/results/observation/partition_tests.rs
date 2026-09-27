@@ -542,20 +542,183 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
 
 #[test]
 fn partitioned_history_restart_preserves_placement_neutral_result_identity() {
+    for retention in [
+        RetentionPolicy::Canonical,
+        RetentionPolicy::LatestSamples { count: 1 },
+    ] {
+        let projection =
+            AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+                .unwrap();
+        let definition = definition();
+        let mut history_spec = spec("partitioned_history", ObservationTarget::WholeModel);
+        history_spec.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0]);
+        history_spec.storage.retention = retention;
+        let mut step = ProcedureStep::thermal_transient("partitioned-history");
+        step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+            origin: 0.0,
+            start: 0.0,
+            end: 1.0,
+            interval_count: 10,
+        };
+        step.observations = vec![ObservationRequest::History(history_spec)];
+        let plan = super::resolve_observation_plan(
+            &step,
+            &projection,
+            std::slice::from_ref(&definition),
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let observation_id = ObservationId("partitioned_history".into());
+        let topology = StructuralObservationTopology::from_projection(&projection);
+        let result_at = |time: f64, policy: ObservationExecutionPolicy| {
+            let coordinate = RecoveredFieldSample::TimeSeconds(time);
+            let values = projection
+                .nodes
+                .iter()
+                .map(|node| node.coordinates_m.iter().sum::<f64>() + time)
+                .collect::<Vec<_>>();
+            let field = RecoveredField::new(
+                definition.clone(),
+                coordinate,
+                AnalysisField::host_f64("temperature.partitioned", vec![values.len()], values),
+            )
+            .unwrap();
+            evaluate_partitioned_observation(
+                &plan,
+                &plan.observations[0],
+                &field,
+                &topology,
+                policy,
+                None,
+            )
+            .unwrap()
+        };
+        let split_policy = ObservationExecutionPolicy::canonical(
+            std::num::NonZeroU32::new(3).expect("nonzero partition count"),
+        );
+        let mut partitioned = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+        let first = result_at(0.0, split_policy);
+        assert!(first.partition_evidence.contributions.len() > 1);
+        let serial_first = result_at(0.0, ObservationExecutionPolicy::serial());
+        assert_eq!(first.logical_identity, serial_first.logical_identity);
+        let sequence = SequenceIdentity::new(Digest::sha256("checkpoint sequence")).unwrap();
+        let producer = StepIdentity::new(sequence, Digest::sha256("checkpoint producer")).unwrap();
+        let request_for = |result: &super::ObservationResult| {
+            crate::execution::ObservationHistoryCheckpointRequest::new(
+                plan.clone(),
+                producer,
+                observation_id.clone(),
+                None,
+                0,
+                result,
+            )
+            .unwrap()
+        };
+        let split_request = request_for(&first);
+        let serial_request = request_for(&serial_first);
+        assert_ne!(split_request.identity, serial_request.identity);
+        split_request.validate_advance_inputs(None, &first).unwrap();
+        assert!(split_request
+            .validate_advance_inputs(None, &serial_first)
+            .is_err());
+        assert!(serial_request
+            .validate_advance_inputs(None, &first)
+            .is_err());
+        let mut legacy = split_request.clone();
+        legacy.schema_version = 1;
+        assert!(legacy.validate().is_err());
+        partitioned
+            .push(RecoveredFieldSample::TimeSeconds(0.0), first)
+            .unwrap();
+        let checkpoint = partitioned.checkpoint(None).unwrap();
+        let checkpoint_identity = checkpoint.manifest().identity;
+        let mut partitioned =
+            BoundedObservationHistory::resume(&plan, &observation_id, checkpoint).unwrap();
+        partitioned
+            .push(
+                RecoveredFieldSample::TimeSeconds(1.0),
+                result_at(1.0, split_policy),
+            )
+            .unwrap();
+        let continued = partitioned.checkpoint(Some(checkpoint_identity)).unwrap();
+        assert_eq!(continued.manifest().predecessor, Some(checkpoint_identity));
+        let partitioned_checkpoint = continued;
+        let partitioned = partitioned.finish().unwrap();
+
+        let mut serial = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
+        for time in [0.0, 1.0] {
+            serial
+                .push(
+                    RecoveredFieldSample::TimeSeconds(time),
+                    result_at(time, ObservationExecutionPolicy::serial()),
+                )
+                .unwrap();
+        }
+        let serial_checkpoint = serial.checkpoint(None).unwrap();
+        assert_ne!(
+            partitioned_checkpoint
+                .manifest()
+                .observed_execution_prefix_digest,
+            serial_checkpoint
+                .manifest()
+                .observed_execution_prefix_digest
+        );
+        assert_ne!(
+            partitioned_checkpoint.manifest().identity,
+            serial_checkpoint.manifest().identity
+        );
+        let mut substituted = partitioned_checkpoint.samples().to_vec();
+        let RecoveredFieldSample::TimeSeconds(time) = substituted[0].coordinate else {
+            panic!("expected time coordinate")
+        };
+        substituted[0].result = result_at(time, ObservationExecutionPolicy::serial());
+        assert_eq!(
+            substituted[0].identity,
+            partitioned_checkpoint.samples()[0].identity
+        );
+        assert!(
+            super::ObservationHistoryCheckpoint::from_manifest_and_samples(
+                partitioned_checkpoint.manifest().clone(),
+                substituted
+            )
+            .is_err()
+        );
+        let resumed = BoundedObservationHistory::resume(
+            &plan,
+            &observation_id,
+            partitioned_checkpoint.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            resumed
+                .checkpoint(partitioned_checkpoint.manifest().predecessor)
+                .unwrap(),
+            partitioned_checkpoint
+        );
+        let serial = serial.finish().unwrap();
+        assert_eq!(partitioned.manifest().identity, serial.manifest().identity);
+        assert_eq!(
+            partitioned.manifest().observed_prefix_digest,
+            serial.manifest().observed_prefix_digest
+        );
+    }
+}
+
+pub(super) fn checkpoint_test_evidence(time: f64) -> super::ObservationPartitionEvidence {
     let projection =
         AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
             .unwrap();
     let definition = definition();
-    let mut history_spec = spec("partitioned_history", ObservationTarget::WholeModel);
-    history_spec.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0]);
-    let mut step = ProcedureStep::thermal_transient("partitioned-history");
+    let mut requested = spec("temperature", ObservationTarget::WholeModel);
+    requested.sampling = SamplingPolicy::TimeSeconds(vec![0.0, 1.0, 2.0]);
+    let mut step = ProcedureStep::thermal_transient("checkpoint");
     step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
         origin: 0.0,
         start: 0.0,
-        end: 1.0,
-        interval_count: 10,
+        end: 2.0,
+        interval_count: 2,
     };
-    step.observations = vec![ObservationRequest::History(history_spec)];
+    step.observations = vec![ObservationRequest::History(requested)];
     let plan = super::resolve_observation_plan(
         &step,
         &projection,
@@ -563,69 +726,26 @@ fn partitioned_history_restart_preserves_placement_neutral_result_identity() {
         ObservationLimits::default(),
     )
     .unwrap();
-    let observation_id = ObservationId("partitioned_history".into());
-    let topology = StructuralObservationTopology::from_projection(&projection);
-    let result_at = |time: f64, policy: ObservationExecutionPolicy| {
-        let coordinate = RecoveredFieldSample::TimeSeconds(time);
-        let values = projection
-            .nodes
-            .iter()
-            .map(|node| node.coordinates_m.iter().sum::<f64>() + time)
-            .collect::<Vec<_>>();
-        let field = RecoveredField::new(
-            definition.clone(),
-            coordinate,
-            AnalysisField::host_f64("temperature.partitioned", vec![values.len()], values),
-        )
-        .unwrap();
-        evaluate_partitioned_observation(
-            &plan,
-            &plan.observations[0],
-            &field,
-            &topology,
-            policy,
-            None,
-        )
-        .unwrap()
-    };
-    let split_policy = ObservationExecutionPolicy::canonical(
-        std::num::NonZeroU32::new(3).expect("nonzero partition count"),
-    );
-    let mut partitioned = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
-    let first = result_at(0.0, split_policy);
-    assert!(first.partition_evidence.contributions.len() > 1);
-    partitioned
-        .push(RecoveredFieldSample::TimeSeconds(0.0), first)
-        .unwrap();
-    let checkpoint = partitioned.checkpoint(None).unwrap();
-    let checkpoint_identity = checkpoint.manifest().identity;
-    let mut partitioned =
-        BoundedObservationHistory::resume(&plan, &observation_id, checkpoint).unwrap();
-    partitioned
-        .push(
-            RecoveredFieldSample::TimeSeconds(1.0),
-            result_at(1.0, split_policy),
-        )
-        .unwrap();
-    let continued = partitioned.checkpoint(Some(checkpoint_identity)).unwrap();
-    assert_eq!(continued.manifest().predecessor, Some(checkpoint_identity));
-    let partitioned = partitioned.finish().unwrap();
-
-    let mut serial = BoundedObservationHistory::new(&plan, &observation_id).unwrap();
-    for time in [0.0, 1.0] {
-        serial
-            .push(
-                RecoveredFieldSample::TimeSeconds(time),
-                result_at(time, ObservationExecutionPolicy::serial()),
-            )
-            .unwrap();
-    }
-    let serial = serial.finish().unwrap();
-    assert_eq!(partitioned.manifest().identity, serial.manifest().identity);
-    assert_eq!(
-        partitioned.manifest().observed_prefix_digest,
-        serial.manifest().observed_prefix_digest
-    );
+    let field = RecoveredField::new(
+        definition,
+        RecoveredFieldSample::TimeSeconds(time),
+        AnalysisField::host_f64(
+            "temperature.partitioned",
+            vec![projection.nodes.len()],
+            vec![time; projection.nodes.len()],
+        ),
+    )
+    .unwrap();
+    evaluate_partitioned_observation(
+        &plan,
+        &plan.observations[0],
+        &field,
+        &StructuralObservationTopology::from_projection(&projection),
+        ObservationExecutionPolicy::serial(),
+        None,
+    )
+    .unwrap()
+    .partition_evidence
 }
 
 #[test]

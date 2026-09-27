@@ -4,6 +4,7 @@ use super::{
     ObservationHistoryStreamIdentity, CHECKPOINT_PREFIX, CHECKPOINT_SCHEMA_VERSION,
     OBSERVATION_LIMITS,
 };
+use super::{ObservationHistorySampleIdentity, ObservationPartitionEvidenceIdentity};
 use runmat_canonical_codec::encode_contract;
 use runmat_execution::Digest;
 
@@ -22,6 +23,7 @@ impl ObservationHistoryCheckpointIdentity {
         retained_sample_count: u64,
         retained_prefix_digest: Digest,
         observed_prefix_digest: Digest,
+        execution_prefixes: (Digest, Digest),
     ) -> Result<Self, ObservationError> {
         if observed_sample_count == 0
             || retained_sample_count == 0
@@ -42,6 +44,7 @@ impl ObservationHistoryCheckpointIdentity {
                 retained_sample_count,
                 retained_prefix_digest,
                 observed_prefix_digest,
+                execution_prefixes,
             ),
             OBSERVATION_LIMITS,
         )?)))
@@ -61,5 +64,65 @@ pub(super) fn derive_checkpoint_identity(
             .map_err(|_| ObservationError::Limit("history checkpoint retained samples"))?,
         manifest.retained_prefix_digest,
         manifest.observed_prefix_digest,
+        (
+            manifest.retained_execution_prefix_digest,
+            manifest.observed_execution_prefix_digest,
+        ),
     )
+}
+
+pub(in super::super) fn initial_execution_prefix_digest(
+    stream: ObservationHistoryStreamIdentity,
+) -> Result<Digest, ObservationError> {
+    Ok(Digest::sha256(encode_contract(
+        CHECKPOINT_PREFIX,
+        "execution-prefix-initial",
+        &stream,
+        OBSERVATION_LIMITS,
+    )?))
+}
+
+pub(in super::super) fn extend_execution_prefix_digest(
+    prefix: Digest,
+    sample: ObservationHistorySampleIdentity,
+    evidence: ObservationPartitionEvidenceIdentity,
+) -> Result<Digest, ObservationError> {
+    Ok(Digest::sha256(encode_contract(
+        CHECKPOINT_PREFIX,
+        "execution-prefix-next",
+        &(prefix, sample, evidence),
+        OBSERVATION_LIMITS,
+    )?))
+}
+
+pub(super) fn validate_execution_prefix(
+    manifest: &ObservationHistoryCheckpointManifest,
+) -> Result<(), ObservationError> {
+    if manifest.partition_evidence.len() != manifest.samples.len()
+        || (manifest.observed_sample_count == manifest.samples.len() as u64
+            && manifest.retained_execution_prefix_digest
+                != initial_execution_prefix_digest(manifest.stream.identity)?)
+    {
+        return Err(ObservationError::Identity(
+            "checkpoint execution evidence coverage or initial prefix differs",
+        ));
+    }
+    let mut prefix = manifest.retained_execution_prefix_digest;
+    for (entry, evidence) in manifest.samples.iter().zip(&manifest.partition_evidence) {
+        evidence.validate()?;
+        if evidence.sample != entry.coordinate
+            || evidence.event_attribution != entry.event_attribution
+        {
+            return Err(ObservationError::Identity(
+                "checkpoint execution evidence coordinate differs",
+            ));
+        }
+        prefix = extend_execution_prefix_digest(prefix, entry.sample, evidence.identity)?;
+    }
+    if prefix != manifest.observed_execution_prefix_digest {
+        return Err(ObservationError::Identity(
+            "checkpoint execution prefix does not converge",
+        ));
+    }
+    Ok(())
 }

@@ -5,15 +5,16 @@ use serde::{Deserialize, Serialize};
 use crate::results::field::RecoveredFieldSample;
 use crate::results::observation::{
     BoundedObservationHistory, ObservationHistoryCheckpoint, ObservationHistoryCheckpointIdentity,
-    ObservationHistoryStream, ObservationResult, ObservationResultIdentity,
-    ResolvedObservationPlan, ResolvedObservationPlanIdentity,
+    ObservationHistoryEntry, ObservationHistoryStream, ObservationPartitionEvidenceIdentity,
+    ObservationResult, ObservationResultIdentity, ResolvedObservationPlan,
+    ResolvedObservationPlanIdentity,
 };
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, ObservationHistoryCheckpointRequestIdentity,
 };
 
-const HISTORY_EXECUTION_PREFIX: &[u8] = b"runmat-analysis-history-execution/v1\0";
+const HISTORY_EXECUTION_PREFIX: &[u8] = b"runmat-analysis-history-execution/v2\0";
 const HISTORY_EXECUTION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
@@ -32,6 +33,7 @@ pub struct ObservationHistoryCheckpointRequest {
     pub sample_ordinal: u64,
     pub sample_coordinate: RecoveredFieldSample,
     pub sample: ObservationResultIdentity,
+    pub sample_partition_evidence: ObservationPartitionEvidenceIdentity,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +48,7 @@ struct ObservationHistoryCheckpointRequestWire {
     sample_ordinal: u64,
     sample_coordinate: RecoveredFieldSample,
     sample: ObservationResultIdentity,
+    sample_partition_evidence: ObservationPartitionEvidenceIdentity,
 }
 
 impl TryFrom<ObservationHistoryCheckpointRequestWire> for ObservationHistoryCheckpointRequest {
@@ -62,6 +65,7 @@ impl TryFrom<ObservationHistoryCheckpointRequestWire> for ObservationHistoryChec
             sample_ordinal: wire.sample_ordinal,
             sample_coordinate: wire.sample_coordinate,
             sample: wire.sample,
+            sample_partition_evidence: wire.sample_partition_evidence,
         };
         request.validate()?;
         Ok(request)
@@ -77,8 +81,8 @@ impl ObservationHistoryCheckpointRequest {
         observation_id: &ObservationId,
         predecessor: Option<ObservationHistoryCheckpointIdentity>,
         sample_ordinal: u64,
-        sample_coordinate: RecoveredFieldSample,
-        sample: ObservationResultIdentity,
+        sample: &ObservationHistoryEntry,
+        evidence: ObservationPartitionEvidenceIdentity,
     ) -> AnalysisExecutionResult<ObservationHistoryCheckpointRequestIdentity> {
         derive_request_identity(
             plan,
@@ -86,8 +90,7 @@ impl ObservationHistoryCheckpointRequest {
             observation_id,
             predecessor,
             sample_ordinal,
-            sample_coordinate,
-            sample,
+            (sample.coordinate, sample.result, evidence),
         )
     }
 
@@ -97,20 +100,24 @@ impl ObservationHistoryCheckpointRequest {
         observation_id: ObservationId,
         predecessor: Option<ObservationHistoryCheckpointIdentity>,
         sample_ordinal: u64,
-        sample_coordinate: RecoveredFieldSample,
-        sample: ObservationResultIdentity,
+        result: &ObservationResult,
     ) -> AnalysisExecutionResult<Self> {
+        result
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        let sample_coordinate = result.sample;
+        let sample = result.logical_identity;
+        let sample_partition_evidence = result.partition_evidence.identity;
         let identity = derive_request_identity(
             plan.identity,
             producer,
             &observation_id,
             predecessor,
             sample_ordinal,
-            sample_coordinate,
-            sample,
+            (sample_coordinate, sample, sample_partition_evidence),
         )?;
         let request = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity,
             plan,
             producer,
@@ -119,6 +126,7 @@ impl ObservationHistoryCheckpointRequest {
             sample_ordinal,
             sample_coordinate,
             sample,
+            sample_partition_evidence,
         };
         request.validate()?;
         Ok(request)
@@ -138,7 +146,7 @@ impl ObservationHistoryCheckpointRequest {
                     "history checkpoint request names an unresolved observation".into(),
                 )
             })?;
-        if self.schema_version != 1
+        if self.schema_version != 2
             || matches!(
                 observation.spec.sampling,
                 runmat_analysis_core::SamplingPolicy::Final
@@ -150,8 +158,11 @@ impl ObservationHistoryCheckpointRequest {
                     &self.observation_id,
                     self.predecessor,
                     self.sample_ordinal,
-                    self.sample_coordinate,
-                    self.sample,
+                    (
+                        self.sample_coordinate,
+                        self.sample,
+                        self.sample_partition_evidence,
+                    ),
                 )?
         {
             return Err(AnalysisExecutionError::Identity(
@@ -197,9 +208,12 @@ impl ObservationHistoryCheckpointRequest {
         result
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if result.logical_identity != self.sample || result.sample != self.sample_coordinate {
+        if result.logical_identity != self.sample
+            || result.sample != self.sample_coordinate
+            || result.partition_evidence.identity != self.sample_partition_evidence
+        {
             return Err(AnalysisExecutionError::Identity(
-                "history checkpoint sample identity or coordinate differs from its request",
+                "history checkpoint sample, coordinate, or execution evidence differs from its request",
             ));
         }
         let observation = self
@@ -277,8 +291,11 @@ fn derive_request_identity(
     observation_id: &ObservationId,
     predecessor: Option<ObservationHistoryCheckpointIdentity>,
     sample_ordinal: u64,
-    sample_coordinate: RecoveredFieldSample,
-    sample: ObservationResultIdentity,
+    sample: (
+        RecoveredFieldSample,
+        ObservationResultIdentity,
+        ObservationPartitionEvidenceIdentity,
+    ),
 ) -> AnalysisExecutionResult<ObservationHistoryCheckpointRequestIdentity> {
     ObservationHistoryCheckpointRequestIdentity::derive(
         "history-checkpoint-request",
@@ -288,7 +305,6 @@ fn derive_request_identity(
             observation_id,
             predecessor,
             sample_ordinal,
-            sample_coordinate,
             sample,
         ),
     )

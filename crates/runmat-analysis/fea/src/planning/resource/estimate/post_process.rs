@@ -85,10 +85,33 @@ pub(super) fn build_observation_history_resource_plan(
         HostPhaseAccounting::host_only(
             demand.topology_digest,
             &demand.inputs,
-            demand.transition_workspace_bytes_upper_bound,
+            ByteCount(history_transition_workspace(
+                demand.transition_workspace_bytes_upper_bound.0,
+                demand.execution_evidence_encoded_bytes_upper_bound.0,
+                demand.execution_evidence_workspace_bytes_upper_bound.0,
+                demand.output.encoded_payload_bytes_upper_bound.0,
+            )?),
             ByteCount(0),
             &[&demand.output],
         ),
+    )
+}
+
+fn history_transition_workspace(
+    transition: u64,
+    evidence_encoded: u64,
+    evidence_workspace: u64,
+    output: u64,
+) -> Result<u64, ResourcePlanningError> {
+    if evidence_encoded == 0 || evidence_workspace < evidence_encoded || output < evidence_encoded {
+        return Err(ResourcePlanningError::Invalid(
+            "history execution evidence exceeds its output or workspace admission".into(),
+        ));
+    }
+    add(
+        transition,
+        evidence_workspace,
+        "history execution evidence transition workspace",
     )
 }
 
@@ -290,4 +313,34 @@ pub(super) fn build_random_response_assembly_resource_plan(
             ],
         ),
     )
+}
+
+#[cfg(test)]
+mod history_admission_tests {
+    use super::history_transition_workspace;
+
+    #[test]
+    fn execution_evidence_is_added_to_transition_workspace() {
+        assert_eq!(
+            history_transition_workspace(100, 200, 500, 300).unwrap(),
+            600
+        );
+    }
+
+    #[test]
+    fn execution_evidence_cannot_use_fixed_overhead_as_its_budget() {
+        let evidence_bytes = 128 * 1024;
+        assert!(
+            history_transition_workspace(100, evidence_bytes, evidence_bytes, 64 * 1024).is_err()
+        );
+        assert!(
+            history_transition_workspace(100, evidence_bytes, 64 * 1024, evidence_bytes).is_err()
+        );
+        assert!(history_transition_workspace(100, 0, 0, 100).is_err());
+    }
+
+    #[test]
+    fn execution_evidence_workspace_overflow_is_rejected() {
+        assert!(history_transition_workspace(u64::MAX, 1, 1, 1).is_err());
+    }
 }

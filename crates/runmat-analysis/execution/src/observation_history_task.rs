@@ -89,8 +89,7 @@ pub fn prepare_observation_history_checkpoint_task(
         preparation.observation_id,
         predecessor,
         sample_ordinal,
-        sample.sample,
-        sample.logical_identity,
+        &sample,
     )?;
     request.validate_advance_inputs(previous.as_ref(), &sample)?;
     let request_bytes = request.canonical_bytes()?;
@@ -115,6 +114,7 @@ pub fn prepare_observation_history_checkpoint_task(
     let output_payload_upper_bound = observation_history_checkpoint_payload_bytes_upper_bound(
         &request,
         previous.as_ref(),
+        &sample,
         &input_facts,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;

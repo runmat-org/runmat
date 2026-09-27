@@ -63,8 +63,24 @@ fn fixture(evicted: bool) -> ObservationHistoryCheckpointManifest {
     let mut retained_prefix = initial;
     let mut predecessor = None;
     let mut terminal_predecessor = None;
+    let evidence = (0..3)
+        .map(|ordinal| {
+            crate::results::observation::partition_tests::checkpoint_test_evidence(f64::from(
+                ordinal,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let initial_execution = initial_execution_prefix_digest(stream.identity).unwrap();
+    let mut execution_prefix = initial_execution;
+    let mut retained_execution = initial_execution;
     for (ordinal, entry) in samples.iter().enumerate() {
         prefix = extend_observed_prefix_digest(prefix, entry.sample).unwrap();
+        execution_prefix = extend_execution_prefix_digest(
+            execution_prefix,
+            entry.sample,
+            evidence[ordinal].identity,
+        )
+        .unwrap();
         terminal_predecessor = predecessor;
         predecessor = Some(
             ObservationHistoryCheckpointIdentity::from_prefixes(
@@ -74,11 +90,13 @@ fn fixture(evicted: bool) -> ObservationHistoryCheckpointManifest {
                 ordinal as u64 + 1,
                 initial,
                 prefix,
+                (initial_execution, execution_prefix),
             )
             .unwrap(),
         );
         if evicted && ordinal == 0 {
             retained_prefix = prefix;
+            retained_execution = execution_prefix;
         }
     }
     let mut manifest = ObservationHistoryCheckpointManifest {
@@ -90,6 +108,9 @@ fn fixture(evicted: bool) -> ObservationHistoryCheckpointManifest {
         retained_prefix_digest: retained_prefix,
         observed_prefix_digest: prefix,
         samples: samples.into_iter().skip(usize::from(evicted)).collect(),
+        partition_evidence: evidence.into_iter().skip(usize::from(evicted)).collect(),
+        retained_execution_prefix_digest: retained_execution,
+        observed_execution_prefix_digest: execution_prefix,
     };
     manifest.identity = derive_checkpoint_identity(&manifest).unwrap();
     manifest.validate().unwrap();
@@ -202,8 +223,23 @@ fn checkpoint_prefix_identities_use_only_constant_size_headers() {
     let mut prefix = initial;
     let mut predecessor = None;
     let samples = entries();
+    let evidence = (0..3)
+        .map(|ordinal| {
+            crate::results::observation::partition_tests::checkpoint_test_evidence(f64::from(
+                ordinal,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let initial_execution = initial_execution_prefix_digest(stream.identity).unwrap();
+    let mut execution_prefix = initial_execution;
     for (ordinal, sample) in samples.iter().enumerate() {
         prefix = extend_observed_prefix_digest(prefix, sample.sample).unwrap();
+        execution_prefix = extend_execution_prefix_digest(
+            execution_prefix,
+            sample.sample,
+            evidence[ordinal].identity,
+        )
+        .unwrap();
         let count = ordinal as u64 + 1;
         let identity = ObservationHistoryCheckpointIdentity::from_prefixes(
             stream.identity,
@@ -212,6 +248,7 @@ fn checkpoint_prefix_identities_use_only_constant_size_headers() {
             count,
             initial,
             prefix,
+            (initial_execution, execution_prefix),
         )
         .unwrap();
         let manifest = ObservationHistoryCheckpointManifest {
@@ -223,6 +260,9 @@ fn checkpoint_prefix_identities_use_only_constant_size_headers() {
             retained_prefix_digest: initial,
             observed_prefix_digest: prefix,
             samples: samples[..=ordinal].to_vec(),
+            partition_evidence: evidence[..=ordinal].to_vec(),
+            retained_execution_prefix_digest: initial_execution,
+            observed_execution_prefix_digest: execution_prefix,
         };
         manifest.validate().unwrap();
         assert_eq!(identity, derive_checkpoint_identity(&manifest).unwrap());
@@ -235,6 +275,7 @@ fn checkpoint_prefix_identities_use_only_constant_size_headers() {
         0,
         initial,
         initial,
+        (initial_execution, initial_execution),
     )
     .is_err());
 }
@@ -259,4 +300,23 @@ fn checkpoint_prefix_iterator_checks_terminal_link_without_prefix_copies() {
     substituted.validate().unwrap();
     assert!(substituted.canonical_prefix_identities().is_err());
     assert!(fixture(true).canonical_prefix_identities().is_err());
+}
+
+#[test]
+fn checkpoint_execution_commitment_rejects_evidence_and_prefix_substitution() {
+    for evicted in [false, true] {
+        let manifest = fixture(evicted);
+        let mut changed = manifest.clone();
+        changed.partition_evidence.remove(0);
+        rejects_with_fresh_header(changed);
+        let mut changed = manifest.clone();
+        changed.partition_evidence.swap(0, 1);
+        rejects_with_fresh_header(changed);
+        let mut changed = manifest.clone();
+        changed.retained_execution_prefix_digest = Digest::sha256("foreign execution prefix");
+        rejects_with_fresh_header(changed);
+        let mut changed = manifest;
+        changed.observed_execution_prefix_digest = Digest::sha256("foreign execution terminal");
+        rejects_with_fresh_header(changed);
+    }
 }

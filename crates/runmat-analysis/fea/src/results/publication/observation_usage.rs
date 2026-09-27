@@ -111,8 +111,8 @@ pub fn validate_observation_publication_usage(
                         &history.request.observation_id,
                         predecessor,
                         ordinal,
-                        sample.coordinate,
-                        sample.result,
+                        sample,
+                        history.checkpoint.partition_evidence[ordinal as usize].identity,
                     )?;
                     require(Task::Checkpoint(request.digest()), &|demand| {
                         matches!(demand, FeaResourceDemand::StructuralObservationHistoryCheckpoint(value)

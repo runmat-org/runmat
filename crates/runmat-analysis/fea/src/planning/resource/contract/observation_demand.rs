@@ -55,6 +55,8 @@ pub struct ObservationHistoryCheckpointResourceDemand {
     pub retained_sample_count: Count,
     pub inputs: PreparedInputResourceFacts,
     pub transition_workspace_bytes_upper_bound: ByteCount,
+    pub execution_evidence_encoded_bytes_upper_bound: ByteCount,
+    pub execution_evidence_workspace_bytes_upper_bound: ByteCount,
     pub output: PreparedOutputResourceFacts,
 }
 

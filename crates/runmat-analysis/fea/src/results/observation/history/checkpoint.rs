@@ -1,3 +1,4 @@
+use super::super::{ObservationPartitionEvidence, ObservationPartitionEvidenceIdentity};
 use runmat_analysis_core::{
     ComplexRepresentation, FieldLocation, IndependentDomain, ObservationId, ObservationQuantity,
     ObservationValueShape, PartialAccessPolicy, RetentionPolicy, SamplingPolicy,
@@ -19,12 +20,13 @@ use super::schedule::{
     sample_matches_history_policy, validate_history_policy,
 };
 
-const CHECKPOINT_PREFIX: &[u8] = b"runmat-observation-history-checkpoint/v2\0";
-const CHECKPOINT_SCHEMA_VERSION: u16 = 2;
+const CHECKPOINT_PREFIX: &[u8] = b"runmat-observation-history-checkpoint/v3\0";
+const CHECKPOINT_SCHEMA_VERSION: u16 = 3;
 
 mod identity;
 mod lineage;
 use identity::derive_checkpoint_identity;
+pub(super) use identity::{extend_execution_prefix_digest, initial_execution_prefix_digest};
 
 #[cfg(test)]
 mod tests;
@@ -208,6 +210,9 @@ pub struct ObservationHistoryCheckpointManifest {
     pub retained_prefix_digest: Digest,
     pub observed_prefix_digest: Digest,
     pub samples: Vec<ObservationHistoryEntry>,
+    pub retained_execution_prefix_digest: Digest,
+    pub observed_execution_prefix_digest: Digest,
+    pub partition_evidence: Vec<ObservationPartitionEvidence>,
 }
 
 #[derive(Deserialize)]
@@ -221,6 +226,9 @@ struct ObservationHistoryCheckpointManifestWire {
     retained_prefix_digest: Digest,
     observed_prefix_digest: Digest,
     samples: Vec<ObservationHistoryEntry>,
+    retained_execution_prefix_digest: Digest,
+    observed_execution_prefix_digest: Digest,
+    partition_evidence: Vec<ObservationPartitionEvidence>,
 }
 
 impl TryFrom<ObservationHistoryCheckpointManifestWire> for ObservationHistoryCheckpointManifest {
@@ -236,6 +244,9 @@ impl TryFrom<ObservationHistoryCheckpointManifestWire> for ObservationHistoryChe
             retained_prefix_digest: wire.retained_prefix_digest,
             observed_prefix_digest: wire.observed_prefix_digest,
             samples: wire.samples,
+            retained_execution_prefix_digest: wire.retained_execution_prefix_digest,
+            observed_execution_prefix_digest: wire.observed_execution_prefix_digest,
+            partition_evidence: wire.partition_evidence,
         };
         manifest.validate()?;
         Ok(manifest)
@@ -298,6 +309,7 @@ impl ObservationHistoryCheckpoint {
         observed_sample_count: u64,
         retained_prefix_digest: Digest,
         observed_prefix_digest: Digest,
+        execution_prefixes: (Digest, Digest),
         samples: Vec<ObservationHistorySample>,
     ) -> Result<Self, ObservationError> {
         let entries = samples.iter().map(history_entry).collect();
@@ -310,6 +322,12 @@ impl ObservationHistoryCheckpoint {
             retained_prefix_digest,
             observed_prefix_digest,
             samples: entries,
+            retained_execution_prefix_digest: execution_prefixes.0,
+            observed_execution_prefix_digest: execution_prefixes.1,
+            partition_evidence: samples
+                .iter()
+                .map(|sample| sample.result.partition_evidence.clone())
+                .collect(),
         };
         manifest.identity = derive_checkpoint_identity(&manifest)?;
         Self::from_manifest_and_samples(manifest, samples)
@@ -401,9 +419,14 @@ fn validate_checkpoint(
             "history checkpoint payload differs from its retained sample count".into(),
         ));
     }
-    for (entry, sample) in manifest.samples.iter().zip(samples) {
+    for ((entry, evidence), sample) in manifest
+        .samples
+        .iter()
+        .zip(&manifest.partition_evidence)
+        .zip(samples)
+    {
         sample.validate()?;
-        if entry != &history_entry(sample) {
+        if entry != &history_entry(sample) || evidence != &sample.result.partition_evidence {
             return Err(ObservationError::Identity(
                 "history checkpoint samples differ from their manifest",
             ));
@@ -439,6 +462,7 @@ fn validate_checkpoint_manifest(
         ));
     }
     validate_entry_order(&manifest.samples)?;
+    identity::validate_execution_prefix(manifest)?;
     validate_observed_prefix(
         &manifest.stream,
         manifest.observed_sample_count,

@@ -50,6 +50,7 @@ pub(super) fn execute_observation_history_checkpoint(
     let output_payload_upper_bound = observation_history_checkpoint_payload_bytes_upper_bound(
         &request,
         previous.as_ref(),
+        &sample,
         &input_facts,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;

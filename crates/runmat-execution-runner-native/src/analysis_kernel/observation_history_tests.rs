@@ -217,6 +217,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
             let payload_ceiling = observation_history_checkpoint_payload_bytes_upper_bound(
                 request,
                 previous,
+                sample,
                 &input_facts,
             )
             .unwrap();
@@ -250,8 +251,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
         observation_id.clone(),
         None,
         0,
-        first_sample.sample,
-        first_sample.logical_identity,
+        &first_sample,
     )
     .unwrap();
     let first_inputs = with_resource_plan(
@@ -288,8 +288,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
         observation_id,
         Some(first_checkpoint.manifest().identity),
         1,
-        second_sample.sample,
-        second_sample.logical_identity,
+        &second_sample,
     )
     .unwrap();
     let second_inputs = with_resource_plan(
@@ -325,45 +324,70 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     assert_eq!(second_checkpoint.manifest().observed_sample_count, 2);
     assert_eq!(second_checkpoint.samples().len(), 1);
 
-    let mut understated_inputs = second_inputs.clone();
-    let resource_index = understated_inputs
-        .iter()
-        .position(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
-        .unwrap();
-    let resource_plan =
-        FeaResourcePlan::from_canonical_bytes(&understated_inputs[resource_index].payload())
+    enum UnderstatedBudget {
+        Output,
+        EvidenceEncoding,
+        EvidenceWorkspace,
+    }
+    for budget in [
+        UnderstatedBudget::Output,
+        UnderstatedBudget::EvidenceEncoding,
+        UnderstatedBudget::EvidenceWorkspace,
+    ] {
+        let mut understated_inputs = second_inputs.clone();
+        let resource_index = understated_inputs
+            .iter()
+            .position(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
             .unwrap();
-    let mut understated_input = resource_plan.input;
-    let FeaResourceDemand::StructuralObservationHistoryCheckpoint(demand) =
-        &mut understated_input.demand
-    else {
-        unreachable!()
-    };
-    demand.output.construction_resident_bytes_admission_budget.0 -= 1;
-    let understated_plan = build_resource_plan(understated_input).unwrap();
-    understated_inputs[resource_index] = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ResourcePlan,
-        understated_plan.identity.digest(),
-        &understated_plan.canonical_bytes().unwrap(),
-        256,
-        ObjectNamespace::InputValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let understated_host = checkpoint_host(&understated_inputs);
-    assert!(NativeAnalysisKernel
-        .execute(AnalysisKernelInvocation {
-            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
-                256,
-                ObjectInventoryLimits::default()
-            )
-            .unwrap(),
-            kind: AnalysisWorkKind::CheckpointObservationHistory,
-            host: &understated_host,
-            inputs: &understated_inputs,
-        })
-        .is_err());
-
+        let resource_plan =
+            FeaResourcePlan::from_canonical_bytes(&understated_inputs[resource_index].payload())
+                .unwrap();
+        let mut understated_input = resource_plan.input;
+        let FeaResourceDemand::StructuralObservationHistoryCheckpoint(demand) =
+            &mut understated_input.demand
+        else {
+            unreachable!()
+        };
+        assert!(demand.execution_evidence_encoded_bytes_upper_bound.0 > 1);
+        assert!(
+            demand.execution_evidence_workspace_bytes_upper_bound.0
+                > demand.execution_evidence_encoded_bytes_upper_bound.0
+        );
+        match budget {
+            UnderstatedBudget::Output => {
+                demand.output.construction_resident_bytes_admission_budget.0 -= 1
+            }
+            UnderstatedBudget::EvidenceEncoding => {
+                demand.execution_evidence_encoded_bytes_upper_bound.0 -= 1
+            }
+            UnderstatedBudget::EvidenceWorkspace => {
+                demand.execution_evidence_workspace_bytes_upper_bound.0 -= 1
+            }
+        }
+        let understated_plan = build_resource_plan(understated_input).unwrap();
+        understated_inputs[resource_index] = prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            understated_plan.identity.digest(),
+            &understated_plan.canonical_bytes().unwrap(),
+            256,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let understated_host = checkpoint_host(&understated_inputs);
+        assert!(NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                    256,
+                    ObjectInventoryLimits::default()
+                )
+                .unwrap(),
+                kind: AnalysisWorkKind::CheckpointObservationHistory,
+                host: &understated_host,
+                inputs: &understated_inputs,
+            })
+            .is_err());
+    }
     let mut substituted_inputs = second_inputs;
     substituted_inputs[1] = prepare_sample(&first_sample);
     assert!(NativeAnalysisKernel

@@ -34,6 +34,7 @@ pub(crate) use acceleration::governed_extrema_device_resident_bytes;
 pub use catalog::{
     ObservationFieldCatalog, ObservationFieldCatalogSource, ObservationSelectionCoordinate,
 };
+pub(crate) use contract::OBSERVATION_LIMITS;
 
 pub use contract::{
     ObservationArtifact, ObservationArtifactEntry, ObservationArtifactIdentity,
