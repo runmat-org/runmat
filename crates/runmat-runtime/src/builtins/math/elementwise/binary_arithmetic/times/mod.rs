@@ -130,13 +130,22 @@ async fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             BUILTIN_NAME,
         )?;
     }
-    let base = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => times_gpu_pair(la, lb).await,
-        (Value::GpuTensor(la), rhs) => times_gpu_host_left(la, rhs).await,
-        (lhs, Value::GpuTensor(rb)) => times_gpu_host_right(lhs, rb).await,
-        (lhs, rhs) => Ok(times_host(lhs, rhs)?),
-    }?;
-    apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await
+    super::preparation::execute(
+        TIMES_CATALOG_ENTRY.identity,
+        2 + rest.len(),
+        lhs,
+        rhs,
+        |lhs, rhs| async move {
+            let base = match (lhs, rhs) {
+                (Value::GpuTensor(la), Value::GpuTensor(lb)) => times_gpu_pair(la, lb).await,
+                (Value::GpuTensor(la), rhs) => times_gpu_host_left(la, rhs).await,
+                (lhs, Value::GpuTensor(rb)) => times_gpu_host_right(lhs, rb).await,
+                (lhs, rhs) => Ok(times_host(lhs, rhs)?),
+            }?;
+            apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await
+        },
+    )
+    .await
 }
 
 #[cfg(test)]

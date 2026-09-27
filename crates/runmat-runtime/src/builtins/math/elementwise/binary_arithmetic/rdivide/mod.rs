@@ -98,8 +98,17 @@ async fn rdivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRes
             BUILTIN_NAME,
         )?;
     }
-    let base = super::division::execute(DIVISION_CONTEXT, lhs, rhs).await?;
-    apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await
+    super::preparation::execute(
+        RDIVIDE_CATALOG_ENTRY.identity,
+        2 + rest.len(),
+        lhs,
+        rhs,
+        |lhs, rhs| async move {
+            let base = super::division::execute(DIVISION_CONTEXT, lhs, rhs).await?;
+            apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base, &template).await
+        },
+    )
+    .await
 }
 
 #[cfg(test)]

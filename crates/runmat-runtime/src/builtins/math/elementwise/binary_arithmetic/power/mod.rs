@@ -112,13 +112,22 @@ async fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             BUILTIN_NAME,
         )?;
     }
-    let base_result = match (lhs, rhs) {
-        (Value::GpuTensor(la), Value::GpuTensor(lb)) => power_gpu_pair(la, lb).await,
-        (Value::GpuTensor(la), rhs) => power_gpu_host_left(la, rhs).await,
-        (lhs, Value::GpuTensor(rb)) => power_gpu_host_right(lhs, rb).await,
-        (lhs, rhs) => Ok(power_host(lhs, rhs)?),
-    }?;
-    apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base_result, &template).await
+    super::preparation::execute(
+        POWER_CATALOG_ENTRY.identity,
+        2 + rest.len(),
+        lhs,
+        rhs,
+        |lhs, rhs| async move {
+            let base_result = match (lhs, rhs) {
+                (Value::GpuTensor(la), Value::GpuTensor(lb)) => power_gpu_pair(la, lb).await,
+                (Value::GpuTensor(la), rhs) => power_gpu_host_left(la, rhs).await,
+                (lhs, Value::GpuTensor(rb)) => power_gpu_host_right(lhs, rb).await,
+                (lhs, rhs) => Ok(power_host(lhs, rhs)?),
+            }?;
+            apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base_result, &template).await
+        },
+    )
+    .await
 }
 
 #[cfg(test)]
