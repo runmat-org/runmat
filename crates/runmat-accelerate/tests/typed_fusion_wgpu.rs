@@ -1,0 +1,173 @@
+#![cfg(feature = "wgpu")]
+//! Qualification tests require a real adapter. No missing-adapter early return
+//! is counted as a pass; F64-specific coverage is an explicit separate gate.
+#[path = "support/typed_fusion_plan.rs"]
+mod fixture;
+use fixture::{cast, plan};
+use futures::executor::block_on;
+use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+use runmat_accelerate::fusion::{FusionOp, FusionStoreMaterialization};
+use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
+use runmat_accelerate::graph::{PrimitiveOp, ShapeInfo, VarBinding, VarKind};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorStorage, HostNumericDataOwned, HostTensorView, NumericElementType,
+    ProviderPrecision,
+};
+use runmat_value::{Tensor, Value};
+
+fn values() -> Vec<f64> {
+    vec![
+        16_777_217.0,
+        -16_777_217.0,
+        f64::from(f32::MIN_POSITIVE),
+        -0.0,
+        0.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ]
+}
+
+fn same_f32(actual: &[f32], expected: &[f32]) {
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        if expected.is_nan() {
+            assert!(actual.is_nan());
+        } else {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+    }
+}
+
+#[test]
+fn actual_adapter_single_final_has_typed_f32_storage_and_preserves_nd_shape() {
+    let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual WGPU adapter required");
+    let values = values();
+    let shape = vec![2, 2, 2];
+    let mut plan = plan(vec![cast("single", 0, 2)], 2);
+    plan.group.shape = ShapeInfo::Tensor(shape.iter().copied().map(Some).collect());
+    let result = block_on(execute_elementwise(FusionExecutionRequest {
+        plan: &plan,
+        inputs: vec![Value::Tensor(
+            Tensor::new(values.clone(), shape.clone()).unwrap(),
+        )],
+        placement: None,
+        runtime: None,
+    }))
+    .unwrap();
+    let Value::GpuTensor(output) = result.final_value else {
+        panic!("resident result required")
+    };
+    assert_eq!(output.shape, shape);
+    assert_eq!(
+        output.descriptor.element_type,
+        Some(NumericElementType::F32)
+    );
+    assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+    let downloaded = block_on(provider.download_numeric(&output)).unwrap();
+    let HostNumericDataOwned::F32(actual) = downloaded.data else {
+        panic!("physical F32 payload required")
+    };
+    same_f32(
+        &actual,
+        &values.iter().map(|value| *value as f32).collect::<Vec<_>>(),
+    );
+    provider.free(&output).unwrap();
+}
+
+#[test]
+#[ignore = "requires an actual F64 WGPU adapter; run explicitly during F64 qualification"]
+fn actual_f64_adapter_preserves_single_interior_rounding_and_mixed_final_buffers() {
+    let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual F64 WGPU adapter required");
+    assert_eq!(
+        provider.precision(),
+        ProviderPrecision::F64,
+        "this gate must not silently test an F32 adapter"
+    );
+    let values = values();
+    let shape = vec![2, 2, 2];
+    let source = provider
+        .upload(&HostTensorView {
+            data: &values,
+            shape: &shape,
+        })
+        .unwrap();
+    let direct_single = block_on(provider.unary_single(&source)).unwrap();
+    let HostNumericDataOwned::F32(direct) = block_on(provider.download_numeric(&direct_single))
+        .unwrap()
+        .data
+    else {
+        panic!("typed direct Single")
+    };
+    let mut plan = plan(
+        vec![
+            cast("single", 0, 2),
+            FusionOp::Primitive {
+                op: PrimitiveOp::Add,
+                inputs: vec![2, 2],
+                output: Some(3),
+            },
+            cast("double", 3, 4),
+        ],
+        4,
+    );
+    plan.group.shape = ShapeInfo::Tensor(shape.iter().copied().map(Some).collect());
+    plan.materialized_stores.push(FusionStoreMaterialization {
+        value_id: 2,
+        binding: VarBinding {
+            kind: VarKind::Global,
+            index: 0,
+        },
+    });
+    let result = block_on(execute_elementwise(FusionExecutionRequest {
+        plan: &plan,
+        inputs: vec![Value::GpuTensor(source.clone())],
+        placement: None,
+        runtime: None,
+    }))
+    .unwrap();
+    let Value::GpuTensor(final_output) = result.final_value else {
+        panic!("resident Double")
+    };
+    let Value::GpuTensor(single_output) = &result.materialized_stores[0].1 else {
+        panic!("resident Single")
+    };
+    assert_eq!(
+        single_output.descriptor.element_type,
+        Some(NumericElementType::F32)
+    );
+    assert_eq!(
+        final_output.descriptor.element_type,
+        Some(NumericElementType::F64)
+    );
+    assert_eq!(single_output.shape, shape);
+    assert_eq!(final_output.shape, shape);
+    let HostNumericDataOwned::F32(single) = block_on(provider.download_numeric(single_output))
+        .unwrap()
+        .data
+    else {
+        panic!("physical F32")
+    };
+    same_f32(&single, &direct);
+    let HostNumericDataOwned::F64(final_values) =
+        block_on(provider.download_numeric(&final_output))
+            .unwrap()
+            .data
+    else {
+        panic!("physical F64")
+    };
+    for (actual, input) in final_values.iter().zip(&values) {
+        let rounded = *input as f32;
+        let expected = f64::from(rounded + rounded);
+        if expected.is_nan() {
+            assert!(actual.is_nan());
+        } else {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+    }
+    for handle in [&source, &direct_single, single_output, &final_output] {
+        provider.free(handle).unwrap();
+    }
+}
