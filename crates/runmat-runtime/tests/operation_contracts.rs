@@ -2998,37 +2998,21 @@ fn analysis_run_gpu_without_provider_records_fallback_contract() {
 
 #[test]
 fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
-    struct ContractTestProvider;
+    struct ContractTestProvider(runmat_accelerate::simple_provider::InProcessProvider);
 
     impl runmat_accelerate_api::AccelProvider for ContractTestProvider {
         fn upload(
             &self,
             host: &runmat_accelerate_api::HostTensorView,
         ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-            static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(2000);
-            Ok(runmat_accelerate_api::GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: 11,
-                buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
-                descriptor: Default::default(),
-            })
+            self.0.upload(host)
         }
 
         fn download<'a>(
             &'a self,
             h: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(runmat_accelerate_api::HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
+            self.0.download(h)
         }
 
         fn device_info(&self) -> String {
@@ -3036,12 +3020,12 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
         }
 
         fn device_id(&self) -> u32 {
-            11
+            self.0.device_id()
         }
 
         fn device_info_struct(&self) -> runmat_accelerate_api::ApiDeviceInfo {
             runmat_accelerate_api::ApiDeviceInfo {
-                device_id: 11,
+                device_id: self.device_id(),
                 name: "contract-test-provider".into(),
                 vendor: "runmat-tests".to_string(),
                 memory_bytes: None,
@@ -3050,8 +3034,10 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
         }
     }
 
-    static PROVIDER: ContractTestProvider = ContractTestProvider;
-    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+    let provider = Box::leak(Box::new(ContractTestProvider(
+        runmat_accelerate::simple_provider::InProcessProvider::new(),
+    )));
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let model = contract_linear_static_model();
 
     let envelope = analysis_run_linear_static_with_options(
@@ -3111,19 +3097,9 @@ fn analysis_run_gpu_upload_failure_records_fallback_contract() {
 
         fn download<'a>(
             &'a self,
-            h: &'a runmat_accelerate_api::GpuTensorHandle,
+            _h: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(runmat_accelerate_api::HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
+            Box::pin(async { anyhow::bail!("upload-fail provider has no published allocations") })
         }
 
         fn device_info(&self) -> String {
@@ -3237,19 +3213,9 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
 
         fn download<'a>(
             &'a self,
-            h: &'a runmat_accelerate_api::GpuTensorHandle,
+            _h: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(runmat_accelerate_api::HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
+            Box::pin(async { anyhow::bail!("upload-fail provider has no published allocations") })
         }
 
         fn device_info(&self) -> String {
@@ -3333,19 +3299,9 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
 
         fn download<'a>(
             &'a self,
-            h: &'a runmat_accelerate_api::GpuTensorHandle,
+            _h: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(runmat_accelerate_api::HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
+            Box::pin(async { anyhow::bail!("upload-fail provider has no published allocations") })
         }
 
         fn device_info(&self) -> String {
