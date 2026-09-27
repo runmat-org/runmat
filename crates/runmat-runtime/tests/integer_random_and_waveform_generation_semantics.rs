@@ -1,5 +1,8 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle, IntegerElementType};
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage,
+    HostNumericDataOwned, HostNumericTensorOwned,
+};
 use runmat_value::{IntValue, IntegerStorage, NumericDType, Tensor, Value};
 
 const PACKET: [(&str, usize, &[usize]); 9] = [
@@ -39,18 +42,22 @@ fn all_integer_scalars(value: i8) -> Vec<IntValue> {
     ]
 }
 
-fn synthetic_resident_integer(buffer_id: u64, shape: Vec<usize>) -> GpuTensorHandle {
-    let handle = GpuTensorHandle {
-        shape,
-        device_id: u32::MAX - 17,
-        buffer_id,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::U64.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    handle.with_provenance(GpuHandleProvenance::Explicit)
+fn resident_integer(shape: Vec<usize>) -> GpuTensorHandle {
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::U64(vec![u64::MAX; shape.iter().product()]),
+            shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(!runmat_accelerate_api::registered_providers()
+        .iter()
+        .any(|provider| provider.device_id() == allocation.handle.device_id()));
+    allocation
+        .handle
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap()
 }
 
 #[test]
@@ -244,10 +251,7 @@ fn strict_mode_rejects_every_new_typed_integer_extension_by_stable_identifier() 
 #[test]
 fn strict_resident_integer_gates_run_before_provider_lookup() {
     let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
-    let handles = [
-        synthetic_resident_integer(1, vec![1, 2]),
-        synthetic_resident_integer(2, vec![1, 1]),
-    ];
+    let handles = [resident_integer(vec![1, 2]), resident_integer(vec![1, 1])];
     let cases = [
         (
             "rectpuls",
@@ -265,7 +269,13 @@ fn strict_resident_integer_gates_run_before_provider_lookup() {
         assert_eq!(error.identifier(), Some(identifier), "{name}: {error:?}");
     }
     for handle in handles {
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        let physical = handle.allocation_lease().downgrade();
+        assert_eq!(
+            handle.physical().element_type(),
+            runmat_accelerate_api::NumericElementType::U64
+        );
+        drop(handle);
+        assert!(physical.acquire().is_none());
     }
 }
 

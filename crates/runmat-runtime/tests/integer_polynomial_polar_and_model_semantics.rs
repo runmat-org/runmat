@@ -1,5 +1,8 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle, IntegerElementType};
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuHandleProvenance, GpuTensorStorage, HostNumericDataOwned,
+    HostNumericTensorOwned,
+};
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, ObjectInstance, Tensor, Value,
 };
@@ -30,18 +33,24 @@ fn floating(values: Vec<f64>, shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new(values, shape.to_vec()).expect("floating tensor"))
 }
 
-fn resident_integer(buffer_id: u64, shape: Vec<usize>) -> Value {
-    let handle = GpuTensorHandle {
-        shape,
-        device_id: u32::MAX - 442,
-        buffer_id,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::U64.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    Value::GpuTensor(handle.with_provenance(GpuHandleProvenance::Explicit))
+fn resident_integer(shape: Vec<usize>) -> Value {
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::U64(vec![u64::MAX; shape.iter().product()]),
+            shape,
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(!runmat_accelerate_api::registered_providers()
+        .iter()
+        .any(|provider| provider.device_id() == allocation.handle.device_id()));
+    Value::GpuTensor(
+        allocation
+            .handle
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap(),
+    )
 }
 
 fn integer_cases(values: &[i64]) -> Vec<(&'static str, Value, Value)> {
@@ -241,11 +250,11 @@ fn strict_mode_rejects_each_runmat_only_integer_surface_before_evaluation() {
 fn strict_resident_integer_gates_run_before_provider_lookup() {
     let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     let calls = [
-        ("pow2", vec![resident_integer(1, vec![1, 2])]),
+        ("pow2", vec![resident_integer(vec![1, 2])]),
         (
             "perfcurve",
             vec![
-                resident_integer(2, vec![2, 1]),
+                resident_integer(vec![2, 1]),
                 floating(vec![0.0, 1.0], &[2, 1]),
                 Value::Num(1.0),
             ],
@@ -254,7 +263,7 @@ fn strict_resident_integer_gates_run_before_provider_lookup() {
             "predict",
             vec![
                 Value::Object(ObjectInstance::new("LinearModel".to_string())),
-                resident_integer(3, vec![1, 2]),
+                resident_integer(vec![1, 2]),
             ],
         ),
     ];
@@ -269,7 +278,13 @@ fn strict_resident_integer_gates_run_before_provider_lookup() {
         );
         for value in args {
             if let Value::GpuTensor(handle) = value {
-                runmat_accelerate_api::clear_handle_metadata(&handle);
+                let physical = handle.allocation_lease().downgrade();
+                assert_eq!(
+                    handle.physical().element_type(),
+                    runmat_accelerate_api::NumericElementType::U64
+                );
+                drop(handle);
+                assert!(physical.acquire().is_none());
             }
         }
     }
