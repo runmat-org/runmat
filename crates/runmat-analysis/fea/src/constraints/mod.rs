@@ -5,6 +5,7 @@
 //! plan; it must not reinterpret authored targets or coordinate frames.
 
 mod algebra;
+mod compilation;
 mod compile;
 mod contract;
 mod coupling;
@@ -45,6 +46,8 @@ pub use result::{
     ConstraintResultError, ConstraintRowReaction, ConstraintViolation,
 };
 
+#[cfg(test)]
+mod compilation_tests;
 #[cfg(test)]
 mod tests;
 pub use algebra::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix};

@@ -31,21 +31,7 @@ impl CanonicalStructuralConstraintPlan {
         model: &AnalysisModel,
         mesh: Option<&SolverMeshArtifact>,
     ) -> Result<Self, ConstraintPlanError> {
-        let has_explicit_elements = model
-            .structural
-            .as_ref()
-            .is_some_and(|structural| !structural.elements.is_empty());
-        match (mesh, has_explicit_elements) {
-            (Some(mesh), true) if !mesh.topology.volume_elements.is_empty() => {
-                super::mixed::compile(model, mesh)
-            }
-            (Some(mesh), _) => super::compile::compile(model, mesh),
-            (None, true) => super::mixed::compile_explicit(model),
-            (None, false) => Err(ConstraintPlanError::Invalid(
-                "structural constraint compilation requires a solid mesh or explicit connectivity"
-                    .into(),
-            )),
-        }
+        super::compilation::compile(model, mesh)
     }
 
     pub fn compile(

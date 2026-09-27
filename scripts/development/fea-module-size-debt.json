@@ -15,7 +15,6 @@
   "crates/runmat-analysis/fea/src/pipeline/electro_thermal.rs": 1108,
   "crates/runmat-analysis/fea/src/results/field/contract.rs": 920,
   "crates/runmat-analysis/fea/src/results/accuracy/mod.rs": 680,
-  "crates/runmat-analysis/fea/src/constraints/mixed.rs": 947,
   "crates/runmat-runtime/src/analysis/value_admission.rs": 869,
   "crates/runmat-runtime/src/analysis/structural_study/lifecycle.rs": 839,
   "crates/runmat-analysis/fea/src/results/observation/distributed_numeric.rs": 835,

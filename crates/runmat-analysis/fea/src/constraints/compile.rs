@@ -1,6 +1,6 @@
 //! One-way lowering from authored structural constraints to solver-topology rows.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
     AnalysisModel, CoordinateFrame, PairedConstraint, PeriodicConstraint, PeriodicTransform,
@@ -10,26 +10,21 @@ use runmat_analysis_core::{
 use runmat_meshing_core::SolverMeshArtifact;
 
 use super::contract::{
-    CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintRow,
-    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
-    CanonicalStructuralReferencePoint, ConstraintCouplingEvidence, ConstraintCouplingKind,
-    ConstraintEnforcement, ConstraintGroupEvidence, ConstraintPairingEvidence, ConstraintPlanError,
-    ConstraintPlanEvidence, ResolvedConstraintTarget,
+    CanonicalStructuralConstraintRow, CanonicalStructuralConstraintTerm, CanonicalStructuralDof,
+    CanonicalStructuralDofOwner, CanonicalStructuralReferencePoint, ConstraintCouplingEvidence,
+    ConstraintCouplingKind, ConstraintPairingEvidence, ConstraintPlanError,
+    ResolvedConstraintTarget,
 };
 use super::coupling::compile_reference_coupling;
-use super::enforcement;
 use super::frame::{
     boundary_tangent_basis, require_global, require_normal_capable, translation_basis,
     translation_direction,
 };
 use super::normal::boundary_node_normals;
 use super::pairing::{pair_targets, pairing_rows};
-use super::plan::{
-    authored_constraints_digest, reference_point_identity, source_digest, structural_constraints,
-};
+use super::plan::reference_point_identity;
 use super::row;
 use super::target::{node_coordinates, resolve_solid_target};
-use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
 type CompiledConstraint = (
     Vec<ResolvedConstraintTarget>,
@@ -37,89 +32,6 @@ type CompiledConstraint = (
     Vec<ConstraintPairingEvidence>,
     Option<ConstraintCouplingEvidence>,
 );
-
-pub(super) fn compile(
-    model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
-) -> Result<CanonicalStructuralConstraintPlan, ConstraintPlanError> {
-    mesh.validate()
-        .map_err(|error| ConstraintPlanError::Invalid(error.to_string()))?;
-    let authored = structural_constraints(model);
-    validate_unique_ids(&authored)?;
-    let reference_points = canonical_reference_points(&authored)?;
-    let authored_constraints_digest = authored_constraints_digest(&authored)?;
-    let mut groups = Vec::with_capacity(authored.len());
-    let mut rows = Vec::new();
-    let mut enforcement = ConstraintEnforcement::DirectElimination;
-
-    for constraint in authored {
-        runmat_analysis_core::validate_coordinate_frame(&constraint.frame).map_err(|_| {
-            ConstraintPlanError::DegenerateFrame {
-                constraint_id: constraint.constraint_id.clone(),
-            }
-        })?;
-        let (mut targets, compiled_rows, pairings, coupling) =
-            compile_constraint(model, mesh, constraint)?;
-        targets.sort_by_key(|target| target.selection_digest);
-        targets.dedup_by_key(|target| target.selection_digest);
-        enforcement = enforcement::combine(
-            enforcement,
-            enforcement::select(&constraint.kind, &compiled_rows),
-        );
-        let first_row = rows.len();
-        rows.extend(compiled_rows);
-        groups.push(ConstraintGroupEvidence {
-            constraint_id: constraint.constraint_id.clone(),
-            source_digest: source_digest(constraint)?,
-            implementation:
-                runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-            targets,
-            reference_point_identities: coupling
-                .iter()
-                .map(|coupling| coupling.reference_point_identity)
-                .collect(),
-            coupling,
-            pairings,
-            row_count: rows.len() - first_row,
-        });
-    }
-
-    groups.sort_by(|left, right| left.constraint_id.cmp(&right.constraint_id));
-    rows.sort_by(row::compare_rows);
-    let (active_row_count, redundant_row_count) = row::classify(&mut rows)?;
-    let plan = CanonicalStructuralConstraintPlan {
-        schema_version: 1,
-        topology: CanonicalStructuralTopologyIdentity::Solid {
-            mesh_digest: mesh.canonical_digest,
-        },
-        authored_constraints_digest,
-        enforcement,
-        reference_points,
-        evidence: ConstraintPlanEvidence {
-            authored_constraint_count: groups.len(),
-            active_row_count,
-            redundant_row_count,
-            conflicting_row_count: 0,
-            rank: active_row_count,
-        },
-        groups,
-        rows,
-    };
-    plan.validate()?;
-    Ok(plan)
-}
-
-fn validate_unique_ids(constraints: &[&StructuralConstraint]) -> Result<(), ConstraintPlanError> {
-    let mut ids = BTreeSet::new();
-    for constraint in constraints {
-        if !ids.insert(constraint.constraint_id.as_str()) {
-            return Err(ConstraintPlanError::DuplicateConstraintId {
-                constraint_id: constraint.constraint_id.clone(),
-            });
-        }
-    }
-    Ok(())
-}
 
 pub(super) fn canonical_reference_points(
     constraints: &[&StructuralConstraint],
@@ -170,7 +82,7 @@ pub(super) fn canonical_reference_points(
     Ok(points)
 }
 
-fn compile_constraint(
+pub(super) fn compile_constraint(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,

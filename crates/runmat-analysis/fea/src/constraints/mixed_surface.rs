@@ -8,13 +8,14 @@ use runmat_meshing_core::SolverMeshArtifact;
 use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 
 use super::{
+    compilation::CompiledConstraint,
     coupling::compile_reference_coupling_for_nodes,
     explicit_surface::resolve_explicit_surface,
     frame::{
         boundary_tangent_basis, require_global, require_normal_capable, translation_basis,
         translation_direction,
     },
-    mixed::{resolve_target, CompiledConstraint},
+    mixed::resolve_target,
     plan::reference_point_identity,
     row, CanonicalStructuralDof, ConstraintCouplingKind, ConstraintPlanError,
 };
