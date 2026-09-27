@@ -1025,7 +1025,12 @@ impl NativeAutoOffload {
                             }
                             Ok(value)
                         }
-                        Err(error) if t.integer_storage().is_some() => {
+                        Err(error)
+                            if t.integer_storage().is_some()
+                                && runmat_accelerate_api::is_unsupported_provider_operation(
+                                    &error,
+                                ) =>
+                        {
                             if let Some(trace) = trace {
                                 trace.event(
                                     PlacementEventKind::Fallback,
@@ -1064,12 +1069,12 @@ impl NativeAutoOffload {
     }
 
     fn tensor_to_gpu(&self, tensor: &Tensor, protected: &[&GpuTensorHandle]) -> Result<Value> {
-        let mut handle = runmat_runtime::builtins::common::gpu_helpers::upload_tensor_protecting(
-            self.provider,
-            tensor,
-            protected,
-        )
-        .map_err(|error| anyhow!(error))?;
+        let mut handle =
+            runmat_runtime::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+                self.provider,
+                tensor,
+                protected,
+            )?;
         runmat_accelerate_api::mark_handle_automatic(&mut handle);
         Ok(Value::GpuTensor(handle))
     }
@@ -1657,6 +1662,10 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Foreign(_) => "Foreign",
     }
 }
+
+#[cfg(test)]
+#[path = "native_auto/upload_tests.rs"]
+mod upload_tests;
 
 #[cfg(test)]
 mod tests {

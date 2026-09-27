@@ -5,6 +5,9 @@ use std::sync::{
     Mutex,
 };
 
+#[path = "metadata_tests.rs"]
+mod metadata;
+
 struct Legacy {
     device: u32,
     returned: GpuTensorHandle,
@@ -117,6 +120,38 @@ fn numeric_upload_legacy_adapter_rejects_unsupported_native_storage_without_wide
     }
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     assert!(provider.freed.lock().unwrap().is_empty());
+}
+
+#[test]
+fn numeric_upload_default_integer_hook_reports_typed_unsupported() {
+    struct LegacyWithoutInteger(Legacy);
+    impl AccelProvider for LegacyWithoutInteger {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            self.0.upload(host)
+        }
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.0.download(handle)
+        }
+        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            self.0.free(handle)
+        }
+        fn device_info(&self) -> String {
+            self.0.device_info()
+        }
+        fn device_id(&self) -> u32 {
+            self.0.device_id()
+        }
+    }
+    let provider = LegacyWithoutInteger(Legacy::new());
+    let view = HostNumericTensorView {
+        data: HostNumericDataView::I64(&[9_007_199_254_740_993]),
+        shape: &[1, 1],
+        storage: GpuTensorStorage::Real,
+    };
+    let error = upload_numeric_protecting(&provider, &view, &[]).unwrap_err();
+    assert!(is_unsupported_provider_operation(&error));
+    assert_eq!(provider.0.calls.load(Ordering::SeqCst), 0);
+    assert!(provider.0.freed.lock().unwrap().is_empty());
 }
 
 #[test]

@@ -26,6 +26,10 @@ pub fn upload_numeric_protecting<P: AccelProvider + ?Sized>(
     protected: &[&GpuTensorHandle],
 ) -> anyhow::Result<GpuTensorHandle> {
     host.validate()?;
+    let _borrowed_metadata: Vec<_> = protected
+        .iter()
+        .map(|handle| crate::HandleMetadataRestoreGuard::new(handle))
+        .collect();
     let handle = provider.upload_numeric_raw(host)?;
     let aliases = protected
         .iter()
@@ -35,15 +39,20 @@ pub fn upload_numeric_protecting<P: AccelProvider + ?Sized>(
         && handle.shape == host.shape
         && handle.descriptor.element_type == Some(host.element_type())
         && handle.descriptor.storage == Some(host.storage)
+        && !crate::handle_is_logical(&handle)
+        && !crate::handle_is_transposed(&handle)
+        && crate::handle_class_identity(&handle)
+            .is_none_or(|class| class == host.element_type().class_identity())
     {
         return Ok(handle);
     }
     let detail = if aliases {
         "provider returned an upload result aliasing a borrowed input".to_owned()
     } else {
-        format!("provider returned an invalid numeric upload descriptor: expected device {}, shape {:?}, element {:?}, storage {:?}; got device {}, shape {:?}, element {:?}, storage {:?}",
+        format!("provider returned an invalid numeric upload descriptor: expected device {}, shape {:?}, element {:?}, storage {:?}; got device {}, shape {:?}, element {:?}, storage {:?}, logical {}, class {:?}, transpose {:?}",
             provider.device_id(), host.shape, host.element_type(), host.storage,
-            handle.device_id, handle.shape, handle.descriptor.element_type, handle.descriptor.storage)
+            handle.device_id, handle.shape, handle.descriptor.element_type, handle.descriptor.storage,
+            crate::handle_is_logical(&handle), crate::handle_class_identity(&handle), crate::handle_transpose_info(&handle))
     };
     if !aliases {
         // Unknown device ids belong to the invocation that produced the

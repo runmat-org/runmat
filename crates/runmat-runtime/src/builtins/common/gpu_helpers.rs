@@ -90,62 +90,10 @@ pub fn select_resident_output_source(
     Ok(selected.map(|(handle, _)| handle))
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GpuHandleMetadataSnapshot {
-    descriptor: runmat_accelerate_api::GpuTensorDescriptor,
-    logical: bool,
-    transpose: Option<runmat_accelerate_api::TransposeInfo>,
-    class_identity: Option<ClassIdentity>,
-    provenance: Option<runmat_accelerate_api::GpuHandleProvenance>,
-}
-
-pub fn snapshot_handle_metadata(handle: &GpuTensorHandle) -> GpuHandleMetadataSnapshot {
-    GpuHandleMetadataSnapshot {
-        descriptor: handle.descriptor,
-        logical: runmat_accelerate_api::handle_is_logical(handle),
-        transpose: runmat_accelerate_api::handle_transpose_info(handle),
-        class_identity: runmat_accelerate_api::handle_class_identity(handle),
-        provenance: runmat_accelerate_api::handle_provenance(handle),
-    }
-}
-
-pub fn restore_handle_metadata(handle: &GpuTensorHandle, snapshot: &GpuHandleMetadataSnapshot) {
-    debug_assert_eq!(handle.descriptor, snapshot.descriptor);
-    runmat_accelerate_api::set_handle_logical(handle, snapshot.logical);
-    match snapshot.transpose {
-        Some(info) => {
-            runmat_accelerate_api::record_handle_transpose(handle, info.base_rows, info.base_cols)
-        }
-        None => runmat_accelerate_api::clear_handle_transpose(handle),
-    }
-    match &snapshot.class_identity {
-        Some(class_identity) => {
-            runmat_accelerate_api::set_handle_class_identity(handle, class_identity.clone())
-        }
-        None => runmat_accelerate_api::clear_handle_class_identity(handle),
-    }
-    runmat_accelerate_api::mark_residency(handle);
-}
-
-pub(crate) struct HandleMetadataRestoreGuard<'a> {
-    handle: &'a GpuTensorHandle,
-    snapshot: GpuHandleMetadataSnapshot,
-}
-
-impl<'a> HandleMetadataRestoreGuard<'a> {
-    pub(crate) fn new(handle: &'a GpuTensorHandle) -> Self {
-        Self {
-            handle,
-            snapshot: snapshot_handle_metadata(handle),
-        }
-    }
-}
-
-impl Drop for HandleMetadataRestoreGuard<'_> {
-    fn drop(&mut self) {
-        restore_handle_metadata(self.handle, &self.snapshot);
-    }
-}
+pub(crate) use runmat_accelerate_api::HandleMetadataRestoreGuard;
+pub use runmat_accelerate_api::{
+    restore_handle_metadata, snapshot_handle_metadata, GpuHandleMetadataSnapshot,
+};
 
 pub fn expected_gpu_class_identity(
     precision: Option<ProviderPrecision>,
@@ -824,13 +772,22 @@ pub fn upload_tensor_protecting(
     tensor: &Tensor,
     protected: &[&GpuTensorHandle],
 ) -> Result<GpuTensorHandle, String> {
+    upload_tensor_protecting_typed(provider, tensor, protected).map_err(|error| error.to_string())
+}
+
+/// Preserve provider error types for callers that distinguish unsupported
+/// representations from allocation failures and malformed upload results.
+pub fn upload_tensor_protecting_typed(
+    provider: &dyn AccelProvider,
+    tensor: &Tensor,
+    protected: &[&GpuTensorHandle],
+) -> anyhow::Result<GpuTensorHandle> {
     let transfer = HostNumericTensorView {
         data: tensor_numeric_view(tensor),
         shape: &tensor.shape,
         storage: GpuTensorStorage::Real,
     };
     runmat_accelerate_api::upload_numeric_protecting(provider, &transfer, protected)
-        .map_err(|error| error.to_string())
 }
 
 mod restore;

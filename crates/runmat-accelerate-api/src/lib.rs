@@ -15,10 +15,15 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 
 mod native_device;
+mod handle_metadata;
 mod numeric_upload;
 mod placement;
 mod power;
 
+pub use handle_metadata::{
+    restore_handle_metadata, snapshot_handle_metadata, GpuHandleMetadataSnapshot,
+    HandleMetadataRestoreGuard,
+};
 pub use native_device::*;
 pub use numeric_upload::{
     is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
@@ -1714,8 +1719,8 @@ pub trait AccelProvider: Send + Sync {
         &self,
         _host: &crate::HostIntegerTensorView,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "provider does not support exact native integer buffers"
+        Err(unsupported_provider_operation(
+            "exact native integer buffers",
         ))
     }
 

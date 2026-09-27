@@ -2,7 +2,7 @@
 
 `AccelProvider::upload_numeric` remains the validated numeric upload entrypoint for callers without borrowed resident operands. Ownership-sensitive internal code calls the non-overridable API function `runmat_accelerate_api::upload_numeric_protecting(provider, view, protected_handles)` directly and includes every borrowed input and output prototype that the provider could return as an alias.
 
-The shared boundary validates the host request before invoking the provider, then validates the returned device, shape, element type, storage, and borrowed-handle identity. A borrowed alias is rejected without releasing it. A fresh rejected allocation is released through its known exact owner, or through the invoked provider when no owner is known. An unrelated selected provider is never used for cleanup. The validated entrypoints do not return malformed handles.
+The shared boundary validates the host request before invoking the provider, then validates the returned device, shape, element type, storage, semantic annotations, and borrowed-handle identity. A borrowed alias is rejected without releasing it. Borrowed logical, class, and transpose annotations are restored on success, error, and unwinding. Fresh numeric uploads cannot carry conflicting logical/class annotations or a transpose view. A fresh rejected allocation is released through its known exact owner, or through the invoked provider when no owner is known. An unrelated selected provider is never used for cleanup. The validated entrypoints do not return malformed handles.
 
 ## Provider implementation migration
 
@@ -14,4 +14,4 @@ The default raw hook adapts legacy real-double and real-integer uploads. It reje
 
 ## Error handling
 
-`InvalidNumericUploadResult` identifies a malformed result or borrowed alias. `is_invalid_numeric_upload_result` recognizes that error through an `anyhow::Error`. It is an execution failure, not an unsupported-operation signal, and must not be swallowed by a host fallback. Existing provider transfer errors retain their own error type and cause.
+`InvalidNumericUploadResult` identifies a malformed result or borrowed alias. `is_invalid_numeric_upload_result` recognizes that error through an `anyhow::Error`. It is an execution failure, not an unsupported-operation signal, and must not be swallowed by a host fallback. Existing provider transfer errors retain their own error type and cause. The typed tensor-upload adapter preserves those errors through automatic placement; integer promotion falls back only for `UnsupportedProviderOperation`. The default unimplemented integer upload reports that typed unsupported condition, while allocation and execution failures remain failures.
