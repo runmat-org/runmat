@@ -82,6 +82,33 @@ fn unpublished_transfer_and_second_component_errors_cleanup_once_preserving_orig
 }
 
 #[test]
+fn independent_copy_initializer_publishes_distinct_allocation_without_retiring_source() {
+    let (state, driver) = owner();
+    let source = allocate(&state, 1401);
+    let original = state.allocation(&source).unwrap();
+    let output = state
+        .allocate(
+            source.shape.clone(),
+            original.descriptor,
+            original.byte_length,
+            || Ok(1402),
+            |destination| {
+                assert_ne!(destination, original.pointer);
+                assert!(state.allocation(&source).is_ok());
+                assert!(state.allocations.try_lock().is_ok());
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_ne!(source.buffer_id, output.buffer_id);
+    state.free(&output).unwrap();
+    assert_eq!(driver.frees(), [1402]);
+    assert!(state.allocation(&source).is_ok());
+    state.free(&source).unwrap();
+    assert_eq!(driver.frees(), [1402, 1401]);
+}
+
+#[test]
 #[cfg(panic = "unwind")]
 fn unpublished_transfer_and_second_component_unwind_cleanup_once_preserving_borrowed_inputs() {
     for stages in [1, 2] {

@@ -373,7 +373,7 @@ impl AccelProvider for CudaProvider {
 
     fn copy_native_device_buffer(&self, source: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let source_allocation = self.allocation(source)?;
-        let output = self.allocate(
+        self.allocate_initialized(
             &source.shape,
             source
                 .descriptor
@@ -383,21 +383,14 @@ impl AccelProvider for CudaProvider {
                 .descriptor
                 .storage
                 .ok_or_else(|| anyhow!("CUDA handle is missing its storage layout"))?,
-            NativeDeviceInitialization::Uninitialized,
-        )?;
-        let output_allocation = self.allocation(&output)?;
-        let result = self.with_context(|| {
-            self.driver.copy(
-                output_allocation.pointer,
-                source_allocation.pointer,
-                source_allocation.byte_length,
-            )
-        });
-        if let Err(error) = result {
-            let _ = self.free(&output);
-            return Err(error);
-        }
-        Ok(output)
+            |pointer, _| {
+                self.driver.copy(
+                    pointer,
+                    source_allocation.pointer,
+                    source_allocation.byte_length,
+                )
+            },
+        )
     }
 
     fn copy_native_device_component(
