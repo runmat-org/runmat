@@ -1002,6 +1002,40 @@ impl Bytecode {
         if groups.is_empty() {
             return groups;
         }
+        // Structural `*` windows are candidates, not execution decisions.
+        // Refine from the same graph that owns scalar-vs-matrix normalization.
+        // Never fabricate a scalar group from an empty or unsupported window.
+        groups.retain_mut(|group| {
+            use runmat_accelerate::{graph::AccelOpCategory, FusionKind};
+            if group.kind != FusionKind::MatmulEpilogue {
+                return true;
+            }
+            let mut has_matrix = false;
+            let mut has_reduction = false;
+            let mut has_elementwise = false;
+            for node in graph.nodes.iter().filter(|node| {
+                node.span.start >= group.span.start && node.span.end <= group.span.end
+            }) {
+                match node.category {
+                    AccelOpCategory::MatMul => has_matrix = true,
+                    AccelOpCategory::Reduction => has_reduction = true,
+                    AccelOpCategory::Elementwise => has_elementwise = true,
+                    AccelOpCategory::Transpose => {}
+                    AccelOpCategory::Other => return false,
+                }
+            }
+            if has_matrix {
+                true
+            } else if has_reduction {
+                group.kind = FusionKind::Reduction;
+                true
+            } else if has_elementwise {
+                group.kind = FusionKind::ElementwiseChain;
+                true
+            } else {
+                false
+            }
+        });
         if groups.iter().any(|group| group.stack_layout.is_none()) {
             annotate_fusion_groups_with_stack_layout(&self.instructions, graph, &mut groups);
         }
