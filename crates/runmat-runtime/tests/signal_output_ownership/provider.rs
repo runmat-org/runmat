@@ -207,9 +207,13 @@ impl AccelProvider for Provider {
                 self.output(request.input, GpuTensorStorage::Real)?
             };
             let lower = if matches!(self.mode, Mode::ExplicitSibling) {
-                lower.with_provenance(GpuHandleProvenance::Explicit)?
+                lower
+                    .with_provenance(GpuHandleProvenance::Explicit)
+                    .map_err(ProviderExecutionError::from_source)?
             } else if matches!(self.mode, Mode::LowerShape) {
-                lower.with_view(lower.view().clone().with_shape(vec![1, 4]))?
+                lower
+                    .with_view(lower.view().clone().with_shape(vec![1, 4]))
+                    .map_err(ProviderExecutionError::from_source)?
             } else {
                 lower
             };
