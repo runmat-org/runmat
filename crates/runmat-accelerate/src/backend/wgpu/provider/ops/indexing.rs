@@ -784,12 +784,11 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_raw(source)?;
         let integer_type = entry.integer_type();
-        ensure!(
-            integer_type.is_some() || entry.precision == self.precision,
-            "gather_linear: native {:?} gpuArray buffer requires a precision-aware provider kernel; {:?} dispatch is not permitted",
-            entry.element_type,
-            self.precision
-        );
+        if integer_type.is_none() && entry.precision != self.precision {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "gather_linear: input requires a precision-aware provider kernel",
+            ));
+        }
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
         let lane_factor = linear_storage_lane_factor(integer_type, entry.storage);
@@ -976,12 +975,14 @@ impl WgpuProvider {
             ));
         }
         let integer_type = target_entry.integer_type();
-        ensure!(
-            integer_type.is_some()
-                || (target_entry.precision == self.precision
-                    && values_entry.precision == self.precision),
-            "scatter_linear: input precision does not match the active provider"
-        );
+        if integer_type.is_none()
+            && (target_entry.precision != self.precision
+                || values_entry.precision != self.precision)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "scatter_linear: inputs require a precision-aware provider kernel",
+            ));
+        }
         ensure!(
             integer_type == values_entry.integer_type(),
             "scatter_linear: integer storage mismatch target={:?} values={:?}",

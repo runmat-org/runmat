@@ -4019,6 +4019,24 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
+        // Authenticate every allocation before distinguishing unsupported storage.
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("gather_linear: allocation owner is poisoned"))?;
+            for input in [source] {
+                ensure!(guard.get(input).is_some(), "gather_linear: unknown buffer");
+            }
+            if [source]
+                .iter()
+                .any(|input| input.physical().element_type() == NumericElementType::F32)
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "gather_linear: F32 storage requires a typed kernel",
+                ));
+            }
+        }
+
         if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(source) {
             let output_len = output_shape
                 .iter()
@@ -4107,6 +4125,24 @@ impl AccelProvider for InProcessProvider {
         indices: &[u32],
         values: &GpuTensorHandle,
     ) -> Result<()> {
+        // Authenticate every allocation before distinguishing unsupported storage.
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("scatter_linear: allocation owner is poisoned"))?;
+            for input in [target, values] {
+                ensure!(guard.get(input).is_some(), "scatter_linear: unknown buffer");
+            }
+            if [target, values]
+                .iter()
+                .any(|input| input.physical().element_type() == NumericElementType::F32)
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "scatter_linear: F32 storage requires a typed kernel",
+                ));
+            }
+        }
+
         match (
             runmat_accelerate_api::handle_integer_type(target),
             runmat_accelerate_api::handle_integer_type(values),
@@ -5835,6 +5871,20 @@ impl AccelProvider for InProcessProvider {
         request: ProviderModulationRequest<'a>,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("modulate_constellation: allocation owner is poisoned"))?;
+                ensure!(
+                    guard.get(request.input).is_some(),
+                    "modulate_constellation: unknown buffer"
+                );
+                if request.input.physical().element_type() != NumericElementType::F64 {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "modulate_constellation: kernel requires F64 symbol storage",
+                    ));
+                }
+            }
             ensure!(
                 runmat_accelerate_api::handle_storage(request.input)
                     != GpuTensorStorage::ComplexInterleaved,
@@ -5902,6 +5952,20 @@ impl AccelProvider for InProcessProvider {
         request: ProviderBitModulationRequest<'a>,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            {
+                let guard = numeric_registry().lock_for(self.device_id).map_err(|_| {
+                    anyhow!("modulate_bits_constellation: allocation owner is poisoned")
+                })?;
+                ensure!(
+                    guard.get(request.input).is_some(),
+                    "modulate_bits_constellation: unknown buffer"
+                );
+                if request.input.physical().element_type() != NumericElementType::F64 {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "modulate_bits_constellation: kernel requires F64 symbol storage",
+                    ));
+                }
+            }
             ensure!(
                 runmat_accelerate_api::handle_storage(request.input)
                     != GpuTensorStorage::ComplexInterleaved,

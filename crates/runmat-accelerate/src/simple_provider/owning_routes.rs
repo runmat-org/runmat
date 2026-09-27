@@ -3,6 +3,43 @@ use futures::executor::block_on;
 use runmat_accelerate_api::HostLogicalTensorView;
 
 #[test]
+fn linear_indexing_distinguishes_unsupported_storage_from_invalid_owner() {
+    let provider = InProcessProvider::new();
+    let foreign = InProcessProvider::new();
+    let single = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider.gather_linear(&single, &[0], &[1, 1]).unwrap_err()
+    ));
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider
+            .scatter_linear(&single, &[0, 1], &single)
+            .unwrap_err()
+    ));
+    let other = foreign
+        .upload(&HostTensorView {
+            data: &[3.0],
+            shape: &[1, 1],
+        })
+        .unwrap();
+    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider.scatter_linear(&single, &[0], &other).unwrap_err()
+    ));
+    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+        &foreign.gather_linear(&single, &[0], &[1, 1]).unwrap_err()
+    ));
+    assert_eq!(
+        block_on(provider.download_numeric(&single)).unwrap().data,
+        HostNumericDataOwned::F32(vec![1.0, 2.0])
+    );
+}
+
+#[test]
 fn fill_like_and_flip_keep_class_or_explicitly_request_typed_fallback() {
     let provider = InProcessProvider::new();
     let single = provider

@@ -1881,7 +1881,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _indices: &[u32],
         _output_shape: &[usize],
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("gather_linear not supported by provider"))
+        Err(unsupported_provider_operation(
+            "gather_linear not supported by provider",
+        ))
     }
 
     /// Scatter logical elements from `values` into `target` at the provided zero-based linear
@@ -1896,7 +1898,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _indices: &[u32],
         _values: &GpuTensorHandle,
     ) -> anyhow::Result<()> {
-        Err(anyhow::anyhow!("scatter_linear not supported by provider"))
+        Err(unsupported_provider_operation(
+            "scatter_linear not supported by provider",
+        ))
     }
 
     /// Structured device information (optional to override). Default adapts from `device_info()`.

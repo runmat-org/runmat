@@ -102,7 +102,11 @@ fn optional_reduction_and_calculus_defaults_are_typed_unsupported() {
         provider.map_nan_to_zero(&input),
         provider.not_nan_mask(&input),
         provider.permute(&input, &[1, 0]),
+        Defaults.gather_linear(&input, &[0], &[1, 1]),
     ];
+    assert!(is_unsupported_provider_operation(
+        &Defaults.scatter_linear(&input, &[0], &input).unwrap_err()
+    ));
     for result in results {
         assert!(is_unsupported_provider_operation(&result.unwrap_err()));
     }
