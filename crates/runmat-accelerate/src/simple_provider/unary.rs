@@ -9,6 +9,7 @@ pub(super) enum Unary {
     Exp,
     Log,
     Sqrt,
+    Conj,
 }
 
 impl InProcessProvider {
@@ -123,6 +124,7 @@ fn map_f32(values: &[f32], storage: GpuTensorStorage, operation: Unary) -> Vec<f
                 Unary::Abs => x.abs(),
                 Unary::Exp => x.exp(),
                 Unary::Log => x.ln(),
+                Unary::Conj => x,
                 Unary::Sqrt => {
                     if x == 0.0 {
                         0.0
@@ -135,6 +137,10 @@ fn map_f32(values: &[f32], storage: GpuTensorStorage, operation: Unary) -> Vec<f
     }
     if matches!(operation, Unary::Abs) {
         return values.chunks_exact(2).map(|z| z[0].hypot(z[1])).collect();
+    }
+    if matches!(operation, Unary::Conj) {
+        // Negate native Single lanes directly: no widening or NaN canonicalization.
+        return values.chunks_exact(2).flat_map(|z| [z[0], -z[1]]).collect();
     }
     values
         .chunks_exact(2)
@@ -161,6 +167,7 @@ fn map_f64(values: &[f64], storage: GpuTensorStorage, operation: Unary) -> Vec<f
                 Unary::Abs => x.abs(),
                 Unary::Exp => x.exp(),
                 Unary::Log => x.ln(),
+                Unary::Conj => x,
                 Unary::Sqrt => {
                     if x == 0.0 {
                         0.0
@@ -180,6 +187,7 @@ fn map_f64(values: &[f64], storage: GpuTensorStorage, operation: Unary) -> Vec<f
             let pair = match operation {
                 Unary::Sin => sin_complex_host(z[0], z[1]),
                 Unary::Cos => cos_complex_host(z[0], z[1]),
+                Unary::Conj => (z[0], -z[1]),
                 _ => unreachable!("unsupported complex operation rejected before mapping"),
             };
             [pair.0, pair.1]
@@ -190,3 +198,7 @@ fn map_f64(values: &[f64], storage: GpuTensorStorage, operation: Unary) -> Vec<f
 #[cfg(test)]
 #[path = "unary/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "unary/conjugation_tests.rs"]
+mod conjugation_tests;
