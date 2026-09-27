@@ -74,14 +74,16 @@ mod tests {
 
 pub(super) fn visit_values(visitor: &mut impl FnMut(&Value)) -> Option<()> {
     FALLBACK_STATE.with(|state| {
-        visit_state(&state.try_borrow().ok()?, visitor);
+        let state = state.try_borrow().ok()?;
+        visit_state(&state, visitor);
         Some(())
     })?;
     CONTEXT_STATES.with(|states| {
         let mut states = states.try_borrow_mut().ok()?;
         states.retain(|state| state.strong_count() > 0);
         for state in states.iter().filter_map(std::rc::Weak::upgrade) {
-            visit_state(&state.classes.try_borrow().ok()?, visitor);
+            let classes = state.classes.try_borrow().ok()?;
+            visit_state(&classes, visitor);
         }
         Some(())
     })

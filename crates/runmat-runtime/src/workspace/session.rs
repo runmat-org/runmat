@@ -90,12 +90,13 @@ pub fn visit_roots(visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> 
         Some(())
     }
     if let Some(context) = crate::context::legacy::active() {
-        return visit(
-            &context.state().session_variables.try_borrow().ok()?,
-            visitor,
-        );
+        let state = context.state().session_variables.try_borrow().ok()?;
+        return visit(&state, visitor);
     }
-    LEGACY_SESSION_VARIABLES.with(|state| visit(&state.try_borrow().ok()?, visitor))
+    LEGACY_SESSION_VARIABLES.with(|state| {
+        let state = state.try_borrow().ok()?;
+        visit(&state, visitor)
+    })
 }
 
 pub fn update_global_slot(index: usize, alias: Option<&str>, value: &Value) {

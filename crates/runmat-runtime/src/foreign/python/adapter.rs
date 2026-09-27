@@ -1150,7 +1150,7 @@ mod tests {
     #[test]
     fn retained_queue_values_disappear_on_queue_cancellation_and_callbacks_fail_closed() {
         let adapter = super::PythonAdapter::new(super::ForeignHandleRegistry::default()).unwrap();
-        let (reply, _receiver) = futures::channel::oneshot::channel();
+        let (reply, _receiver) = tokio::sync::oneshot::channel();
         adapter
             .nested_isolated_calls
             .borrow_mut()
