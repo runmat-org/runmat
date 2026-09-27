@@ -42,7 +42,10 @@ impl InProcessMultiLabExecutionService {
 }
 
 impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabExecutionService {
-    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+    fn visit_retained_values(
+        &self,
+        visitor: &mut dyn FnMut(&runmat_value::Value) -> Option<()>,
+    ) -> Option<()> {
         runmat_runtime::execution::RuntimeExecutionServices::visit_retained_values(
             &self.serial,
             visitor,
