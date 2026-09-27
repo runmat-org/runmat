@@ -45,6 +45,7 @@ pub const CELL2MAT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     message: "cell2mat: internal error",
 };
 const ERRORS: &[BuiltinErrorDescriptor] = &[
+    CELL2MAT_ERROR_TOO_MANY_OUTPUTS,
     CELL2MAT_ERROR_INVALID_INPUT,
     CELL2MAT_ERROR_INVALID_CONTENTS,
     CELL2MAT_ERROR_SIZE_EXCEEDED,
@@ -76,3 +77,10 @@ pub const CELL2MAT_INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] =
         overload: BuiltinIntegerOverloadKind::Multiple,
         notes: "The leftmost nonempty integer block selects the mixed-integer output class; later blocks saturate into that class. Scalar doubles cannot mix with int64 or uint64.",
     }];
+
+pub const CELL2MAT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL2MAT.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:cell2mat:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "cell2mat: too many output arguments",
+};

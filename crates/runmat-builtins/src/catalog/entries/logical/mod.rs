@@ -2,16 +2,19 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod operators;
+mod conversion;
 mod rel;
 mod relational;
 mod tests;
 
+pub use conversion::*;
 pub use operators::*;
 pub use rel::*;
 pub use relational::*;
 pub use tests::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(conversion::ENTRIES.iter().copied());
     values.extend(
         tests::ENTRY_GROUPS
             .iter()

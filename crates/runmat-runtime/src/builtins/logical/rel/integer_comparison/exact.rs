@@ -10,6 +10,25 @@ use crate::builtins::common::broadcast::BroadcastPlan;
 
 use super::{IntegerComparisonError, IntegerComparisonOp};
 
+/// Reuse exact comparison operand admission without evaluating any elements.
+/// Non-numeric identity/text/symbolic/table routes remain with their domains.
+pub(crate) fn admit_numeric_pair(lhs: &Value, rhs: &Value) -> Result<bool, IntegerComparisonError> {
+    fn shape(value: &Value) -> Option<Vec<usize>> {
+        real_operand(value)
+            .map(|operand| operand.shape)
+            .or_else(|| complex_operand(value).map(|operand| operand.shape))
+            .or_else(|| match value {
+                Value::GpuTensor(handle) => Some(handle.shape.clone()),
+                _ => None,
+            })
+    }
+    let (Some(lhs), Some(rhs)) = (shape(lhs), shape(rhs)) else {
+        return Ok(false);
+    };
+    BroadcastPlan::new(&lhs, &rhs).map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    Ok(true)
+}
+
 /// Performs a comparison when native integer storage is compared against other
 /// native integer storage or real numeric storage. This keeps integer values
 /// exact even when the other operand is an f64 array.
@@ -282,9 +301,14 @@ impl RealOperand<'_> {
             ),
             RealSource::Logical { data } => RealValue::Float(f64::from(data[index] != 0)),
             RealSource::Char(array) => {
-                let row = index % array.rows;
-                let column = index / array.rows;
-                RealValue::Float(f64::from(array.data[row * array.cols + column] as u32))
+                let page_len = array.rows * array.cols;
+                let page_offset = (index / page_len) * page_len;
+                let in_page = index % page_len;
+                let row = in_page % array.rows;
+                let column = in_page / array.rows;
+                RealValue::Float(f64::from(
+                    array.data[page_offset + row * array.cols + column] as u32,
+                ))
             }
         }
     }
@@ -549,7 +573,7 @@ fn real_operand(value: &Value) -> Option<RealOperand<'_>> {
         }),
         Value::CharArray(array) => Some(RealOperand {
             source: RealSource::Char(array),
-            shape: vec![array.rows, array.cols],
+            shape: array.shape.clone(),
         }),
         _ => None,
     }

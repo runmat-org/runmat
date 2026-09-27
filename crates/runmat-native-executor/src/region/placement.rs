@@ -11,33 +11,58 @@ use runmat_value::Value;
 
 use super::plan::OptimizedRegionPlan;
 
-pub(crate) struct VectorizedPlacement {
+pub(crate) enum RegionPlacement {
+    Unavailable,
+    Generic(RegionObservation),
+    Vectorized(RegionObservation),
+}
+
+/// One selected execution, completed explicitly or failed when its scope exits.
+pub(crate) struct RegionObservation {
     runtime: RuntimeContext,
     signature: PlacementSignature,
     candidate: String,
+    started: runmat_time::Instant,
+    reported: bool,
 }
 
-impl VectorizedPlacement {
-    pub fn observe(self, elapsed_ns: u64, succeeded: bool) {
+impl RegionObservation {
+    pub fn complete(mut self) {
+        self.report(true);
+    }
+
+    fn report(&mut self, succeeded: bool) {
+        if self.reported {
+            return;
+        }
+        self.reported = true;
         let Some(service) = self.runtime.service_ports().placement() else {
             return;
         };
         let _ = service.observe(PlacementFeedback {
-            signature: self.signature,
-            candidate: self.candidate,
-            total_elapsed_ns: elapsed_ns.max(1),
+            signature: self.signature.clone(),
+            candidate: self.candidate.clone(),
+            total_elapsed_ns: runmat_time::duration_ns_saturating(self.started.elapsed()).max(1),
             succeeded,
         });
     }
 }
 
-pub(crate) fn choose_vectorized(
+impl Drop for RegionObservation {
+    fn drop(&mut self) {
+        self.report(false);
+    }
+}
+
+pub(crate) fn choose_region(
     runtime: &RuntimeContext,
     plan: &OptimizedRegionPlan,
     inputs: &[&Value],
     workload: runmat_runtime::numeric_region::NumericRegionWorkload,
-) -> Option<VectorizedPlacement> {
-    let service = runtime.service_ports().placement()?;
+) -> RegionPlacement {
+    let Some(service) = runtime.service_ports().placement() else {
+        return RegionPlacement::Unavailable;
+    };
     let signature = signature(runtime, plan, inputs);
     let elements = u64::try_from(workload.elements).unwrap_or(u64::MAX);
     let operations = u64::from(plan.arithmetic_operations);
@@ -66,7 +91,7 @@ pub(crate) fn choose_vectorized(
                 identity: format!("native.region.{}", plan.region.ordinal),
                 candidates: vec![
                     PlacementGraphCandidate {
-                        descriptor: generic,
+                        descriptor: generic.clone(),
                         resources: CandidateResourceDemand {
                             cpu_millicores: 1_000,
                             ..CandidateResourceDemand::default()
@@ -102,17 +127,29 @@ pub(crate) fn choose_vectorized(
     };
     let decision = match service.plan(request) {
         Ok(decision) => decision,
-        Err(_) => return None,
+        Err(_) => return RegionPlacement::Unavailable,
     };
-    decision
-        .selections
-        .first()
-        .filter(|selected| selected.kind == ExecutionCandidateKind::VectorizedNativeCpu)
-        .map(|_| VectorizedPlacement {
-            runtime: runtime.clone(),
-            signature,
-            candidate: vectorized.identity,
-        })
+    if decision.signature != signature || decision.selections.len() != 1 {
+        return RegionPlacement::Unavailable;
+    }
+    let selected = &decision.selections[0];
+    if selected.node != format!("native.region.{}", plan.region.ordinal) {
+        return RegionPlacement::Unavailable;
+    }
+    let observation = |candidate| RegionObservation {
+        runtime: runtime.clone(),
+        signature: signature.clone(),
+        candidate,
+        started: runmat_time::Instant::now(),
+        reported: false,
+    };
+    if selected.kind == generic.kind && selected.candidate == generic.identity {
+        RegionPlacement::Generic(observation(generic.identity))
+    } else if selected.kind == vectorized.kind && selected.candidate == vectorized.identity {
+        RegionPlacement::Vectorized(observation(vectorized.identity))
+    } else {
+        RegionPlacement::Unavailable
+    }
 }
 
 fn candidate(
@@ -183,59 +220,6 @@ fn signature(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-    use std::rc::Rc;
-
-    use runmat_runtime::execution::RuntimeExecutionService;
-
-    use super::*;
-    use crate::region::{RegionOutputSource, SiteIdentity};
-
-    #[test]
-    fn absent_shared_placement_authority_falls_back_to_specialized_execution() {
-        let region = runmat_types::RegionId {
-            function: runmat_types::ProgramFunctionId(0),
-            ordinal: 0,
-        };
-        let plan = OptimizedRegionPlan {
-            region,
-            entry: SiteIdentity {
-                point: runmat_types::ProgramPointId {
-                    function: region.function,
-                    block: 0,
-                    position: 0,
-                },
-                phase: runmat_native_codegen::NativeSitePhase::Rvalue,
-                ordinal: 0,
-            },
-            inputs: vec![runmat_types::RegionValueId {
-                function: region.function,
-                local: 0,
-            }],
-            outputs: vec![crate::region::plan::RegionOutput {
-                value: None,
-                ssa: runmat_native_codegen::NativeValueId(0),
-                source: RegionOutputSource::Computed(0),
-            }],
-            program: runmat_runtime::numeric_region::NumericRegionProgram {
-                nodes: vec![runmat_runtime::numeric_region::NumericRegionNode::Input(0)],
-                outputs: vec![0],
-            },
-            skipped_sites: BTreeSet::new(),
-            arithmetic_operations: 1,
-        };
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        let input = Value::Num(1.0);
-        assert!(choose_vectorized(
-            &runtime,
-            &plan,
-            &[&input],
-            runmat_runtime::numeric_region::NumericRegionWorkload {
-                elements: 1,
-                output_bytes_per_value: 8,
-            },
-        )
-        .is_none());
-    }
-}
+mod tests;
+#[cfg(test)]
+pub(crate) mod test_support;

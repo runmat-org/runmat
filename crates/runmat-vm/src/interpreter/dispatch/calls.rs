@@ -301,17 +301,10 @@ async fn handle_builtin_call_inner(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
-    let prepared_primary = call_builtins::prepare_builtin_args(name, &args).await?;
     let result =
-        runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, requested_outputs)
-            .await;
-    let imported = call_builtins::resolve_imported_builtin(
-        name,
-        imports,
-        &prepared_primary,
-        requested_outputs,
-    )
-    .await?;
+        runmat_runtime::call_builtin_async_with_outputs(name, &args, requested_outputs).await;
+    let imported =
+        call_builtins::resolve_imported_builtin(name, imports, &args, requested_outputs).await?;
     if result.is_err() {
         if let Some(err) = call_builtins::rethrow_without_explicit_exception(
             name,

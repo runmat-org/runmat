@@ -4,9 +4,11 @@ use runmat_types::{
 };
 
 use super::super::shorthand::CellfunShorthand;
+use crate::catalog::inference::gathered_value_fact;
+use runmat_types::FactJoin;
 
 pub(super) struct Result {
-    pub(super) output: Option<ValueFact>,
+    pub(super) outputs: Vec<ValueFact>,
     pub(super) effects: EffectSet,
     pub(super) capabilities: CapabilitySet,
     pub(super) diagnostics: Vec<InferenceDiagnostic>,
@@ -16,10 +18,70 @@ pub(super) fn infer(
     request: &CallRequest,
     cell_indices: &[usize],
     extra_indices: &[usize],
+    count: usize,
+) -> Result {
+    let mut result = primary(request, cell_indices, extra_indices, count);
+    let start = super::options::Options::parse(request).start;
+    for index in (start..request.arguments.len()).step_by(2) {
+        let handler = request
+            .literals
+            .literal_args
+            .get(index)
+            .and_then(crate::catalog::inference::literal_text)
+            .is_some_and(|name| name.trim().eq_ignore_ascii_case("ErrorHandler"));
+        if !handler {
+            continue;
+        }
+        let Some(callable) = request.arguments.get(index + 1).and_then(callable) else {
+            result.outputs = vec![ValueFact::unknown(DynamicReason::UnresolvedCallable); count];
+            continue;
+        };
+        let arguments = std::iter::once(ValueFact::unknown(DynamicReason::RuntimeValue))
+            .chain(
+                cell_indices
+                    .iter()
+                    .filter_map(|i| request.arguments.get(*i))
+                    .map(cell_element),
+            )
+            .chain(
+                extra_indices
+                    .iter()
+                    .filter_map(|i| request.arguments.get(*i))
+                    .map(gathered_value_fact),
+            )
+            .collect();
+        let inferred = crate::infer_callable_call(
+            callable,
+            &CallRequest {
+                arguments,
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(count)),
+            },
+        );
+        result.effects.0.extend(inferred.effects.0);
+        result.capabilities.0.extend(inferred.capabilities.0);
+        result.diagnostics.extend(inferred.diagnostics);
+        for (output, recovery) in result.outputs.iter_mut().zip(inferred.outputs) {
+            *output = output.join(&recovery);
+        }
+    }
+    result
+}
+
+fn primary(
+    request: &CallRequest,
+    cell_indices: &[usize],
+    extra_indices: &[usize],
+    count: usize,
 ) -> Result {
     let Some(callable) = request.arguments.first().and_then(callable) else {
         return Result {
-            output: shorthand_output(request),
+            outputs: vec![
+                shorthand_output(request).unwrap_or_else(|| ValueFact::unknown(
+                    DynamicReason::UnresolvedCallable
+                ));
+                count
+            ],
             effects: EffectSet::default(),
             capabilities: CapabilitySet::default(),
             diagnostics: Vec::new(),
@@ -33,19 +95,19 @@ pub(super) fn infer(
     arguments.extend(
         extra_indices
             .iter()
-            .filter_map(|index| request.arguments.get(*index).cloned()),
+            .filter_map(|index| request.arguments.get(*index))
+            .map(gathered_value_fact),
     );
     let literals = LiteralContext::new(
-        extra_indices
-            .iter()
-            .map(|index| {
+        std::iter::repeat_n(LiteralValue::Unknown, cell_indices.len())
+            .chain(extra_indices.iter().map(|index| {
                 request
                     .literals
                     .literal_args
                     .get(*index)
                     .cloned()
                     .unwrap_or(LiteralValue::Unknown)
-            })
+            }))
             .collect(),
     );
     let inferred = crate::infer_callable_call(
@@ -53,11 +115,11 @@ pub(super) fn infer(
         &CallRequest {
             arguments,
             literals,
-            outputs: OutputSelection::new(RequestedOutputCount::One),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(count)),
         },
     );
     Result {
-        output: inferred.outputs.into_iter().next(),
+        outputs: inferred.outputs,
         effects: inferred.effects,
         capabilities: inferred.capabilities,
         diagnostics: inferred.diagnostics,
@@ -73,7 +135,7 @@ fn callable(value: &ValueFact) -> Option<&CallableFact> {
 
 fn cell_element(value: &ValueFact) -> ValueFact {
     match &value.kind {
-        ValueKindFact::Cell(cell) => (*cell.element).clone(),
+        ValueKindFact::Cell(cell) => gathered_value_fact(&cell.element),
         _ => ValueFact::unknown(DynamicReason::RuntimeValue),
     }
 }
@@ -94,5 +156,34 @@ fn shorthand_output(request: &CallRequest) -> Option<ValueFact> {
                 domain: runmat_types::NumericDomain::Real,
             },
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_types::{
+        CellFact, NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact,
+    };
+
+    #[test]
+    fn callback_input_materialization_preserves_sparse_class() {
+        let mut input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }));
+        input.residency = ResidencyFact::Device {
+            provider: Some("test".into()),
+        };
+        input.storage = StorageFact::Sparse;
+        let cell = ValueFact::scalar(ValueKindFact::Cell(CellFact {
+            element: Box::new(input.clone()),
+            elements: vec![input],
+            elements_complete: true,
+        }));
+        let actual = cell_element(&cell);
+        assert_eq!(actual.residency, ResidencyFact::Host);
+        assert_eq!(actual.storage, StorageFact::Sparse);
+        assert_eq!(actual.numeric().unwrap().class, NumericClass::UInt64);
     }
 }

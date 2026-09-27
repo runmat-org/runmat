@@ -255,7 +255,11 @@ fn visit_rvalue_operands(
                 visitor(callee);
             }
             for argument in &call.args {
-                argument.visit_operands(&mut *visitor);
+                if descend_expression_regions {
+                    argument.visit_operands(&mut *visitor);
+                } else {
+                    argument.visit_outer_operands_dyn(visitor);
+                }
             }
         }
         MirRvalue::Aggregate { elements, .. } => {
@@ -292,7 +296,11 @@ fn visit_rvalue_operands(
         }
         MirRvalue::Future { args, .. } => {
             for argument in args {
-                argument.visit_operands(&mut *visitor);
+                if descend_expression_regions {
+                    argument.visit_operands(&mut *visitor);
+                } else {
+                    argument.visit_outer_operands_dyn(visitor);
+                }
             }
         }
         MirRvalue::Distributed(operation) => {
@@ -385,6 +393,12 @@ fn visit_stmt_operands(
     visitor: &mut dyn FnMut(&MirOperand),
     descend_expression_regions: bool,
 ) {
+    if !descend_expression_regions {
+        // The shared statement visitor also respects contextual regions in
+        // assignment destinations and sequence targets, not only rvalues.
+        statement.visit_outer_operands_dyn(visitor);
+        return;
+    }
     match &statement.kind {
         crate::MirStmtKind::CaptureSequence { source, .. } => source.visit_operands(&mut *visitor),
         crate::MirStmtKind::Assign { place, value } => {

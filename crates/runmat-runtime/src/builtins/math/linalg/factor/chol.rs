@@ -526,72 +526,19 @@ fn parse_triangle(args: &[Value]) -> BuiltinResult<CholTriangle> {
 
 const EPS: f64 = 1.0e-12;
 
-#[inline]
-fn hermitian_pair_matches(a: Complex64, b: Complex64) -> bool {
-    let diff = a - b.conj();
-    let scale = a.norm().max(b.norm()).max(1.0);
-    diff.norm() <= EPS * scale
-}
-
 fn chol_factor(matrix: RowMajorMatrix) -> BuiltinResult<CholComponents> {
-    let n = matrix.rows;
-    if n == 0 {
-        return Ok(CholComponents {
-            upper: RowMajorMatrix::zeros(0, 0),
-            info: 0,
-        });
-    }
-    let mut upper = RowMajorMatrix::zeros(n, n);
-    let mut info = 0usize;
-
-    'outer: for j in 0..n {
-        for i in 0..j {
-            if !hermitian_pair_matches(matrix.get(i, j), matrix.get(j, i)) {
-                info = j + 1;
-                break 'outer;
-            }
-        }
-
-        for i in 0..=j {
-            let mut sum = matrix.get(i, j);
-            for k in 0..i {
-                let rik = upper.get(k, i).conj();
-                let rkj = upper.get(k, j);
-                sum -= rik * rkj;
-            }
-            if i == j {
-                let imag_tol = EPS * sum.re.abs().max(1.0);
-                if !sum.re.is_finite()
-                    || !sum.im.is_finite()
-                    || sum.re <= 0.0
-                    || sum.im.abs() > imag_tol
-                {
-                    info = j + 1;
-                    break 'outer;
-                }
-                let diag = sum.re.sqrt();
-                upper.set(i, i, Complex64::new(diag, 0.0));
-            } else {
-                let denom = upper.get(i, i);
-                if denom.norm() <= EPS {
-                    info = i + 1;
-                    break 'outer;
-                }
-                upper.set(i, j, sum / denom);
-            }
-        }
-    }
-
-    if info != 0 {
-        let start = info.saturating_sub(1).min(n);
-        for row in start..n {
-            for col in row..n {
-                upper.set(row, col, Complex64::new(0.0, 0.0));
-            }
-        }
-    }
-
-    Ok(CholComponents { upper, info })
+    let factor = super::cholesky::factor_upper(matrix.rows, |row, col| matrix.get(row, col))
+        .map_err(|error| {
+            chol_internal_error(format!("chol: factor allocation failed: {error:?}"))
+        })?;
+    Ok(CholComponents {
+        upper: RowMajorMatrix {
+            rows: matrix.rows,
+            cols: matrix.cols,
+            data: factor.upper,
+        },
+        info: factor.info,
+    })
 }
 
 async fn extract_matrix(value: Value) -> BuiltinResult<RowMajorMatrix> {

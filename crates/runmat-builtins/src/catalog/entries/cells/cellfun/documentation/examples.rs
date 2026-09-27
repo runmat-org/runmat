@@ -3,6 +3,17 @@ use crate::{
 };
 
 pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "multiple-outputs",
+        title: "Collect values and indices from each callback",
+        program: "C = {[4 1], [2 7]};\n[peaks, indices] = cellfun(@max, C);",
+        display_output: Some("peaks = [4 7], indices = [1 2]"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(peaks, [4 7])); assert(isequal(indices, [1 2]));" },
+    },
     BuiltinExample { id: "string-lengths", title: "Measure text stored in cells", program: "C = {'apple', 'banana', 'cherry'};\nlengths = cellfun(@length, C)", display_output: Some("lengths = [5 6 6]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(lengths, [5 6 6]));" } },
     BuiltinExample { id: "lockstep-cells", title: "Map equal-sized cell arrays together", program: "A = {1, 2, 3};\nB = {4, 5, 6};\ntotals = cellfun(@plus, A, B)", display_output: Some("totals = [5 7 9]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(totals, [5 7 9]));" } },
     BuiltinExample { id: "nonuniform-output", title: "Keep non-scalar results in cells", program: "names = {'Ada', 'Linus', 'Katherine'};\nupper_names = cellfun(@upper, names, 'UniformOutput', false)", display_output: Some("upper_names is a 1-by-3 cell array"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(iscell(upper_names));\nassert(isequal(upper_names, {'ADA', 'LINUS', 'KATHERINE'}));" } },

@@ -176,7 +176,8 @@ pub(super) fn execute(
                     Some(&state.function.name),
                 ),
                 "comma-separated member assignment",
-            )?;
+            )
+            .finish(state)?;
             commit_prepared_place_write(state, prepared.destination.writeback, updated)?;
             let base = match target {
                 runmat_mir::MirSequenceTarget::Member { base, .. }
@@ -235,7 +236,7 @@ fn prepare_place_write(
     let mut current = state.arena.get(root_reference)?.clone();
     let mut parents = Vec::with_capacity(segments.len());
     for segment in &segments {
-        let child = read_segment(state, current.clone(), segment)?;
+        let child = read_segment(state, current.clone(), segment, false)?;
         parents.push((state.arena.insert(current), segment.clone()));
         current = child;
     }
@@ -266,7 +267,14 @@ fn assign_place(
         let reference = state.arena.insert(rhs);
         return state.set_local(local.0, reference);
     }
-    let root = root_local_value(state, place)?;
+    let mut segments = Vec::new();
+    let local = flatten_place(place, &mut segments)?;
+    let create_struct = allow_init
+        && matches!(
+            segments.first(),
+            Some(PlaceSegment::Member(_) | PlaceSegment::DynamicMember(_))
+        );
+    let root = state.assignment_root(local.0, create_struct)?;
     let (local, updated) = assign_place_to_root(state, place, root, rhs, delete, allow_init)?;
     let reference = state.arena.insert(updated);
     state.set_local(local.0, reference)
@@ -288,7 +296,7 @@ pub(super) fn assign_place_to_root(
     let mut current = root_value;
     let mut parents = Vec::with_capacity(segments.len().saturating_sub(1));
     for segment in &segments[..segments.len() - 1] {
-        let child = read_segment(state, current.clone(), segment)?;
+        let child = read_segment(state, current.clone(), segment, allow_init)?;
         parents.push((current, segment.clone()));
         current = child;
     }
@@ -346,6 +354,7 @@ fn read_segment(
     state: &mut HostState,
     base: Value,
     segment: &PlaceSegment,
+    allow_init: bool,
 ) -> NativeExecutorResult<Value> {
     match segment {
         PlaceSegment::Member(member) => super::sync::complete(
@@ -354,11 +363,12 @@ fn read_segment(
                 Some(&state.runtime),
                 base,
                 member.clone(),
-                false,
+                allow_init,
                 Some(&state.function.name),
             ),
             "member read",
-        ),
+        )
+        .finish(state),
         PlaceSegment::DynamicMember(member) => {
             let member = super::operand::materialize_operand(state, member)?;
             let member = String::try_from(&member).map_err(|error| {
@@ -373,11 +383,12 @@ fn read_segment(
                     Some(&state.runtime),
                     base,
                     member,
-                    false,
+                    allow_init,
                     Some(&state.function.name),
                 ),
                 "dynamic member read",
             )
+            .finish(state)
         }
         PlaceSegment::Index(indexing) => {
             let values = super::indexing::read_value(state, base, indexing, 1)?;
@@ -407,7 +418,8 @@ fn write_segment(
                 Some(&state.function.name),
             ),
             "member write",
-        ),
+        )
+        .finish(state),
         PlaceSegment::DynamicMember(member) => {
             let member = super::operand::materialize_operand(state, member)?;
             let member = String::try_from(&member).map_err(|error| {
@@ -427,6 +439,7 @@ fn write_segment(
                 ),
                 "dynamic member write",
             )
+            .finish(state)
         }
         PlaceSegment::Index(indexing) => {
             super::indexing::assign(state, base, indexing, rhs, delete)

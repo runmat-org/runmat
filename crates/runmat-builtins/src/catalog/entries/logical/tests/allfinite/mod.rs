@@ -109,6 +109,7 @@ pub const ALLFINITE_CATALOG_ENTRY: crate::BuiltinCatalogEntry = crate::BuiltinCa
         capabilities: &[],
     },
     placement: crate::BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: crate::BuiltinPortability::NativeAndWasm,
         accelerator: crate::BuiltinAcceleratorPolicy::Optional,
         residency: crate::BuiltinResidencyPolicy::GatherToHost,

@@ -25,7 +25,8 @@ pub(super) fn prepare_sequence_target(
             &state.runtime,
             builder.push_step(step, Some(&state.function.name)),
             "native sequence destination preparation",
-        )?;
+        )
+        .finish(state)?;
     }
     let endpoint = match target {
         MirSequenceTarget::Member { member, .. } => SequenceEndpointSpec::Member(member.clone()),
@@ -47,7 +48,8 @@ pub(super) fn prepare_sequence_target(
         &state.runtime,
         builder.finish(endpoint),
         "native sequence destination finalization",
-    )?;
+    )
+    .finish(state)?;
     Ok((root, destination))
 }
 

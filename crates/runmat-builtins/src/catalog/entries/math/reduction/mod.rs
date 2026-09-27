@@ -4,11 +4,17 @@
 mod all;
 mod any;
 mod support;
+mod bounds;
+mod topk;
 
 pub use all::*;
 pub use any::*;
+pub use bounds::*;
+pub use topk::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(bounds::ENTRIES.iter().copied());
+    values.extend(topk::ENTRIES.iter().copied());
     values.extend(all::ENTRIES.iter().copied());
     values.extend(any::ENTRIES.iter().copied());
 }

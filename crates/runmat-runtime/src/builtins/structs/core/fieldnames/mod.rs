@@ -18,9 +18,16 @@ pub(super) const BUILTIN_NAME: &str = "fieldnames";
 
 #[runtime_builtin(
     name = "fieldnames",
+    binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
 async fn fieldnames_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::FIELDNAMES_DESCRIPTOR,
+        &runmat_builtins::FIELDNAMES_ERROR_TOO_MANY_OUTPUTS,
+        "fieldnames",
+    )?;
+
     execution::execute(value)
 }
 

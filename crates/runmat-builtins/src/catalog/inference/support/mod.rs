@@ -6,6 +6,7 @@ use runmat_types::{
 };
 
 pub(super) mod facts;
+pub(super) mod materialization;
 
 pub(crate) fn literal_text(literal: &LiteralValue) -> Option<String> {
     match literal {

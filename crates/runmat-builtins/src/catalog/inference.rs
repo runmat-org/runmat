@@ -2,7 +2,6 @@ use super::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest};
 
 mod acceleration_semantics;
-mod aggregate_semantics;
 mod array;
 mod distributed;
 pub(in crate::catalog) mod field_path;
@@ -25,6 +24,7 @@ mod unary_logical_scalar;
 
 pub use distributed::infer_partition_local_call;
 pub(crate) use support::facts::materialize;
+pub(crate) use support::materialization::gathered_value_fact;
 pub(super) use support::{
     argument_error, default_double_scalar, finish_fixed, finish_fixed_outputs, literal_text,
     numeric_kind, preserved_binary_residency, unavailable_rule,

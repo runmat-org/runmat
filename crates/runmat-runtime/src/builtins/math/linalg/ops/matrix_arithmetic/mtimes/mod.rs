@@ -6,9 +6,6 @@ use runmat_value::Value;
 use crate::BuiltinResult;
 
 mod errors;
-mod host;
-mod integer;
-mod provider;
 pub(crate) mod spec;
 
 pub(super) const NAME: &str = "mtimes";
@@ -30,13 +27,9 @@ async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 pub(crate) async fn mtimes_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
-    if integer::contains(lhs) || integer::contains(rhs) {
-        return integer::evaluate(lhs, rhs).await;
-    }
-    if let Some(result) = provider::try_product(lhs, rhs).await? {
-        return Ok(result);
-    }
-    host::evaluate(lhs.clone(), rhs.clone()).await
+    super::product::evaluate(lhs, rhs)
+        .await
+        .map_err(errors::from_product)
 }
 
 #[cfg(test)]

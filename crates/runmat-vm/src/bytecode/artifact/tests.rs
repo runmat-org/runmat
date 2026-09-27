@@ -10,6 +10,48 @@ use std::collections::HashMap;
 const SCRIPT_V2_PREAMBLE: &[u8] = b"runmat-interpreter-script-v2\n";
 
 #[test]
+fn struct_assignment_opcode_round_trips_and_pre_creation_artifacts_reject() {
+    let bytecode =
+        Bytecode::with_instructions(vec![Instr::LoadVarForStructAssignment(0), Instr::Return], 1);
+    let encoded = encode_interpreter_script_v2(&bytecode).unwrap();
+    let decoded = decode_interpreter_script_v2(&encoded).unwrap();
+    assert!(matches!(
+        decoded.instructions[0],
+        Instr::LoadVarForStructAssignment(0)
+    ));
+    // Preserve the historical bytes: this was the current producer before schema 8.
+    let historical = include_bytes!("../../../tests/fixtures/interpreter-program-current.artifact");
+    assert!(matches!(
+        decode_interpreter_program_v2(historical),
+        Err(InterpreterPayloadError::UnsupportedRevision {
+            field: InterpreterRevisionField::Bytecode,
+            actual: 7,
+            expected: BYTECODE_SCHEMA_VERSION,
+        })
+    ));
+    let stale_registry = format!("runmat-interpreter-program-v2\nbytecode={BYTECODE_SCHEMA_VERSION}\nfunction_registry=4\n\n{{}}\n");
+    assert!(matches!(
+        decode_interpreter_program_v2(stale_registry.as_bytes()),
+        Err(InterpreterPayloadError::UnsupportedRevision {
+            field: InterpreterRevisionField::FunctionRegistry,
+            actual: 4,
+            expected: FUNCTION_REGISTRY_SCHEMA_VERSION,
+        })
+    ));
+    let future = format!(
+        "runmat-interpreter-script-v2\nbytecode={}\n\n{{}}\n",
+        BYTECODE_SCHEMA_VERSION + 1
+    );
+    assert!(matches!(
+        decode_interpreter_script_v2(future.as_bytes()),
+        Err(InterpreterPayloadError::UnsupportedRevision {
+            field: InterpreterRevisionField::Bytecode,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn current_script_and_program_envelopes_round_trip() {
     let bytecode = Bytecode::with_instructions(vec![Instr::Return], 0);
     let encoded_script = encode_interpreter_script_v2(&bytecode).unwrap();
@@ -22,10 +64,6 @@ fn current_script_and_program_envelopes_round_trip() {
     );
     let registry = FunctionRegistry::default();
     let encoded_program = encode_interpreter_program_v2(&registry).unwrap();
-    assert_eq!(
-        encoded_program,
-        include_bytes!("../../../tests/fixtures/interpreter-program-current.artifact")
-    );
     let decoded = decode_interpreter_program_v2(&encoded_program).unwrap();
     assert!(decoded.functions.is_empty());
 }
@@ -45,9 +83,9 @@ fn frozen_stale_and_legacy_payloads_are_rejected() {
     assert!(matches!(
         decode_interpreter_program_v2(program),
         Err(InterpreterPayloadError::UnsupportedRevision {
-            field: InterpreterRevisionField::FunctionRegistry,
-            actual: 4,
-            expected: FUNCTION_REGISTRY_SCHEMA_VERSION,
+            field: InterpreterRevisionField::Bytecode,
+            actual: 7,
+            expected: BYTECODE_SCHEMA_VERSION,
         })
     ));
     let legacy = include_bytes!("../../../tests/fixtures/interpreter-program-legacy-raw.json");
@@ -102,9 +140,9 @@ fn revisions_are_rejected_before_the_body_is_deserialized() {
 
 #[test]
 fn noncanonical_current_body_is_rejected() {
-    let payload = b"runmat-interpreter-script-v2\nbytecode=7\n\n{ \"instructions\": [\"Return\"], \"var_count\": 0 }\n";
+    let payload = format!("runmat-interpreter-script-v2\nbytecode={BYTECODE_SCHEMA_VERSION}\n\n{{ \"instructions\": [\"Return\"], \"var_count\": 0 }}\n");
     assert!(matches!(
-        decode_interpreter_script_v2(payload),
+        decode_interpreter_script_v2(payload.as_bytes()),
         Err(InterpreterPayloadError::InvalidEnvelope {
             form: InterpreterPayloadForm::ScriptV2,
             ..

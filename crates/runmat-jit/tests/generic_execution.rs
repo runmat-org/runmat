@@ -1,5 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
+#[path = "generic_execution/short_circuit.rs"]
+mod short_circuit;
+
 use std::{
     collections::BTreeMap,
     rc::Rc,
@@ -2842,47 +2845,123 @@ fn structure_growth_fixture() -> runmat_native_codegen::NativeAssembly {
 }
 
 fn member_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
+    member_assignment_fixture_with_root(true, false)
+}
+
+fn member_assignment_fixture_with_root(
+    initialize: bool,
+    nested: bool,
+) -> runmat_native_codegen::NativeAssembly {
+    member_assignment_fixture_with_input(initialize, nested, false)
+}
+
+fn member_assignment_fixture_with_input(
+    initialize: bool,
+    nested: bool,
+    omitted_formal: bool,
+) -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 4 };
-    let place = MirPlace::Member(
-        Box::new(MirPlace::Local(MirLocalId(0))),
-        runmat_types::MemberName("answer".into()),
-    );
-    lower_body(
+    let base = if nested {
+        MirPlace::Member(
+            Box::new(MirPlace::Local(MirLocalId(0))),
+            runmat_types::MemberName("child".into()),
+        )
+    } else {
+        MirPlace::Local(MirLocalId(0))
+    };
+    let place = MirPlace::Member(Box::new(base), runmat_types::MemberName("answer".into()));
+    let mut statements = Vec::new();
+    if initialize {
+        statements.push(MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::StructLiteral {
+                    fields: vec![(
+                        runmat_types::MemberName("answer".into()),
+                        MirOperand::Constant(MirConstant::Number("1".into())),
+                    )],
+                },
+            },
+            span,
+        });
+    }
+    statements.extend([
+        MirStmt {
+            kind: MirStmtKind::PlaceMutation(MirPlaceMutation {
+                place: place.clone(),
+                kind: runmat_types::PlaceMutationKind::MemberAssign,
+                creation_policy: runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
+                shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
+            }),
+            span,
+        },
+        MirStmt {
+            kind: MirStmtKind::Assign {
+                place,
+                value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("42".into()))),
+            },
+            span,
+        },
+    ]);
+    lower_body_with_inputs(
         "member_assignment",
         1,
-        vec![
-            MirStmt {
-                kind: MirStmtKind::Assign {
-                    place: MirPlace::Local(MirLocalId(0)),
-                    value: MirRvalue::StructLiteral {
-                        fields: vec![(
-                            runmat_types::MemberName("answer".into()),
-                            MirOperand::Constant(MirConstant::Number("1".into())),
-                        )],
-                    },
-                },
-                span,
-            },
-            MirStmt {
-                kind: MirStmtKind::PlaceMutation(MirPlaceMutation {
-                    place: place.clone(),
-                    kind: runmat_types::PlaceMutationKind::MemberAssign,
-                    creation_policy: runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
-                    shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
-                }),
-                span,
-            },
-            MirStmt {
-                kind: MirStmtKind::Assign {
-                    place,
-                    value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("42".into()))),
-                },
-                span,
-            },
-        ],
+        statements,
         MirOperand::Local(MirLocalId(0)),
         span,
+        if omitted_formal {
+            vec![BindingId(0)]
+        } else {
+            vec![]
+        },
     )
+}
+
+#[test]
+fn generic_native_omitted_input_can_be_initialized_before_member_assignment() {
+    for initialize in [false, true] {
+        let executor = compile_executor(member_assignment_fixture_with_input(
+            initialize, false, true,
+        ))
+        .unwrap();
+        let result = executor.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context());
+        if initialize {
+            let output = result.unwrap().outputs.pop().unwrap();
+            let Value::Struct(root) = output else {
+                panic!("initialized struct")
+            };
+            assert_eq!(root.fields.get("answer"), Some(&Value::Num(42.0)));
+        } else {
+            assert!(matches!(result, Err(NativeExecutorError::Runtime(error))
+                if error.identifier() == Some("RunMat:NotEnoughInputs")));
+        }
+    }
+}
+
+#[test]
+fn generic_native_member_assignment_creates_unassigned_roots_and_nested_paths() {
+    for (initialize, nested) in [(false, false), (false, true), (true, true)] {
+        let executor =
+            compile_executor(member_assignment_fixture_with_root(initialize, nested)).unwrap();
+        let output = executor
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs
+            .pop()
+            .unwrap();
+        let Value::Struct(root) = output else {
+            panic!("expected initialized structure")
+        };
+        let structure = if nested {
+            let Some(Value::Struct(child)) = root.fields.get("child") else {
+                panic!("expected initialized nested structure")
+            };
+            child
+        } else {
+            &root
+        };
+        assert_eq!(structure.fields.get("answer"), Some(&Value::Num(42.0)));
+    }
 }
 
 fn multi_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
@@ -3213,6 +3292,17 @@ fn lower_body(
     returned: MirOperand,
     span: Span,
 ) -> runmat_native_codegen::NativeAssembly {
+    lower_body_with_inputs(name, local_count, statements, returned, span, Vec::new())
+}
+
+fn lower_body_with_inputs(
+    name: &str,
+    local_count: usize,
+    statements: Vec<MirStmt>,
+    returned: MirOperand,
+    span: Span,
+    fixed_inputs: Vec<BindingId>,
+) -> runmat_native_codegen::NativeAssembly {
     let function = FunctionId(0);
     let mir = MirAssembly {
         bodies: [(
@@ -3220,7 +3310,7 @@ fn lower_body(
             MirBody {
                 function,
                 abi: FunctionAbi {
-                    fixed_inputs: Vec::new(),
+                    fixed_inputs: fixed_inputs.clone(),
                     varargin: None,
                     fixed_outputs: Vec::new(),
                     varargout: None,
@@ -3230,8 +3320,12 @@ fn lower_body(
                 locals: (0..local_count)
                     .map(|id| MirLocal {
                         id: MirLocalId(id),
-                        binding: None,
-                        kind: MirLocalKind::Temporary,
+                        binding: fixed_inputs.get(id).copied(),
+                        kind: if id < fixed_inputs.len() {
+                            MirLocalKind::Parameter
+                        } else {
+                            MirLocalKind::Temporary
+                        },
                         span,
                     })
                     .collect(),
@@ -3273,7 +3367,13 @@ fn lower_body(
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
-        binding_names: None,
+        binding_names: Some(
+            &fixed_inputs
+                .iter()
+                .enumerate()
+                .map(|(index, binding)| (*binding, format!("input{index}")))
+                .collect(),
+        ),
         target: NativeTarget::current(),
     })
     .unwrap()

@@ -61,6 +61,19 @@ fn sync_initial_vars(initial: &mut Vec<Value>, vars: &[Value]) {
     initial.extend_from_slice(vars);
 }
 
+fn check_cancelled_with_residency_cleanup(stack: &[Value], vars: &[Value]) -> VmResult<()> {
+    let result = interp_engine::check_cancelled();
+    #[cfg(feature = "native-accel")]
+    if result.is_err() {
+        for value in stack.iter().chain(vars) {
+            clear_residency(value);
+        }
+    }
+    #[cfg(not(feature = "native-accel"))]
+    let _ = (stack, vars);
+    result
+}
+
 fn ensure_workspace_resolver_registered() {
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
@@ -181,6 +194,7 @@ async fn invoke_semantic_function_value_with_input_residency(
     input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
+    let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(invoke_semantic_function_value_with_input_residency_inner(
             function,
@@ -435,6 +449,7 @@ pub async fn interpret_with_vars_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(runmat_runtime::data::with_tx_registry_scope(
             interpret_with_vars_inner(
@@ -453,11 +468,20 @@ pub async fn interpret_resume_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(runmat_runtime::data::with_tx_registry_scope(
             interpret_resume_inner(bytecode, resume, current_function_name, runtime.clone()),
         ))
         .await
+}
+
+fn with_default_acceleration_service(
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> runmat_runtime::context::RuntimeContext {
+    #[cfg(feature = "native-accel")]
+    let runtime = runmat_accelerate::native_auto::install_preparation_service(runtime);
+    runtime
 }
 
 /// Install immutable bytecode metadata that native execution does not visit as
@@ -753,6 +777,8 @@ async fn run_interpreter_inner(
     let debug_stack = interp_engine::debug_stack_enabled();
     let mut interpreter_timing = InterpreterTiming::new();
     let mut sequence_register = interp_dispatch::SequenceState::default();
+    #[cfg(feature = "native-accel")]
+    let mut fusion_observations = super::fusion_observation::FusionRegionObservations::default();
     while pc < bytecode.instructions.len() {
         if completion_boundary.is_some_and(|boundary| boundary.pc() == pc) {
             break;
@@ -763,22 +789,11 @@ async fn run_interpreter_inner(
         set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
-        if let Err(err) = interp_engine::check_cancelled() {
-            #[cfg(feature = "native-accel")]
-            {
-                for value in &stack {
-                    clear_residency(value);
-                }
-                for value in &vars {
-                    clear_residency(value);
-                }
-            }
-            return Err(err);
-        }
+        check_cancelled_with_residency_cleanup(&stack, &vars)?;
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) = (active_group_plan_clone(), fusion_accel_graph.as_ref())
         {
-            if plan.group.span.start == pc {
+            if plan.group.span.start == pc && !fusion_observations.contains_start(pc) {
                 #[cfg(feature = "native-accel")]
                 {
                     interp_engine::note_fusion_gate(
@@ -835,21 +850,41 @@ async fn run_interpreter_inner(
                     )
                     .await
                     {
-                        Ok(result) => {
-                            trace.complete(
-                                Some(PlacementVariant::ProviderFusion),
+                        Ok(runmat_accelerate::fusion_exec::FusionExecutionOutcome::Executed(
+                            result,
+                        )) => {
+                            trace.submitted(
+                                PlacementVariant::ProviderFusion,
                                 Some(duration_ns_saturating(fusion_started.elapsed())),
                             );
                             stack.push(result);
+                            let executed_pc = pc;
                             pc = plan.group.span.end + 1;
+                            fusion_observations.instruction_exit(executed_pc, pc);
                             continue;
                         }
+                        Ok(
+                            runmat_accelerate::fusion_exec::FusionExecutionOutcome::SharedRuntime(
+                                ticket,
+                            ),
+                        ) => {
+                            fusion_observations.begin(span.clone(), Some(ticket), trace);
+                            // Planning may yield or request cancellation. Install
+                            // the observation first so cancellation retires the
+                            // selected ticket as failure, even for a one-instruction
+                            // CPU region that could otherwise complete this turn.
+                            check_cancelled_with_residency_cleanup(&stack, &vars)?;
+                        }
                         Err(err) => {
-                            trace.fallback(
+                            trace.event(
+                                PlacementEventKind::Fallback,
                                 Some(PlacementVariant::SharedRuntime),
-                                "fusion_execution_failed",
+                                Some("fusion_execution_failed"),
                                 Some(duration_ns_saturating(fusion_started.elapsed())),
+                                None,
+                                &[],
                             );
+                            fusion_observations.begin(span.clone(), None, trace);
                             log::debug!("fusion fallback at pc {}: {}", pc, err);
                         }
                     }
@@ -862,11 +897,7 @@ async fn run_interpreter_inner(
                         None,
                         &[],
                     );
-                    trace.fallback(
-                        Some(PlacementVariant::SharedRuntime),
-                        "fusion_vm_barrier",
-                        Some(duration_ns_saturating(fusion_started.elapsed())),
-                    );
+                    fusion_observations.begin(span.clone(), None, trace);
                     interp_engine::note_fusion_skip(pc, &span);
                 }
             }
@@ -918,6 +949,8 @@ async fn run_interpreter_inner(
                     stored_value,
                 );
             };
+        #[cfg(feature = "native-accel")]
+        let executed_pc = pc;
         let dispatch_result = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[pc],
@@ -956,6 +989,8 @@ async fn run_interpreter_inner(
         let dispatch_result = match dispatch_result {
             Ok(result) => result,
             Err(err) => {
+                #[cfg(feature = "native-accel")]
+                fusion_observations.abort();
                 sequence_register.clear(&mut stack);
                 match interp_dispatch::redirect_exception_to_catch(
                     err,
@@ -975,10 +1010,14 @@ async fn run_interpreter_inner(
         if let Some(decision) = dispatch_result {
             match decision {
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => {
+                    #[cfg(feature = "native-accel")]
+                    fusion_observations.instruction_exit(executed_pc, pc);
                     continue;
                 }
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::FallThrough) => {
                     pc += 1;
+                    #[cfg(feature = "native-accel")]
+                    fusion_observations.instruction_exit(executed_pc, pc);
                     continue;
                 }
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::Return) => {
@@ -987,6 +1026,8 @@ async fn run_interpreter_inner(
                 }
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::ContinueLoop)
                 | interp_dispatch::DispatchHandled::Return(DispatchDecision::ContinueLoop) => {
+                    #[cfg(feature = "native-accel")]
+                    fusion_observations.instruction_exit(executed_pc, pc);
                     continue;
                 }
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::Return) => {
@@ -1000,6 +1041,8 @@ async fn run_interpreter_inner(
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::FallThrough)
                 | interp_dispatch::DispatchHandled::Return(DispatchDecision::FallThrough) => {
                     pc += 1;
+                    #[cfg(feature = "native-accel")]
+                    fusion_observations.instruction_exit(executed_pc, pc);
                     continue;
                 }
             }
@@ -1020,6 +1063,7 @@ async fn run_interpreter_inner(
             | Instr::LoadLocal(_)
             | Instr::LoadVar(_)
             | Instr::LoadVarForIndexAssignment(_)
+            | Instr::LoadVarForStructAssignment(_)
             | Instr::StoreVar(_)
             | Instr::StoreLocal(_)
             | Instr::Swap
@@ -1208,7 +1252,13 @@ async fn run_interpreter_inner(
             debug!(pc, stack_len = stack.len(), "[vm] after exec");
         }
         pc += 1;
+        #[cfg(feature = "native-accel")]
+        fusion_observations.instruction_exit(executed_pc, pc);
     }
+    // A completion boundary or return can stop inside a region; never infer
+    // success from the function's eventual return value.
+    #[cfg(feature = "native-accel")]
+    fusion_observations.abort();
     interpreter_timing.flush_host_span("loop_complete", None);
     #[cfg(feature = "native-accel")]
     {
@@ -1468,6 +1518,7 @@ async fn interpret_function_with_counts_in_context(
     missing_input_slots: HashSet<usize>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
+    let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(interpret_function_with_counts_in_context_inner(
             bytecode,

@@ -34,6 +34,10 @@ pub(super) struct ContextualRegionState {
     regions: Vec<RegionProgress>,
     pub(super) operation_path: Vec<OperationScope>,
     pub(super) completed_operations: BTreeMap<EmbeddedOperationIdentity, Vec<NativeValueRef>>,
+    // Calls may finish or suspend after evaluating nested argument regions.
+    // A resumed/cached call skips those arguments but must still consume their
+    // ordinal interval before later sibling regions are visited.
+    pub(super) operation_region_ends: BTreeMap<EmbeddedOperationIdentity, usize>,
     pub(super) prepared_subscript_receivers: BTreeMap<
         (Option<EmbeddedOperationIdentity>, usize),
         (
@@ -47,6 +51,7 @@ pub(super) struct ContextualRegionState {
 struct RegionProgress {
     next_step: usize,
     result: Option<NativeValueRef>,
+    next_region: usize,
 }
 
 impl HostState {
@@ -85,11 +90,13 @@ impl HostState {
         let ordinal = self.contextual_regions.next_region;
         self.contextual_regions.next_region += 1;
         if self.contextual_regions.regions.len() == ordinal {
-            self.contextual_regions
-                .regions
-                .push(RegionProgress::default());
+            self.contextual_regions.regions.push(RegionProgress {
+                next_region: ordinal + 1,
+                ..RegionProgress::default()
+            });
         }
         let progress = &self.contextual_regions.regions[ordinal];
+        self.contextual_regions.next_region = progress.next_region;
         (ordinal, progress.next_step, progress.result)
     }
 
@@ -108,11 +115,13 @@ impl HostState {
     ) -> NativeExecutorResult<()> {
         self.pop_operation(EmbeddedOperationSegment::RegionStep { region, step })?;
         self.contextual_regions.regions[region].next_step = next_step;
+        self.contextual_regions.regions[region].next_region = self.contextual_regions.next_region;
         Ok(())
     }
 
     pub fn finish_contextual_region(&mut self, region: usize, result: NativeValueRef) {
         self.contextual_regions.regions[region].result = Some(result);
+        self.contextual_regions.regions[region].next_region = self.contextual_regions.next_region;
     }
 
     pub fn contextual_region_roots(&self) -> impl Iterator<Item = NativeValueRef> + '_ {

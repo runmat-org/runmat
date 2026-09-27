@@ -18,9 +18,16 @@ pub(crate) use spec::{
 
 #[runtime_builtin(
     name = "num2cell",
+    binding_variant = "default",
     builtin_path = "crate::builtins::cells::core::num2cell"
 )]
 async fn num2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::NUM2CELL_DESCRIPTOR,
+        &runmat_builtins::NUM2CELL_ERROR_TOO_MANY_OUTPUTS,
+        "num2cell",
+    )?;
+
     if rest.len() > 1 {
         return Err(error::invalid_input("expected A or A,dim"));
     }

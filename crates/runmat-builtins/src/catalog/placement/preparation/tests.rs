@@ -1,0 +1,112 @@
+use super::*;
+use crate::*;
+
+const DATA: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Data",
+};
+const CONTROL: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "option",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Unchanged control",
+};
+const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &[BuiltinSignatureDescriptor {
+        label: "value, option",
+        inputs: &[DATA, CONTROL],
+        outputs: &[],
+    }],
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &[],
+};
+const FORM: BuiltinPreparationForm = BuiltinPreparationForm {
+    id: BuiltinPreparationFormId(0),
+    binding_variant: "default",
+    signatures: &[0],
+    data_arguments: &[0],
+    operation: BuiltinPreparationOperation::Unary,
+    provider_requirement: BuiltinPreparationProviderRequirement::InputSupported,
+};
+
+fn errors(forms: &'static [BuiltinPreparationForm]) -> Vec<&'static str> {
+    let mut entry = crate::SIN_CATALOG_ENTRY;
+    entry.descriptor = &DESCRIPTOR;
+    entry.placement.preparation = BuiltinOperandPreparation::Forms(forms);
+    validate_builtin_preparation(&entry)
+}
+
+#[test]
+fn roles_reference_existing_signatures_without_claiming_control_operands() {
+    assert!(errors(&[FORM]).is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        data_arguments: &[1],
+        ..FORM
+    }])
+    .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        data_arguments: &[2],
+        ..FORM
+    }])
+    .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        signatures: &[1],
+        ..FORM
+    }])
+    .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        binding_variant: "missing",
+        ..FORM
+    }])
+    .is_empty());
+}
+
+#[test]
+fn duplicate_and_inconsistent_forms_are_rejected() {
+    assert!(!errors(&[]).is_empty());
+    assert!(!errors(&[FORM, FORM]).is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        signatures: &[0, 0],
+        ..FORM
+    }])
+    .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        data_arguments: &[0, 0],
+        operation: BuiltinPreparationOperation::ElementwiseBinary,
+        ..FORM
+    }])
+    .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        operation: BuiltinPreparationOperation::MatrixMultiply,
+        ..FORM
+    }])
+    .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        operation: BuiltinPreparationOperation::Sink(BuiltinSinkPreparation::Gather),
+        provider_requirement: BuiltinPreparationProviderRequirement::F64,
+        ..FORM
+    }])
+    .is_empty());
+}
+
+#[test]
+fn runtime_owned_does_not_change_accelerator_capability_and_forms_serialize() {
+    let mut entry = crate::SIN_CATALOG_ENTRY;
+    entry.placement.preparation = BuiltinOperandPreparation::RuntimeOwned;
+    assert!(validate_builtin_preparation(&entry).is_empty());
+    assert_eq!(
+        entry.placement.accelerator,
+        BuiltinAcceleratorPolicy::Optional
+    );
+    let encoded = serde_json::to_string(&FORM).unwrap();
+    assert!(encoded.contains("data_arguments"));
+    entry.descriptor = &DESCRIPTOR;
+    entry.placement.preparation = BuiltinOperandPreparation::Forms(&[FORM]);
+    entry.placement.accelerator = BuiltinAcceleratorPolicy::Forbidden;
+    assert!(!validate_builtin_preparation(&entry).is_empty());
+}

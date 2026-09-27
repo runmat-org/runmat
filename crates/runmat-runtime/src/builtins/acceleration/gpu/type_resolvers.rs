@@ -18,7 +18,3 @@ pub fn gpudevice_type(_args: &[Type], _context: &ResolveContext) -> Type {
 pub fn gpuinfo_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::String
 }
-
-pub fn pagefun_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}

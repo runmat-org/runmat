@@ -275,13 +275,17 @@ impl FunctionRegistry {
 
     pub fn insert_replacing_name(&mut self, function: FunctionBytecode) {
         self.execution_stacks.take();
-        if let Some(previous) = self
-            .names
-            .insert(function.display_name.clone(), function.function)
-        {
-            self.remove(previous);
+        if let Some(previous) = self.resolve_name(&function.display_name) {
+            if previous != function.function {
+                self.remove(previous);
+            }
         }
         let function_id = function.function;
+        // Refreshing an existing identity does not retire its live aliases,
+        // but its previous source membership must still be detached.
+        self.detach_definition(function_id);
+        self.names
+            .insert(function.display_name.clone(), function_id);
         if let Some(source_id) = function.source_id {
             let functions = self.source_functions.entry(source_id).or_default();
             if !functions.contains(&function_id) {
@@ -293,10 +297,13 @@ impl FunctionRegistry {
 
     pub fn remove(&mut self, function: FunctionId) -> Option<FunctionBytecode> {
         self.execution_stacks.take();
+        let removed = self.detach_definition(function)?;
+        self.names.retain(|_, target| *target != function);
+        Some(removed)
+    }
+
+    fn detach_definition(&mut self, function: FunctionId) -> Option<FunctionBytecode> {
         let removed = self.functions.remove(&function)?;
-        if self.names.get(&removed.display_name) == Some(&function) {
-            self.names.remove(&removed.display_name);
-        }
         if let Some(source_id) = removed.source_id {
             if let Some(functions) = self.source_functions.get_mut(&source_id) {
                 functions.retain(|id| *id != function);
@@ -313,10 +320,7 @@ impl FunctionRegistry {
         let ids = self.source_functions.remove(&source).unwrap_or_default();
         let mut removed = Vec::new();
         for id in ids {
-            if let Some(function) = self.functions.remove(&id) {
-                if self.names.get(&function.display_name) == Some(&id) {
-                    self.names.remove(&function.display_name);
-                }
+            if let Some(function) = self.remove(id) {
                 removed.push(function);
             }
         }
@@ -566,6 +570,10 @@ impl FunctionRegistry {
             .max()
     }
 }
+
+#[cfg(test)]
+#[path = "program/registry_retirement_tests.rs"]
+mod registry_retirement_tests;
 
 fn instruction_has_dynamic_dispatch(instruction: &Instr) -> bool {
     !dynamic_dispatch_method_names(instruction).is_empty()

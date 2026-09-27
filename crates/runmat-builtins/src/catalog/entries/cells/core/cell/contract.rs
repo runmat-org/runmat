@@ -36,6 +36,7 @@ pub const CELL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "cell: internal allocation error",
 };
 const ERRORS: &[BuiltinErrorDescriptor] = &[
+    CELL_ERROR_TOO_MANY_OUTPUTS,
     CELL_ERROR_INVALID_INPUT,
     CELL_ERROR_INVALID_SIZE,
     CELL_ERROR_INTERNAL,
@@ -65,3 +66,10 @@ pub const CELL_INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] =
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "Signed negative sizes become zero; oversized shapes reject before allocation.",
     }];
+
+pub const CELL_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:cell:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "cell: too many output arguments",
+};

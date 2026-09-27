@@ -9,7 +9,11 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::LogicalReductionKind;
 use runmat_value::{LogicalArray, Value};
 
-use super::{arguments::ReductionSpec, host, shape, LogicalReductionConfig};
+use super::{arguments::ReductionSpec, host, route, shape, LogicalReductionConfig};
+
+mod output;
+#[cfg(test)]
+mod tests;
 
 pub(super) async fn reduce(
     config: &LogicalReductionConfig,
@@ -17,7 +21,7 @@ pub(super) async fn reduce(
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Value> {
-    if config.kind == LogicalReductionKind::Any && nan_mode == ReductionNaN::Omit {
+    if route::select(config.kind, nan_mode) == route::LogicalReductionRoute::HostExact {
         return fallback(config, handle, spec, nan_mode).await;
     }
     let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
@@ -53,8 +57,16 @@ async fn try_provider(
             LogicalReductionKind::Any => provider.reduce_any(handle, omit_nan).await,
         };
         if let Ok(reduced) = reduced {
-            let downloaded = gpu_helpers::download_truth_values_async(provider, &reduced).await;
-            let _ = provider.free(&reduced);
+            let mut outputs = output::ReductionOutputs::new(handle);
+            // Full reductions may choose a scalar rank, but never a non-scalar.
+            let expected = if is_scalar_shape(&reduced.shape) {
+                reduced.shape.clone()
+            } else {
+                vec![1, 1]
+            };
+            outputs.adopt(config, provider, reduced, expected)?;
+            let downloaded =
+                gpu_helpers::download_truth_values_async(provider, outputs.current()).await;
             return downloaded
                 .map(Some)
                 .map_err(|error| config.error(config.internal, error));
@@ -74,56 +86,39 @@ async fn reduce_dimensions(
     if dimensions.is_empty() {
         return Ok(None);
     }
-    let mut current = handle.clone();
-    let mut current_owned = false;
-    let mut intermediates = Vec::new();
+    let mut outputs = output::ReductionOutputs::new(handle);
 
     for dimension in dimensions {
         let Some(axis) = dimension.checked_sub(1) else {
-            free_owned(provider, current_owned.then_some(&current), &intermediates);
             return Ok(None);
         };
-        if axis >= current.shape.len() {
-            free_owned(provider, current_owned.then_some(&current), &intermediates);
+        if axis >= outputs.current().shape.len() {
             return Ok(None);
         }
+        let mut expected = outputs.current().shape.clone();
+        expected[axis] = 1;
         let next = match config.kind {
-            LogicalReductionKind::All => provider.reduce_all_dim(&current, axis, omit_nan).await,
-            LogicalReductionKind::Any => provider.reduce_any_dim(&current, axis, omit_nan).await,
+            LogicalReductionKind::All => {
+                provider
+                    .reduce_all_dim(outputs.current(), axis, omit_nan)
+                    .await
+            }
+            LogicalReductionKind::Any => {
+                provider
+                    .reduce_any_dim(outputs.current(), axis, omit_nan)
+                    .await
+            }
         };
         let Ok(next) = next else {
-            free_owned(provider, current_owned.then_some(&current), &intermediates);
             return Ok(None);
         };
-        if current_owned {
-            intermediates.push(current);
-        }
-        current = next;
-        current_owned = true;
-    }
-    if !current_owned {
-        return Ok(None);
+        outputs.adopt(config, provider, next, expected)?;
     }
 
-    let downloaded = gpu_helpers::download_truth_values_async(provider, &current).await;
-    let _ = provider.free(&current);
-    free_owned(provider, None, &intermediates);
+    let downloaded = gpu_helpers::download_truth_values_async(provider, outputs.current()).await;
     downloaded
         .map(Some)
         .map_err(|error| config.error(config.internal, error))
-}
-
-fn free_owned(
-    provider: &dyn AccelProvider,
-    current: Option<&GpuTensorHandle>,
-    intermediates: &[GpuTensorHandle],
-) {
-    if let Some(current) = current {
-        let _ = provider.free(current);
-    }
-    for intermediate in intermediates {
-        let _ = provider.free(intermediate);
-    }
 }
 
 fn logical_from_host(

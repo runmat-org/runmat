@@ -1,0 +1,79 @@
+//! Roles for already-admitted calls, never another argument or option parser.
+use serde::Serialize;
+
+mod validation;
+pub use validation::validate_builtin_preparation;
+#[cfg(test)]
+mod tests;
+
+/// Stable within a canonical identity. IDs are not signature array offsets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub struct BuiltinPreparationFormId(pub u16);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinOperandPreparation {
+    /// The implementation owns preparation, including any provider execution.
+    /// This does NOT mean host-only, nor prove migration of an old auto route.
+    RuntimeOwned,
+    /// The domain selects a form only after its existing admission succeeds.
+    Forms(&'static [BuiltinPreparationForm]),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BuiltinPreparationForm {
+    pub id: BuiltinPreparationFormId,
+    pub binding_variant: &'static str,
+    /// Canonical descriptor signatures to which the role declaration applies.
+    pub signatures: &'static [usize],
+    /// Original argument positions, strictly increasing. Every other argument
+    /// is an unchanged control retained by the admitted domain implementation.
+    pub data_arguments: &'static [usize],
+    pub operation: BuiltinPreparationOperation,
+    pub provider_requirement: BuiltinPreparationProviderRequirement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinPreparationOperation {
+    Unary,
+    ElementwiseBinary,
+    MatrixMultiply,
+    Transpose,
+    Reduction(BuiltinPreparationReduction),
+    Sink(BuiltinSinkPreparation),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinPreparationReduction {
+    Sum,
+    Mean,
+    Min,
+    Max,
+    All,
+    Any,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinSinkPreparation {
+    /// Retain residency; terminate pending fusion use of these data operands.
+    Barrier,
+    /// Materialize declared data operands after admission, not option controls.
+    Gather,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinPreparationProviderRequirement {
+    /// Existing transfer/class admission remains authoritative.
+    InputSupported,
+    /// The operation produces/requires double storage even for single inputs.
+    F64,
+}
+
+impl BuiltinPreparationOperation {
+    pub const fn data_arity(self) -> Option<usize> {
+        match self {
+            Self::Unary | Self::Transpose | Self::Reduction(_) => Some(1),
+            Self::ElementwiseBinary | Self::MatrixMultiply => Some(2),
+            Self::Sink(_) => None,
+        }
+    }
+}

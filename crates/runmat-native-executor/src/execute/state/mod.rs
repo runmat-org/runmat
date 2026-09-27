@@ -92,7 +92,7 @@ pub(super) struct HostState {
     requested_outputs: usize,
     missing_input_locals: Vec<runmat_native_codegen::NativeLocalId>,
     optimized_regions: BTreeMap<crate::region::SiteIdentity, crate::region::OptimizedRegionPlan>,
-    disabled_optimized_regions: BTreeSet<runmat_types::RegionId>,
+    pub(super) region_observation: Option<super::region::observation::GenericRegionObservation>,
     skipped_optimized_sites: BTreeSet<crate::region::SiteIdentity>,
     vectorized_regions: u64,
     workspace: Option<super::workspace::NativeWorkspaceState>,
@@ -231,7 +231,7 @@ impl HostState {
             }
             let reference = *local;
             if !reference.is_null() {
-                workspace.synchronize_local(slot, arena.get(reference)?.clone());
+                workspace.synchronize_local(slot, arena.get(reference)?.clone())?;
             }
         }
         let roots = locals
@@ -293,7 +293,7 @@ impl HostState {
                 .cloned()
                 .map(|plan| (plan.entry, plan))
                 .collect(),
-            disabled_optimized_regions: BTreeSet::new(),
+            region_observation: None,
             skipped_optimized_sites: BTreeSet::new(),
             vectorized_regions: 0,
             workspace: Some(workspace),

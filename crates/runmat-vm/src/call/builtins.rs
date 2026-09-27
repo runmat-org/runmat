@@ -17,14 +17,6 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
-#[cfg(feature = "native-accel")]
-fn map_prepare_builtin_args_error(err: impl std::fmt::Display) -> RuntimeError {
-    mex(
-        "AccelerationOperationFailed",
-        &format!("prepare builtin args: {err}"),
-    )
-}
-
 #[derive(Clone, Copy)]
 enum VmIntrinsicBuiltin {
     Nargin,
@@ -209,17 +201,8 @@ impl VmIntrinsicExceptionBuiltin {
     }
 }
 
-#[cfg(feature = "native-accel")]
-pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    runmat_accelerate::prepare_builtin_args(name, args)
-        .await
-        .map_err(map_prepare_builtin_args_error)
-}
-
-#[cfg(not(feature = "native-accel"))]
-pub async fn prepare_builtin_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    Ok(args.to_vec())
-}
+#[cfg(test)]
+mod dispatch_tests;
 
 pub fn collect_call_args(
     stack: &mut Vec<Value>,
@@ -1000,7 +983,10 @@ fn remap_emit_label(label: &mut crate::bytecode::EmitLabel, slot_remap: &HashMap
 
 fn remap_instr_slots(instr: &mut Instr, slot_remap: &HashMap<usize, usize>) {
     match instr {
-        Instr::LoadVar(slot) | Instr::LoadVarForIndexAssignment(slot) | Instr::StoreVar(slot) => {
+        Instr::LoadVar(slot)
+        | Instr::LoadVarForIndexAssignment(slot)
+        | Instr::LoadVarForStructAssignment(slot)
+        | Instr::StoreVar(slot) => {
             remap_slot(slot, slot_remap);
         }
         Instr::CallFevalMultiUsingOutputSlot(_, slot)
@@ -1163,7 +1149,7 @@ fn imported_builtin_qualified_name(path: &[String], leaf: Option<&str>) -> Optio
 pub async fn resolve_imported_builtin(
     name: &str,
     imports: &[(Vec<String>, bool)],
-    prepared_primary: &[Value],
+    args: &[Value],
     requested_outputs: usize,
 ) -> Result<ImportedBuiltinResolution, RuntimeError> {
     let mut specific_matches: Vec<(String, Value)> = Vec::new();
@@ -1175,13 +1161,9 @@ pub async fn resolve_imported_builtin(
             let Some(qual) = imported_builtin_qualified_name(path, None) else {
                 continue;
             };
-            let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
-            let result = runmat_runtime::call_builtin_async_with_outputs(
-                &qual,
-                &qual_args,
-                requested_outputs,
-            )
-            .await;
+            let result =
+                runmat_runtime::call_builtin_async_with_outputs(&qual, args, requested_outputs)
+                    .await;
             if let Ok(value) = result {
                 specific_matches.push((qual, value));
             }
@@ -1210,10 +1192,8 @@ pub async fn resolve_imported_builtin(
         let Some(qual) = imported_builtin_qualified_name(path, Some(name)) else {
             continue;
         };
-        let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
         let result =
-            runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, requested_outputs)
-                .await;
+            runmat_runtime::call_builtin_async_with_outputs(&qual, args, requested_outputs).await;
         if let Ok(value) = result {
             wildcard_matches.push((qual, value));
         }
@@ -1393,14 +1373,5 @@ mod tests {
         // The f64 mirror is intentionally plausible but must never decide an
         // integer-only argument bound.
         assert!(parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs",).is_err());
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn prepare_builtin_args_error_maps_to_accel_identifier() {
-        let err = super::map_prepare_builtin_args_error("boom");
-        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
-        assert!(err.message().contains("prepare builtin args"));
-        assert!(err.message().contains("boom"));
     }
 }

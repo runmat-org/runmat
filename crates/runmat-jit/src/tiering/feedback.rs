@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use super::policy::decide;
 use super::{TierAvailability, TierDecision, TieringConfig};
 
+#[cfg(test)]
+mod unprofiled_tests;
+
 const FEEDBACK_SCHEMA_VERSION: u16 = 1;
 const MAX_OBSERVATIONS: u64 = (1 << 53) - 1;
 
@@ -122,16 +125,38 @@ impl TieringSession {
     ) -> Result<(), &'static str> {
         site.validate()?;
         validate_profile(profile, self.config.max_profile_bytes)?;
+        self.record_invocation(site, Some(profile), elapsed_ns)
+    }
+
+    /// Record generic hotness and elapsed execution when bounded representation
+    /// profiling is unavailable. No specialization sample is manufactured.
+    pub fn observe_unprofiled_invocation(
+        &self,
+        site: TierSiteId,
+        elapsed_ns: u64,
+    ) -> Result<(), &'static str> {
+        self.record_invocation(site, None, elapsed_ns)
+    }
+
+    fn record_invocation(
+        &self,
+        site: TierSiteId,
+        profile: Option<&RepresentationProfile>,
+        elapsed_ns: u64,
+    ) -> Result<(), &'static str> {
+        site.validate()?;
         let mut state = self.state.borrow_mut();
         let tick = next_tick(&mut state)?;
         let feedback = state.sites.entry(site.clone()).or_default();
         feedback.invocations = bounded_count_add(feedback.invocations, 1);
         feedback.total_elapsed_ns = feedback.total_elapsed_ns.saturating_add(elapsed_ns);
         feedback.latest_tick = tick;
-        let profile_feedback = feedback.profiles.entry(profile.digest).or_default();
-        profile_feedback.samples = bounded_count_add(profile_feedback.samples, 1);
-        profile_feedback.latest_tick = tick;
-        evict_profiles(feedback, self.config.max_profiles_per_site);
+        if let Some(profile) = profile {
+            let profile_feedback = feedback.profiles.entry(profile.digest).or_default();
+            profile_feedback.samples = bounded_count_add(profile_feedback.samples, 1);
+            profile_feedback.latest_tick = tick;
+            evict_profiles(feedback, self.config.max_profiles_per_site);
+        }
         evict_sites(&mut state, self.config.max_sites, Some(&site));
         Ok(())
     }
@@ -176,6 +201,27 @@ impl TieringSession {
             feedback.invocations,
             feedback.backedges,
             dominant_profile(feedback),
+            availability,
+        )
+    }
+
+    /// Apply the same hotness and resource budgets without making a profile
+    /// eligible for specialization. Retained specialized code cannot substitute
+    /// for a generic entry when the current invocation has no admissible profile.
+    pub fn decide_generic(
+        &self,
+        site: &TierSiteId,
+        availability: &TierAvailability,
+    ) -> TierDecision {
+        let state = self.state.borrow();
+        let Some(feedback) = state.sites.get(site) else {
+            return TierDecision::Interpret;
+        };
+        decide(
+            self.config,
+            feedback.invocations,
+            feedback.backedges,
+            None,
             availability,
         )
     }

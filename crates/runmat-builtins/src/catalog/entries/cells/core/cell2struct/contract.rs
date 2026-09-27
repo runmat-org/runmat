@@ -55,8 +55,11 @@ pub const CELL2STRUCT_ERROR_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "The field count differs from the selected cell dimension.",
     message: "cell2struct: field count does not match selected dimension",
 };
-const ERRORS: &[BuiltinErrorDescriptor] =
-    &[CELL2STRUCT_ERROR_INVALID_INPUT, CELL2STRUCT_ERROR_SHAPE];
+const ERRORS: &[BuiltinErrorDescriptor] = &[
+    CELL2STRUCT_ERROR_TOO_MANY_OUTPUTS,
+    CELL2STRUCT_ERROR_INVALID_INPUT,
+    CELL2STRUCT_ERROR_SHAPE,
+];
 
 pub const CELL2STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
@@ -83,3 +86,10 @@ pub const CELL2STRUCT_INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor
     BuiltinIntegerCapabilityDescriptor { form: "S = cell2struct(C_with_integer_payload, fields, dim)", inputs: PAYLOAD, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Only container metadata changes; nested host values and resident handles retain identity." },
     BuiltinIntegerCapabilityDescriptor { form: "S = cell2struct(C, fields, integer_dim)", inputs: DIMENSION, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The dimension must be positive and representable by the target platform." },
 ];
+
+pub const CELL2STRUCT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL2STRUCT.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:cell2struct:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "cell2struct: too many output arguments",
+};

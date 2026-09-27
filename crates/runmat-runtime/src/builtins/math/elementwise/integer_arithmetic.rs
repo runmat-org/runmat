@@ -7,6 +7,8 @@ use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::math::elementwise::extended_precision::Extended;
+mod admission;
+pub(crate) use admission::validate_integer_binary_inputs;
 
 #[derive(Clone, Copy)]
 pub(crate) enum IntegerBinaryOp {
@@ -277,14 +279,16 @@ pub(crate) fn try_integer_binary(
     if left.is_none() && right.is_none() {
         return Ok(None);
     }
+    validate_integer_binary_inputs(
+        lhs,
+        rhs,
+        real_scalar(lhs).is_some(),
+        real_scalar(rhs).is_some(),
+        builtin,
+    )?;
 
     let (integer, other, integer_is_left) = match (left, right) {
         (Some(left), Some(right)) => {
-            if left.target != right.target {
-                return Err(format!(
-                    "{builtin}: integer operands must have the same integer class"
-                ));
-            }
             if matches!(operation, IntegerBinaryOp::Power) {
                 validate_integer_exponent_storage(&right.storage, builtin)?;
             }
@@ -297,11 +301,7 @@ pub(crate) fn try_integer_binary(
         (None, None) => unreachable!("integer presence checked above"),
     };
 
-    let Some(scalar) = real_scalar(other) else {
-        return Err(format!(
-            "{builtin}: integer arrays can only be combined with scalar double values"
-        ));
-    };
+    let scalar = real_scalar(other).expect("integer admission validated the scalar double operand");
     if matches!(operation, IntegerBinaryOp::Power) {
         if integer_is_left {
             if !nonnegative_integer_exponent(scalar) {

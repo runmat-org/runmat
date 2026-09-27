@@ -4082,7 +4082,7 @@ impl AccelProvider for InProcessProvider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
-        crate::placement::dense_feasibility(&self.capability_snapshot(), query)
+        crate::placement::in_process_feasibility(self, query)
     }
 
     fn gather_linear(
@@ -9972,8 +9972,8 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn pagefun(&self, _request: &PagefunRequest) -> Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "pagefun: in-process provider does not implement GPU page operations"
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "pagefun: in-process provider does not implement GPU page operations",
         ))
     }
 

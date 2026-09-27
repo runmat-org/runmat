@@ -6,6 +6,8 @@ use runmat_runtime::native::*;
 use crate::NativeExecutorError;
 
 use super::state::HostState;
+#[cfg(test)]
+mod observation_tests;
 
 pub(super) fn table(state: &mut HostState) -> NativeHostVTable {
     NativeHostVTable {
@@ -147,12 +149,17 @@ fn boundary(
     let state = unsafe { &mut *context.cast::<HostState>() };
     match catch_unwind(AssertUnwindSafe(|| operation(state))) {
         Ok(Ok(())) => NativeHostStatus::OK,
-        Ok(Err(NativeExecutorError::StaleValue)) => NativeHostStatus::STALE_VALUE,
+        Ok(Err(NativeExecutorError::StaleValue)) => {
+            state.region_observation = None;
+            NativeHostStatus::STALE_VALUE
+        }
         Ok(Err(error)) => {
+            state.region_observation = None;
             state.host_failure = Some(error);
             NativeHostStatus::HOST_FAILURE
         }
         Err(_) => {
+            state.region_observation = None;
             state.host_failure = Some(NativeExecutorError::Host(
                 "panic contained at native host boundary".into(),
             ));

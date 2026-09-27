@@ -59,12 +59,7 @@ impl HostState {
     ) -> Option<crate::region::OptimizedRegionPlan> {
         self.optimized_regions
             .get(&optimized_site_identity(request))
-            .filter(|plan| !self.disabled_optimized_regions.contains(&plan.region))
             .cloned()
-    }
-
-    pub fn disable_optimized_region(&mut self, region: runmat_types::RegionId) {
-        self.disabled_optimized_regions.insert(region);
     }
 
     pub fn optimized_region_inputs(

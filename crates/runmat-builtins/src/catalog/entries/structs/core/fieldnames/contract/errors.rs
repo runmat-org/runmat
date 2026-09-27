@@ -13,5 +13,15 @@ pub const FIELDNAMES_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescri
     message: "fieldnames: internal error",
 };
 
-pub(super) const ERRORS: &[BuiltinErrorDescriptor] =
-    &[FIELDNAMES_ERROR_INVALID_TARGET, FIELDNAMES_ERROR_INTERNAL];
+pub(super) const ERRORS: &[BuiltinErrorDescriptor] = &[
+    FIELDNAMES_ERROR_TOO_MANY_OUTPUTS,
+    FIELDNAMES_ERROR_INVALID_TARGET,
+    FIELDNAMES_ERROR_INTERNAL,
+];
+
+pub const FIELDNAMES_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIELDNAMES.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:fieldnames:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "fieldnames: too many output arguments",
+};

@@ -117,6 +117,7 @@ macro_rules! define_integer_conversion_contract {
                 capabilities: &[],
             },
             placement: BuiltinPlacementContract {
+                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
                 portability: BuiltinPortability::NativeAndWasm,
                 accelerator: BuiltinAcceleratorPolicy::Optional,
                 residency: BuiltinResidencyPolicy::PreserveInputs,

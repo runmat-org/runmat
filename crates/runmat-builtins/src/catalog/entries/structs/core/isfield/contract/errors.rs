@@ -20,7 +20,15 @@ pub const ISFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescripto
 };
 
 pub(super) const ERRORS: &[BuiltinErrorDescriptor] = &[
+    ISFIELD_ERROR_TOO_MANY_OUTPUTS,
     ISFIELD_ERROR_FIELD_NAME_TYPE,
     ISFIELD_ERROR_CELL_ELEMENT_TYPE,
     ISFIELD_ERROR_INTERNAL,
 ];
+
+pub const ISFIELD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFIELD.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:isfield:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "isfield: too many output arguments",
+};

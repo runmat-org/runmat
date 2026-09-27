@@ -28,12 +28,32 @@ pub(super) fn infer(
 
     let symbolic = matches!(left.kind, ValueKindFact::Symbolic)
         || matches!(right.kind, ValueKindFact::Symbolic);
-    let kind = if symbolic {
+    let kind = if matches!(left.kind, ValueKindFact::Unknown)
+        || matches!(right.kind, ValueKindFact::Unknown)
+    {
+        ValueKindFact::Unknown
+    } else if symbolic {
         ValueKindFact::Symbolic
     } else {
         ValueKindFact::Logical
     };
-    let shape = match broadcast_shape(&left.shape, &right.shape) {
+    // Runtime text normalization treats a character operand as one string when
+    // paired with string storage, not as a vector of numeric code points.
+    let left_shape = if matches!(left.kind, ValueKindFact::Character)
+        && matches!(right.kind, ValueKindFact::String)
+    {
+        ShapeFact::Scalar
+    } else {
+        left.shape.clone()
+    };
+    let right_shape = if matches!(right.kind, ValueKindFact::Character)
+        && matches!(left.kind, ValueKindFact::String)
+    {
+        ShapeFact::Scalar
+    } else {
+        right.shape.clone()
+    };
+    let shape = match broadcast_shape(&left_shape, &right_shape) {
         Ok(shape) => shape,
         Err(diagnostic) => {
             diagnostics.push(diagnostic);
@@ -52,10 +72,22 @@ pub(super) fn infer(
         layout: LayoutFact::ColumnMajor,
         contiguity: ContiguityFact::Contiguous,
         view: ViewFact::Materialized,
-        residency: super::super::preserved_binary_residency(&left.residency, &right.residency),
+        residency: if left.residency == runmat_types::ResidencyFact::Host
+            && right.residency == runmat_types::ResidencyFact::Host
+        {
+            runmat_types::ResidencyFact::Host
+        } else {
+            runmat_types::ResidencyFact::Unknown
+        },
         alias: AliasFact::Unique,
         mutation: MutationFact::ValueSemantics,
-        certainty: runmat_types::CertaintyFact::Proven,
+        certainty: if matches!(left.kind, ValueKindFact::Unknown)
+            || matches!(right.kind, ValueKindFact::Unknown)
+        {
+            runmat_types::CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
+        } else {
+            runmat_types::CertaintyFact::Proven
+        },
         invalidation: Default::default(),
     };
     super::super::finish_fixed(entry, request, output, diagnostics)
@@ -114,5 +146,42 @@ mod tests {
         assert!(inference.diagnostics.is_empty());
         assert_eq!(inference.outputs[0].kind, ValueKindFact::Symbolic);
         assert_eq!(inference.outputs[0].residency, ResidencyFact::Host);
+    }
+
+    #[test]
+    fn unknown_relations_do_not_exclude_symbolic_outputs() {
+        let entry = crate::builtin_catalog_entry_by_name("eq").unwrap();
+        let mut input = numeric(ShapeFact::Scalar);
+        input.residency = ResidencyFact::Device {
+            provider: Some("test".into()),
+        };
+        let result = infer(
+            &request(vec![ValueFact::unknown(DynamicReason::RuntimeValue), input]),
+            entry,
+            RelationalOperator::Equal,
+        );
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+        assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
+    }
+
+    #[test]
+    fn character_string_comparison_uses_whole_text_not_character_shape() {
+        let entry = crate::builtin_catalog_entry_by_name("eq").unwrap();
+        let chars = ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(1), Some(5)]),
+            StorageFact::Dense,
+        );
+        let strings = ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::from(vec![Some(2), Some(1)]),
+            StorageFact::Dense,
+        );
+        let result = infer(
+            &request(vec![chars, strings.clone()]),
+            entry,
+            RelationalOperator::Equal,
+        );
+        assert_eq!(result.outputs[0].shape, strings.shape);
     }
 }

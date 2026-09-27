@@ -8,7 +8,7 @@ use runmat_value::{Tensor, Value};
 use crate::BuiltinResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SolveOrientation {
+pub(in crate::builtins::math::linalg) enum SolveOrientation {
     Left,
     Right,
 }
@@ -22,7 +22,7 @@ impl SolveOrientation {
     }
 }
 
-pub(super) async fn evaluate(
+pub(in crate::builtins::math::linalg) async fn evaluate(
     orientation: SolveOrientation,
     lhs: &Value,
     rhs: &Value,

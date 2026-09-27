@@ -1,5 +1,4 @@
 pub(super) mod acceleration;
-pub(super) mod aggregate;
 pub(super) mod array;
 mod distributed;
 pub(super) mod introspection;

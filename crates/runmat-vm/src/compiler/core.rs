@@ -2234,7 +2234,7 @@ impl Compiler {
             }
             _ => {
                 let slot = self.mir_place_slot(base)?;
-                self.emit(Instr::LoadVar(slot));
+                self.emit(Instr::LoadVarForStructAssignment(slot));
                 Ok(())
             }
         }
@@ -3815,10 +3815,11 @@ impl Compiler {
                 .with_identifier(IDENT_MIR_AGGREGATE_SHAPE_INVALID));
         }
         let rows = row_lengths.len();
+        let columns = row_lengths.first().copied().unwrap_or(0);
         let rectangular_columns = row_lengths
-            .first()
-            .copied()
-            .filter(|columns| row_lengths.iter().all(|candidate| candidate == columns));
+            .iter()
+            .all(|candidate| *candidate == columns)
+            .then_some(columns);
 
         if elements.iter().any(|element| {
             matches!(
@@ -4494,9 +4495,10 @@ impl Compiler {
 
     pub fn emit(&mut self, instr: Instr) -> usize {
         match &instr {
-            Instr::LoadVar(id) | Instr::LoadVarForIndexAssignment(id) | Instr::StoreVar(id) => {
-                self.ensure_var(*id)
-            }
+            Instr::LoadVar(id)
+            | Instr::LoadVarForIndexAssignment(id)
+            | Instr::LoadVarForStructAssignment(id)
+            | Instr::StoreVar(id) => self.ensure_var(*id),
             _ => {}
         }
         let pc = self.instructions.len();

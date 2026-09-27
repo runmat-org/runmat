@@ -65,7 +65,17 @@ pub(super) fn take_completed(
         NativeExecutorError::Host("completed native call has no active site".into())
     })?;
     if completed.request != request || completed.embedded.as_ref() != embedded {
+        let descendant = completed.request == request
+            && completed
+                .embedded
+                .as_ref()
+                .is_some_and(|identity| identity.is_descendant_of(embedded));
         state.completed_call = Some(completed);
+        if descendant {
+            // The enclosing call is re-entering its argument evaluation. Only
+            // the exact child operation may consume this completed payload.
+            return Ok(None);
+        }
         return Err(NativeExecutorError::Host(
             "completed native call does not match the exact resumed operation".into(),
         ));
@@ -76,6 +86,9 @@ pub(super) fn take_completed(
             "completed native call payload does not match the exact resumed operation".into(),
         ));
     };
+    if let Some(embedded) = embedded {
+        state.restore_embedded_call_regions(embedded);
+    }
     outputs
         .iter()
         .map(|reference| state.arena.get(*reference).cloned())
@@ -101,7 +114,10 @@ pub(super) fn begin(
     let mut future: CompletionFuture =
         Box::pin(async move { future.await.map(CallCompletion::Values) });
     if let Some(result) = future.as_mut().now_or_never() {
-        let CallCompletion::Values(values) = result? else {
+        drop(future);
+        let CallCompletion::Values(values) =
+            super::sync::CompletedOperation::new(result).finish(state)?
+        else {
             unreachable!("ordinary call future has a value-sequence completion")
         };
         return Ok(values);
@@ -135,7 +151,8 @@ pub(super) async fn complete(
             "native call continuation identity is stale or mismatched".into(),
         ));
     }
-    let completion = pending.future.await?;
+    let completion = pending.future.await;
+    let completion = super::sync::CompletedOperation::new(completion).finish(state)?;
     let request = pending.request;
     let payload = match completion {
         CallCompletion::Values(values) => CompletedPayload::Values(

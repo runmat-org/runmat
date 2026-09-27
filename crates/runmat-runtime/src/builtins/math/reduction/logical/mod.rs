@@ -2,6 +2,8 @@ pub(super) mod arguments;
 mod gpu;
 pub(super) mod host;
 mod shape;
+mod preparation;
+mod route;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
@@ -55,6 +57,9 @@ pub(super) async fn execute(
     }
     let (spec, nan_mode) = arguments::parse(config, &arguments).await?;
     match value {
+        Value::Tensor(tensor) => {
+            preparation::execute(config, tensor, arguments.len() + 1, spec, nan_mode).await
+        }
         Value::GpuTensor(handle) => gpu::reduce(config, handle, spec, nan_mode).await,
         value => host::reduce(config, value, spec, nan_mode).await,
     }

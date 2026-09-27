@@ -59,7 +59,8 @@ pub(super) fn evaluate(
             &state.runtime,
             runmat_runtime::create_matrix_from_values(&realized_rows),
             "tensor aggregate construction",
-        ),
+        )
+        .finish(state),
     }
 }
 

@@ -46,6 +46,29 @@ async fn value(
 ) -> BuiltinResult<Value> {
     enforce_extensions(&lhs, &rhs, contract)?;
     let output_source = provider::select_binary_source([&lhs, &rhs], contract.name)?;
+    let shape = broadcast_shapes(
+        contract.name,
+        operand::admitted_shape(contract.name, &lhs, contract.invalid)?,
+        operand::admitted_shape(contract.name, &rhs, contract.invalid)?,
+    )
+    .map_err(|error| operand::error_with_detail(contract.name, contract.mismatch, error))?;
+    if matches!(lhs, Value::Tensor(_)) || matches!(rhs, Value::Tensor(_)) {
+        return super::preparation::binary(contract.entry, lhs, rhs, |lhs, rhs| async move {
+            admitted_value(lhs, rhs, operation, contract, output_source, shape).await
+        })
+        .await;
+    }
+    admitted_value(lhs, rhs, operation, contract, output_source, shape).await
+}
+
+async fn admitted_value(
+    lhs: Value,
+    rhs: Value,
+    operation: LogicalBinaryOperator,
+    contract: &contract::BinaryContract,
+    output_source: Option<runmat_accelerate_api::GpuTensorHandle>,
+    shape: Vec<usize>,
+) -> BuiltinResult<Value> {
     if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (&lhs, &rhs) {
         if let Some(value) = provider::binary_hook(left, right, contract.name, operation)? {
             return Ok(value);
@@ -53,8 +76,6 @@ async fn value(
     }
     let left = operand::from_value(contract.name, lhs, contract.invalid).await?;
     let right = operand::from_value(contract.name, rhs, contract.invalid).await?;
-    let shape = broadcast_shapes(contract.name, &left.shape, &right.shape)
-        .map_err(|error| operand::error_with_detail(contract.name, contract.mismatch, error))?;
     let data = evaluate::binary(&left, &right, &shape, operation);
     let value = operand::into_value(contract.name, data, shape, contract.invalid)?;
     provider::restore_explicit(value, output_source.as_ref(), contract.name)

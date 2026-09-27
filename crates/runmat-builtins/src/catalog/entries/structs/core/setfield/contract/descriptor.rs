@@ -163,6 +163,7 @@ pub const SETFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     message: "setfield: internal error",
 };
 pub const SETFIELD_ERRORS: &[BuiltinErrorDescriptor] = &[
+    SETFIELD_ERROR_TOO_MANY_OUTPUTS,
     SETFIELD_ERROR_NOT_ENOUGH_INPUTS,
     SETFIELD_ERROR_FIELD_EXPECTED,
     SETFIELD_ERROR_INDEX_SELECTOR_TYPE,
@@ -183,4 +184,11 @@ pub const SETFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: SETFIELD_ERRORS,
+};
+
+pub const SETFIELD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:setfield:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "setfield: too many output arguments",
 };

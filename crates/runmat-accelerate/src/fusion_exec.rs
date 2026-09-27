@@ -30,6 +30,9 @@ use runmat_value::{NumericDType, Value};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+mod observation;
+pub use observation::{FusionCpuObservation, FusionExecutionOutcome};
+
 struct PreparedInput {
     handle: GpuTensorHandle,
     owned: Option<GpuTensorHandle>,
@@ -177,12 +180,14 @@ struct FusionPlacementSelection {
     observer: FusionPlacementObserver,
     feedback: Option<LocalPlacementFeedback>,
     started: Instant,
-    succeeded: bool,
 }
 
 impl FusionPlacementSelection {
-    fn complete(mut self) {
-        self.succeeded = true;
+    fn submitted(mut self) {
+        // Provider APIs return submitted handles, not a completion timestamp.
+        // Do not train execution cost with enqueue/staging latency. Errors and
+        // cancelled futures still retain the ticket and report failure on drop.
+        self.feedback = None;
     }
 }
 
@@ -194,13 +199,13 @@ impl Drop for FusionPlacementSelection {
         let Some(service) = feedback.runtime.service_ports().placement() else {
             return;
         };
-        // This records provider completion only. The result remains staged;
-        // the VM owns the later stack/workspace commit transaction.
+        // Only unsuccessful attempts reach this path. Successful submission is
+        // deliberately not a completed-device-execution cost sample.
         let _ = service.observe(runmat_execution::PlacementFeedback {
             signature: feedback.signature.clone(),
             candidate: feedback.candidate.clone(),
             total_elapsed_ns: runmat_time::duration_ns_saturating(self.started.elapsed()),
-            succeeded: self.succeeded,
+            succeeded: false,
         });
     }
 }
@@ -209,7 +214,7 @@ fn select_fusion_provider(
     request: &FusionExecutionRequest<'_>,
     provider: &dyn AccelProvider,
     output_shapes: &[Vec<usize>],
-) -> Result<FusionPlacementSelection> {
+) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
     let observer = FusionPlacementObserver::new(request.placement);
     let elements = fusion_input_elements(&request.inputs);
     if request.placement.is_none() {
@@ -222,12 +227,11 @@ fn select_fusion_provider(
             None,
         )?;
         observer.selected(PlacementVariant::ProviderFusion, "direct_request", None);
-        return Ok(FusionPlacementSelection {
+        return Ok(FusionExecutionOutcome::Executed(FusionPlacementSelection {
             observer,
             feedback: None,
             started: Instant::now(),
-            succeeded: false,
-        });
+        }));
     }
 
     let operation = fusion_operation_token(&request.plan.group.kind);
@@ -306,21 +310,24 @@ fn select_fusion_provider(
                 "complete_cost",
                 provider_cost.checked_total_ns(),
             );
-            Ok(FusionPlacementSelection {
+            Ok(FusionExecutionOutcome::Executed(FusionPlacementSelection {
                 observer,
                 feedback: feedback.map(|feedback| *feedback),
                 started: Instant::now(),
-                succeeded: false,
-            })
+            }))
         }
-        LocalPlacementOutcome::Selected { cpu_cost, .. } => {
+        LocalPlacementOutcome::Selected {
+            cpu_cost, feedback, ..
+        } => {
             observer.provider_candidate();
             observer.selected(
                 PlacementVariant::SharedRuntime,
                 "complete_cost",
                 cpu_cost.checked_total_ns(),
             );
-            Err(anyhow!("fusion placement selected shared runtime"))
+            Ok(FusionExecutionOutcome::SharedRuntime(
+                FusionCpuObservation::new(feedback),
+            ))
         }
     }
 }
@@ -470,7 +477,7 @@ fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
 fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
-) -> Result<HashMap<ValueId, Value>> {
+) -> Result<FusionExecutionOutcome<HashMap<ValueId, Value>>> {
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_elementwise() {
         return Err(anyhow!("unsupported fusion kind"));
@@ -525,6 +532,12 @@ fn execute_elementwise_outputs(
         provider,
         &vec![output_shape.clone(); output_ids.len()],
     )?;
+    let selection = match selection {
+        FusionExecutionOutcome::Executed(selection) => selection,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+    };
     let observer = selection.observer;
     let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
     let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
@@ -671,13 +684,25 @@ fn execute_elementwise_outputs(
     timer.mark("cleanup");
     timer.finish();
 
-    selection.complete();
-    Ok(outputs)
+    selection.submitted();
+    Ok(FusionExecutionOutcome::Executed(outputs))
 }
 
+/// Execute a direct provider request. VM placement uses the typed entrypoint.
 pub fn execute_elementwise(
     request: FusionExecutionRequest<'_>,
 ) -> Result<ElementwiseExecutionResult> {
+    match execute_elementwise_placed(request)? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub fn execute_elementwise_placed(
+    request: FusionExecutionRequest<'_>,
+) -> Result<FusionExecutionOutcome<ElementwiseExecutionResult>> {
     let final_output = request
         .plan
         .output
@@ -688,7 +713,12 @@ pub fn execute_elementwise(
             output_ids.push(store.value_id);
         }
     }
-    let mut outputs = execute_elementwise_outputs(&request, &output_ids)?;
+    let mut outputs = match execute_elementwise_outputs(&request, &output_ids)? {
+        FusionExecutionOutcome::Executed(outputs) => outputs,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+    };
     let final_value = outputs
         .remove(&final_output)
         .ok_or_else(|| anyhow!("fusion: final output materialization missing"))?;
@@ -707,10 +737,12 @@ pub fn execute_elementwise(
             value.map(|v| (store.clone(), v))
         })
         .collect();
-    Ok(ElementwiseExecutionResult {
-        final_value,
-        materialized_stores,
-    })
+    Ok(FusionExecutionOutcome::Executed(
+        ElementwiseExecutionResult {
+            final_value,
+            materialized_stores,
+        },
+    ))
 }
 
 pub fn execute_reduction(
@@ -719,15 +751,22 @@ pub fn execute_reduction(
     num_slices: usize,
     workgroup_size: u32,
 ) -> Result<Value> {
-    execute_reduction_with_shape(
+    match execute_reduction_with_shape_placed(
         request,
         reduce_len,
         num_slices,
         &[num_slices],
         workgroup_size,
-    )
+    )? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
 }
 
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
 pub fn execute_reduction_with_shape(
     request: FusionExecutionRequest<'_>,
     reduce_len: usize,
@@ -735,6 +774,27 @@ pub fn execute_reduction_with_shape(
     output_shape: &[usize],
     workgroup_size: u32,
 ) -> Result<Value> {
+    match execute_reduction_with_shape_placed(
+        request,
+        reduce_len,
+        num_slices,
+        output_shape,
+        workgroup_size,
+    )? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub fn execute_reduction_with_shape_placed(
+    request: FusionExecutionRequest<'_>,
+    reduce_len: usize,
+    num_slices: usize,
+    output_shape: &[usize],
+    workgroup_size: u32,
+) -> Result<FusionExecutionOutcome<Value>> {
     if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION").is_ok() {
         return Err(anyhow!("fused reduction disabled by env"));
     }
@@ -763,6 +823,12 @@ pub fn execute_reduction_with_shape(
         normalize_scalar_shape(&vec![1; constant_shape.len()])
     };
     let selection = select_fusion_provider(&request, provider, &[output_shape.to_vec()])?;
+    let selection = match selection {
+        FusionExecutionOutcome::Executed(selection) => selection,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+    };
     let observer = selection.observer;
     let mut timer = FusionStageTimer::new("reduction", request.plan.index, len);
     let mut prepared = Vec::with_capacity(request.inputs.len());
@@ -892,11 +958,24 @@ pub fn execute_reduction_with_shape(
     timer.mark("cleanup");
     timer.finish();
 
-    selection.complete();
-    Ok(Value::GpuTensor(output))
+    selection.submitted();
+    Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
 
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
 pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_centered_gram_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_centered_gram_placed(
+    request: FusionExecutionRequest<'_>,
+) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::CenteredGram {
@@ -904,6 +983,12 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, provider, &[])?;
+    let selection = match selection {
+        FusionExecutionOutcome::Executed(selection) => selection,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+    };
     let observer = selection.observer;
     let (matrix_vid, normalization) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::CenteredGram {
@@ -943,11 +1028,24 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
     }
 
     mark_fusion_output(&mut output, &request.inputs);
-    selection.complete();
-    Ok(Value::GpuTensor(output))
+    selection.submitted();
+    Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
 
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
 pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_power_step_normalize_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_power_step_normalize_placed(
+    request: FusionExecutionRequest<'_>,
+) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::PowerStepNormalize {
@@ -955,6 +1053,12 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, provider, &[])?;
+    let selection = match selection {
+        FusionExecutionOutcome::Executed(selection) => selection,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+    };
     let observer = selection.observer;
     let (lhs_vid, rhs_vid, epsilon) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::PowerStepNormalize { lhs, rhs, epsilon }) => (*lhs, *rhs, *epsilon),
@@ -1005,11 +1109,24 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
     }
 
     mark_fusion_output(&mut output, &request.inputs);
-    selection.complete();
-    Ok(Value::GpuTensor(output))
+    selection.submitted();
+    Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
 
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
 pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_explained_variance_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_explained_variance_placed(
+    request: FusionExecutionRequest<'_>,
+) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::ExplainedVariance {
@@ -1017,6 +1134,12 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, provider, &[])?;
+    let selection = match selection {
+        FusionExecutionOutcome::Executed(selection) => selection,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+    };
     let observer = selection.observer;
     let (q_vid, g_vid) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::ExplainedVariance { q, g }) => (*q, *g),
@@ -1159,11 +1282,24 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
     }
 
     mark_fusion_output(&mut diag, &request.inputs);
-    selection.complete();
-    Ok(Value::GpuTensor(diag))
+    selection.submitted();
+    Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(diag)))
 }
 
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
 pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_image_normalize_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_image_normalize_placed(
+    request: FusionExecutionRequest<'_>,
+) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::ImageNormalize {
@@ -1171,6 +1307,12 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, provider, &[])?;
+    let selection = match selection {
+        FusionExecutionOutcome::Executed(selection) => selection,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+    };
     let observer = selection.observer;
     let pattern = match request.plan.pattern.as_ref() {
         Some(FusionPattern::ImageNormalize(p)) => p,
@@ -1264,11 +1406,24 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
     }
 
     mark_fusion_output(&mut output, &request.inputs);
-    selection.complete();
-    Ok(Value::GpuTensor(output))
+    selection.submitted();
+    Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
 
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
 pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_matmul_epilogue_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_matmul_epilogue_placed(
+    request: FusionExecutionRequest<'_>,
+) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != crate::fusion::FusionKind::MatmulEpilogue {
@@ -1276,6 +1431,12 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
     }
     let prov = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, prov, &[])?;
+    let selection = match selection {
+        FusionExecutionOutcome::Executed(selection) => selection,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+    };
     let observer = selection.observer;
 
     // Map ValueId -> prepared GpuTensorHandle
@@ -1527,13 +1688,42 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
     }
 
     mark_fusion_output(&mut result, &request.inputs);
-    selection.complete();
-    Ok(Value::GpuTensor(result))
+    selection.submitted();
+    Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(result)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_direct_execution_signatures_remain_value_returning() {
+        let _: for<'a, 'b> fn(
+            FusionExecutionRequest<'a>,
+            usize,
+            usize,
+            &'b [usize],
+            u32,
+        ) -> Result<Value> = execute_reduction_with_shape;
+        let _: for<'a> fn(FusionExecutionRequest<'a>, usize, usize, u32) -> Result<Value> =
+            execute_reduction;
+        let _: for<'a> fn(FusionExecutionRequest<'a>) -> Result<ElementwiseExecutionResult> =
+            execute_elementwise;
+
+        fn require_value_future(_: impl std::future::Future<Output = Result<Value>>) {}
+        fn check_async_signatures(request: FusionExecutionRequest<'_>, which: usize) {
+            match which {
+                0 => require_value_future(execute_centered_gram(request)),
+                1 => require_value_future(execute_power_step_normalize(request)),
+                2 => require_value_future(execute_explained_variance(request)),
+                3 => require_value_future(execute_image_normalize(request)),
+                _ => require_value_future(execute_matmul_epilogue(request)),
+            }
+        }
+        // Type-check every public future without invoking a provider or creating
+        // a runtime request. Existing direct-GPU parity tests execute the APIs.
+        let _: for<'a> fn(FusionExecutionRequest<'a>, usize) = check_async_signatures;
+    }
     use runmat_value::IntValue;
 
     #[test]

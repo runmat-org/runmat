@@ -531,6 +531,16 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluati
     }
 }
 
+/// Validate a reduction's controls without materializing its data operand.
+/// L07 will move this parser together with the extrema engine into its domain
+/// service; bounds must not duplicate option or exact-dimension authority.
+pub(super) async fn validate_reduction_arguments(rest: &[Value]) -> BuiltinResult<()> {
+    match parse_call(rest).await? {
+        ParsedCall::Reduction(_) => Ok(()),
+        ParsedCall::Elementwise(_) => Err(min_invalid_argument("expected reduction controls")),
+    }
+}
+
 #[derive(Debug, Clone)]
 enum ParsedCall {
     Reduction(ReductionArgs),

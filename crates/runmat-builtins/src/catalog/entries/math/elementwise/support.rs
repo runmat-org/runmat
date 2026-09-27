@@ -54,6 +54,7 @@ pub(super) const fn unary_numeric_catalog_entry(
             capabilities: &[],
         },
         placement: BuiltinPlacementContract {
+            preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
             portability: BuiltinPortability::NativeAndWasm,
             accelerator: BuiltinAcceleratorPolicy::Optional,
             residency: BuiltinResidencyPolicy::Dynamic,

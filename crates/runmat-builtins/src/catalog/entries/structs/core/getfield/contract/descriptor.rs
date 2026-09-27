@@ -144,6 +144,7 @@ pub const GETFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     message: "getfield: internal error",
 };
 pub const GETFIELD_ERRORS: &[BuiltinErrorDescriptor] = &[
+    GETFIELD_ERROR_TOO_MANY_OUTPUTS,
     GETFIELD_ERROR_NOT_ENOUGH_INPUTS,
     GETFIELD_ERROR_FIELD_EXPECTED,
     GETFIELD_ERROR_INDEX_SELECTOR_TYPE,
@@ -164,4 +165,11 @@ pub const GETFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: GETFIELD_ERRORS,
+};
+
+pub const GETFIELD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:getfield:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "getfield: too many output arguments",
 };

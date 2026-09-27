@@ -20,7 +20,7 @@ pub enum IntegerComparisonError {
 }
 
 pub(crate) use exact::{
-    compare_integer_values, compare_numeric_scalars_exact, integer_f64_order,
+    admit_numeric_pair, compare_integer_values, compare_numeric_scalars_exact, integer_f64_order,
     matches_optional_relation, matches_relation, storage_value,
     try_complex_integer_equality_comparison, try_complex_ordering_comparison,
     try_integer_comparison, try_real_ordering_comparison,

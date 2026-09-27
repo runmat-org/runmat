@@ -44,7 +44,10 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::Symbolic(_) => scalar(ValueKindFact::Symbolic),
         Value::SymbolicArray(value) => dense(ValueKindFact::Symbolic, &value.shape),
         Value::Cell(value) => {
-            let elements = value.data.iter().map(value_fact).collect::<Vec<_>>();
+            let elements = value
+                .iter_column_major()
+                .map(value_fact)
+                .collect::<Vec<_>>();
             let element = elements
                 .iter()
                 .cloned()

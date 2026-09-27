@@ -1,9 +1,15 @@
+pub use fieldnames::FIELDNAMES_ERROR_TOO_MANY_OUTPUTS;
+pub use getfield::GETFIELD_ERROR_TOO_MANY_OUTPUTS;
+pub use isfield::ISFIELD_ERROR_TOO_MANY_OUTPUTS;
+pub use rmfield::RMFIELD_ERROR_TOO_MANY_OUTPUTS;
+pub use setfield::SETFIELD_ERROR_TOO_MANY_OUTPUTS;
 pub(in crate::catalog) mod fieldnames;
 pub(in crate::catalog) mod getfield;
 pub(in crate::catalog) mod isfield;
 pub(in crate::catalog) mod orderfields;
 pub(in crate::catalog) mod rmfield;
 pub(in crate::catalog) mod setfield;
+pub(in crate::catalog) mod r#struct;
 pub(in crate::catalog) mod structfun;
 
 pub use fieldnames::{
@@ -37,6 +43,7 @@ pub use orderfields::{
     ORDERFIELDS_ERROR_REBUILD_FAILED, ORDERFIELDS_ERROR_TOO_MANY_INPUTS,
     ORDERFIELDS_ERROR_UNKNOWN_FIELD, ORDERFIELDS_INTEGER_CAPABILITIES,
 };
+pub use r#struct::*;
 pub use rmfield::{
     RMFIELD_CATALOG_ENTRY, RMFIELD_DESCRIPTOR, RMFIELD_ERROR_FIELD_NAME_EMPTY,
     RMFIELD_ERROR_FIELD_NAME_TYPE, RMFIELD_ERROR_INVALID_TARGET, RMFIELD_ERROR_MISSING_FIELD,
@@ -71,6 +78,7 @@ pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEnt
             orderfields::ENTRIES,
             rmfield::ENTRIES,
             setfield::ENTRIES,
+            r#struct::ENTRIES,
             structfun::ENTRIES,
         ],
     );

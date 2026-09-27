@@ -3,7 +3,7 @@ use super::error::{
 };
 use super::input::{CellEntry, ElementKind};
 use crate::builtins::cells::core::block_layout::{
-    checked_element_count, extend_with_ones, prefix_offsets,
+    checked_element_count, column_major_coordinates, extend_with_ones, prefix_offsets,
 };
 use crate::BuiltinResult;
 
@@ -22,7 +22,7 @@ pub(super) fn build(
 ) -> BuiltinResult<AssemblyPlan> {
     let cell_rank = cell_shape.len();
     let cell_coordinates = (0..entries.len())
-        .map(|linear| row_major_coordinates(linear, cell_shape))
+        .map(|linear| column_major_coordinates(linear, cell_shape))
         .collect::<Vec<_>>();
     let mut block_extents = cell_shape
         .iter()
@@ -106,17 +106,6 @@ fn checked_sum(extents: &[usize]) -> BuiltinResult<usize> {
         .iter()
         .try_fold(0usize, |sum, extent| sum.checked_add(*extent))
         .ok_or_else(size_exceeded)
-}
-
-fn row_major_coordinates(mut linear: usize, shape: &[usize]) -> Vec<usize> {
-    let mut coordinates = vec![0; shape.len()];
-    for (index, extent) in shape.iter().enumerate().rev() {
-        if *extent > 0 {
-            coordinates[index] = linear % *extent;
-            linear /= *extent;
-        }
-    }
-    coordinates
 }
 
 fn invalid(detail: &'static str) -> crate::RuntimeError {

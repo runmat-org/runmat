@@ -13,6 +13,7 @@ use runmat_execution::{
 use runmat_value::Value;
 
 use super::{select_candidate, summarize_values, tensor_representation, PlacementPolicy};
+mod signature;
 
 pub(crate) struct LocalPlacementRequest<'a> {
     pub(crate) operation: &'a str,
@@ -102,14 +103,15 @@ pub(crate) fn plan_local(
     }
 
     let upload_bytes = residency.required_upload_bytes(provider.device_id());
+    let cost_query = ProviderCostQuery {
+        operation: query.clone(),
+        preparation: request.preparation,
+        required_upload_bytes: upload_bytes,
+        required_download_bytes: request.required_download_bytes,
+        downstream_materialization: request.downstream_materialization,
+    };
     let provider_cost = provider
-        .estimate_cost(&ProviderCostQuery {
-            operation: query.clone(),
-            preparation: request.preparation,
-            required_upload_bytes: upload_bytes,
-            required_download_bytes: request.required_download_bytes,
-            downstream_materialization: request.downstream_materialization,
-        })
+        .estimate_cost(&cost_query)
         .map(|estimate| estimate.cost)
         .unwrap_or_else(|| {
             let mut cost = request.provider_fallback;
@@ -147,27 +149,6 @@ pub(crate) fn plan_local(
                     serde_json::to_vec(&capability)
                         .expect("provider capability snapshot must serialize"),
                 );
-                let mut facts =
-                    serde_json::to_vec(&query).expect("provider feasibility query must serialize");
-                facts.extend_from_slice(&residency.host_bytes.to_le_bytes());
-                facts.extend_from_slice(&provider_resident_bytes.to_le_bytes());
-                facts.extend_from_slice(&provider_resources.epoch.to_le_bytes());
-                let signature = PlacementSignature {
-                    region: cpu.region,
-                    operation: request.operation.into(),
-                    runtime_facts: Digest::sha256(facts),
-                    revision: PlacementRevision {
-                        program: runtime.program_revision().cloned(),
-                        catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
-                        compiler: Digest::sha256(b"runmat-placement-compiler-v1"),
-                        provider: provider_digest,
-                        policy: Digest::sha256(format!(
-                            "local:{}:{}",
-                            policy.absolute_margin_ns, policy.relative_margin_basis_points
-                        )),
-                    },
-                };
-                let transactional = capability.concurrency.transactional_results;
                 let host_resources = runtime
                     .service_ports()
                     .parallel()
@@ -182,6 +163,28 @@ pub(crate) fn plan_local(
                     providers: vec![provider_resources.clone()],
                     epoch: provider_resources.epoch ^ host_resources.epoch.rotate_left(32),
                 };
+                let signature = PlacementSignature {
+                    region: cpu.region,
+                    operation: request.operation.into(),
+                    runtime_facts: signature::runtime_facts(
+                        &cost_query,
+                        cpu.preparation,
+                        &residency,
+                        &resources,
+                        host_resources.epoch,
+                    ),
+                    revision: PlacementRevision {
+                        program: runtime.program_revision().cloned(),
+                        catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
+                        compiler: Digest::sha256(b"runmat-placement-compiler-v1"),
+                        provider: provider_digest,
+                        policy: Digest::sha256(format!(
+                            "local:{}:{}",
+                            policy.absolute_margin_ns, policy.relative_margin_basis_points
+                        )),
+                    },
+                };
+                let transactional = capability.concurrency.transactional_results;
                 let decision = service.plan(PlacementPlanRequest {
                     signature: signature.clone(),
                     graph: PlacementGraph {

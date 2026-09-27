@@ -1,7 +1,7 @@
 mod parse;
 mod prototype;
 
-use runmat_value::{IntegerComplexStorage, NumericStorage};
+use runmat_value::{ComplexStorage, IntegerComplexStorage, NumericStorage};
 
 use super::error::{cell2mat_error_with_message, CELL2MAT_ERROR_INVALID_CONTENTS};
 use crate::{gather_if_needed_async, BuiltinResult};
@@ -25,7 +25,7 @@ pub(super) struct CellEntry {
 #[derive(Clone)]
 pub(super) enum EntryData {
     Numeric(NumericStorage),
-    Complex(Vec<(f64, f64)>),
+    Complex(ComplexStorage),
     TypedComplexInteger(IntegerComplexStorage),
     Logical(Vec<u8>),
     Character(Vec<char>),
@@ -54,7 +54,7 @@ pub(super) async fn gather(
 ) -> BuiltinResult<(ElementKind, Vec<CellEntry>)> {
     let mut entries = Vec::with_capacity(cells.data.len());
     let mut kind = None;
-    for value in &cells.data {
+    for value in cells.iter_column_major() {
         let entry = parse::value(gather_if_needed_async(value).await?)?;
         if entry.len() > 0 {
             if kind.is_some_and(|expected| expected != entry.kind) {
@@ -67,7 +67,10 @@ pub(super) async fn gather(
         }
         entries.push(entry);
     }
-    Ok((kind.unwrap_or(ElementKind::Numeric), entries))
+    let kind = kind
+        .or_else(|| entries.first().map(|entry| entry.kind))
+        .unwrap_or(ElementKind::Numeric);
+    Ok((kind, entries))
 }
 
 pub(super) use prototype::{numeric as numeric_prototype, typed_complex_integer};

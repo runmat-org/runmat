@@ -7,7 +7,6 @@ use crate::{
 };
 
 mod acceleration;
-mod aggregate;
 mod array;
 mod inference;
 mod introspection;
@@ -18,7 +17,6 @@ mod parallel;
 mod stats;
 
 pub use acceleration::*;
-pub use aggregate::*;
 pub use array::*;
 pub use inference::*;
 pub use introspection::*;

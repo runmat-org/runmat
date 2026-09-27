@@ -2,9 +2,12 @@
 // Projection schema: runmat-builtin-module-composition-projection/v5
 
 mod matrix_arithmetic;
+mod factor;
 
+pub use factor::*;
 pub use matrix_arithmetic::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    factor::extend_entries(values);
     values.extend(matrix_arithmetic::ENTRIES.iter().copied());
 }

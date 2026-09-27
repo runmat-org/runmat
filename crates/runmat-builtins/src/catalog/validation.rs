@@ -67,6 +67,11 @@ pub fn validate_builtin_catalog_with_aliases(
             errors.push(error(Some(name), "documentation summary must not be empty"));
         }
         validate_documentation(entry, &mut errors);
+        errors.extend(
+            super::validate_builtin_preparation(entry)
+                .into_iter()
+                .map(|message| error(Some(name), message)),
+        );
         if entry.bindings.is_empty() {
             errors.push(error(
                 Some(name),

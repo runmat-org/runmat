@@ -19,6 +19,7 @@ pub(super) const BUILTIN_NAME: &str = "orderfields";
 
 #[runtime_builtin(
     name = "orderfields",
+    binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::orderfields"
 )]
 async fn orderfields_builtin(target: Value, order: Vec<Value>) -> crate::BuiltinResult<Value> {

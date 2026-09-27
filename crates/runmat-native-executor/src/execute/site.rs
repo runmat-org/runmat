@@ -18,6 +18,41 @@ pub(super) fn execute(
     request: NativeSiteRequest,
     exit: &mut NativeExit,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
+    if state.region_observation.is_some() && !request_matches_function(state, request) {
+        state.region_observation = None;
+    } else {
+        super::region::observation::before_site(state, request);
+    }
+    let result = execute_inner(state, call, request, exit);
+    super::region::observation::after_site(state, request, &result);
+    result
+}
+
+fn request_matches_function(state: &HostState, request: NativeSiteRequest) -> bool {
+    request.function == state.function.id.0
+        && state
+            .function
+            .blocks
+            .iter()
+            .find(|block| block.id.0 == request.block)
+            .is_some_and(|block| {
+                if request.phase == NativeSitePhase::TERMINATOR {
+                    ensure_site(&block.terminator, request).is_ok()
+                } else {
+                    block
+                        .instructions
+                        .iter()
+                        .any(|instruction| site_matches(instruction, request))
+                }
+            })
+}
+
+fn execute_inner(
+    state: &mut HostState,
+    call: &mut NativeCall,
+    request: NativeSiteRequest,
+    exit: &mut NativeExit,
+) -> NativeExecutorResult<NativeSiteOutcome> {
     if request.function != state.function.id.0 {
         return Err(NativeExecutorError::Host(
             "native site function identity mismatch".into(),
@@ -149,6 +184,11 @@ pub(super) fn execute(
         }
         if request.phase == NativeSitePhase::RVALUE {
             if let Some(outcome) = super::region::checkpoint(state, request, exit)? {
+                // The region completed this site's work without entering the
+                // ordinary instruction path. Release its expression scope and
+                // publish the updated roots before the next native site.
+                state.finish_contextual_site();
+                refresh_frame_roots(state, call)?;
                 return Ok(outcome);
             }
         }
@@ -363,7 +403,8 @@ fn execute_terminator(
                 &state.runtime,
                 runmat_runtime::condition::logical_truth_from_value(value, "branch condition"),
                 "branch condition",
-            )?;
+            )
+            .finish(state)?;
             if truth {
                 take_edge(state, then_edge, 0, None, None)
             } else {
@@ -382,7 +423,8 @@ fn execute_terminator(
                     &state.runtime,
                     runmat_runtime::call_builtin_async("eq", &[discriminant.clone(), case]),
                     "switch comparison",
-                )?;
+                )
+                .finish(state)?;
                 if super::sync::complete(
                     &state.runtime,
                     runmat_runtime::condition::logical_truth_from_value(
@@ -390,7 +432,9 @@ fn execute_terminator(
                         "switch case comparison",
                     ),
                     "switch truth evaluation",
-                )? {
+                )
+                .finish(state)?
+                {
                     return take_edge(state, edge, index as u32, None, None);
                 }
             }
@@ -408,14 +452,16 @@ fn execute_terminator(
                     &state.runtime,
                     runmat_runtime::iteration::ForColumnIterator::new(source),
                     "for iterable capture",
-                )?;
+                )
+                .finish(state)?;
                 state.start_for_loop(block, body.target, iterator);
             }
             let runtime = state.runtime.clone();
             let next = {
                 let active = state.for_loop_mut(block)?;
-                super::sync::complete(&runtime, active.iterator.next(), "for iteration")?
-            };
+                super::sync::complete(&runtime, active.iterator.next(), "for iteration")
+            }
+            .finish(state)?;
             if let Some(value) = next {
                 state.observe_loop_backedge(terminator.site.point);
                 let reference = state.arena.insert(value);

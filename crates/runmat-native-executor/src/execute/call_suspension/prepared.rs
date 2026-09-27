@@ -30,7 +30,11 @@ pub(in crate::execute) fn take_completed_prepared_receiver(
             "completed receiver preparation payload has the wrong typed result".into(),
         ));
     };
-    Ok(Some(prepared.as_ref().clone()))
+    let prepared = prepared.as_ref().clone();
+    if let Some(embedded) = embedded {
+        state.restore_embedded_call_regions(embedded);
+    }
+    Ok(Some(prepared))
 }
 
 pub(in crate::execute) fn begin_prepared_receiver(
@@ -53,7 +57,10 @@ pub(in crate::execute) fn begin_prepared_receiver(
             .map(CallCompletion::PreparedReceiver)
     });
     if let Some(result) = future.as_mut().now_or_never() {
-        let CallCompletion::PreparedReceiver(prepared) = result? else {
+        drop(future);
+        let CallCompletion::PreparedReceiver(prepared) =
+            super::super::sync::CompletedOperation::new(result).finish(state)?
+        else {
             unreachable!("prepared receiver future has a typed completion")
         };
         return Ok(*prepared);

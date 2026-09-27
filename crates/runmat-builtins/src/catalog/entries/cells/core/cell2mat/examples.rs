@@ -3,6 +3,19 @@ use crate::{
 };
 
 pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "asymmetric-nd-grid",
+        title: "Tile an N-D cell grid with unequal row and page extents",
+        program: "C = cell(2,1,2);\nC{1,1,1} = reshape(1:4,[1 2 2]);\nC{2,1,1} = reshape(5:12,[2 2 2]);\nC{1,1,2} = reshape(13:18,[1 2 3]);\nC{2,1,2} = reshape(19:30,[2 2 3]);\nA = cell2mat(C);",
+        display_output: Some("A has shape 3-by-2-by-5"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(size(A),[3 2 5]));\nassert(isequal(A(1,:,1:2),C{1,1,1}));\nassert(isequal(A(2:3,:,1:2),C{2,1,1}));\nassert(isequal(A(1,:,3:5),C{1,1,2}));\nassert(isequal(A(2:3,:,3:5),C{2,1,2}));",
+        },
+    },
     BuiltinExample { id: "scalars", title: "Convert scalar cells", program: "C = {1, 2; 3, 4};\nA = cell2mat(C);", display_output: Some("A is [1 2; 3 4]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(A, [1 2; 3 4]));" } },
     BuiltinExample { id: "blocks", title: "Concatenate rectangular blocks", program: "C = {[1 2], [3 4 5]; [6 7], [8 9 10]};\nA = cell2mat(C);", display_output: Some("A is a 2-by-5 matrix"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(A, [1 2 3 4 5; 6 7 8 9 10]));" } },
     BuiltinExample { id: "logical", title: "Preserve logical storage", program: "C = {true(2,1), false(2,1)};\nA = cell2mat(C);", display_output: Some("A is a 2-by-2 logical array"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(islogical(A));\nassert(isequal(A, logical([1 0; 1 0])));" } },

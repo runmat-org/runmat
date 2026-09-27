@@ -79,6 +79,12 @@ fn struct_error_with_message(
     builtin_path = "crate::builtins::structs::core::r#struct"
 )]
 async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::STRUCT_DESCRIPTOR,
+        &runmat_builtins::STRUCT_ERROR_TOO_MANY_OUTPUTS,
+        "struct",
+    )?;
+
     match rest.len() {
         0 => Ok(Value::Struct(StructValue::new())),
         1 => match rest.into_iter().next().unwrap() {

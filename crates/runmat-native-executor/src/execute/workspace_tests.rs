@@ -7,6 +7,24 @@ use runmat_types::{BindingId, ProgramFunctionId, ProgramSourceId};
 use runmat_value::{Tensor, Value};
 use std::collections::BTreeMap;
 
+#[test]
+fn only_external_workspace_mutation_requests_reconciliation() {
+    let (function, input) = fixture(Value::Num(1.0));
+    let state = NativeWorkspaceState::new(&function, input).unwrap();
+    assert!(!state.needs_reconciliation());
+    state.synchronize_local(0, Value::Num(2.0)).unwrap();
+    assert!(!state.needs_reconciliation());
+    let service = state.service();
+    service.assign("missing", Value::Num(3.0)).unwrap();
+    assert!(state.needs_reconciliation());
+    state.mark_reconciled();
+    service.remove("missing").unwrap();
+    assert!(state.needs_reconciliation());
+    state.mark_reconciled();
+    service.clear().unwrap();
+    assert!(state.needs_reconciliation());
+}
+
 fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
     let binding = BindingId(0);
     let function = NativeFunction {

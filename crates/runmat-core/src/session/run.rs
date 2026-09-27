@@ -985,7 +985,7 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some((workspace, profile)) = tiered_interactive.as_ref() {
             match self
-                .invoke_tiered_interactive(&interactive_unit, workspace, profile)
+                .invoke_tiered_interactive(&interactive_unit, workspace, profile.as_ref())
                 .await
             {
                 Ok(Some(native)) => {
@@ -1233,7 +1233,7 @@ impl RunMatSession {
         if let Some((_, profile)) = tiered_interactive.as_ref() {
             self.observe_tiered_interactive(
                 &interactive_unit,
-                profile,
+                profile.as_ref(),
                 execution_time,
                 &native_loop_backedges,
             );

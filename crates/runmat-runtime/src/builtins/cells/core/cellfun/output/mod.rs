@@ -1,4 +1,6 @@
 use crate::builtins::common::uniform_scalar_output::UniformScalarError;
+mod collector;
+pub(super) use collector::{normalize, Collector};
 
 pub(super) fn map_error(error: UniformScalarError) -> crate::RuntimeError {
     match error {

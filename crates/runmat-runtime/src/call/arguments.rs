@@ -127,7 +127,7 @@ pub async fn materialize_expansion(
                 }
             } else {
                 match (base, indices.len()) {
-                    (Value::Cell(cell), 1 | 2) => {
+                    (Value::Cell(cell), 1..) => {
                         crate::object::cell::expand_cell_indices(&cell, &indices)?
                     }
                     (Value::Composite(handle), _) => {
@@ -317,6 +317,28 @@ mod tests {
         crate::context::RuntimeContext::new(std::rc::Rc::new(
             crate::execution::RuntimeExecutionService::new(),
         ))
+    }
+
+    #[test]
+    fn indexed_expansion_still_rejects_zero_selectors_and_noncell_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for (base, indices) in [
+            (Value::Cell(CellArray::new(vec![], 0, 0).unwrap()), vec![]),
+            (Value::Num(1.0), vec![Value::Num(1.0); 3]),
+        ] {
+            let error = block_on(expand_arguments(
+                &runtime(),
+                vec![MaterializedArgument::Expansion(
+                    MaterializedExpansionSource::CellContents {
+                        base,
+                        indices,
+                        expand_all: false,
+                    },
+                )],
+            ))
+            .expect_err("invalid expansion remains rejected");
+            assert_eq!(error.identifier(), Some("RunMat:InvalidExpandTarget"));
+        }
     }
 
     #[test]

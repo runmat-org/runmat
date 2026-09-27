@@ -9,6 +9,8 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::executor::NativeExecution;
 use super::state::HostState;
+#[cfg(test)]
+mod observation_tests;
 
 /// Invocation-owned state that survives every generated-code exit.
 ///
@@ -280,6 +282,9 @@ impl NativeInvocation {
         // live and stable until this synchronous machine-code entry returns.
         let _runtime_guard = self.state.runtime.enter();
         let status = unsafe { (self.entrypoint)(&mut call, &mut exit) };
+        // A generated entry has returned: any still-open region was incomplete,
+        // including ABI failures, suspension, cancellation and exceptional exits.
+        self.state.region_observation = None;
         if status != NativeHostStatus::OK {
             return Err(self.state.host_failure.take().unwrap_or_else(|| {
                 NativeExecutorError::Host(format!("native host returned status {}", status.0))

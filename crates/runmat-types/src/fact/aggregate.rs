@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 pub struct CellFact {
     /// Conservative common fact for arbitrary element access.
     pub element: Box<ValueFact>,
-    /// Position-preserving facts when the cell contents are statically known.
+    /// Position-preserving facts in column-major linear order when known.
     pub elements: Vec<ValueFact>,
     pub elements_complete: bool,
 }

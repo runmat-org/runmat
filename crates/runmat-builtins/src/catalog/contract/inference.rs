@@ -2,9 +2,8 @@ use runmat_types::{CallInference, CallRequest};
 use serde::Serialize;
 
 use super::{
-    AccelerationInferenceRule, AggregateInferenceRule, ArrayInferenceRule,
-    IntrospectionInferenceRule, IoInferenceRule, LogicalInferenceRule, MathInferenceRule,
-    ParallelInferenceRule, StatsInferenceRule,
+    AccelerationInferenceRule, ArrayInferenceRule, IntrospectionInferenceRule, IoInferenceRule,
+    LogicalInferenceRule, MathInferenceRule, ParallelInferenceRule, StatsInferenceRule,
 };
 use crate::BuiltinCatalogEntry;
 
@@ -49,7 +48,6 @@ impl Eq for IdentityInferenceRule {}
 pub enum BuiltinInferenceRule {
     Identity(IdentityInferenceRule),
     Acceleration(AccelerationInferenceRule),
-    Aggregate(AggregateInferenceRule),
     Array(ArrayInferenceRule),
     Introspection(IntrospectionInferenceRule),
     Io(IoInferenceRule),

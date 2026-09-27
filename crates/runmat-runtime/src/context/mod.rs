@@ -11,6 +11,7 @@ mod services;
 mod state;
 
 pub mod legacy;
+pub mod preparation;
 
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use runtime::{

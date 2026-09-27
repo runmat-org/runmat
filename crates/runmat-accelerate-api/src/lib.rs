@@ -2899,7 +2899,9 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("syrk not supported by provider"))
     }
     fn pagefun(&self, _request: &PagefunRequest) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("pagefun not supported by provider"))
+        Err(unsupported_provider_operation(
+            "pagefun not supported by provider",
+        ))
     }
 
     /// Optional: matrix multiplication with an epilogue applied before store.

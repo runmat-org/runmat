@@ -100,7 +100,8 @@ pub(super) fn assign(
                         .into_values(),
                 ),
                 "object indexed assignment",
-            );
+            )
+            .finish(state);
         }
         if let Some(indices) = object_scalar_indices(state, &selectors)? {
             return runmat_runtime::indexing::object::assign_scalar_indices(
@@ -113,7 +114,8 @@ pub(super) fn assign(
         &state.runtime,
         plan_for_assignment(&base, &selectors, !delete),
         "indexed assignment planning",
-    )?;
+    )
+    .finish(state)?;
     let updated = match base {
         Value::Tensor(value) => {
             if delete {
@@ -125,6 +127,7 @@ pub(super) fn assign(
                     write_slice::assign_tensor_with_plan(value, &plan, &rhs),
                     "tensor indexed assignment",
                 )
+                .finish(state)
             }
         }
         Value::ComplexTensor(value) => {
@@ -137,6 +140,7 @@ pub(super) fn assign(
                     write_slice::assign_complex_with_plan(value, &plan, &rhs),
                     "complex indexed assignment",
                 )
+                .finish(state)
             }
         }
         Value::SparseTensor(value) => {
@@ -149,6 +153,7 @@ pub(super) fn assign(
                     write_slice::assign_sparse_with_plan(value, &plan, &rhs),
                     "sparse indexed assignment",
                 )
+                .finish(state)
             }
         }
         Value::GpuTensor(value) => {
@@ -158,12 +163,14 @@ pub(super) fn assign(
                     write_slice::delete_gpu_slice_with_plan(&value, &plan, &rhs),
                     "GPU indexed deletion",
                 )
+                .finish(state)
             } else {
                 super::sync::complete(
                     &state.runtime,
                     write_slice::assign_gpu_slice_with_plan(&value, &plan, &rhs),
                     "GPU indexed assignment",
                 )
+                .finish(state)
             }
         }
         Value::Cell(value) => {
@@ -204,7 +211,7 @@ pub(super) fn assign(
 }
 
 fn object_scalar_indices(
-    state: &HostState,
+    state: &mut HostState,
     selectors: &MaterializedSelectors,
 ) -> NativeExecutorResult<Option<Vec<usize>>> {
     if selectors.colon_mask != 0 || selectors.end_mask != 0 {
@@ -216,7 +223,8 @@ fn object_scalar_indices(
             &state.runtime,
             index_scalar_from_value(selector),
             "object scalar index decoding",
-        )?
+        )
+        .finish(state)?
         else {
             return Ok(None);
         };
@@ -394,7 +402,7 @@ fn selector_dimension_length(
 }
 
 fn read_paren(
-    state: &HostState,
+    state: &mut HostState,
     base: Value,
     selectors: MaterializedSelectors,
     requested_outputs: usize,
@@ -414,7 +422,8 @@ fn read_paren(
                 requested_outputs,
             ),
             "function-handle indexed call",
-        )?;
+        )
+        .finish(state)?;
         return normalize_outputs(value, requested_outputs);
     }
     if matches!(
@@ -438,7 +447,8 @@ fn read_paren(
                     requested_outputs,
                 ),
                 "object indexed read",
-            )?;
+            )
+            .finish(state)?;
             return normalize_sequence_outputs(value, requested_outputs);
         }
     }
@@ -446,7 +456,8 @@ fn read_paren(
         &state.runtime,
         plan_for(&base, &selectors),
         "indexed read planning",
-    )?;
+    )
+    .finish(state)?;
     let value = read_with_plan(base, &plan)?;
     normalize_outputs(value, requested_outputs)
 }
@@ -569,7 +580,7 @@ fn assign_brace(
 }
 
 fn assign_logical(
-    state: &HostState,
+    state: &mut HostState,
     value: LogicalArray,
     plan: &IndexPlan,
     rhs: &Value,
@@ -592,7 +603,8 @@ fn assign_logical(
             &state.runtime,
             write_slice::assign_tensor_with_plan(tensor, plan, rhs),
             "logical indexed assignment",
-        )?
+        )
+        .finish(state)?
     };
     match updated {
         Value::Num(value) => Ok(Value::Bool(value != 0.0)),

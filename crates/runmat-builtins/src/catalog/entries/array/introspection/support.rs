@@ -84,6 +84,7 @@ macro_rules! define_shape_predicate_entry {
                 capabilities: &[],
             },
             placement: crate::BuiltinPlacementContract {
+                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
                 portability: crate::BuiltinPortability::NativeAndWasm,
                 accelerator: crate::BuiltinAcceleratorPolicy::Optional,
                 residency: crate::BuiltinResidencyPolicy::Host,
@@ -169,6 +170,7 @@ macro_rules! define_shape_scalar_query_entry {
                 capabilities: &[],
             },
             placement: crate::BuiltinPlacementContract {
+                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
                 portability: crate::BuiltinPortability::NativeAndWasm,
                 accelerator: crate::BuiltinAcceleratorPolicy::Optional,
                 residency: crate::BuiltinResidencyPolicy::Host,

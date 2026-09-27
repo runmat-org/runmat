@@ -27,11 +27,7 @@ pub(super) fn uniform(mut element: ValueFact, shape: ShapeFact) -> ValueFact {
         );
     }
     element.shape = shape;
-    element.storage = if element.is_scalar() {
-        StorageFact::Scalar
-    } else {
-        StorageFact::Dense
-    };
+    element.storage = StorageFact::Dense;
     element.residency = ResidencyFact::Host;
     element
 }

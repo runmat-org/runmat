@@ -74,20 +74,9 @@ pub fn is_gpu_value(value: &Value) -> bool {
 
 /// Returns true when the value (or nested elements) contains any GPU-resident tensors.
 pub fn value_contains_gpu(value: &Value) -> bool {
-    match value {
-        Value::GpuTensor(_) => true,
-        Value::Cell(ca) => ca.data.iter().any(|ptr| value_contains_gpu(ptr)),
-        Value::Struct(sv) => sv.fields.values().any(value_contains_gpu),
-        Value::StructArray(array) => {
-            let mut found = false;
-            array.for_each_value(|value| found |= value_contains_gpu(value));
-            found
-        }
-        Value::Object(obj) => obj.properties.values().any(value_contains_gpu),
-        Value::Closure(closure) => closure.captures.iter().any(value_contains_gpu),
-        Value::OutputList(values) => values.iter().any(value_contains_gpu),
-        _ => false,
-    }
+    let mut found = false;
+    let inspected = try_visit_gpu_handles(value, &mut |_| found = true);
+    found || inspected.is_err()
 }
 
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
@@ -257,6 +246,9 @@ struct ResolvedBuiltinName<'a> {
     canonical: &'a str,
 }
 
+mod preparation;
+use preparation::SelectedBindingOrigin;
+
 impl<'a> ResolvedBuiltinName<'a> {
     fn resolve(requested: &'a str) -> Self {
         Self {
@@ -348,25 +340,40 @@ async fn call_builtin_async_impl(
     let implementations = matching_bindings
         .into_iter()
         .rev()
-        .map(|binding| binding.implementation)
+        .map(|binding| {
+            (
+                SelectedBindingOrigin::CanonicalOrScoped,
+                binding.implementation,
+            )
+        })
         .chain(
             no_category
                 .into_iter()
                 .rev()
                 .chain(categorized.into_iter().rev())
-                .map(|builtin| builtin.implementation),
+                .map(|builtin| {
+                    (
+                        SelectedBindingOrigin::LegacyInventory,
+                        builtin.implementation,
+                    )
+                }),
         );
 
     // Try each builtin until one succeeds. Within each group, prefer later-registered
     // implementations to allow overrides when names collide.
     let mut last_error = RuntimeError::new("unknown error");
-    for implementation in implementations {
+    for (origin, implementation) in implementations {
+        // Resolve methods and scoped overrides before legacy preparation. This
+        // bridge preserves the old transfer contract only for selected inventory
+        // implementations; canonical bodies own their admitted preparation.
+        let prepared = preparation::prepare_selected(origin, name, args).await?;
+        let execution_args = prepared.as_deref().unwrap_or(args);
         let f = implementation;
-        match (f)(args).await {
+        match (f)(execution_args).await {
             Ok(result) => return compatibility_checked_builtin_result(name, args, result),
             Err(err) => {
-                if should_retry_with_gpu_gather(&err, args) {
-                    match gather_args_for_retry_async(args).await {
+                if should_retry_with_gpu_gather(&err, execution_args) {
+                    match gather_args_for_retry_async(execution_args).await {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
                             Ok(result) => {
                                 return compatibility_checked_builtin_result(name, args, result);
@@ -590,33 +597,86 @@ fn propagate_gpu_provenance(args: &[Value], result: &mut Value) {
     });
 }
 
-fn visit_gpu_handles(value: &Value, visitor: &mut impl FnMut(&GpuTensorHandle)) {
+/// Visit resident handles, including nested object/callable payloads, without
+/// revisiting cycles in GC-owned object graphs.
+pub fn visit_gpu_handles(value: &Value, visitor: &mut impl FnMut(&GpuTensorHandle)) {
+    let _ = try_visit_gpu_handles(value, visitor);
+}
+
+/// Prove the resident handles reachable from a value. Inaccessible GC payloads
+/// are errors, not evidence that a borrowed or returned value contains no alias.
+pub fn try_visit_gpu_handles(
+    value: &Value,
+    visitor: &mut impl FnMut(&GpuTensorHandle),
+) -> Result<(), RuntimeError> {
+    visit_gpu_handles_inner(value, visitor, &mut Vec::new())
+}
+
+fn visit_gpu_handles_inner(
+    value: &Value,
+    visitor: &mut impl FnMut(&GpuTensorHandle),
+    seen: &mut Vec<runmat_gc_api::GcHandle>,
+) -> Result<(), RuntimeError> {
     match value {
         Value::GpuTensor(handle) => visitor(handle),
         Value::Cell(cell) => cell
             .data
             .iter()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
         Value::Struct(value) => value
             .fields
             .values()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
         Value::StructArray(array) => {
-            array.for_each_value(|value| visit_gpu_handles(value, visitor));
+            let mut result = Ok(());
+            array.for_each_value(|value| {
+                if result.is_ok() {
+                    result = visit_gpu_handles_inner(value, visitor, seen);
+                }
+            });
+            result?;
         }
         Value::Object(value) => value
             .properties
             .values()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
+        Value::ObjectArray(array) => array
+            .data()
+            .iter()
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
+        Value::HandleObject(handle) => visit_gpu_target(&handle.target, visitor, seen)?,
+        Value::Listener(listener) => {
+            visit_gpu_target(&listener.target, visitor, seen)?;
+            visit_gpu_target(&listener.callback, visitor, seen)?;
+        }
         Value::Closure(value) => value
             .captures
             .iter()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
         Value::OutputList(values) => values
             .iter()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen))?,
         _ => {}
     }
+    Ok(())
+}
+
+fn visit_gpu_target(
+    target: &runmat_gc_api::GcHandle,
+    visitor: &mut impl FnMut(&GpuTensorHandle),
+    seen: &mut Vec<runmat_gc_api::GcHandle>,
+) -> Result<(), RuntimeError> {
+    if seen.contains(target) {
+        return Ok(());
+    }
+    seen.push(*target);
+    // Release the GC access scope before following another handle edge.
+    let value = runmat_gc::gc_with_value(target, Clone::clone).map_err(|error| {
+        crate::build_runtime_error(format!("cannot inspect resident aliases: {error}"))
+            .with_identifier("RunMat:Gpu:AliasInspectionFailed")
+            .build()
+    })?;
+    visit_gpu_handles_inner(&value, visitor, seen)
 }
 
 fn visit_gpu_handles_mut(value: &mut Value, visitor: &mut impl FnMut(&mut GpuTensorHandle)) {
@@ -1060,6 +1120,10 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
     }
 }
 
+#[cfg(test)]
+mod gpu_visit_tests;
+#[cfg(test)]
+mod preparation_tests;
 #[cfg(test)]
 mod tests {
     use super::{

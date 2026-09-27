@@ -1,8 +1,19 @@
 mod basic;
 mod character_shape;
 mod complex_integer;
+mod complex_floating;
 mod integer;
 mod providers;
+
+#[test]
+fn concatenation_is_a_real_fusion_boundary() {
+    assert!(super::spec::FUSION_SPEC.elementwise.is_none());
+    assert!(super::spec::FUSION_SPEC.reduction.is_none());
+    assert_eq!(
+        runmat_builtins::CELL2MAT_CATALOG_ENTRY.placement.fusion,
+        runmat_builtins::BuiltinFusionPolicy::Boundary
+    );
+}
 
 use futures::executor::block_on;
 use runmat_value::{IntValue, IntegerStorage, Value};
