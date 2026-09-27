@@ -445,6 +445,7 @@ fn ctranspose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
 }
 
 async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    use super::transpose::resident;
     ensure_vector_or_matrix_shape(handle.shape())?;
     let input_complex =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
@@ -453,18 +454,18 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             "ctranspose: complex integer input is not supported",
         ));
     }
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+    let provider = resident::owner(&handle, native_provider_error)?;
     let rank = handle.shape().len();
-    if rank == 0 {
-        return Ok(Value::GpuTensor(handle));
+    if rank == 0 && !input_complex {
+        return resident::adopt(&handle, handle.clone(), native_provider_error);
     }
 
-    let owner = gpu_helpers::exact_provider_for_handle(&handle);
-    if let Some(provider) = owner {
-        let mut expected_shape = handle.shape().to_vec();
-        if expected_shape.len() >= 2 {
-            expected_shape.swap(0, 1);
-        }
-        let transpose = if rank <= 2 {
+    {
+        let expected_shape = resident::shape(&handle);
+        let transpose = if rank == 0 {
+            Ok(handle.clone())
+        } else if rank <= 2 {
             provider.transpose(&handle)
         } else {
             let order = ctranspose_order(rank);
@@ -481,20 +482,18 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 ) =>
             {
                 // Transpose may lawfully return a lazy view of the same allocation.
-                Some(output)
+                Some(resident::live(output, native_provider_error)?)
             }
             Ok(output) => return Err(reject_native_output(output, "malformed transpose output")),
-            Err(error)
-                if gpu_helpers::provider_hook_is_unsupported(&error)
-                    || error.to_string() == "transpose not supported by provider" =>
-            {
-                None
-            }
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
             Err(error) => return Err(native_provider_error(error)),
         };
         if let Some(transposed) = transposed {
+            if !input_complex {
+                return resident::adopt(&handle, transposed, native_provider_error);
+            }
             match provider.unary_conj(&transposed).await {
-                Ok(mut output)
+                Ok(output)
                     if native_conjugate_output_matches(
                         &handle,
                         &transposed,
@@ -505,12 +504,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 {
                     // The producer owns its layout. Copying the intermediate's
                     // transpose annotation onto a materialized output is invalid.
-                    gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
-                    return if input_complex {
-                        gpu_helpers::complex_gpu_value(output)
-                    } else {
-                        gpu_helpers::resident_gpu_value(output)
-                    };
+                    return resident::adopt(&handle, output, native_provider_error);
                 }
                 Ok(output) => {
                     return Err(reject_native_output(output, "malformed conjugate output"))
@@ -525,7 +519,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
     let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
     let transposed_value = match gathered {
-        Value::Tensor(tensor) => tensor::tensor_into_value(ctranspose_tensor(tensor)?),
+        Value::Tensor(tensor) => Value::Tensor(ctranspose_tensor(tensor)?),
         Value::ComplexTensor(tensor) if input_complex => {
             Value::ComplexTensor(ctranspose_complex_tensor_preserve_complex(tensor)?)
         }
@@ -547,31 +541,17 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 fn native_ctranspose_output_matches(
     input: &GpuTensorHandle,
     output: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
     expected_shape: &[usize],
 ) -> bool {
-    output.shape() == expected_shape
-        && output.device_id() == input.device_id()
-        && runmat_accelerate_api::handle_precision(output)
-            == Some(
-                runmat_accelerate_api::handle_precision(input)
-                    .unwrap_or_else(|| provider.precision()),
-            )
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::handle_storage(input)
-        && runmat_accelerate_api::handle_integer_type(output)
-            == runmat_accelerate_api::handle_integer_type(input)
-        && runmat_accelerate_api::handle_is_logical(output)
-            == runmat_accelerate_api::handle_is_logical(input)
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+    super::transpose::resident::output_matches(input, output, provider, expected_shape)
 }
 
 fn native_conjugate_output_matches(
     original: &GpuTensorHandle,
     transposed: &GpuTensorHandle,
     output: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
     expected_shape: &[usize],
 ) -> bool {
     native_ctranspose_output_matches(transposed, output, provider, expected_shape)

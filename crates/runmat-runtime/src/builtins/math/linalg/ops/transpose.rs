@@ -15,8 +15,10 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
 use crate::builtins::math::linalg::type_resolvers::matrix_transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use log::warn;
 use runmat_accelerate_api::GpuTensorHandle;
+
+#[path = "transpose/resident.rs"]
+pub(super) mod resident;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -161,23 +163,6 @@ fn ensure_vector_or_matrix_shape(shape: &[usize]) -> BuiltinResult<()> {
         ));
     }
     Ok(())
-}
-
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let mut builder = build_runtime_error(err.message()).with_builtin(NAME);
-    if let Some(identifier) = err.identifier() {
-        builder = builder.with_identifier(identifier.to_string());
-    }
-    if let Some(task_id) = err.context.task_id.clone() {
-        builder = builder.with_task_id(task_id);
-    }
-    if !err.context.call_stack.is_empty() {
-        builder = builder.with_call_stack(err.context.call_stack.clone());
-    }
-    if let Some(phase) = err.context.phase.clone() {
-        builder = builder.with_phase(phase);
-    }
-    builder.with_source(err).build()
 }
 
 #[runmat_macros::register_fusion_spec(
@@ -398,38 +383,55 @@ fn transpose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
 
 async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     ensure_vector_or_matrix_shape(handle.shape())?;
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+    let provider = resident::owner(&handle, native_provider_error)?;
     let rank = handle.shape().len();
     if rank == 0 {
-        return Ok(Value::GpuTensor(handle));
+        return resident::adopt(&handle, handle.clone(), native_provider_error);
     }
-    if rank <= 2 {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            match provider.transpose(&handle) {
-                Ok(out) => return Ok(Value::GpuTensor(out)),
-                Err(err) => {
-                    let info = provider.device_info_struct();
-                    warn!(
-                        "transpose: provider {} (backend: {}) is missing transpose support; falling back ({err})",
-                        info.name,
-                        info.backend.as_deref().unwrap_or("unknown")
-                    );
-                }
-            }
+    let shape = resident::shape(&handle);
+    let result = if rank <= 2 {
+        provider.transpose(&handle)
+    } else {
+        let order: Vec<_> = transpose_order(rank)
+            .into_iter()
+            .map(|axis| axis - 1)
+            .collect();
+        provider.permute(&handle, &order)
+    };
+    match result {
+        Ok(output) if resident::output_matches(&handle, &output, provider, &shape) => {
+            return resident::adopt(&handle, output, native_provider_error);
         }
-    }
-    let host = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(map_control_flow)?;
-    let transposed = transpose_tensor(host)?;
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        match gpu_helpers::upload_tensor(provider, &transposed) {
-            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-            Err(upload_err) => warn!(
-                "transpose: re-upload after host fallback failed; returning host tensor ({upload_err})"
-            ),
+        Ok(output) => {
+            return Err(gpu_helpers::reject_gpu_output(
+                output,
+                native_provider_error(anyhow::anyhow!("malformed transpose output")),
+            ))
         }
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+        Err(error) => return Err(native_provider_error(error)),
     }
-    Ok(tensor::tensor_into_value(transposed))
+    let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
+    let result = match host {
+        Value::Tensor(tensor) => Value::Tensor(transpose_tensor(tensor)?),
+        Value::ComplexTensor(tensor) => Value::ComplexTensor(transpose_complex_tensor(tensor)?),
+        Value::LogicalArray(array) => Value::LogicalArray(transpose_logical_array(array)?),
+        scalar @ (Value::Num(_) | Value::Complex(_, _) | Value::Int(_) | Value::Bool(_)) => scalar,
+        other => {
+            return Err(invalid_input(format!(
+                "transpose: unsupported gathered resident value {other:?}"
+            )))
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, result, NAME)
+}
+
+fn native_provider_error(source: anyhow::Error) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        internal_error(format!("transpose: provider failed: {source}")),
+        source.into(),
+    )
 }
 
 fn transpose_order(rank: usize) -> Vec<usize> {
