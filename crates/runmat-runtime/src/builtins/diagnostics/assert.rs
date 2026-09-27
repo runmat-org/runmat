@@ -1250,10 +1250,12 @@ pub(crate) mod tests {
                     &Tensor::new_integer(storage, vec![2, 1]).expect("condition"),
                 )
                 .expect("upload");
+                let lease = handle.allocation_lease().downgrade();
                 let err = assert_builtin(vec![Value::GpuTensor(handle.clone())])
                     .expect_err("resident zero fails");
                 assert_eq!(err.identifier(), Some(assert_default_identifier()));
-                let _ = provider.free(&handle);
+                drop((err, handle));
+                assert!(lease.acquire().is_none());
             }
 
             let handle = gpu_helpers::upload_tensor(
@@ -1262,6 +1264,7 @@ pub(crate) mod tests {
                     .expect("format value"),
             )
             .expect("upload");
+            let lease = handle.allocation_lease().downgrade();
             let err = assert_builtin(vec![
                 Value::Bool(false),
                 Value::String("%u".to_string()),
@@ -1269,7 +1272,8 @@ pub(crate) mod tests {
             ])
             .expect_err("resident scalar formats");
             assert_eq!(err.message(), u64::MAX.to_string());
-            let _ = provider.free(&handle);
+            drop((err, handle));
+            assert!(lease.acquire().is_none());
         });
     }
 
