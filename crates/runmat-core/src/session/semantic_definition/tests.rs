@@ -28,7 +28,7 @@ fn complete_mutual_group_reuses_normalized_identities() {
     let incoming = group(1);
     let published = group(100);
     let remap =
-        unchanged_unit_remap(&Bytecode::default(), &incoming, &published, &HashSet::new()).unwrap();
+        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).unwrap();
     assert_eq!(remap.get(&FunctionId(1)), Some(&FunctionId(100)));
     assert_eq!(remap.get(&FunctionId(2)), Some(&FunctionId(101)));
 }
@@ -51,8 +51,77 @@ fn changed_body_source_scope_capture_layout_and_alias_do_not_reuse() {
             _ => unreachable!(),
         }
         assert!(
-            unchanged_unit_remap(&Bytecode::default(), &incoming, &published, &HashSet::new())
+            unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new())
                 .is_none()
         );
     }
+}
+
+#[test]
+fn removed_same_source_definition_does_not_reuse_subset() {
+    let incoming =
+        FunctionRegistry::new(HashMap::from([(FunctionId(1), definition(1, "first", 1))]));
+    let published = FunctionRegistry::new(HashMap::from([
+        (FunctionId(100), definition(100, "first", 100)),
+        (FunctionId(101), definition(101, "removed", 101)),
+    ]));
+    assert!(
+        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_none()
+    );
+}
+
+#[test]
+fn aliases_must_match_in_both_directions() {
+    let mut incoming = group(1);
+    let mut published = group(100);
+    published.names.insert("alias".into(), FunctionId(100));
+    assert!(
+        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_none()
+    );
+    incoming.names.insert("alias".into(), FunctionId(1));
+    assert!(
+        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_some()
+    );
+    incoming.names.insert("alias".into(), FunctionId(2));
+    assert!(
+        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_none()
+    );
+}
+
+#[test]
+fn unrelated_published_source_does_not_prevent_reuse() {
+    let incoming = group(1);
+    let mut functions = group(100).functions;
+    let mut unrelated = definition(200, "unrelated", 200);
+    unrelated.source_id = Some(SourceId(6));
+    functions.insert(FunctionId(200), unrelated);
+    let mut published = FunctionRegistry::new(functions);
+    published
+        .names
+        .insert("unrelated_alias".into(), FunctionId(200));
+    assert!(
+        unchanged_unit_remap(&Bytecode::empty(), &incoming, &published, &HashSet::new()).is_some()
+    );
+}
+
+#[test]
+fn source_identity_includes_text_name_and_path() {
+    let mut pool = crate::source_pool::SourcePool::default();
+    let source = pool.intern_with_fullpath("unit", Some("/first/unit.m"), "f; g;");
+    assert_eq!(
+        source,
+        pool.intern_with_fullpath("unit", Some("/first/unit.m"), "f; g;")
+    );
+    assert_ne!(
+        source,
+        pool.intern_with_fullpath("unit", Some("/first/unit.m"), "f;")
+    );
+    assert_ne!(
+        source,
+        pool.intern_with_fullpath("other", Some("/first/unit.m"), "f; g;")
+    );
+    assert_ne!(
+        source,
+        pool.intern_with_fullpath("unit", Some("/other/unit.m"), "f; g;")
+    );
 }

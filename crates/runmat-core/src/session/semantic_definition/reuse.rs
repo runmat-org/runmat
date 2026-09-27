@@ -13,6 +13,7 @@ pub(in crate::session) fn unchanged_unit_remap(
 ) -> Option<HashMap<FunctionId, FunctionId>> {
     let mut remap = HashMap::new();
     let mut targets = HashSet::new();
+    let mut sources = HashSet::new();
     for (local, function) in &incoming.functions {
         // Private companions are execution-local and are deliberately not
         // published into the session's name authority.
@@ -26,6 +27,18 @@ pub(in crate::session) fn unchanged_unit_remap(
             return None;
         }
         remap.insert(*local, existing_id);
+        sources.insert(source);
+    }
+    // Source identity normally includes the complete source text, but compiler
+    // options can still change which definitions/aliases are published. Reuse
+    // must prove equality, not merely that the incoming group is a subset.
+    if published.functions.iter().any(|(id, function)| {
+        function
+            .source_id
+            .is_some_and(|source| sources.contains(&source))
+            && !targets.contains(id)
+    }) {
+        return None;
     }
     if let Some(layout) = &bytecode.layout {
         if layout
@@ -38,6 +51,13 @@ pub(in crate::session) fn unchanged_unit_remap(
     }
     for (name, local) in &incoming.names {
         if published.resolve_name(name) != remap.get(local).copied() {
+            return None;
+        }
+    }
+    for (name, target) in &published.names {
+        if targets.contains(target)
+            && incoming.names.get(name).and_then(|local| remap.get(local)) != Some(target)
+        {
             return None;
         }
     }
