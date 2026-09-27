@@ -46,6 +46,7 @@ pub async fn execute_matmul_epilogue_placed(
         None,
         None,
         Some(contract),
+        None,
     )? {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {

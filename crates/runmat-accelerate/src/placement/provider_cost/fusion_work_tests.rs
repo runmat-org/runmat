@@ -25,6 +25,7 @@ fn query(element: ProviderElementType, elements: u64, units: Option<u64>) -> Pro
             },
         },
         preparation: CandidatePreparationState::Warm,
+        context: Default::default(),
         required_upload_bytes: 0,
         required_download_bytes: 0,
         downstream_materialization: false,
@@ -32,8 +33,69 @@ fn query(element: ProviderElementType, elements: u64, units: Option<u64>) -> Pro
 }
 
 #[test]
+fn exact_cache_readiness_is_distinct_from_uncertain_compile_prior_and_fence_service() {
+    use runmat_accelerate_api::{
+        observation::ProviderObservationOverhead, ProviderPreparationSnapshot,
+    };
+    let provider =
+        crate::placement::provider_contract::fusion_elementwise::fixture::GeometryProvider::new();
+    let mut query = query(ProviderElementType::F64, 8, Some(8));
+    let baseline = wgpu_cost_estimate(&provider, &query).cost;
+    query.context.preparation = Some(ProviderPreparationSnapshot {
+        identity: runmat_execution::Digest::sha256(b"exact pipeline keys"),
+        state: Some(CandidatePreparationState::Cold),
+        cold_pipelines: 2,
+        warm_pipelines: 1,
+    });
+    query.context.observation = Some(ProviderObservationOverhead {
+        submissions: 2,
+        requested_peak_buffer_bytes: 16,
+        clear_commands: 2,
+        map_callbacks: 2,
+    });
+    let measured_intent = wgpu_cost_estimate(&provider, &query).cost;
+    assert_eq!(measured_intent.components.compile_or_prepare_ns, 200_000);
+    assert_eq!(
+        measured_intent.components.queue_ns,
+        baseline.components.queue_ns
+    );
+    assert_eq!(
+        measured_intent.components.allocation_ns,
+        baseline.components.allocation_ns + 10_000
+    );
+    assert_eq!(
+        measured_intent.components.synchronization_ns,
+        baseline.components.synchronization_ns + 10_000
+    );
+    assert_eq!(
+        measured_intent.components.execution_ns,
+        baseline.components.execution_ns + 4
+    );
+    assert_eq!(measured_intent.scratch_bytes, baseline.scratch_bytes + 16);
+    assert_eq!(measured_intent.source, EstimateSource::StaticPrior);
+    query.context.preparation.as_mut().unwrap().state = Some(CandidatePreparationState::Warm);
+    assert_eq!(
+        wgpu_cost_estimate(&provider, &query)
+            .cost
+            .components
+            .compile_or_prepare_ns,
+        0
+    );
+    query.context.preparation.as_mut().unwrap().state = None;
+    query.preparation = CandidatePreparationState::Cold;
+    assert_eq!(
+        wgpu_cost_estimate(&provider, &query)
+            .cost
+            .components
+            .compile_or_prepare_ns,
+        100_000
+    );
+}
+
+#[test]
 fn weighted_primary_program_is_not_repeated_for_output_adapters() {
-    let provider = crate::simple_provider::InProcessProvider::new();
+    let provider =
+        crate::placement::provider_contract::fusion_elementwise::fixture::GeometryProvider::new();
     let native = wgpu_cost_estimate(
         &provider,
         &query(ProviderElementType::F64, 8, Some(100_000)),
@@ -57,9 +119,10 @@ fn weighted_primary_program_is_not_repeated_for_output_adapters() {
 
 #[test]
 fn weighted_work_is_total_across_chunks_and_empty_work_stays_zero() {
-    let provider = crate::simple_provider::InProcessProvider::new();
+    let provider =
+        crate::placement::provider_contract::fusion_elementwise::fixture::GeometryProvider::new();
     let capacity = crate::backend::wgpu::config::elementwise_chunk_capacity(
-        crate::backend::wgpu::config::effective_workgroup_size(),
+        provider.elementwise_geometry().unwrap().workgroup_size,
     )
     .unwrap();
     let elements = capacity + 1;
@@ -69,7 +132,7 @@ fn weighted_work_is_total_across_chunks_and_empty_work_stays_zero() {
     )
     .cost;
     assert_eq!(estimate.components.execution_ns, elements * 100);
-    assert_eq!(estimate.components.queue_ns, 20_000);
+    assert_eq!(estimate.components.queue_ns, 30_000); // two chunks plus warmup
 
     let empty = wgpu_cost_estimate(&provider, &query(ProviderElementType::F64, 0, Some(0))).cost;
     assert_eq!(empty.components.execution_ns, 0);

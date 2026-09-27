@@ -179,6 +179,7 @@ async fn execute_elementwise_outputs(
         Some(semantic_identity),
         Some(scalar_work_units),
         None,
+        Some(runmat_accelerate_api::ProviderPreparationProgram::Elementwise { shader: &shader }),
     )?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,

@@ -1,11 +1,36 @@
+use super::fixture::GeometryProvider;
 use super::*;
-use crate::simple_provider::InProcessProvider;
+
+#[test]
+fn provider_instances_keep_independent_launch_geometry() {
+    let first = GeometryProvider(64);
+    let mut input = value(ProviderElementType::F64, ProviderResidency::Device);
+    input.shape = vec![1, 65_535 * 64 + 1];
+    let query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new("fusion.elementwise"),
+        family: ProviderOperationFamily::Fusion,
+        inputs: vec![input.clone()],
+        outputs: vec![input],
+        workload: Default::default(),
+    };
+    let before = physical_work(&first, &query).unwrap().estimate.dispatches;
+    let second = GeometryProvider(512);
+    assert_eq!(
+        physical_work(&second, &query).unwrap().estimate.dispatches,
+        Some(1)
+    );
+    assert_eq!(before, Some(2));
+    assert_eq!(
+        physical_work(&first, &query).unwrap().estimate.dispatches,
+        before
+    );
+}
 
 #[cfg(feature = "wgpu")]
 #[test]
 fn observation_accounts_for_complete_physical_chain_not_one_dispatch() {
     use runmat_accelerate_api::observation::ProviderObservationCapability;
-    let provider = InProcessProvider::new(); // geometry only, not execution proof
+    let provider = GeometryProvider::new(); // geometry only, not execution proof
     let mut query = ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new("fusion.elementwise"),
         family: ProviderOperationFamily::Fusion,
@@ -49,7 +74,7 @@ fn value(
 
 #[test]
 fn output_cast_and_resident_widening_are_both_in_peak_and_dispatch_estimates() {
-    let provider = InProcessProvider::new(); // F64 physical geometry; not an execution witness.
+    let provider = GeometryProvider::new(); // F64 physical geometry; not an execution witness.
     let query = ProviderFeasibilityQuery {
         operation: runmat_accelerate_api::ProviderOperationIdentity::new("fusion.elementwise"),
         family: ProviderOperationFamily::Fusion,
@@ -76,7 +101,7 @@ fn output_cast_and_resident_widening_are_both_in_peak_and_dispatch_estimates() {
 
 #[test]
 fn host_single_upload_is_counted_at_the_actual_native_f64_buffer_width() {
-    let provider = InProcessProvider::new();
+    let provider = GeometryProvider::new();
     let query = ProviderFeasibilityQuery {
         operation: runmat_accelerate_api::ProviderOperationIdentity::new("fusion.elementwise"),
         family: ProviderOperationFamily::Fusion,
@@ -95,7 +120,7 @@ fn host_single_upload_is_counted_at_the_actual_native_f64_buffer_width() {
 
 #[test]
 fn broadcast_inputs_are_charged_at_source_size_but_incompatible_geometry_rejects() {
-    let provider = InProcessProvider::new();
+    let provider = GeometryProvider::new();
     let mut row = value(ProviderElementType::F64, ProviderResidency::Host);
     row.shape = vec![1, 8];
     let mut column = row.clone();
@@ -124,7 +149,7 @@ fn broadcast_inputs_are_charged_at_source_size_but_incompatible_geometry_rejects
 
 #[test]
 fn strided_single_materialization_and_widening_have_distinct_scratch_allocations() {
-    let provider = InProcessProvider::new();
+    let provider = GeometryProvider::new();
     let mut input = value(ProviderElementType::F32, ProviderResidency::Device);
     input.layout = ProviderLayout::Strided;
     let query = ProviderFeasibilityQuery {
@@ -139,7 +164,7 @@ fn strided_single_materialization_and_widening_have_distinct_scratch_allocations
     assert_eq!(work.estimate.transient_bytes, Some(224));
     assert_eq!(work.scratch_bytes, 160);
     assert_eq!(work.estimate.dispatches, Some(4));
-    assert_eq!(work.queue_submissions, 6);
+    assert_eq!(work.queue_submissions, 7); // includes fused pipeline warmup
     let mut contiguous = query;
     contiguous.inputs[0].layout = ProviderLayout::ColumnMajorContiguous;
     let work = physical_work(&provider, &contiguous).unwrap();
@@ -149,7 +174,7 @@ fn strided_single_materialization_and_widening_have_distinct_scratch_allocations
     let work = physical_work(&provider, &contiguous).unwrap();
     assert_eq!(work.scratch_bytes, 64); // Raw output only; input stays borrowed.
     assert_eq!(work.estimate.dispatches, Some(2));
-    assert_eq!(work.queue_submissions, 2);
+    assert_eq!(work.queue_submissions, 3); // includes fused pipeline warmup
 }
 
 #[test]
@@ -173,7 +198,7 @@ fn shared_resident_fact_preserves_lazy_transpose_layout() {
 
 #[test]
 fn adapter_visits_follow_selected_source_and_output_passes() {
-    let provider = InProcessProvider::new();
+    let provider = GeometryProvider::new();
     let mut query = ProviderFeasibilityQuery {
         operation: runmat_accelerate_api::ProviderOperationIdentity::new("fusion.elementwise"),
         family: ProviderOperationFamily::Fusion,
@@ -230,6 +255,13 @@ fn adapter_visits_follow_selected_source_and_output_passes() {
 fn host_single_staging_counts_both_actual_conversion_passes_on_f32_abi() {
     struct SingleGeometry;
     impl AccelProvider for SingleGeometry {
+        fn elementwise_geometry(
+            &self,
+        ) -> Option<runmat_accelerate_api::ProviderElementwiseGeometry> {
+            Some(runmat_accelerate_api::ProviderElementwiseGeometry {
+                workgroup_size: 512,
+            })
+        }
         fn precision(&self) -> ProviderPrecision {
             ProviderPrecision::F32
         }

@@ -3,6 +3,8 @@
 //! are counted separately instead of pretending the kernel writes F32 in an
 //! F64 allocation.
 use super::*;
+#[cfg(test)]
+pub(crate) mod fixture;
 
 /// Shared costing consumes the same physical plan as feasibility. This is a
 /// prior for the complete route, not timing evidence from one kernel enqueue.
@@ -77,6 +79,16 @@ fn analyze(
             "fusion.elementwise.shader_backend_required",
         );
     }
+    let Some(geometry) = provider
+        .elementwise_geometry()
+        .filter(|g| g.workgroup_size != 0)
+    else {
+        return reject(
+            ProviderRejectionCode::UnknownResourceEstimate,
+            "fusion.elementwise.unknown_dispatch_geometry",
+        );
+    };
+    let dispatches = |elements| dispatches(elements, geometry.workgroup_size);
     if query.family != ProviderOperationFamily::Fusion
         || query.inputs.is_empty()
         || query.outputs.is_empty()
@@ -447,6 +459,9 @@ fn analyze(
             let Some(_queue_submissions) = estimate
                 .dispatches
                 .and_then(|dispatches| dispatches.checked_add(materialization_setup_submissions))
+                // Both fused entrypoints submit one pipeline warmup pass even
+                // on a cache hit, before the numerical chunk submissions.
+                .and_then(|submissions| submissions.checked_add(1))
             else {
                 return reject(
                     ProviderRejectionCode::ResourceLimit,
@@ -467,16 +482,11 @@ fn analyze(
     })
 }
 
-fn dispatches(elements: u64) -> Option<u64> {
+fn dispatches(elements: u64, workgroup: u32) -> Option<u64> {
     if elements > u64::from(u32::MAX) {
         return None;
     }
-    #[cfg(feature = "wgpu")]
-    let capacity = crate::backend::wgpu::config::elementwise_chunk_capacity(
-        crate::backend::wgpu::config::effective_workgroup_size(),
-    )?;
-    #[cfg(not(feature = "wgpu"))]
-    let capacity = u64::from(u32::MAX);
+    let capacity = crate::backend::wgpu_geometry::elementwise_chunk_capacity(workgroup)?;
     Some(elements.div_ceil(capacity))
 }
 

@@ -28,6 +28,7 @@ pub(crate) struct LocalPlacementRequest<'a> {
     pub(crate) outputs: Vec<ProviderRepresentation>,
     pub(crate) workload: ProviderWorkload,
     pub(crate) preparation: CandidatePreparationState,
+    pub(crate) preparation_program: Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
     pub(crate) cpu: ExecutionCandidateDescriptor,
     /// Provider execution prior without transfer components. It is used only
     /// when the provider has no trustworthy estimate of its own.
@@ -55,6 +56,7 @@ pub(crate) enum LocalPlacementOutcome {
         feedback: Option<Box<LocalPlacementFeedback>>,
         /// Exact compact query already validated by this placement authority.
         provider_query: Box<ProviderFeasibilityQuery>,
+        provider_observation: bool,
     },
     ProviderRejected {
         code: ProviderRejectionCode,
@@ -127,9 +129,28 @@ pub(crate) fn plan_local(
     let upload_bytes = request
         .required_upload_bytes
         .unwrap_or_else(|| residency.required_upload_bytes(provider.device_id()));
+    let context = runmat_accelerate_api::ProviderCostContext {
+            preparation: request.preparation_program.and_then(|program| provider.preparation_snapshot(&query, program)),
+            observation: request.preparation_program.and_then(|_| request.runtime)
+                .and_then(|runtime| runtime.service_ports().placement())
+                .and_then(|_| match provider.operation_observation_capability(&query) {
+                    runmat_accelerate_api::observation::ProviderObservationCapability::Supported(overhead) => Some(overhead),
+                    runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported => None,
+                }),
+        };
+    let preparation = if request.preparation_program.is_some() {
+        context
+            .preparation
+            .as_ref()
+            .and_then(|snapshot| snapshot.state)
+            .unwrap_or(CandidatePreparationState::Cold)
+    } else {
+        request.preparation
+    };
     let cost_query = ProviderCostQuery {
+        context,
         operation: query.clone(),
-        preparation: request.preparation,
+        preparation,
         required_upload_bytes: upload_bytes,
         required_download_bytes: request.required_download_bytes,
         downstream_materialization: request.downstream_materialization,
@@ -155,7 +176,7 @@ pub(crate) fn plan_local(
         execution_location: CandidateExecutionLocation::Provider {
             device_id: provider.device_id(),
         },
-        preparation: request.preparation,
+        preparation,
         cost: provider_cost,
         output_residency: CandidateOutputResidency::Provider {
             device_id: provider.device_id(),
@@ -282,6 +303,7 @@ pub(crate) fn plan_local(
         cpu_cost,
         provider_cost,
         feedback,
+        provider_observation: cost_query.context.observation.is_some(),
         provider_query: Box::new(cost_query.operation),
     })
 }

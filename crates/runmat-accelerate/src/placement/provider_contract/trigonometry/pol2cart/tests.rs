@@ -66,6 +66,7 @@ fn coordinate_wgpu_cost_includes_extra_upload_without_completion_claim() {
         &ProviderCostQuery {
             operation,
             preparation: CandidatePreparationState::Warm,
+            context: Default::default(),
             required_upload_bytes: 0,
             required_download_bytes: 0,
             downstream_materialization: false,

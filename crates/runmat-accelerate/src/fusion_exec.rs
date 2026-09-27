@@ -195,6 +195,7 @@ fn select_fusion_provider(
         None,
         None,
         None,
+        None,
     )
 }
 
@@ -205,6 +206,7 @@ fn select_fusion_provider_with_contract(
     semantic_identity: Option<runmat_execution::Digest>,
     scalar_work_units: Option<u64>,
     matmul: Option<matmul::workload::Selection<'_>>,
+    preparation_program: Option<runmat_accelerate_api::ProviderPreparationProgram<'_>>,
 ) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
     let scalar_work_units = if let Some(contract) = &matmul {
         Some(
@@ -337,6 +339,7 @@ fn select_fusion_provider_with_contract(
             } else {
                 CandidatePreparationState::Warm
             },
+            preparation_program,
             cpu,
             provider_fallback,
             required_upload_bytes,
@@ -356,6 +359,7 @@ fn select_fusion_provider_with_contract(
             provider_cost,
             feedback,
             provider_query,
+            provider_observation,
             ..
         } if selected.kind.is_provider() => {
             observer.provider_candidate();
@@ -369,7 +373,7 @@ fn select_fusion_provider_with_contract(
                     observer,
                     feedback.map(|feedback| *feedback),
                     provider,
-                    Some(&provider_query),
+                    provider_observation.then_some(provider_query.as_ref()),
                 ),
             ))
         }

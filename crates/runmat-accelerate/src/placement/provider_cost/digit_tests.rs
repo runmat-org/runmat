@@ -36,6 +36,7 @@ fn query() -> ProviderCostQuery {
             },
         },
         preparation: CandidatePreparationState::Cold,
+        context: Default::default(),
         required_upload_bytes: 268_431_368,
         required_download_bytes: 0,
         downstream_materialization: false,

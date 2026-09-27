@@ -13,6 +13,18 @@ use runmat_accelerate_api::{
 };
 
 impl AccelProvider for WgpuProvider {
+    fn elementwise_geometry(&self) -> Option<runmat_accelerate_api::ProviderElementwiseGeometry> {
+        Some(runmat_accelerate_api::ProviderElementwiseGeometry {
+            workgroup_size: self.workgroup_config.scalar,
+        })
+    }
+    fn preparation_snapshot(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        program: runmat_accelerate_api::ProviderPreparationProgram<'_>,
+    ) -> Option<runmat_accelerate_api::ProviderPreparationSnapshot> {
+        self.fusion_preparation_snapshot(query, program)
+    }
     fn operation_observation_capability(
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,

@@ -265,6 +265,20 @@ pub(crate) fn wgpu_cost_estimate(
     } else {
         compile_or_prepare_ns
     };
+    // Readiness is exact cache state; cold timing remains the existing explicit
+    // StaticPrior, not a claimed measurement. Count distinct cold recipes, not
+    // every invocation of a shared cast pipeline. Contention is unknown/one
+    // conservative prior, never a fabricated warm hit.
+    let compile_or_prepare_ns = match &query.context.preparation {
+        Some(snapshot) => match snapshot.state {
+            Some(CandidatePreparationState::Ready | CandidatePreparationState::Warm) => 0,
+            Some(CandidatePreparationState::Cold) => {
+                100_000u64.saturating_mul(u64::from(snapshot.cold_pipelines))
+            }
+            Some(CandidatePreparationState::Preparing) | None => compile_or_prepare_ns,
+        },
+        None => compile_or_prepare_ns,
+    };
     let compile_or_prepare_ns = if fusion_empty {
         0
     } else {
@@ -283,15 +297,26 @@ pub(crate) fn wgpu_cost_estimate(
     } else {
         compile_or_prepare_ns
     };
+    // Fence clear is in the existing command buffer, not another submission.
+    // Allocation and map/progress service reuse the existing component priors;
+    // they are not GPU timestamps or separately measured service latency.
+    let observation = query.context.observation;
+    let fence_allocations = observation.map_or(0, |work| u64::from(work.submissions));
+    let completion_services = observation.map_or(0, |work| u64::from(work.map_callbacks));
+    let clear_units = observation.map_or(0, |work| u64::from(work.clear_commands));
+    let scratch_bytes = scratch_bytes
+        .saturating_add(observation.map_or(0, |work| work.requested_peak_buffer_bytes));
     ProviderCostEstimate {
         cost: ExecutionCostEstimate {
             components: ExecutionCostComponents {
                 compile_or_prepare_ns,
                 upload_ns: transfer_prior_ns(upload_bytes),
-                allocation_ns: 5_000u64.saturating_mul(u64::from(allocations)),
+                allocation_ns: 5_000u64
+                    .saturating_mul(u64::from(allocations).saturating_add(fence_allocations)),
                 queue_ns: 10_000u64.saturating_mul(u64::from(queue_submissions)),
-                execution_ns,
-                synchronization_ns: 5_000u64.saturating_mul(synchronization_events),
+                execution_ns: execution_ns.saturating_add(clear_units.saturating_mul(2)),
+                synchronization_ns: 5_000u64
+                    .saturating_mul(synchronization_events.saturating_add(completion_services)),
                 download_ns: transfer_prior_ns(download_bytes),
                 downstream_ns: if query.downstream_materialization && !fusion_empty {
                     5_000
@@ -378,6 +403,7 @@ mod tests {
                 },
             },
             preparation: CandidatePreparationState::Warm,
+            context: Default::default(),
             required_upload_bytes: 0,
             required_download_bytes: 0,
             downstream_materialization: false,
@@ -422,6 +448,7 @@ mod tests {
                 },
             },
             preparation: CandidatePreparationState::Warm,
+            context: Default::default(),
             required_upload_bytes: 0,
             required_download_bytes: 0,
             downstream_materialization: false,
@@ -451,6 +478,7 @@ mod tests {
                     },
                 },
                 preparation: CandidatePreparationState::Cold,
+                context: Default::default(),
                 required_upload_bytes: 8_000,
                 required_download_bytes: 4_000,
                 downstream_materialization: true,
@@ -490,6 +518,7 @@ mod tests {
                 },
             },
             preparation: CandidatePreparationState::Warm,
+            context: Default::default(),
             required_upload_bytes: 64,
             required_download_bytes: 0,
             downstream_materialization: false,

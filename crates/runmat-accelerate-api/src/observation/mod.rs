@@ -64,7 +64,7 @@ pub enum ProviderObservationFailure {
 
 /// Physical instrumentation demand for the admitted operation. Requested buffer
 /// bytes are not driver allocation/VRAM granularity. No timing estimate is implied.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderObservationOverhead {
     pub submissions: u32,
     pub requested_peak_buffer_bytes: u64,

@@ -349,6 +349,7 @@ impl WgpuPipelines {
         device: &Arc<wgpu::Device>,
         precision: NumericPrecision,
         image_norm_bootstrap: ImageNormalizeBootstrap,
+        scalar_workgroup: u32,
     ) -> Self {
         #[cfg(target_os = "windows")]
         let _ = &image_norm_bootstrap;
@@ -447,10 +448,11 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
+            &match precision {
                 NumericPrecision::F64 => PERMUTE_SHADER_F64,
                 NumericPrecision::F32 => PERMUTE_SHADER_F32,
-            },
+            }
+            .replace("@WG@", &scalar_workgroup.to_string()),
         );
         let integer_permute_shader = crate::backend::wgpu::shaders::permute::permute_shader_u32();
         let integer_permute = create_pipeline(
@@ -463,7 +465,7 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            integer_permute_shader,
+            &integer_permute_shader.replace("@WG@", &scalar_workgroup.to_string()),
         );
 
         let flip = create_pipeline(

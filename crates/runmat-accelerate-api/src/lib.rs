@@ -1900,6 +1900,20 @@ pub trait AccelProvider: Send + Sync {
         None
     }
 
+    fn elementwise_geometry(&self) -> Option<ProviderElementwiseGeometry> {
+        None
+    }
+
+    /// Read-only exact program-cache lookup. No compilation, upload or warmup.
+    /// Providers without an audited key inventory return None, never Warm.
+    fn preparation_snapshot(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+        _program: ProviderPreparationProgram<'_>,
+    ) -> Option<ProviderPreparationSnapshot> {
+        None
+    }
+
     /// Returns a side-effect-free resource snapshot for placement admission.
     /// Providers with allocator/queue telemetry should override this default;
     /// the conservative snapshot exposes declared capacity when available,

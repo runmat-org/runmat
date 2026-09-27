@@ -88,6 +88,7 @@ mod tests {
                 },
             },
             preparation: CandidatePreparationState::Warm,
+            context: Default::default(),
             required_upload_bytes: 0,
             required_download_bytes: 0,
             downstream_materialization: false,
@@ -108,6 +109,28 @@ mod tests {
         };
         let original = digest(&query);
         assert_eq!(original, digest(&query.clone()));
+        let mut prepared = query.clone();
+        prepared.context.preparation = Some(runmat_accelerate_api::ProviderPreparationSnapshot {
+            identity: Digest::sha256(b"selected pipeline recipes"),
+            state: Some(CandidatePreparationState::Cold),
+            cold_pipelines: 1,
+            warm_pipelines: 0,
+        });
+        let cold = digest(&prepared);
+        assert_ne!(original, cold);
+        prepared.context.preparation.as_mut().unwrap().state =
+            Some(CandidatePreparationState::Warm);
+        assert_ne!(cold, digest(&prepared));
+        let without_fences = digest(&prepared);
+        prepared.context.observation = Some(
+            runmat_accelerate_api::observation::ProviderObservationOverhead {
+                submissions: 2,
+                requested_peak_buffer_bytes: 16,
+                clear_commands: 2,
+                map_callbacks: 2,
+            },
+        );
+        assert_ne!(without_fences, digest(&prepared));
         let mut changed = query.clone();
         changed.operation.workload.scalar_work_units = Some(32);
         assert_ne!(original, digest(&changed));

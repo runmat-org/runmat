@@ -1,19 +1,17 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
-pub const WORKGROUP_SIZE: u32 = 512;
+pub const WORKGROUP_SIZE: u32 = crate::backend::wgpu_geometry::WORKGROUP_SIZE;
 pub const REDUCE_WORKGROUP_SIZE: u32 = 512;
 pub const DEFAULT_TWO_PASS_THRESHOLD: usize = 262_144;
 pub const DEFAULT_REDUCTION_WG: u32 = 512;
 pub const MATMUL_TILE: u32 = 32;
-pub const MAX_DISPATCH_WORKGROUPS: u32 = 65_535;
+pub const MAX_DISPATCH_WORKGROUPS: u32 = crate::backend::wgpu_geometry::MAX_DISPATCH_WORKGROUPS;
 
 /// Logical elements addressable by one elementwise dispatch. Callers use the
 /// same selected workgroup size for shader compilation and dispatch counting.
 /// The uniform ABI also bounds each chunk length to a u32.
 pub(crate) fn elementwise_chunk_capacity(workgroup_size: u32) -> Option<u64> {
-    (workgroup_size != 0).then(|| {
-        (u64::from(MAX_DISPATCH_WORKGROUPS) * u64::from(workgroup_size)).min(u64::from(u32::MAX))
-    })
+    crate::backend::wgpu_geometry::elementwise_chunk_capacity(workgroup_size)
 }
 
 static EFFECTIVE_WG_OVERRIDE: AtomicU32 = AtomicU32::new(0);

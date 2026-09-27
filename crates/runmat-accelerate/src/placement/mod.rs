@@ -15,6 +15,8 @@ pub(crate) use provider_contract::matmul::scalar_work_units as matmul_scalar_wor
 
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::observation_capability as provider_observation_capability;
+#[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::fusion_elementwise::physical_work as fusion_physical_work;
 pub(crate) use provider_contract::{
     dense_output_representation, in_process_capability_snapshot, in_process_feasibility,
     provider_rejection_token, tensor_representation,

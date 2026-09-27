@@ -1308,6 +1308,7 @@ impl NativeAutoOffload {
                 outputs: Vec::new(),
                 workload,
                 preparation: CandidatePreparationState::Warm,
+                preparation_program: None,
                 cpu,
                 provider_fallback,
                 required_upload_bytes: None,
@@ -1330,6 +1331,7 @@ impl NativeAutoOffload {
                 provider_cost,
                 feedback,
                 provider_query: _,
+                provider_observation: _,
             }) => {
                 evaluation.recommend_gpu = selected.kind.is_provider();
                 evaluation.reason = DecisionReason::CostModel;

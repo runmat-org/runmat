@@ -6,9 +6,19 @@ use serde::{Deserialize, Serialize};
 
 use super::ProviderFeasibilityQuery;
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderCostContext {
+    pub preparation: Option<super::ProviderPreparationSnapshot>,
+    /// Present only when this selected route will request completion evidence.
+    pub observation: Option<crate::observation::ProviderObservationOverhead>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderCostQuery {
+    #[serde(default)]
+    pub context: ProviderCostContext,
     /// The operation contract that placement has already proven feasible.
     pub operation: ProviderFeasibilityQuery,
     pub preparation: CandidatePreparationState,
@@ -61,6 +71,7 @@ mod tests {
                 },
             },
             preparation: CandidatePreparationState::Cold,
+            context: Default::default(),
             required_upload_bytes: 256,
             required_download_bytes: 128,
             downstream_materialization: true,
@@ -69,6 +80,30 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<ProviderCostQuery>(&encoded).unwrap(),
             query
+        );
+        let mut legacy = serde_json::to_value(&query).unwrap();
+        legacy.as_object_mut().unwrap().remove("context");
+        assert_eq!(
+            serde_json::from_value::<ProviderCostQuery>(legacy).unwrap(),
+            query
+        );
+        let mut observed = query;
+        observed.context.preparation = Some(super::super::ProviderPreparationSnapshot {
+            identity: runmat_execution::Digest::sha256(b"pipeline inventory"),
+            state: None,
+            cold_pipelines: 0,
+            warm_pipelines: 0,
+        });
+        observed.context.observation = Some(crate::observation::ProviderObservationOverhead {
+            submissions: 2,
+            requested_peak_buffer_bytes: 16,
+            clear_commands: 2,
+            map_callbacks: 2,
+        });
+        assert_eq!(
+            serde_json::from_value::<ProviderCostQuery>(serde_json::to_value(&observed).unwrap())
+                .unwrap(),
+            observed
         );
     }
 }

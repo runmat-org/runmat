@@ -12,12 +12,16 @@ mod feasibility;
 mod matmul;
 pub use matmul::{MatmulScaleWork, MatmulWorkload};
 mod representation;
+mod preparation;
+pub use preparation::{
+    ProviderElementwiseGeometry, ProviderPreparationProgram, ProviderPreparationSnapshot,
+};
 
 pub use capability::{
     ProviderCapabilityOperation, ProviderCapabilitySnapshot, ProviderConcurrencyCapabilities,
     ProviderOperationFamily, PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };
-pub use cost::{ProviderCostEstimate, ProviderCostQuery};
+pub use cost::{ProviderCostContext, ProviderCostEstimate, ProviderCostQuery};
 pub use execution_inventory::{
     execution_accelerator_device, execution_provider_contract, ExecutionProviderContract,
     EXECUTION_PROVIDER_ABI_SCHEMA_VERSION, RUNMAT_BUILTIN_PROVIDER_VERSION,

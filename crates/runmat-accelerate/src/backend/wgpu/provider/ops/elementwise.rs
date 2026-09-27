@@ -1678,15 +1678,20 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(anyhow!("fused_elementwise: tensor too large"));
         }
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let workgroup_size = self.workgroup_config.scalar;
         let chunk_capacity =
             crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
                 .ok_or_else(|| anyhow!("fused_elementwise: workgroup size is zero"))?
                 as usize;
         // Freeze the selector for the shader, cache identity, and dispatch. The
         // generic shader helper must not re-read a different @WG@ selection.
-        let selected_shader = shader.replace("@WG@", &workgroup_size.to_string());
-        let shader = selected_shader.as_str();
+        let recipe = super::pipeline_recipe::PipelineRecipe::fusion(
+            shader,
+            inputs.len(),
+            super::pipeline_recipe::FusionPipelineLayout::Single,
+            workgroup_size,
+        );
+        let shader = recipe.shader.as_str();
         let storage_bindings = checked_binding_count("fused_elementwise", inputs.len(), 1)?;
         let total_bindings = checked_binding_count("fused_elementwise", inputs.len(), 2)?;
         validate_compute_binding_counts(
@@ -1745,31 +1750,10 @@ impl WgpuProvider {
             "runmat-fusion-output",
         );
         let bind_group_layout = self.cached_fusion_bind_group_layout(inputs.len());
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-fusion-pipeline-layout",
+        let pipeline = self.recipe_pipeline(
+            &recipe,
             bind_group_layout.as_ref(),
-        );
-        let layout_tag = {
-            let mut tag = String::from("runmat-fusion-layout-");
-            tag.push_str(&inputs.len().to_string());
-            tag
-        };
-        let shader_hash =
-            self.compute_pipeline_hash_bytes(shader.as_bytes(), &layout_tag, Some(workgroup_size));
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-fusion-shader",
-            shader,
-        );
-        let pipeline = self.get_or_create_pipeline(
-            shader_hash,
-            &pipeline_layout,
-            &module,
             "runmat-fusion-pipeline",
-            Some(shader.as_bytes()),
-            Some(&layout_tag),
-            Some(workgroup_size),
         );
         // Warmup once
         crate::backend::wgpu::dispatch::elementwise::warmup_noop(
@@ -1993,13 +1977,17 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(anyhow!("fused_elementwise_multi: tensor too large"));
         }
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let workgroup_size = self.workgroup_config.scalar;
         let chunk_capacity =
             crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
                 .ok_or_else(|| anyhow!("fused_elementwise_multi: workgroup size is zero"))?
                 as usize;
-        let selected_shader = shader.replace("@WG@", &workgroup_size.to_string());
-        let shader = selected_shader.as_str();
+        let recipe = super::pipeline_recipe::PipelineRecipe::fusion(
+            shader,
+            inputs.len(),
+            super::pipeline_recipe::FusionPipelineLayout::Multiple(num_outputs),
+            workgroup_size,
+        );
         let storage_bindings =
             checked_binding_count("fused_elementwise_multi", inputs.len(), num_outputs)?;
         let total_bindings = checked_binding_count("fused_elementwise_multi", storage_bindings, 1)?;
@@ -2045,31 +2033,10 @@ impl WgpuProvider {
                 )
             })
         };
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-fusion-multi-pipeline-layout",
+        let pipeline = self.recipe_pipeline(
+            &recipe,
             bind_group_layout.as_ref(),
-        );
-        let layout_tag = format!(
-            "runmat-fusion-multi-layout-{}-{}",
-            inputs.len(),
-            num_outputs
-        );
-        let shader_hash =
-            self.compute_pipeline_hash_bytes(shader.as_bytes(), &layout_tag, Some(workgroup_size));
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-fusion-multi-shader",
-            shader,
-        );
-        let pipeline = self.get_or_create_pipeline(
-            shader_hash,
-            &pipeline_layout,
-            &module,
             "runmat-fusion-multi-pipeline",
-            Some(shader.as_bytes()),
-            Some(&layout_tag),
-            Some(workgroup_size),
         );
         crate::backend::wgpu::dispatch::elementwise::warmup_noop(
             self.device_ref(),

@@ -505,13 +505,55 @@ impl WgpuProvider {
         persist_layout_tag: Option<&str>,
         persist_workgroup_size: Option<u32>,
     ) -> Arc<wgpu::ComputePipeline> {
+        self.get_or_create_pipeline_with(
+            hash_key, label, persist_wgsl_src, persist_layout_tag, persist_workgroup_size,
+            || self.device.create_compute_pipeline(
+                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                    label: Some(label), layout: Some(pipeline_layout), module: module, entry_point: "main",
+                },
+            ),
+        )
+    }
+
+    pub(super) fn recipe_pipeline(
+        &self,
+        recipe: &super::pipeline_recipe::PipelineRecipe,
+        bindings: &wgpu::BindGroupLayout,
+        label: &str,
+    ) -> Arc<wgpu::ComputePipeline> {
+        self.get_or_create_pipeline_with(recipe.key(), label, Some(recipe.shader.as_bytes()),
+            Some(&recipe.layout), Some(recipe.workgroup), || {
+                let layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                    self.device_ref(), label, bindings);
+                let module = crate::backend::wgpu::pipelines::create_shader_module(
+                    self.device_ref(), label, &recipe.shader);
+                self.device.create_compute_pipeline(
+                    &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                        label: Some(label), layout: Some(&layout), module: &module, entry_point: "main",
+                    },
+                )
+            })
+    }
+
+    fn get_or_create_pipeline_with(
+        &self,
+        hash_key: u64,
+        label: &str,
+        persist_wgsl_src: Option<&[u8]>,
+        persist_layout_tag: Option<&str>,
+        persist_workgroup_size: Option<u32>,
+        create: impl FnOnce() -> wgpu::ComputePipeline,
+    ) -> Arc<wgpu::ComputePipeline> {
         let observation = super::pipeline_observation::PipelineObservation::begin();
-        if let Some(p) = self
-            .fused_pipeline_cache
-            .try_lock()
-            .ok()
-            .and_then(|guard| guard.get(&hash_key).cloned())
-        {
+        let cached = match self.fused_pipeline_cache.lock() {
+            Ok(guard) => guard.get(&hash_key).cloned(),
+            Err(error) => {
+                drop(error);
+                super::pipeline_observation::poisoned_cache();
+                None
+            }
+        };
+        if let Some(p) = cached {
             self.metrics.inc_hit();
             observation.finish(runmat_execution::CandidatePreparationState::Warm);
             return p;
@@ -525,16 +567,16 @@ impl WgpuProvider {
             persist_workgroup_size,
             persist_wgsl_src,
         );
-        let p = Arc::new(self.device.create_compute_pipeline(
-            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                label: Some(label),
-                layout: Some(pipeline_layout),
-                module: module,
-                entry_point: "main",
-            },
-        ));
-        if let Ok(mut guard) = self.fused_pipeline_cache.try_lock() {
-            guard.insert(hash_key, p.clone());
+        // Cache lock is released before any driver/compiler callback.
+        let p = Arc::new(create());
+        match self.fused_pipeline_cache.lock() {
+            Ok(mut guard) => {
+                guard.insert(hash_key, p.clone());
+            }
+            Err(error) => {
+                drop(error);
+                super::pipeline_observation::poisoned_cache();
+            }
         }
         observation.finish(runmat_execution::CandidatePreparationState::Cold);
         p

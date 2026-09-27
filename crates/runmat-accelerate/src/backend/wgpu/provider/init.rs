@@ -369,7 +369,12 @@ impl WgpuProvider {
             lane_count: sanitized_bootstrap.lane_count,
             spatial_tile: sanitized_bootstrap.spatial_tile,
         };
-        let pipelines = WgpuPipelines::new(&device, precision, image_norm_bootstrap);
+        let pipelines = WgpuPipelines::new(
+            &device,
+            precision,
+            image_norm_bootstrap,
+            workgroup_config.scalar,
+        );
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
         let max_poolable_bytes =

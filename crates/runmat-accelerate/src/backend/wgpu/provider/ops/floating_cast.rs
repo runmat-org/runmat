@@ -67,63 +67,26 @@ impl WgpuProvider {
         // float precision; typed registration below owns the interpretation.
         let output = self.create_integer_word_buffer(words, "runmat-floating-cast")?;
         if len != 0 {
-            let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-            let source_type = match entry.precision {
-                NumericPrecision::F32 => "f32",
-                NumericPrecision::F64 => "f64",
-            };
-            let target_type = match target {
-                NumericPrecision::F32 => "f32",
-                NumericPrecision::F64 => "f64",
-            };
-            let shader = format!(
-                "struct Params {{ len: u32, offset: u32, padding: vec2<u32> }};
-                 @group(0) @binding(0) var<storage, read> input: array<{source_type}>;
-                 @group(0) @binding(1) var<storage, read_write> output: array<{target_type}>;
-                 @group(0) @binding(2) var<uniform> params: Params;
-                 @compute @workgroup_size({workgroup_size})
-                 fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
-                     if (id.x >= params.len) {{ return; }}
-                     let index = params.offset + id.x;
-                     output[index] = {target_type}(input[index]);
-                 }}"
+            let workgroup_size = self.workgroup_config.scalar;
+            let recipe = super::pipeline_recipe::PipelineRecipe::floating_cast(
+                entry.precision,
+                target,
+                workgroup_size,
             );
-            let bindings =
-                self.device_ref()
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("runmat-floating-cast-bgl"),
-                        entries: &[
-                            crate::backend::wgpu::bindings::storage_read_entry(0),
-                            crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                            crate::backend::wgpu::bindings::uniform_entry(2),
-                        ],
-                    });
-            let layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-                self.device_ref(),
-                "runmat-floating-cast-pl",
-                &bindings,
-            );
-            let module = crate::backend::wgpu::pipelines::create_shader_module(
-                self.device_ref(),
-                "runmat-floating-cast-module",
-                &shader,
-            );
-            let key = self.compute_pipeline_hash_bytes(
-                shader.as_bytes(),
-                "runmat-floating-cast-bgl",
-                Some(workgroup_size),
-            );
-            let pipeline = self.get_or_create_pipeline(
-                key,
-                &layout,
-                &module,
-                "runmat-floating-cast",
-                Some(shader.as_bytes()),
-                Some("runmat-floating-cast-bgl"),
-                Some(workgroup_size),
-            );
-            let capacity = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize
-                * workgroup_size as usize;
+            let bindings = self.cached_bind_group_layout(&recipe.layout, |device| {
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-floating-cast-bgl"),
+                    entries: &[
+                        crate::backend::wgpu::bindings::storage_read_entry(0),
+                        crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                        crate::backend::wgpu::bindings::uniform_entry(2),
+                    ],
+                })
+            });
+            let pipeline = self.recipe_pipeline(&recipe, &bindings, "runmat-floating-cast");
+            let capacity = crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
+                .ok_or_else(|| anyhow!("floating cast has invalid workgroup geometry"))?
+                as usize;
             let mut offset = 0;
             while offset < len {
                 let count = (len - offset).min(capacity);

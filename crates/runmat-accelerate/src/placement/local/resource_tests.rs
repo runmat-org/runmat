@@ -112,6 +112,7 @@ fn plan(
             outputs: vec![],
             workload: ProviderWorkload::default(),
             preparation: CandidatePreparationState::Ready,
+            preparation_program: None,
             cpu: ExecutionCandidateDescriptor {
                 identity: "cpu.fixture".into(),
                 region: None,

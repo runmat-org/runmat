@@ -1086,8 +1086,10 @@ impl WgpuProvider {
             self.submit(enc);
         }
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let chunk_capacity =
+            crate::backend::wgpu::config::elementwise_chunk_capacity(self.workgroup_config.scalar)
+                .ok_or_else(|| anyhow!("permute: invalid provider workgroup geometry"))?
+                as usize;
         let mut offset = 0usize;
         while offset < storage_total {
             let remaining = storage_total - offset;
@@ -1125,7 +1127,7 @@ impl WgpuProvider {
                 });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
+                self.workgroup_config.scalar,
             );
             crate::backend::wgpu::dispatch::permute::run(
                 self.device_ref(),
@@ -1880,6 +1882,10 @@ impl WgpuProvider {
         Ok(handle)
     }
 }
+
+#[cfg(test)]
+#[path = "tensor/preparation_geometry_tests.rs"]
+mod preparation_geometry_tests;
 
 #[cfg(test)]
 mod tests {

@@ -5,6 +5,14 @@ use runmat_accelerate_api::observation::{
 use runmat_execution::CandidatePreparationState;
 use runmat_time::Instant;
 
+pub(super) fn poisoned_cache() {
+    log::error!("WGPU pipeline cache is poisoned; executing uncached without preparation evidence");
+    if let Some(recorder) = current_provider_observation() {
+        recorder
+            .fail(runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed);
+    }
+}
+
 pub(super) struct PipelineObservation(Option<(ProviderOperationRecorder, Instant)>);
 impl PipelineObservation {
     pub(super) fn begin() -> Self {
