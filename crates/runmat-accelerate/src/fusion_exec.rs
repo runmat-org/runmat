@@ -36,6 +36,7 @@ mod admission;
 use admission::AdmittedBindings;
 mod outputs;
 mod explained_input;
+mod explained_output;
 #[cfg(test)]
 mod ownership_tests;
 mod elementwise;
@@ -1042,17 +1043,37 @@ pub async fn execute_explained_variance_placed(
         return Err(anyhow!("explained variance: G shape mismatch").into());
     }
 
-    let q_transposed_view = provider.transpose(&q_handle)?;
-    if q_transposed_view.shape() != [q_cols, q_rows] {
-        return Err(anyhow!("explained variance: invalid transpose shape").into());
-    }
+    let q_element = q_handle.physical().element_type();
+    let product_element = if q_element == runmat_accelerate_api::NumericElementType::F32
+        || g_handle.physical().element_type() == runmat_accelerate_api::NumericElementType::F32
+    {
+        runmat_accelerate_api::NumericElementType::F32
+    } else {
+        runmat_accelerate_api::NumericElementType::F64
+    };
+    // Transpose may lawfully retain Q's allocation. No operation may adopt G's
+    // distinct allocation as Q's transpose.
+    let transpose_protected: Vec<_> = (!q_handle.shares_allocation_with(&g_handle))
+        .then_some(&g_handle)
+        .into_iter()
+        .collect();
+    let q_transposed_view = explained_output::admit(
+        provider.transpose(&q_handle)?,
+        provider,
+        &[q_cols, q_rows],
+        q_element,
+        &transpose_protected,
+    )?;
 
     observer.queue_unmeasured();
-    let tmp = provider.matmul(&q_transposed_view, &g_handle).await?;
+    let tmp = explained_output::admit(
+        provider.matmul(&q_transposed_view, &g_handle).await?,
+        provider,
+        &[q_cols, q_rows],
+        product_element,
+        &[&q_handle, &g_handle, &q_transposed_view],
+    )?;
     observer.kernel_unmeasured();
-    if tmp.shape() != [q_cols, q_rows] {
-        return Err(anyhow!("explained variance: invalid first product shape").into());
-    }
 
     if debug_explained {
         println!(
@@ -1062,11 +1083,14 @@ pub async fn execute_explained_variance_placed(
     }
 
     observer.queue_unmeasured();
-    let product = provider.matmul(&tmp, &q_handle).await?;
+    let product = explained_output::admit(
+        provider.matmul(&tmp, &q_handle).await?,
+        provider,
+        &[q_cols, q_cols],
+        product_element,
+        &[&q_handle, &g_handle, &q_transposed_view, &tmp],
+    )?;
     observer.kernel_unmeasured();
-    if product.shape() != [q_cols, q_cols] {
-        return Err(anyhow!("explained variance: invalid second product shape").into());
-    }
 
     if debug_explained {
         println!("[explained] product shape {:?}", product.shape());
@@ -1076,11 +1100,23 @@ pub async fn execute_explained_variance_placed(
     let diag = provider.diag_extract(&product, 0)?;
     observer.queue(started);
     observer.kernel_unmeasured();
-    let mut diag = match diag.shape() {
+    let diag = match diag.shape() {
         [len] if *len == q_cols => provider.reshape(&diag, &[*len, 1])?,
         [len, 1] if *len == q_cols => diag,
-        _ => return Err(anyhow!("explained variance: invalid diagonal shape").into()),
+        _ => {
+            return Err(outputs::reject_outputs(
+                vec![diag],
+                "explained variance: invalid diagonal shape",
+            ))
+        }
     };
+    let mut diag = explained_output::admit(
+        diag,
+        provider,
+        &[q_cols, 1],
+        product_element,
+        &[&q_handle, &g_handle, &q_transposed_view, &tmp, &product],
+    )?;
 
     if debug_explained {
         if let Ok(host) = provider.download(&tmp).await {

@@ -140,7 +140,10 @@ impl FusionOutputAdmission {
     }
 }
 
-fn reject_outputs(handles: Vec<GpuTensorHandle>, message: &'static str) -> ProviderExecutionError {
+pub(super) fn reject_outputs(
+    handles: Vec<GpuTensorHandle>,
+    message: &'static str,
+) -> ProviderExecutionError {
     let cleanup: Vec<_> = handles
         .into_iter()
         .filter_map(|handle| handle.release().err())

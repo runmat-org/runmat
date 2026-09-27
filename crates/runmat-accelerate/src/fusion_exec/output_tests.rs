@@ -52,6 +52,65 @@ fn allocation() -> TestAllocation {
         .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap()
 }
+
+#[test]
+fn explained_results_preserve_class_and_reject_physical_input_aliases() {
+    let _serial = SERIAL.lock().unwrap();
+    let _selected = ThreadProviderGuard::set(Some(&*OWNER));
+    for element in [NumericElementType::F32, NumericElementType::F64] {
+        let allocation = OWNER
+            .allocations
+            .allocate_zeroed(vec![1, 2], element, GpuTensorStorage::Real)
+            .unwrap();
+        let admitted = crate::fusion_exec::explained_output::admit(
+            allocation.handle.clone(),
+            &*OWNER,
+            &[1, 2],
+            element,
+            &[],
+        )
+        .unwrap();
+        assert!(admitted.shares_allocation_with(&allocation.handle));
+        let alias = admitted
+            .with_view(GpuTensorView::contiguous(vec![2, 1]))
+            .unwrap();
+        assert!(crate::fusion_exec::explained_output::admit(
+            alias,
+            &*OWNER,
+            &[2, 1],
+            element,
+            &[&allocation.handle],
+        )
+        .is_err());
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(admitted);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
+}
+
+#[test]
+fn explained_results_reject_wrong_class_and_retain_cleanup_failure() {
+    let _serial = SERIAL.lock().unwrap();
+    let _selected = ThreadProviderGuard::set(Some(&*OWNER));
+    let allocation = OWNER
+        .allocations
+        .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    allocation.probe.fail_retirement("fixture retained result");
+    let error = crate::fusion_exec::explained_output::admit(
+        allocation.handle,
+        &*OWNER,
+        &[2, 1],
+        NumericElementType::F64,
+        &[],
+    )
+    .unwrap_err();
+    assert!(std::error::Error::source(&error).is_some());
+    assert_eq!(allocation.probe.retirements(), 1);
+    drop(error);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
 fn facts(
     handle: &GpuTensorHandle,
 ) -> (runmat_accelerate_api::GpuPhysicalDescriptor, GpuTensorView) {
