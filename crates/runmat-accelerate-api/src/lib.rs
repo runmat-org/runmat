@@ -2093,8 +2093,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _vector: &GpuTensorHandle,
         _offset: isize,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "diag_from_vector not supported by provider"
+        Err(unsupported_provider_operation(
+            "diag_from_vector not supported by provider",
         ))
     }
 
@@ -2108,8 +2108,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _rows: usize,
         _cols: usize,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "diag_from_vector_sized not supported by provider"
+        Err(unsupported_provider_operation(
+            "diag_from_vector_sized not supported by provider",
         ))
     }
 
@@ -2119,7 +2119,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _matrix: &GpuTensorHandle,
         _offset: isize,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("diag_extract not supported by provider"))
+        Err(unsupported_provider_operation(
+            "diag_extract not supported by provider",
+        ))
     }
 
     /// Apply a lower-triangular mask to the first two dimensions of a tensor.

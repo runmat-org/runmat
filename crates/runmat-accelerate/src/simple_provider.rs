@@ -4840,10 +4840,7 @@ impl AccelProvider for InProcessProvider {
 
     fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &vector.shape())?;
-        ensure!(
-            runmat_accelerate_api::handle_storage(vector) == GpuTensorStorage::Real,
-            "diag: complex input is not supported by this provider hook"
-        );
+
         let (rows, cols) = rows_cols(&vector.shape());
         ensure!(
             is_vector_like(rows, cols, vector.shape().len()),
@@ -4859,6 +4856,11 @@ impl AccelProvider for InProcessProvider {
                 .map(InProcessNumericData::len)
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id()))?
         };
+        if runmat_accelerate_api::handle_storage(vector) != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "diag: complex input is not supported by this provider hook",
+            ));
+        }
         let (size, _) = diag_matrix_size(len, offset)?;
         self.diag_from_vector_sized(vector, offset, size, size)
     }
@@ -4871,10 +4873,7 @@ impl AccelProvider for InProcessProvider {
         out_cols: usize,
     ) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &vector.shape())?;
-        ensure!(
-            runmat_accelerate_api::handle_storage(vector) == GpuTensorStorage::Real,
-            "diag: complex input is not supported by this provider hook"
-        );
+
         let (rows, cols) = rows_cols(&vector.shape());
         ensure!(
             is_vector_like(rows, cols, vector.shape().len()),
@@ -4890,16 +4889,18 @@ impl AccelProvider for InProcessProvider {
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id()))?
         };
+        if runmat_accelerate_api::handle_storage(vector) != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "diag: complex input is not supported by this provider hook",
+            ));
+        }
         let output = diagonalize_numeric_data(&data, offset, out_rows, out_cols)?;
         self.allocate_numeric_data(output, vec![out_rows, out_cols], GpuTensorStorage::Real)
     }
 
     fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
         ensure_diag_shape("diag", &matrix.shape())?;
-        ensure!(
-            runmat_accelerate_api::handle_storage(matrix) == GpuTensorStorage::Real,
-            "diag: complex input is not supported by this provider hook"
-        );
+
         let (rows, cols) = rows_cols(&matrix.shape());
         ensure!(
             !is_vector_like(rows, cols, matrix.shape().len()),
@@ -4915,6 +4916,11 @@ impl AccelProvider for InProcessProvider {
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", matrix.buffer_id()))?
         };
+        if runmat_accelerate_api::handle_storage(matrix) != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "diag: complex input is not supported by this provider hook",
+            ));
+        }
         let output = extract_numeric_diagonal(&data, rows, offset, diag_len)?;
         self.allocate_numeric_data(output, vec![diag_len, 1], GpuTensorStorage::Real)
     }

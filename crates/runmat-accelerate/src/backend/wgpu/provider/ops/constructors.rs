@@ -1006,6 +1006,11 @@ impl WgpuProvider {
         offset: isize,
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(vector)?;
+        if entry.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "diag: complex input requires a complex provider kernel",
+            ));
+        }
         diag_ensure_shape(&entry.shape)?;
         let (rows, cols) = diag_rows_cols(&entry.shape);
         ensure!(
@@ -1026,6 +1031,11 @@ impl WgpuProvider {
         out_cols: usize,
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(vector)?;
+        if entry.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "diag: complex input requires a complex provider kernel",
+            ));
+        }
         diag_ensure_shape(&entry.shape)?;
         let (rows, cols) = diag_rows_cols(&entry.shape);
         ensure!(
@@ -1123,6 +1133,11 @@ impl WgpuProvider {
         offset: isize,
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(matrix)?;
+        if entry.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "diag: complex input requires a complex provider kernel",
+            ));
+        }
         diag_ensure_shape(&entry.shape)?;
         let (rows, cols) = diag_rows_cols(&entry.shape);
         ensure!(
