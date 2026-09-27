@@ -217,7 +217,7 @@ pub(super) fn target_shape(target: &Value) -> Option<Vec<usize>> {
         Value::StringArray(array) => Some(array.shape.clone()),
         Value::SparseTensor(sparse) => Some(sparse.shape()),
         Value::CharArray(chars) => Some(chars.shape.clone()),
-        Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
         Value::Object(_) | Value::HandleObject(_) => Some(vec![1, 1]),
         _ => None,
     }

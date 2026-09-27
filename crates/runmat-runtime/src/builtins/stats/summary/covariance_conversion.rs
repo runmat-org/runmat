@@ -1310,7 +1310,7 @@ mod tests {
                 .expect("resident integer gather fallback");
                 assert!(matches!(result, Value::Tensor(_)));
             }
-            let _ = provider.free(&integer_handle);
+            drop(integer_handle);
 
             let double_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
@@ -1328,7 +1328,7 @@ mod tests {
                 err.identifier(),
                 Some("RunMat:compatibility:Cov2corrGpuInputExtension")
             );
-            let _ = provider.free(&double_handle);
+            drop(double_handle);
         });
     }
 
