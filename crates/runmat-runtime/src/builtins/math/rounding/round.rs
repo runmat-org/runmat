@@ -108,6 +108,16 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    if strategy == RoundStrategy::Integer {
+        return super::preparation::unary(&runmat_builtins::ROUND_CATALOG_ENTRY, value, |value| {
+            round_value(value, strategy)
+        })
+        .await;
+    }
+    round_value(value, strategy).await
+}
+
+async fn round_value(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => round_gpu(handle, strategy).await,
         value => round_host_value(value, strategy),

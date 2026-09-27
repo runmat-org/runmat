@@ -81,6 +81,10 @@ async fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    super::preparation::unary(&runmat_builtins::CEIL_CATALOG_ENTRY, value, ceil_value).await
+}
+
+async fn ceil_value(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => ceil_gpu(handle).await,
         Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {

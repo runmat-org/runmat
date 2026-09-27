@@ -79,6 +79,10 @@ fn builtin_error_with_detail(
 async fn fix_builtin(value: Value) -> BuiltinResult<Value> {
     super::unary::reject_excess_outputs(BUILTIN_NAME, &FIX_ERROR_TOO_MANY_OUTPUTS)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
+    super::preparation::unary(&runmat_builtins::FIX_CATALOG_ENTRY, value, fix_value).await
+}
+
+async fn fix_value(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => fix_gpu(handle).await,
         Value::Object(object) if crate::builtins::table::is_tabular_object(&object) => {
