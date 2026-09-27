@@ -472,6 +472,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CovArgs::parse(value, rest)?;
     ensure_cov_extensions(&args)?;
+    if let (Some(left), Some(right)) = (
+        covariance_input_shape(&args.first),
+        args.second.as_ref().and_then(covariance_input_shape),
+    ) {
+        validate_covariance_pair_shapes(left, right)?;
+    }
     // Resolve every borrowed resident operand before any hook or host gather.
     // The legacy lookup may return an unrelated ambient provider.
     for handle in std::iter::once(&args.first)
@@ -497,19 +503,28 @@ async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(result) = cov_try_gpu(&args).await? {
         return Ok(result);
     }
-    let output_source = gpu_helpers::select_resident_output_source(
-        std::iter::once(&args.first)
-            .chain(args.second.as_ref())
-            .chain(args.weight_vector.as_ref())
-            .filter_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle.clone()),
-                _ => None,
-            }),
-        NAME,
-    )?;
+    let resident_inputs: Vec<_> = std::iter::once(&args.first)
+        .chain(args.second.as_ref())
+        .chain(args.weight_vector.as_ref())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    let output_source =
+        gpu_helpers::select_resident_output_source(resident_inputs.iter().cloned(), NAME)?;
+    // cov_host consumes the argument values. Keep all original leases and
+    // intent alive through every download, suspension and output restoration.
+    let protected: Vec<_> = resident_inputs.iter().collect();
+    let _residency: Vec<_> = protected
+        .iter()
+        .map(|handle| gpu_helpers::ResidencyRestoreGuard::new(handle))
+        .collect();
     let result = cov_host(args).await?;
     match output_source {
-        Some(source) => gpu_helpers::restore_class_preserving_value(&source, result, NAME),
+        Some(source) => gpu_helpers::restore_class_preserving_value_protecting(
+            &source, result, NAME, &protected,
+        ),
         None => Ok(result),
     }
 }
@@ -709,6 +724,9 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
     };
 
     let rows = gpu_observation_count(first_handle, maybe_second_handle.is_some())?;
+    if let Some(second) = maybe_second_handle {
+        validate_covariance_pair_shapes(first_handle.shape(), second.shape())?;
+    }
     let protected: Vec<_> = std::iter::once(first_handle)
         .chain(maybe_second_handle)
         .collect();
@@ -821,7 +839,7 @@ fn gpu_observation_count(handle: &GpuTensorHandle, paired_input: bool) -> Builti
             "inputs must be 2-D matrices or vectors",
         ));
     }
-    let len = handle.shape().iter().copied().product::<usize>();
+    let len = covariance_element_count(handle.shape())?;
     Ok(match handle.shape() {
         [] => 1,
         _ if paired_input => len,
@@ -874,16 +892,26 @@ async fn materialize_gpu_weight_vector(
                 runmat_accelerate_api::ProviderPrecision::F64 => Tensor::new(weights, shape),
             }
             .map_err(cov_internal_error)?;
-            let handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+            let handle = match crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
                 provider, &weights, protected,
-            )
-            .map_err(|error| {
-                crate::build_runtime_error(format!("cov: weight upload failed: {error}"))
+            ) {
+                Ok(handle) => handle,
+                Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                    if gpu_helpers::provider_hook_is_unsupported(&error) =>
+                {
+                    return Ok(None)
+                }
+                Err(error) => {
+                    return Err(crate::build_runtime_error(format!(
+                        "cov: weight upload failed: {error}"
+                    ))
                     .with_builtin(NAME)
                     .with_identifier(COV_ERROR_INTERNAL.identifier.expect("internal identifier"))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .with_source(error)
-                    .build()
-            })?;
+                    .build())
+                }
+            };
             Ok(Some(handle))
         }
     }
@@ -912,7 +940,7 @@ fn validate_gpu_weight_shape(handle: &GpuTensorHandle, expected_rows: usize) -> 
             "weight vector must be one-dimensional",
         ));
     }
-    if rows != expected_rows && cols != expected_rows {
+    if covariance_element_count(handle.shape())? != expected_rows {
         return Err(cov_error_with_detail(
             &COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
             format!("expected {expected_rows} elements"),
@@ -1158,6 +1186,48 @@ fn covariance_column_count(rows: usize, columns: usize) -> usize {
     }
 }
 
+fn covariance_element_count(shape: &[usize]) -> BuiltinResult<usize> {
+    if shape.contains(&0) {
+        return Ok(0);
+    }
+    shape
+        .iter()
+        .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+        .ok_or_else(|| cov_error_with_detail(&COV_ERROR_INVALID_ARGUMENT, "input shape overflow"))
+}
+
+fn covariance_input_shape(value: &Value) -> Option<&[usize]> {
+    match value {
+        Value::Tensor(tensor) => Some(&tensor.shape),
+        Value::LogicalArray(array) => Some(&array.shape),
+        Value::GpuTensor(handle) => Some(handle.shape()),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(&[1, 1]),
+        _ => None,
+    }
+}
+
+fn validate_covariance_pair_shapes(left: &[usize], right: &[usize]) -> BuiltinResult<()> {
+    if left.len() > 2 || right.len() > 2 {
+        return Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            "inputs must be 2-D matrices or vectors",
+        ));
+    }
+    let vector = |shape: &[usize]| {
+        shape.first().copied().unwrap_or(1) == 1 || shape.get(1).copied().unwrap_or(1) == 1
+    };
+    let compatible = if vector(left) && vector(right) {
+        covariance_element_count(left)? == covariance_element_count(right)?
+    } else {
+        left == right
+    };
+    if compatible {
+        Ok(())
+    } else {
+        Err(cov_error(&COV_ERROR_ROWS_MISMATCH))
+    }
+}
+
 impl Matrix {
     fn from_single_tensor(tensor: Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
@@ -1190,22 +1260,7 @@ impl Matrix {
     }
 
     fn from_tensor_pair(left: Tensor, right: Tensor) -> BuiltinResult<Self> {
-        if left.shape.len() > 2 || right.shape.len() > 2 {
-            return Err(cov_error_with_detail(
-                &COV_ERROR_INVALID_ARGUMENT,
-                "inputs must be 2-D matrices or vectors",
-            ));
-        }
-        let left_is_vector = left.rows() == 1 || left.cols() == 1;
-        let right_is_vector = right.rows() == 1 || right.cols() == 1;
-        let compatible = if left_is_vector && right_is_vector {
-            left.len() == right.len()
-        } else {
-            left.shape == right.shape
-        };
-        if !compatible {
-            return Err(cov_error(&COV_ERROR_ROWS_MISMATCH));
-        }
+        validate_covariance_pair_shapes(&left.shape, &right.shape)?;
         let rows = left.len();
         let mut data = centered_tensor_values(&left, rows, 1);
         data.extend(centered_tensor_values(&right, rows, 1));

@@ -288,6 +288,8 @@ fn covariance_shape_admission_matches_host_vectors_matrices_and_empty_inputs() {
     let provider = PROVIDER.get_or_init(InProcessProvider::default);
     let _active = ThreadProviderGuard::set(Some(provider));
     for shape in [
+        vec![],
+        vec![3],
         vec![1, 3],
         vec![3, 1],
         vec![0, 0],
