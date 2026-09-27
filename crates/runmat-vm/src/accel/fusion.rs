@@ -14,8 +14,8 @@ use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
 };
 use runmat_accelerate::InstrSpan;
-use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
-use runmat_runtime::builtins::common::{shape::is_scalar_shape, tensor::scalar_integer_value};
+use runmat_accelerate::{FusionKind, ValueOrigin, VarKind};
+use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
@@ -576,494 +576,23 @@ pub async fn execute_fusion_special_kind(
     }
 }
 
-pub struct ReductionGeometry {
-    pub axis: usize,
-    pub reduce_len: usize,
-    pub num_slices: usize,
-    pub output_shape: Vec<usize>,
-}
-
-fn validate_fused_reduction_domain(
-    axes: Option<&runmat_accelerate::ReductionAxes>,
-    runtime_shape: Option<&[usize]>,
-    reduce_all: bool,
-) -> Result<(), RuntimeError> {
-    if matches!(
-        axes,
-        Some(runmat_accelerate::ReductionAxes::Explicit(dims)) if dims.len() != 1
-    ) {
-        return Err(mex(
-            "FusionReductionAxesUnsupported",
-            "fusion: multi-axis reduction requires the provider N-D reduction path",
-        ));
-    }
-    if !reduce_all && runtime_shape.is_some_and(|shape| shape.len() > 2) {
-        return Err(mex(
-            "FusionReductionRankUnsupported",
-            "fusion: N-D reduction requires the provider N-D reduction path",
-        ));
-    }
-    Ok(())
-}
-
-fn fused_reduction_output_shape(
-    runtime_shape: Option<Vec<usize>>,
-    rows: usize,
-    columns: usize,
-    axis: usize,
-    reduce_all: bool,
-) -> Result<Vec<usize>, RuntimeError> {
-    if reduce_all {
-        return Ok(vec![1, 1]);
-    }
-    let mut shape = runtime_shape.unwrap_or_else(|| vec![rows, columns]);
-    if shape.len() < 2 {
-        shape.resize(2, 1);
-    }
-    if axis >= shape.len() {
-        return Err(mex(
-            "FusionReductionAxisUnsupported",
-            "fusion: reduction dimension exceeds the runtime tensor rank",
-        ));
-    }
-    shape[axis] = 1;
-    Ok(shape)
-}
-
-pub fn resolve_reduction_geometry(
-    plan: &runmat_accelerate::FusionGroupPlan,
-    graph: &runmat_accelerate::AccelGraph,
-    request: &FusionExecutionRequest<'_>,
-    consumed_inputs: &[Option<Value>],
-    vars: &[Value],
-    context: &ExecutionContext,
-) -> Result<ReductionGeometry, RuntimeError> {
-    fn detect_reduce_all(
-        plan: &runmat_accelerate::FusionGroupPlan,
-        graph: &runmat_accelerate::AccelGraph,
-    ) -> bool {
-        let mut reduce_all = matches!(
-            plan.reduction_axes,
-            Some(runmat_accelerate::ReductionAxes::All)
-        );
-        let has_all = reduce_all
-            || plan.constants.values().any(value_is_all_keyword)
-            || plan.const_values.values().any(value_is_all_keyword);
-        if has_all {
-            return true;
-        }
-        for node_id in &plan.group.nodes {
-            if let Some(node) = graph.node(*node_id) {
-                if let runmat_accelerate::graph::AccelNodeLabel::Builtin { name, .. } = &node.label
-                {
-                    if name.eq_ignore_ascii_case("mean") {
-                        for input_vid in &node.inputs {
-                            if let Some(info) = graph.value(*input_vid) {
-                                if let Some(constant) = &info.constant {
-                                    if value_is_all_keyword(constant) {
-                                        reduce_all = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if reduce_all {
-                break;
-            }
-        }
-        reduce_all
-    }
-
-    fn reduction_axis_from_value(value: &Value) -> Result<Option<usize>, RuntimeError> {
-        if let Some(integer) = scalar_integer_value(value) {
-            return integer
-                .try_to_usize()
-                .and_then(|dim| dim.checked_sub(1))
-                .map(Some)
-                .ok_or_else(|| {
-                    mex(
-                        "FusionReductionAxisUnsupported",
-                        "fusion: integer reduction dimension is outside the platform index range",
-                    )
-                });
-        }
-        match value {
-            // Floating-point dimension arguments deliberately retain MATLAB's
-            // double conversion semantics. Native integers, however, must be
-            // representable by the host index type before acceleration plans
-            // them as an axis.
-            Value::Num(n) if *n >= 1.0 => Ok(Some((*n as usize).saturating_sub(1))),
-            _ => Ok(None),
-        }
-    }
-
-    fn resolve_reduction_axis(
-        plan: &runmat_accelerate::FusionGroupPlan,
-    ) -> Result<(usize, bool), RuntimeError> {
-        let mut axis = 0usize;
-        let mut axis_explicit = false;
-        if let Some(runmat_accelerate::ReductionAxes::Explicit(dims)) = &plan.reduction_axes {
-            if let Some(first) = dims.first().copied() {
-                axis = first.saturating_sub(1);
-                axis_explicit = true;
-            }
-        }
-        if let Some(dim_vid) = plan.reduction_dim {
-            if let Some(cv) = plan.const_values.get(&dim_vid) {
-                if let Some(parsed) = reduction_axis_from_value(cv)? {
-                    axis = parsed;
-                }
-                axis_explicit = true;
-            } else if let Some(input_idx) = plan.inputs.iter().position(|v| *v == dim_vid) {
-                if let Some(cv) = plan.constants.get(&input_idx) {
-                    if let Some(parsed) = reduction_axis_from_value(cv)? {
-                        axis = parsed;
-                    }
-                    axis_explicit = true;
-                }
-            }
-        } else if let Some(dim_const) = plan.constants.get(&1) {
-            if let Some(parsed) = reduction_axis_from_value(dim_const)? {
-                axis = parsed;
-            }
-            axis_explicit = true;
-        }
-        Ok((axis, axis_explicit))
-    }
-
-    fn derive_rows_cols(
-        plan: &runmat_accelerate::FusionGroupPlan,
-        graph: &runmat_accelerate::AccelGraph,
-        request: &FusionExecutionRequest<'_>,
-        consumed_inputs: &[Option<Value>],
-        vars: &[Value],
-        context: &ExecutionContext,
-    ) -> Option<(usize, usize)> {
-        let shape_of = |value: &Value| -> Option<(usize, usize)> {
-            match value {
-                Value::GpuTensor(h) => Some((
-                    h.shape().first().copied().unwrap_or(1).max(1),
-                    h.shape().get(1).copied().unwrap_or(1).max(1),
-                )),
-                Value::Tensor(t) => Some((
-                    t.shape.first().copied().unwrap_or(1).max(1),
-                    t.shape.get(1).copied().unwrap_or(1).max(1),
-                )),
-                _ => None,
-            }
-        };
-
-        if let Some(shape) = plan.reduction_data_shape(graph) {
-            if shape.len() >= 2 {
-                return Some((shape[0].max(1), shape[1].max(1)));
-            }
-            if shape.len() == 1 {
-                return Some((shape[0].max(1), 1));
-            }
-        }
-
-        for &vid in &plan.inputs {
-            if let Some(binding) = graph.var_binding(vid) {
-                let value_opt = match binding.kind {
-                    VarKind::Global => vars.get(binding.index).cloned(),
-                    VarKind::Local => {
-                        if let Some(frame) = context.call_stack.last() {
-                            let absolute = frame.locals_start + binding.index;
-                            context.locals.get(absolute).cloned()
-                        } else {
-                            vars.get(binding.index).cloned()
-                        }
-                    }
-                };
-                if let Some(value) = value_opt {
-                    if let Some(shape) = shape_of(&value) {
-                        return Some(shape);
-                    }
-                }
-            }
-        }
-
-        for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
-            if let Some(shape) = shape_of(v) {
-                return Some(shape);
-            }
-        }
-
-        if let Some(data_id) = plan.reduction_data {
-            if let Some(input_index) = plan.inputs.iter().position(|vid| *vid == data_id) {
-                if let Some(val) = consumed_inputs.get(input_index).and_then(|v| v.as_ref()) {
-                    if let Some(shape) = shape_of(val) {
-                        return Some(shape);
-                    }
-                }
-                if let Some(val) = request.inputs.get(input_index) {
-                    if let Some(shape) = shape_of(val) {
-                        return Some(shape);
-                    }
-                }
-            }
-            if let Some(info) = graph.value(data_id) {
-                if let ValueOrigin::Variable { kind, index } = &info.origin {
-                    let val = match kind {
-                        VarKind::Global => vars.get(*index).cloned(),
-                        VarKind::Local => {
-                            if let Some(frame) = context.call_stack.last() {
-                                let absolute = frame.locals_start + index;
-                                context.locals.get(absolute).cloned()
-                            } else {
-                                vars.get(*index).cloned()
-                            }
-                        }
-                    };
-                    if let Some(v) = val {
-                        if let Some(shape) = shape_of(&v) {
-                            return Some(shape);
-                        }
-                    }
-                }
-                if let ShapeInfo::Tensor(dims) = &info.shape {
-                    if !dims.is_empty() {
-                        let r = dims.first().and_then(|d| *d).unwrap_or(1);
-                        let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
-                        return Some((r.max(1), c.max(1)));
-                    }
-                }
-            }
-        }
-
-        for v in &request.inputs {
-            if let Some(shape) = shape_of(v) {
-                return Some(shape);
-            }
-        }
-
-        if let ShapeInfo::Tensor(dims) = &plan.group.shape {
-            if !dims.is_empty() {
-                let r = dims.first().and_then(|d| *d).unwrap_or(1);
-                let c = dims.get(1).and_then(|d| *d).unwrap_or(1);
-                return Some((r.max(1), c.max(1)));
-            }
-        }
-        None
-    }
-
-    if log::log_enabled!(log::Level::Debug) {
-        let meta: Vec<String> = plan
-            .inputs
-            .iter()
-            .map(|vid| {
-                if let Some(info) = graph.value(*vid) {
-                    format!(
-                        "vid={} origin={:?} shape={:?}",
-                        vid, info.origin, info.shape
-                    )
-                } else {
-                    format!("vid={} origin=<missing>", vid)
-                }
-            })
-            .collect();
-        log::debug!("reduction gather meta: [{}]", meta.join(", "));
-    }
-
-    let reduce_all = detect_reduce_all(plan, graph);
-    let (mut axis, axis_explicit) = if reduce_all {
-        (0usize, false)
-    } else {
-        resolve_reduction_axis(plan)?
-    };
-    if reduce_all && interp_engine::fusion_debug_enabled() {
-        log::debug!(
-            "fusion reduction (all) meta: data_vid={:?} inputs={:?} stack_pattern={:?}",
-            plan.reduction_data,
-            plan.inputs,
-            plan.stack_pattern
-        );
-    }
-
-    let runtime_shape = plan.reduction_data_shape(graph).or_else(|| {
-        consumed_inputs
-            .iter()
-            .filter_map(|value| value.as_ref())
-            .chain(request.inputs.iter())
-            .find_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
-                Value::Tensor(tensor) => Some(tensor.shape.clone()),
-                _ => None,
-            })
-    });
-    validate_fused_reduction_domain(
-        plan.reduction_axes.as_ref(),
-        runtime_shape.as_deref(),
-        reduce_all,
-    )?;
-    let (r, c) = runtime_shape
-        .as_ref()
-        .map(|shape| {
-            (
-                shape.first().copied().unwrap_or(1).max(1),
-                shape.get(1).copied().unwrap_or(1).max(1),
-            )
-        })
-        .or_else(|| derive_rows_cols(plan, graph, request, consumed_inputs, vars, context))
-        .unwrap_or((1, 1));
-    let (reduce_len, num_slices) = if reduce_all {
-        let total_from_runtime = consumed_inputs
-            .iter()
-            .filter_map(|v| v.as_ref())
-            .chain(request.inputs.iter())
-            .find_map(|value| match value {
-                Value::GpuTensor(handle) => Some(if handle.shape().is_empty() {
-                    1
-                } else {
-                    handle
-                        .shape()
-                        .iter()
-                        .copied()
-                        .map(|d| d.max(1))
-                        .product::<usize>()
-                }),
-                Value::Tensor(tensor) => Some(if tensor.shape.is_empty() {
-                    1
-                } else {
-                    tensor
-                        .shape
-                        .iter()
-                        .copied()
-                        .map(|d| d.max(1))
-                        .product::<usize>()
-                }),
-                _ => None,
-            });
-        let total = plan
-            .reduction_data_shape(graph)
-            .map(|shape| shape.into_iter().map(|d| d.max(1)).product::<usize>())
-            .or(total_from_runtime)
-            .or_else(|| plan.element_count())
-            .filter(|v| *v > 0)
-            .ok_or_else(|| {
-                mex(
-                    "FusionReductionExtentUnknown",
-                    "fusion: reduction all extent unknown",
-                )
-            })?;
-        if interp_engine::fusion_debug_enabled() {
-            log::debug!(
-                "fusion reduction (all): total_elems={} fallback_rows={} fallback_cols={}",
-                total,
-                r,
-                c
-            );
-        }
-        (total, 1usize)
-    } else {
-        if !axis_explicit {
-            axis = if r == 1 && c > 1 {
-                1
-            } else if r > 1 {
-                0
-            } else {
-                axis
-            };
-        }
-        if interp_engine::fusion_debug_enabled() {
-            if r == 1 && c == 1 {
-                log::debug!(
-                    "fusion reduction: unresolved shape (defaulted to 1x1); axis={}, constants={:?}",
-                    axis,
-                    plan.constants
-                );
-            } else {
-                log::debug!(
-                    "fusion reduction: resolved shape rows={} cols={} axis={} constants={:?}",
-                    r,
-                    c,
-                    axis,
-                    plan.constants
-                );
-            }
-        }
-        if axis == 0 {
-            (r, c)
-        } else {
-            (c, r)
-        }
-    };
-
-    if interp_engine::fusion_debug_enabled() {
-        log::debug!(
-            "fusion reduction: axis={} reduce_len={} num_slices={} constants={:?}",
-            axis,
-            reduce_len,
-            num_slices,
-            plan.constants
-        );
-    }
-
-    let looks_wrong = reduce_len == 1 && num_slices == 1 && {
-        let mut big = false;
-        let mut check_val = |v: &Value| match v {
-            Value::GpuTensor(h) => {
-                let prod = h.shape().iter().copied().product::<usize>();
-                if prod > 1 {
-                    big = true;
-                }
-            }
-            Value::Tensor(t) => {
-                let prod = t.shape.iter().copied().product::<usize>();
-                if prod > 1 {
-                    big = true;
-                }
-            }
-            _ => {}
-        };
-        for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
-            check_val(v);
-        }
-        for v in &request.inputs {
-            check_val(v);
-        }
-        big
-    };
-    if looks_wrong {
-        log::debug!("fusion reduction: skipping fusion due to unresolved shape; falling back to provider path");
-        return Err(mex(
-            "FusionReductionShapeUnresolved",
-            "fusion: reduction shape unresolved",
-        ));
-    }
-    let output_shape = fused_reduction_output_shape(runtime_shape, r, c, axis, reduce_all)?;
-    if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
-        return Err(mex(
-            "FusionReductionDisabled",
-            "fusion: fused reductions disabled",
-        ));
-    }
-
-    Ok(ReductionGeometry {
-        axis,
-        reduce_len,
-        num_slices,
-        output_shape,
-    })
-}
+#[path = "fusion/reduction_geometry.rs"]
+mod reduction_geometry;
+pub use reduction_geometry::{resolve_reduction_geometry, ReductionGeometry};
 
 pub fn execute_fusion_reduction(
     plan: &runmat_accelerate::FusionGroupPlan,
-    graph: &runmat_accelerate::AccelGraph,
     request: FusionExecutionRequest<'_>,
-    consumed_inputs: &[Option<Value>],
     stack_guard: StackSliceGuard<'_>,
-    vars: &[Value],
-    context: &ExecutionContext,
 ) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
-    let geom = resolve_reduction_geometry(plan, graph, &request, consumed_inputs, vars, context)?;
+    let geom = resolve_reduction_geometry(plan, &request)?;
+    // Specialize only this invocation. The generator must use the same axis as
+    // geometry; never overwrite a cached dimension value used by another op.
+    let resolved_plan = reduction_geometry::bind_axis(plan, &geom)?;
+    let request = FusionExecutionRequest {
+        plan: &resolved_plan,
+        ..request
+    };
     match execute_reduction_with_shape_placed(
         request,
         geom.reduce_len,
@@ -1090,7 +619,7 @@ pub async fn try_execute_fusion_group(
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
 ) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
-    let (stack_guard, request, consumed_inputs) =
+    let (stack_guard, request, _consumed_inputs) =
         gather_fusion_inputs(plan, graph, stack, vars, context, placement)?;
     if plan.group.kind.is_elementwise()
         && !request.inputs.is_empty()
@@ -1109,15 +638,7 @@ pub async fn try_execute_fusion_group(
     if plan.group.kind.is_elementwise() {
         execute_fusion_elementwise(request, stack_guard, vars, context).await
     } else if plan.group.kind.is_reduction() {
-        execute_fusion_reduction(
-            plan,
-            graph,
-            request,
-            &consumed_inputs,
-            stack_guard,
-            vars,
-            context,
-        )
+        execute_fusion_reduction(plan, request, stack_guard)
     } else {
         execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard)
             .await
@@ -1126,10 +647,10 @@ pub async fn try_execute_fusion_group(
 
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
-    use super::{
+    use super::reduction_geometry::{
         fused_reduction_output_shape, validate_fused_reduction_domain,
-        write_elementwise_materialized_stores, StackSliceGuard,
     };
+    use super::{write_elementwise_materialized_stores, StackSliceGuard};
     use crate::bytecode::program::ExecutionContext;
     use runmat_accelerate::fusion::FusionStoreMaterialization;
     use runmat_accelerate::fusion_residency;
