@@ -83,40 +83,39 @@ fn semantic_projection_releases_temporaries_on_success_and_output_error() {
 
 #[test]
 fn completion_projection_cancellation_retires_owned_values_but_not_published_aliases() {
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
     use std::future::Future;
     use std::task::{Context, Poll};
     gc_test_context(|| {
-        let _lock = accel_test_lock();
-        ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
-        let owned = provider.push(vec![1.0], vec![1, 1]);
-        let published = provider.push(vec![2.0], vec![1, 1]);
-        let caller = runmat_gc::gc_register_value_root(Box::new(runmat_gc::GlobalRoot::new(
-            vec![Value::GpuTensor(published.clone())],
-            "published projection alias".into(),
-        )))
-        .unwrap();
-        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ));
+        let owner = TestAllocationOwner::new();
+        let owned = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let published = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let owned_weak = owned.handle.downgrade();
         let frame = vec![
-            Value::GpuTensor(owned.clone()),
-            Value::GpuTensor(published.clone()),
+            Value::GpuTensor(owned.handle),
+            Value::GpuTensor(published.handle.clone()),
         ];
         let mut pending = Box::pin(async move {
-            let _projection = runmat_vm::CompletedFrameProjection::new(frame, runtime);
+            let _projection = runmat_vm::CompletedFrameProjection::new(frame).unwrap();
             futures::future::pending::<()>().await;
         });
         let mut context = Context::from_waker(futures::task::noop_waker_ref());
         assert!(matches!(pending.as_mut().poll(&mut context), Poll::Pending));
         drop(pending);
-        assert!(provider.pull(&owned).is_err());
-        assert_eq!(
-            provider.frees.lock().unwrap().get(&owned.buffer_id),
-            Some(&1)
-        );
-        assert_eq!(provider.pull(&published).unwrap(), (vec![2.0], vec![1, 1]));
-        runmat_gc::gc_unregister_root(caller).unwrap();
-        provider.free(&published).unwrap();
+        assert!(owned_weak.acquire().is_err());
+        assert_eq!(owned.probe.retirements(), 1);
+        assert_eq!(published.probe.retirements(), 0);
+        published
+            .probe
+            .with_data(&published.handle, |data| assert_eq!(data.len(), 1))
+            .unwrap();
+        drop(published.handle);
+        assert_eq!(published.probe.retirements(), 1);
     });
 }

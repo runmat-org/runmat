@@ -3,5 +3,6 @@ pub mod fusion;
 pub(crate) mod fusion_declaration;
 pub(crate) mod graph;
 pub(crate) mod idioms;
-pub(crate) mod residency;
+#[cfg(test)]
+mod residency_tests;
 pub(crate) mod stack_layout;
