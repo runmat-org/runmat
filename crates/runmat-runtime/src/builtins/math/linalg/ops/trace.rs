@@ -579,7 +579,7 @@ pub(crate) mod tests {
                     assert_eq!(host.shape, vec![1, 1]);
                     assert_eq!(host.len(), 1);
                     assert!((host.materialize_f64()[0] - 6.0).abs() < 1e-12);
-                    let _ = provider.free(&out);
+                    drop(out);
                 }
                 other => panic!("expected gpu result, got {other:?}"),
             }
@@ -602,7 +602,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(out) => {
                     let host = test_support::gather(Value::GpuTensor(out.clone())).expect("gather");
                     assert_eq!(host.materialize_f64(), vec![0.0]);
-                    let _ = provider.free(&out);
+                    drop(out);
                 }
                 other => panic!("expected gpu result, got {other:?}"),
             }
@@ -627,7 +627,7 @@ pub(crate) mod tests {
             let host = test_support::gather(Value::GpuTensor(out.clone())).expect("gather");
             assert_eq!(host.shape, vec![1, 1]);
             assert_eq!(host.materialize_f64(), vec![10.0]);
-            let _ = provider.free(&out);
+            drop(out);
         });
     }
 
