@@ -3,6 +3,14 @@ use std::error::Error as StdError;
 use miette::SourceSpan;
 use thiserror::Error;
 
+/// Native errors retain the thread-safe source required by worker transport.
+/// Browser sources may own thread-local resources and stay on that execution
+/// lane; formatting a diagnostic does not replace or release the source.
+#[cfg(not(target_arch = "wasm32"))]
+pub type RuntimeErrorSource = dyn StdError + Send + Sync + 'static;
+#[cfg(target_arch = "wasm32")]
+pub type RuntimeErrorSource = dyn StdError + 'static;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErrorContext {
     pub builtin: Option<String>,
@@ -58,7 +66,7 @@ pub struct RuntimeError {
     pub message: String,
     pub span: Option<SourceSpan>,
     #[source]
-    pub source: Option<Box<dyn StdError + Send + Sync>>,
+    pub source: Option<Box<RuntimeErrorSource>>,
     pub identifier: Option<String>,
     pub context: ErrorContext,
     pub gpu_gather_retry: GpuGatherRetry,
@@ -238,7 +246,14 @@ impl RuntimeErrorBuilder {
         self
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
+        self.error.source = Some(Box::new(source));
+        self
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn with_source(mut self, source: impl StdError + 'static) -> Self {
         self.error.source = Some(Box::new(source));
         self
     }
@@ -247,6 +262,10 @@ impl RuntimeErrorBuilder {
         self.error
     }
 }
+
+#[cfg(test)]
+#[path = "runtime_error/source_tests.rs"]
+mod source_tests;
 
 pub fn runtime_error(message: impl Into<String>) -> RuntimeErrorBuilder {
     RuntimeErrorBuilder {
