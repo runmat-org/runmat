@@ -87,6 +87,36 @@ fn unresolved_template_preserves_hook_support_without_alias_resource_or_receipt_
 }
 
 #[test]
+fn exact_plain_double_has_resource_work_without_enabling_completion_observation() {
+    use runmat_accelerate_api::observation::ProviderObservationCapability;
+    let provider = PlanningProvider;
+    let mut request = query(
+        DOUBLE_CATALOG_ENTRY.identity.name,
+        ProviderElementType::F64,
+        &[1, 8],
+    );
+    assert!(work::physical_work(&provider, &request).is_none());
+    request.workload.preparation_route = ProviderPreparationProgram::FloatingCast {
+        target: ProviderPrecision::F64,
+    }
+    .route();
+    for residency in [ProviderResidency::Host, ProviderResidency::Device] {
+        request.inputs[0].residency = residency;
+        let physical = work::physical_work(&provider, &request).unwrap();
+        assert_eq!(physical.estimate.output_bytes, Some(64));
+        assert_eq!(physical.estimate.dispatches, Some(0));
+        assert_eq!(
+            physical.allocations,
+            u32::from(residency == ProviderResidency::Host)
+        );
+        assert!(matches!(
+            work::observation_capability(&provider, &request),
+            ProviderObservationCapability::Unsupported
+        ));
+    }
+}
+
+#[test]
 fn placement_derives_route_only_from_admitted_program_not_legacy_workload() {
     let provider = PlanningProvider;
     let input = Value::Tensor(Tensor::from_f32(vec![1.25; 8], vec![1, 8]).unwrap());

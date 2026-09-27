@@ -43,8 +43,22 @@ impl RuntimeAccelerationService for Service {
         assert!(["double", "single"].contains(&admission.binding.builtin.name));
         assert_eq!(
             request.form().id.0,
-            u16::from(admission.binding.builtin.name == "single" && admission.signature == 0),
+            u16::from(admission.signature == 0),
             "the admitted owner selects the stable plain form explicitly; overlapping legacy signatures must not select the first form"
+        );
+        assert_eq!(
+            request.form().operation,
+            if admission.signature == 0 {
+                runmat_builtins::BuiltinPreparationOperation::FloatingCast(
+                    if admission.binding.builtin.name == "single" {
+                        runmat_types::NumericClass::Single
+                    } else {
+                        runmat_types::NumericClass::Double
+                    },
+                )
+            } else {
+                runmat_builtins::BuiltinPreparationOperation::Unary
+            }
         );
         assert_eq!(request.form().data_arguments, &[0]);
         assert_eq!(
