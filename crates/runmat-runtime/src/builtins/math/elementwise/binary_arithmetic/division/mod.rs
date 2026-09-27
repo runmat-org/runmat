@@ -109,7 +109,7 @@ fn is_scalar_double(value: &Value) -> bool {
             tensor::is_scalar_tensor(value) && value.numeric_dtype() == NumericDType::F64
         }
         Value::GpuTensor(value) => {
-            value.shape.iter().copied().product::<usize>() <= 1
+            value.shape().iter().copied().product::<usize>() <= 1
                 && runmat_accelerate_api::handle_integer_type(value).is_none()
                 && !runmat_accelerate_api::handle_is_logical(value)
                 && runmat_accelerate_api::handle_storage(value)

@@ -19,7 +19,7 @@ pub(super) fn floating_pair_shape(
         return Ok(None);
     }
     let shape =
-        crate::builtins::common::broadcast::broadcast_shapes(builtin, &left.shape, &right.shape)?;
+        crate::builtins::common::broadcast::broadcast_shapes(builtin, left.shape(), right.shape())?;
     if !shape.contains(&0)
         && shape
             .iter()

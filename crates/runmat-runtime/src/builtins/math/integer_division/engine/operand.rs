@@ -51,7 +51,7 @@ impl AdmittedOperand {
     pub(super) fn shape(&self) -> &[usize] {
         match self {
             Self::Host(buffer) => &buffer.shape,
-            Self::Resident { handle, .. } => &handle.shape,
+            Self::Resident { handle, .. } => handle.shape(),
         }
     }
 

@@ -15,7 +15,7 @@ impl<T> AdmittedBuffer<T> {
     pub(super) fn shape(&self, host: fn(&T) -> &[usize]) -> &[usize] {
         match self {
             Self::Host(value) => host(value),
-            Self::Resident(handle) => &handle.shape,
+            Self::Resident(handle) => handle.shape(),
         }
     }
     pub(super) async fn materialize(
@@ -41,7 +41,7 @@ impl AdmittedBuffer<BitBuffer> {
             Self::Host(value) => (value.output_class, value.is_scalar),
             Self::Resident(handle) => (
                 runmat_accelerate_api::handle_integer_class(handle),
-                tensor::element_count(&handle.shape) == 1,
+                tensor::element_count(handle.shape()) == 1,
             ),
         }
     }

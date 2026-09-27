@@ -120,7 +120,7 @@ fn is_scalar(value: &Value) -> bool {
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
         Value::ComplexTensor(tensor) => tensor::is_scalar_complex_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
-        Value::GpuTensor(handle) => crate::builtins::common::shape::is_scalar_shape(&handle.shape),
+        Value::GpuTensor(handle) => crate::builtins::common::shape::is_scalar_shape(handle.shape()),
         _ => false,
     }
 }

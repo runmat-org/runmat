@@ -263,7 +263,7 @@ fn try_polyint_gpu(
     if constant.im.abs() > EPS {
         return Ok(None);
     }
-    ensure_vector_shape(&handle.shape)?;
+    ensure_vector_shape(handle.shape())?;
     let Some(provider) =
         runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
     else {

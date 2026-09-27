@@ -41,7 +41,7 @@ fn operand(value: &Value) -> BuiltinResult<Operand<'_>> {
                 return Err(atan2_error(&ATAN2_ERROR_COMPLEX_UNSUPPORTED));
             }
             (
-                &handle.shape,
+                handle.shape(),
                 runmat_accelerate_api::handle_integer_type(handle).is_none()
                     && !runmat_accelerate_api::handle_is_logical(handle),
             )

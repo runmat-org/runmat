@@ -15,7 +15,7 @@ impl OutputTemplate {
     pub(super) fn validate_input(&self, value: &Value) -> BuiltinResult<()> {
         if matches!(self, Self::Like(Value::GpuTensor(_)))
             && (matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
-                || matches!(value, Value::GpuTensor(handle) if handle.descriptor.storage == Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)))
+                || matches!(value, Value::GpuTensor(handle) if handle.descriptor().storage == Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)))
         {
             return Err(single_error_with_detail(
                 &SINGLE_ERROR_INVALID_INPUT,
