@@ -20,6 +20,7 @@ fn error(builtin: &str, detail: impl std::fmt::Display) -> RuntimeError {
 }
 
 struct Reductions<'a> {
+    provider: &'static dyn AccelProvider,
     input: &'a GpuTensorHandle,
     owned: Vec<GpuTensorHandle>,
 }
@@ -64,7 +65,11 @@ impl Reductions<'_> {
 impl Drop for Reductions<'_> {
     fn drop(&mut self) {
         for output in &self.owned {
-            gpu_helpers::free_unprotected_exact_owner(output, &[self.input]);
+            // Every accepted result is distinct from the borrowed input and
+            // belongs to this retained authority, even after selection ends.
+            if self.provider.free(output).is_ok() {
+                runmat_accelerate_api::clear_handle_metadata(output);
+            }
         }
     }
 }
@@ -95,6 +100,7 @@ pub(crate) async fn requires_complex(
         ));
     }
     let mut outputs = Reductions {
+        provider,
         input,
         owned: Vec::new(),
     };

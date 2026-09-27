@@ -306,3 +306,25 @@ fn invalid_form_and_unpolled_drop_never_touch_provider() {
     drop(state);
     assert_borrowed_live(provider, &borrowed);
 }
+
+#[test]
+fn polled_drop_retains_admitted_owner_after_provider_selection_ends() {
+    let _lock = test_support::accel_test_lock();
+    let provider = provider(4, Fault::Pending);
+    let selected = ThreadProviderGuard::set(Some(provider));
+    let (borrowed, args) = inputs(provider);
+    let mut call = Box::pin(crate::dispatcher::call_builtin_async_with_outputs(
+        NAME, &args, 3,
+    ));
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&noop_waker())),
+        Poll::Pending
+    ));
+    drop(selected);
+    for output in &provider.state.lock().unwrap().created {
+        runmat_accelerate_api::clear_handle_metadata(output);
+    }
+    drop(call);
+    provider.assert_reclaimed(0);
+    assert_borrowed_live(provider, &borrowed);
+}

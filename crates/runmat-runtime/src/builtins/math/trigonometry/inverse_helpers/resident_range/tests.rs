@@ -106,6 +106,9 @@ impl Provider {
 }
 
 impl AccelProvider for Provider {
+    fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload(host)
+    }
     fn device_id(&self) -> u32 {
         self.inner.device_id()
     }
@@ -163,11 +166,11 @@ fn fixture(at: usize, fault: Fault) -> (&'static Provider, GpuTensorHandle) {
 
 #[test]
 fn inverse_range_actual_call_failure_is_not_host_fallback_and_reclaims_temporaries() {
-    let _serial = test_support::test_guard();
+    let _serial = test_support::accel_test_lock();
     for (name, steps) in [("asin", 4), ("acos", 4), ("atanh", 4), ("acosh", 2)] {
         for step in 1..=steps {
             let (provider, input) = fixture(step, Fault::Failure);
-            let _provider = ThreadProviderGuard::install(provider);
+            let _provider = ThreadProviderGuard::set(Some(provider));
             let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
                 name,
                 &[Value::GpuTensor(input.clone())],
@@ -186,11 +189,11 @@ fn inverse_range_actual_call_failure_is_not_host_fallback_and_reclaims_temporari
 
 #[test]
 fn inverse_range_actual_call_drop_reclaims_each_suspended_stage() {
-    let _serial = test_support::test_guard();
+    let _serial = test_support::accel_test_lock();
     for (name, steps) in [("asin", 4), ("acos", 4), ("atanh", 4), ("acosh", 2)] {
         for step in 0..=steps {
             let (provider, input) = fixture(step, Fault::Pending);
-            let _provider = ThreadProviderGuard::install(provider);
+            let _provider = ThreadProviderGuard::set(Some(provider));
             let args = [Value::GpuTensor(input.clone())];
             let mut call = Box::pin(crate::dispatcher::call_builtin_async_with_outputs(
                 name, &args, 1,
@@ -210,7 +213,7 @@ fn inverse_range_actual_call_drop_reclaims_each_suspended_stage() {
 
 #[test]
 fn inverse_range_rejects_aliases_and_missing_storage_without_freeing_borrowed_input() {
-    let _serial = test_support::test_guard();
+    let _serial = test_support::accel_test_lock();
     for (step, fault) in [
         (1, Fault::BorrowedAlias),
         (2, Fault::TemporaryAlias),
@@ -218,7 +221,7 @@ fn inverse_range_rejects_aliases_and_missing_storage_without_freeing_borrowed_in
         (2, Fault::MissingStorage),
     ] {
         let (provider, input) = fixture(step, fault);
-        let _provider = ThreadProviderGuard::install(provider);
+        let _provider = ThreadProviderGuard::set(Some(provider));
         assert!(block_on(requires_complex(
             provider,
             &input,
@@ -233,10 +236,10 @@ fn inverse_range_rejects_aliases_and_missing_storage_without_freeing_borrowed_in
 
 #[test]
 fn inverse_range_only_unsupported_hook_is_inconclusive() {
-    let _serial = test_support::test_guard();
+    let _serial = test_support::accel_test_lock();
     for step in 1..=2 {
         let (provider, input) = fixture(step, Fault::Unsupported);
-        let _provider = ThreadProviderGuard::install(provider);
+        let _provider = ThreadProviderGuard::set(Some(provider));
         assert_eq!(
             block_on(requires_complex(
                 provider,
@@ -250,7 +253,7 @@ fn inverse_range_only_unsupported_hook_is_inconclusive() {
         provider.assert_reclaimed(&input);
     }
     let (provider, input) = fixture(0, Fault::None);
-    let _provider = ThreadProviderGuard::install(provider);
+    let _provider = ThreadProviderGuard::set(Some(provider));
     assert_eq!(
         block_on(requires_complex(
             provider,
@@ -261,5 +264,28 @@ fn inverse_range_only_unsupported_hook_is_inconclusive() {
         .unwrap(),
         Some(false)
     );
+    provider.assert_reclaimed(&input);
+}
+
+#[test]
+fn inverse_range_abandonment_keeps_its_admitted_provider_after_selection_is_removed() {
+    let _serial = test_support::accel_test_lock();
+    let (provider, input) = fixture(2, Fault::Pending);
+    let selected = ThreadProviderGuard::set(Some(provider));
+    let mut call = Box::pin(requires_complex(
+        provider,
+        &input,
+        RealDomain::ClosedUnitInterval,
+        "asin",
+    ));
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&noop_waker())),
+        Poll::Pending
+    ));
+    drop(selected);
+    for output in &provider.state.lock().unwrap().owned {
+        runmat_accelerate_api::clear_handle_metadata(output);
+    }
+    drop(call);
     provider.assert_reclaimed(&input);
 }

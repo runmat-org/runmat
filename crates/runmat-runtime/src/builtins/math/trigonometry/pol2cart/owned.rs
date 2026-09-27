@@ -5,7 +5,7 @@ use runmat_accelerate_api::ProviderPrecision;
 /// when a malformed provider returns one as an output. Drop handles cancellation.
 pub(super) struct Outputs {
     borrowed: Vec<GpuTensorHandle>,
-    owned: Vec<GpuTensorHandle>,
+    owned: Vec<(GpuTensorHandle, &'static dyn AccelProvider)>,
 }
 
 impl Outputs {
@@ -23,7 +23,10 @@ impl Outputs {
     }
 
     pub(super) fn protected(&self) -> Vec<&GpuTensorHandle> {
-        self.borrowed.iter().chain(&self.owned).collect()
+        self.borrowed
+            .iter()
+            .chain(self.owned.iter().map(|(handle, _)| handle))
+            .collect()
     }
 
     pub(super) fn adopt(
@@ -57,22 +60,25 @@ impl Outputs {
                 "provider returned an invalid or aliased coordinate result",
             ));
         }
-        self.owned.push(output.clone());
+        self.owned.push((output.clone(), provider));
         Ok(output)
     }
 
     pub(super) fn publish(&mut self, handle: GpuTensorHandle) -> Value {
         self.owned
-            .retain(|owned| !gpu_helpers::same_gpu_handle(owned, &handle));
+            .retain(|(owned, _)| !gpu_helpers::same_gpu_handle(owned, &handle));
         gpu_helpers::resident_gpu_value(handle)
     }
 }
 
 impl Drop for Outputs {
     fn drop(&mut self) {
-        let protected: Vec<_> = self.borrowed.iter().collect();
-        for handle in &self.owned {
-            gpu_helpers::free_unprotected_exact_owner(handle, &protected);
+        for (handle, provider) in &self.owned {
+            // Adoption proved these are fresh and non-borrowed. Retain the
+            // actual provider authority across suspension and selection drop.
+            if provider.free(handle).is_ok() {
+                runmat_accelerate_api::clear_handle_metadata(handle);
+            }
         }
     }
 }
