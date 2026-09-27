@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use glob::Pattern;
 use regex::Regex;
-use runmat_accelerate_api::{handle_is_logical, ProviderPrecision};
+use runmat_accelerate_api::handle_is_logical;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -656,7 +656,14 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             let elem_size = if handle_is_logical(handle) {
                 1
             } else {
-                gpu_element_size_bytes()
+                let lanes = if handle.physical().storage()
+                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                {
+                    2
+                } else {
+                    1
+                };
+                handle.physical().element_type().element_size() * lanes
             };
             let count = handle
                 .shape()
@@ -754,15 +761,6 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
             .saturating_add(reference.type_identity.name.len()),
     };
     Ok(bytes)
-}
-
-fn gpu_element_size_bytes() -> usize {
-    runmat_accelerate_api::provider()
-        .map(|provider| match provider.precision() {
-            ProviderPrecision::F32 => 4,
-            ProviderPrecision::F64 => 8,
-        })
-        .unwrap_or(8)
 }
 
 #[cfg(test)]
@@ -1177,27 +1175,24 @@ pub(crate) mod tests {
     fn whos_reports_gpu_logical_bytes() {
         let _guard = workspace_guard();
         ensure_test_resolver();
-        test_support::with_test_provider(|_| {
-            let tensor = Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![4, 1]).unwrap();
-            let gpu_value = block_on(crate::call_builtin_async(
-                "gpuArray",
-                &[Value::Tensor(tensor.clone())],
-            ))
-            .expect("gpuArray");
-            let handle = match gpu_value {
-                Value::GpuTensor(ref h) => {
-                    runmat_accelerate_api::set_handle_logical(h, true);
-                    h.clone()
-                }
-                _ => panic!("expected gpu tensor"),
-            };
+        test_support::with_test_provider(|provider| {
+            let data = [0, 1, 0, 1];
+            let handle = runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &data,
+                    shape: &[4, 1],
+                },
+                &[],
+            )
+            .expect("logical producer upload");
             set_workspace(&[("logical_gpu", Value::GpuTensor(handle))], &[]);
 
             let value = whos_builtin(vec![Value::from("logical_gpu")]).expect("whos");
             let entries = structs_from_value(value);
             assert_eq!(entries.len(), 1);
             let bytes = field_bytes(&entries[0]).unwrap();
-            assert_eq!(bytes, tensor.materialize_f64().len() as f64);
+            assert_eq!(bytes, data.len() as f64);
         });
     }
 
@@ -1355,5 +1350,41 @@ pub(crate) mod tests {
             value_memory_bytes(&Value::ComplexTensor(tensor), &mut HashSet::new()).expect("bytes"),
             8
         );
+    }
+
+    #[test]
+    fn resident_byte_estimates_follow_native_class_not_ambient_precision() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        test_support::with_f32_test_provider(|_| {
+            let owner = TestAllocationOwner::new();
+            for element in [
+                NumericElementType::F64,
+                NumericElementType::F32,
+                NumericElementType::I8,
+                NumericElementType::I16,
+                NumericElementType::I32,
+                NumericElementType::I64,
+                NumericElementType::U8,
+                NumericElementType::U16,
+                NumericElementType::U32,
+                NumericElementType::U64,
+            ] {
+                for (storage, lanes) in [
+                    (GpuTensorStorage::Real, 1),
+                    (GpuTensorStorage::ComplexInterleaved, 2),
+                ] {
+                    let allocation = owner.allocate_zeroed(vec![2, 3], element, storage).unwrap();
+                    let bytes = value_memory_bytes(
+                        &Value::GpuTensor(allocation.handle),
+                        &mut HashSet::new(),
+                    )
+                    .unwrap();
+                    assert_eq!(bytes, 6 * element.element_size() * lanes);
+                    assert_eq!(allocation.probe.retirements(), 1);
+                }
+            }
+        });
     }
 }
