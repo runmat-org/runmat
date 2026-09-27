@@ -6,6 +6,10 @@ use runmat_value::{NumericDType, Value};
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+#[cfg(test)]
+#[path = "unary_provider_owned_tests.rs"]
+mod owned_tests;
+
 pub(super) fn validate_real_unary_output(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
@@ -17,20 +21,19 @@ pub(super) fn validate_real_unary_output(
         precision: runmat_accelerate_api::handle_precision(input),
         integer: None,
         logical: false,
-        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if !gpu_helpers::unary_gpu_output_matches(&output, input, provider, contract)
         || !gpu_helpers::expected_handle_numeric_element_type(&output).is_ok_and(|element| {
             gpu_helpers::numeric_descriptor_matches(&output, element, GpuTensorStorage::Real)
         })
     {
-        gpu_helpers::free_rejected_provider_output(&output, &[input], provider);
-        return Err(internal(
-            builtin,
-            "provider returned malformed unary output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            internal(builtin, "provider returned malformed unary output"),
         ));
     }
-    preserve_provenance(&mut output, input);
+    preserve_provenance(&mut output, input)?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -65,14 +68,14 @@ fn restore_output(
                 .map_err(|error| internal(builtin, error))?;
             (
                 gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])
-                    .map_err(|error| internal(builtin, error))?,
+                    .map_err(|error| retained_internal(builtin, error))?,
                 GpuTensorStorage::Real,
                 Some(ProviderPrecision::F64),
             )
         }
         Value::Tensor(tensor) => (
             gpu_helpers::upload_tensor_protecting(provider, tensor, &[input])
-                .map_err(|error| internal(builtin, error))?,
+                .map_err(|error| retained_internal(builtin, error))?,
             GpuTensorStorage::Real,
             precision_for(tensor.numeric_dtype()),
         ),
@@ -81,14 +84,14 @@ fn restore_output(
                 .map_err(|error| internal(builtin, error))?;
             (
                 gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])
-                    .map_err(|error| internal(builtin, error))?,
+                    .map_err(|error| retained_internal(builtin, error))?,
                 GpuTensorStorage::ComplexInterleaved,
                 Some(ProviderPrecision::F64),
             )
         }
         Value::ComplexTensor(tensor) => (
             gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[input])
-                .map_err(|error| internal(builtin, error))?,
+                .map_err(|error| retained_internal(builtin, error))?,
             GpuTensorStorage::ComplexInterleaved,
             precision_for(tensor.numeric_dtype()),
         ),
@@ -104,23 +107,30 @@ fn restore_output(
         precision,
         integer: None,
         logical: false,
-        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if !gpu_helpers::unary_gpu_output_matches(&handle, input, provider, contract) {
-        gpu_helpers::free_rejected_provider_output(&handle, &[input], provider);
-        return Err(internal(
-            builtin,
-            "provider upload returned malformed fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            handle,
+            internal(
+                builtin,
+                "provider upload returned malformed fallback output",
+            ),
         ));
     }
-    preserve_provenance(&mut handle, input);
+    preserve_provenance(&mut handle, input)?;
     gpu_helpers::resident_gpu_value(handle)
 }
 
-fn preserve_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {
+fn preserve_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) -> BuiltinResult<()> {
     let provenance =
         runmat_accelerate_api::handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
-    runmat_accelerate_api::set_handle_provenance(output, provenance);
+    *output = output.with_provenance(provenance).map_err(|error| {
+        build_runtime_error(format!("cannot preserve unary output intent: {error}"))
+            .with_source(error)
+            .build()
+    })?;
+    Ok(())
 }
 
 fn precision_for(dtype: NumericDType) -> Option<ProviderPrecision> {
@@ -135,4 +145,10 @@ fn internal(builtin: &'static str, detail: impl std::fmt::Display) -> RuntimeErr
     build_runtime_error(format!("{builtin}: {detail}"))
         .with_builtin(builtin)
         .build()
+}
+
+fn retained_internal(builtin: &'static str, error: RuntimeError) -> RuntimeError {
+    let mut contextual = internal(builtin, error.message());
+    contextual.source = Some(Box::new(error));
+    contextual
 }
