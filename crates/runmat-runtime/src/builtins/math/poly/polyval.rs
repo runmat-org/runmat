@@ -1,8 +1,8 @@
 //! MATLAB-compatible `polyval` builtin with GPU-aware semantics for RunMat.
 
-use log::debug;
 use num_complex::Complex64;
-use runmat_accelerate_api::{HostTensorView, ProviderPolyvalMu, ProviderPolyvalOptions};
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -385,6 +385,7 @@ pub async fn evaluate(
     }
     let options = parse_option_values(rest).await?;
 
+    let residency = resident::Request::new(&points, &coefficients, rest)?;
     let coeff_clone = coefficients.clone();
     let points_clone = points.clone();
 
@@ -400,9 +401,7 @@ pub async fn evaluate(
     };
 
     if prefer_gpu_output && !want_delta && options.s.is_none() {
-        if let Some(value) =
-            try_gpu_polyval(&coeffs, coeff_real, &inputs, mu, prefer_gpu_output).await?
-        {
+        if let Some(value) = residency.try_evaluate(&coeffs, coeff_real, &inputs, mu)? {
             return Ok(PolyvalEval::new(value, None));
         }
     }
@@ -424,9 +423,9 @@ pub async fn evaluate(
     }
 
     if inputs.data.is_empty() {
-        let y = zeros_like(&inputs.shape, prefer_gpu_output)?;
+        let y = zeros_like(&inputs.shape, prefer_gpu_output, &residency)?;
         let delta = if want_delta {
-            Some(zeros_like(&inputs.shape, prefer_gpu_output)?)
+            Some(zeros_like(&inputs.shape, prefer_gpu_output, &residency)?)
         } else {
             None
         };
@@ -434,9 +433,9 @@ pub async fn evaluate(
     }
 
     if coeffs.is_empty() {
-        let zeros = zeros_like(&inputs.shape, prefer_gpu_output)?;
+        let zeros = zeros_like(&inputs.shape, prefer_gpu_output, &residency)?;
         let delta = if want_delta {
-            Some(zeros_like(&inputs.shape, prefer_gpu_output)?)
+            Some(zeros_like(&inputs.shape, prefer_gpu_output, &residency)?)
         } else {
             None
         };
@@ -450,13 +449,14 @@ pub async fn evaluate(
         &inputs.shape,
         prefer_gpu_output,
         output_real && values_are_real(&values),
+        &residency,
     )?;
 
     let delta_value = if want_delta {
         let stats = stats.expect("delta requires stats");
         let delta = compute_prediction_interval(&coeffs, &inputs.data, &stats)?;
         let prefer = prefer_gpu_output && stats.is_real;
-        Some(finalize_delta(delta, &inputs.shape, prefer)?)
+        Some(finalize_delta(delta, &inputs.shape, prefer, &residency)?)
     } else {
         None
     };
@@ -464,91 +464,8 @@ pub async fn evaluate(
     Ok(PolyvalEval::new(result_value, delta_value))
 }
 
-async fn try_gpu_polyval(
-    coeffs: &[Complex64],
-    coeff_real: bool,
-    inputs: &NumericArray,
-    mu: Option<Mu>,
-    prefer_gpu_output: bool,
-) -> BuiltinResult<Option<Value>> {
-    if !coeff_real || !inputs.all_real {
-        return Ok(None);
-    }
-    if coeffs.is_empty() || inputs.data.is_empty() {
-        return Ok(None);
-    }
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(None);
-    };
-
-    let coeff_data: Vec<f64> = coeffs.iter().map(|c| c.re).collect();
-    let coeff_shape = vec![1usize, coeffs.len()];
-    let coeff_view = HostTensorView {
-        data: &coeff_data,
-        shape: &coeff_shape,
-    };
-    let coeff_handle = match provider.upload(&coeff_view) {
-        Ok(handle) => handle,
-        Err(err) => {
-            debug!("polyval: GPU upload of coefficients failed, falling back: {err}");
-            return Ok(None);
-        }
-    };
-
-    let input_data: Vec<f64> = inputs.data.iter().map(|c| c.re).collect();
-    let input_shape = inputs.shape.clone();
-    let input_view = HostTensorView {
-        data: &input_data,
-        shape: &input_shape,
-    };
-    let input_handle = match provider.upload(&input_view) {
-        Ok(handle) => handle,
-        Err(err) => {
-            debug!("polyval: GPU upload of evaluation points failed, falling back: {err}");
-            let _ = provider.free(&coeff_handle);
-            return Ok(None);
-        }
-    };
-
-    let options = ProviderPolyvalOptions {
-        mu: mu.map(|m| ProviderPolyvalMu {
-            mean: m.mean,
-            scale: m.scale,
-        }),
-    };
-
-    let result_handle = match provider.polyval(&coeff_handle, &input_handle, &options) {
-        Ok(handle) => handle,
-        Err(err) => {
-            debug!("polyval: GPU kernel execution failed, falling back: {err}");
-            let _ = provider.free(&coeff_handle);
-            let _ = provider.free(&input_handle);
-            return Ok(None);
-        }
-    };
-
-    let _ = provider.free(&coeff_handle);
-    let _ = provider.free(&input_handle);
-
-    if prefer_gpu_output {
-        return Ok(Some(Value::GpuTensor(result_handle)));
-    }
-
-    let host = match gpu_helpers::download_floating_projection_async(provider, &result_handle).await
-    {
-        Ok(host) => host,
-        Err(err) => {
-            debug!("polyval: GPU download failed, falling back: {err}");
-            let _ = provider.free(&result_handle);
-            return Ok(None);
-        }
-    };
-    let _ = provider.free(&result_handle);
-
-    let tensor =
-        Tensor::new(host.data, host.shape).map_err(|e| polyval_error(format!("polyval: {e}")))?;
-    Ok(Some(tensor::tensor_into_value(tensor)))
-}
+#[path = "polyval/resident.rs"]
+mod resident;
 
 /// Result object for polyval evaluation.
 #[derive(Debug)]
@@ -716,18 +633,15 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
     }
 }
 
+#[async_recursion::async_recursion(?Send)]
 async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            let array = NumericArray {
-                data: tensor::tensor_values_f64(&tensor)
-                    .into_iter()
-                    .map(|re| Complex64::new(re, 0.0))
-                    .collect(),
-                shape: tensor.shape.clone(),
-                all_real: true,
-            };
+            let owner = gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| polyval_error("polyval: no exact owner for resident points"))?;
+            let host =
+                gpu_helpers::download_value_preserving_residency_async(owner, &handle).await?;
+            let (array, _) = convert_points(host).await?;
             Ok((array, true))
         }
         Value::Tensor(tensor) => Ok((
@@ -1095,10 +1009,11 @@ fn finalize_values(
     shape: &[usize],
     prefer_gpu: bool,
     real_only: bool,
+    residency: &resident::Request,
 ) -> BuiltinResult<Value> {
     if real_only {
         let real_data: Vec<f64> = data.iter().map(|c| c.re).collect();
-        finalize_real(real_data, shape, prefer_gpu)
+        finalize_real(real_data, shape, prefer_gpu, residency)
     } else if data.len() == 1 {
         let value = data[0];
         Ok(Value::Complex(value.re, value.im))
@@ -1110,31 +1025,45 @@ fn finalize_values(
     }
 }
 
-fn finalize_delta(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
-    finalize_real(data, shape, prefer_gpu)
+fn finalize_delta(
+    data: Vec<f64>,
+    shape: &[usize],
+    prefer_gpu: bool,
+    residency: &resident::Request,
+) -> BuiltinResult<Value> {
+    finalize_real(data, shape, prefer_gpu, residency)
 }
 
-fn finalize_real(data: Vec<f64>, shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
+fn finalize_real(
+    data: Vec<f64>,
+    shape: &[usize],
+    prefer_gpu: bool,
+    residency: &resident::Request,
+) -> BuiltinResult<Value> {
     let tensor = Tensor::new(data, shape.to_vec())
         .map_err(|e| polyval_error(format!("polyval: failed to build tensor: {e}")))?;
     if prefer_gpu {
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            let data = tensor::tensor_values_f64_cow(&tensor);
-            let view = HostTensorView {
-                data: data.as_ref(),
-                shape: &tensor.shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
-                return Ok(Value::GpuTensor(handle));
-            }
+        if let Some(value) = residency.upload_result(&tensor)? {
+            return Ok(value);
         }
     }
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn zeros_like(shape: &[usize], prefer_gpu: bool) -> BuiltinResult<Value> {
-    let len = shape.iter().product();
-    finalize_real(vec![0.0; len], shape, prefer_gpu)
+fn zeros_like(
+    shape: &[usize],
+    prefer_gpu: bool,
+    residency: &resident::Request,
+) -> BuiltinResult<Value> {
+    let len = if shape.contains(&0) {
+        0
+    } else {
+        shape
+            .iter()
+            .try_fold(1usize, |n, d| n.checked_mul(*d))
+            .ok_or_else(|| polyval_error("polyval: output shape overflow"))?
+    };
+    finalize_real(vec![0.0; len], shape, prefer_gpu, residency)
 }
 
 fn ensure_vector_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
@@ -1623,8 +1552,7 @@ pub(crate) mod tests {
         )
         .expect("polyval gpu");
 
-        let _ = provider.free(&coeff_handle);
-        let _ = provider.free(&point_handle);
+        drop((coeff_handle, point_handle));
 
         let gathered = test_support::gather(gpu_value).expect("gather");
 

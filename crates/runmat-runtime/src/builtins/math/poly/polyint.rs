@@ -1,6 +1,5 @@
 //! MATLAB-compatible `polyint` builtin with GPU-aware semantics for RunMat.
 
-use log::{trace, warn};
 use num_complex::Complex64;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
@@ -200,14 +199,18 @@ async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResul
         reject_unsupported_numeric_class(value, "constant")?;
     }
 
+    let mut protected = Vec::new();
+    for value in &rest {
+        dispatcher::try_visit_gpu_handles(value, &mut |handle| protected.push(handle.clone()))?;
+    }
     let constant = match rest.into_iter().next() {
         Some(value) => parse_constant(value).await?,
         None => Complex64::new(0.0, 0.0),
     };
 
     if let Value::GpuTensor(handle) = &coeffs {
-        if let Some(device_result) = try_polyint_gpu(handle, constant)? {
-            return Ok(Value::GpuTensor(device_result));
+        if let Some(device_result) = try_polyint_gpu(handle, constant, &protected)? {
+            return gpu_helpers::resident_gpu_value(device_result);
         }
     }
 
@@ -215,13 +218,14 @@ async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResul
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     };
-    polyint_host_value(coeffs, constant, source_gpu).await
+    polyint_host_value(coeffs, constant, source_gpu, &protected).await
 }
 
 async fn polyint_host_value(
     coeffs: Value,
     constant: Complex64,
     source_gpu: Option<runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let polynomial = parse_polynomial(coeffs).await?;
     let mut integrated = integrate_coeffs(&polynomial.coeffs);
@@ -231,7 +235,15 @@ async fn polyint_host_value(
         *last += constant;
     }
     let value = coeffs_to_value(&integrated, polynomial.class)?;
-    maybe_return_gpu(value, source_gpu.as_ref())
+    let Some(source) = source_gpu.as_ref() else {
+        return Ok(value);
+    };
+    gpu_helpers::restore_class_preserving_value_protecting(
+        source,
+        value,
+        "polyint",
+        &protected.iter().collect::<Vec<_>>(),
+    )
 }
 
 fn reject_unsupported_numeric_class(value: &Value, role: &str) -> BuiltinResult<()> {
@@ -259,22 +271,73 @@ fn reject_unsupported_numeric_class(value: &Value, role: &str) -> BuiltinResult<
 fn try_polyint_gpu(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     constant: Complex64,
+    protected: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Option<runmat_accelerate_api::GpuTensorHandle>> {
     if constant.im.abs() > EPS {
         return Ok(None);
     }
     ensure_vector_shape(handle.shape())?;
-    let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
-    else {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) else {
         return Ok(None);
     };
+    let length = if handle.shape().contains(&0) {
+        0
+    } else {
+        handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |n, d| n.checked_mul(*d))
+            .ok_or_else(|| polyint_error("polyint: input size overflow"))?
+    }
+    .checked_add(1)
+    .ok_or_else(|| polyint_error("polyint: output size overflow"))?;
+    let _residency = std::iter::once(handle)
+        .chain(protected.iter())
+        .map(gpu_helpers::ResidencyRestoreGuard::new)
+        .collect::<Vec<_>>();
     match provider.polyint(handle, constant.re) {
-        Ok(result) => Ok(Some(result)),
-        Err(err) => {
-            trace!("polyint: provider hook unavailable, falling back to host: {err}");
-            Ok(None)
+        Ok(mut result) => {
+            let output_length = if result.shape().contains(&0) {
+                Some(0)
+            } else {
+                result
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |n, d| n.checked_mul(*d))
+            };
+            if output_length != Some(length)
+                || ensure_vector_shape(result.shape()).is_err()
+                || result.physical().element_type() != handle.physical().element_type()
+                || result.physical().storage() != handle.physical().storage()
+                || runmat_accelerate_api::handle_is_logical(&result)
+                || runmat_accelerate_api::handle_is_transposed(&result)
+                || gpu_helpers::exact_provider_for_handle(&result)
+                    .is_none_or(|owner| !std::ptr::eq(owner, provider))
+                || std::iter::once(handle)
+                    .chain(protected.iter())
+                    .any(|input| result.shares_allocation_with(input))
+            {
+                return Err(gpu_helpers::reject_gpu_output(
+                    result,
+                    polyint_error("polyint: invalid provider output"),
+                ));
+            }
+            // The public integral contract is always a row vector, including column input.
+            result = result
+                .with_view(result.view().clone().with_shape(vec![1, length]))
+                .map_err(|error| {
+                    build_runtime_error(format!("polyint: invalid result view: {error}"))
+                        .with_source(error)
+                        .build()
+                })?;
+            gpu_helpers::propagate_output_provenance(&mut result, [handle])?;
+            Ok(Some(result))
         }
+        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => Ok(None),
+        Err(error) => Err(crate::runtime_error::with_provider_execution_source(
+            polyint_error(format!("polyint: provider execution failed: {error}")),
+            runmat_accelerate_api::ProviderExecutionError::from(error),
+        )),
     }
 }
 
@@ -293,47 +356,6 @@ fn integrate_coeffs(coeffs: &[Complex64]) -> Vec<Complex64> {
     }
     result.push(Complex64::new(0.0, 0.0));
     result
-}
-
-fn maybe_return_gpu(
-    value: Value,
-    source_gpu: Option<&runmat_accelerate_api::GpuTensorHandle>,
-) -> BuiltinResult<Value> {
-    let Some(source_gpu) = source_gpu else {
-        return Ok(value);
-    };
-    let provider = runmat_accelerate_api::provider_for_handle(source_gpu);
-    match value {
-        Value::Tensor(tensor) => {
-            if let Some(provider) = provider {
-                match gpu_helpers::upload_tensor(provider, &tensor) {
-                    Ok(handle) => return Ok(Value::GpuTensor(handle)),
-                    Err(err) => {
-                        warn!("polyint: provider upload failed, keeping result on host: {err}");
-                    }
-                }
-            } else {
-                trace!("polyint: no provider available to re-upload result");
-            }
-            Ok(Value::Tensor(tensor))
-        }
-        Value::ComplexTensor(tensor) => {
-            if let Some(provider) = provider {
-                match gpu_helpers::upload_complex_tensor(provider, &tensor) {
-                    Ok(handle) => return gpu_helpers::complex_gpu_value(handle),
-                    Err(err) => {
-                        warn!(
-                            "polyint: provider complex upload failed, keeping result on host: {err}"
-                        );
-                    }
-                }
-            } else {
-                trace!("polyint: no provider available to re-upload complex result");
-            }
-            Ok(Value::ComplexTensor(tensor))
-        }
-        other => Ok(other),
-    }
 }
 
 fn coeffs_to_value(coeffs: &[Complex64], class: FloatingClass) -> BuiltinResult<Value> {
@@ -480,6 +502,44 @@ enum FloatingClass {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn resident_column_complex_integral_keeps_storage_and_public_row_shape() {
+        test_support::with_test_provider(|provider| {
+            let source = ComplexTensor::new(vec![(2.0, 4.0), (3.0, -2.0)], vec![2, 1]).unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &source).unwrap();
+            let output =
+                polyint_builtin(Value::GpuTensor(input.clone()), vec![Value::Num(5.0)]).unwrap();
+            let Value::GpuTensor(output) = output else {
+                panic!("resident integral required")
+            };
+            assert_eq!(output.shape(), &[1, 3]);
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                output.physical().storage(),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let host = futures::executor::block_on(
+                gpu_helpers::download_value_preserving_residency_async(provider, &output),
+            )
+            .unwrap();
+            let Value::ComplexTensor(host) = host else {
+                panic!("complex result required")
+            };
+            assert_eq!(
+                host.materialize_f64(),
+                vec![(1.0, 2.0), (3.0, -2.0), (5.0, 0.0)]
+            );
+            let original = futures::executor::block_on(
+                gpu_helpers::download_value_preserving_residency_async(provider, &input),
+            )
+            .unwrap();
+            let Value::ComplexTensor(original) = original else {
+                panic!("complex input required")
+            };
+            assert_eq!(original.materialize_f64(), source.materialize_f64());
+        });
+    }
+
     use super::*;
     use crate::builtins::common::gpu_helpers;
     use crate::builtins::common::test_support;

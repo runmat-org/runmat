@@ -1,6 +1,5 @@
 //! MATLAB-compatible `polyder` builtin with GPU-aware semantics for RunMat.
 
-use log::trace;
 use num_complex::Complex64;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -252,60 +251,9 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
     }
 }
 
-async fn try_gpu_derivative_single(value: &Value) -> BuiltinResult<Option<Value>> {
-    let Value::GpuTensor(handle) = value else {
-        return Ok(None);
-    };
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(None);
-    };
-    match provider.polyder_single(handle).await {
-        Ok(out) => Ok(Some(Value::GpuTensor(out))),
-        Err(err) => {
-            trace!("polyder: provider polyder_single fallback: {err}");
-            Ok(None)
-        }
-    }
-}
-
-async fn try_gpu_derivative_product(first: &Value, second: &Value) -> BuiltinResult<Option<Value>> {
-    match (first, second) {
-        (Value::GpuTensor(p), Value::GpuTensor(q)) => {
-            let Some(provider) = runmat_accelerate_api::provider() else {
-                return Ok(None);
-            };
-            match provider.polyder_product(p, q).await {
-                Ok(out) => Ok(Some(Value::GpuTensor(out))),
-                Err(err) => {
-                    trace!("polyder: provider polyder_product fallback: {err}");
-                    Ok(None)
-                }
-            }
-        }
-        _ => Ok(None),
-    }
-}
-
-async fn try_gpu_quotient(u: &Value, v: &Value) -> BuiltinResult<Option<PolyderEval>> {
-    match (u, v) {
-        (Value::GpuTensor(uh), Value::GpuTensor(vh)) => {
-            let Some(provider) = runmat_accelerate_api::provider() else {
-                return Ok(None);
-            };
-            match provider.polyder_quotient(uh, vh).await {
-                Ok(result) => Ok(Some(PolyderEval {
-                    numerator: Value::GpuTensor(result.numerator),
-                    denominator: Value::GpuTensor(result.denominator),
-                })),
-                Err(err) => {
-                    trace!("polyder: provider polyder_quotient fallback: {err}");
-                    Ok(None)
-                }
-            }
-        }
-        _ => Ok(None),
-    }
-}
+#[path = "polyder/resident.rs"]
+mod resident;
+use resident::{try_gpu_derivative_product, try_gpu_derivative_single, try_gpu_quotient};
 
 /// Evaluate the quotient rule derivative `[num, den] = polyder(u, v)`.
 pub async fn evaluate_quotient(u: Value, v: Value) -> BuiltinResult<PolyderEval> {

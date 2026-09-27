@@ -1,6 +1,6 @@
 //! MATLAB-compatible `polyfit` builtin with GPU-aware semantics for RunMat.
 
-use log::{trace, warn};
+use log::warn;
 use num_complex::Complex64;
 use runmat_accelerate_api::ProviderPolyfitResult;
 use runmat_builtins::{
@@ -14,6 +14,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::tensor;
 use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -468,11 +469,6 @@ async fn try_gpu_polyfit(
     degree: usize,
     rest: &[Value],
 ) -> BuiltinResult<Option<PolyfitEval>> {
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-
     let x_handle = match x {
         Value::GpuTensor(handle) => handle,
         _ => return Ok(None),
@@ -491,18 +487,67 @@ async fn try_gpu_polyfit(
         Some(_) => return Ok(None),
         None => None,
     };
+    let inputs = [Some(x_handle), Some(y_handle), weight_handle]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let mut count = None;
+    for input in &inputs {
+        ensure_vector_shape("polyfit", "input", input.shape())?;
+        let len = if input.shape().contains(&0) {
+            0
+        } else {
+            input
+                .shape()
+                .iter()
+                .try_fold(1usize, |n, d| n.checked_mul(*d))
+                .ok_or_else(|| polyfit_error("polyfit: input size overflow"))?
+        };
+        if len == 0 || count.is_some_and(|count| count != len) {
+            return Err(polyfit_error(
+                "polyfit: input vectors must have matching nonempty lengths",
+            ));
+        }
+        count = Some(len);
+    }
+    let provider = gpu_helpers::exact_provider_for_handle(x_handle)
+        .ok_or_else(|| polyfit_internal_error("polyfit: no exact owner for resident input"))?;
+    for input in &inputs {
+        let owner = gpu_helpers::exact_provider_for_handle(input)
+            .ok_or_else(|| polyfit_internal_error("polyfit: no exact owner for resident input"))?;
+        if !std::ptr::eq(owner, provider)
+            || input.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(input)
+            || runmat_accelerate_api::handle_precision(input) != Some(provider.precision())
+        {
+            return Ok(None);
+        }
+    }
+    let _residency = inputs
+        .iter()
+        .map(|input| gpu_helpers::ResidencyRestoreGuard::new(input))
+        .collect::<Vec<_>>();
 
     let result = match provider
         .polyfit(x_handle, y_handle, degree, weight_handle)
         .await
     {
         Ok(res) => res,
-        Err(err) => {
-            trace!("polyfit: provider path unavailable ({err}); falling back to host");
-            return Ok(None);
+        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+            return Ok(None)
+        }
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                polyfit_internal_error(format!("polyfit: provider execution failed: {error}")),
+                runmat_accelerate_api::ProviderExecutionError::from(error),
+            ))
         }
     };
-
+    if degree.checked_add(1) != Some(result.coefficients.len()) {
+        return Err(polyfit_internal_error(
+            "polyfit: provider returned incorrect coefficient count",
+        ));
+    }
     let solution = PolyfitSolution::from_provider(result)?;
     PolyfitEval::from_solution(solution).map(Some)
 }
@@ -527,7 +572,7 @@ impl PolyfitSolution {
                 "polyfit: provider returned empty coefficient vector",
             ));
         }
-        if result.r_matrix.len() != cols * cols {
+        if cols.checked_mul(cols) != Some(result.r_matrix.len()) {
             return Err(polyfit_internal_error(
                 "polyfit: provider returned malformed R matrix",
             ));
@@ -1480,9 +1525,7 @@ pub(crate) mod tests {
             assert_eq!(cpu_eval.coefficients(), gpu_eval.coefficients());
             assert_eq!(cpu_eval.mu(), gpu_eval.mu());
 
-            let _ = provider.free(&x_handle);
-            let _ = provider.free(&y_handle);
-            let _ = provider.free(&w_handle);
+            drop((x_handle, y_handle, w_handle));
         });
     }
 
@@ -1530,8 +1573,7 @@ pub(crate) mod tests {
         )
         .expect("gpu polyfit");
 
-        let _ = trait_provider.free(&x_handle);
-        let _ = trait_provider.free(&y_handle);
+        drop((x_handle, y_handle));
 
         let cpu_coeff = match cpu_eval.coefficients() {
             Value::Tensor(t) => t,
