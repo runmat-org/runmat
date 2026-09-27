@@ -399,8 +399,18 @@ async fn fft_gpu(
     }
 
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(out) = provider.fft_dim(&handle, length, dim_index).await {
-            return Ok(Value::GpuTensor(out));
+        match provider.fft_dim(&handle, length, dim_index).await {
+            Ok(out) => return Ok(Value::GpuTensor(out)),
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    fft_error_with_detail(
+                        &FFT_ERROR_INTERNAL,
+                        format!("provider FFT failed: {error}"),
+                    ),
+                    error,
+                ))
+            }
         }
     }
 

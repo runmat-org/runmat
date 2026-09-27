@@ -305,7 +305,7 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
                     // intermediate; aliased input/output leases remain live.
                     current = next;
                 }
-                Err(_) => {
+                Err(error) if error.is_unsupported() => {
                     let downloaded =
                         download_provider_complex_tensor(provider, &current, BUILTIN_NAME)
                             .await
@@ -334,6 +334,15 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
                     drop(current);
                     let partial = transformed?;
                     return restore_complex_gpu_result(&handle, &partial, BUILTIN_NAME);
+                }
+                Err(error) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        fftn_error_with_detail(
+                            &FFTN_ERROR_INTERNAL,
+                            format!("provider FFT pass {} failed: {error}", axis + 1),
+                        ),
+                        error,
+                    ))
                 }
             }
         }

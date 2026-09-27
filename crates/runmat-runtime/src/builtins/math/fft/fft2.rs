@@ -368,12 +368,12 @@ async fn fft2_gpu(
     }
 
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        if let Ok(first) = provider.fft_dim(&handle, lengths.0, 0).await {
-            match provider.fft_dim(&first, lengths.1, 1).await {
+        match provider.fft_dim(&handle, lengths.0, 0).await {
+            Ok(first) => match provider.fft_dim(&first, lengths.1, 1).await {
                 Ok(second) => {
                     return Ok(Value::GpuTensor(second));
                 }
-                Err(_) => {
+                Err(error) if error.is_unsupported() => {
                     let partial = download_provider_complex_tensor(provider, &first, BUILTIN_NAME)
                         .await
                         .map_err(|source| {
@@ -387,6 +387,25 @@ async fn fft2_gpu(
                     let completed = fft_complex_tensor(partial?, lengths.1, Some(2))?;
                     return restore_complex_gpu_result(&handle, &completed, BUILTIN_NAME);
                 }
+                Err(error) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        fft2_error_with_detail(
+                            &FFT2_ERROR_INTERNAL,
+                            format!("second provider FFT pass failed: {error}"),
+                        ),
+                        error,
+                    ))
+                }
+            },
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    fft2_error_with_detail(
+                        &FFT2_ERROR_INTERNAL,
+                        format!("first provider FFT pass failed: {error}"),
+                    ),
+                    error,
+                ))
             }
         }
     }

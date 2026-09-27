@@ -4,10 +4,9 @@ use super::common::{
     complex_tensor_to_real_value, download_owned_provider_complex_tensor,
     download_provider_complex_tensor, ensure_wide_integer_data_exact, gather_gpu_complex_tensor,
     gpu_metadata_snapshot, is_wide_integer_value, parse_nd_sizes_value, parse_symflag,
-    provider_operation_unsupported, restore_complex_gpu_result, restore_gpu_metadata,
-    restore_real_gpu_result, same_gpu_handle, transform_complex_tensor,
-    transform_nd_complex_tensor, valid_provider_fft_output, value_to_complex_tensor,
-    TransformDirection,
+    restore_complex_gpu_result, restore_gpu_metadata, restore_real_gpu_result, same_gpu_handle,
+    transform_complex_tensor, transform_nd_complex_tensor, valid_provider_fft_output,
+    value_to_complex_tensor, TransformDirection,
 };
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -458,7 +457,7 @@ async fn ifftn_gpu(
                     }
                     current = next;
                 }
-                Err(error) if provider_operation_unsupported(&error, "ifft_dim") => {
+                Err(error) if error.is_unsupported() => {
                     let downloaded = if same_gpu_handle(&current, &handle) {
                         gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await
                     } else {
@@ -487,10 +486,10 @@ async fn ifftn_gpu(
                     return restore_ifftn_gpu_result(&handle, transformed, symmetric);
                 }
                 Err(error) => {
-                    return Err(ifftn_provider_error(format!(
-                        "ifft_dim pass {} failed: {error}",
-                        axis + 1
-                    )));
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        ifftn_provider_error(format!("ifft_dim pass {} failed: {error}", axis + 1)),
+                        error,
+                    ));
                 }
             }
         }

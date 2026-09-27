@@ -4,10 +4,9 @@ use super::common::{
     complex_tensor_to_real_value, download_owned_provider_complex_tensor,
     download_provider_complex_tensor, ensure_wide_integer_data_exact, gather_gpu_complex_tensor,
     gpu_metadata_snapshot, is_wide_integer_value, parse_2d_lengths_from_data,
-    parse_2d_lengths_from_tensor, parse_length, parse_symflag, provider_operation_unsupported,
-    restore_complex_gpu_result, restore_gpu_metadata, restore_real_gpu_result, same_gpu_handle,
-    transform_axes_complex_tensor, valid_provider_fft_output, value_to_complex_tensor,
-    TransformDirection,
+    parse_2d_lengths_from_tensor, parse_length, parse_symflag, restore_complex_gpu_result,
+    restore_gpu_metadata, restore_real_gpu_result, same_gpu_handle, transform_axes_complex_tensor,
+    valid_provider_fft_output, value_to_complex_tensor, TransformDirection,
 };
 use super::ifft::ifft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -587,7 +586,7 @@ async fn ifft2_gpu(
                             };
                             return restore_real_gpu_result(&handle, &real, BUILTIN_NAME);
                         }
-                        Err(error) if provider_operation_unsupported(&error, "ifft_dim") => {
+                        Err(error) if error.is_unsupported() => {
                             let downloaded =
                                 download_provider_complex_tensor(provider, &first, BUILTIN_NAME)
                                     .await;
@@ -605,17 +604,21 @@ async fn ifft2_gpu(
                             return restore_ifft2_gpu_result(&handle, completed, symmetric);
                         }
                         Err(error) => {
-                            return Err(ifft2_provider_error(format!(
-                                "second ifft_dim pass failed: {error}"
-                            )));
+                            return Err(crate::runtime_error::with_provider_execution_source(
+                                ifft2_provider_error(format!(
+                                    "second ifft_dim pass failed: {error}"
+                                )),
+                                error,
+                            ));
                         }
                     }
                 }
-                Err(error) if provider_operation_unsupported(&error, "ifft_dim") => {}
+                Err(error) if error.is_unsupported() => {}
                 Err(error) => {
-                    return Err(ifft2_provider_error(format!(
-                        "first ifft_dim pass failed: {error}"
-                    )));
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        ifft2_provider_error(format!("first ifft_dim pass failed: {error}")),
+                        error,
+                    ));
                 }
             }
         }
