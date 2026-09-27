@@ -2612,7 +2612,7 @@ mod tests {
                 panic!("expected resident integer output")
             };
             assert_eq!(output.device_id(), input.device_id());
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), vec![1, 2]);
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(IntegerElementType::U64)
@@ -2624,8 +2624,18 @@ mod tests {
                 gathered.data,
                 runmat_accelerate_api::HostIntegerDataOwned::U64(vec![2, u64::MAX])
             );
-            let _ = input.release();
-            let _ = output.release();
+            let input_lease = input.allocation_lease().downgrade();
+            let output_lease = output.allocation_lease().downgrade();
+            assert_eq!(
+                block_on(provider.download_integer(&input))
+                    .expect("caller input survives")
+                    .data,
+                runmat_accelerate_api::HostIntegerDataOwned::U64(values.to_vec())
+            );
+            input.release().expect("release input");
+            output.release().expect("release output");
+            assert!(input_lease.acquire().is_none());
+            assert!(output_lease.acquire().is_none());
         });
     }
 

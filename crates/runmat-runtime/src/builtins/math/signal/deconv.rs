@@ -1148,7 +1148,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn deconv_resident_output_cleanup_releases_the_handle() {
+    fn deconv_resident_output_drop_preserves_caller_alias_until_final_lease() {
         test_support::with_test_provider(|provider| {
             let handle = provider
                 .upload(&HostTensorView {
@@ -1156,8 +1156,18 @@ pub(crate) mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload");
-            free_deconv_output(&Value::GpuTensor(handle.clone()));
-            assert!(block_on(provider.download(&handle)).is_err());
+            let lease = handle.allocation_lease().downgrade();
+            let original = handle.wire_descriptor();
+            let output = Value::GpuTensor(handle.clone());
+            drop(output);
+            let downloaded =
+                block_on(provider.download(&handle)).expect("caller alias remains live");
+            assert_eq!(downloaded.data, vec![1.0, 2.0]);
+            assert_eq!(downloaded.shape, vec![1, 2]);
+            assert_eq!(handle.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            handle.release().expect("release final caller lease");
+            assert!(lease.acquire().is_none());
         });
     }
 

@@ -761,7 +761,7 @@ mod tests {
                     .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
                         data: runmat_accelerate_api::HostNumericDataOwned::F64(host.data.to_vec()),
                         shape: host.shape.to_vec(),
-                        storage: GpuTensorStorage::Real,
+                        storage: runmat_accelerate_api::GpuTensorStorage::Real,
                     })?;
             self.probes.lock().unwrap().push(allocation.probe);
             Ok(allocation.handle)

@@ -413,8 +413,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorOwned,
-        HostTensorView,
+        AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorStorage, HostTensorView,
     };
     use runmat_builtins::{builtin_function_by_name, AccelTag, ResolveContext, Type};
     use runmat_value::{CharArray, IntValue};
