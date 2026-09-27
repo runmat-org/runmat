@@ -194,7 +194,13 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         let wakes = Arc::new(Wakes::default());
         let waker = Waker::from(wakes.clone());
         let mut cx = Context::from_waker(&waker);
-        assert!(execution.as_mut().poll(&mut cx).is_pending());
+        match execution.as_mut().poll(&mut cx) {
+            Poll::Pending => {}
+            Poll::Ready(Err(error)) => panic!("stochastic returned before suspension: {error:?}"),
+            Poll::Ready(Ok(_)) => {
+                panic!("stochastic completed without entering the pending download")
+            }
+        }
         assert_eq!(probe.polls.get(), 1);
         assert_eq!(
             provider.buffers.lock().unwrap().len(),
@@ -247,11 +253,74 @@ fn pending_typed_fusion_cancellation_releases_uploaded_input() {
     witness(false, false);
 }
 
+#[test]
+fn typed_fusion_single_restoration_completes_with_exact_single_output() {
+    gc_test_context(|| {
+        let _lock = accel_test_lock();
+        ensure_provider_registered();
+        let provider = PROVIDER.get().unwrap();
+        let dispatches = provider.fused_dispatches.load(Ordering::Relaxed);
+        let baseline = provider.buffers.lock().unwrap().clone();
+        let bytecode = compile_semantic("x = 1:4096; y = single(sin(x) .* x + 2);");
+        let data = (1..=4096).map(f64::from).collect::<Vec<_>>();
+        let resume = observation::resume_after_input_store(
+            &bytecode,
+            Value::Tensor(Tensor::new(data.clone(), vec![1, 4096]).unwrap()),
+        );
+        let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default()
+                .with_placement(placement.clone()),
+        );
+        let runmat_vm::InterpreterOutcome::Completed(completed) = block_on(
+            runmat_vm::interpret_resume_in_context(&bytecode, resume, None, runtime),
+        )
+        .unwrap();
+        let y = *bytecode
+            .var_names
+            .iter()
+            .find(|(_, name)| name.as_str() == "y")
+            .unwrap()
+            .0;
+        let Value::GpuTensor(handle) = &completed.values[y] else {
+            panic!("actual fused output must remain resident")
+        };
+        assert_eq!(
+            handle.descriptor.element_type,
+            Some(runmat_accelerate_api::NumericElementType::F32)
+        );
+        let output = block_on(provider.download_numeric(handle)).unwrap();
+        assert_eq!(output.shape, vec![1, 4096]);
+        let runmat_accelerate_api::HostNumericDataOwned::F32(values) = output.data else {
+            panic!("Single payload")
+        };
+        assert_eq!(values.len(), data.len());
+        assert!(provider.fused_dispatches.load(Ordering::Relaxed) > dispatches);
+        for (actual, input) in values.iter().zip(data) {
+            let expected = (input.sin() * input + 2.0) as f32;
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+        // Successful submission is not completed-device timing feedback.
+        let profile = placement.profile_snapshot();
+        assert!(profile
+            .feedback
+            .iter()
+            .filter(|series| series.candidate.contains("fusion.elementwise"))
+            .all(|series| series.samples == 0 && series.failures == 0));
+        provider.free(handle).unwrap();
+        assert_eq!(*provider.buffers.lock().unwrap(), baseline);
+    });
+}
+
 fn witness(resident: bool, cancel: bool) {
     gc_test_context(|| {
         let _lock = accel_test_lock();
         ensure_provider_registered();
         let provider = PROVIDER.get().unwrap();
+        let dispatches = provider.fused_dispatches.load(Ordering::Relaxed);
         // The semantic compiler admits elementwise windows, not CenteredGram
         // windows. Single output restoration is an actual awaited provider
         // boundary after the fused F64 submission and owned allocations.
@@ -296,13 +365,27 @@ fn witness(resident: bool, cancel: bool) {
         let wakes = Arc::new(Wakes::default());
         let waker = Waker::from(wakes.clone());
         let mut cx = Context::from_waker(&waker);
-        assert!(execution.as_mut().poll(&mut cx).is_pending());
+        match execution.as_mut().poll(&mut cx) {
+            Poll::Pending => {}
+            Poll::Ready(Err(error)) => panic!(
+                "fusion returned before suspension: {error:?}; profile={:?}",
+                placement.profile_snapshot()
+            ),
+            Poll::Ready(Ok(_)) => panic!(
+                "fusion completed without pending restoration; profile={:?}",
+                placement.profile_snapshot()
+            ),
+        }
         assert_eq!(
             probe.polls.get(),
             1,
             "actual post-submission Single restoration hook entered"
         );
         assert_eq!(probe.drops.get(), 0);
+        assert!(
+            provider.fused_dispatches.load(Ordering::Relaxed) > dispatches,
+            "actual fused provider dispatch must precede pending restoration"
+        );
         assert!(
             provider.buffers.lock().unwrap().len() > baseline.len(),
             "fusion owns submitted output buffers before restoration suspends"

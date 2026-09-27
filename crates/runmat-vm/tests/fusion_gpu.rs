@@ -123,6 +123,7 @@ struct TestProvider {
     next_id: AtomicU64,
     buffers: Mutex<BufferStore>,
     reject_fusion: AtomicBool,
+    fused_dispatches: AtomicU64,
 }
 
 impl TestProvider {
@@ -131,6 +132,7 @@ impl TestProvider {
             next_id: AtomicU64::new(1),
             buffers: Mutex::new(HashMap::new()),
             reject_fusion: AtomicBool::new(false),
+            fused_dispatches: AtomicU64::new(0),
         }
     }
 
@@ -189,7 +191,7 @@ impl AccelProvider for TestProvider {
                     family: *family,
                 })
                 .collect(),
-            element_types: vec![ProviderElementType::F64],
+            element_types: vec![ProviderElementType::F32, ProviderElementType::F64],
             max_rank: None,
             max_allocation_bytes: None,
             concurrency: ProviderConcurrencyCapabilities {
@@ -212,8 +214,15 @@ impl AccelProvider for TestProvider {
         }
         let capability = self.capability_snapshot();
         let supported = capability.supports_operation(&query.operation, query.family)
-            && query.inputs.iter().chain(&query.outputs).all(|value| {
+            && query.inputs.iter().all(|value| {
                 value.element_type == ProviderElementType::F64
+                    && value.storage == ProviderStorage::DenseReal
+                    && value.checked_byte_len().is_some()
+            })
+            && query.outputs.iter().all(|value| {
+                (value.element_type == ProviderElementType::F64
+                    || (query.operation.0 == "fusion.elementwise"
+                        && value.element_type == ProviderElementType::F32))
                     && value.storage == ProviderStorage::DenseReal
                     && value.checked_byte_len().is_some()
             });
@@ -784,13 +793,24 @@ impl AccelProvider for TestProvider {
 
     fn unary_single<'a>(
         &'a self,
-        _input: &'a GpuTensorHandle,
+        input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             suspension::pending_single_if_armed().await;
-            Err(runmat_accelerate_api::unsupported_provider_operation(
-                "unary_single not supported by test provider",
-            ))
+            let (data, shape) = self.pull(input)?;
+            let single = data
+                .into_iter()
+                .map(|value| value as f32)
+                .collect::<Vec<_>>();
+            runmat_accelerate_api::upload_numeric_protecting(
+                self,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::F32(&single),
+                    shape: &shape,
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                },
+                &[input],
+            )
         })
     }
 
@@ -801,6 +821,7 @@ impl AccelProvider for TestProvider {
         output_shape: &[usize],
         len: usize,
     ) -> anyhow::Result<GpuTensorHandle> {
+        self.fused_dispatches.fetch_add(1, Ordering::Relaxed);
         let parsed = ParsedShader::parse(shader)?;
         if parsed.tmp_exprs.len() > 1024 {
             bail!(
@@ -875,6 +896,7 @@ impl AccelProvider for TestProvider {
         len: usize,
         num_outputs: usize,
     ) -> anyhow::Result<Vec<GpuTensorHandle>> {
+        self.fused_dispatches.fetch_add(1, Ordering::Relaxed);
         let parsed = ParsedShader::parse(shader)?;
         if parsed.output_exprs.len() != num_outputs {
             bail!(
