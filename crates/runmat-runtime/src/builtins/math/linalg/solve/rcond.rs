@@ -222,7 +222,7 @@ async fn rcond_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &handle.shape).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, handle.shape()).map_err(builtin_error)?;
     if rows != cols {
         return Err(builtin_error(format!(
             "{NAME}: input must be a square matrix."
@@ -348,7 +348,7 @@ async fn rcond_gpu_via_linsolve(
     };
     let outcome = provider.linsolve(handle, &identity, &options).await;
 
-    let _ = provider.free(&identity);
+    drop(identity);
 
     let result = match outcome {
         Ok(res) => res,
@@ -364,7 +364,7 @@ async fn rcond_gpu_via_linsolve(
     };
 
     let rcond_value = result.reciprocal_condition;
-    let _ = provider.free(&result.solution);
+    drop(result.solution);
 
     match upload_scalar(provider, rcond_value) {
         Ok(uploaded) => return Ok(Some(Value::GpuTensor(uploaded))),

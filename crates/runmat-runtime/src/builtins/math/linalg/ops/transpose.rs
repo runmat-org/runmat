@@ -397,7 +397,7 @@ fn transpose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
 }
 
 async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    ensure_vector_or_matrix_shape(&handle.shape)?;
+    ensure_vector_or_matrix_shape(handle.shape())?;
     let rank = handle.shape().len();
     if rank == 0 {
         return Ok(Value::GpuTensor(handle));

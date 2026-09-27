@@ -315,8 +315,8 @@ fn trace_char_array(ca: CharArray) -> BuiltinResult<Value> {
 }
 
 async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    ensure_matrix_shape(NAME, &handle.shape)?;
-    let (rows, _) = matrix_extents_from_shape(&handle.shape);
+    ensure_matrix_shape(NAME, handle.shape())?;
+    let (rows, _) = matrix_extents_from_shape(handle.shape());
     let diag_len = rows;
 
     let floating_input = runmat_accelerate_api::handle_integer_type(&handle).is_none()
@@ -325,7 +325,7 @@ async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
             if let Ok(diagonal) = provider.diag_extract(&handle, 0) {
                 let reduced = provider.reduce_sum(&diagonal).await;
-                let _ = provider.free(&diagonal);
+                drop(diagonal);
                 if let Ok(result) = reduced {
                     return Ok(Value::GpuTensor(result));
                 }
