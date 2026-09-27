@@ -6974,34 +6974,11 @@ impl AccelProvider for InProcessProvider {
         significant: bool,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            fn round_decimals(value: f64, digits: i32) -> f64 {
-                if !value.is_finite() {
-                    return value;
-                }
-                if digits == 0 {
-                    return value.round();
-                }
-                let factor = 10f64.powi(digits);
-                if !factor.is_finite() || factor == 0.0 {
-                    return value;
-                }
-                (value * factor).round() / factor
-            }
-
-            fn round_significant(value: f64, digits: i32) -> f64 {
-                if !value.is_finite() {
-                    return value;
-                }
-                if value == 0.0 {
-                    return 0.0;
-                }
-                let order = value.abs().log10().floor();
-                let scale_power = digits - 1 - order as i32;
-                let scale = 10f64.powi(scale_power);
-                if !scale.is_finite() || scale == 0.0 {
-                    return value;
-                }
-                (value * scale).round() / scale
+            use runmat_runtime::builtins::math::rounding::digits::{
+                decimal_f64 as round_decimals, significant_f64 as round_significant,
+            };
+            if significant && digits <= 0 {
+                anyhow::bail!("round significant digits must be positive");
             }
 
             let guard = registry().lock().unwrap();

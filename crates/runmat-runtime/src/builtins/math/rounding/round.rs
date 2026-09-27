@@ -12,6 +12,10 @@ use runmat_macros::runtime_builtin;
 use runmat_value::ComplexStorage;
 use runmat_value::{CharArray, ComplexTensor, NumericStorage, Tensor, Value};
 
+use super::digits::{
+    decimal_f32 as round_with_decimals_f32, decimal_f64 as round_with_decimals,
+    significant_f32 as round_with_significant_f32, significant_f64 as round_with_significant,
+};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
@@ -317,56 +321,6 @@ fn round_scalar_f32(value: f32, strategy: RoundStrategy) -> f32 {
         RoundStrategy::Decimals(digits) => round_with_decimals_f32(value, digits),
         RoundStrategy::Significant(digits) => round_with_significant_f32(value, digits),
     }
-}
-
-fn round_with_decimals(value: f64, digits: i32) -> f64 {
-    if digits == 0 {
-        return value.round();
-    }
-    let factor = 10f64.powi(digits);
-    if !factor.is_finite() || factor == 0.0 {
-        // Large magnitude digits saturate: rounding has no effect.
-        return value;
-    }
-    (value * factor).round() / factor
-}
-
-fn round_with_significant(value: f64, digits: i32) -> f64 {
-    if value == 0.0 {
-        return 0.0;
-    }
-    let abs_val = value.abs();
-    let order = abs_val.log10().floor();
-    let scale_power = digits - 1 - order as i32;
-    let scale = 10f64.powi(scale_power);
-    if !scale.is_finite() || scale == 0.0 {
-        return value;
-    }
-    (value * scale).round() / scale
-}
-
-fn round_with_decimals_f32(value: f32, digits: i32) -> f32 {
-    if digits == 0 {
-        return value.round();
-    }
-    let factor = 10f32.powi(digits);
-    if !factor.is_finite() || factor == 0.0 {
-        return value;
-    }
-    (value * factor).round() / factor
-}
-
-fn round_with_significant_f32(value: f32, digits: i32) -> f32 {
-    if value == 0.0 {
-        return 0.0;
-    }
-    let order = value.abs().log10().floor();
-    let scale_power = digits - 1 - order as i32;
-    let scale = 10f32.powi(scale_power);
-    if !scale.is_finite() || scale == 0.0 {
-        return value;
-    }
-    (value * scale).round() / scale
 }
 
 fn parse_arguments(args: &[Value]) -> BuiltinResult<RoundStrategy> {

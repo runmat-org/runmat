@@ -455,3 +455,26 @@ fn finite_remainders_survive_overflowing_quotients() {
         assert_eq!(result, expected);
     }
 }
+
+#[test]
+fn round_extreme_digit_controls_have_finite_semantics() {
+    for (input, digits, mode, expected) in [
+        (1.25, i32::MAX, "significant", 1.25),
+        (f64::MAX, 2, "decimals", f64::MAX),
+        (123.0, i32::MIN, "decimals", 0.0),
+    ] {
+        let Value::Num(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            "round",
+            &[
+                Value::Num(input),
+                Value::Num(f64::from(digits)),
+                Value::String(mode.into()),
+            ],
+            1,
+        ))
+        .unwrap() else {
+            panic!("round scalar")
+        };
+        assert_eq!(result, expected);
+    }
+}
