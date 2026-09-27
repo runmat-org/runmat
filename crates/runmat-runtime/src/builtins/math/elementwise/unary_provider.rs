@@ -19,7 +19,11 @@ pub(super) fn validate_real_unary_output(
         logical: false,
         alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
     };
-    if !gpu_helpers::unary_gpu_output_matches(&output, input, provider, contract) {
+    if !gpu_helpers::unary_gpu_output_matches(&output, input, provider, contract)
+        || !gpu_helpers::expected_handle_numeric_element_type(&output).is_ok_and(|element| {
+            gpu_helpers::numeric_descriptor_matches(&output, element, GpuTensorStorage::Real)
+        })
+    {
         gpu_helpers::free_rejected_provider_output(&output, &[input], provider);
         return Err(internal(
             builtin,

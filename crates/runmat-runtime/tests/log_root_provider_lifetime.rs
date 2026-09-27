@@ -19,6 +19,8 @@ enum Fault {
     FailedDownload,
     Alias,
     MissingStorage,
+    PendingUnary,
+    MalformedUnary,
 }
 
 #[derive(Default)]
@@ -34,7 +36,52 @@ struct Provider {
     state: Mutex<State>,
 }
 
+impl Provider {
+    fn unary<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if matches!(self.state.lock().unwrap().fault, Fault::PendingUnary) {
+                runmat_accelerate_api::set_handle_logical(input, true);
+                return std::future::pending().await;
+            }
+            let mut output = self.inner.unary_sqrt(input).await?;
+            self.state.lock().unwrap().temporary = Some(output.clone());
+            output.descriptor.storage = None;
+            Ok(output)
+        })
+    }
+}
+
 impl AccelProvider for Provider {
+    fn unary_log<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.unary(input)
+    }
+    fn unary_log10<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.unary(input)
+    }
+    fn unary_log1p<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.unary(input)
+    }
+    fn unary_log2<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.unary(input)
+    }
+    fn unary_sqrt<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.unary(input)
+    }
     fn device_id(&self) -> u32 {
         self.inner.device_id()
     }
@@ -120,7 +167,12 @@ fn logarithm_root_and_gammaln_probe_lifetimes_through_dispatch() {
             Fault::FailedDownload,
             Fault::Alias,
             Fault::MissingStorage,
+            Fault::PendingUnary,
+            Fault::MalformedUnary,
         ] {
+            if name == "gammaln" && matches!(fault, Fault::PendingUnary | Fault::MalformedUnary) {
+                continue; // This identity is a shared probe consumer, not a migrated unary body.
+            }
             let (provider, input) = fixture(fault);
             let _provider = ThreadProviderGuard::set(Some(provider));
             let args = [Value::GpuTensor(input.clone())];
@@ -140,7 +192,10 @@ fn logarithm_root_and_gammaln_probe_lifetimes_through_dispatch() {
                 name, &args, 1,
             ));
             let result = call.as_mut().poll(&mut Context::from_waker(&noop_waker()));
-            if matches!(fault, Fault::PendingReduction | Fault::PendingDownload) {
+            if matches!(
+                fault,
+                Fault::PendingReduction | Fault::PendingDownload | Fault::PendingUnary
+            ) {
                 assert!(matches!(result, Poll::Pending), "{name}");
             } else {
                 assert!(matches!(result, Poll::Ready(Err(_))), "{name}");
@@ -150,6 +205,13 @@ fn logarithm_root_and_gammaln_probe_lifetimes_through_dispatch() {
             let state = provider.state.lock().unwrap();
             assert_eq!(state.calls, 1, "{name}: no retry after provider failure");
             assert!(!state.freed.contains(&input.buffer_id), "{name}");
+            if matches!(fault, Fault::MalformedUnary) {
+                assert_eq!(
+                    state.freed.len(),
+                    2,
+                    "{name}: reduction and rejected output"
+                );
+            }
             if let Some(temporary) = &state.temporary {
                 assert_eq!(
                     state

@@ -11,7 +11,7 @@ pub(super) fn validate(
     mut output: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
     if !valid(&output, input, provider) {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[input]);
+        gpu_helpers::free_rejected_provider_output(&output, &[input], provider);
         return Err(super::super::errors::internal(
             operation,
             "provider returned malformed logarithm output",
@@ -36,4 +36,7 @@ pub(in crate::builtins::math::elementwise::logarithms) fn valid(
         alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
     };
     gpu_helpers::unary_gpu_output_matches(output, input, provider, contract)
+        && gpu_helpers::expected_handle_numeric_element_type(output).is_ok_and(|element| {
+            gpu_helpers::numeric_descriptor_matches(output, element, GpuTensorStorage::Real)
+        })
 }
