@@ -1,16 +1,15 @@
 //! MATLAB-compatible spectrogram using a short-time Fourier transform.
+use runmat_builtins::{
+    BuiltinErrorDescriptor, SPECTROGRAM_ERROR_ARG_COUNT, SPECTROGRAM_ERROR_INTERNAL,
+    SPECTROGRAM_ERROR_INVALID_FREQ, SPECTROGRAM_ERROR_INVALID_FS, SPECTROGRAM_ERROR_INVALID_OPTION,
+    SPECTROGRAM_ERROR_INVALID_OVERLAP, SPECTROGRAM_ERROR_INVALID_SIGNAL,
+    SPECTROGRAM_ERROR_INVALID_WINDOW, SPECTROGRAM_INTEGER_CONTROL_EXTENSION,
+    SPECTROGRAM_INTEGER_SIGNAL_EXTENSION,
+};
 
 use num_complex::Complex;
 use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
-};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -25,7 +24,6 @@ use crate::builtins::math::signal::common::{
     centered_frequency_offset, centered_shift, gpu_vector_len, parse_nonnegative_integer,
     parse_scalar_f64, selected_frequency_len, value_to_complex_vector,
 };
-use crate::builtins::math::signal::type_resolvers::spectrogram_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "spectrogram";
@@ -59,263 +57,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "spectrogram materialises STFT and spectral estimate matrices and is not fused.",
 };
-
-const SPECTROGRAM_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "s",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Complex short-time Fourier transform matrix in the signal's floating precision, like every numerical output in RunMat.",
-}];
-
-const SPECTROGRAM_OUTPUT_FULL: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "s",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Complex short-time Fourier transform matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Frequencies in radians/sample or Hz when fs is supplied.",
-    },
-    BuiltinParamDescriptor {
-        name: "t",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Segment midpoint sample indices or time instants when fs is supplied.",
-    },
-    BuiltinParamDescriptor {
-        name: "ps",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Power spectral density or power spectrum estimate for each segment.",
-    },
-    BuiltinParamDescriptor {
-        name: "fc",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Center frequency matrix for reassigned-output compatibility.",
-    },
-    BuiltinParamDescriptor {
-        name: "tc",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Center time matrix for reassigned-output compatibility.",
-    },
-];
-
-const SPECTROGRAM_INPUTS: [BuiltinParamDescriptor; 7] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input signal vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "win",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Hamming-window length, window vector, or [] for the default window.",
-    },
-    BuiltinParamDescriptor {
-        name: "nOverlap",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Number of overlapped samples between adjacent segments.",
-    },
-    BuiltinParamDescriptor {
-        name: "freqSpec",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "DFT length or explicit frequency vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Fs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Sampling frequency in Hz.",
-    },
-    BuiltinParamDescriptor {
-        name: "freqRange",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Frequency range selector: `onesided`, `twosided`, or `centered`.",
-    },
-    BuiltinParamDescriptor {
-        name: "spectrumType",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("psd"),
-        description: "Spectral estimate scaling: `psd` or `power`.",
-    },
-];
-
-const SPECTROGRAM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "s = spectrogram(x, win, nOverlap, freqSpec, Fs, freqRange, spectrumType)",
-        inputs: &SPECTROGRAM_INPUTS,
-        outputs: &SPECTROGRAM_OUTPUT_S,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[s, f, t, ps, fc, tc] = spectrogram(x, win, nOverlap, freqSpec, Fs, freqRange, spectrumType)",
-        inputs: &SPECTROGRAM_INPUTS,
-        outputs: &SPECTROGRAM_OUTPUT_FULL,
-    },
-];
-
-const SPECTROGRAM_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.ARG_COUNT",
-    identifier: Some("RunMat:spectrogram:ArgCount"),
-    when: "The argument count is outside supported forms.",
-    message: "spectrogram: expected spectrogram(x, [win, [nOverlap, [freqSpec, [Fs, [freqRange_or_spectrumType]]]]])",
-};
-
-const SPECTROGRAM_ERROR_INVALID_SIGNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_SIGNAL",
-    identifier: Some("RunMat:spectrogram:InvalidSignal"),
-    when: "Input signal is not a numeric vector.",
-    message: "spectrogram: x must be a nonempty numeric vector",
-};
-
-const SPECTROGRAM_ERROR_INVALID_WINDOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_WINDOW",
-    identifier: Some("RunMat:spectrogram:InvalidWindow"),
-    when: "Window input is invalid.",
-    message:
-        "spectrogram: win must be [] or a nonempty finite real vector or positive integer length",
-};
-
-const SPECTROGRAM_ERROR_INVALID_OVERLAP: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_OVERLAP",
-    identifier: Some("RunMat:spectrogram:InvalidOverlap"),
-    when: "Overlap is invalid.",
-    message: "spectrogram: nOverlap must be a nonnegative integer smaller than the window length",
-};
-
-const SPECTROGRAM_ERROR_INVALID_FREQ: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_FREQ",
-    identifier: Some("RunMat:spectrogram:InvalidFreqSpec"),
-    when: "Frequency specification is invalid.",
-    message: "spectrogram: freqSpec must be a positive integer or finite real frequency vector with at least two elements",
-};
-
-const SPECTROGRAM_ERROR_INVALID_FS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_FS",
-    identifier: Some("RunMat:spectrogram:InvalidFs"),
-    when: "Sampling frequency is invalid.",
-    message: "spectrogram: Fs must be a positive finite scalar",
-};
-
-const SPECTROGRAM_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INVALID_OPTION",
-    identifier: Some("RunMat:spectrogram:InvalidOption"),
-    when: "Frequency range, spectrum type, or display option is invalid.",
-    message: "spectrogram: expected 'onesided', 'twosided', 'centered', 'psd', 'power', 'reassigned', or 'yaxis'",
-};
-
-const SPECTROGRAM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPECTROGRAM.INTERNAL",
-    identifier: Some("RunMat:spectrogram:Internal"),
-    when: "Output tensor construction fails internally.",
-    message: "spectrogram: internal error",
-};
-
-const SPECTROGRAM_ERRORS: [BuiltinErrorDescriptor; 8] = [
-    SPECTROGRAM_ERROR_ARG_COUNT,
-    SPECTROGRAM_ERROR_INVALID_SIGNAL,
-    SPECTROGRAM_ERROR_INVALID_WINDOW,
-    SPECTROGRAM_ERROR_INVALID_OVERLAP,
-    SPECTROGRAM_ERROR_INVALID_FREQ,
-    SPECTROGRAM_ERROR_INVALID_FS,
-    SPECTROGRAM_ERROR_INVALID_OPTION,
-    SPECTROGRAM_ERROR_INTERNAL,
-];
-
-pub const SPECTROGRAM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPECTROGRAM_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SPECTROGRAM_ERRORS,
-};
-
-const SPECTROGRAM_INTEGER_SIGNAL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "spectrogram-integer-signal",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "spectrogram with a typed-integer signal is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:SpectrogramIntegerSignalExtension"),
-    };
-const SPECTROGRAM_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "spectrogram-integer-numeric-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "spectrogram with typed-integer numeric options is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:SpectrogramIntegerNumericControlExtension"),
-    };
-pub const SPECTROGRAM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    SPECTROGRAM_INTEGER_SIGNAL_EXTENSION,
-    SPECTROGRAM_INTEGER_CONTROL_EXTENSION,
-];
-const SPECTROGRAM_INTEGER_SIGNAL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented signal classes are single and double; admitted typed values must be exact at the binary64 STFT boundary.",
-    }];
-const SPECTROGRAM_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 4] = [
-    spectrogram_integer_control("win"),
-    spectrogram_integer_control("nOverlap"),
-    spectrogram_integer_control("freqSpec"),
-    spectrogram_integer_control("Fs"),
-];
-const fn spectrogram_integer_control(name: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Public documentation establishes single and double storage for this role; RunMat gates typed input and prevents rounded conversion.",
-    }
-}
-pub const SPECTROGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[s,f,t,ps] = spectrogram(integer_x, ...)",
-        inputs: &SPECTROGRAM_INTEGER_SIGNAL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The signal crosses an exact binary64 boundary before host STFT or provider spectral dispatch; GPU support remains provider-dependent.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "spectrogram(x, integer_win/nOverlap/freqSpec/Fs, ...)",
-        inputs: &SPECTROGRAM_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed numeric controls are gated RunMat extensions. Structural scalars are range checked, and numerical vectors enter binary64 only after exact representability is proven.",
-    },
-];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrequencyRange {
@@ -397,15 +138,7 @@ fn spectrogram_error_with_message(
 
 #[runtime_builtin(
     name = "spectrogram",
-    category = "math/signal",
-    summary = "Compute a short-time Fourier transform spectrogram.",
-    keywords = "spectrogram,stft,psd,power spectrum,time frequency,signal processing",
-    type_resolver(spectrogram_type),
-    descriptor(crate::builtins::math::signal::spectrogram::SPECTROGRAM_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::spectrogram::SPECTROGRAM_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::signal::spectrogram::SPECTROGRAM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::spectrogram"
 )]
 async fn spectrogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1321,7 +1054,7 @@ mod tests {
         let builtin = builtin_function_by_name(BUILTIN_NAME).expect("spectrogram builtin");
         let descriptor = builtin.descriptor.expect("descriptor");
         assert!(descriptor.signatures.iter().any(|sig| {
-            sig.label == "[s, f, t, ps, fc, tc] = spectrogram(x, win, nOverlap, freqSpec, Fs, freqRange, spectrumType)"
+            sig.label == "[s, f, t, ps] = spectrogram(x, win, nOverlap, freqSpec, Fs, freqRange, spectrumType)"
         }));
     }
 

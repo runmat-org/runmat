@@ -1,16 +1,15 @@
 //! MATLAB-compatible periodogram power spectral density estimate.
+use runmat_builtins::{
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, PERIODOGRAM_ERROR_ARG_COUNT,
+    PERIODOGRAM_ERROR_INTERNAL, PERIODOGRAM_ERROR_INVALID_FS, PERIODOGRAM_ERROR_INVALID_NFFT,
+    PERIODOGRAM_ERROR_INVALID_RANGE, PERIODOGRAM_ERROR_INVALID_SIGNAL,
+    PERIODOGRAM_ERROR_INVALID_WINDOW, PERIODOGRAM_INTEGER_CONTROL_EXTENSION,
+    PERIODOGRAM_INTEGER_SIGNAL_EXTENSION,
+};
 
 use num_complex::Complex;
 use runmat_accelerate_api::{
     ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
-};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -25,7 +24,6 @@ use crate::builtins::math::signal::common::{
     centered_frequency_offset, centered_shift, gpu_matrix_shape, parse_nonnegative_integer,
     parse_scalar_f64, value_to_complex_vector,
 };
-use crate::builtins::math::signal::type_resolvers::periodogram_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "periodogram";
@@ -59,228 +57,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "periodogram materialises PSD and frequency vectors and is not fused.",
 };
-
-const PERIODOGRAM_OUTPUT_PXX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "pxx",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Power spectral density or power spectrum estimate.",
-}];
-
-const PERIODOGRAM_OUTPUT_PXX_F: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "pxx",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Power spectral density or power spectrum estimate.",
-    },
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Frequency vector in radians/sample or Hz when fs is supplied.",
-    },
-];
-
-const PERIODOGRAM_INPUTS: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "x",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input signal vector or matrix with one signal per column. In RunMat its floating precision determines every numerical output class.",
-    },
-    BuiltinParamDescriptor {
-        name: "window",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Window vector. [] uses a rectangular window matching the signal length.",
-    },
-    BuiltinParamDescriptor {
-        name: "nfft",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "DFT length or explicit frequency vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "fs",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Sampling frequency in Hz.",
-    },
-    BuiltinParamDescriptor {
-        name: "freqrange",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Frequency range selector (`onesided`, `twosided`, or `centered`) and spectrum type (`psd` or `power`).",
-    },
-];
-
-const PERIODOGRAM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "pxx = periodogram(x, window, nfft, fs, freqrange)",
-        inputs: &PERIODOGRAM_INPUTS,
-        outputs: &PERIODOGRAM_OUTPUT_PXX,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[pxx, f] = periodogram(x, window, nfft, fs, freqrange)",
-        inputs: &PERIODOGRAM_INPUTS,
-        outputs: &PERIODOGRAM_OUTPUT_PXX_F,
-    },
-];
-
-const PERIODOGRAM_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.ARG_COUNT",
-    identifier: Some("RunMat:periodogram:ArgCount"),
-    when: "The argument count is outside supported forms.",
-    message:
-        "periodogram: expected periodogram(x, [window, [nfft_or_f, [fs, [freqrange_or_scale]]]])",
-};
-
-const PERIODOGRAM_ERROR_INVALID_SIGNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_SIGNAL",
-    identifier: Some("RunMat:periodogram:InvalidSignal"),
-    when: "Input signal is not a numeric vector or matrix.",
-    message: "periodogram: x must be a nonempty numeric vector or 2-D matrix",
-};
-
-const PERIODOGRAM_ERROR_INVALID_WINDOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_WINDOW",
-    identifier: Some("RunMat:periodogram:InvalidWindow"),
-    when: "Window input is invalid.",
-    message: "periodogram: window must be a finite real vector matching the signal length",
-};
-
-const PERIODOGRAM_ERROR_INVALID_NFFT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_NFFT",
-    identifier: Some("RunMat:periodogram:InvalidNfft"),
-    when: "DFT length or frequency vector is invalid.",
-    message: "periodogram: nfft must be a positive integer or finite real frequency vector",
-};
-
-const PERIODOGRAM_ERROR_INVALID_FS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_FS",
-    identifier: Some("RunMat:periodogram:InvalidFs"),
-    when: "Sampling frequency is invalid.",
-    message: "periodogram: fs must be a positive finite scalar",
-};
-
-const PERIODOGRAM_ERROR_INVALID_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INVALID_RANGE",
-    identifier: Some("RunMat:periodogram:InvalidRange"),
-    when: "Frequency range selector or spectrum type is invalid.",
-    message: "periodogram: freqrange must be 'onesided', 'twosided', or 'centered'; spectrum type must be 'psd' or 'power'",
-};
-
-const PERIODOGRAM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PERIODOGRAM.INTERNAL",
-    identifier: Some("RunMat:periodogram:Internal"),
-    when: "Output tensor construction fails internally.",
-    message: "periodogram: internal error",
-};
-
-const PERIODOGRAM_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    PERIODOGRAM_ERROR_ARG_COUNT,
-    PERIODOGRAM_ERROR_INVALID_SIGNAL,
-    PERIODOGRAM_ERROR_INVALID_WINDOW,
-    PERIODOGRAM_ERROR_INVALID_NFFT,
-    PERIODOGRAM_ERROR_INVALID_FS,
-    PERIODOGRAM_ERROR_INVALID_RANGE,
-    PERIODOGRAM_ERROR_INTERNAL,
-];
-
-pub const PERIODOGRAM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PERIODOGRAM_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PERIODOGRAM_ERRORS,
-};
-
-const PERIODOGRAM_INTEGER_SIGNAL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "periodogram-integer-signal",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "periodogram accepts a typed-integer input signal as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PeriodogramIntegerSignalExtension"),
-    };
-const PERIODOGRAM_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "periodogram-integer-numeric-control",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "periodogram accepts typed-integer window, frequency, DFT-length, or sample-rate controls as a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PeriodogramIntegerNumericControlExtension"),
-    };
-pub const PERIODOGRAM_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    PERIODOGRAM_INTEGER_SIGNAL_EXTENSION,
-    PERIODOGRAM_INTEGER_CONTROL_EXTENSION,
-];
-const PERIODOGRAM_INTEGER_SIGNAL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "x",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double signals. RunMat gates typed integer signals before provider dispatch and requires exact binary64 conversion.",
-    }];
-const PERIODOGRAM_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 4] = [
-    BuiltinIntegerInputCapability {
-        name: "window",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Documented window storage is single or double; typed windows cross a checked floating boundary.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "freqSpec/nfft",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A scalar is decoded as an exact structural DFT length; a vector is a checked floating frequency grid.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Fs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed sample rates enter the floating frequency-scaling boundary only after exactness is proved.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "confidence or numeric option",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Additional supported numeric controls remain independently classified as checked floating inputs.",
-    },
-];
-pub const PERIODOGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[pxx,f] = periodogram(integer_x, ...)",
-        inputs: &PERIODOGRAM_INTEGER_SIGNAL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed signals are a RunMat-only extension; authoritative storage is checked before FFT conversion and supported resident floating paths remain unaffected.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "periodogram(x, integer_window_or_frequency_controls)",
-        inputs: &PERIODOGRAM_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed numerical controls are independently gated; scalar DFT length is structural and remaining controls cross a checked binary64 boundary.",
-    },
-];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FrequencyRange {
@@ -365,15 +141,7 @@ fn periodogram_error_with_message(
 
 #[runtime_builtin(
     name = "periodogram",
-    category = "math/signal",
-    summary = "Estimate power spectral density with a periodogram.",
-    keywords = "periodogram,psd,power spectrum,spectral density,signal processing",
-    type_resolver(periodogram_type),
-    descriptor(crate::builtins::math::signal::periodogram::PERIODOGRAM_DESCRIPTOR),
-    extensions(crate::builtins::math::signal::periodogram::PERIODOGRAM_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::signal::periodogram::PERIODOGRAM_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::periodogram"
 )]
 async fn periodogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
