@@ -1,6 +1,7 @@
 //! Rounding and remainder builtins.
 
 mod binary;
+mod preparation;
 pub(crate) mod ceil;
 pub(crate) mod fix;
 pub(crate) mod floor;
