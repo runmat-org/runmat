@@ -146,6 +146,7 @@ const OUTPUT_PROTOTYPE_CONTEXT: OutputPrototypeContext = OutputPrototypeContext 
 };
 
 mod host;
+mod domain;
 use host::power_host;
 
 mod math;

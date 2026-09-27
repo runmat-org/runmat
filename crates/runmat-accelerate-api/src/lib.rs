@@ -16,9 +16,11 @@ use std::sync::RwLock;
 
 mod native_device;
 mod placement;
+mod power;
 
 pub use native_device::*;
 pub use placement::*;
+pub use power::PowerResultDomain;
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);

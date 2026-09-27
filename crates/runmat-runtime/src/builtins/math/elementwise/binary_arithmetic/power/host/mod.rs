@@ -47,12 +47,11 @@ fn scalar_power_value(lhs: &Value, rhs: &Value) -> Option<Value> {
         let (re, im) = complex_pow_scalar(br, bi, er, ei);
         return Some(Value::Complex(re, im));
     }
-    let pow = br.powf(er);
-    if pow.is_nan() {
-        let (re, im) = complex_pow_scalar(br, 0.0, er, 0.0);
+    let (domain, (re, im)) = super::domain::evaluate_f64(br, er);
+    if domain == super::domain::PowerResultDomain::Complex {
         Some(Value::Complex(re, im))
     } else {
-        Some(Value::Num(pow))
+        Some(Value::Num(re))
     }
 }
 
