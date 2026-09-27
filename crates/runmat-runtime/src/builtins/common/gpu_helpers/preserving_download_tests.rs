@@ -304,9 +304,11 @@ fn class_preserving_restore_uses_shared_single_and_complex_integer_storage() {
     test_support::with_test_provider(|provider| {
         let source =
             upload_tensor(provider, &Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()).unwrap();
-        let source = source
+        let replacement = source
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
             .expect("automatic view");
+        drop(source);
+        let source = replacement;
 
         let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).unwrap();
         let restored =
@@ -384,9 +386,11 @@ fn class_preserving_logical_restore_uses_native_logical_encoding() {
             &Tensor::from_f32(vec![0.0, 0.0], vec![1, 2]).unwrap(),
         )
         .unwrap();
-        let source = source
+        let replacement = source
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
             .expect("automatic view");
+        drop(source);
+        let source = replacement;
         let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
         let restored =
             restore_class_preserving_value(&source, Value::LogicalArray(logical.clone()), "test")
@@ -411,12 +415,16 @@ fn resident_output_source_prefers_explicit_intent_independent_of_order() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let automatic = upload_tensor(provider, &tensor).unwrap();
         let explicit = upload_tensor(provider, &tensor).unwrap();
-        let automatic = automatic
+        let replacement = automatic
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
             .expect("automatic view");
-        let explicit = explicit
+        drop(automatic);
+        let automatic = replacement;
+        let replacement = explicit
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("explicit view");
+        drop(explicit);
+        let explicit = replacement;
         for handles in [
             vec![automatic.clone(), explicit.clone()],
             vec![explicit.clone(), automatic.clone()],
@@ -651,9 +659,11 @@ fn native_truth_download_keeps_wide_unsigned_values_exact_and_resident() {
         )
         .expect("wide integer source");
         let handle = upload_tensor(provider, &source).expect("wide integer upload");
-        let handle = handle
+        let replacement = handle
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
             .expect("automatic view");
+        drop(handle);
+        let handle = replacement;
 
         let native = block_on(download_native_values_async(provider, &handle))
             .expect("native-value download");
