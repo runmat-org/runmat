@@ -6285,6 +6285,7 @@ dependencies = [
  "libloading 0.8.9",
  "libm",
  "log",
+ "naga 24.0.0",
  "num-complex",
  "once_cell",
  "pollster 0.3.0",

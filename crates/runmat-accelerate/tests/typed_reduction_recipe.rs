@@ -15,6 +15,9 @@ use runmat_accelerate_api::{
 };
 use runmat_value::{Tensor, Value};
 
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 fn config() -> ReductionRecipeConfig {
     ReductionRecipeConfig {
         workgroup_size: 8,
@@ -107,7 +110,8 @@ fn axes(name: &str, axis: Value, omit: bool) -> Vec<Value> {
     controls
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn native_leaf_output_and_partial_types_do_not_follow_preferred_precision() {
     let single_sum = recipe(
         "sum",
@@ -157,7 +161,8 @@ fn native_leaf_output_and_partial_types_do_not_follow_preferred_precision() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn broadcast_and_authentic_transpose_share_the_existing_addressing_policy() {
     let broadcast = recipe(
         "sum",
@@ -214,7 +219,8 @@ fn broadcast_and_authentic_transpose_share_the_existing_addressing_policy() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn all_axes_nd_identity_and_empty_geometry_are_explicit() {
     let all = recipe(
         "sum",
@@ -274,7 +280,8 @@ fn all_axes_nd_identity_and_empty_geometry_are_explicit() {
         .contains("let end = start + min(12u, 0u - start)"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn every_pass_carries_nan_counts_validity_and_signed_zero_ties() {
     let mean = recipe(
         "mean",
@@ -322,7 +329,8 @@ fn every_pass_carries_nan_counts_validity_and_signed_zero_ties() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn f64_zero_sign_encoding_is_exact_without_narrowing_nonzero_comparisons() {
     // Independent IEEE bit-pattern oracle for the conversion used only after
     // the shader's zero guard. This is not a GPU execution claim; the Naga
@@ -361,7 +369,8 @@ fn f64_zero_sign_encoding_is_exact_without_narrowing_nonzero_comparisons() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn geometry_and_layout_are_part_of_the_immutable_recipe_identity() {
     let a = recipe("sum", vec![array(false, &[25, 2])], vec![], None, config());
     let mut different = config();
@@ -375,7 +384,8 @@ fn geometry_and_layout_are_part_of_the_immutable_recipe_identity() {
     assert_eq!(a.work().two_pass_dispatches, 2);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn provider_limits_and_invalid_geometry_are_rejected_without_execution() {
     for case in 0..6 {
         let mut cfg = config();
@@ -395,7 +405,8 @@ fn provider_limits_and_invalid_geometry_are_rejected_without_execution() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn resident_binding_limits_use_authentic_allocation_not_smaller_view_bytes() {
     let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
     let allocation = owner
@@ -432,7 +443,8 @@ fn resident_binding_limits_use_authentic_allocation_not_smaller_view_bytes() {
     assert_eq!(allocation.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn real_recipe_projects_one_checked_physical_authority_for_both_strategies() {
     use runmat_accelerate_api::reduction::{
         ReductionSelection, ReductionStrategy, ReductionSubmission,
@@ -496,8 +508,12 @@ fn real_recipe_projects_one_checked_physical_authority_for_both_strategies() {
     assert_eq!(recipe.inputs()[0].source_payload_bytes, 200);
 }
 
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+use wgpu::naga;
+
 #[cfg(feature = "wgpu")]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn naga_validates_all_three_real_shaders_at_both_precisions() {
     for single in [true, false] {
         for name in ["sum", "mean", "min", "max"] {
@@ -561,11 +577,11 @@ fn validate_shaders(recipe: &ReductionRecipe) {
         recipe.pass1_source(),
         recipe.pass2_source(),
     ] {
-        let module = wgpu::naga::front::wgsl::parse_str(source)
+        let module = naga::front::wgsl::parse_str(source)
             .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
-        wgpu::naga::valid::Validator::new(
-            wgpu::naga::valid::ValidationFlags::all(),
-            wgpu::naga::valid::Capabilities::all(),
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
         )
         .validate(&module)
         .unwrap_or_else(|error| panic!("{error:?}\n{source}"));
@@ -575,7 +591,7 @@ fn validate_shaders(recipe: &ReductionRecipe) {
             .find(|(_, ty)| ty.name.as_deref() == Some("RRPartial"))
             .unwrap()
             .1;
-        let wgpu::naga::TypeInner::Struct { members, span } = &partial.inner else {
+        let naga::TypeInner::Struct { members, span } = &partial.inner else {
             panic!("partial state struct");
         };
         assert_eq!(*span, recipe.partial_layout().stride);

@@ -74,6 +74,7 @@ web-sys = { version = "0.3", features = [
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
+naga = { version = "24.0.0", features = ["wgsl-in"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { version = "0.19", optional = true, features = ["trace"] }
