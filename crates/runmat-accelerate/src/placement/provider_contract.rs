@@ -97,9 +97,9 @@ pub(crate) fn tensor_representation(
             )
         }
         Value::Num(_) => (
-            ProviderElementType::from(provider_precision),
+            ProviderElementType::F64,
             ProviderStorage::DenseReal,
-            Vec::new(),
+            vec![1, 1],
             ProviderResidency::Host,
         ),
         _ => return None,
@@ -441,6 +441,22 @@ fn dense_feasibility_with_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn authored_double_scalar_representation_does_not_follow_provider_precision() {
+        use super::*;
+        for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
+            let scalar = tensor_representation(&Value::Num(1.0 + f64::EPSILON), precision).unwrap();
+            assert_eq!(scalar.element_type, ProviderElementType::F64);
+            assert_eq!(scalar.shape, vec![1, 1]);
+            let tensor = tensor_representation(
+                &Value::Tensor(runmat_value::Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                precision,
+            )
+            .unwrap();
+            assert_eq!(tensor.element_type, ProviderElementType::F32);
+            assert_ne!(scalar.element_type, tensor.element_type);
+        }
+    }
     use super::*;
     use runmat_accelerate_api::{
         ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderStorage,
