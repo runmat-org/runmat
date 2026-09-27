@@ -45,14 +45,16 @@ pub async fn execute_matmul_epilogue_placed(
         &request,
         &bindings,
         provider,
-        vec![dense_output_representation(
-            provider.precision(),
-            &output_shape,
-        )],
-        None,
-        None,
-        Some(contract),
-        None,
+        FusionProviderContract {
+            outputs: vec![dense_output_representation(
+                provider.precision(),
+                &output_shape,
+            )],
+            semantic_identity: None,
+            scalar_work_units: None,
+            matmul: Some(contract),
+            preparation_program: None,
+        },
     )? {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {

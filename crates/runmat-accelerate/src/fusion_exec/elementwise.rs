@@ -181,11 +181,15 @@ async fn execute_elementwise_outputs(
         request,
         &bindings,
         provider,
-        representations,
-        Some(semantic_identity),
-        Some(scalar_work_units),
-        None,
-        Some(runmat_accelerate_api::ProviderPreparationProgram::Elementwise { shader: &shader }),
+        FusionProviderContract {
+            outputs: representations,
+            semantic_identity: Some(semantic_identity),
+            scalar_work_units: Some(scalar_work_units),
+            matmul: None,
+            preparation_program: Some(
+                runmat_accelerate_api::ProviderPreparationProgram::Elementwise { shader: &shader },
+            ),
+        },
     )?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,

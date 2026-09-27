@@ -182,6 +182,14 @@ fn fusion_input_elements(values: &[Value]) -> Option<usize> {
         .max()
 }
 
+struct FusionProviderContract<'a> {
+    outputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
+    semantic_identity: Option<runmat_execution::Digest>,
+    scalar_work_units: Option<u64>,
+    matmul: Option<matmul::workload::Selection<'a>>,
+    preparation_program: Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
+}
+
 fn select_fusion_provider(
     request: &FusionExecutionRequest<'_>,
     bindings: &AdmittedBindings,
@@ -192,14 +200,16 @@ fn select_fusion_provider(
         request,
         bindings,
         provider,
-        output_shapes
-            .iter()
-            .map(|shape| dense_output_representation(provider.precision(), shape))
-            .collect(),
-        None,
-        None,
-        None,
-        None,
+        FusionProviderContract {
+            outputs: output_shapes
+                .iter()
+                .map(|shape| dense_output_representation(provider.precision(), shape))
+                .collect(),
+            semantic_identity: None,
+            scalar_work_units: None,
+            matmul: None,
+            preparation_program: None,
+        },
     )
 }
 
@@ -207,12 +217,15 @@ fn select_fusion_provider_with_contract(
     request: &FusionExecutionRequest<'_>,
     bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
-    outputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
-    semantic_identity: Option<runmat_execution::Digest>,
-    scalar_work_units: Option<u64>,
-    matmul: Option<matmul::workload::Selection<'_>>,
-    preparation_program: Option<runmat_accelerate_api::ProviderPreparationProgram<'_>>,
+    contract: FusionProviderContract<'_>,
 ) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
+    let FusionProviderContract {
+        outputs,
+        semantic_identity,
+        scalar_work_units,
+        matmul,
+        preparation_program,
+    } = contract;
     let scalar_work_units = if let Some(contract) = &matmul {
         Some(
             crate::placement::matmul_scalar_work_units(&contract.workload, provider.precision())
