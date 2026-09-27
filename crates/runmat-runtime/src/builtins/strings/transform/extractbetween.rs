@@ -534,7 +534,7 @@ fn raw_boundary_shape(value: &Value) -> Option<Vec<usize>> {
         Value::CharArray(array) => Some(vec![array.rows, 1]),
         Value::Cell(cell) => Some(cell.shape.clone()),
         Value::Tensor(tensor) => Some(tensor.shape.clone()),
-        Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
         _ => None,
     }
 }

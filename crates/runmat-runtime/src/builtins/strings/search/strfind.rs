@@ -361,7 +361,7 @@ async fn validate_force_cell_output_extensions(rest: Vec<Value>) -> BuiltinResul
 
 fn validate_force_cell_output_shape(value: &Value) -> BuiltinResult<()> {
     let len = match value {
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape),
+        Value::GpuTensor(handle) => tensor::element_count(handle.shape()),
         Value::Tensor(value) => value.len(),
         Value::LogicalArray(value) => value.data.len(),
         _ => 1,

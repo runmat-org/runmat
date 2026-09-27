@@ -419,7 +419,7 @@ fn is_typed_integer_dimension_candidate(value: &Value) -> bool {
             tensor::is_scalar_tensor(tensor) && tensor.integer_storage().is_some()
         }
         Value::GpuTensor(handle) => {
-            handle.shape.iter().copied().product::<usize>() == 1
+            handle.shape().iter().all(|&dimension| dimension == 1)
                 && runmat_accelerate_api::handle_integer_type(handle).is_some()
         }
         _ => false,
@@ -430,7 +430,7 @@ fn is_dimension_candidate(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) => true,
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
-        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>() == 1,
+        Value::GpuTensor(handle) => handle.shape().iter().all(|&dimension| dimension == 1),
         _ => false,
     }
 }

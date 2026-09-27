@@ -350,7 +350,7 @@ fn validate_documents_outer_type(value: &Value) -> BuiltinResult<()> {
 fn validate_scalar_control_shape(value: &Value) -> BuiltinResult<()> {
     let len = match value {
         Value::GpuTensor(handle) => handle
-            .shape
+            .shape()
             .iter()
             .try_fold(1usize, |total, dimension| total.checked_mul(*dimension))
             .unwrap_or(usize::MAX),

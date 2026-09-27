@@ -530,7 +530,7 @@ fn is_typed_integer_value(value: &Value) -> bool {
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
         Value::Tensor(tensor) => Some(&tensor.shape),
-        Value::GpuTensor(handle) => Some(&handle.shape),
+        Value::GpuTensor(handle) => Some(handle.shape()),
         Value::Num(_) | Value::Int(_) => Some(&[1, 1]),
         _ => None,
     }

@@ -440,7 +440,7 @@ fn option_value(rest: &[Value]) -> Option<&Value> {
 
 fn validate_ignore_case_shape(value: &Value) -> BuiltinResult<()> {
     let element_count = match value {
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape),
+        Value::GpuTensor(handle) => tensor::element_count(handle.shape()),
         Value::Tensor(tensor) => tensor.len(),
         Value::LogicalArray(array) => array.data.len(),
         _ => 1,
