@@ -15,6 +15,7 @@ use std::sync::{
 struct Provider {
     owner: TestAllocationOwner,
     supports_double: bool,
+    fail_upload: bool,
     records: Mutex<Vec<(u64, RetirementProbe)>>,
     downloads: AtomicUsize,
     unary_calls: AtomicUsize,
@@ -89,6 +90,9 @@ impl AccelProvider for Provider {
         let HostNumericDataView::F64(data) = host.data else {
             panic!("expected resolved Double output");
         };
+        if self.fail_upload {
+            anyhow::bail!("injected typed Double upload failure");
+        }
         if !self.supports_double {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
                 "fixture cannot encode Double",
@@ -132,6 +136,7 @@ fn exponential_language_class_uses_typed_capability_not_preferred_precision() {
         let provider = Box::leak(Box::new(Provider {
             owner: TestAllocationOwner::new(),
             supports_double,
+            fail_upload: false,
             records: Mutex::new(Vec::new()),
             downloads: AtomicUsize::new(0),
             unary_calls: AtomicUsize::new(0),
@@ -249,4 +254,59 @@ fn exponential_language_class_uses_typed_capability_not_preferred_precision() {
             }
         }
     }
+}
+
+#[test]
+fn mapped_automatic_exponential_never_hides_operational_upload_failure() {
+    let provider = Box::leak(Box::new(Provider {
+        owner: TestAllocationOwner::new(),
+        supports_double: true,
+        fail_upload: true,
+        records: Mutex::new(Vec::new()),
+        downloads: AtomicUsize::new(0),
+        unary_calls: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let allocation = provider
+        .owner
+        .allocate_logical_zeroed(vec![1, 1, 1], ProviderPrecision::F32)
+        .unwrap();
+    let input = provider
+        .remember(allocation)
+        .with_provenance(GpuHandleProvenance::Automatic)
+        .unwrap();
+    for mapped in [false, true] {
+        let mut arguments = vec![Value::GpuTensor(input.clone())];
+        let name = if mapped {
+            arguments.insert(0, Value::FunctionHandle("exp".into()));
+            "arrayfun"
+        } else {
+            "exp"
+        };
+        let before = provider.downloads.load(Ordering::Relaxed);
+        let error = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            name, &arguments, 1,
+        ))
+        .unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("injected typed Double upload failure"),
+            "{error:?}"
+        );
+        assert!(error.source.is_some());
+        assert_eq!(
+            provider.downloads.load(Ordering::Relaxed),
+            before + 1,
+            "no scalar retry after operational failure"
+        );
+        assert_eq!(
+            provider.records.lock().unwrap().len(),
+            1,
+            "only original allocation remains"
+        );
+        input.allocation_lease().validate_live().unwrap();
+    }
+    assert_eq!(provider.unary_calls.load(Ordering::Relaxed), 0);
 }

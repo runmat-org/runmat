@@ -1,9 +1,7 @@
-use crate::builtins::common::{gpu_helpers, provider_restore};
+use crate::builtins::common::gpu_helpers;
 use crate::BuiltinResult;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_value::Value;
-
-use super::super::error::arrayfun_flow;
 
 pub(in crate::builtins::acceleration::gpu::arrayfun) fn maybe_upload_uniform(
     value: Value,
@@ -12,17 +10,11 @@ pub(in crate::builtins::acceleration::gpu::arrayfun) fn maybe_upload_uniform(
     let Some(prototype) = resident_inputs.first() else {
         return Ok(value);
     };
-    let provider = gpu_helpers::exact_provider_for_handle(prototype)
-        .ok_or_else(|| arrayfun_flow("arrayfun: input allocation provider unavailable"))?;
-
     match value {
         value @ (Value::Tensor(_) | Value::LogicalArray(_) | Value::ComplexTensor(_)) => {
-            provider_restore::upload_value_like_protected(
-                provider,
-                value,
-                "arrayfun",
-                prototype,
-                resident_inputs,
+            let protected = resident_inputs.iter().collect::<Vec<_>>();
+            gpu_helpers::restore_class_preserving_value_protecting(
+                prototype, value, "arrayfun", &protected,
             )
         }
         other => Ok(other),
