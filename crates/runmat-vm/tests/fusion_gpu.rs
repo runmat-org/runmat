@@ -1678,6 +1678,8 @@ mod observation;
 mod suspension;
 #[path = "fusion_gpu/consumed_values.rs"]
 mod consumed_values;
+#[path = "fusion_gpu/completion.rs"]
+mod completion;
 
 #[test]
 fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {

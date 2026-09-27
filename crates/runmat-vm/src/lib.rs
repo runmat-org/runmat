@@ -45,6 +45,7 @@ pub use interpreter::runner::{interpret_resume_in_context, prepare_native_execut
 pub use interpreter::state::{
     InterpreterCompletionBoundary, InterpreterOutcome, InterpreterResumeState, InterpreterState,
 };
+pub use interpreter::CompletedFrameProjection;
 pub use layout::{
     derive_layout, remap_layout_function_ids, LayoutError, VmAssemblyLayout, VmEntrypointLayout,
     VmFunctionLayout, VmSlotId, VM_LAYOUT_SCHEMA_VERSION,

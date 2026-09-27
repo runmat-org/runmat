@@ -202,6 +202,8 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
     input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
+    #[cfg(not(feature = "native-accel"))]
+    let _ = input_residency;
     #[cfg(feature = "native-accel")]
     let _borrowed_arguments = matches!(input_residency, InputResidency::Borrowed)
         .then(|| super::resident_ownership::BorrowedInputs::new(args))
@@ -320,7 +322,7 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
             requested_outputs,
             prepared.nargin,
             missing_input_slots,
-            runtime,
+            runtime.clone(),
         );
         #[cfg(target_arch = "wasm32")]
         {
@@ -354,6 +356,8 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
             }
         }
     };
+    let projected = super::CompletedFrameProjection::new(result_vars, runtime);
+    let result_vars = projected.values();
     let fixed_outputs = func
         .output_slots
         .iter()
@@ -371,18 +375,9 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
         .iter()
         .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
         .collect::<Vec<_>>();
-    #[cfg(feature = "native-accel")]
-    clear_semantic_function_temp_residency(
-        &result_vars,
-        args,
-        &output_values,
-        &updated_captures,
-        input_residency,
-    );
-    Ok((
-        output_sequence(output_values, requested_outputs)?,
-        updated_captures,
-    ))
+    let outputs = output_sequence(output_values, requested_outputs)?;
+    projected.finish(outputs.iter().chain(updated_captures.iter()));
+    Ok((outputs, updated_captures))
 }
 
 fn output_sequence(
@@ -399,30 +394,6 @@ fn output_sequence(
             output_values.into_iter().take(requested_outputs).collect(),
         )
         .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
-    }
-}
-
-#[cfg(feature = "native-accel")]
-fn clear_semantic_function_temp_residency(
-    result_vars: &[Value],
-    args: &[Value],
-    output_values: &[Value],
-    updated_captures: &[Value],
-    input_residency: InputResidency,
-) {
-    let mut keep_values = output_values.to_vec();
-    if matches!(input_residency, InputResidency::Borrowed) {
-        // Interpreter-to-interpreter calls borrow arguments from the caller's
-        // workspace. Those values remain live after the callee returns even if
-        // the callee overwrites its input slots.
-        keep_values.extend(args.iter().cloned());
-    }
-    keep_values.extend(updated_captures.iter().cloned());
-    keep_values.extend(runtime_globals::collect_thread_roots());
-    for value in result_vars {
-        if let Err(err) = accel_residency::clear_value_excluding_values(value, &keep_values) {
-            log::warn!("failed to clear temporary semantic function GPU residency: {err}");
-        }
     }
 }
 

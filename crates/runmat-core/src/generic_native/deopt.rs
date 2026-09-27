@@ -236,9 +236,15 @@ async fn resume_interpreter(
         side_effect_epoch: frame.site.side_effect_epoch,
     };
     let runmat_vm::InterpreterOutcome::Completed(completion) =
-        runmat_vm::interpret_resume_in_context(&bytecode, resume, Some(&function_name), runtime)
-            .await?;
-    let values = completion.values;
+        runmat_vm::interpret_resume_in_context(
+            &bytecode,
+            resume,
+            Some(&function_name),
+            runtime.clone(),
+        )
+        .await?;
+    let projection = runmat_vm::CompletedFrameProjection::new(completion.values, runtime);
+    let values = projection.values();
     let body = unit.mir().bodies.get(&function_id).ok_or_else(|| {
         super::error::stage("NativeDeoptimization", "MIR function body is unavailable")
     })?;
@@ -266,7 +272,7 @@ async fn resume_interpreter(
         varargout,
         requested_outputs,
     )?;
-    let captures = unit
+    let captures: Vec<_> = unit
         .mir()
         .functions
         .get(&function_id)
@@ -284,6 +290,11 @@ async fn resume_interpreter(
             })
         })
         .collect();
+    projection.finish(
+        outputs
+            .iter()
+            .chain(captures.iter().map(|capture| &capture.value)),
+    );
     Ok(NativeExecution {
         outputs,
         captures,
@@ -294,6 +305,10 @@ async fn resume_interpreter(
         expression: None,
     })
 }
+
+#[cfg(test)]
+#[path = "deopt_projection_tests.rs"]
+mod projection_tests;
 
 #[cfg(test)]
 mod tests {

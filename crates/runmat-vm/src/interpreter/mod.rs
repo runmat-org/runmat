@@ -1,4 +1,6 @@
 pub mod api;
+mod completion;
+pub use completion::CompletedFrameProjection;
 pub mod debug;
 pub mod dispatch;
 mod dispatch_cancellation;
