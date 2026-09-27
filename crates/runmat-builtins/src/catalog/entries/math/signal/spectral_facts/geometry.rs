@@ -19,6 +19,10 @@ fn invalid_real(value: &LiteralValue) -> bool {
     }
 }
 
+fn proven_invalid_integer(value: &LiteralValue) -> bool {
+    LiteralContext::numeric_from_literal(value).is_some() && integer(value).is_none()
+}
+
 pub(super) fn invalid_controls(
     request: &CallRequest,
     spectrum: Spectrum,
@@ -29,13 +33,32 @@ pub(super) fn invalid_controls(
         .get(1..request.arguments.len())?;
     let mut index = 0;
     let window = positional(args, &mut index)?;
+    if let Some(value) = window {
+        if matches!(value, LiteralValue::Vector(v) if v.iter().any(invalid_real))
+            || (!matches!(value, LiteralValue::Vector(_) | LiteralValue::Empty)
+                && invalid_real(value))
+            || (matches!(spectrum, Spectrum::Spectrogram)
+                && match value {
+                    LiteralValue::Vector(v) if v.len() == 1 => proven_invalid_integer(&v[0]),
+                    LiteralValue::Vector(_) | LiteralValue::Empty => false,
+                    v => proven_invalid_integer(v),
+                })
+        {
+            return Some(argument_error(
+                "RM-CATALOG-SPECTRAL-WINDOW",
+                "invalid spectral window",
+                1,
+            ));
+        }
+    }
     let signal_len = request
         .arguments
         .first()?
         .shape
         .known_dims()
         .and_then(|dims| match dims.as_slice() {
-            [Some(1), Some(n)] | [Some(n), Some(1)] => Some(*n),
+            [Some(1), Some(columns)] => Some(*columns),
+            [Some(rows), _] => Some(*rows),
             _ => None,
         });
     let default_window = signal_len.and_then(|n| match spectrum {
@@ -73,6 +96,17 @@ pub(super) fn invalid_controls(
             ));
         }
         let overlap = positional(args, &mut index)?;
+        if match overlap {
+            Some(LiteralValue::Vector(v)) if v.len() == 1 => proven_invalid_integer(&v[0]),
+            Some(LiteralValue::Vector(_) | LiteralValue::Empty) | None => false,
+            Some(v) => proven_invalid_integer(v),
+        } {
+            return Some(argument_error(
+                "RM-CATALOG-SPECTRAL-OVERLAP",
+                "invalid overlap",
+                2,
+            ));
+        }
         let overlap = match overlap {
             None | Some(LiteralValue::Empty) => window_len.map(|n| n / 2),
             Some(LiteralValue::Vector(v)) if v.is_empty() => window_len.map(|n| n / 2),
@@ -177,7 +211,7 @@ pub(super) fn invalid_grid(
         LiteralValue::Empty => false,
         LiteralValue::Vector(v) if v.is_empty() => false,
         LiteralValue::Vector(v) if v.len() == 1 => {
-            integer(&v[0]).is_some_and(|n| n == 0 || n > MAX_NFFT)
+            proven_invalid_integer(&v[0]) || integer(&v[0]).is_some_and(|n| n == 0 || n > MAX_NFFT)
         }
         LiteralValue::Vector(v) => {
             v.len()
@@ -188,7 +222,7 @@ pub(super) fn invalid_grid(
                 }
                 || v.len() > MAX_NFFT
         }
-        v => integer(v).is_some_and(|n| n == 0 || n > MAX_NFFT),
+        v => proven_invalid_integer(v) || integer(v).is_some_and(|n| n == 0 || n > MAX_NFFT),
     };
     invalid.then(|| {
         argument_error(
