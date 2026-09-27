@@ -35,13 +35,18 @@ fn readback_releases_access_and_mapping_for_reuse() {
     let expected = [1.25f32, -3.5, 0.0, 9.0];
     let buffer = access
         .with_shared(|emission| {
-            emission
+            let buffer = emission
                 .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("plot-readback-owner-test"),
                     contents: bytemuck::cast_slice(&expected),
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                })
+                });
+            // Initial mapped writes may be staged until the next submission.
+            // Readback consumes completed producer work; polling alone does
+            // not submit the producer's pending upload.
+            emission.queue().submit(std::iter::empty());
+            buffer
         })
         .expect("create test buffer");
 
