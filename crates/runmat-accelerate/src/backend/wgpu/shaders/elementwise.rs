@@ -264,7 +264,17 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
         UnaryOpCode::Log2 => Some("return runmat_log(a) * 1.4426950408889634;"),
         _ => None,
     };
-    let case_body = if let Some(body) = logarithm_body {
+    let case_body = if matches!(op, UnaryOpCode::Round) {
+        let precision = match precision {
+            NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+            NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+        };
+        helpers = crate::kernel_math::rounding::functions(precision);
+        format!(
+            "return {}(a);",
+            crate::kernel_math::rounding::entrypoint(precision)
+        )
+    } else if let Some(body) = logarithm_body {
         helpers = super::logarithms::helpers(precision);
         body.to_owned()
     } else if matches!(op, UnaryOpCode::Gammaln) {

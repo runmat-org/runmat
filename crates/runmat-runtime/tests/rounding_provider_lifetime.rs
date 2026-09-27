@@ -219,3 +219,39 @@ fn rounding_characters_retain_pages_and_semantic_element_order() {
         );
     }
 }
+
+#[test]
+fn round_scalar_ties_integral_extremes_and_signed_zero_have_independent_oracles() {
+    let large = 4_503_599_627_370_497.0;
+    for (input, expected) in [
+        (0.5, 1.0_f64),
+        (-0.5, -1.0),
+        (2.5, 3.0),
+        (-2.5, -3.0),
+        (large, large),
+        (-large, -large),
+        (-0.0, -0.0),
+        (-0.25, -0.0),
+        (f64::INFINITY, f64::INFINITY),
+        (f64::NEG_INFINITY, f64::NEG_INFINITY),
+    ] {
+        let Value::Num(actual) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            "round",
+            &[Value::Num(input)],
+            1,
+        ))
+        .unwrap() else {
+            panic!("round scalar")
+        };
+        assert_eq!(actual.to_bits(), expected.to_bits());
+    }
+    let Value::Num(actual) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        "round",
+        &[Value::Num(f64::NAN)],
+        1,
+    ))
+    .unwrap() else {
+        panic!("round NaN")
+    };
+    assert!(actual.is_nan());
+}

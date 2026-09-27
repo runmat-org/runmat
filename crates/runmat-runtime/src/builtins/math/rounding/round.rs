@@ -41,7 +41,18 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute round directly on the device; digit-aware rounding uses the round_digits hook when available.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::round")]
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration {
+        binding: runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::ROUND_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        revision: 1,
+        admit: None,
+        helpers: &[crate::builtins::common::spec::FusionMathHelper::Round],
+    };
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::round", semantics = FUSION_SEMANTICS)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "round",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -49,13 +60,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
+            if ctx.inputs.len() != 1 {
+                return Err(FusionError::Message(
+                    "round digit forms require their parsed runtime strategy",
+                ));
+            }
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!("round({input})"))
+            let helper = crate::builtins::common::spec::FusionMathHelper::Round.entrypoint(ctx.scalar_ty)?;
+            Ok(format!("{helper}({input})"))
         },
     }),
     reduction: None,
     emits_nan: false,
-    notes: "Fusion planner emits WGSL `round` calls; providers can substitute custom kernels.",
+    notes: "Plain round(X) uses the shared ties-away rounding helper; digit forms retain their parsed runtime strategy.",
 };
 
 const BUILTIN_NAME: &str = "round";
@@ -465,6 +482,29 @@ pub(crate) mod tests {
         BuiltinIntegerBackendRule, BuiltinIntegerInputAvailability, BuiltinIntegerOutputClassRule,
     };
     use runmat_value::{IntValue, IntegerStorage, Tensor};
+
+    #[test]
+    fn fusion_plain_form_uses_shared_helper_and_rejects_digit_controls() {
+        let template = FUSION_SPEC.elementwise.as_ref().unwrap();
+        for (scalar_ty, helper) in [
+            (ScalarType::F32, "rm_round_f32"),
+            (ScalarType::F64, "rm_round_f64"),
+        ] {
+            let expression = (template.wgsl_body)(&FusionExprContext {
+                scalar_ty,
+                inputs: &["x"],
+                constants: &[],
+            })
+            .unwrap();
+            assert_eq!(expression, format!("{helper}(x)"));
+            assert!((template.wgsl_body)(&FusionExprContext {
+                scalar_ty,
+                inputs: &["x", "2"],
+                constants: &[]
+            })
+            .is_err());
+        }
+    }
 
     fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::round_builtin(value, rest))
