@@ -523,16 +523,13 @@ async fn imfilter_gpu(
         )
         .await;
     };
-    if expected_precision != provider.precision() {
-        return imfilter_gpu_host_fallback(
-            provider,
-            &image_handle,
-            &kernel_tensor,
-            &options,
-            resident_kernel.as_ref(),
-        )
-        .await;
-    }
+    let kernel_precision = match floating_accumulation(
+        expected_precision,
+        runmat_accelerate_api::handle_is_explicit(&image_handle),
+    ) {
+        FilterAccumulation::HostDouble => ProviderPrecision::F64,
+        FilterAccumulation::GpuSingle => ProviderPrecision::F32,
+    };
     // Retain both originals through upload, execution, fallback and suspension.
     let _image_residency = runmat_accelerate_api::ResidencyRestoreGuard::new(&image_handle);
     let _kernel_residency = resident_kernel
@@ -541,6 +538,7 @@ async fn imfilter_gpu(
     let same_owner_kernel = resident_kernel.as_ref().filter(|handle| {
         gpu_helpers::exact_provider_for_handle(handle)
             .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+            && runmat_accelerate_api::handle_precision(handle) == Some(kernel_precision)
     });
     let kernel_handle = match same_owner_kernel {
         Some(handle) => handle.clone(),
@@ -549,6 +547,7 @@ async fn imfilter_gpu(
             &kernel_tensor,
             &image_handle,
             resident_kernel.as_ref(),
+            kernel_precision,
         )? {
             Some(uploaded) => uploaded,
             None => {
@@ -615,6 +614,7 @@ fn upload_kernel(
     tensor: &Tensor,
     image: &GpuTensorHandle,
     resident_kernel: Option<&GpuTensorHandle>,
+    precision: ProviderPrecision,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView, NumericUploadError};
     let values = tensor.as_f64_slice().ok_or_else(|| {
@@ -623,7 +623,7 @@ fn upload_kernel(
     // Preserve the existing kernel adaptation to the admitted execution
     // precision, but declare the actual upload payload instead of relabeling.
     let single;
-    let data = if provider.precision() == ProviderPrecision::F32 {
+    let data = if precision == ProviderPrecision::F32 {
         single = values.iter().map(|value| *value as f32).collect::<Vec<_>>();
         HostNumericDataView::F32(&single)
     } else {
@@ -915,9 +915,21 @@ pub struct ImfilterPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FilterAccumulation {
+pub enum FilterAccumulation {
     HostDouble,
     GpuSingle,
+}
+
+/// Floating provider arithmetic follows placement intent, independently of
+/// physical input/output storage or a provider's preferred precision.
+pub fn floating_accumulation(precision: ProviderPrecision, explicit: bool) -> FilterAccumulation {
+    fallback_accumulation(
+        match precision {
+            ProviderPrecision::F32 => ImageOutputClass::Single,
+            ProviderPrecision::F64 => ImageOutputClass::Double,
+        },
+        explicit,
+    )
 }
 
 impl ImfilterPlan {
@@ -1033,6 +1045,43 @@ pub fn apply_imfilter_tensor(
     let data = plan.evaluate(&image_values, options);
     Tensor::new(data, plan.final_shape.clone())
         .map_err(|e| ImfilterKernelError::new(builtin, format!("{builtin}: {e}")))
+}
+
+/// Native floating adapter over the same operation-owned plan and evaluator.
+/// Prepared H may use the accumulation encoding; public H admission remains
+/// Double at the builtin boundary. Output storage always follows A.
+pub fn apply_imfilter_native(
+    image: &Tensor,
+    kernel: &Tensor,
+    options: &ImfilterOptions,
+    explicit: bool,
+    builtin: &str,
+) -> ImfilterKernelResult<Tensor> {
+    let precision = match image.numeric_dtype() {
+        NumericDType::F32 => ProviderPrecision::F32,
+        NumericDType::F64 => ProviderPrecision::F64,
+        _ => {
+            return Err(ImfilterKernelError::new(
+                builtin,
+                "native imfilter requires floating A",
+            ))
+        }
+    };
+    let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
+    let values = tensor::tensor_values_f64_cow(image);
+    let data = plan.evaluate_with_accumulation(
+        &values,
+        options,
+        floating_accumulation(precision, explicit),
+    );
+    match precision {
+        ProviderPrecision::F32 => Tensor::from_f32(
+            data.into_iter().map(|value| value as f32).collect(),
+            plan.final_shape,
+        ),
+        ProviderPrecision::F64 => Tensor::new(data, plan.final_shape),
+    }
+    .map_err(|error| ImfilterKernelError::new(builtin, error))
 }
 
 fn apply_imfilter_host(

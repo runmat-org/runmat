@@ -9,6 +9,7 @@ mod arithmetic;
 mod dimensional_extrema;
 mod median;
 mod dot;
+mod imfilter;
 #[cfg(test)]
 mod owning_routes;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
@@ -5414,33 +5415,7 @@ impl AccelProvider for InProcessProvider {
         kernel: &'a GpuTensorHandle,
         options: &'a ImfilterOptions,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let (image_vec, kernel_vec) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let image_buf = guard
-                    .get(&image)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("imfilter: unknown buffer {}", image.buffer_id()))?;
-                let kernel_buf = guard
-                    .get(&kernel)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("imfilter: unknown buffer {}", kernel.buffer_id()))?;
-                (image_buf, kernel_buf)
-            };
-            let image_tensor = Tensor::new(image_vec, image.shape().to_vec())
-                .map_err(|e| anyhow!("imfilter: {e}"))?;
-            let kernel_tensor = Tensor::new(kernel_vec, kernel.shape().to_vec())
-                .map_err(|e| anyhow!("imfilter: {e}"))?;
-            let result = runmat_runtime::builtins::image::filters::imfilter::apply_imfilter_tensor(
-                &image_tensor,
-                &kernel_tensor,
-                options,
-                "imfilter",
-            )
-            .map_err(|err| anyhow!(err))?;
-            let shape = result.shape.clone();
-            self.allocate_tensor(result.materialize_f64(), shape)
-        })
+        Box::pin(async move { self.native_imfilter(image, kernel, options) })
     }
 
     fn random_permutation(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
