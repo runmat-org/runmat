@@ -3,6 +3,9 @@
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+
+#[path = "median/resident.rs"]
+mod resident;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
@@ -691,6 +694,13 @@ async fn median_gpu(
     protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+    let provider = gpu_helpers::exact_provider_for_handle(&handle)
+        .ok_or_else(|| resident::terminal("median: resident input has no exact owning provider"))?;
+    handle.allocation_lease().validate_live().map_err(|error| {
+        resident::provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+            error,
+        ))
+    })?;
     let is_logical = runmat_accelerate_api::handle_is_logical(&handle);
     let is_integer = runmat_accelerate_api::handle_integer_type(&handle).is_some();
     if !is_integer
@@ -698,10 +708,14 @@ async fn median_gpu(
         && args.weights.is_none()
         && args.nan_mode == ReductionNaN::Include
     {
-        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-            if let Some(device_result) = median_gpu_try(provider, &handle, &args.axes).await {
-                return Ok(Value::GpuTensor(device_result));
-            }
+        if let Some(device_result) =
+            resident::try_reduce(provider, &handle, &args.axes, protected).await?
+        {
+            return gpu_helpers::resident_gpu_value(device_result).map_err(|error| {
+                resident::provider_error(
+                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                )
+            });
         }
     }
 
@@ -723,72 +737,6 @@ async fn median_gpu(
         Value::Tensor(reduced)
     };
     gpu_helpers::restore_class_preserving_value_protecting(&handle, result, "median", protected)
-}
-
-async fn median_gpu_try(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-    axes: &MedianAxes,
-) -> Option<GpuTensorHandle> {
-    match axes {
-        MedianAxes::Default => {
-            if handle.shape().is_empty() {
-                Some(handle.clone())
-            } else {
-                let dim = default_dimension_from_shape(handle.shape());
-                reduce_median_dim_gpu(provider, handle.clone(), dim).await
-            }
-        }
-        MedianAxes::Dim(dim) => reduce_median_dim_gpu(provider, handle.clone(), *dim).await,
-        MedianAxes::Vec(dims) => {
-            let mut result = handle.clone();
-            let mut dims_sorted = dims.clone();
-            dims_sorted.sort_unstable();
-            dims_sorted.dedup();
-            for dim in dims_sorted {
-                match reduce_median_dim_gpu(provider, result, dim).await {
-                    Some(next) => result = next,
-                    None => return None,
-                }
-            }
-            Some(result)
-        }
-        MedianAxes::All => {
-            if handle.shape().is_empty() {
-                Some(handle.clone())
-            } else {
-                provider
-                    .reduce_median(handle)
-                    .await
-                    .map_err(|err| {
-                        log::trace!("median: provider reduce_median fallback triggered: {err}");
-                        err
-                    })
-                    .ok()
-            }
-        }
-    }
-}
-
-async fn reduce_median_dim_gpu(
-    provider: &dyn AccelProvider,
-    handle: GpuTensorHandle,
-    dim: usize,
-) -> Option<GpuTensorHandle> {
-    if dim == 0 {
-        return None;
-    }
-    if handle.shape().len() < dim {
-        return Some(handle);
-    }
-    provider
-        .reduce_median_dim(&handle, dim - 1)
-        .await
-        .map_err(|err| {
-            log::trace!("median: provider reduce_median_dim fallback triggered: {err}");
-            err
-        })
-        .ok()
 }
 
 fn median_tensor(
@@ -836,12 +784,11 @@ fn median_tensor(
             if tensor.shape.is_empty() {
                 Ok(tensor)
             } else {
-                let mut current = tensor;
-                let rank = current.shape.len();
-                for dim in 1..=rank {
-                    current = reduce_tensor_median_dim(current, dim, nan_mode)?;
-                }
-                Ok(current)
+                let len = tensor.len();
+                let flat = tensor
+                    .reshape(vec![len, 1])
+                    .map_err(median_internal_error)?;
+                reduce_tensor_median_dim(flat, 1, nan_mode)
             }
         }
     }
