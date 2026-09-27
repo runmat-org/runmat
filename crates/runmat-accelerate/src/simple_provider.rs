@@ -4,6 +4,7 @@ use allocation_state::{integer_registry, numeric_registry, registry};
 mod power;
 mod logarithms;
 mod remainder;
+mod unary;
 #[cfg(test)]
 mod owning_routes;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
@@ -6795,30 +6796,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn unary_sin<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let storage = runmat_accelerate_api::handle_storage(a);
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
-                ensure!(
-                    abuf.len() % 2 == 0,
-                    "unary_sin: complex-interleaved buffer has odd length"
-                );
-                let mut out = Vec::with_capacity(abuf.len());
-                for pair in abuf.chunks_exact(2) {
-                    let (re, im) = sin_complex_host(pair[0], pair[1]);
-                    out.push(re);
-                    out.push(im);
-                }
-                out
-            } else {
-                abuf.iter().map(|&x| x.sin()).collect()
-            };
-            drop(guard);
-            self.allocate_tensor_with_storage(out, a.shape().to_vec(), storage)
-        })
+        Box::pin(async move { self.native_unary(a, unary::Unary::Sin) })
     }
     fn unary_sinc<'a>(
         &'a self,
@@ -7215,30 +7193,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn unary_cos<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let storage = runmat_accelerate_api::handle_storage(a);
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
-                ensure!(
-                    abuf.len() % 2 == 0,
-                    "unary_cos: complex-interleaved buffer has odd length"
-                );
-                let mut out = Vec::with_capacity(abuf.len());
-                for pair in abuf.chunks_exact(2) {
-                    let (re, im) = cos_complex_host(pair[0], pair[1]);
-                    out.push(re);
-                    out.push(im);
-                }
-                out
-            } else {
-                abuf.iter().map(|&x| x.cos()).collect()
-            };
-            drop(guard);
-            self.allocate_tensor_with_storage(out, a.shape().to_vec(), storage)
-        })
+        Box::pin(async move { self.native_unary(a, unary::Unary::Cos) })
     }
 
     fn unary_angle<'a>(
@@ -7317,27 +7272,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn unary_abs<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out: Vec<f64> = if runmat_accelerate_api::handle_storage(a)
-                == GpuTensorStorage::ComplexInterleaved
-            {
-                ensure!(
-                    abuf.len() % 2 == 0,
-                    "unary_abs: complex-interleaved buffer has odd length"
-                );
-                abuf.chunks_exact(2)
-                    .map(|pair| pair[0].hypot(pair[1]))
-                    .collect()
-            } else {
-                abuf.iter().map(|&x| x.abs()).collect()
-            };
-            drop(guard);
-            self.allocate_tensor(out, a.shape().to_vec())
-        })
+        Box::pin(async move { self.native_unary(a, unary::Unary::Abs) })
     }
 
     fn unary_sign<'a>(
@@ -7417,19 +7352,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn unary_exp<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            ensure!(
-                runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved,
-                "unary_exp does not support complex-interleaved buffers"
-            );
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.exp()).collect();
-            drop(guard);
-            self.allocate_tensor_with_storage(out, a.shape().to_vec(), GpuTensorStorage::Real)
-        })
+        Box::pin(async move { self.native_unary(a, unary::Unary::Exp) })
     }
 
     fn unary_expm1<'a>(
@@ -7524,15 +7447,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.ln()).collect();
-            drop(guard);
-            self.allocate_tensor(out, a.shape().to_vec())
-        })
+        Box::pin(async move { self.native_unary(a, unary::Unary::Log) })
     }
 
     fn unary_log2<'a>(
@@ -7560,15 +7475,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out: Vec<f64> = abuf.iter().map(|&x| x.sqrt()).collect();
-            drop(guard);
-            self.allocate_tensor_with_storage(out, a.shape().to_vec(), GpuTensorStorage::Real)
-        })
+        Box::pin(async move { self.native_unary(a, unary::Unary::Sqrt) })
     }
 
     fn unary_double<'a>(
@@ -9303,15 +9210,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let m = abuf.iter().cloned().fold(f64::INFINITY, f64::min);
-            drop(guard);
-            self.allocate_tensor_with_storage(vec![m], vec![1, 1], GpuTensorStorage::Real)
-        })
+        Box::pin(async move { self.native_extremum(a, true) })
     }
 
     fn reduce_min_dim<'a>(
@@ -9393,15 +9292,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let m = abuf.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            drop(guard);
-            self.allocate_tensor_with_storage(vec![m], vec![1, 1], GpuTensorStorage::Real)
-        })
+        Box::pin(async move { self.native_extremum(a, false) })
     }
 
     fn reduce_max_dim<'a>(
