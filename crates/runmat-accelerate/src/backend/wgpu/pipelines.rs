@@ -448,7 +448,7 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            &match precision {
+            match precision {
                 NumericPrecision::F64 => PERMUTE_SHADER_F64,
                 NumericPrecision::F32 => PERMUTE_SHADER_F32,
             }
@@ -465,7 +465,7 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            &integer_permute_shader.replace("@WG@", &scalar_workgroup.to_string()),
+            integer_permute_shader.replace("@WG@", &scalar_workgroup.to_string()),
         );
 
         let flip = create_pipeline(
