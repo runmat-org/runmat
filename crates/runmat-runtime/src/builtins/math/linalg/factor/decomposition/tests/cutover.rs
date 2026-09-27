@@ -32,12 +32,16 @@ fn cholesky_validation_is_independent_of_requested_outputs() {
 #[test]
 fn every_method_checks_output_count_before_inputs_or_provider_access() {
     let d = call_constructor(vec![tensor(&[2.0], 1, 1)]).unwrap();
-    let providerless = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX - 396,
-        buffer_id: u64::MAX - 396,
-        descriptor: Default::default(),
-    });
+    let providerless = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle,
+    );
     let _outputs = crate::output_count::push_output_count(Some(2));
     let errors = [
         call_constructor(vec![providerless.clone()]).unwrap_err(),

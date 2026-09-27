@@ -20,16 +20,14 @@ fn decomposition_nonfloating_input_follows_compatibility_mode() {
         ));
     }
 
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 2],
-        device_id: 0,
-        buffer_id: 9_300_001,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::I16,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 2],
+            runmat_accelerate_api::NumericElementType::I16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap()
+        .handle;
     {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call_constructor(vec![Value::GpuTensor(handle.clone())])
@@ -149,12 +147,16 @@ fn every_nonfloating_object_entry_point_binds_canonical_extension_metadata() {
 fn gpu_object_operands_are_gated_before_provider_access() {
     let d = call_constructor(vec![tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2)])
         .expect("floating decomposition");
-    let gpu_scalar = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX - 397,
-        buffer_id: u64::MAX - 397,
-        descriptor: Default::default(),
-    });
+    let gpu_scalar = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle,
+    );
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     for error in [
         block_on(decomposition_times(d.clone(), gpu_scalar.clone())).expect_err("times gpu gate"),

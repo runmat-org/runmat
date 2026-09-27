@@ -375,18 +375,18 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
     }
     match value {
         Value::GpuTensor(handle) => {
-            let provider = runmat_accelerate_api::provider_for_handle(&handle);
+            let provider = gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| chol_internal_error("chol: no exact owner for resident input"))?;
             if !integer_input {
                 if let Some(eval) = evaluate_gpu(&handle, triangle).await? {
                     return Ok(eval);
                 }
             }
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(with_chol_context)?;
-            ensure_exact_integer_boundary(&Value::Tensor(tensor.clone()))?;
-            let eval = evaluate_host_value(Value::Tensor(tensor), triangle).await?;
-            reupload_factor(eval, provider)
+            let host =
+                gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+            ensure_exact_integer_boundary(&host)?;
+            let eval = evaluate_host_value(host, triangle).await?;
+            reupload_factor(eval, provider, &handle)
         }
         other => {
             ensure_exact_integer_boundary(&other)?;
@@ -448,32 +448,33 @@ fn numeric_scalar_as_i128(value: NumericScalar) -> Option<i128> {
 
 fn reupload_factor(
     mut eval: CholEval,
-    provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
 ) -> BuiltinResult<CholEval> {
-    let Some(provider) = provider else {
-        return Ok(eval);
-    };
     let uploaded = match &eval.factor {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, tensor),
-        Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
-            .map_err(|err| err.to_string())
-            .and_then(|tensor| gpu_helpers::upload_tensor(provider, &tensor)),
-        Value::ComplexTensor(tensor) => {
-            gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|err| err.to_string())
+        Value::Tensor(tensor) => gpu_helpers::upload_tensor_protecting(provider, tensor, &[input]),
+        Value::Num(value) => {
+            let tensor = Tensor::new(vec![*value], vec![1, 1])
+                .map_err(|error| chol_internal_error(error.to_string()))?;
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])
         }
-        Value::Complex(real, imag) => ComplexTensor::new(vec![(*real, *imag)], vec![1, 1])
-            .map_err(|err| err.to_string())
-            .and_then(|tensor| {
-                gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| err.to_string())
-            }),
+        Value::ComplexTensor(tensor) => {
+            gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[input])
+        }
+        Value::Complex(real, imag) => {
+            let tensor = ComplexTensor::new(vec![(*real, *imag)], vec![1, 1])
+                .map_err(|error| chol_internal_error(error.to_string()))?;
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])
+        }
         other => {
             return Err(chol_internal_error(format!(
                 "chol: cannot restore GPU factor of type {other:?}"
             )))
         }
-    }
-    .map_err(|err| chol_internal_error(format!("chol: GPU fallback upload failed: {err}")))?;
-    eval.factor = gpu_helpers::resident_gpu_value(uploaded);
+    }?;
+    let mut uploaded = uploaded;
+    gpu_helpers::propagate_output_provenance(&mut uploaded, [input])?;
+    eval.factor = gpu_helpers::resident_gpu_value(uploaded)?;
     Ok(eval)
 }
 
@@ -501,10 +502,36 @@ async fn evaluate_gpu(
     handle: &GpuTensorHandle,
     triangle: CholTriangle,
 ) -> BuiltinResult<Option<CholEval>> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
+        if runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle) != Some(provider.precision())
+        {
+            return Ok(None);
+        }
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
         let lower = matches!(triangle, CholTriangle::Lower);
         match provider.chol(handle, lower).await {
-            Ok(result) => return Ok(Some(CholEval::from_provider(result, triangle))),
+            Ok(mut result) => {
+                let valid = result.factor.shape() == handle.shape()
+                    && result.info as usize <= handle.shape().first().copied().unwrap_or(1)
+                    && !result.factor.shares_allocation_with(handle)
+                    && !runmat_accelerate_api::handle_is_logical(&result.factor)
+                    && !runmat_accelerate_api::handle_is_transposed(&result.factor)
+                    && result.factor.physical().element_type() == handle.physical().element_type()
+                    && result.factor.physical().storage() == handle.physical().storage()
+                    && gpu_helpers::exact_provider_for_handle(&result.factor)
+                        .is_some_and(|owner| std::ptr::eq(owner, provider));
+                if !valid {
+                    return Err(gpu_helpers::reject_gpu_output(
+                        result.factor,
+                        chol_internal_error("chol: invalid provider factor output"),
+                    ));
+                }
+                gpu_helpers::propagate_output_provenance(&mut result.factor, [handle])?;
+                return Ok(Some(CholEval::from_provider(result, triangle)));
+            }
             Err(error) if error.is_unsupported() => {}
             Err(error) => return Err(chol_provider_error(error)),
         }
@@ -1218,9 +1245,12 @@ pub(crate) mod tests {
             );
         }
         test_support::with_test_provider(|provider| {
-            let tensor = tensor::logical_to_tensor(&logical).expect("logical tensor");
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("logical upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &logical.data,
+                    shape: &logical.shape,
+                })
+                .expect("logical upload");
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = match evaluate(Value::GpuTensor(handle.clone()), &[]) {
                 Err(err) => err,
@@ -1231,7 +1261,7 @@ pub(crate) mod tests {
                 CHOL_LOGICAL_INPUT_EXTENSION.error_identifier
             );
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
-            let _ = provider.free(&handle);
+            drop(handle);
         });
     }
 

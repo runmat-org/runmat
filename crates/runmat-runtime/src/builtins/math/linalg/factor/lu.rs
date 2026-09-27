@@ -370,7 +370,7 @@ impl LuEval {
         mut result: ProviderLuResult,
         pivot_mode: PivotMode,
         provenance: runmat_accelerate_api::GpuHandleProvenance,
-    ) -> Self {
+    ) -> BuiltinResult<Self> {
         for handle in [
             &mut result.combined,
             &mut result.lower,
@@ -378,17 +378,21 @@ impl LuEval {
             &mut result.perm_matrix,
             &mut result.perm_vector,
         ] {
-            runmat_accelerate_api::set_handle_provenance(handle, provenance);
+            *handle = handle.with_provenance(provenance).map_err(|error| {
+                build_runtime_error(format!("lu: cannot adopt provider output: {error}"))
+                    .with_source(error)
+                    .build()
+            })?;
             runmat_accelerate_api::mark_residency(handle);
         }
-        Self {
+        Ok(Self {
             combined: Value::GpuTensor(result.combined),
             lower: Value::GpuTensor(result.lower),
             upper: Value::GpuTensor(result.upper),
             perm_matrix: Value::GpuTensor(result.perm_matrix),
             perm_vector: Value::GpuTensor(result.perm_vector),
             pivot_mode,
-        }
+        })
     }
 }
 
@@ -415,17 +419,15 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
             if let Some(eval) = evaluate_gpu(&handle, pivot_mode).await? {
                 return Ok(eval);
             }
-            let owner = gpu_helpers::exact_provider_for_handle(&handle);
+            let owner = gpu_helpers::exact_provider_for_handle(&handle)
+                .ok_or_else(|| lu_internal_error("lu: no exact owner for resident input"))?;
             let explicit = runmat_accelerate_api::handle_is_explicit(&handle);
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            let host = gpu_helpers::download_value_preserving_residency_async(owner, &handle)
                 .await
                 .map_err(with_lu_context)?;
-            let eval = evaluate_host_value(Value::Tensor(tensor), pivot_mode).await?;
+            let eval = evaluate_host_value(host, pivot_mode).await?;
             if explicit {
-                let owner = owner.ok_or_else(|| {
-                    lu_invalid_input("lu: no exact owner for explicit gpuArray input")
-                })?;
-                restore_lu_eval_to_provider(eval, owner)
+                restore_lu_eval_to_provider(eval, owner, &handle)
             } else {
                 Ok(eval)
             }
@@ -437,15 +439,20 @@ pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
 fn restore_lu_eval_to_provider(
     eval: LuEval,
     owner: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
 ) -> BuiltinResult<LuEval> {
     fn upload(
         owner: &'static dyn runmat_accelerate_api::AccelProvider,
         value: &Value,
+        protected: &[&GpuTensorHandle],
     ) -> BuiltinResult<GpuTensorHandle> {
         let handle = match value {
-            Value::Tensor(tensor) => gpu_helpers::upload_tensor(owner, tensor)
-                .map_err(|error| lu_internal_error(format!("lu: GPU upload failed: {error}")))?,
-            Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(owner, tensor)?,
+            Value::Tensor(tensor) => {
+                gpu_helpers::upload_tensor_protecting(owner, tensor, protected)?
+            }
+            Value::ComplexTensor(tensor) => {
+                gpu_helpers::upload_complex_tensor_protecting(owner, tensor, protected)?
+            }
             _ => return Err(lu_internal_error("lu: unexpected host factor value")),
         };
         Ok(handle)
@@ -458,15 +465,11 @@ fn restore_lu_eval_to_provider(
         &eval.perm_matrix,
         &eval.perm_vector,
     ] {
-        match upload(owner, value) {
-            Ok(handle) => uploaded.push(handle),
-            Err(error) => {
-                for handle in &uploaded {
-                    gpu_helpers::free_unprotected_exact_owner(handle, &[]);
-                }
-                return Err(error);
-            }
-        }
+        let protected = std::iter::once(input)
+            .chain(uploaded.iter())
+            .collect::<Vec<_>>();
+        let handle = upload(owner, value, &protected)?;
+        uploaded.push(handle);
     }
     let mut uploaded = uploaded.into_iter();
     let mut combined = uploaded.next().expect("combined upload");
@@ -481,7 +484,7 @@ fn restore_lu_eval_to_provider(
         &mut perm_matrix,
         &mut perm_vector,
     ] {
-        runmat_accelerate_api::mark_handle_explicit(handle);
+        gpu_helpers::propagate_output_provenance(handle, [input])?;
         runmat_accelerate_api::mark_residency(handle);
     }
     Ok(LuEval {
@@ -534,13 +537,33 @@ async fn evaluate_gpu(
     pivot_mode: PivotMode,
 ) -> BuiltinResult<Option<LuEval>> {
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
-        if let Ok(result) = provider.lu(handle).await {
-            if valid_provider_lu_result(&result, handle, provider) {
-                let provenance = runmat_accelerate_api::handle_provenance(handle)
-                    .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-                return Ok(Some(LuEval::from_provider(result, pivot_mode, provenance)));
+        if runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle) != Some(provider.precision())
+        {
+            return Ok(None);
+        }
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
+        match provider.lu(handle).await {
+            Ok(result) => {
+                if valid_provider_lu_result(&result, handle, provider) {
+                    let provenance = runmat_accelerate_api::handle_provenance(handle)
+                        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+                    return Ok(Some(LuEval::from_provider(result, pivot_mode, provenance)?));
+                }
+                return Err(reject_provider_lu_result(
+                    result,
+                    lu_internal_error("lu: provider returned invalid factor outputs"),
+                ));
             }
-            free_invalid_provider_lu_result(&result, handle);
+            Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {}
+            Err(error) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    lu_internal_error(format!("lu: provider execution failed: {error}")),
+                    runmat_accelerate_api::ProviderExecutionError::from(error),
+                ))
+            }
         }
     }
     Ok(None)
@@ -562,14 +585,15 @@ fn valid_provider_lu_result(
     let expected = [
         input.shape().to_vec(),
         vec![rows, rows],
-        input.shape.clone(),
+        input.shape().to_vec(),
         vec![rows, rows],
         vec![rows, 1],
     ];
     outputs.iter().zip(expected.iter()).all(|(output, shape)| {
-        output.shape == *shape
-            && output.device_id == input.device_id()
-            && !gpu_helpers::same_gpu_handle(output, input)
+        output.shape() == *shape
+            && output.device_id() == input.device_id()
+            && !output.shares_allocation_with(input)
+            && !runmat_accelerate_api::handle_is_transposed(output)
             && runmat_accelerate_api::handle_storage(output)
                 == runmat_accelerate_api::GpuTensorStorage::Real
             && runmat_accelerate_api::handle_integer_type(output).is_none()
@@ -582,27 +606,22 @@ fn valid_provider_lu_result(
         outputs
             .iter()
             .skip(index + 1)
-            .all(|other| !gpu_helpers::same_gpu_handle(output, other))
+            .all(|other| !output.shares_allocation_with(other))
     })
 }
 
-fn free_invalid_provider_lu_result(result: &ProviderLuResult, input: &GpuTensorHandle) {
+fn reject_provider_lu_result(result: ProviderLuResult, mut error: RuntimeError) -> RuntimeError {
     let outputs = [
-        &result.combined,
-        &result.lower,
-        &result.upper,
-        &result.perm_matrix,
-        &result.perm_vector,
+        result.combined,
+        result.lower,
+        result.upper,
+        result.perm_matrix,
+        result.perm_vector,
     ];
-    for (index, output) in outputs.iter().enumerate() {
-        if outputs[..index]
-            .iter()
-            .any(|prior| gpu_helpers::same_gpu_handle(output, prior))
-        {
-            continue;
-        }
-        gpu_helpers::free_unprotected_exact_owner(output, &[input]);
+    for output in outputs {
+        error = gpu_helpers::reject_gpu_output(output, error);
     }
+    error
 }
 
 fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
@@ -924,6 +943,33 @@ impl RowMajorMatrix {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn rejected_factor_batch_retires_each_owned_allocation_not_borrowed_aliases() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let output = owner
+            .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let result = ProviderLuResult {
+            combined: input.handle.clone(),
+            lower: output.handle.clone(),
+            upper: output.handle.clone(),
+            perm_matrix: output.handle.clone(),
+            perm_vector: output.handle,
+        };
+        let error = reject_provider_lu_result(result, lu_internal_error("invalid factors"));
+        assert!(error.message().contains("invalid factors"));
+        assert_eq!(input.probe.retirements(), 0);
+        assert_eq!(output.probe.retirements(), 1);
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
+    }
+
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;

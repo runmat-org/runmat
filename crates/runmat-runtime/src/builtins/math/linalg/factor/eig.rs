@@ -440,20 +440,33 @@ impl EigEval {
         })
     }
 
-    fn from_provider(result: runmat_accelerate_api::ProviderEigResult) -> Self {
+    fn from_provider(
+        mut result: runmat_accelerate_api::ProviderEigResult,
+        input: &GpuTensorHandle,
+    ) -> BuiltinResult<Self> {
+        for output in [
+            &mut result.eigenvalues,
+            &mut result.diagonal,
+            &mut result.right,
+        ]
+        .into_iter()
+        .chain(result.left.iter_mut())
+        {
+            gpu_helpers::propagate_output_provenance(output, [input])?;
+        }
         let runmat_accelerate_api::ProviderEigResult {
             eigenvalues,
             diagonal,
             right,
             left,
         } = result;
-        EigEval {
-            eigenvalues: Value::GpuTensor(eigenvalues),
-            diagonal_matrix: Value::GpuTensor(diagonal.clone()),
-            diagonal_output: Value::GpuTensor(diagonal),
-            right: Value::GpuTensor(right),
-            left: left.map(Value::GpuTensor),
-        }
+        Ok(EigEval {
+            eigenvalues: gpu_helpers::resident_gpu_value(eigenvalues)?,
+            diagonal_matrix: gpu_helpers::resident_gpu_value(diagonal.clone())?,
+            diagonal_output: gpu_helpers::resident_gpu_value(diagonal)?,
+            right: gpu_helpers::resident_gpu_value(right)?,
+            left: left.map(gpu_helpers::resident_gpu_value).transpose()?,
+        })
     }
 }
 
@@ -537,13 +550,16 @@ async fn evaluate_gpu(
     let Some(order) = eig_gpu_order(handle) else {
         return Ok(None);
     };
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
     match provider.eig(handle, require_left).await {
         Ok(result) => {
             if valid_provider_eig_result(&result, provider, handle, order, require_left) {
-                Ok(Some(EigEval::from_provider(result)))
+                Ok(Some(EigEval::from_provider(result, handle)?))
             } else {
-                free_provider_eig_result_unique(&result, provider, handle);
-                Ok(None)
+                Err(reject_provider_eig_result(
+                    result,
+                    eig_internal_error("eig: provider returned invalid factor outputs"),
+                ))
             }
         }
         Err(error) if error.is_unsupported() => Ok(None),
@@ -564,8 +580,7 @@ fn eig_gpu_order(handle: &GpuTensorHandle) -> Option<usize> {
 fn resolved_actual_eig_owner(
     handle: &GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
-    runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id())
+    gpu_helpers::exact_provider_for_handle(handle)
 }
 
 fn eig_result_handles(result: &runmat_accelerate_api::ProviderEigResult) -> Vec<&GpuTensorHandle> {
@@ -577,7 +592,7 @@ fn eig_result_handles(result: &runmat_accelerate_api::ProviderEigResult) -> Vec<
 }
 
 fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
+    lhs.shares_allocation_with(rhs)
 }
 
 fn valid_provider_eig_result(
@@ -608,6 +623,7 @@ fn valid_provider_eig_result(
             || !identities.insert((handle.device_id(), handle.buffer_id()))
             || handle.device_id() != input.device_id()
             || handle.shape() != *expected_shape
+            || runmat_accelerate_api::handle_is_transposed(handle)
             || resolved_actual_eig_owner(handle).is_none_or(|owner| !std::ptr::eq(owner, provider))
             || !matches!(
                 storage,
@@ -626,20 +642,17 @@ fn valid_provider_eig_result(
     true
 }
 
-fn free_provider_eig_result_unique(
-    result: &runmat_accelerate_api::ProviderEigResult,
-    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    input: &GpuTensorHandle,
-) {
-    let mut freed = HashSet::new();
-    for handle in eig_result_handles(result) {
-        let identity = (handle.device_id(), handle.buffer_id());
-        if gpu_handles_alias(handle, input) || !freed.insert(identity) {
-            continue;
-        }
-        let owner = resolved_actual_eig_owner(handle).unwrap_or(invoked_provider);
-        let _ = owner.free(handle);
+fn reject_provider_eig_result(
+    result: runmat_accelerate_api::ProviderEigResult,
+    mut error: RuntimeError,
+) -> RuntimeError {
+    for handle in [result.eigenvalues, result.diagonal, result.right]
+        .into_iter()
+        .chain(result.left)
+    {
+        error = gpu_helpers::reject_gpu_output(handle, error);
     }
+    error
 }
 
 async fn evaluate_host(
@@ -1570,7 +1583,10 @@ pub(crate) mod tests {
             ));
 
             let mut wrong_shape = valid.clone();
-            wrong_shape.eigenvalues.shape = vec![1, 2];
+            wrong_shape.eigenvalues = wrong_shape
+                .eigenvalues
+                .with_view(runmat_accelerate_api::GpuTensorView::contiguous(vec![1, 2]))
+                .unwrap();
             assert!(!valid_provider_eig_result(
                 &wrong_shape,
                 provider,
@@ -1579,19 +1595,35 @@ pub(crate) mod tests {
                 true
             ));
 
-            runmat_accelerate_api::set_handle_logical(&right, true);
+            let mut wrong_class = valid.clone();
+            wrong_class.right = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 0, 1],
+                    shape: &[2, 2],
+                })
+                .unwrap();
             assert!(!valid_provider_eig_result(
-                &valid, provider, &input, 2, true
+                &wrong_class,
+                provider,
+                &input,
+                2,
+                true
             ));
-            runmat_accelerate_api::set_handle_logical(&right, false);
-
-            runmat_accelerate_api::set_handle_class_identity(&right, "uint8");
+            wrong_class.right = provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::U8(&[1, 0, 0, 1]),
+                    shape: &[2, 2],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .unwrap();
             assert!(!valid_provider_eig_result(
-                &valid, provider, &input, 2, true
+                &wrong_class,
+                provider,
+                &input,
+                2,
+                true
             ));
-            runmat_accelerate_api::set_handle_class_identity(&right, "double");
             assert!(valid_provider_eig_result(&valid, provider, &input, 2, true));
-            runmat_accelerate_api::clear_handle_class_identity(&right);
 
             let alias = upload(&[3.0, 4.0], &[2, 1]);
             let cleanup = ProviderEigResult {
@@ -1600,13 +1632,13 @@ pub(crate) mod tests {
                 right: alias.clone(),
                 left: None,
             };
-            free_provider_eig_result_unique(&cleanup, provider, &input);
+            let error = reject_provider_eig_result(cleanup, eig_internal_error("invalid output"));
+            assert!(error.message().contains("invalid output"));
             assert!(block_on(provider.download(&input)).is_ok());
-            assert!(block_on(provider.download(&alias)).is_err());
-
-            for handle in [&eigenvalues, &diagonal, &right, &left, &input] {
-                provider.free(handle).ok();
-            }
+            assert!(
+                block_on(provider.download(&alias)).is_ok(),
+                "rejecting result references cannot retire another retained owner"
+            );
         });
     }
 
@@ -1682,16 +1714,14 @@ pub(crate) mod tests {
 
     #[test]
     fn eig_classifies_resident_integer_coefficients_before_provider_access() {
-        let handle = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_300_042,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::U16,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::U16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = evaluate(Value::GpuTensor(handle.clone()), &[], false)
             .expect_err("resident integer A must gate before provider access");
@@ -2032,7 +2062,7 @@ pub(crate) mod tests {
             let eval = evaluate(Value::GpuTensor(handle), &[Value::from("vector")], false)
                 .expect("evaluate");
             match eval.diagonal() {
-                Value::GpuTensor(handle) => assert_eq!(handle.shape, vec![2, 1]),
+                Value::GpuTensor(handle) => assert_eq!(handle.shape(), &[2, 1]),
                 other => panic!("unexpected eigenvalue output: {other:?}"),
             }
             assert!(matches!(eval.right(), Value::GpuTensor(_)));
