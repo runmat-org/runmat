@@ -50,7 +50,9 @@ pub fn exact_provider_for_binary_inputs(
         .ok_or_else(|| "no provider owns the left resident operand".to_string())?;
     let right_owner = exact_provider_for_handle(right)
         .ok_or_else(|| "no provider owns the right resident operand".to_string())?;
-    if !std::ptr::eq(left_owner, right_owner) || left.device_id() != right.device_id() {
+    if !runmat_accelerate_api::same_provider_instance(left_owner, right_owner)
+        || left.device_id() != right.device_id()
+    {
         return Err("resident operands must share one owning provider and device".to_string());
     }
     Ok(left_owner)
@@ -73,7 +75,9 @@ pub fn select_resident_output_source(
             .build()
         })?;
         if let Some((current, current_owner)) = &selected {
-            if current.device_id() != handle.device_id() || !std::ptr::eq(*current_owner, owner) {
+            if current.device_id() != handle.device_id()
+                || !runmat_accelerate_api::same_provider_instance(*current_owner, owner)
+            {
                 return Err(build_runtime_error(format!(
                     "{builtin}: resident inputs must share one owning provider"
                 ))
@@ -312,7 +316,9 @@ pub fn unary_gpu_output_matches(
     output.shape() == input.shape()
         && output.device_id() == input.device_id()
         && contract.alias.accepts(output, input)
-        && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        // Device namespace was checked above and by exact_provider_for_handle.
+        // Compare the retained facade address, not codegen-dependent dyn vtables.
+        && exact_provider_for_handle(output).is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == contract.storage
         && runmat_accelerate_api::handle_precision(output) == contract.precision
         && runmat_accelerate_api::handle_integer_type(output) == contract.integer
@@ -346,7 +352,10 @@ pub fn binary_gpu_output_matches(
         && output.device_id() == provider.device_id()
         && contract.alias.accepts(output, left)
         && contract.alias.accepts(output, right)
-        && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        // Registered live owners have distinct device namespaces. The address
+        // additionally rejects a substituted facade in that same namespace;
+        // dyn vtable equality is not stable across async/codegen boundaries.
+        && exact_provider_for_handle(output).is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == contract.storage
         && runmat_accelerate_api::handle_precision(output) == contract.precision
         && runmat_accelerate_api::handle_integer_type(output) == contract.integer

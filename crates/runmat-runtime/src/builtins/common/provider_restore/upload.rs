@@ -182,7 +182,7 @@ pub(crate) fn upload_value_protected(
         && (expected_integer_type.is_some()
             || runmat_accelerate_api::handle_precision(&handle) == expected_precision)
         && gpu_helpers::exact_provider_for_handle(&handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && protected
             .iter()
             .all(|input| !handle.shares_allocation_with(input));

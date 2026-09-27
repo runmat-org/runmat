@@ -241,7 +241,8 @@ pub fn restore_class_preserving_value_protecting(
 
     let valid = output.shape() == expected_shape
         && output.device_id() == provider.device_id()
-        && exact_provider_for_handle(&output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && exact_provider_for_handle(&output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(&output) == expected_storage
         && expected_precision.is_none_or(|precision| {
             runmat_accelerate_api::handle_precision(&output) == Some(precision)
