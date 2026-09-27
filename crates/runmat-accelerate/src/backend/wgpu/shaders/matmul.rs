@@ -318,9 +318,15 @@ fn main(
         }
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
-    var val = acc * ep.alpha + ep.beta;
-
     let flags = ep.flags;
+    var val = acc;
+    if ((flags & 256u) == 0u) { val = acc * ep.alpha + ep.beta; }
+    else {
+        if ((flags & 512u) != 0u) { val = val * ep.alpha; }
+        if ((flags & 1024u) != 0u) { val = val + ep.beta; }
+        if ((flags & 2048u) != 0u) { val = val - ep.beta; }
+        if ((flags & 4096u) != 0u) { val = ep.beta - val; }
+    }
     if ((flags & 1u) != 0u) {
         let s = Row.data[row];
         if ((flags & 4u) != 0u) { val = val / s; } else { val = val * s; }
@@ -407,8 +413,15 @@ fn main(
         }
         acc = acc + A.data[a_idx] * B.data[b_idx];
     }
-    var val = acc * ep.alpha + ep.beta;
     let flags = ep.flags;
+    var val = acc;
+    if ((flags & 256u) == 0u) { val = acc * ep.alpha + ep.beta; }
+    else {
+        if ((flags & 512u) != 0u) { val = val * ep.alpha; }
+        if ((flags & 1024u) != 0u) { val = val + ep.beta; }
+        if ((flags & 2048u) != 0u) { val = val - ep.beta; }
+        if ((flags & 4096u) != 0u) { val = ep.beta - val; }
+    }
     if ((flags & 1u) != 0u) {
         let s = Row.data[row];
         if ((flags & 4u) != 0u) { val = val / s; } else { val = val * s; }

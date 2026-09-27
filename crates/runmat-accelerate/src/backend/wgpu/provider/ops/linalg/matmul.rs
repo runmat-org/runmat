@@ -430,7 +430,7 @@ impl WgpuProvider {
             None => (0u32, 1u32, 0u32, false),
         };
 
-        let mut flags: u32 = 0;
+        let (mut flags, alpha, beta) = crate::backend::wgpu::params::matmul_affine_params(ep);
         if has_row {
             flags |= MATMUL_EPILOGUE_FLAG_ROW_SCALE;
             if matches!(ep.row_op, runmat_accelerate_api::ScaleOp::Divide) {
@@ -471,8 +471,8 @@ impl WgpuProvider {
         let (shader_src, ep_buf, pipeline_layout) = match self.provider_precision_exec() {
             ProviderPrecision::F64 => {
                 let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF64 {
-                    alpha: ep.alpha,
-                    beta: ep.beta,
+                    alpha,
+                    beta,
                     clamp_min,
                     clamp_max,
                     pow_exponent,
@@ -497,8 +497,8 @@ impl WgpuProvider {
             }
             ProviderPrecision::F32 => {
                 let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF32 {
-                    alpha: ep.alpha as f32,
-                    beta: ep.beta as f32,
+                    alpha: alpha as f32,
+                    beta: beta as f32,
                     clamp_min: clamp_min as f32,
                     clamp_max: clamp_max as f32,
                     pow_exponent: pow_exponent as f32,

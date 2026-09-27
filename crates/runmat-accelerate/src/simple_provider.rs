@@ -9838,7 +9838,7 @@ impl AccelProvider for InProcessProvider {
             for j in 0..cols {
                 for i in 0..rows {
                     let idx = i + j * rows;
-                    let mut v = data[idx] * ep.alpha + ep.beta;
+                    let mut v = ep.affine.apply(data[idx], ep.alpha, ep.beta);
                     if let Some(ref rs) = row_scale {
                         let s = *rs.get(i).unwrap_or(&1.0);
                         v = match ep.row_op {

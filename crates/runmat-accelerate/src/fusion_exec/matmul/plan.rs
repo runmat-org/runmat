@@ -1,7 +1,7 @@
 use super::*;
 use crate::fusion::FusionOp;
 use crate::graph::PrimitiveOp;
-use runmat_accelerate_api::{MatmulEpilogue, ScaleOp};
+use runmat_accelerate_api::{MatmulAffine, MatmulEpilogue, MatmulOffset, ScaleOp};
 use runmat_runtime::builtins::common::spec::{
     canonical_fusion_declaration, FusionStructuralOperation,
 };
@@ -10,8 +10,8 @@ pub(super) struct AdmittedMatmul {
     pub left: ValueId,
     pub right: ValueId,
     pub shape: [usize; 2],
-    alpha: f64,
-    beta: f64,
+    scale: Option<f64>,
+    offset: Option<MatmulOffset>,
     row: Option<(ValueId, ScaleOp)>,
     column: Option<(ValueId, ScaleOp)>,
 }
@@ -78,8 +78,8 @@ impl AdmittedMatmul {
             left,
             right,
             shape: [0, 0],
-            alpha: 1.0,
-            beta: 0.0,
+            scale: None,
+            offset: None,
             row: None,
             column: None,
         };
@@ -116,20 +116,19 @@ impl AdmittedMatmul {
             if let Some(scalar) = representation::scalar(value, provider.precision()) {
                 match op {
                     PrimitiveOp::Mul | PrimitiveOp::ElemMul if phase == Phase::Product => {
-                        result.alpha = scalar;
+                        result.scale = Some(scalar);
                         phase = Phase::Scale;
                     }
                     PrimitiveOp::Add if phase <= Phase::Scale => {
-                        result.beta = scalar;
+                        result.offset = Some(MatmulOffset::Add(scalar));
                         phase = Phase::Bias;
                     }
                     PrimitiveOp::Sub if phase <= Phase::Scale && current_left => {
-                        result.beta = -scalar;
+                        result.offset = Some(MatmulOffset::Subtract(scalar));
                         phase = Phase::Bias;
                     }
                     PrimitiveOp::Sub if phase == Phase::Product && !current_left => {
-                        result.alpha = -1.0;
-                        result.beta = scalar;
+                        result.offset = Some(MatmulOffset::SubtractFrom(scalar));
                         phase = Phase::Bias;
                     }
                     _ => return None,
@@ -169,8 +168,10 @@ impl AdmittedMatmul {
 
     pub fn descriptor(&self, handles: &HashMap<ValueId, GpuTensorHandle>) -> MatmulEpilogue {
         let mut descriptor = MatmulEpilogue::noop();
-        descriptor.alpha = self.alpha;
-        descriptor.beta = self.beta;
+        descriptor.affine = MatmulAffine::Ordered {
+            scale: self.scale,
+            offset: self.offset,
+        };
         if let Some((id, operation)) = self.row {
             descriptor.row_scale = Some(handles[&id].clone());
             descriptor.row_op = operation;

@@ -4715,6 +4715,9 @@ pub enum ScaleOp {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MatmulEpilogue {
+    /// Ordered mode is authoritative; alpha/beta are compatibility-only then.
+    #[serde(default)]
+    pub affine: MatmulAffine,
     /// Scalar multiply applied to each output element.
     pub alpha: f64,
     /// Scalar add applied to each output element after scaling.
@@ -4744,6 +4747,7 @@ pub struct MatmulEpilogue {
 impl MatmulEpilogue {
     pub fn noop() -> Self {
         Self {
+            affine: MatmulAffine::Legacy,
             alpha: 1.0,
             beta: 0.0,
             row_scale: None,
@@ -4757,9 +4761,10 @@ impl MatmulEpilogue {
         }
     }
     pub fn is_noop(&self) -> bool {
-        self.alpha == 1.0
-            && self.beta == 0.0
-            && self.row_scale.is_none()
+        (match self.affine {
+            MatmulAffine::Legacy => self.alpha == 1.0 && self.beta == 0.0,
+            MatmulAffine::Ordered { scale, offset } => scale.is_none() && offset.is_none(),
+        }) && self.row_scale.is_none()
             && self.col_scale.is_none()
             && self.clamp_min.is_none()
             && self.clamp_max.is_none()
@@ -4767,6 +4772,9 @@ impl MatmulEpilogue {
             && self.diag_output.is_none()
     }
 }
+
+mod matmul_affine;
+pub use matmul_affine::{MatmulAffine, MatmulOffset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PowerStepEpilogue {
