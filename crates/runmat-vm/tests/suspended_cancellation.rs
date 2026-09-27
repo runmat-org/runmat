@@ -26,6 +26,30 @@ impl Drop for PendingDrop {
     }
 }
 struct PendingBuiltin;
+
+#[test]
+fn execution_scope_preserves_normal_caught_language_errors() {
+    let bytecode = support::compile_source("try; error('expected'); catch; x = 42; end").unwrap();
+    let source = CancellationSource::new();
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+        source.token(),
+    );
+    let mut vars = vec![];
+    let outcome = futures::executor::block_on(runmat_vm::interpret_with_vars_in_context(
+        &bytecode, &mut vars, None, runtime,
+    ))
+    .expect("language catch remains available");
+    let runmat_vm::InterpreterOutcome::Completed(completion) = outcome;
+    let slot = bytecode
+        .var_names
+        .iter()
+        .find_map(|(slot, name)| (name == "x").then_some(*slot))
+        .unwrap();
+    assert_eq!(completion.values[slot], runmat_value::Value::Num(42.0));
+    assert!(!source.token().is_cancelled());
+}
+
 impl RuntimeBuiltinService for PendingBuiltin {
     fn bindings_by_name(&self, name: &str) -> Vec<RuntimeBuiltinBinding> {
         if name != "sin" {

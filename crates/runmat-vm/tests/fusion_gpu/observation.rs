@@ -20,7 +20,7 @@ fn fusion_var_index(bytecode: &runmat_vm::Bytecode, name: &str) -> usize {
         .expect("named fixture variable")
 }
 
-fn resume_after_input_store(
+pub(super) fn resume_after_input_store(
     bytecode: &runmat_vm::Bytecode,
     input: Value,
 ) -> runmat_vm::InterpreterResumeState {

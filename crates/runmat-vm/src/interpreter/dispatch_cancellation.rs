@@ -1,4 +1,4 @@
-//! Wakeable cancellation of suspended dispatch; synchronous dispatch allocates
+//! Wakeable cancellation of an execution scope; synchronous execution allocates
 //! no cancellation listener. The caller retains terminal VM cleanup ownership.
 use runmat_execution::cancellation::CancellationToken;
 use std::future::{poll_fn, Future};

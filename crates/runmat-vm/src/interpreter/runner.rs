@@ -783,68 +783,74 @@ async fn run_interpreter_inner(
     let mut sequence_register = interp_dispatch::SequenceState::default();
     #[cfg(feature = "native-accel")]
     let mut fusion_observations = super::fusion_observation::FusionRegionObservations::default();
-    while pc < bytecode.instructions.len() {
-        if completion_boundary.is_some_and(|boundary| boundary.pc() == pc) {
-            break;
-        }
-        if let Some(sites) = bytecode.coverage_sites.get(pc) {
-            runmat_runtime::coverage::hit_sites(sites);
-        }
-        set_vm_pc(pc);
-        #[cfg(feature = "native-accel")]
-        set_current_pc(pc);
-        check_cancelled_with_residency_cleanup(&stack, &vars)?;
-        #[cfg(feature = "native-accel")]
-        if let (Some(plan), Some(graph)) = (active_group_plan_clone(), fusion_accel_graph.as_ref())
-        {
-            if plan.group.span.start == pc && !fusion_observations.contains_start(pc) {
-                #[cfg(feature = "native-accel")]
-                {
-                    interp_engine::note_fusion_gate(
-                        &mut interpreter_timing,
-                        &plan,
-                        &bytecode,
-                        pc,
-                        accel_fusion::fusion_span_has_vm_barrier(
-                            &bytecode.instructions,
-                            &plan.group.span,
-                        ),
-                        accel_fusion::fusion_span_live_result_count(
-                            &bytecode.instructions,
-                            &plan.group.span,
-                        ),
+    let cancellation = context.runtime.cancellation();
+    // One wakeable scope owns all instruction execution, including provider
+    // fusion and idioms that execute outside ordinary bytecode dispatch. Keep
+    // roots and frame state outside it until suspended work has been dropped.
+    let execution_result = super::dispatch_cancellation::until_cancelled(&cancellation, async {
+        while pc < bytecode.instructions.len() {
+            if completion_boundary.is_some_and(|boundary| boundary.pc() == pc) {
+                break;
+            }
+            if let Some(sites) = bytecode.coverage_sites.get(pc) {
+                runmat_runtime::coverage::hit_sites(sites);
+            }
+            set_vm_pc(pc);
+            #[cfg(feature = "native-accel")]
+            set_current_pc(pc);
+            check_cancelled_with_residency_cleanup(&stack, &vars)?;
+            #[cfg(feature = "native-accel")]
+            if let (Some(plan), Some(graph)) =
+                (active_group_plan_clone(), fusion_accel_graph.as_ref())
+            {
+                if plan.group.span.start == pc && !fusion_observations.contains_start(pc) {
+                    #[cfg(feature = "native-accel")]
+                    {
+                        interp_engine::note_fusion_gate(
+                            &mut interpreter_timing,
+                            &plan,
+                            &bytecode,
+                            pc,
+                            accel_fusion::fusion_span_has_vm_barrier(
+                                &bytecode.instructions,
+                                &plan.group.span,
+                            ),
+                            accel_fusion::fusion_span_live_result_count(
+                                &bytecode.instructions,
+                                &plan.group.span,
+                            ),
+                        );
+                    }
+                    let span = plan.group.span.clone();
+                    let has_barrier =
+                        accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &span);
+                    let _fusion_span = info_span!(
+                        "fusion.execute",
+                        span_start = plan.group.span.start,
+                        span_end = plan.group.span.end,
+                        kind = ?plan.group.kind
+                    )
+                    .entered();
+                    let fusion_started = Instant::now();
+                    let trace = begin_trace(fusion_operation_token(&plan.group.kind), None);
+                    trace.event(
+                        PlacementEventKind::Candidate,
+                        Some(PlacementVariant::ProviderFusion),
+                        Some("legacy_fusion_candidate"),
+                        None,
+                        None,
+                        &[],
                     );
-                }
-                let span = plan.group.span.clone();
-                let has_barrier =
-                    accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &span);
-                let _fusion_span = info_span!(
-                    "fusion.execute",
-                    span_start = plan.group.span.start,
-                    span_end = plan.group.span.end,
-                    kind = ?plan.group.kind
-                )
-                .entered();
-                let fusion_started = Instant::now();
-                let trace = begin_trace(fusion_operation_token(&plan.group.kind), None);
-                trace.event(
-                    PlacementEventKind::Candidate,
-                    Some(PlacementVariant::ProviderFusion),
-                    Some("legacy_fusion_candidate"),
-                    None,
-                    None,
-                    &[],
-                );
-                trace.event(
-                    PlacementEventKind::Candidate,
-                    Some(PlacementVariant::SharedRuntime),
-                    Some("bytecode_fallback_candidate"),
-                    None,
-                    None,
-                    &[],
-                );
-                if !has_barrier {
-                    match accel_fusion::try_execute_fusion_group(
+                    trace.event(
+                        PlacementEventKind::Candidate,
+                        Some(PlacementVariant::SharedRuntime),
+                        Some("bytecode_fallback_candidate"),
+                        None,
+                        None,
+                        &[],
+                    );
+                    if !has_barrier {
+                        match accel_fusion::try_execute_fusion_group(
                         &plan,
                         graph,
                         &mut stack,
@@ -892,73 +898,70 @@ async fn run_interpreter_inner(
                             log::debug!("fusion fallback at pc {}: {}", pc, err);
                         }
                     }
-                } else {
-                    trace.event(
-                        PlacementEventKind::Selected,
-                        Some(PlacementVariant::SharedRuntime),
-                        Some("fusion_vm_barrier"),
-                        None,
-                        None,
-                        &[],
-                    );
-                    fusion_observations.begin(span.clone(), None, trace);
-                    interp_engine::note_fusion_skip(pc, &span);
+                    } else {
+                        trace.event(
+                            PlacementEventKind::Selected,
+                            Some(PlacementVariant::SharedRuntime),
+                            Some("fusion_vm_barrier"),
+                            None,
+                            None,
+                            &[],
+                        );
+                        fusion_observations.begin(span.clone(), None, trace);
+                        interp_engine::note_fusion_skip(pc, &span);
+                    }
                 }
             }
-        }
-        interp_engine::note_pre_dispatch(
-            &mut interpreter_timing,
-            debug_stack,
-            pc,
-            &bytecode.instructions[pc],
-            stack.len(),
-        );
-        let call_counts_snapshot = CALL_COUNTS.with(|cc| cc.borrow().clone());
-        let store_var_global_aliases = match &bytecode.instructions[pc] {
-            Instr::StoreVar(_) => Some(global_aliases.clone()),
-            _ => None,
-        };
-        let store_local_global_aliases = match &bytecode.instructions[pc] {
-            Instr::StoreLocal(_) => Some(global_aliases.clone()),
-            _ => None,
-        };
-        let mut clear_value_residency = |value: &Value| {
-            #[cfg(feature = "native-accel")]
-            clear_residency(value);
-        };
-        let mut store_var_before_overwrite = |_current: &Value, _incoming: &Value| {};
-        let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
-            if let Some(assigned_slots) = completion_assigned_slots.as_mut() {
-                assigned_slots.insert(stored_index);
-            }
-            if let Some(ref aliases) = store_var_global_aliases {
-                runtime_globals::update_global_store(stored_index, stored_value, aliases);
-            }
-        };
-        let mut store_local_before_local_overwrite = |_current: &Value, _incoming: &Value| {};
-        let mut store_local_before_var_overwrite = |_current: &Value, _incoming: &Value| {};
-        let mut store_local_after_store = |stored_offset: usize, stored_value: &Value| {
-            if let Some(ref aliases) = store_local_global_aliases {
-                runtime_globals::update_global_store(stored_offset, stored_value, aliases);
-            }
-        };
-        let mut store_local_after_fallback_store =
-            |func_name: &str, stored_offset: usize, stored_value: &Value| {
+            interp_engine::note_pre_dispatch(
+                &mut interpreter_timing,
+                debug_stack,
+                pc,
+                &bytecode.instructions[pc],
+                stack.len(),
+            );
+            let call_counts_snapshot = CALL_COUNTS.with(|cc| cc.borrow().clone());
+            let store_var_global_aliases = match &bytecode.instructions[pc] {
+                Instr::StoreVar(_) => Some(global_aliases.clone()),
+                _ => None,
+            };
+            let store_local_global_aliases = match &bytecode.instructions[pc] {
+                Instr::StoreLocal(_) => Some(global_aliases.clone()),
+                _ => None,
+            };
+            let mut clear_value_residency = |value: &Value| {
+                #[cfg(feature = "native-accel")]
+                clear_residency(value);
+            };
+            let mut store_var_before_overwrite = |_current: &Value, _incoming: &Value| {};
+            let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
+                if let Some(assigned_slots) = completion_assigned_slots.as_mut() {
+                    assigned_slots.insert(stored_index);
+                }
+                if let Some(ref aliases) = store_var_global_aliases {
+                    runtime_globals::update_global_store(stored_index, stored_value, aliases);
+                }
+            };
+            let mut store_local_before_local_overwrite = |_current: &Value, _incoming: &Value| {};
+            let mut store_local_before_var_overwrite = |_current: &Value, _incoming: &Value| {};
+            let mut store_local_after_store = |stored_offset: usize, stored_value: &Value| {
                 if let Some(ref aliases) = store_local_global_aliases {
                     runtime_globals::update_global_store(stored_offset, stored_value, aliases);
                 }
-                runtime_globals::update_persistent_local_store(
-                    func_name,
-                    stored_offset,
-                    stored_value,
-                );
             };
-        #[cfg(feature = "native-accel")]
-        let executed_pc = pc;
-        let cancellation = context.runtime.cancellation();
-        let dispatch_result = super::dispatch_cancellation::until_cancelled(
-            &cancellation,
-            interp_dispatch::dispatch_instruction(
+            let mut store_local_after_fallback_store =
+                |func_name: &str, stored_offset: usize, stored_value: &Value| {
+                    if let Some(ref aliases) = store_local_global_aliases {
+                        runtime_globals::update_global_store(stored_offset, stored_value, aliases);
+                    }
+                    runtime_globals::update_persistent_local_store(
+                        func_name,
+                        stored_offset,
+                        stored_value,
+                    );
+                };
+            #[cfg(feature = "native-accel")]
+            let executed_pc = pc;
+            let dispatch_result = interp_dispatch::dispatch_instruction(
                 interp_dispatch::DispatchMeta {
                     instr: &bytecode.instructions[pc],
                     bytecode: &bytecode,
@@ -991,287 +994,295 @@ async fn run_interpreter_inner(
                     store_local_after_store: &mut store_local_after_store,
                     store_local_after_fallback_store: &mut store_local_after_fallback_store,
                 },
-            ),
-        )
-        .await;
-        // Drop the suspended operation before touching its borrowed VM state.
-        // Cancellation is a terminal control outcome, not a catchable language error.
-        let Some(dispatch_result) = dispatch_result else {
-            #[cfg(feature = "native-accel")]
-            fusion_observations.abort();
-            clear_cancelled_residency(&stack, &vars);
-            sequence_register.clear(&mut stack);
-            return Err(interp_engine::cancellation_error());
-        };
-        let dispatch_result = match dispatch_result {
-            Ok(result) => result,
-            Err(err) => {
-                #[cfg(feature = "native-accel")]
-                fusion_observations.abort();
-                sequence_register.clear(&mut stack);
-                match interp_dispatch::redirect_exception_to_catch(
-                    err,
-                    &mut try_stack,
-                    &mut vars,
-                    &mut last_exception,
-                    &mut pc,
-                    refresh_workspace_state,
-                ) {
-                    interp_dispatch::ExceptionHandling::Caught => {
+            )
+            .await;
+            let dispatch_result = match dispatch_result {
+                Ok(result) => result,
+                Err(err) => {
+                    #[cfg(feature = "native-accel")]
+                    fusion_observations.abort();
+                    sequence_register.clear(&mut stack);
+                    match interp_dispatch::redirect_exception_to_catch(
+                        err,
+                        &mut try_stack,
+                        &mut vars,
+                        &mut last_exception,
+                        &mut pc,
+                        refresh_workspace_state,
+                    ) {
+                        interp_dispatch::ExceptionHandling::Caught => {
+                            continue;
+                        }
+                        interp_dispatch::ExceptionHandling::Uncaught(err) => return Err(*err),
+                    }
+                }
+            };
+            if let Some(decision) = dispatch_result {
+                match decision {
+                    interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => {
+                        #[cfg(feature = "native-accel")]
+                        fusion_observations.instruction_exit(executed_pc, pc);
                         continue;
                     }
-                    interp_dispatch::ExceptionHandling::Uncaught(err) => return Err(*err),
-                }
-            }
-        };
-        if let Some(decision) = dispatch_result {
-            match decision {
-                interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => {
-                    #[cfg(feature = "native-accel")]
-                    fusion_observations.instruction_exit(executed_pc, pc);
-                    continue;
-                }
-                interp_dispatch::DispatchHandled::Generic(DispatchDecision::FallThrough) => {
-                    pc += 1;
-                    #[cfg(feature = "native-accel")]
-                    fusion_observations.instruction_exit(executed_pc, pc);
-                    continue;
-                }
-                interp_dispatch::DispatchHandled::Generic(DispatchDecision::Return) => {
-                    interpreter_timing.flush_host_span("return", None);
-                    break;
-                }
-                interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::ContinueLoop)
-                | interp_dispatch::DispatchHandled::Return(DispatchDecision::ContinueLoop) => {
-                    #[cfg(feature = "native-accel")]
-                    fusion_observations.instruction_exit(executed_pc, pc);
-                    continue;
-                }
-                interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::Return) => {
-                    interpreter_timing.flush_host_span("return_value", None);
-                    break;
-                }
-                interp_dispatch::DispatchHandled::Return(DispatchDecision::Return) => {
-                    interpreter_timing.flush_host_span("return", None);
-                    break;
-                }
-                interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::FallThrough)
-                | interp_dispatch::DispatchHandled::Return(DispatchDecision::FallThrough) => {
-                    pc += 1;
-                    #[cfg(feature = "native-accel")]
-                    fusion_observations.instruction_exit(executed_pc, pc);
-                    continue;
-                }
-            }
-        }
-        match bytecode.instructions[pc].clone() {
-            Instr::EmitStackTop { .. }
-            | Instr::EmitVar { .. }
-            | Instr::AndAnd(_)
-            | Instr::OrOr(_)
-            | Instr::JumpIfFalse(_)
-            | Instr::Jump(_)
-            | Instr::LoadConst(_)
-            | Instr::LoadInt(_)
-            | Instr::LoadComplex(_, _)
-            | Instr::LoadBool(_)
-            | Instr::LoadString(_)
-            | Instr::LoadCharRow(_)
-            | Instr::LoadLocal(_)
-            | Instr::LoadVar(_)
-            | Instr::LoadVarForIndexAssignment(_)
-            | Instr::LoadVarForStructAssignment(_)
-            | Instr::StoreVar(_)
-            | Instr::StoreLocal(_)
-            | Instr::Swap
-            | Instr::Pop
-            | Instr::EnterTry { .. }
-            | Instr::LeaveTry(_)
-            | Instr::ReturnValue
-            | Instr::Return
-            | Instr::EnterScope(_)
-            | Instr::LoadMember(_)
-            | Instr::LoadMemberOrInit(_)
-            | Instr::LoadMemberDynamic
-            | Instr::LoadMemberDynamicOrInit
-            | Instr::LoadMemberSequence { .. }
-            | Instr::LoadMemberDynamicSequence { .. }
-            | Instr::MemberSequenceCardinality
-            | Instr::LoadMemberSequenceUsingOutputSlot { .. }
-            | Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. }
-            | Instr::CaptureCallOutputSequence
-            | Instr::CaptureScalarSequence
-            | Instr::CaptureMemberSequence { .. }
-            | Instr::CaptureMemberDynamicSequence { .. }
-            | Instr::CaptureCellContentsSequence { .. }
-            | Instr::CaptureReturnedOutputsSequence { .. }
-            | Instr::ReadSubscriptPath { .. }
-            | Instr::CaptureSubscriptPath { .. }
-            | Instr::BeginSubscriptEndReceiver { .. }
-            | Instr::LoadSubscriptEnd { .. }
-            | Instr::FinishSubscriptEndReceiver { .. }
-            | Instr::BeginOutputAssignment { .. }
-            | Instr::PrepareFixedOutputTarget
-            | Instr::PrepareDiscardOutputTarget
-            | Instr::PrepareMemberSequenceOutputTarget { .. }
-            | Instr::PrepareMemberDynamicSequenceOutputTarget { .. }
-            | Instr::PrepareIndexedMemberSequenceOutputTarget { .. }
-            | Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { .. }
-            | Instr::PrepareCellContentsSequenceOutputTarget { .. }
-            | Instr::BeginSequenceOutputTarget { .. }
-            | Instr::PrepareMemberPathStep(_)
-            | Instr::PrepareDynamicMemberPathStep
-            | Instr::BeginPreparedIndexSelectors { .. }
-            | Instr::LoadPreparedIndexEnd { .. }
-            | Instr::BeginContextualIndexSelectors { .. }
-            | Instr::LoadContextualIndexEnd { .. }
-            | Instr::FinishContextualIndexSelectors { .. }
-            | Instr::PrepareParenthesesPathStep { .. }
-            | Instr::PrepareBracesPathStep { .. }
-            | Instr::FinishMemberSequenceOutputTarget(_)
-            | Instr::FinishDynamicMemberSequenceOutputTarget
-            | Instr::FinishCellContentsSequenceOutputTarget { .. }
-            | Instr::LoadPreparedOutputCardinality
-            | Instr::CommitPreparedOutputTargets { .. }
-            | Instr::StoreMember(_)
-            | Instr::StoreMemberOrInit(_)
-            | Instr::StoreMemberDynamic
-            | Instr::StoreMemberDynamicOrInit
-            | Instr::StoreMemberSequence(_)
-            | Instr::StoreMemberDynamicSequence
-            | Instr::Index(_)
-            | Instr::IndexSlice(_, _, _, _)
-            | Instr::IndexCell { .. }
-            | Instr::IndexCellExpand { .. }
-            | Instr::IndexCellList { .. }
-            | Instr::StoreIndex(_)
-            | Instr::StoreIndexCell { .. }
-            | Instr::StoreIndexDelete(_)
-            | Instr::StoreIndexCellDelete { .. }
-            | Instr::StoreSlice(_, _, _, _)
-            | Instr::StoreSliceDelete(_, _, _, _)
-            | Instr::CallMethodOrMemberIndexMulti { .. }
-            | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. }
-            | Instr::LoadMethod(_)
-            | Instr::CreateFunctionHandle(_)
-            | Instr::CreateExternalFunctionHandle(_)
-            | Instr::CreateMethodFunctionHandle(_)
-            | Instr::CreateBoundFunctionHandle(_, _)
-            | Instr::CreateExternalBoundFunctionHandle(_, _)
-            | Instr::CreateClosure(_, _)
-            | Instr::CreateSemanticClosure(_, _, _)
-            | Instr::LoadStaticProperty(_, _)
-            | Instr::LoadWorkspaceFirstStaticProperty { .. }
-            | Instr::RegisterClass { .. }
-            | Instr::CallFevalMulti(_, _)
-            | Instr::CallFevalMultiUsingOutputSlot(_, _)
-            | Instr::CallFevalExpandMultiOutput(_, _)
-            | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
-            | Instr::CreateSemanticFuture(_, _, _)
-            | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
-            | Instr::ScheduleFeval { .. }
-            | Instr::Spawn
-            | Instr::SpawnOn
-            | Instr::Await
-            | Instr::FetchOutputs { .. }
-            | Instr::FetchNext { .. }
-            | Instr::EnsurePool(_)
-            | Instr::CurrentPool(_)
-            | Instr::CallBuiltinMulti(_, _, _)
-            | Instr::CallBuiltinMultiUsingOutputSlot(_, _, _)
-            | Instr::CallSuperConstructorMulti { .. }
-            | Instr::CallSuperMethodMulti { .. }
-            | Instr::CallSemanticFunctionMulti(_, _, _)
-            | Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, _)
-            | Instr::CallSemanticNestedFunctionMulti { .. }
-            | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
-            | Instr::CallFunctionMulti { .. }
-            | Instr::CallFunctionMultiUsingOutputSlot { .. }
-            | Instr::CallFunctionExpandMultiOutput { .. }
-            | Instr::CallWorkspaceFirstMulti { .. }
-            | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. }
-            | Instr::CallWorkspaceFirstExpandMultiOutput { .. }
-            | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { .. }
-            | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
-            | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }
-            | Instr::CallBuiltinExpandMultiOutput(_, _, _)
-            | Instr::CallSuperConstructorExpandMultiOutput { .. }
-            | Instr::CallSuperMethodExpandMultiOutput { .. }
-            | Instr::ExitScope(_)
-            | Instr::RegisterImport { .. }
-            | Instr::DeclareGlobal(_)
-            | Instr::DeclareGlobalNamed(_, _)
-            | Instr::DeclarePersistent(_)
-            | Instr::DeclarePersistentNamed(_, _)
-            | Instr::CreateCell2D(_, _)
-            | Instr::CreateCellFromSequences { .. }
-            | Instr::CreateStructLiteral(_)
-            | Instr::CreateObjectLiteral { .. }
-            | Instr::Add
-            | Instr::Sub
-            | Instr::Mul
-            | Instr::ElemMul
-            | Instr::ElemDiv
-            | Instr::ElemPow
-            | Instr::ElemLeftDiv
-            | Instr::Neg
-            | Instr::UPlus
-            | Instr::Transpose
-            | Instr::ConjugateTranspose
-            | Instr::Pow
-            | Instr::RightDiv
-            | Instr::LeftDiv
-            | Instr::LessEqual
-            | Instr::Less
-            | Instr::Greater
-            | Instr::GreaterEqual
-            | Instr::Equal
-            | Instr::NotEqual
-            | Instr::LogicalNot
-            | Instr::LogicalAnd
-            | Instr::LogicalOr
-            | Instr::ExecuteParfor { .. }
-            | Instr::ExecuteSpmd { .. }
-            | Instr::Distributed(_)
-            | Instr::Collective { .. }
-            | Instr::Unpack(_)
-            | Instr::CreateMatrix(_, _)
-            | Instr::CreateMatrixFromSequences { .. }
-            | Instr::CreateMatrixDynamic(_)
-            | Instr::CreateRange(_)
-            | Instr::PackToRow(_)
-            | Instr::PackToCol(_) => unreachable!("handled by dispatch_instruction"),
-            Instr::StochasticEvolution => {
-                let steps_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let scale_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let drift_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let state_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let evolved =
-                    crate::accel::idioms::stochastic_evolution::execute_stochastic_evolution(
-                        state_value,
-                        drift_value,
-                        scale_value,
-                        steps_value,
+                    interp_dispatch::DispatchHandled::Generic(DispatchDecision::FallThrough) => {
+                        pc += 1;
+                        #[cfg(feature = "native-accel")]
+                        fusion_observations.instruction_exit(executed_pc, pc);
+                        continue;
+                    }
+                    interp_dispatch::DispatchHandled::Generic(DispatchDecision::Return) => {
+                        interpreter_timing.flush_host_span("return", None);
+                        break;
+                    }
+                    interp_dispatch::DispatchHandled::ReturnValue(
+                        DispatchDecision::ContinueLoop,
                     )
-                    .await?;
-                stack.push(evolved);
+                    | interp_dispatch::DispatchHandled::Return(DispatchDecision::ContinueLoop) => {
+                        #[cfg(feature = "native-accel")]
+                        fusion_observations.instruction_exit(executed_pc, pc);
+                        continue;
+                    }
+                    interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::Return) => {
+                        interpreter_timing.flush_host_span("return_value", None);
+                        break;
+                    }
+                    interp_dispatch::DispatchHandled::Return(DispatchDecision::Return) => {
+                        interpreter_timing.flush_host_span("return", None);
+                        break;
+                    }
+                    interp_dispatch::DispatchHandled::ReturnValue(
+                        DispatchDecision::FallThrough,
+                    )
+                    | interp_dispatch::DispatchHandled::Return(DispatchDecision::FallThrough) => {
+                        pc += 1;
+                        #[cfg(feature = "native-accel")]
+                        fusion_observations.instruction_exit(executed_pc, pc);
+                        continue;
+                    }
+                }
             }
+            match bytecode.instructions[pc].clone() {
+                Instr::EmitStackTop { .. }
+                | Instr::EmitVar { .. }
+                | Instr::AndAnd(_)
+                | Instr::OrOr(_)
+                | Instr::JumpIfFalse(_)
+                | Instr::Jump(_)
+                | Instr::LoadConst(_)
+                | Instr::LoadInt(_)
+                | Instr::LoadComplex(_, _)
+                | Instr::LoadBool(_)
+                | Instr::LoadString(_)
+                | Instr::LoadCharRow(_)
+                | Instr::LoadLocal(_)
+                | Instr::LoadVar(_)
+                | Instr::LoadVarForIndexAssignment(_)
+                | Instr::LoadVarForStructAssignment(_)
+                | Instr::StoreVar(_)
+                | Instr::StoreLocal(_)
+                | Instr::Swap
+                | Instr::Pop
+                | Instr::EnterTry { .. }
+                | Instr::LeaveTry(_)
+                | Instr::ReturnValue
+                | Instr::Return
+                | Instr::EnterScope(_)
+                | Instr::LoadMember(_)
+                | Instr::LoadMemberOrInit(_)
+                | Instr::LoadMemberDynamic
+                | Instr::LoadMemberDynamicOrInit
+                | Instr::LoadMemberSequence { .. }
+                | Instr::LoadMemberDynamicSequence { .. }
+                | Instr::MemberSequenceCardinality
+                | Instr::LoadMemberSequenceUsingOutputSlot { .. }
+                | Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. }
+                | Instr::CaptureCallOutputSequence
+                | Instr::CaptureScalarSequence
+                | Instr::CaptureMemberSequence { .. }
+                | Instr::CaptureMemberDynamicSequence { .. }
+                | Instr::CaptureCellContentsSequence { .. }
+                | Instr::CaptureReturnedOutputsSequence { .. }
+                | Instr::ReadSubscriptPath { .. }
+                | Instr::CaptureSubscriptPath { .. }
+                | Instr::BeginSubscriptEndReceiver { .. }
+                | Instr::LoadSubscriptEnd { .. }
+                | Instr::FinishSubscriptEndReceiver { .. }
+                | Instr::BeginOutputAssignment { .. }
+                | Instr::PrepareFixedOutputTarget
+                | Instr::PrepareDiscardOutputTarget
+                | Instr::PrepareMemberSequenceOutputTarget { .. }
+                | Instr::PrepareMemberDynamicSequenceOutputTarget { .. }
+                | Instr::PrepareIndexedMemberSequenceOutputTarget { .. }
+                | Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { .. }
+                | Instr::PrepareCellContentsSequenceOutputTarget { .. }
+                | Instr::BeginSequenceOutputTarget { .. }
+                | Instr::PrepareMemberPathStep(_)
+                | Instr::PrepareDynamicMemberPathStep
+                | Instr::BeginPreparedIndexSelectors { .. }
+                | Instr::LoadPreparedIndexEnd { .. }
+                | Instr::BeginContextualIndexSelectors { .. }
+                | Instr::LoadContextualIndexEnd { .. }
+                | Instr::FinishContextualIndexSelectors { .. }
+                | Instr::PrepareParenthesesPathStep { .. }
+                | Instr::PrepareBracesPathStep { .. }
+                | Instr::FinishMemberSequenceOutputTarget(_)
+                | Instr::FinishDynamicMemberSequenceOutputTarget
+                | Instr::FinishCellContentsSequenceOutputTarget { .. }
+                | Instr::LoadPreparedOutputCardinality
+                | Instr::CommitPreparedOutputTargets { .. }
+                | Instr::StoreMember(_)
+                | Instr::StoreMemberOrInit(_)
+                | Instr::StoreMemberDynamic
+                | Instr::StoreMemberDynamicOrInit
+                | Instr::StoreMemberSequence(_)
+                | Instr::StoreMemberDynamicSequence
+                | Instr::Index(_)
+                | Instr::IndexSlice(_, _, _, _)
+                | Instr::IndexCell { .. }
+                | Instr::IndexCellExpand { .. }
+                | Instr::IndexCellList { .. }
+                | Instr::StoreIndex(_)
+                | Instr::StoreIndexCell { .. }
+                | Instr::StoreIndexDelete(_)
+                | Instr::StoreIndexCellDelete { .. }
+                | Instr::StoreSlice(_, _, _, _)
+                | Instr::StoreSliceDelete(_, _, _, _)
+                | Instr::CallMethodOrMemberIndexMulti { .. }
+                | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. }
+                | Instr::LoadMethod(_)
+                | Instr::CreateFunctionHandle(_)
+                | Instr::CreateExternalFunctionHandle(_)
+                | Instr::CreateMethodFunctionHandle(_)
+                | Instr::CreateBoundFunctionHandle(_, _)
+                | Instr::CreateExternalBoundFunctionHandle(_, _)
+                | Instr::CreateClosure(_, _)
+                | Instr::CreateSemanticClosure(_, _, _)
+                | Instr::LoadStaticProperty(_, _)
+                | Instr::LoadWorkspaceFirstStaticProperty { .. }
+                | Instr::RegisterClass { .. }
+                | Instr::CallFevalMulti(_, _)
+                | Instr::CallFevalMultiUsingOutputSlot(_, _)
+                | Instr::CallFevalExpandMultiOutput(_, _)
+                | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
+                | Instr::CreateSemanticFuture(_, _, _)
+                | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
+                | Instr::ScheduleFeval { .. }
+                | Instr::Spawn
+                | Instr::SpawnOn
+                | Instr::Await
+                | Instr::FetchOutputs { .. }
+                | Instr::FetchNext { .. }
+                | Instr::EnsurePool(_)
+                | Instr::CurrentPool(_)
+                | Instr::CallBuiltinMulti(_, _, _)
+                | Instr::CallBuiltinMultiUsingOutputSlot(_, _, _)
+                | Instr::CallSuperConstructorMulti { .. }
+                | Instr::CallSuperMethodMulti { .. }
+                | Instr::CallSemanticFunctionMulti(_, _, _)
+                | Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, _)
+                | Instr::CallSemanticNestedFunctionMulti { .. }
+                | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
+                | Instr::CallFunctionMulti { .. }
+                | Instr::CallFunctionMultiUsingOutputSlot { .. }
+                | Instr::CallFunctionExpandMultiOutput { .. }
+                | Instr::CallWorkspaceFirstMulti { .. }
+                | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. }
+                | Instr::CallWorkspaceFirstExpandMultiOutput { .. }
+                | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { .. }
+                | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
+                | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }
+                | Instr::CallBuiltinExpandMultiOutput(_, _, _)
+                | Instr::CallSuperConstructorExpandMultiOutput { .. }
+                | Instr::CallSuperMethodExpandMultiOutput { .. }
+                | Instr::ExitScope(_)
+                | Instr::RegisterImport { .. }
+                | Instr::DeclareGlobal(_)
+                | Instr::DeclareGlobalNamed(_, _)
+                | Instr::DeclarePersistent(_)
+                | Instr::DeclarePersistentNamed(_, _)
+                | Instr::CreateCell2D(_, _)
+                | Instr::CreateCellFromSequences { .. }
+                | Instr::CreateStructLiteral(_)
+                | Instr::CreateObjectLiteral { .. }
+                | Instr::Add
+                | Instr::Sub
+                | Instr::Mul
+                | Instr::ElemMul
+                | Instr::ElemDiv
+                | Instr::ElemPow
+                | Instr::ElemLeftDiv
+                | Instr::Neg
+                | Instr::UPlus
+                | Instr::Transpose
+                | Instr::ConjugateTranspose
+                | Instr::Pow
+                | Instr::RightDiv
+                | Instr::LeftDiv
+                | Instr::LessEqual
+                | Instr::Less
+                | Instr::Greater
+                | Instr::GreaterEqual
+                | Instr::Equal
+                | Instr::NotEqual
+                | Instr::LogicalNot
+                | Instr::LogicalAnd
+                | Instr::LogicalOr
+                | Instr::ExecuteParfor { .. }
+                | Instr::ExecuteSpmd { .. }
+                | Instr::Distributed(_)
+                | Instr::Collective { .. }
+                | Instr::Unpack(_)
+                | Instr::CreateMatrix(_, _)
+                | Instr::CreateMatrixFromSequences { .. }
+                | Instr::CreateMatrixDynamic(_)
+                | Instr::CreateRange(_)
+                | Instr::PackToRow(_)
+                | Instr::PackToCol(_) => unreachable!("handled by dispatch_instruction"),
+                Instr::StochasticEvolution => {
+                    let steps_value = stack
+                        .pop()
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let scale_value = stack
+                        .pop()
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let drift_value = stack
+                        .pop()
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let state_value = stack
+                        .pop()
+                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                    let evolved =
+                        crate::accel::idioms::stochastic_evolution::execute_stochastic_evolution(
+                            state_value,
+                            drift_value,
+                            scale_value,
+                            steps_value,
+                        )
+                        .await?;
+                    stack.push(evolved);
+                }
+            }
+            if debug_stack {
+                debug!(pc, stack_len = stack.len(), "[vm] after exec");
+            }
+            pc += 1;
+            #[cfg(feature = "native-accel")]
+            fusion_observations.instruction_exit(executed_pc, pc);
         }
-        if debug_stack {
-            debug!(pc, stack_len = stack.len(), "[vm] after exec");
-        }
-        pc += 1;
+        Ok::<(), RuntimeError>(())
+    })
+    .await;
+    // The suspended operation is gone before cleanup touches its frame.
+    // Cancellation bypasses language catch handlers and never completes an
+    // unfinished placement observation successfully.
+    let Some(execution_result) = execution_result else {
         #[cfg(feature = "native-accel")]
-        fusion_observations.instruction_exit(executed_pc, pc);
-    }
+        fusion_observations.abort();
+        clear_cancelled_residency(&stack, &vars);
+        sequence_register.clear(&mut stack);
+        return Err(interp_engine::cancellation_error());
+    };
+    execution_result?;
     // A completion boundary or return can stop inside a region; never infer
     // success from the function's eventual return value.
     #[cfg(feature = "native-accel")]

@@ -422,6 +422,7 @@ impl AccelProvider for TestProvider {
         options: &'a CovarianceOptions,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            suspension::pending_covariance_if_armed().await;
             if second.is_some() {
                 bail!("test provider: covariance secondary input unsupported");
             }
@@ -1582,6 +1583,8 @@ fn accel_test_lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[path = "fusion_gpu/observation.rs"]
 mod observation;
+#[path = "fusion_gpu/suspension.rs"]
+mod suspension;
 
 #[test]
 fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -151,7 +151,10 @@ impl MexAsyncHostServices for BoundaryServiceSlot {
             Self::Concurrent(services) => services.submit(operation),
             Self::Local(_) => {
                 let completion = self.with(|services| {
-                    Ok(services.execute_async(operation, Arc::new(AtomicBool::new(false))))
+                    Ok(services.execute_async(
+                        operation,
+                        runmat_execution::cancellation::CancellationSource::new().token(),
+                    ))
                 })?;
                 Ok(Arc::new(CompletedAsyncResult(completion)))
             }
