@@ -7129,31 +7129,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(&a)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?
-                    .clone()
-            };
-            if runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved {
-                return self.allocate_tensor(data, a.shape().to_vec());
-            }
-            ensure!(
-                data.len() % 2 == 0,
-                "unary_conj: complex-interleaved buffer has odd length"
-            );
-            let mut out = data;
-            for pair in out.chunks_exact_mut(2) {
-                pair[1] = -pair[1];
-            }
-            self.allocate_tensor_with_storage(
-                out,
-                a.shape().to_vec(),
-                GpuTensorStorage::ComplexInterleaved,
-            )
-        })
+        Box::pin(async move { self.native_unary(a, unary::Unary::Conj) })
     }
 
     fn unary_heaviside<'a>(
