@@ -118,7 +118,7 @@ fn resident_shape_requires_no_payload_read() {
             run(Value::GpuTensor(handle.clone())).unwrap(),
             Value::Num(4.0)
         );
-        provider.free(&handle).ok();
+        drop(handle);
     });
 }
 
@@ -138,5 +138,5 @@ fn wgpu_reads_shape_without_payload_transfer() {
         run(Value::GpuTensor(handle.clone())).unwrap(),
         Value::Num(6.0)
     );
-    provider.free(&handle).ok();
+    drop(handle);
 }

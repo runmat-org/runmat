@@ -147,12 +147,14 @@ mod tests {
         .unwrap();
         assert_eq!(call(table, vec![]).unwrap(), Value::Num(6.0));
 
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![8, 9],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![8, 9],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("real metadata-only fixture allocation")
+            .handle;
         assert_eq!(
             call(Value::GpuTensor(handle), vec![]).unwrap(),
             Value::Num(72.0)

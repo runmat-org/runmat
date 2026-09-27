@@ -107,12 +107,14 @@ fn uses_outer_dimensions_for_text_and_containers() {
 
 #[test]
 fn empty_resident_shape_is_scalar_metadata_not_missing_metadata() {
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: Vec::new(),
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    };
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            Vec::new(),
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("real metadata-only fixture allocation")
+        .handle;
     assert_eq!(run(Value::GpuTensor(handle)).unwrap(), Value::Num(2.0));
 }
 
@@ -139,5 +141,5 @@ fn wgpu_reads_shape_without_payload_transfer() {
         run(Value::GpuTensor(handle.clone())).unwrap(),
         Value::Num(3.0)
     );
-    provider.free(&handle).ok();
+    drop(handle);
 }

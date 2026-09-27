@@ -43,5 +43,5 @@ fn wgpu_reads_shape_without_payload_transfer() {
     )
     .unwrap();
     assert!(run(Value::GpuTensor(handle.clone())));
-    provider.free(&handle).ok();
+    drop(handle);
 }

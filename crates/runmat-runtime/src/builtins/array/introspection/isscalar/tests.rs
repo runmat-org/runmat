@@ -49,5 +49,5 @@ fn wgpu_reads_shape_without_payload_transfer() {
     let handle =
         gpu_helpers::upload_tensor(provider, &Tensor::new(vec![1.0], vec![1, 1]).unwrap()).unwrap();
     assert!(run(Value::GpuTensor(handle.clone())));
-    provider.free(&handle).ok();
+    drop(handle);
 }

@@ -54,12 +54,14 @@ fn table_width_counts_variables_not_payload_columns() {
 
 #[test]
 fn resident_shape_requires_no_provider_or_payload_access() {
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![4, 13],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    };
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![4, 13],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("real metadata-only fixture allocation")
+        .handle;
     assert_eq!(run(Value::GpuTensor(handle)).unwrap(), Value::Num(13.0));
 }
 

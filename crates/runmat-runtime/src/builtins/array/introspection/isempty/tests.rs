@@ -37,7 +37,7 @@ fn provider_handle_shape_requires_no_payload_read() {
     test_support::with_test_provider(|provider| {
         let handle = gpu_helpers::upload_tensor(provider, &Tensor::zeros(vec![0, 4])).unwrap();
         assert!(run(Value::GpuTensor(handle.clone())));
-        provider.free(&handle).ok();
+        drop(handle);
     });
 }
 
@@ -50,5 +50,5 @@ fn wgpu_reads_shape_without_payload_transfer() {
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let handle = gpu_helpers::upload_tensor(provider, &Tensor::zeros(vec![0, 4])).unwrap();
     assert!(run(Value::GpuTensor(handle.clone())));
-    provider.free(&handle).ok();
+    drop(handle);
 }
