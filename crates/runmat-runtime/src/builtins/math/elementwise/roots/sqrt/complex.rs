@@ -51,30 +51,43 @@ fn parts_f64(real: f64, imag: f64) -> (f64, f64) {
             (real.sqrt(), 0.0)
         };
     }
-    let magnitude = real.hypot(imag);
-    if magnitude == 0.0 {
-        return (0.0, 0.0);
+    if imag.is_infinite() {
+        return (f64::INFINITY, imag);
     }
-    let output_real = ((magnitude + real) / 2.0).sqrt();
-    let output_imag = ((magnitude - real) / 2.0).sqrt().copysign(imag);
-    (output_real, output_imag)
+    if real.is_infinite() {
+        return if real.is_sign_positive() {
+            (real, if imag.is_nan() { imag } else { 0.0 })
+        } else {
+            (
+                if imag.is_nan() { imag } else { 0.0 },
+                f64::INFINITY.copysign(imag),
+            )
+        };
+    }
+    // Scale before forming the magnitude: both hypot(MAX, MAX) and
+    // hypot(x, y) + |x| can overflow even though their square root is finite.
+    let x = real.abs();
+    let y = imag.abs();
+    let major = if x >= y {
+        let ratio = y / x;
+        x.sqrt() * ((1.0 + 1.0_f64.hypot(ratio)) * 0.5).sqrt()
+    } else {
+        let ratio = x / y;
+        y.sqrt() * ((ratio + 1.0_f64.hypot(ratio)) * 0.5).sqrt()
+    };
+    // Recover the smaller component from 2*u*v = imag, avoiding subtraction
+    // of nearly equal numbers when one component is tiny.
+    let minor = y / (2.0 * major);
+    if real >= 0.0 {
+        (major, minor.copysign(imag))
+    } else {
+        (minor, major.copysign(imag))
+    }
 }
 
 pub(super) fn parts_f32(real: f32, imag: f32) -> (f32, f32) {
-    if imag == 0.0 {
-        return if real < 0.0 {
-            (0.0, (-real).sqrt())
-        } else {
-            (real.sqrt(), 0.0)
-        };
-    }
-    let magnitude = real.hypot(imag);
-    if magnitude == 0.0 {
-        return (0.0, 0.0);
-    }
-    let output_real = ((magnitude + real) / 2.0).sqrt();
-    let output_imag = ((magnitude - real) / 2.0).sqrt().copysign(imag);
-    (output_real, output_imag)
+    let (real, imag) = parts_f64(f64::from(real), f64::from(imag));
+    (real as f32, imag as f32)
 }
 
 pub(super) fn zero_f64(value: f64) -> f64 {

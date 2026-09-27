@@ -25,7 +25,7 @@ const SQRT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Single or double real/complex input; integer, logical, and character forms are RunMat-only extensions.",
+    description: "Single or double real/complex, logical, or character input; typed integer inputs require RunMat mode.",
 }];
 const SQRT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "Y = sqrt(X)",

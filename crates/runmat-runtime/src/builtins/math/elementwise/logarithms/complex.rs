@@ -28,7 +28,7 @@ fn one_plus<T: LogFloat>(real: T, imaginary: T) -> (T, T) {
     let real_part = if real.abs() < T::HALF && imaginary.abs() < T::HALF {
         (T::TWO * real + real * real + imaginary * imaginary).ln_1p() * T::HALF
     } else {
-        magnitude.ln()
+        log_magnitude(shifted_real, imaginary)
     };
     (real_part, imaginary.atan2(shifted_real))
 }
@@ -38,12 +38,33 @@ fn natural<T: LogFloat>(real: T, imaginary: T) -> (T, T) {
     if magnitude == T::ZERO {
         (T::NEG_INFINITY, T::ZERO)
     } else {
-        (magnitude.ln(), imaginary.atan2(real))
+        (log_magnitude(real, imaginary), imaginary.atan2(real))
     }
 }
 
+fn log_magnitude<T: LogFloat>(real: T, imaginary: T) -> T {
+    let x = real.abs();
+    let y = imaginary.abs();
+    // Retain hypot's infinity/NaN semantics, without materializing an
+    // overflowing finite magnitude before taking its logarithm.
+    if !x.is_finite() || !y.is_finite() {
+        return x.hypot(y).ln();
+    }
+    let (major, minor) = if x >= y { (x, y) } else { (y, x) };
+    if major == T::ZERO {
+        return T::NEG_INFINITY;
+    }
+    let ratio = minor / major;
+    major.ln() + (ratio * ratio).ln_1p() * T::HALF
+}
+
 trait LogFloat:
-    Copy + PartialEq + PartialOrd + std::ops::Add<Output = Self> + std::ops::Mul<Output = Self>
+    Copy
+    + PartialEq
+    + PartialOrd
+    + std::ops::Add<Output = Self>
+    + std::ops::Mul<Output = Self>
+    + std::ops::Div<Output = Self>
 {
     const ZERO: Self;
     const ONE: Self;
@@ -51,6 +72,7 @@ trait LogFloat:
     const HALF: Self;
     const NEG_INFINITY: Self;
     fn abs(self) -> Self;
+    fn is_finite(self) -> bool;
     fn hypot(self, other: Self) -> Self;
     fn ln(self) -> Self;
     fn ln_1p(self) -> Self;
@@ -68,6 +90,9 @@ macro_rules! impl_log_float {
             const NEG_INFINITY: Self = Self::NEG_INFINITY;
             fn abs(self) -> Self {
                 self.abs()
+            }
+            fn is_finite(self) -> bool {
+                self.is_finite()
             }
             fn hypot(self, other: Self) -> Self {
                 self.hypot(other)

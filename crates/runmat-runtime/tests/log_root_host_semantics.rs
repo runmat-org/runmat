@@ -11,6 +11,84 @@ fn call(name: &str, value: Value) -> Value {
 }
 
 #[test]
+fn complex_roots_retain_small_components_and_finite_extremes() {
+    for sign in [-1.0, 1.0] {
+        let Value::Complex(real, imag) = call("sqrt", Value::Complex(1.0, sign * 1e-20)) else {
+            panic!("complex scalar result");
+        };
+        assert_eq!(real, 1.0);
+        assert!((imag / (sign * 5e-21) - 1.0).abs() < 4.0 * f64::EPSILON);
+    }
+    // Polar half-angle identities supply an oracle without forming |MAX+iMAX|.
+    let scale = f64::MAX.sqrt();
+    let Value::Complex(real, imag) = call("sqrt", Value::Complex(f64::MAX, f64::MAX)) else {
+        panic!("complex scalar result");
+    };
+    let radius = 2.0_f64.powf(0.25);
+    let angle = std::f64::consts::FRAC_PI_8;
+    assert!((real / scale - radius * angle.cos()).abs() < 1e-15);
+    assert!((imag / scale - radius * angle.sin()).abs() < 1e-15);
+    let Value::Complex(real, imag) = call("sqrt", Value::Complex(f64::MAX, 1.0)) else {
+        panic!("complex scalar result");
+    };
+    assert!((real / scale - 1.0).abs() < 4.0 * f64::EPSILON);
+    assert!((imag * scale - 0.5).abs() < 4.0 * f64::EPSILON);
+
+    let input = ComplexTensor::from_complex_storage(
+        ComplexStorage::F32(vec![(1.0, 1e-20), (f32::MAX, f32::MAX)].into()),
+        vec![1, 1, 2],
+    )
+    .unwrap();
+    let Value::ComplexTensor(output) = call("sqrt", Value::ComplexTensor(input)) else {
+        panic!("single complex pages");
+    };
+    assert_eq!(output.shape, vec![1, 1, 2]);
+    let ComplexStorage::F32(values) = output.into_complex_storage() else {
+        panic!("single retained")
+    };
+    assert!((values[0].1 / 5e-21 - 1.0).abs() < 4.0 * f32::EPSILON);
+    assert!(values[1].0.is_finite() && values[1].1.is_finite());
+}
+
+#[test]
+fn complex_logarithms_do_not_overflow_finite_magnitudes() {
+    for (name, multiplier) in [
+        ("log", 1.0),
+        ("log1p", 1.0),
+        ("log2", std::f64::consts::LOG2_E),
+        ("log10", std::f64::consts::LOG10_E),
+    ] {
+        let Value::Complex(real, imag) = call(name, Value::Complex(f64::MAX, f64::MAX)) else {
+            panic!("{name}: complex result");
+        };
+        let expected = (f64::MAX.ln() + std::f64::consts::LN_2 * 0.5) * multiplier;
+        assert!(
+            (real - expected).abs() < 4.0 * f64::EPSILON * expected,
+            "{name}"
+        );
+        assert!(
+            (imag - std::f64::consts::FRAC_PI_4 * multiplier).abs() < 1e-15,
+            "{name}"
+        );
+        let input = ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(vec![(f32::MAX, f32::MAX)].into()),
+            vec![1, 1],
+        )
+        .unwrap();
+        let Value::ComplexTensor(output) = call(name, Value::ComplexTensor(input)) else {
+            panic!("single complex")
+        };
+        let ComplexStorage::F32(values) = output.into_complex_storage() else {
+            panic!("single retained")
+        };
+        let expected = (f64::from(f32::MAX).ln() + std::f64::consts::LN_2 * 0.5) * multiplier;
+        assert!(
+            (f64::from(values[0].0) - expected).abs() < 4.0 * f64::from(f32::EPSILON) * expected
+        );
+    }
+}
+
+#[test]
 fn discarded_outputs_still_validate_argument_and_domain() {
     for name in ["log", "log10", "log1p", "log2", "sqrt", "realsqrt"] {
         assert!(
