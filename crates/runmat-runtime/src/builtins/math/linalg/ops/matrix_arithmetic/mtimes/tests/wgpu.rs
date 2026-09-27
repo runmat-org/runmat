@@ -16,11 +16,20 @@ fn mtimes_gpu_roundtrip() {
         };
         let ha = provider.upload(&view_a).expect("upload A");
         let hb = provider.upload(&view_b).expect("upload B");
+        let inputs = [
+            ha.allocation_lease().downgrade(),
+            hb.allocation_lease().downgrade(),
+        ];
         let result = mtimes_builtin(Value::GpuTensor(ha), Value::GpuTensor(hb)).expect("mtimes");
-        assert!(matches!(&result, Value::GpuTensor(_)));
+        let Value::GpuTensor(output) = &result else {
+            panic!("resident mtimes output")
+        };
+        let output_lease = output.allocation_lease().downgrade();
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![26.0, 38.0, 30.0, 44.0]);
+        assert!(inputs.iter().all(|lease| lease.acquire().is_none()));
+        assert!(output_lease.acquire().is_none());
     });
 }
 
@@ -51,16 +60,24 @@ fn mtimes_wgpu_matches_cpu() {
     let ha = provider
         .upload(&view_a)
         .expect("upload A")
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .expect("admit explicit input view");
     let hb = provider.upload(&view_b).expect("upload B");
+    let inputs = [
+        ha.allocation_lease().downgrade(),
+        hb.allocation_lease().downgrade(),
+    ];
 
     let gpu = mtimes_builtin(Value::GpuTensor(ha), Value::GpuTensor(hb)).expect("wgpu mtimes");
     let Value::GpuTensor(output) = &gpu else {
         panic!("explicit wgpu mtimes must remain resident");
     };
     assert!(runmat_accelerate_api::handle_is_explicit(output));
+    let output_lease = output.allocation_lease().downgrade();
     let gathered = test_support::gather(gpu).expect("gather gpu");
 
     assert_eq!(gathered.shape, expected.shape);
     assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
+    assert!(inputs.iter().all(|lease| lease.acquire().is_none()));
+    assert!(output_lease.acquire().is_none());
 }
