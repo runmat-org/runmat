@@ -326,3 +326,65 @@ fn rank_zero_owned_singleton_maps_to_the_same_uniform_shape_as_host() {
         source.allocation_lease().validate_live().unwrap();
     });
 }
+
+#[test]
+fn asymmetric_mixed_class_batches_preserve_column_order_and_all_original_intents() {
+    use runmat_accelerate_api::GpuHandleProvenance::{Automatic, Explicit};
+    runmat_gc::gc_test_context(|| {
+        let _provider = ThreadProviderGuard::set(Some(provider()));
+        for (left_intent, right_intent) in [
+            (Automatic, Explicit),
+            (Explicit, Automatic),
+            (Automatic, Automatic),
+        ] {
+            let left = upload(&Value::Tensor(
+                Tensor::from_f32(vec![2.0, 4.0], vec![2, 1]).unwrap(),
+            ))
+            .with_provenance(left_intent)
+            .unwrap();
+            let right = upload(&Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 8.0], vec![1, 3]).unwrap(),
+            ))
+            .with_provenance(right_intent)
+            .unwrap();
+            for name in ["plus", "minus", "times", "rdivide", "ldivide"] {
+                let output = mapped(
+                    name,
+                    vec![
+                        Value::GpuTensor(left.clone()),
+                        Value::GpuTensor(right.clone()),
+                    ],
+                )
+                .unwrap();
+                let Value::GpuTensor(handle) = &output else {
+                    panic!("native class-capable owner must preserve resident output for {name}")
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_is_explicit(handle),
+                    left_intent == Explicit || right_intent == Explicit,
+                    "{name}: both original intents participate"
+                );
+                let mut expected = Vec::new();
+                for right in [1.0f64, 2.0, 8.0] {
+                    for left in [2.0f64, 4.0] {
+                        expected.push(match name {
+                            "plus" => left + right,
+                            "minus" => left - right,
+                            "times" => left * right,
+                            "rdivide" => left / right,
+                            "ldivide" => right / left,
+                            _ => unreachable!(),
+                        } as f32);
+                    }
+                }
+                same_result(
+                    output,
+                    Value::Tensor(Tensor::from_f32(expected, vec![2, 3]).unwrap()),
+                    name,
+                );
+                left.allocation_lease().validate_live().unwrap();
+                right.allocation_lease().validate_live().unwrap();
+            }
+        }
+    });
+}
