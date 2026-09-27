@@ -1064,7 +1064,16 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer(total, "runmat-diag-vec-out");
         if len == 0 || total == 0 {
-            return self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total);
+            return if vector.view().is_logical() {
+                self.register_logical_buffer(
+                    out_buffer,
+                    vec![out_rows, out_cols],
+                    total,
+                    BufferUsageClass::Generic,
+                )
+            } else {
+                self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total)
+            };
         }
         {
             let mut enc =
@@ -1125,7 +1134,16 @@ impl WgpuProvider {
             "runmat-diag-vec-pass",
         );
 
-        self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total)
+        if vector.view().is_logical() {
+            self.register_logical_buffer(
+                out_buffer,
+                vec![out_rows, out_cols],
+                total,
+                BufferUsageClass::Generic,
+            )
+        } else {
+            self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total)
+        }
     }
     pub(crate) fn diag_extract_exec(
         &self,
@@ -1147,7 +1165,11 @@ impl WgpuProvider {
         let diag_len = diag_length(rows, cols, offset);
         if diag_len == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-diag-extract-empty");
-            return self.register_existing_buffer(out_buffer, vec![0, 1], 0);
+            return if matrix.view().is_logical() {
+                self.register_logical_buffer(out_buffer, vec![0, 1], 0, BufferUsageClass::Generic)
+            } else {
+                self.register_existing_buffer(out_buffer, vec![0, 1], 0)
+            };
         }
         ensure!(
             diag_len <= u32::MAX as usize,
@@ -1216,7 +1238,16 @@ impl WgpuProvider {
             "runmat-diag-extract-pass",
         );
 
-        self.register_existing_buffer(out_buffer, vec![diag_len, 1], diag_len)
+        if matrix.view().is_logical() {
+            self.register_logical_buffer(
+                out_buffer,
+                vec![diag_len, 1],
+                diag_len,
+                BufferUsageClass::Generic,
+            )
+        } else {
+            self.register_existing_buffer(out_buffer, vec![diag_len, 1], diag_len)
+        }
     }
 }
 
@@ -1287,6 +1318,44 @@ mod tests {
             Err(err) if err.to_string() == "wgpu: no compatible adapter found" => None,
             Err(err) => panic!("register wgpu provider failed: {err:?}"),
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an actual WGPU device"]
+    async fn wgpu_diagonal_outputs_preserve_logical_producer() {
+        let provider = crate::backend::wgpu::provider::register_wgpu_provider(Default::default())
+            .expect("actual WGPU qualification requires a device");
+        let input = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1, 0, 1],
+                shape: &[3, 1],
+            })
+            .unwrap();
+        let matrix = provider.diag_from_vector(&input, 0).unwrap();
+        let output = provider.diag_extract(&matrix, 0).unwrap();
+        let empty = provider.diag_extract(&matrix, 9).unwrap();
+        for result in [&matrix, &output, &empty] {
+            assert!(result.view().is_logical());
+            assert!(!result.shares_allocation_with(&input));
+        }
+        drop(input);
+        drop(matrix);
+        assert_eq!(
+            provider.download(&output).await.unwrap().data,
+            vec![1.0, 0.0, 1.0]
+        );
+        assert_eq!(empty.shape(), &[0, 1]);
+        let zero = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[],
+                shape: &[0, 1],
+            })
+            .unwrap();
+        assert!(provider
+            .diag_from_vector_sized(&zero, 0, 0, 0)
+            .unwrap()
+            .view()
+            .is_logical());
     }
 
     #[tokio::test]

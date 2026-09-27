@@ -4895,7 +4895,12 @@ impl AccelProvider for InProcessProvider {
             ));
         }
         let output = diagonalize_numeric_data(&data, offset, out_rows, out_cols)?;
-        self.allocate_numeric_data(output, vec![out_rows, out_cols], GpuTensorStorage::Real)
+        self.allocate_produced(
+            output,
+            vec![out_rows, out_cols],
+            GpuTensorStorage::Real,
+            vector.view().is_logical(),
+        )
     }
 
     fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
@@ -4922,7 +4927,12 @@ impl AccelProvider for InProcessProvider {
             ));
         }
         let output = extract_numeric_diagonal(&data, rows, offset, diag_len)?;
-        self.allocate_numeric_data(output, vec![diag_len, 1], GpuTensorStorage::Real)
+        self.allocate_produced(
+            output,
+            vec![diag_len, 1],
+            GpuTensorStorage::Real,
+            matrix.view().is_logical(),
+        )
     }
 
     fn tril<'a>(
@@ -10409,6 +10419,42 @@ mod tests {
         assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
             &provider.logical_and(&input, &foreign).unwrap_err()
         ));
+    }
+
+    #[test]
+    fn diagonal_outputs_preserve_logical_producer_and_independent_ownership() {
+        let provider = InProcessProvider::new();
+        let input = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1, 0, 1],
+                shape: &[3, 1],
+            })
+            .unwrap();
+        let matrix = provider.diag_from_vector(&input, 0).unwrap();
+        let output = provider.diag_extract(&matrix, 0).unwrap();
+        let empty = provider.diag_extract(&matrix, 9).unwrap();
+        for result in [&matrix, &output, &empty] {
+            assert!(result.view().is_logical());
+            assert!(!result.shares_allocation_with(&input));
+        }
+        drop(input);
+        drop(matrix);
+        assert_eq!(
+            block_on(provider.download(&output)).unwrap().data,
+            vec![1.0, 0.0, 1.0]
+        );
+        assert_eq!(empty.shape(), &[0, 1]);
+        let zero = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[],
+                shape: &[0, 1],
+            })
+            .unwrap();
+        assert!(provider
+            .diag_from_vector_sized(&zero, 0, 0, 0)
+            .unwrap()
+            .view()
+            .is_logical());
     }
 
     #[test]
