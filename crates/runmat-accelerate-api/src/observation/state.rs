@@ -60,6 +60,14 @@ struct Shared {
     budget: Arc<ProviderObservationBudget>,
 }
 
+// Kept outside callback-shared state: an outstanding map callback must not hold
+// the worker's channel sender alive while that worker waits for channel closure.
+#[derive(Clone, Default)]
+#[cfg(feature = "wgpu")]
+struct ProgressOwner {
+    port: Option<Arc<dyn WgpuObservationProgress>>,
+}
+
 impl Shared {
     fn with<T>(&self, f: impl FnOnce(&mut State) -> T) -> T {
         let mut state = self
@@ -82,7 +90,7 @@ impl Shared {
 
 /// Unique session-side owner. Dropping an unconsumed receipt abandons it;
 /// provider callbacks cannot resurrect it or deliver feedback themselves.
-pub struct ProviderOperationReceipt(Arc<Shared>);
+pub struct ProviderOperationReceipt(Arc<Shared>, #[cfg(feature = "wgpu")] ProgressOwner);
 
 impl Default for ProviderOperationReceipt {
     fn default() -> Self {
@@ -108,33 +116,51 @@ impl ProviderOperationReceipt {
         Self::with_clock_and_budget(clock(), budget)
     }
 
+    #[cfg(feature = "wgpu")]
+    pub fn with_wgpu_progress(
+        budget: Arc<ProviderObservationBudget>,
+        progress: Arc<dyn WgpuObservationProgress>,
+    ) -> Self {
+        let mut receipt = Self::with_budget(budget);
+        receipt.1.port = Some(progress);
+        receipt
+    }
+
     pub fn with_clock_and_budget(
         clock: Arc<dyn ProviderObservationClock>,
         budget: Arc<ProviderObservationBudget>,
     ) -> Self {
         let start = clock.now();
-        Self(Arc::new(Shared {
-            state: Mutex::new(State {
-                start,
-                publication: None,
-                completion: None,
-                registered: 0,
-                pending: 0,
-                failure: start
-                    .is_none()
-                    .then_some(ProviderObservationFailure::InvalidTiming),
-                taken: false,
-                stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
-                pipelines: ProviderPipelineObservations::default(),
-                waiter: None,
+        Self(
+            Arc::new(Shared {
+                state: Mutex::new(State {
+                    start,
+                    publication: None,
+                    completion: None,
+                    registered: 0,
+                    pending: 0,
+                    failure: start
+                        .is_none()
+                        .then_some(ProviderObservationFailure::InvalidTiming),
+                    taken: false,
+                    stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
+                    pipelines: ProviderPipelineObservations::default(),
+                    waiter: None,
+                }),
+                clock,
+                budget,
             }),
-            clock,
-            budget,
-        }))
+            #[cfg(feature = "wgpu")]
+            ProgressOwner::default(),
+        )
     }
 
     pub fn recorder(&self) -> ProviderOperationRecorder {
-        ProviderOperationRecorder(self.0.clone())
+        ProviderOperationRecorder(
+            self.0.clone(),
+            #[cfg(feature = "wgpu")]
+            self.1.clone(),
+        )
     }
 
     /// Seal submission registration after all selected-route work and successful
@@ -226,9 +252,17 @@ impl Drop for ProviderOperationReceipt {
 
 /// Thread-safe callback authority; cannot publish outputs or consume feedback.
 #[derive(Clone)]
-pub struct ProviderOperationRecorder(Arc<Shared>);
+pub struct ProviderOperationRecorder(Arc<Shared>, #[cfg(feature = "wgpu")] ProgressOwner);
 
 impl ProviderOperationRecorder {
+    pub fn fail(&self, reason: ProviderObservationFailure) {
+        self.0.with(|state| state.fail(reason));
+    }
+
+    #[cfg(feature = "wgpu")]
+    pub fn wgpu_progress(&self) -> Option<Arc<dyn WgpuObservationProgress>> {
+        self.1.port.clone()
+    }
     /// Register before submission. Each token is completed exactly once, or its
     /// drop marks observation failure. Registration after publication is rejected.
     pub fn submission(&self) -> Result<ProviderSubmission, ProviderObservationFailure> {

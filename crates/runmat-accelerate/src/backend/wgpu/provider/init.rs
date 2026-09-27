@@ -372,6 +372,14 @@ impl WgpuProvider {
         let max_poolable_bytes =
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
+        #[cfg(not(target_arch = "wasm32"))]
+        let observation_progress = super::observation_progress::NativeObservationProgress::start(
+            device.clone(),
+            std::num::NonZeroU32::new(64).expect("nonzero observation mailbox bound"),
+        )
+        .map_err(|error| log::warn!("provider observation progress unavailable: {error}"))
+        .ok();
+
         Ok(Self {
             instance,
             device,
@@ -386,6 +394,8 @@ impl WgpuProvider {
             next_id: AtomicU64::new(1),
             pipelines,
             runtime_device_id,
+            #[cfg(not(target_arch = "wasm32"))]
+            observation_progress,
             observation_budget: Arc::new(
                 runmat_accelerate_api::observation::ProviderObservationBudget::new(
                     std::num::NonZeroU32::new(64)

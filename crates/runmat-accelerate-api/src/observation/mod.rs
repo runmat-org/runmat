@@ -9,6 +9,12 @@
 mod activation;
 mod budget;
 mod state;
+#[cfg(feature = "wgpu")]
+mod wgpu_progress;
+#[cfg(feature = "wgpu")]
+pub use wgpu_progress::{
+    WgpuObservationProgress, WgpuObservationProgressError, WgpuObservationProgressReservation,
+};
 
 pub use activation::{
     current_provider_observation, observe_provider_future, with_provider_observation,

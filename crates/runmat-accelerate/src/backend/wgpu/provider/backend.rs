@@ -85,6 +85,9 @@ mod finance;
 mod helpers;
 #[path = "pipeline_observation.rs"]
 mod pipeline_observation;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "observation_progress.rs"]
+mod observation_progress;
 #[path = "ops/image.rs"]
 mod image;
 #[path = "ops/indexing.rs"]

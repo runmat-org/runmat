@@ -17,10 +17,12 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
-        // Native map callbacks require a timely progress owner. Until that
-        // separate boundary is connected, opportunistic polls cannot train
-        // timings: they may include arbitrary idle time between commands.
-        if cfg!(not(target_arch = "wasm32")) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self
+            .observation_progress
+            .as_ref()
+            .is_some_and(|progress| progress.is_available())
+        {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
         }
         crate::placement::provider_observation_capability(self, query)
@@ -35,9 +37,20 @@ impl AccelProvider for WgpuProvider {
         };
         match self.operation_observation_capability(query) {
             ProviderObservationCapability::Unsupported => ProviderObservationSupport::Unsupported,
-            ProviderObservationCapability::Supported(_) => ProviderObservationSupport::Observed(
-                ProviderOperationReceipt::with_budget(self.observation_budget.clone()),
-            ),
+            ProviderObservationCapability::Supported(_) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                let receipt = match &self.observation_progress {
+                    Some(progress) => ProviderOperationReceipt::with_wgpu_progress(
+                        self.observation_budget.clone(),
+                        progress.clone(),
+                    ),
+                    None => return ProviderObservationSupport::Unsupported,
+                };
+                #[cfg(target_arch = "wasm32")]
+                let receipt =
+                    ProviderOperationReceipt::with_budget(self.observation_budget.clone());
+                ProviderObservationSupport::Observed(receipt)
+            }
         }
     }
 

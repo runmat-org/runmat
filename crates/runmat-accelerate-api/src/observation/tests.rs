@@ -412,3 +412,31 @@ fn every_stage_has_a_distinct_bounded_measurement_slot() {
         );
     }
 }
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn outstanding_callback_does_not_keep_progress_sender_alive() {
+    struct Driver;
+    impl WgpuObservationProgress for Driver {
+        fn reserve(
+            &self,
+        ) -> Result<Box<dyn WgpuObservationProgressReservation>, WgpuObservationProgressError>
+        {
+            Err(WgpuObservationProgressError::Stopped)
+        }
+    }
+    let driver = Arc::new(Driver);
+    let weak = Arc::downgrade(&driver);
+    let budget = Arc::new(ProviderObservationBudget::new(
+        std::num::NonZeroU32::new(1).unwrap(),
+    ));
+    let receipt = ProviderOperationReceipt::with_wgpu_progress(budget, driver.clone());
+    let callback = receipt.recorder().submission().unwrap();
+    drop(receipt);
+    drop(driver);
+    assert!(
+        weak.upgrade().is_none(),
+        "map callback must not retain worker sender"
+    );
+    callback.complete();
+}

@@ -34,6 +34,9 @@ pub struct WgpuProvider {
     pub(super) next_id: AtomicU64,
     pub(super) pipelines: WgpuPipelines,
     pub(super) runtime_device_id: u32,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) observation_progress:
+        Option<Arc<super::observation_progress::NativeObservationProgress>>,
     pub(super) observation_budget:
         Arc<runmat_accelerate_api::observation::ProviderObservationBudget>,
     pub(super) cache_device_id: u32,
