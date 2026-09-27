@@ -128,11 +128,12 @@ mod tests {
     #[test]
     fn gpu_submission_is_not_completed_execution_feedback() {
         let (feedback, session) = ticket("gpu.fusion.test");
-        FusionPlacementSelection {
-            observer: FusionPlacementObserver::new(None),
-            feedback: Some(feedback),
-            started: Instant::now(),
-        }
+        FusionPlacementSelection::new(
+            FusionPlacementObserver::new(None),
+            Some(feedback),
+            &crate::simple_provider::InProcessProvider::new(),
+            None,
+        )
         .submitted();
         assert!(session.profile_snapshot().feedback.is_empty());
     }
@@ -140,11 +141,12 @@ mod tests {
     #[test]
     fn failed_gpu_submission_retains_failure_feedback() {
         let (feedback, session) = ticket("gpu.fusion.test");
-        drop(FusionPlacementSelection {
-            observer: FusionPlacementObserver::new(None),
-            feedback: Some(feedback),
-            started: Instant::now(),
-        });
+        drop(FusionPlacementSelection::new(
+            FusionPlacementObserver::new(None),
+            Some(feedback),
+            &crate::simple_provider::InProcessProvider::new(),
+            None,
+        ));
         let snapshot = session.profile_snapshot();
         assert_eq!(snapshot.feedback[0].samples, 0);
         assert_eq!(snapshot.feedback[0].failures, 1);
