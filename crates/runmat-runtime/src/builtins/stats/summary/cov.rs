@@ -472,6 +472,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CovArgs::parse(value, rest)?;
     ensure_cov_extensions(&args)?;
+    // Resolve every borrowed resident operand before any hook or host gather.
+    // The legacy lookup may return an unrelated ambient provider.
+    for handle in std::iter::once(&args.first)
+        .chain(args.second.as_ref())
+        .chain(args.weight_vector.as_ref())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+    {
+        if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+            let mut error =
+                cov_internal_error("cov: resident operand has no exact owning provider");
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+        handle.allocation_lease().validate_live().map_err(|error| {
+            cov_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
+        })?;
+    }
     if let Some(result) = cov_try_gpu(&args).await? {
         return Ok(result);
     }
@@ -667,14 +689,14 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
         _ => return Ok(None),
     };
 
-    let provider = match runmat_accelerate_api::provider_for_handle(first_handle) {
+    let provider = match gpu_helpers::exact_provider_for_handle(first_handle) {
         Some(p) => p,
         None => return Ok(None),
     };
 
     let maybe_second_handle = match &args.second {
         Some(Value::GpuTensor(handle)) => {
-            let Some(second_provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+            let Some(second_provider) = gpu_helpers::exact_provider_for_handle(handle) else {
                 return Ok(None);
             };
             if !std::ptr::eq(provider, second_provider) {
@@ -700,6 +722,10 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
     if args.weight_vector.is_some() && weight_handle.is_none() {
         return Ok(None);
     }
+    let _weight_residency = match args.weight_vector.as_ref() {
+        Some(Value::GpuTensor(handle)) => Some(gpu_helpers::ResidencyRestoreGuard::new(handle)),
+        _ => None,
+    };
 
     let options = CovarianceOptions {
         normalization: args.normalization,
@@ -716,7 +742,68 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
         )
         .await
     {
-        Ok(result) => Ok(Some(Value::GpuTensor(result))),
+        Ok(mut result) => {
+            let columns = if maybe_second_handle.is_some() {
+                2
+            } else {
+                let (rows, columns) = value_rows_cols(&args.first)?;
+                covariance_column_count(rows, columns)
+            };
+            let borrowed: Vec<_> = protected
+                .iter()
+                .copied()
+                .chain(weight_handle.as_ref())
+                .collect();
+            // Both native floating precisions have existing covariance routes.
+            // Exact Single/mixed precision reconciliation remains separate from
+            // this ownership boundary; never relabel the producer's class.
+            let valid = [
+                runmat_accelerate_api::ProviderPrecision::F32,
+                runmat_accelerate_api::ProviderPrecision::F64,
+            ]
+            .into_iter()
+            .any(|precision| {
+                gpu_helpers::binary_gpu_output_matches(
+                    &result,
+                    first_handle,
+                    maybe_second_handle.unwrap_or(first_handle),
+                    provider,
+                    &gpu_helpers::BinaryGpuOutputContract {
+                        shape: vec![columns, columns],
+                        storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                        precision: Some(precision),
+                        integer: None,
+                        logical: false,
+                        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                    },
+                )
+            }) && borrowed
+                .iter()
+                .all(|input| !result.shares_allocation_with(input));
+            if !valid {
+                let mut error = cov_internal_error("cov: invalid provider covariance output");
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(result, error));
+            }
+            if let Err(error) = result.allocation_lease().validate_live() {
+                let error = cov_provider_error(
+                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                );
+                return Err(gpu_helpers::reject_gpu_output(result, error));
+            }
+            gpu_helpers::propagate_output_provenance(&mut result, borrowed).map_err(|error| {
+                cov_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    error,
+                ))
+            })?;
+            gpu_helpers::resident_gpu_value(result)
+                .map(Some)
+                .map_err(|error| {
+                    cov_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+                        error,
+                    ))
+                })
+        }
         Err(error) => {
             if error.is_unsupported() {
                 Ok(None)
@@ -768,7 +855,7 @@ async fn materialize_gpu_weight_vector(
                 return Ok(None);
             }
             validate_gpu_weight_shape(handle, expected_rows)?;
-            let Some(weight_provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+            let Some(weight_provider) = gpu_helpers::exact_provider_for_handle(handle) else {
                 return Ok(None);
             };
             if !std::ptr::eq(provider, weight_provider) {
@@ -1061,6 +1148,16 @@ struct Matrix {
     cols: usize,
 }
 
+// Shared host/resident result geometry: vectors and zero-column inputs are
+// normalized to one variable; ordinary matrices retain their column count.
+fn covariance_column_count(rows: usize, columns: usize) -> usize {
+    if rows == 1 || columns <= 1 {
+        1
+    } else {
+        columns
+    }
+}
+
 impl Matrix {
     fn from_single_tensor(tensor: Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
@@ -1073,11 +1170,17 @@ impl Matrix {
         let original_cols = tensor.cols();
         let is_vector = original_rows == 1 || original_cols == 1;
         let (rows, cols) = if is_vector {
-            (tensor.len(), 1)
+            (
+                tensor.len(),
+                covariance_column_count(original_rows, original_cols),
+            )
         } else if tensor.is_empty() && original_cols == 0 {
-            (0, 1)
+            (0, covariance_column_count(original_rows, original_cols))
         } else {
-            (original_rows, original_cols)
+            (
+                original_rows,
+                covariance_column_count(original_rows, original_cols),
+            )
         };
         Ok(Self {
             rows,
