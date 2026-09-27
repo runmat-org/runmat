@@ -51,7 +51,8 @@ async fn convert_to_gpu(
         value => value,
     };
     let tensor = host_value_to_tensor(context, host_value)?;
-    let handle = gpu_helpers::upload_tensor(provider, &tensor)
+    let _prototype_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(prototype);
+    let handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype])
         .map_err(|error| context.internal_error(format!("failed to upload GPU result: {error}")))?;
     Ok(resident_output_from_sources(handle, [prototype]))
 }

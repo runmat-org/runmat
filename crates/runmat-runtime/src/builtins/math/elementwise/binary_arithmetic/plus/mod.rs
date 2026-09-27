@@ -124,6 +124,9 @@ async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult
     if matches!(template, OutputTemplate::Like(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(&PLUS_LIKE_EXTENSION, BUILTIN_NAME)?;
     }
+    let template =
+        super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
+            .await?;
     super::preparation::execute(
         PLUS_CATALOG_ENTRY.identity,
         2 + rest.len(),

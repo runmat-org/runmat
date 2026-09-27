@@ -47,26 +47,41 @@ pub(super) enum OutputTemplate {
     Like(Value),
 }
 
+pub(super) enum ResolvedOutputTemplate {
+    Default,
+    Like(analysis::LikeAnalysis),
+}
+
+/// Resolve the prototype before arithmetic or automatic operand uploads.
+/// The resolved placement/class is carried through execution, not reparsed.
+pub(super) async fn resolve_output_template(
+    context: OutputPrototypeContext,
+    template: &OutputTemplate,
+) -> BuiltinResult<ResolvedOutputTemplate> {
+    match template {
+        OutputTemplate::Default => Ok(ResolvedOutputTemplate::Default),
+        OutputTemplate::Like(prototype) => analysis::analyse(context, prototype)
+            .await
+            .map(ResolvedOutputTemplate::Like),
+    }
+}
+
 pub(super) async fn apply_output_template(
     context: OutputPrototypeContext,
     value: Value,
-    template: &OutputTemplate,
+    template: &ResolvedOutputTemplate,
 ) -> BuiltinResult<Value> {
     match template {
-        OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(prototype) => {
-            let analysis = analysis::analyse(context, prototype).await?;
-            match analysis.class {
-                analysis::PrototypeClass::Real => {
-                    placement::ensure(context, value, &analysis.device).await
-                }
-                analysis::PrototypeClass::Complex => {
-                    let host_value =
-                        placement::ensure(context, value, &analysis::DevicePreference::Host)
-                            .await?;
-                    conversion::real_to_complex(context, host_value).await
-                }
+        ResolvedOutputTemplate::Default => Ok(value),
+        ResolvedOutputTemplate::Like(analysis) => match analysis.class {
+            analysis::PrototypeClass::Real => {
+                placement::ensure(context, value, &analysis.device).await
             }
-        }
+            analysis::PrototypeClass::Complex => {
+                let host_value =
+                    placement::ensure(context, value, &analysis::DevicePreference::Host).await?;
+                conversion::real_to_complex(context, host_value).await
+            }
+        },
     }
 }

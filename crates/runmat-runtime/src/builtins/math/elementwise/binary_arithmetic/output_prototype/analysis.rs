@@ -17,7 +17,7 @@ pub(super) enum DevicePreference {
     LikeGpu(runmat_accelerate_api::GpuTensorHandle),
 }
 
-pub(super) struct LikeAnalysis {
+pub(in crate::builtins::math::elementwise::binary_arithmetic) struct LikeAnalysis {
     pub(super) device: DevicePreference,
     pub(super) class: PrototypeClass,
 }
@@ -28,10 +28,18 @@ pub(super) async fn analyse(
     prototype: &Value,
 ) -> BuiltinResult<LikeAnalysis> {
     match prototype {
-        Value::GpuTensor(handle) => Ok(LikeAnalysis {
-            device: DevicePreference::LikeGpu(handle.clone()),
-            class: PrototypeClass::Real,
-        }),
+        Value::GpuTensor(handle) => {
+            if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+                return Err(context.described_error(context.invalid_argument,
+                    "GPU output requested via 'like' but no acceleration provider owns the prototype"));
+            }
+            gpu_helpers::expected_handle_numeric_element_type(handle)
+                .map_err(|error| context.described_error(context.invalid_argument, error))?;
+            Ok(LikeAnalysis {
+                device: DevicePreference::LikeGpu(handle.clone()),
+                class: PrototypeClass::Real,
+            })
+        }
         Value::Tensor(_)
         | Value::Num(_)
         | Value::Int(_)

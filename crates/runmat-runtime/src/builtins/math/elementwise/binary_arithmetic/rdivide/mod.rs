@@ -98,6 +98,9 @@ async fn rdivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRes
             BUILTIN_NAME,
         )?;
     }
+    let template =
+        super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
+            .await?;
     super::preparation::execute(
         RDIVIDE_CATALOG_ENTRY.identity,
         2 + rest.len(),

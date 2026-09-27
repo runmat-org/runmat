@@ -130,6 +130,9 @@ async fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             BUILTIN_NAME,
         )?;
     }
+    let template =
+        super::output_prototype::resolve_output_template(OUTPUT_PROTOTYPE_CONTEXT, &template)
+            .await?;
     super::preparation::execute(
         TIMES_CATALOG_ENTRY.identity,
         2 + rest.len(),
