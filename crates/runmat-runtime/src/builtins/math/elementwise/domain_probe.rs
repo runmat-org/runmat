@@ -59,7 +59,7 @@ pub(super) async fn probe_gpu_lower_bound(
     let element = gpu_helpers::expected_handle_numeric_element_type(handle)
         .map_err(|_| GpuDomainProbeError::MalformedInput)?;
     if gpu_helpers::exact_provider_for_handle(handle)
-        .is_none_or(|owner| !std::ptr::eq(owner, provider))
+        .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
         || !gpu_helpers::numeric_descriptor_matches(handle, element, GpuTensorStorage::Real)
         || runmat_accelerate_api::handle_integer_type(handle).is_some()
         || runmat_accelerate_api::handle_is_logical(handle)
@@ -95,7 +95,7 @@ pub(super) async fn probe_gpu_lower_bound(
     }
     if minimum.device_id() != handle.device_id()
         || gpu_helpers::exact_provider_for_handle(&minimum)
-            .is_none_or(|owner| !std::ptr::eq(owner, provider))
+            .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
         || runmat_accelerate_api::handle_storage(&minimum) != GpuTensorStorage::Real
         || runmat_accelerate_api::handle_precision(&minimum)
             != runmat_accelerate_api::handle_precision(handle)

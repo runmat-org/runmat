@@ -166,6 +166,12 @@ fn rdivide_like_gpu_uses_the_prototype_owner_not_the_ambient_provider() {
         panic!("expected resident result")
     };
     let result_owner = runmat_accelerate_api::provider_for_handle(&result).expect("result owner");
-    assert!(std::ptr::eq(result_owner, owner));
-    assert!(!std::ptr::eq(result_owner, ambient));
+    assert!(runmat_accelerate_api::same_provider_instance(
+        result_owner,
+        owner
+    ));
+    assert!(!runmat_accelerate_api::same_provider_instance(
+        result_owner,
+        ambient
+    ));
 }

@@ -219,8 +219,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_precision(handle),
                 Some(runmat_accelerate_api::ProviderPrecision::F64)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             match block_on(gpu_helpers::gather_value_async(&output)).expect("gather") {
                 Value::ComplexTensor(result) => {
                     let values = result.materialize_f64();

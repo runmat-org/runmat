@@ -78,7 +78,7 @@ pub(crate) async fn requires_complex(
     }
     let owner = gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| error(builtin, "GPU input has no owning provider"))?;
-    if !std::ptr::eq(owner, provider)
+    if !runmat_accelerate_api::same_provider_instance(owner, provider)
         || !gpu_helpers::expected_handle_numeric_element_type(input).is_ok_and(|element| {
             gpu_helpers::numeric_descriptor_matches(input, element, GpuTensorStorage::Real)
         })

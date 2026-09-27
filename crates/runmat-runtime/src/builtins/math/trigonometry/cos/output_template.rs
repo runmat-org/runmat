@@ -96,8 +96,9 @@ async fn convert_to_gpu(
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(&handle)
                 == runmat_accelerate_api::GpuTensorStorage::Real
-                && gpu_helpers::exact_provider_for_handle(&handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
+                && gpu_helpers::exact_provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                }) =>
         {
             gpu_helpers::resident_gpu_value(handle)
         }
@@ -154,14 +155,16 @@ async fn convert_to_gpu_complex(
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(&handle)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-                && gpu_helpers::exact_provider_for_handle(&handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
+                && gpu_helpers::exact_provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                }) =>
         {
             gpu_helpers::complex_gpu_value(handle)
         }
         Value::GpuTensor(handle) => {
-            let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider));
+            let same_owner = gpu_helpers::exact_provider_for_handle(&handle).is_some_and(|owner| {
+                runmat_accelerate_api::same_provider_instance(owner, provider)
+            });
             if same_owner
                 && runmat_accelerate_api::handle_storage(&handle)
                     == runmat_accelerate_api::GpuTensorStorage::Real

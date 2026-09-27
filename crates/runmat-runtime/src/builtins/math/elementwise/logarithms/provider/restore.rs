@@ -35,7 +35,7 @@ fn restore(
 ) -> BuiltinResult<Value> {
     let exact_owner = gpu_helpers::exact_provider_for_handle(handle)
         .ok_or_else(|| super::super::errors::internal(operation, "GPU provider unavailable"))?;
-    if !std::ptr::eq(provider, exact_owner) {
+    if !runmat_accelerate_api::same_provider_instance(provider, exact_owner) {
         return Err(super::super::errors::internal(
             operation,
             "GPU input owner changed during fallback",

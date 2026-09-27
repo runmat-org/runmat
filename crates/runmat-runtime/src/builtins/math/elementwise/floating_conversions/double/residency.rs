@@ -26,8 +26,9 @@ pub(super) async fn convert_to_gpu(
     }
     let value = match value {
         Value::GpuTensor(handle) => {
-            let same_owner = resolved_actual_double_owner(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider));
+            let same_owner = resolved_actual_double_owner(&handle).is_some_and(|owner| {
+                runmat_accelerate_api::same_provider_instance(owner, provider)
+            });
             if same_owner
                 && handle.device_id() == prototype.device_id()
                 && runmat_accelerate_api::handle_precision(&handle) == Some(ProviderPrecision::F64)
@@ -149,7 +150,8 @@ pub(super) fn valid_double_like_output(
         )
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
-        && resolved_actual_double_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && resolved_actual_double_owner(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 pub(super) fn resolved_actual_double_owner(

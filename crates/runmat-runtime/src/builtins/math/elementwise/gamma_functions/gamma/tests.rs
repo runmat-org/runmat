@@ -197,7 +197,7 @@ fn logical_gpu_input_is_rejected_before_provider_gamma() {
         let error = call(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
         assert_eq!(error.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
         assert!(runmat_accelerate_api::provider_for_handle(&handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider)));
         assert!(runmat_accelerate_api::handle_is_logical(&handle));
         handle
             .allocation_lease()

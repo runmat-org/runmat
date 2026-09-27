@@ -301,8 +301,11 @@ fn gammaln_resident_integer_gate_precedes_provider_and_restores_double_output() 
                 error.identifier(),
                 Some("RunMat:compatibility:GammalnIntegerInputExtension")
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
         }
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let Value::GpuTensor(output) = call(Value::GpuTensor(handle)).expect("gammaln") else {
@@ -310,7 +313,7 @@ fn gammaln_resident_integer_gate_precedes_provider_and_restores_double_output() 
         };
         assert!(runmat_accelerate_api::handle_integer_type(&output).is_none());
         assert!(runmat_accelerate_api::provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider)));
     });
 }
 

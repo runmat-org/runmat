@@ -104,6 +104,23 @@ fn pending_coordinate_operation_releases_owned_result_not_borrowed_input() {
     let borrowed = input.handle.clone();
     let mut future = Box::pin(async move {
         let mut outputs = Outputs::new(&[Value::GpuTensor(borrowed.clone())]);
+        assert_eq!(temporary.handle.shape(), [1, 2]);
+        assert_eq!(temporary.handle.device_id(), provider.device_id());
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&temporary.handle),
+            Some(ProviderPrecision::F64)
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&temporary.handle),
+            GpuTensorStorage::Real
+        );
+        assert!(!temporary.handle.shares_allocation_with(&borrowed));
+        let owner = gpu_helpers::exact_provider_for_handle(&temporary.handle)
+            .expect("actual fixture owner");
+        assert!(runmat_accelerate_api::same_provider_instance(
+            owner,
+            provider as &dyn AccelProvider
+        ));
         drop(
             outputs
                 .adopt(
