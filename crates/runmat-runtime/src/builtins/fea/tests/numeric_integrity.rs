@@ -502,14 +502,18 @@ fn fea_domain_revision_and_field_metadata_remain_exact_in_public_objects() {
 
 #[test]
 fn fea_numeric_constructors_reject_resident_fields_without_provider_access() {
-    let resident = || {
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 1,
-            descriptor: Default::default(),
-        })
-    };
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let resident = || Value::GpuTensor(allocation.handle.clone());
     let cases = [
         block_on(fea_domain_builtin(vec![
             Value::String("electromagnetic".into()),
@@ -543,6 +547,9 @@ fn fea_numeric_constructors_reject_resident_fields_without_provider_access() {
         assert_eq!(error.identifier(), Some("RunMat:fea:InvalidInput"));
         assert!(error.message().contains("cannot convert value"));
     }
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

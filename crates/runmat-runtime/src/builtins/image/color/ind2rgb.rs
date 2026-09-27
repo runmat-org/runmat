@@ -562,7 +562,7 @@ mod tests {
             let Value::GpuTensor(output) = result else {
                 panic!("expected restored gpu output");
             };
-            assert_eq!(output.shape, vec![1, 2, 3]);
+            assert_eq!(output.shape(), &[1, 2, 3]);
             assert!(runmat_accelerate_api::provider_for_handle(&output)
                 .is_some_and(|owner| std::ptr::eq(owner, provider)));
             assert_eq!(

@@ -1109,18 +1109,15 @@ mod tests {
                 Some("RunMat:compatibility:DelaunayTriIntegerTopologyExtension")
             );
 
-            let resident_points = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![3, 2],
-                device_id: 0,
-                buffer_id: 9_307_001,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::U16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let resident_points = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data: runmat_accelerate_api::HostNumericDataOwned::U16(vec![0, 1, 0, 0, 0, 1]),
+                    shape: vec![3, 2],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })
+                .unwrap();
             let error = block_on(delaunay_tri_builtin(vec![Value::GpuTensor(
-                resident_points.clone(),
+                resident_points.handle.clone(),
             )]))
             .expect_err("MATLAB mode rejects resident integer coordinates before gather");
             assert_eq!(
@@ -1128,25 +1125,27 @@ mod tests {
                 Some("RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension")
             );
 
-            let resident_topology = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![0, 2],
-                device_id: 0,
-                buffer_id: 9_307_002,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::U16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let resident_topology = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![0, 2],
+                    runmat_accelerate_api::NumericElementType::U16,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
             let error = block_on(delaunay_tri_builtin(vec![
                 tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
-                Value::GpuTensor(resident_topology.clone()),
+                Value::GpuTensor(resident_topology.handle.clone()),
             ]))
             .expect_err("MATLAB mode rejects resident integer topology before gather");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:compatibility:DelaunayTriIntegerTopologyExtension")
             );
+            assert_eq!(resident_points.probe.retirements(), 0);
+            assert_eq!(resident_topology.probe.retirements(), 0);
+            drop((resident_points.handle, resident_topology.handle));
+            assert_eq!(resident_points.probe.retirements(), 1);
+            assert_eq!(resident_topology.probe.retirements(), 1);
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
