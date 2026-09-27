@@ -9,6 +9,7 @@ use runmat_value::{NumericDType, Value};
 
 mod arithmetic;
 mod complex_components;
+mod floating_conversion;
 mod integer_conversion;
 mod logical;
 mod trigonometry;
@@ -163,6 +164,7 @@ pub(crate) fn in_process_capability_snapshot(
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
+    floating_conversion::append(&mut snapshot);
     trigonometry::append(&mut snapshot);
     snapshot
 }
@@ -176,6 +178,7 @@ pub(crate) fn wgpu_capability_snapshot(
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
+    floating_conversion::append(&mut snapshot);
     trigonometry::append(&mut snapshot);
     snapshot
 }
@@ -188,6 +191,9 @@ pub(crate) fn in_process_feasibility(
         return result;
     }
     if let Some(result) = trigonometry::validate(provider, false, query) {
+        return result;
+    }
+    if let Some(result) = floating_conversion::validate(provider, false, query) {
         return result;
     }
     if let Some(result) =
@@ -222,6 +228,9 @@ pub(crate) fn wgpu_feasibility(
         return result;
     }
     if let Some(result) = trigonometry::validate(provider, true, query) {
+        return result;
+    }
+    if let Some(result) = floating_conversion::validate(provider, true, query) {
         return result;
     }
     if let Some(result) = logical::validate(logical::HookProfile::Wgpu, provider.precision(), query)

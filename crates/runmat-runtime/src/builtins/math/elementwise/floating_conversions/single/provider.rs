@@ -35,8 +35,10 @@ pub(super) async fn single_from_gpu(
     let _metadata_guard = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
     let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-    let direct_eligible = matches!(input_element, NumericElementType::F32 | NumericElementType::F64)
-        && !runmat_accelerate_api::handle_is_logical(&handle)
+    let direct_eligible = matches!(
+        input_element,
+        NumericElementType::F32 | NumericElementType::F64
+    ) && !runmat_accelerate_api::handle_is_logical(&handle)
         && runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::Real;
     if direct_eligible {
         let direct = provider.unary_single(&handle).await;
