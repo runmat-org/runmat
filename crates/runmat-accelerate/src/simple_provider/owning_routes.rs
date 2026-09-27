@@ -3,6 +3,39 @@ use futures::executor::block_on;
 use runmat_accelerate_api::HostLogicalTensorView;
 
 #[test]
+fn ndgrid_unsupported_representation_does_not_hide_invalid_owner_or_request() {
+    let provider = InProcessProvider::new();
+    let foreign = InProcessProvider::new();
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::U64(&[1, u64::MAX]),
+            shape: &[2, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let axes = [runmat_accelerate_api::ProviderNdgridAxis { handle: &input }];
+    let request = ProviderNdgridRequest {
+        axes: &axes,
+        output_shape: &[2],
+        output_count: 1,
+    };
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider.ndgrid(&request).unwrap_err()
+    ));
+    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+        &foreign.ndgrid(&request).unwrap_err()
+    ));
+    let malformed = ProviderNdgridRequest {
+        axes: &axes,
+        output_shape: &[],
+        output_count: 1,
+    };
+    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider.ndgrid(&malformed).unwrap_err()
+    ));
+}
+
+#[test]
 fn typed_zero_constructors_preserve_class_storage_shape_and_owner() {
     let provider = InProcessProvider::new();
     let foreign = InProcessProvider::new();

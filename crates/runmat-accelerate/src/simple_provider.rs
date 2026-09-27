@@ -4355,6 +4355,10 @@ impl AccelProvider for InProcessProvider {
             "ndgrid: too many outputs for axes"
         );
         ensure!(!request.output_shape.is_empty(), "ndgrid: missing shape");
+        ensure!(
+            request.output_count <= request.output_shape.len(),
+            "ndgrid: output rank does not cover requested axes"
+        );
 
         let total = request
             .output_shape
@@ -4369,20 +4373,22 @@ impl AccelProvider for InProcessProvider {
                 .unwrap_or_else(|error| error.into_inner());
             let mut axes = Vec::with_capacity(request.output_count);
             for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
-                ensure!(
-                    runmat_accelerate_api::handle_storage(axis.handle)
-                        != GpuTensorStorage::ComplexInterleaved,
-                    "ndgrid: complex axes are not supported"
-                );
                 let data = guard
                     .get(&axis.handle)
                     .cloned()
                     .ok_or_else(|| anyhow!("ndgrid: unknown buffer {}", axis.handle.buffer_id()))?;
+                if axis.handle.physical().storage() == GpuTensorStorage::ComplexInterleaved {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "ndgrid: complex axes are not supported",
+                    ));
+                }
                 let data_len = match &data {
                     InProcessNumericData::F64(values) => values.len(),
                     InProcessNumericData::F32(values) => values.len(),
                     InProcessNumericData::Integer(_) => {
-                        return Err(anyhow!("ndgrid: integer axes require typed host fallback"));
+                        return Err(runmat_accelerate_api::unsupported_provider_operation(
+                            "ndgrid: integer axes require typed host fallback",
+                        ));
                     }
                 };
                 let expected = request.output_shape.get(dim).copied().unwrap_or(1);

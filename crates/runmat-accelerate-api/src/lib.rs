@@ -2034,7 +2034,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Allocate an identity tensor with ones along the leading diagonal of the first two axes.
     fn eye(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("eye not supported by provider"))
+        Err(unsupported_provider_operation(
+            "eye not supported by provider",
+        ))
     }
 
     /// Allocate an identity tensor matching the prototype tensor's shape.
@@ -2049,7 +2051,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Construct MATLAB-style N-D coordinate grids from resident GPU axis vectors.
     fn ndgrid(&self, _request: &ProviderNdgridRequest<'_>) -> anyhow::Result<ProviderNdgridResult> {
-        Err(anyhow::anyhow!("ndgrid not supported by provider"))
+        Err(unsupported_provider_operation(
+            "ndgrid not supported by provider",
+        ))
     }
 
     /// Compute vectorized Black-Scholes European call and put prices on resident GPU inputs.
@@ -4740,6 +4744,18 @@ mod tests {
         ));
         assert!(is_unsupported_provider_operation(
             &provider.logical_fill(&[2, 3], true).unwrap_err()
+        ));
+        assert!(is_unsupported_provider_operation(
+            &provider.eye(&[2, 3]).unwrap_err()
+        ));
+        assert!(is_unsupported_provider_operation(
+            &provider
+                .ndgrid(&ProviderNdgridRequest {
+                    axes: &[],
+                    output_shape: &[2, 3],
+                    output_count: 1,
+                })
+                .unwrap_err()
         ));
     }
 

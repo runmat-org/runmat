@@ -409,6 +409,10 @@ impl WgpuProvider {
             "ndgrid: too many outputs for axes"
         );
         ensure!(!request.output_shape.is_empty(), "ndgrid: missing shape");
+        ensure!(
+            request.output_count <= request.output_shape.len(),
+            "ndgrid: output rank does not cover requested axes"
+        );
 
         let total_len = product_checked(request.output_shape)
             .ok_or_else(|| anyhow!("ndgrid: tensor size exceeds GPU limits"))?;
@@ -430,16 +434,20 @@ impl WgpuProvider {
                     "ndgrid: axis belongs to a different device"
                 );
                 let entry = self.get_entry_raw(axis.handle)?;
-                ensure!(
-                    entry.storage != GpuTensorStorage::ComplexInterleaved,
-                    "ndgrid: complex axes are not supported"
-                );
-                ensure!(
-                    entry.element_type == expected_element_type,
-                    "ndgrid: axis physical type {} does not match provider type {}",
-                    entry.element_type.class_name(),
-                    expected_element_type.class_name()
-                );
+                if entry.storage == GpuTensorStorage::ComplexInterleaved {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "ndgrid: complex axes are not supported",
+                    ));
+                }
+                if entry.element_type != expected_element_type {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        format!(
+                            "ndgrid: axis physical type {} does not match provider type {}",
+                            entry.element_type.class_name(),
+                            expected_element_type.class_name()
+                        ),
+                    ));
+                }
                 let expected = request.output_shape.get(dim).copied().unwrap_or(1);
                 ensure!(
                     entry.len == expected,
