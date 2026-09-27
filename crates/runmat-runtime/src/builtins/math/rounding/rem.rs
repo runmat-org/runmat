@@ -302,7 +302,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
-        Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
+        Value::CharArray(ca) if ca.data.len() == 1 => {
             Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
         }
         _ => None,
@@ -336,9 +336,12 @@ fn value_into_real_tensor(value: Value) -> BuiltinResult<Tensor> {
             "inputs must be real",
         )),
         Value::CharArray(ca) => {
-            let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-            Tensor::new(data, vec![ca.rows, ca.cols])
-                .map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))
+            let data: Vec<f64> = ca
+                .to_column_major()
+                .into_iter()
+                .map(|ch| ch as u32 as f64)
+                .collect();
+            Tensor::new(data, ca.shape).map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))
         }
         Value::String(_) | Value::StringArray(_) => Err(rem_error_with_detail(
             &REM_ERROR_INVALID_INPUT,
