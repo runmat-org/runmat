@@ -1706,7 +1706,10 @@ mod tests {
             runmat_value::MAX_VALUE_SEQUENCE_OUTPUTS + 1,
         ))
         .unwrap_err();
-        assert_eq!(invalid.identifier(), Some("RunMat:OutputSequenceLimitExceeded"));
+        assert_eq!(
+            invalid.identifier(),
+            Some("RunMat:OutputSequenceLimitExceeded")
+        );
         assert_eq!(*counter.lock().unwrap(), 0);
         assert_eq!(crate::output_count::current_output_count(), Some(7));
         for expected_calls in 1..=2 {
@@ -1737,6 +1740,65 @@ mod tests {
                 "failed output selection must not publish a cache entry"
             );
         }
+    }
+
+    #[test]
+    fn feval_overloaded_object_keeps_literal_colon_argument_payload() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        reset_memoize_registry_for_test();
+        let _guard =
+            crate::user_functions::install_semantic_function_invoker(Some(echo_first_invoker()));
+        let output = block_on(crate::call_feval_async_with_outputs(
+            memoized(),
+            &[Value::String(":".into())],
+            1,
+        ))
+        .expect("overloaded subsref receives original literal payload");
+        assert_eq!(output, Value::String(":".into()));
+    }
+
+    #[test]
+    fn cancelled_memoized_feval_restores_output_scope_without_publishing() {
+        use std::future::Future;
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        reset_memoize_registry_for_test();
+        let counter = Arc::new(Mutex::new(0usize));
+        let observed = Arc::clone(&counter);
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, _args, requested| {
+                let counter = Arc::clone(&observed);
+                Box::pin(async move {
+                    assert_eq!(requested, 2);
+                    *counter.lock().unwrap() += 1;
+                    futures::future::pending().await
+                })
+            },
+        )));
+        let f = memoized();
+        let _caller = crate::output_count::push_output_count(Some(7));
+        let args = [Value::Num(2.0)];
+        let mut future = Box::pin(crate::call_feval_async_with_outputs(f.clone(), &args, 2));
+        let waker = futures::task::noop_waker();
+        assert!(future
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(&waker))
+            .is_pending());
+        assert_eq!(*counter.lock().unwrap(), 1);
+        drop(future);
+        assert_eq!(crate::output_count::current_output_count(), Some(7));
+        let Value::HandleObject(handle) = f else {
+            panic!("memoized handle")
+        };
+        let cached = runmat_gc::gc_with_value(&handle.target, |target| {
+            let Value::Object(object) = target else {
+                panic!("memoized target")
+            };
+            object_cache(object).unwrap().len()
+        })
+        .unwrap();
+        assert_eq!(cached, 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

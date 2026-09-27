@@ -1607,7 +1607,14 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
             let path = crate::object::indexing::ObjectSubscriptPath::single(
                 crate::object::indexing::ObjectSubscript::parentheses(
                     crate::object::indexing::ObjectIndexSelector::IndexValues {
-                        components: rest.into_iter().map(Into::into).collect(),
+                        // Preserve standard-substruct selector semantics from
+                        // the former encode/decode boundary without rebuilding
+                        // the whole descriptor. Overloads still receive the
+                        // original protocol payload through protocol_value().
+                        components: rest
+                            .into_iter()
+                            .map(crate::object::indexing::ObjectIndexComponent::from_protocol_value)
+                            .collect(),
                     },
                 ),
             );
@@ -3154,6 +3161,21 @@ mod tests {
             Value::Object(object)
                 if object.class_name.display_name() == "NoSubsrefProtocolClass"
         ));
+    }
+
+    #[test]
+    fn feval_default_object_indexing_preserves_standard_colon_selector() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let receiver = Value::Object(runmat_value::ObjectInstance::new(
+            "NoSubsrefProtocolClass".to_string(),
+        ));
+        let result = block_on(crate::call_feval_async_with_outputs(
+            receiver.clone(),
+            &[Value::String(":".into())],
+            1,
+        ))
+        .expect("standard colon retains default scalar-object indexing");
+        assert_eq!(result, receiver);
     }
 
     #[test]
