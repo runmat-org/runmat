@@ -2,9 +2,16 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod gauspuls;
+mod periodogram;
+mod spectral_facts;
+mod spectrogram;
 
 pub use gauspuls::*;
+pub use periodogram::*;
+pub use spectrogram::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(gauspuls::ENTRIES.iter().copied());
+    values.extend(periodogram::ENTRIES.iter().copied());
+    values.extend(spectrogram::ENTRIES.iter().copied());
 }
