@@ -21,6 +21,33 @@ fn broadcast_geometry_checks_overflow_and_preserves_empty_shapes() {
     assert!(broadcast_repeats(&[2, 3], &[4, 3]).unwrap().is_none());
 }
 
+#[test]
+fn successful_fill_and_unsupported_pair_keep_supported_scalar_max_route() {
+    for scalar_left in [false, true] {
+        let provider = provider(Mode::UnsupportedPair);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider.allocate(vec![1.0, 4.0], vec![2, 1]);
+        let resident = Value::GpuTensor(input.handle.clone());
+        let args = if scalar_left {
+            [Value::Num(3.0), resident]
+        } else {
+            [resident, Value::Num(3.0)]
+        };
+        let output = futures::executor::block_on(crate::call_builtin_async("max", &args)).unwrap();
+        let Value::GpuTensor(ref handle) = output else {
+            panic!("supported scalar result stays resident")
+        };
+        assert_eq!(provider.read(handle).unwrap(), vec![3.0, 4.0]);
+        assert_eq!(provider.fills.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.values.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        drop((output, args));
+        all_retired_except(provider, &[input.handle.buffer_id()]);
+        drop(input.handle);
+        all_retired_except(provider, &[]);
+    }
+}
+
 async fn full(name: &str, input: Value, other: Value) -> BuiltinResult<(Value, Value)> {
     match name {
         "min" => crate::builtins::math::reduction::min::evaluate(input, &[other])

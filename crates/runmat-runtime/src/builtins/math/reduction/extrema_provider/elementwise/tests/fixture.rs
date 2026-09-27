@@ -19,6 +19,7 @@ pub(super) enum Mode {
     PendingValues,
     PendingDownload,
     FailedValues,
+    UnsupportedPair,
 }
 
 pub(super) struct Provider {
@@ -161,6 +162,11 @@ impl AccelProvider for Provider {
         right: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if matches!(self.mode, Mode::UnsupportedPair) {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "pair extrema unavailable",
+                ));
+            }
             let output = self.output(left, &self.read(right)?, true)?;
             if matches!(self.mode, Mode::PendingValues) {
                 std::future::pending::<()>().await;

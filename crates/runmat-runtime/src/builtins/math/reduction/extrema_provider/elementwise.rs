@@ -143,7 +143,10 @@ impl ExtremaKind {
                 } else {
                     provider.elem_max(input, &fill).await
                 };
-                self.optional("elem_max", result)?
+                match self.optional("elem_max", result)? {
+                    Some(output) => Some(output),
+                    None => self.optional("scalar_max", provider.scalar_max(input, scalar))?,
+                }
             } else {
                 self.optional("scalar_max", provider.scalar_max(input, scalar))?
             }
