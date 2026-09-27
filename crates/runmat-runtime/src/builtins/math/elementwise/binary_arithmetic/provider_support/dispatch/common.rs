@@ -80,12 +80,11 @@ pub(super) fn provider_error(
     operation: ArithmeticProviderOperation,
     error: anyhow::Error,
 ) -> crate::RuntimeError {
-    let mut result = build_runtime_error(format!("{}: {error}", operation.name()))
+    let result = build_runtime_error(format!("{}: {error}", operation.name()))
         .with_builtin(operation.name())
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build();
-    result.source = Some(error.into_boxed_dyn_error());
-    result
+    crate::runtime_error::with_provider_execution_source(result, error.into())
 }
 
 pub(super) fn provider_contract_error(

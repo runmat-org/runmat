@@ -47,9 +47,8 @@ impl DivisionContext {
     }
 
     fn provider_error(self, source: anyhow::Error) -> RuntimeError {
-        let mut error = self.provider_contract_error(&source);
-        error.source = Some(source.into_boxed_dyn_error());
-        error
+        let error = self.provider_contract_error(&source);
+        crate::runtime_error::with_provider_execution_source(error, source.into())
     }
 
     fn provider_contract_error(self, detail: impl std::fmt::Display) -> RuntimeError {
