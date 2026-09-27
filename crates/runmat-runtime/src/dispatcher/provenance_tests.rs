@@ -19,8 +19,11 @@ fn result_projection_preserves_source_view_and_allocation_lifetime() {
         unreachable!()
     };
     assert!(projected.shares_allocation_with(&allocation.handle));
-    assert_eq!(projected.provenance(), Some(GpuHandleProvenance::Explicit));
-    assert_eq!(allocation.handle.provenance(), None);
+    assert_eq!(
+        projected.view().provenance(),
+        Some(GpuHandleProvenance::Explicit)
+    );
+    assert_eq!(allocation.handle.view().provenance(), None);
     assert_eq!(projected.shape(), &[2, 1]);
     drop(allocation.handle);
     assert_eq!(allocation.probe.retirements(), 0);
@@ -45,6 +48,9 @@ fn explicit_producer_intent_survives_without_resident_arguments() {
     let Value::GpuTensor(projected) = result else {
         unreachable!()
     };
-    assert_eq!(projected.provenance(), Some(GpuHandleProvenance::Explicit));
+    assert_eq!(
+        projected.view().provenance(),
+        Some(GpuHandleProvenance::Explicit)
+    );
     assert_eq!(projected.shape(), &[0, 3]);
 }
