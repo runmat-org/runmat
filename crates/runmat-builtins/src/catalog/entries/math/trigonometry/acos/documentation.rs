@@ -18,12 +18,13 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "RunMat extensions",
         paragraphs: &[
             "RunMat mode accepts all eight real fixed-width integer classes, logical arrays, and character arrays. These forms cross an explicit binary64 computation boundary and return double or complex double. Character elements are interpreted as Unicode scalar values; values above one therefore produce complex results.",
-            "Real provider-resident input that requires a complex result is also a RunMat extension. MATLAB compatibility modes require potentially complex resident input to be explicitly complex. Strings, sparse arrays, typed complex integers, direct table/timetable overloads, and tall containers are rejected. Execution-owned distributed arrays use the catalog's unary mapping policy.",
+            "Explicit gpuArray real input that requires a complex result is also a RunMat extension. MATLAB compatibility modes require potentially complex gpuArray input to be explicitly complex. Strings, sparse arrays, typed complex integers, direct table/timetable overloads, and tall containers are rejected. Execution-owned distributed arrays use the catalog's unary mapping policy.",
         ],
     },
     BuiltinDocumentationSection {
         heading: "GPU execution and fusion",
         paragraphs: &[
+            "Automatic placement of host floating arrays is available for values proven to remain in the real domain. Arrays outside that domain or containing NaN retain the host route. Automatic residency does not impose gpuArray-specific compatibility restrictions: an automatically resident input that needs complex output returns the host complex result. The owner-preserving GPU behavior below applies to explicitly resident input.",
             "For floating real input, RunMat checks the domain with provider reductions. Values in `[-1, 1]` can use the provider's unary inverse-cosine operation and stay resident. Missing hooks and results that require complex promotion gather through the input's owner, compute on the host, and return to that same owner and device.",
             "Fusion is disabled because a real-only shader expression would return `NaN` where the language requires complex promotion. Provider execution remains available when the runtime domain probe establishes that every value is in `[-1, 1]`.",
         ],

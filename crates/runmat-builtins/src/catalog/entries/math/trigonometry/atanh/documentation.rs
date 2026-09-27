@@ -19,6 +19,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "GPU execution",
         paragraphs: &[
+            "Automatic placement of host floating arrays is available for values proven to remain in the real domain. Arrays outside that domain or containing NaN retain the host route. Automatic residency does not impose gpuArray-specific compatibility restrictions: an automatically resident input that needs complex output returns the host complex result. The owner-preserving GPU behavior below applies to explicitly resident input.",
             "A provider can execute real floating input directly when exact domain inspection proves that every value lies in the closed interval from minus one through one. Successful provider output is validated before it becomes the result.",
             "When domain inspection or the unary operation is unsupported, RunMat gathers through the concrete owner, computes on the host, and restores the result to that owner and device. Other provider failures remain errors.",
             "MATLAB-compatible GPU execution requires potentially complex output to start from explicitly complex input. RunMat mode additionally permits resident real input outside the real domain and restores the promoted complex result through the same provider.",

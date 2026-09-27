@@ -92,7 +92,7 @@ pub const ACOSH_GPU_REAL_COMPLEX_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "acosh-gpu-real-complex-promotion",
         mode: BuiltinExtensionMode::RunMatOnly,
-        description: "acosh resident real input that requires complex output is a RunMat extension",
+        description: "acosh explicit gpuArray real input that requires complex output is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:AcoshGpuRealComplexPromotionExtension"),
     };
 pub const ACOSH_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [

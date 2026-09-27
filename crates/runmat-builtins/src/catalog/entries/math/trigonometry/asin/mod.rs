@@ -91,7 +91,7 @@ pub const ASIN_GPU_REAL_COMPLEX_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "asin-gpu-real-complex-promotion",
         mode: BuiltinExtensionMode::RunMatOnly,
-        description: "asin resident real input that requires complex output is a RunMat extension",
+        description: "asin explicit gpuArray real input that requires complex output is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:AsinGpuRealComplexPromotionExtension"),
     };
 pub const ASIN_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
