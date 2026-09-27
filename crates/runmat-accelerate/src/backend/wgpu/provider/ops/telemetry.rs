@@ -1,4 +1,7 @@
 use super::*;
+use runmat_accelerate_api::observation::{
+    current_provider_observation, ProviderObservationFailure,
+};
 
 pub(crate) struct FusedReductionTelemetryRequest<'a> {
     pub(crate) shader: &'a str,
@@ -286,8 +289,8 @@ impl WgpuProvider {
             })
             .and_then(|result| result);
         if let Err(error) = warmup {
-            if let Some(recorder) = runmat_accelerate_api::current_provider_observation() {
-                recorder.fail(runmat_accelerate_api::ProviderObservationFailure::ProviderFailed);
+            if let Some(recorder) = current_provider_observation() {
+                recorder.fail(ProviderObservationFailure::ProviderFailed);
             }
             log::warn!("RunMat Accelerate: WGPU warmup failed: {error:#}");
             return;

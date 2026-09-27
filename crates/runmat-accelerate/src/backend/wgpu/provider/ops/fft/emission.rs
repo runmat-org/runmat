@@ -1,8 +1,9 @@
 use super::*;
 use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
-use runmat_accelerate_api::{
-    current_provider_observation, ProviderObservationFailure, WgpuEmission,
+use runmat_accelerate_api::observation::{
+    current_provider_observation, ProviderObservationFailure,
 };
+use runmat_accelerate_api::WgpuEmission;
 
 impl WgpuProvider {
     /// Normal chunks prepare and submit within one shared access interval.
