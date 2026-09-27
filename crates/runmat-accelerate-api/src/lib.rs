@@ -22,6 +22,7 @@ pub use allocation::{
 };
 mod native_device;
 mod logical_upload;
+mod fusion_outputs;
 pub mod observation;
 mod residency;
 mod numeric_upload;
@@ -29,6 +30,7 @@ mod placement;
 mod power;
 mod numerical_domain;
 
+pub use fusion_outputs::validate_fused_output_classes;
 pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
 pub use native_device::*;
 pub use numeric_upload::{
@@ -3513,9 +3515,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _inputs: &[GpuTensorHandle],
         _output_shape: &[usize],
         _len: usize,
+        output_class: ProviderElementType,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "fused_elementwise not supported by provider"
+        validate_fused_output_classes(self.precision(), &[output_class])?;
+        Err(unsupported_provider_operation(
+            "fused_elementwise not supported by provider",
         ))
     }
 
@@ -3524,17 +3528,19 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// bindings (at binding indices `inputs.len()` through `inputs.len() + num_outputs - 1`) and a
     /// uniform `params` binding at `inputs.len() + num_outputs`.
     ///
-    /// Providers that do not override this method fall back to calling `fused_elementwise` once
-    /// per output, which preserves correctness at the cost of the O(N²) dispatch overhead this
-    /// method is designed to eliminate.
+    /// Output count is exactly `output_classes.len()`. Classes describe this
+    /// physical hook stage, not a later output adaptation. Logical outputs use
+    /// the provider's native floating encoding and producer-owned classification.
+    /// The default is typed Unsupported, never guessed shader rewriting.
     fn fused_elementwise_multi(
         &self,
         _shader: &str,
         _inputs: &[GpuTensorHandle],
         _output_shape: &[usize],
         _len: usize,
-        _num_outputs: usize,
+        output_classes: &[ProviderElementType],
     ) -> anyhow::Result<Vec<GpuTensorHandle>> {
+        validate_fused_output_classes(self.precision(), output_classes)?;
         Err(unsupported_provider_operation(
             "fused_elementwise_multi not supported by provider",
         ))
