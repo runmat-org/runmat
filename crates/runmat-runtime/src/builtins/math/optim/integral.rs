@@ -1109,8 +1109,18 @@ mod tests {
             ))
             .expect("resident integer tolerance");
             assert!(matches!(result, Value::Num(_)));
-            provider.free(&handle).expect("free resident tolerance");
-            runmat_accelerate_api::clear_handle_metadata(&handle);
+            handle
+                .allocation_lease()
+                .validate_live()
+                .expect("borrowed tolerance remains live");
+            let preserved = test_support::gather(Value::GpuTensor(handle.clone())).unwrap();
+            assert_eq!(
+                preserved.integer_storage(),
+                Some(&IntegerStorage::U64(vec![1]))
+            );
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().expect("release resident tolerance");
+            assert!(physical.acquire().is_none());
         });
     }
 
