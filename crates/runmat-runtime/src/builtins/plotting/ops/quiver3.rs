@@ -557,33 +557,52 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, x, y, z, u, v, w, rest) =
         parse_quiver3_args(args).map_err(map_quiver3_invalid_argument)?;
     let parsed = parse_quiver3_style_args(&rest).map_err(map_quiver3_invalid_argument)?;
-    let x_tensor = NumericInput::from_value(x, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let [x, y, z, u, v, w] = [x, y, z, u, v, w].map(|value| {
+        NumericInput::from_value(value, BUILTIN_NAME).map_err(map_quiver3_invalid_argument)
+    });
+    // Validate all representations before the first potentially pending download.
+    let (x, y, z, u, v, w) = (x?, y?, z?, u?, v?, w?);
+    let x_tensor = x
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let y_tensor = NumericInput::from_value(y, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let y_tensor = y
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let z_tensor = NumericInput::from_value(z, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let z_tensor = z
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let u_tensor = NumericInput::from_value(u, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let u_tensor = u
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let v_tensor = NumericInput::from_value(v, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let v_tensor = v
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
-    let w_tensor = NumericInput::from_value(w, BUILTIN_NAME)
-        .map_err(map_quiver3_invalid_argument)?
-        .into_tensor(BUILTIN_NAME)
+    let w_tensor = w
+        .into_tensor_async(BUILTIN_NAME)
+        .await
         .map_err(map_quiver3_invalid_argument)?;
     let (x_vals, y_vals, z_vals, u_vals, v_vals, w_vals) =
         materialize_quiver3_components(x_tensor, y_tensor, z_tensor, u_tensor, v_tensor, w_tensor)
             .map_err(map_quiver3_invalid_argument)?;
+    let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
+    let mut plot = QuiverPlot::from_numeric_data3d(x_vals, y_vals, z_vals, u_vals, v_vals, w_vals)
+        .map_err(|err| plotting_error(BUILTIN_NAME, err))?
+        .with_style(
+            parsed.color,
+            parsed.line_width,
+            parsed.scale,
+            parsed.head_size,
+        )
+        .with_label(label);
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
+    let mut prepared = Some(plot);
     let opts = PlotRenderOptions {
         title: "Quiver3",
         x_label: "X",
@@ -595,26 +614,9 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let axes = target_axes.unwrap_or(axes);
-        let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
-        let mut plot = QuiverPlot::from_numeric_data3d(
-            x_vals.clone(),
-            y_vals.clone(),
-            z_vals.clone(),
-            u_vals.clone(),
-            v_vals.clone(),
-            w_vals.clone(),
-        )
-        .map_err(|err| plotting_error(BUILTIN_NAME, err))?
-        .with_style(
-            parsed.color,
-            parsed.line_width,
-            parsed.scale,
-            parsed.head_size,
-        )
-        .with_label(label);
-        if let Some(visible) = parsed.visible {
-            plot.set_visible(visible);
-        }
+        let plot = prepared
+            .take()
+            .expect("quiver3 prepared plot consumed once");
         let plot_index = figure.add_quiver_plot_on_axes(plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())

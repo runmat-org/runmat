@@ -61,7 +61,7 @@ fn dispatched_stem_and_stairs_publish_only_after_preparation_completes() {
     });
     let _plot = lock_plot_test_context();
     let _current = ThreadProviderGuard::set(Some(provider));
-    for name in ["stem", "stairs"] {
+    for name in ["stem", "stairs", "quiver3"] {
         provider.mode.store(0, Ordering::SeqCst);
         provider.freed.store(0, Ordering::SeqCst);
         assert_preparation_lifecycle(name, provider);
@@ -78,12 +78,20 @@ fn assert_preparation_lifecycle(name: &str, provider: &Provider) {
             shape: &[1, 2],
         })
         .unwrap();
-    let args = [
-        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
-        Value::GpuTensor(input.clone()),
-        Value::from("Visible"),
-        Value::from("off"),
-    ];
+    let host = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let mut args = if name == "quiver3" {
+        vec![
+            host.clone(),
+            host.clone(),
+            host.clone(),
+            host.clone(),
+            host,
+            Value::GpuTensor(input.clone()),
+        ]
+    } else {
+        vec![host, Value::GpuTensor(input.clone())]
+    };
+    args.extend([Value::from("Visible"), Value::from("off")]);
     let mut invalid = args.to_vec();
     *invalid.last_mut().unwrap() = Value::from("invalid");
     let mut rejected = Box::pin(runmat_runtime::call_builtin_async(name, &invalid));
