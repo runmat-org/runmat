@@ -19,6 +19,26 @@ struct Provider {
 struct Defaults;
 
 #[test]
+fn transpose_default_is_typed_unsupported_and_preserves_input_ownership() {
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![2, 3], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let error = Defaults.transpose(&input.handle).unwrap_err();
+    assert!(error
+        .downcast_ref::<UnsupportedProviderOperation>()
+        .is_some());
+    assert!(is_unsupported_provider_operation(&error));
+    assert!(!is_unsupported_provider_operation(&anyhow::anyhow!(
+        "transpose not supported by provider"
+    )));
+    input.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(input.probe.retirements(), 0);
+    drop(input.handle);
+    assert_eq!(input.probe.retirements(), 1);
+}
+
+#[test]
 fn extrema_composite_defaults_are_typed_unsupported_without_device_work() {
     let owner = TestAllocationOwner::new();
     let input = owner

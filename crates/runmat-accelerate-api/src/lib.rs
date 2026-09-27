@@ -3144,7 +3144,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Box::pin(async move { Ok(None) })
     }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("transpose not supported by provider"))
+        Err(unsupported_provider_operation("transpose not supported by provider"))
     }
     fn conv1d(
         &self,
