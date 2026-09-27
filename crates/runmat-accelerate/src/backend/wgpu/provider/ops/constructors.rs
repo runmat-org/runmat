@@ -625,8 +625,7 @@ impl WgpuProvider {
     }
 
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
-        let spec =
-            runtime_fspecial_spec_from_request(&request.filter).map_err(|err| anyhow!(err))?;
+        let spec = runtime_fspecial_spec_from_request(&request.filter);
 
         let (rows, cols, kind, sigma, alpha, norm, center_x, center_y) = match &spec {
             FspecialFilterSpec::Average { rows, cols } => (

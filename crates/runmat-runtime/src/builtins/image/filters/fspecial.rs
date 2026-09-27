@@ -244,16 +244,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Generates constant kernels; fusion is not applicable.",
 };
 
+#[path = "fspecial/kernel_error.rs"]
+pub mod kernel_error;
+use kernel_error::{FspecialKernelError, FspecialKernelResult};
+
 fn fspecial_descriptor_error(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
 ) -> RuntimeError {
-    let detail = detail.as_ref();
-    let message = if detail.starts_with("fspecial:") {
-        detail.to_string()
-    } else {
-        format!("{}: {}", error.message, detail)
-    };
+    let message = kernel_error::message(error, detail.as_ref());
     let mut builder = build_runtime_error(message).with_builtin(NAME);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
@@ -267,10 +266,6 @@ fn fspecial_argument_error(detail: impl AsRef<str>) -> RuntimeError {
 
 fn fspecial_error(detail: impl AsRef<str>) -> RuntimeError {
     fspecial_descriptor_error(&FSPECIAL_ERROR_INVALID_INPUT, detail)
-}
-
-fn fspecial_internal_error(detail: impl AsRef<str>) -> RuntimeError {
-    fspecial_descriptor_error(&FSPECIAL_ERROR_INTERNAL, detail)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -324,7 +319,7 @@ pub enum FspecialFilterSpec {
 }
 
 impl FspecialFilterSpec {
-    pub fn generate_tensor(&self) -> BuiltinResult<Tensor> {
+    pub fn generate_tensor(&self) -> FspecialKernelResult<Tensor> {
         match self {
             FspecialFilterSpec::Average { rows, cols } => generate_average(*rows, *cols),
             FspecialFilterSpec::Disk { radius, size } => generate_disk(*radius, *size),
@@ -410,8 +405,8 @@ impl FspecialFilterSpec {
 
 /// Convert an API request into a runtime specification.
 #[allow(dead_code)]
-pub fn spec_from_request(filter: &FspecialFilter) -> BuiltinResult<FspecialFilterSpec> {
-    Ok(match filter {
+pub fn spec_from_request(filter: &FspecialFilter) -> FspecialFilterSpec {
+    match filter {
         FspecialFilter::Average { rows, cols } => FspecialFilterSpec::Average {
             rows: *rows as usize,
             cols: *cols as usize,
@@ -445,7 +440,7 @@ pub fn spec_from_request(filter: &FspecialFilter) -> BuiltinResult<FspecialFilte
         FspecialFilter::Prewitt => FspecialFilterSpec::Prewitt,
         FspecialFilter::Sobel => FspecialFilterSpec::Sobel,
         FspecialFilter::Unsharp { alpha } => FspecialFilterSpec::Unsharp { alpha: *alpha },
-    })
+    }
 }
 
 #[runtime_builtin(
@@ -817,30 +812,30 @@ fn parse_unsharp_alpha(arg: Option<&Value>) -> BuiltinResult<f64> {
     }
 }
 
-fn generate_average(rows: usize, cols: usize) -> BuiltinResult<Tensor> {
+fn generate_average(rows: usize, cols: usize) -> FspecialKernelResult<Tensor> {
     let total = rows
         .checked_mul(cols)
-        .ok_or_else(|| fspecial_error("fspecial: LENGTHS are too large"))?;
+        .ok_or_else(|| FspecialKernelError::invalid("fspecial: LENGTHS are too large"))?;
     if total == 0 {
-        return Err(fspecial_error(
+        return Err(FspecialKernelError::invalid(
             "fspecial: LENGTHS must be positive integers",
         ));
     }
     let fill = 1.0 / total as f64;
     let data = vec![fill; total];
     Tensor::new(data, vec![rows, cols])
-        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+        .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
-fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
+fn generate_disk(radius: f64, size: usize) -> FspecialKernelResult<Tensor> {
     if radius == 0.0 {
         return Tensor::new(vec![1.0], vec![1, 1])
-            .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")));
+            .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")));
     }
 
     let total = size
         .checked_mul(size)
-        .ok_or_else(|| fspecial_error("fspecial: RADIUS is too large"))?;
+        .ok_or_else(|| FspecialKernelError::invalid("fspecial: RADIUS is too large"))?;
     let mut data = vec![0.0f64; total];
     let center = (size as isize / 2) as f64;
 
@@ -857,7 +852,9 @@ fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
 
     let normaliser = PI * radius * radius;
     if normaliser <= f64::EPSILON {
-        return Err(fspecial_error("fspecial: radius is too small"));
+        return Err(FspecialKernelError::invalid(
+            "fspecial: radius is too small",
+        ));
     }
     let mut sum = 0.0;
     for value in &mut data {
@@ -865,20 +862,22 @@ fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
         sum += *value;
     }
     if sum <= 0.0 {
-        return Err(fspecial_error("fspecial: failed to generate disk filter"));
+        return Err(FspecialKernelError::invalid(
+            "fspecial: failed to generate disk filter",
+        ));
     }
     for value in &mut data {
         *value /= sum;
     }
 
     Tensor::new(data, vec![size, size])
-        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+        .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
-fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
+fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> FspecialKernelResult<Tensor> {
     let total = rows
         .checked_mul(cols)
-        .ok_or_else(|| fspecial_error("fspecial: LENGTHS are too large"))?;
+        .ok_or_else(|| FspecialKernelError::invalid("fspecial: LENGTHS are too large"))?;
     let row_center = (rows as f64 - 1.0) / 2.0;
     let col_center = (cols as f64 - 1.0) / 2.0;
     let denom = 2.0 * sigma * sigma;
@@ -894,7 +893,7 @@ fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tens
         }
     }
     if sum == 0.0 {
-        return Err(fspecial_error(
+        return Err(FspecialKernelError::invalid(
             "fspecial: gaussian generation failed (degenerate sigma)",
         ));
     }
@@ -903,10 +902,10 @@ fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tens
     }
 
     Tensor::new(data, vec![rows, cols])
-        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+        .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
-fn generate_laplacian(alpha: f64) -> BuiltinResult<Tensor> {
+fn generate_laplacian(alpha: f64) -> FspecialKernelResult<Tensor> {
     let scale = 4.0 / (alpha + 1.0);
     let a = alpha / 4.0;
     let b = (1.0 - alpha) / 4.0;
@@ -918,13 +917,14 @@ fn generate_laplacian(alpha: f64) -> BuiltinResult<Tensor> {
     for value in &mut data {
         *value *= scale;
     }
-    Tensor::new(data, vec![3, 3]).map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![3, 3])
+        .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
-fn generate_log(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
+fn generate_log(rows: usize, cols: usize, sigma: f64) -> FspecialKernelResult<Tensor> {
     let total = rows
         .checked_mul(cols)
-        .ok_or_else(|| fspecial_error("fspecial: LENGTHS are too large"))?;
+        .ok_or_else(|| FspecialKernelError::invalid("fspecial: LENGTHS are too large"))?;
     let row_center = (rows as f64 - 1.0) / 2.0;
     let col_center = (cols as f64 - 1.0) / 2.0;
     let mut gauss = Vec::with_capacity(total);
@@ -939,7 +939,7 @@ fn generate_log(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
         }
     }
     if gauss_sum == 0.0 {
-        return Err(fspecial_error(
+        return Err(FspecialKernelError::invalid(
             "fspecial: failed to normalise Laplacian of Gaussian",
         ));
     }
@@ -959,7 +959,7 @@ fn generate_log(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
         }
     }
     Tensor::new(data, vec![rows, cols])
-        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+        .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
 fn sigma6(sigma: f64) -> f64 {
@@ -972,13 +972,13 @@ fn generate_motion(
     kernel_size: usize,
     angle_degrees: f64,
     oversample: usize,
-) -> BuiltinResult<Tensor> {
+) -> FspecialKernelResult<Tensor> {
     let total = kernel_size
         .checked_mul(kernel_size)
-        .ok_or_else(|| fspecial_error("fspecial: LENGTH is too large"))?;
+        .ok_or_else(|| FspecialKernelError::invalid("fspecial: LENGTH is too large"))?;
     let total_samples = length
         .checked_mul(oversample)
-        .ok_or_else(|| fspecial_error("fspecial: LENGTH is too large"))?;
+        .ok_or_else(|| FspecialKernelError::invalid("fspecial: LENGTH is too large"))?;
     let mut data = vec![0.0f64; total];
     let center = (kernel_size as f64 - 1.0) / 2.0;
     let theta = angle_degrees.to_radians();
@@ -999,14 +999,16 @@ fn generate_motion(
         sum += *value;
     }
     if sum == 0.0 {
-        return Err(fspecial_error("fspecial: failed to build motion kernel"));
+        return Err(FspecialKernelError::invalid(
+            "fspecial: failed to build motion kernel",
+        ));
     }
     for value in &mut data {
         *value /= sum;
     }
 
     Tensor::new(data, vec![kernel_size, kernel_size])
-        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+        .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
 fn deposit_bilinear(data: &mut [f64], size: usize, x: f64, y: f64, contribution: f64) {
@@ -1032,7 +1034,7 @@ fn deposit_bilinear(data: &mut [f64], size: usize, x: f64, y: f64, contribution:
     }
 }
 
-fn generate_prewitt() -> BuiltinResult<Tensor> {
+fn generate_prewitt() -> FspecialKernelResult<Tensor> {
     Tensor::new(
         vec![
             1.0, 0.0, -1.0, //
@@ -1041,10 +1043,10 @@ fn generate_prewitt() -> BuiltinResult<Tensor> {
         ],
         vec![3, 3],
     )
-    .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+    .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
-fn generate_sobel() -> BuiltinResult<Tensor> {
+fn generate_sobel() -> FspecialKernelResult<Tensor> {
     Tensor::new(
         vec![
             1.0, 0.0, -1.0, //
@@ -1053,10 +1055,10 @@ fn generate_sobel() -> BuiltinResult<Tensor> {
         ],
         vec![3, 3],
     )
-    .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+    .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
-fn generate_unsharp(alpha: f64) -> BuiltinResult<Tensor> {
+fn generate_unsharp(alpha: f64) -> FspecialKernelResult<Tensor> {
     let denom = alpha + 1.0;
     let mut data = vec![
         -alpha,
@@ -1072,7 +1074,8 @@ fn generate_unsharp(alpha: f64) -> BuiltinResult<Tensor> {
     for value in &mut data {
         *value /= denom;
     }
-    Tensor::new(data, vec![3, 3]).map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![3, 3])
+        .map_err(|e| FspecialKernelError::internal(format!("fspecial: {e}")))
 }
 
 fn should_materialize_on_gpu() -> bool {

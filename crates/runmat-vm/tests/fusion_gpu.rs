@@ -442,8 +442,7 @@ impl AccelProvider for TestProvider {
     }
 
     fn fspecial(&self, request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
-        let spec =
-            test_fspecial_spec_from_request(&request.filter).map_err(|error| anyhow!(error))?;
+        let spec = test_fspecial_spec_from_request(&request.filter);
         let tensor = spec.generate_tensor().map_err(|error| anyhow!(error))?;
         Ok(self.push(tensor.materialize_f64().clone(), tensor.shape.clone()))
     }

@@ -5402,8 +5402,7 @@ impl AccelProvider for InProcessProvider {
 
     fn fspecial(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         let spec =
-            runmat_runtime::builtins::image::filters::fspecial::spec_from_request(&request.filter)
-                .map_err(|err| anyhow!(err))?;
+            runmat_runtime::builtins::image::filters::fspecial::spec_from_request(&request.filter);
         let tensor = spec.generate_tensor().map_err(|err| anyhow!(err))?;
         self.allocate_tensor(tensor.materialize_f64(), tensor.shape.clone())
     }
