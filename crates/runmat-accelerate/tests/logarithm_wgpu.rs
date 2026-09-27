@@ -1,5 +1,5 @@
 #![cfg(feature = "wgpu")]
-use runmat_accelerate_api::{GpuTensorStorage, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView, ProviderPrecision};
 
 #[tokio::test]
 #[ignore = "requires an actual compatible WGPU adapter"]
