@@ -26,6 +26,30 @@ fn provider_error() -> Option<String> {
     PROVIDER_ERROR.with(|slot| slot.borrow().clone())
 }
 
+fn assert_buffers_equal(provider: &TestProvider, expected: &BufferStore) {
+    let actual = provider.buffers.lock().unwrap();
+    let mut actual_ids = actual.keys().copied().collect::<Vec<_>>();
+    let mut expected_ids = expected.keys().copied().collect::<Vec<_>>();
+    actual_ids.sort_unstable();
+    expected_ids.sort_unstable();
+    assert_eq!(actual_ids, expected_ids, "live buffer identities differ");
+    for (id, (expected_data, expected_shape)) in expected {
+        let (data, shape) = &actual[id];
+        assert_eq!(shape, expected_shape, "buffer {id} shape changed");
+        assert_eq!(
+            data.len(),
+            expected_data.len(),
+            "buffer {id} length changed"
+        );
+        assert!(
+            data.iter()
+                .zip(expected_data)
+                .all(|(a, b)| a.to_bits() == b.to_bits()),
+            "buffer {id} exact payload changed"
+        );
+    }
+}
+
 #[test]
 fn deterministic_shader_interpreter_executes_typed_temporary_precision() {
     let parsed = ParsedShader::parse("let typed0: f32 = f64(16777217.0);\nlet typed1: f64 = f64(typed0) + 1.0;\noutput0.data[g] = f64(typed1);").unwrap();
@@ -247,7 +271,7 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         drop(execution);
         assert_eq!(probe.drops.get(), 1);
         assert_eq!(probe.polls.get(), 1);
-        assert_eq!(*provider.buffers.lock().unwrap(), baseline);
+        assert_buffers_equal(provider, &baseline);
         assert_published_buffers(&runtime, provider);
         unpublish_borrowed(&runtime);
         provider.free(&drift).unwrap();
@@ -343,7 +367,7 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
             .filter(|series| series.candidate.contains("fusion.elementwise"))
             .all(|series| series.samples == 0 && series.failures == 0));
         provider.free(handle).unwrap();
-        assert_eq!(*provider.buffers.lock().unwrap(), baseline);
+        assert_buffers_equal(provider, &baseline);
     });
 }
 
@@ -455,11 +479,7 @@ fn witness(resident: bool, cancel: bool) {
             1,
             "no resumed provider work or fallback replay"
         );
-        assert_eq!(
-            *provider.buffers.lock().unwrap(),
-            baseline,
-            "only invocation-owned uploads must be released"
-        );
+        assert_buffers_equal(provider, &baseline);
         assert_published_buffers(&runtime, provider);
         if let Some(handle) = borrowed {
             unpublish_borrowed(&runtime);
