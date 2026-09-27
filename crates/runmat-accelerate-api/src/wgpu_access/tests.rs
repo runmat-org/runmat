@@ -57,6 +57,33 @@ fn authority_identity_requires_the_same_owner_not_equal_payloads() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn poisoned_admission_allows_only_cleanup_after_scope_unwind() {
+    let gate = gate::Gate::default();
+    let driver = Driver::default();
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = gate.exclusive(|| {
+            let _scopes = ActiveScopes::push(&driver);
+            panic!("injected encoder failure");
+        });
+    }));
+    assert!(panic.is_err());
+    assert!(driver.stack.lock().unwrap().is_empty());
+    assert!(matches!(gate.shared(|| ()), Err(WgpuAccessError::Poisoned)));
+    let cleanup_count = AtomicUsize::new(0);
+    gate.cleanup(|| {
+        cleanup_count.fetch_add(1, Ordering::SeqCst);
+    })
+    .unwrap();
+    assert_eq!(cleanup_count.load(Ordering::SeqCst), 1);
+    assert!(matches!(gate.shared(|| ()), Err(WgpuAccessError::Poisoned)));
+    assert!(matches!(
+        gate.exclusive(|| ()),
+        Err(WgpuAccessError::Poisoned)
+    ));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn scope_error_preserves_original_cause_and_recovers_inspection_poison() {
     #[derive(Debug)]
     struct OriginalCause;

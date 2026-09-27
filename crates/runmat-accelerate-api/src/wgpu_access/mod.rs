@@ -85,6 +85,21 @@ impl fmt::Debug for WgpuDeviceAccess {
     }
 }
 impl WgpuDeviceAccess {
+    /// Teardown after an emission has returned/unwound and all scopes have been
+    /// popped. Recovers native gate poison only for restricted resource cleanup;
+    /// ordinary emission remains rejected. Never call from an active permit or
+    /// an inline driver callback. Browser reentrant teardown is still rejected.
+    pub fn with_cleanup<T>(
+        &self,
+        cleanup: impl for<'p> FnOnce(&WgpuCleanup<'p>) -> T,
+    ) -> Result<T, WgpuAccessError> {
+        self.inner.gate.cleanup(|| {
+            cleanup(&WgpuCleanup {
+                _scope: std::marker::PhantomData,
+            })
+        })
+    }
+
     /// Take the fresh pair returned by request_device. The queue must belong to
     /// this device and no independently gated raw clones may remain in use.
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
@@ -153,6 +168,23 @@ impl WgpuDeviceAccess {
 /// constructor, clone, lock reacquisition or ownership counter exists here.
 pub struct WgpuEmission<'a> {
     access: &'a WgpuDeviceAccess,
+}
+
+/// Teardown-only authority. No raw device/queue accessor or allocation/encoding
+/// operation is available, so poisoned admission cannot become normal work.
+pub struct WgpuCleanup<'a> {
+    _scope: std::marker::PhantomData<&'a ()>,
+}
+impl WgpuCleanup<'_> {
+    pub fn unmap_buffer(&self, buffer: &wgpu::Buffer) {
+        buffer.unmap();
+    }
+    pub fn release_buffer(&self, buffer: wgpu::Buffer) {
+        drop(buffer);
+    }
+    pub fn release_shared_buffer(&self, buffer: std::sync::Arc<wgpu::Buffer>) {
+        drop(buffer);
+    }
 }
 impl WgpuEmission<'_> {
     /// Clone the authority, not a raw device, when handing completed resources

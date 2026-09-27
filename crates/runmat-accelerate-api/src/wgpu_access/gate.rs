@@ -14,6 +14,18 @@ pub(super) struct Gate {
 }
 
 impl Gate {
+    /// Recovery is teardown-only; never clear poison or admit new emission.
+    pub fn cleanup<T>(&self, operation: impl FnOnce() -> T) -> Result<T, WgpuAccessError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _guard = self
+            .state
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        #[cfg(target_arch = "wasm32")]
+        let _guard = self.state.try_borrow().map_err(|_| WgpuAccessError::Busy)?;
+        Ok(operation())
+    }
+
     pub fn shared<T>(&self, operation: impl FnOnce() -> T) -> Result<T, WgpuAccessError> {
         #[cfg(not(target_arch = "wasm32"))]
         let _guard = self.state.read().map_err(|_| WgpuAccessError::Poisoned)?;
