@@ -120,7 +120,12 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
             // re-upload, or release the storage owned by the caller's handle.
             let explicit = handle
                 .clone()
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .map_err(|error| {
+                    provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                        error,
+                    ))
+                })?;
             return Ok(Value::GpuTensor(explicit));
         }
     }
@@ -148,14 +153,15 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         dtype,
         prepared.logical,
     ) {
-        if prepared.owns_handle {
-            let _ = prepared.provider.free(&handle);
-        }
-        return Err(error);
+        return Err(gpu_helpers::reject_gpu_output(handle, error));
     }
-    runmat_accelerate_api::set_handle_logical(&handle, prepared.logical);
-    runmat_accelerate_api::set_handle_class_identity(&handle, dtype.class_name());
-    handle.descriptor.provenance = Some(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+    handle = handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .map_err(|error| {
+            provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
+        })?;
 
     Ok(Value::GpuTensor(handle))
 }
@@ -165,7 +171,7 @@ fn gpu_array_value_shape(value: &Value) -> Vec<usize> {
         Value::Tensor(tensor) => tensor.shape.clone(),
         Value::ComplexTensor(tensor) => tensor.shape.clone(),
         Value::LogicalArray(array) => array.shape.clone(),
-        Value::GpuTensor(handle) => handle.shape.clone(),
+        Value::GpuTensor(handle) => handle.shape().to_vec(),
         Value::CharArray(array) => array.shape.clone(),
         Value::String(text) => vec![1, text.chars().count()],
         _ => vec![1, 1],
@@ -587,7 +593,6 @@ struct PreparedHandle {
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     logical: bool,
     storage: runmat_accelerate_api::GpuTensorStorage,
-    owns_handle: bool,
 }
 
 fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHandle> {
@@ -672,25 +677,17 @@ fn upload_real_host_value(
             provider,
             logical: false,
             storage: runmat_accelerate_api::GpuTensorStorage::Real,
-            owns_handle: true,
         });
     }
     let tensor = coerce_host_value(value)?;
     let (tensor, logical) = cast_tensor(tensor, dtype)?;
-    let tensor = physical_logical_tensor(tensor, logical, provider.precision())?;
-    let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
-        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-    })?;
-    if logical {
-        runmat_accelerate_api::set_handle_logical(&new_handle, true);
-    }
+    let new_handle = upload_real_tensor(provider, &tensor, logical, &[])?;
 
     Ok(PreparedHandle {
         handle: new_handle,
         provider,
         logical,
         storage: runmat_accelerate_api::GpuTensorStorage::Real,
-        owns_handle: true,
     })
 }
 
@@ -773,7 +770,6 @@ fn upload_complex_host_value(
         provider,
         logical: false,
         storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-        owns_handle: true,
     })
 }
 
@@ -803,7 +799,6 @@ async fn convert_device_value(
                     } else {
                         runmat_accelerate_api::GpuTensorStorage::Real
                     },
-                    owns_handle: false,
                 });
             }
         }
@@ -814,7 +809,6 @@ async fn convert_device_value(
                     provider,
                     logical: true,
                     storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                    owns_handle: false,
                 });
             }
         }
@@ -833,7 +827,6 @@ async fn convert_device_value(
                     } else {
                         runmat_accelerate_api::GpuTensorStorage::Real
                     },
-                    owns_handle: false,
                 });
             }
         }
@@ -860,7 +853,7 @@ async fn convert_device_value(
         let downloaded = provider.download_integer(&handle).await.map_err(|err| {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
         })?;
-        if downloaded.shape != handle.shape || downloaded.data.element_type() != integer_type {
+        if downloaded.shape != handle.shape() || downloaded.data.element_type() != integer_type {
             return Err(gpu_array_error_with_message(
                 "gpuArray: provider returned contradictory integer payload metadata",
                 &GPUARRAY_ERROR_PROVIDER_IO,
@@ -880,7 +873,6 @@ async fn convert_device_value(
             provider,
             logical: false,
             storage: runmat_accelerate_api::GpuTensorStorage::Real,
-            owns_handle: true,
         });
     }
 
@@ -890,20 +882,13 @@ async fn convert_device_value(
             gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
         })?;
     let (tensor, logical) = cast_tensor(tensor, dtype)?;
-    let tensor = physical_logical_tensor(tensor, logical, provider.precision())?;
-    let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
-        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-    })?;
-    if logical {
-        runmat_accelerate_api::set_handle_logical(&new_handle, true);
-    }
+    let new_handle = upload_real_tensor(provider, &tensor, logical, &[&handle])?;
 
     Ok(PreparedHandle {
         handle: new_handle,
         provider,
         logical,
         storage: runmat_accelerate_api::GpuTensorStorage::Real,
-        owns_handle: true,
     })
 }
 
@@ -918,10 +903,7 @@ fn validate_prepared_handle(
     let expected_element = match dtype {
         DataClass::Double => runmat_accelerate_api::NumericElementType::F64,
         DataClass::Single => runmat_accelerate_api::NumericElementType::F32,
-        DataClass::Logical => match provider.precision() {
-            ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
-            ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
-        },
+        DataClass::Logical => handle.physical().element_type(),
         DataClass::Int8 => runmat_accelerate_api::NumericElementType::I8,
         DataClass::Int16 => runmat_accelerate_api::NumericElementType::I16,
         DataClass::Int32 => runmat_accelerate_api::NumericElementType::I32,
@@ -931,13 +913,13 @@ fn validate_prepared_handle(
         DataClass::UInt32 => runmat_accelerate_api::NumericElementType::U32,
         DataClass::UInt64 => runmat_accelerate_api::NumericElementType::U64,
     };
-    let owner_matches = runmat_accelerate_api::provider_for_handle(handle)
+    let owner_matches = gpu_helpers::exact_provider_for_handle(handle)
         .is_some_and(|owner| std::ptr::eq(owner, provider));
     if !owner_matches
-        || handle.device_id != provider.device_id()
-        || handle.shape != expected_shape
-        || handle.descriptor.storage != Some(expected_storage)
-        || handle.descriptor.element_type != Some(expected_element)
+        || handle.device_id() != provider.device_id()
+        || handle.shape() != expected_shape
+        || handle.physical().storage() != expected_storage
+        || handle.physical().element_type() != expected_element
     {
         return Err(gpu_array_error_with_message(
             "gpuArray: provider returned a handle with the wrong owner or shape",
@@ -945,7 +927,7 @@ fn validate_prepared_handle(
         ));
     }
     let existing_class = runmat_accelerate_api::handle_class_identity(handle);
-    if (runmat_accelerate_api::handle_is_logical(handle) && !logical)
+    if runmat_accelerate_api::handle_is_logical(handle) != logical
         || existing_class.is_some_and(|class_identity| class_identity != dtype.class_identity())
     {
         return Err(gpu_array_error_with_message(
@@ -993,29 +975,8 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
     }
 }
 
-fn physical_logical_tensor(
-    tensor: Tensor,
-    logical: bool,
-    precision: ProviderPrecision,
-) -> BuiltinResult<Tensor> {
-    if !logical || precision == ProviderPrecision::F64 {
-        return Ok(tensor);
-    }
-    let shape = tensor.shape.clone();
-    let values = tensor
-        .into_numeric_storage()
-        .map(numeric_storage_into_f64)
-        .map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
-        })?;
-    Tensor::from_f32(
-        values.into_iter().map(|value| value as f32).collect(),
-        shape,
-    )
-    .map_err(|err| {
-        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
-    })
-}
+mod transfer;
+use transfer::{provider_failure, upload_real_tensor};
 
 fn cast_tensor(tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, bool)> {
     // This function is reached for non-integer destinations only.  Native integer
@@ -1103,12 +1064,19 @@ fn convert_to_single(data: &mut [f64]) {
 }
 
 fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> BuiltinResult<()> {
-    let new_elems: usize = dims.iter().product();
-    let current_elems: usize = if handle.shape.is_empty() {
-        new_elems
-    } else {
-        handle.shape.iter().product()
+    let count = |shape: &[usize]| -> BuiltinResult<usize> {
+        if shape.contains(&0) {
+            return Ok(0);
+        }
+        shape
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            .ok_or_else(|| {
+                gpu_array_error_with_message("gpuArray: shape overflow", &GPUARRAY_ERROR_RESHAPE)
+            })
     };
+    let new_elems = count(dims)?;
+    let current_elems = count(handle.shape())?;
     if new_elems != current_elems {
         return Err(gpu_array_error_with_message(
             format!(
@@ -1118,7 +1086,42 @@ fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> BuiltinResult<()>
             &GPUARRAY_ERROR_RESHAPE,
         ));
     }
-    handle.shape = dims.to_vec();
+    if handle.shape() == dims {
+        return Ok(());
+    }
+    let provider = gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER))?;
+    let reshaped = provider
+        .reshape(handle, dims)
+        .map_err(|error| provider_failure(error.into()))?;
+    if reshaped.shape() != dims
+        || reshaped.physical().element_type() != handle.physical().element_type()
+        || reshaped.physical().storage() != handle.physical().storage()
+        || runmat_accelerate_api::handle_is_logical(&reshaped)
+            != runmat_accelerate_api::handle_is_logical(handle)
+        || !gpu_helpers::exact_provider_for_handle(&reshaped)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            reshaped,
+            gpu_array_error_with_message(
+                "gpuArray: invalid provider reshape result",
+                &GPUARRAY_ERROR_RESHAPE,
+            ),
+        ));
+    }
+    *handle = reshaped
+        .with_provenance(
+            handle
+                .view()
+                .provenance()
+                .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+        )
+        .map_err(|error| {
+            provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
+        })?;
     Ok(())
 }
 
