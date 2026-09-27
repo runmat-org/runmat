@@ -2062,6 +2062,11 @@ fn scalar_elementwise_min(
     rhs: &Value,
     comparison: ComparisonMethod,
 ) -> Option<MinEvaluation> {
+    if super::extrema_provider::needs_typed_scalar_selection(lhs)
+        || super::extrema_provider::needs_typed_scalar_selection(rhs)
+    {
+        return None;
+    }
     let left = scalar_complex_value(lhs).or_else(|| extract_scalar(lhs).map(|v| (v, 0.0)))?;
     let right = scalar_complex_value(rhs).or_else(|| extract_scalar(rhs).map(|v| (v, 0.0)))?;
     let (ar, ai) = left;

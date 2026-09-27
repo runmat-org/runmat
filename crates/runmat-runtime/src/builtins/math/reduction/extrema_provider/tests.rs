@@ -5,6 +5,59 @@ use runmat_accelerate_api::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[test]
+fn scalar_extrema_use_native_single_storage_selection() {
+    use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage};
+
+    for (name, expected) in [("min", 1.25), ("max", 3.5)] {
+        for shape in [vec![1, 1], vec![1, 1, 1]] {
+            let left = Value::Tensor(Tensor::from_f32(vec![3.5], shape.clone()).unwrap());
+            let right = Value::Tensor(Tensor::from_f32(vec![1.25], shape.clone()).unwrap());
+            let result = futures::executor::block_on(crate::call_builtin_async(
+                name,
+                &[left.clone(), right],
+            ))
+            .unwrap();
+            let Value::Tensor(result) = result else {
+                panic!("{name}: Single scalar must retain its native carrier");
+            };
+            assert_eq!(result.shape, shape);
+            assert_eq!(
+                result.into_numeric_storage().unwrap(),
+                NumericStorage::F32(vec![expected])
+            );
+
+            // Preserve the existing mixed-class policy, in both operand orders.
+            for args in [[left.clone(), Value::Num(1.25)], [Value::Num(1.25), left]] {
+                assert_eq!(
+                    futures::executor::block_on(crate::call_builtin_async(name, &args)).unwrap(),
+                    Value::Num(f64::from(expected))
+                );
+            }
+
+            // Zero imaginary parts still belong to the complex Single carrier.
+            let args = [
+                Value::ComplexTensor(
+                    ComplexTensor::from_f32(vec![(3.5, 0.0)], shape.clone()).unwrap(),
+                ),
+                Value::ComplexTensor(
+                    ComplexTensor::from_f32(vec![(1.25, 0.0)], shape.clone()).unwrap(),
+                ),
+            ];
+            let result =
+                futures::executor::block_on(crate::call_builtin_async(name, &args)).unwrap();
+            let Value::ComplexTensor(result) = result else {
+                panic!("{name}: complex Single scalar must retain its native carrier");
+            };
+            assert_eq!(result.shape, shape);
+            assert_eq!(
+                result.into_complex_storage(),
+                ComplexStorage::F32(vec![(expected, 0.0)].into())
+            );
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Fault {
     Execution,

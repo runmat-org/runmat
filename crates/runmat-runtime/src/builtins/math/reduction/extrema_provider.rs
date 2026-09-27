@@ -6,6 +6,17 @@ use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
 use runmat_value::{Tensor, Value};
 
+/// Single has no immediate scalar `Value` representation. Its scalar extrema
+/// must use the same typed storage selection as its nonscalar extrema, not the
+/// double-only scalar shortcut. Mixed precision remains resolved there too.
+pub(super) fn needs_typed_scalar_selection(value: &Value) -> bool {
+    match value {
+        Value::Tensor(value) => value.numeric_dtype() == runmat_value::NumericDType::F32,
+        Value::ComplexTensor(value) => value.numeric_dtype() == runmat_value::NumericDType::F32,
+        _ => false,
+    }
+}
+
 macro_rules! supported {
     ($kind:expr, $operation:expr, $result:expr) => {
         match $kind.optional($operation, $result)? {

@@ -2394,6 +2394,11 @@ fn scalar_elementwise_max(
     nan_mode: ReductionNaN,
     comparison: ComparisonMethod,
 ) -> Option<MaxEvaluation> {
+    if super::extrema_provider::needs_typed_scalar_selection(lhs)
+        || super::extrema_provider::needs_typed_scalar_selection(rhs)
+    {
+        return None;
+    }
     let left = scalar_complex_value(lhs).or_else(|| scalar_real_value(lhs).map(|v| (v, 0.0)))?;
     let right = scalar_complex_value(rhs).or_else(|| scalar_real_value(rhs).map(|v| (v, 0.0)))?;
     let (ar, ai) = left;
