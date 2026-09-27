@@ -6,6 +6,7 @@ use super::*;
 use runmat_builtins::*;
 
 mod atan2;
+pub(crate) mod inverse;
 
 #[cfg(test)]
 mod tests;
@@ -55,6 +56,7 @@ const OPERATIONS: &[DirectUnary] = &[
 ];
 
 pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
+    inverse::append(snapshot);
     snapshot.operations.push(atan2::operation());
     snapshot.operations.extend(
         OPERATIONS
@@ -71,6 +73,9 @@ pub(super) fn validate(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
+    if let Some(result) = inverse::validate(provider, wgpu, query) {
+        return Some(result);
+    }
     if let Some(result) = atan2::validate(provider, wgpu, query) {
         return Some(result);
     }

@@ -103,6 +103,12 @@ pub(crate) fn work(
             if elements > u64::from(u32::MAX) {
                 return Err((Code::ResourceLimit, "real_unary.dispatch.length"));
             }
+            let groups = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS);
+            let chunk = groups * u64::from(crate::backend::wgpu::config::WORKGROUP_SIZE);
+            let effective = u64::from(crate::backend::wgpu::config::effective_workgroup_size());
+            if effective == 0 || elements.min(chunk).div_ceil(effective) > groups {
+                return Err((Code::ResourceLimit, "real_unary.unary.dispatch_groups"));
+            }
             if [
                 "RUNMAT_DISABLE_REDUCE_GLOBAL",
                 "RUNMAT_DISABLE_UNARY",

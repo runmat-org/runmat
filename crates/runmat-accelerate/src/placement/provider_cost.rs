@@ -23,7 +23,26 @@ pub(crate) fn wgpu_cost_estimate(
             None::<super::provider_contract::power::PowerWork>
         }
     };
-    let (probe_elements, probe_bytes, readback_bytes, dispatches) =
+    let unary_work = {
+        #[cfg(feature = "wgpu")]
+        {
+            super::provider_contract::trigonometry::inverse::wgpu_work(
+                provider.precision(),
+                &query.operation,
+            )
+            .or_else(|| {
+                super::provider_contract::logarithm_roots::wgpu_work(
+                    provider.precision(),
+                    &query.operation,
+                )
+            })
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            None::<super::provider_contract::real_unary::UnaryWork>
+        }
+    };
+    let (mut probe_elements, mut probe_bytes, mut readback_bytes, mut dispatches) =
         power_work.as_ref().map_or((0, 0, 0, 1), |work| {
             (
                 work.elements,
@@ -32,7 +51,22 @@ pub(crate) fn wgpu_cost_estimate(
                 work.dispatches,
             )
         });
+    let mut readbacks = u32::from(readback_bytes > 0);
+    let mut queue_submissions = dispatches;
+    if let Some(work) = &unary_work {
+        probe_elements = work.probe_elements;
+        probe_bytes = work.temporary_bytes;
+        readback_bytes = work.readback_bytes;
+        dispatches = work.dispatches;
+        readbacks = work.readbacks;
+        queue_submissions = work.queue_submissions;
+    }
     let download_bytes = query.required_download_bytes.saturating_add(readback_bytes);
+    let synchronization_events = if unary_work.is_some() {
+        u64::from(readbacks) + u64::from(query.required_download_bytes > 0)
+    } else {
+        u64::from(download_bytes > 0)
+    };
     let telemetry = provider.telemetry_snapshot();
     let stats = match query.operation.family {
         ProviderOperationFamily::MatrixMultiply => telemetry.matmul,
@@ -48,7 +82,7 @@ pub(crate) fn wgpu_cost_estimate(
     // A single elementwise enqueue sample does not measure the composite
     // classification/reduction/readback/kernel route. Keep its prior explicit
     // until the existing invocation feedback supplies a matching observation.
-    let observed_execution_ns = if power_work.is_some() {
+    let observed_execution_ns = if power_work.is_some() || unary_work.is_some() {
         None
     } else {
         average_ns(stats)
@@ -67,9 +101,9 @@ pub(crate) fn wgpu_cost_estimate(
                 compile_or_prepare_ns,
                 upload_ns: transfer_prior_ns(query.required_upload_bytes),
                 allocation_ns: 5_000u64.saturating_mul(u64::from(dispatches)),
-                queue_ns: 10_000u64.saturating_mul(u64::from(dispatches)),
+                queue_ns: 10_000u64.saturating_mul(u64::from(queue_submissions)),
                 execution_ns,
-                synchronization_ns: if download_bytes == 0 { 0 } else { 5_000 },
+                synchronization_ns: 5_000u64.saturating_mul(synchronization_events),
                 download_ns: transfer_prior_ns(download_bytes),
                 downstream_ns: if query.downstream_materialization {
                     5_000
@@ -117,6 +151,51 @@ mod tests {
     };
 
     use super::*;
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn inverse_domain_cost_includes_both_readbacks_and_all_probe_passes() {
+        use runmat_accelerate_api::{
+            NumericalDomainEvidence, ProviderElementType, ProviderLayout, ProviderRepresentation,
+            ProviderResidency, ProviderStorage,
+        };
+        use runmat_types::{RealUnaryClassification, RealUnaryPredicate};
+        let provider = crate::simple_provider::InProcessProvider::new();
+        let query = ProviderCostQuery {
+            operation: ProviderFeasibilityQuery {
+                operation: ProviderOperationIdentity::new(
+                    runmat_builtins::ASIN_CATALOG_ENTRY.identity.name,
+                ),
+                family: ProviderOperationFamily::Elementwise,
+                inputs: vec![ProviderRepresentation {
+                    element_type: ProviderElementType::F64,
+                    storage: ProviderStorage::DenseReal,
+                    layout: ProviderLayout::ColumnMajorContiguous,
+                    shape: vec![1, 1025],
+                    residency: ProviderResidency::Device,
+                }],
+                outputs: vec![],
+                workload: ProviderWorkload {
+                    elements: Some(1025),
+                    numerical_domain: NumericalDomainEvidence::RealUnary {
+                        predicate: RealUnaryPredicate::ClosedUnitInterval,
+                        classification: RealUnaryClassification::Inside,
+                    },
+                    ..Default::default()
+                },
+            },
+            preparation: CandidatePreparationState::Warm,
+            required_upload_bytes: 0,
+            required_download_bytes: 0,
+            downstream_materialization: false,
+        };
+        let estimate = wgpu_cost_estimate(&provider, &query).cost;
+        assert_eq!(estimate.components.synchronization_ns, 10_000);
+        assert_eq!(estimate.components.download_ns, transfer_prior_ns(16));
+        assert_eq!(estimate.components.queue_ns, 80_000);
+        assert_eq!(estimate.scratch_bytes, 144);
+        assert_eq!(estimate.source, EstimateSource::StaticPrior);
+    }
 
     #[cfg(feature = "wgpu")]
     #[test]
