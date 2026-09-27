@@ -2547,25 +2547,17 @@ fn detect_explained_variance(
             continue;
         }
 
-        let (matmul1_id, matmul1_node, q_vid) = if let Some((mm_id, mm_node)) =
-            node_from_value(graph, matmul2_node.inputs[0])
-        {
-            if matches!(mm_node.label, AccelNodeLabel::Builtin { ref name, .. } if name.eq_ignore_ascii_case("mtimes"))
-            {
-                (mm_id, mm_node, matmul2_node.inputs[1])
-            } else {
-                continue;
-            }
-        } else if let Some((mm_id, mm_node)) = node_from_value(graph, matmul2_node.inputs[1]) {
-            if matches!(mm_node.label, AccelNodeLabel::Builtin { ref name, .. } if name.eq_ignore_ascii_case("mtimes"))
-            {
-                (mm_id, mm_node, matmul2_node.inputs[0])
-            } else {
-                continue;
-            }
-        } else {
+        // Matrix multiplication is ordered. This pattern represents precisely
+        // diag((transpose(Q) * G) * Q), not permutations of those operands.
+        let Some((matmul1_id, matmul1_node)) = node_from_value(graph, matmul2_node.inputs[0])
+        else {
             continue;
         };
+        if !matches!(matmul1_node.label, AccelNodeLabel::Builtin { ref name, .. } if name.eq_ignore_ascii_case("mtimes"))
+        {
+            continue;
+        }
+        let q_vid = matmul2_node.inputs[1];
 
         if assigned.contains(&matmul1_id) {
             continue;
@@ -2575,14 +2567,12 @@ fn detect_explained_variance(
             continue;
         }
 
-        let (transpose_id, transpose_input_vid, g_vid) =
-            if let Some((t_id, src_vid)) = is_transpose_node(graph, matmul1_node.inputs[0]) {
-                (t_id, src_vid, matmul1_node.inputs[1])
-            } else if let Some((t_id, src_vid)) = is_transpose_node(graph, matmul1_node.inputs[1]) {
-                (t_id, src_vid, matmul1_node.inputs[0])
-            } else {
-                continue;
-            };
+        let Some((transpose_id, transpose_input_vid)) =
+            is_transpose_node(graph, matmul1_node.inputs[0])
+        else {
+            continue;
+        };
+        let g_vid = matmul1_node.inputs[1];
 
         if assigned.contains(&transpose_id) {
             continue;

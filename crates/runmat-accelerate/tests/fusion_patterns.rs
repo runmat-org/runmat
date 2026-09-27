@@ -238,6 +238,20 @@ fn detects_explained_variance_group() {
 }
 
 #[test]
+fn explained_variance_does_not_reorder_matrix_products() {
+    for expression in ["diag((G * Q.') * Q)", "diag(Q * (Q.' * G))"] {
+        let source = format!("Q = [1, 2; 3, 4]; G = [5, 6; 7, 8]; result = {expression};");
+        let graph = compile_graph(&source);
+        assert!(
+            !detect_fusion_groups(&graph)
+                .iter()
+                .any(|group| matches!(group.kind, FusionKind::ExplainedVariance)),
+            "must retain matrix operand order: {expression}",
+        );
+    }
+}
+
+#[test]
 fn detects_image_normalize_group() {
     let source = r#"
     seed = 0;

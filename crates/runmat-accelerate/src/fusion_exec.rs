@@ -982,7 +982,7 @@ pub async fn execute_explained_variance_placed(
     let q_value = find_value(q_vid)?;
     let g_value = find_value(g_vid)?;
 
-    let mut q_handle = ensure_gpu_tensor(provider, q_value, observer)?;
+    let q_handle = ensure_gpu_tensor(provider, q_value, observer)?;
     let g_handle = ensure_gpu_tensor(provider, g_value, observer)?;
 
     let debug_explained = std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok();
@@ -1004,7 +1004,7 @@ pub async fn execute_explained_variance_placed(
     }
 
     let q_shape = q_handle.shape().to_vec();
-    if q_shape.len() < 2 {
+    if q_shape.len() != 2 {
         return Err(anyhow!("explained variance: Q must be 2-D"));
     }
     let q_rows = q_shape[0];
@@ -1014,56 +1014,38 @@ pub async fn execute_explained_variance_placed(
     }
 
     let g_shape = g_handle.shape().to_vec();
-    if g_shape.len() < 2 {
+    if g_shape.len() != 2 {
         return Err(anyhow!("explained variance: G must be 2-D"));
     }
     if g_shape[0] != q_rows || g_shape[1] != q_rows {
         return Err(anyhow!("explained variance: G shape mismatch"));
     }
 
-    observer.queue_unmeasured();
-    let mut tmp = provider.matmul(&q_handle, &g_handle).await?;
-    observer.kernel_unmeasured();
-    let tmp_shape = tmp.shape().to_vec();
-    if tmp_shape.len() < 2 {
-        return Err(anyhow!("explained variance: intermediate must be 2-D"));
+    let q_transposed_view = provider.transpose(&q_handle)?;
+    if q_transposed_view.shape() != [q_cols, q_rows] {
+        return Err(anyhow!("explained variance: invalid transpose shape"));
     }
-    if tmp_shape[0] != q_cols {
-        return Err(anyhow!(
-            "explained variance: expected intermediate rows {}, got {}",
-            q_cols,
-            tmp_shape[0]
-        ));
-    }
-
-    if debug_explained {
-        println!("[explained] after Q*G tmp shape {:?}", tmp.shape());
-    }
-
-    // Interpreter's transpose retains the original data layout. Mimic that by
-    // reshaping rather than launching a real transpose so downstream matmul
-    // observes the same misoriented layout.
-    let mut transposed_shape = q_shape.clone();
-    transposed_shape.swap(0, 1);
-    let q_transposed_view = provider.reshape(&q_handle, &transposed_shape)?;
 
     observer.queue_unmeasured();
-    tmp = provider.matmul(&q_transposed_view, &g_handle).await?;
+    let tmp = provider.matmul(&q_transposed_view, &g_handle).await?;
     observer.kernel_unmeasured();
+    if tmp.shape() != [q_cols, q_rows] {
+        return Err(anyhow!("explained variance: invalid first product shape"));
+    }
 
     if debug_explained {
         println!(
-            "[explained] after reshape(matmul) tmp shape {:?}",
+            "[explained] after transpose(Q)*G tmp shape {:?}",
             tmp.shape()
         );
     }
 
-    // Restore Q's original shape before the second multiplication.
-    q_handle = provider.reshape(&q_handle, &q_shape)?;
-
     observer.queue_unmeasured();
     let product = provider.matmul(&tmp, &q_handle).await?;
     observer.kernel_unmeasured();
+    if product.shape() != [q_cols, q_cols] {
+        return Err(anyhow!("explained variance: invalid second product shape"));
+    }
 
     if debug_explained {
         println!("[explained] product shape {:?}", product.shape());
@@ -1074,9 +1056,9 @@ pub async fn execute_explained_variance_placed(
     observer.queue(started);
     observer.kernel_unmeasured();
     let mut diag = match diag.shape() {
-        [len] => provider.reshape(&diag, &[*len, 1])?,
-        [_len, 1] => diag,
-        _ => diag,
+        [len] if *len == q_cols => provider.reshape(&diag, &[*len, 1])?,
+        [len, 1] if *len == q_cols => diag,
+        _ => return Err(anyhow!("explained variance: invalid diagonal shape")),
     };
 
     if debug_explained {
