@@ -47,6 +47,7 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         )?;
     }
     template.validate()?;
+    template.validate_input(&value)?;
     let borrowed: Vec<_> = std::iter::once(&value)
         .chain(rest.iter())
         .filter_map(|value| {

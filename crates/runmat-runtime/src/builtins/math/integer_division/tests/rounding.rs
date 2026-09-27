@@ -55,3 +55,17 @@ fn requested_output_admission_preserves_discard_and_single_output() {
         runmat_builtins::IDIVIDE_ERROR_INVALID_INPUT.identifier
     );
 }
+
+#[test]
+fn rounding_character_rows_allow_trailing_singletons_not_pages() {
+    for (shape, valid) in [(vec![1, 3, 1], true), (vec![1, 1, 3], false)] {
+        let control =
+            runmat_value::CharArray::new_with_shape("fix".chars().collect(), shape).unwrap();
+        let result = block_on(idivide_builtin(vec![
+            Value::Int(IntValue::I16(6)),
+            Value::Int(IntValue::I16(2)),
+            Value::CharArray(control),
+        ]));
+        assert_eq!(result.is_ok(), valid);
+    }
+}

@@ -42,6 +42,19 @@ const DOUBLE_SECTIONS: &[BuiltinDocumentationSection] = &[
 ];
 
 const DOUBLE_EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "character-matrix",
+        title: "Preserve character matrix order",
+        program: "codes = double(['ab'; 'cd']);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isa(codes, 'double')); assert(isequal(double(codes), [97 98; 99 100]));",
+        },
+    },
     BuiltinExample { id: "integer", title: "Convert integers to double precision", program: "ints = int32([1 2 3]);\ndoubles = double(ints)", display_output: Some("doubles = [1 2 3]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(doubles, \"double\"));\nassert(isequal(doubles, [1 2 3]));" } },
     BuiltinExample { id: "logical", title: "Promote a logical mask for arithmetic", program: "mask = logical([0 1 0 1]);\nweights = double(mask)", display_output: Some("weights = [0 1 0 1]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(weights, \"double\"));\nassert(isequal(weights, [0 1 0 1]));" } },
     BuiltinExample { id: "characters", title: "Convert characters to Unicode code points", program: "codes = double('RunMat')", display_output: Some("codes = [82 117 110 77 97 116]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(codes, \"double\"));\nassert(isequal(codes, [82 117 110 77 97 116]));" } },

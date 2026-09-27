@@ -8,7 +8,7 @@ use documentation::DOCUMENTATION;
 pub const IDIVIDE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.BITWISE.INVALID_INPUT",
     identifier: Some("RunMat:bitwise:InvalidInput"),
-    when: "Inputs are not supported integer arrays or compatible integer-valued scalar doubles.",
+    when: "Inputs are not supported integer arrays or compatible integer-valued scalar doubles, the rounding control is invalid, or more than one output is requested.",
     message: "bitwise operation: invalid input",
 };
 pub const IDIVIDE_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

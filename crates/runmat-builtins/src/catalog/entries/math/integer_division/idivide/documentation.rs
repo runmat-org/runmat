@@ -19,6 +19,20 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "empty-nd",
+        title: "Retain an empty N-D integer shape",
+        program: "A = reshape(int16([]), [0 2 3]); q = idivide(A, int16(0));",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source:
+                "assert(isa(q, 'int16')); assert(isempty(q)); assert(isequal(size(q), [0 2 3]));",
+        },
+    },
+    BuiltinExample {
         id: "fix",
         title: "Truncate toward zero",
         program: "q = idivide(int16(-7), int16(3))",

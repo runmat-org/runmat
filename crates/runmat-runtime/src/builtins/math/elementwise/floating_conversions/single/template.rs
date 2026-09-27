@@ -12,6 +12,19 @@ pub(super) enum OutputTemplate {
 }
 
 impl OutputTemplate {
+    pub(super) fn validate_input(&self, value: &Value) -> BuiltinResult<()> {
+        if matches!(self, Self::Like(Value::GpuTensor(_)))
+            && (matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
+                || matches!(value, Value::GpuTensor(handle) if handle.descriptor.storage == Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)))
+        {
+            return Err(single_error_with_detail(
+                &SINGLE_ERROR_INVALID_INPUT,
+                "GPU prototypes for 'like' only support real numeric outputs",
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate(&self) -> BuiltinResult<()> {
         match self {
             Self::Default => Ok(()),
@@ -59,6 +72,14 @@ impl OutputTemplate {
 }
 
 pub(super) fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
+    if matches!(args.first(), Some(Value::CharArray(chars))
+        if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2)
+    {
+        return Err(single_error_with_detail(
+            &SINGLE_ERROR_INVALID_ARGUMENT,
+            "option must be scalar text or a character row",
+        ));
+    }
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {

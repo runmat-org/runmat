@@ -11,6 +11,14 @@ pub(super) enum RoundingMode {
 
 impl RoundingMode {
     pub(super) fn parse(value: &Value) -> BuiltinResult<Self> {
+        if matches!(value, Value::CharArray(chars)
+            if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2)
+        {
+            return Err(error(
+                &ERROR_INVALID_INPUT,
+                "rounding mode must be scalar text or a character row",
+            ));
+        }
         let Some(keyword) = keyword_of(value) else {
             return Err(error(&ERROR_INVALID_INPUT, "rounding mode must be text"));
         };

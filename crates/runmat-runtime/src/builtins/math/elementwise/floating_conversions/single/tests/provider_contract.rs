@@ -79,6 +79,29 @@ fn invalid_like_prototype_rejects_before_a_pending_conversion_hook() {
 }
 
 #[test]
+fn unsupported_complex_like_input_rejects_without_gathering() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    with_conversion_hook_provider(HookBehavior::PendingTemplateDownload, |provider| {
+        let prototype = upload_input(provider);
+        let complex = runmat_value::ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).unwrap();
+        let input = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+        let error = single_builtin(
+            Value::GpuTensor(input.clone()),
+            vec![Value::from("like"), Value::GpuTensor(prototype.clone())],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::SINGLE_ERROR_INVALID_INPUT.identifier
+        );
+        assert!(!provider.was_freed(&input));
+        assert!(!provider.was_freed(&prototype));
+        provider.free(&input).unwrap();
+        provider.free(&prototype).unwrap();
+    });
+}
+
+#[test]
 fn fixed_outputs_admit_discard_and_reject_multiple_before_provider_work() {
     for count in [None, Some(0), Some(1)] {
         let _outputs = crate::output_count::push_output_count(count);

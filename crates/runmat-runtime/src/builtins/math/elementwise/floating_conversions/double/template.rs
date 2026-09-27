@@ -64,6 +64,14 @@ impl OutputTemplate {
 }
 
 pub(super) fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
+    if matches!(args.first(), Some(Value::CharArray(chars))
+        if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2)
+    {
+        return Err(double_error_with_detail(
+            &DOUBLE_ERROR_INVALID_ARGUMENT,
+            "option must be scalar text or a character row",
+        ));
+    }
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {

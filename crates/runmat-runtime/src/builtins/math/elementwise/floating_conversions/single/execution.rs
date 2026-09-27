@@ -5,6 +5,7 @@ pub(super) async fn convert(
     template: OutputTemplate,
     mut borrowed: Vec<runmat_accelerate_api::GpuTensorHandle>,
 ) -> BuiltinResult<Value> {
+    template.validate_input(&value)?;
     // Services may transform the operand; protect both originals and the
     // actual prepared resident payload, and re-admit through the domain body.
     if let Value::GpuTensor(handle) = &value {

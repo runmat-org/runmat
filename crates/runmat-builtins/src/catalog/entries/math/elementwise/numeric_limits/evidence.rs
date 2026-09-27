@@ -29,6 +29,11 @@ const STATIC_VERIFICATION: BuiltinEvidenceReference = BuiltinEvidenceReference {
 const FLOATING_VERIFICATION: &[BuiltinEvidenceReference] = &[
     BuiltinEvidenceReference {
         kind: BuiltinEvidenceKind::UnitTest,
+        label: "Runtime representation oracles and protected resident prototype admission",
+        location: "builtins::math::elementwise::numeric_limits::tests",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
         label: "Floating limit representation tests",
         location: "builtins::math::elementwise::numeric_limits::tests::floating",
     },
@@ -36,6 +41,11 @@ const FLOATING_VERIFICATION: &[BuiltinEvidenceReference] = &[
 ];
 
 const INTEGER_VERIFICATION: &[BuiltinEvidenceReference] = &[
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Runtime representation oracles and protected resident prototype admission",
+        location: "builtins::math::elementwise::numeric_limits::tests",
+    },
     BuiltinEvidenceReference {
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Exact integer limit representation tests",

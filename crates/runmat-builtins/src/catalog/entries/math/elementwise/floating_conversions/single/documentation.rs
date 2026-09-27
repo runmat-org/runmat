@@ -29,11 +29,24 @@ const SINGLE_SECTIONS: &[BuiltinDocumentationSection] = &[
     ] },
     BuiltinDocumentationSection { heading: "GPU execution", paragraphs: &[
         "Supported providers convert real input on its owning device and keep the result resident as native binary32. Complex conversion and unsupported provider operations use the typed owner-aware fallback.",
-        "Fallback gathers through the exact owner, converts both complex components or real storage on the host, and re-uploads for an explicit GPU `\"like\"` prototype. Returned handles are validated for class, shape, owner, and non-aliasing.",
+        "Fallback gathers through the exact owner, converts the real or complex storage, and re-uploads to the source owner before optional prototype adaptation. A host output prototype gathers the converted result and releases its temporary resident allocation. Provider errors remain visible; only typed unsupported-operation errors select fallback.",
     ] },
 ];
 
 const SINGLE_EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "character-matrix",
+        title: "Preserve character matrix order",
+        program: "codes = single(['ab'; 'cd']);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isa(codes, 'single')); assert(isequal(double(codes), [97 98; 99 100]));",
+        },
+    },
     BuiltinExample { id: "matrix", title: "Convert a matrix to single precision", program: "A = [1 2 3; 4 5 6];\nB = single(A)", display_output: Some("B is a 2-by-3 single matrix"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(B, \"single\"));\nassert(isequal(size(B), [2 3]));\nassert(isequal(B, single([1 2 3; 4 5 6])));" } },
     BuiltinExample { id: "scalar", title: "Convert a scalar to single precision", program: "pi_single = single(pi)", display_output: Some("pi_single = single(3.1416)"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(pi_single, \"single\"));\nassert(abs(double(pi_single) - pi) < 2e-7);" } },
     BuiltinExample { id: "complex", title: "Convert complex numbers to single precision", program: "z = [1+2i 3-4i];\nsingle_z = single(z)", display_output: Some("single_z is a 1-by-2 complex single vector"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: crate::BuiltinExampleFixture::None, requirements: crate::BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(single_z, \"single\"));\nassert(max(abs(double(single_z) - z)) < 1e-6);" } },
@@ -49,7 +62,7 @@ const SINGLE_FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "What about structs, cells, or user objects?", answer: "Unsupported container and object inputs return a conversion error. Extract the numeric value first." },
     BuiltinDocumentationFaq { question: "Does `single` support complex numbers?", answer: "Yes. Both real and imaginary components convert to native single precision." },
     BuiltinDocumentationFaq { question: "How does `single` handle empty arrays?", answer: "Empty arrays remain empty and retain all dimensions and orientation." },
-    BuiltinDocumentationFaq { question: "Will GPU input stay on the GPU?", answer: "Supported providers cast on device. Typed fallback gathers through the owner and re-uploads when explicit output residency requires it." },
+    BuiltinDocumentationFaq { question: "Will GPU input stay on the GPU?", answer: "Supported providers cast on device. Typed fallback returns the converted result to the original owner unless an explicit output prototype requests different residency." },
     BuiltinDocumentationFaq { question: "What do `class` and `isa` report?", answer: "Host and gathered results own native binary32 storage, so their class is `single`; this is not a label over a double buffer." },
     BuiltinDocumentationFaq { question: "Do NaN and infinity survive the cast?", answer: "Yes. IEEE NaN, positive and negative infinity, and signed zero are retained subject to binary32 precision." },
     BuiltinDocumentationFaq { question: "Can a prototype select output residency?", answer: "In RunMat mode, `single(X, \"like\", prototype)` selects compatible host or GPU residency while output class remains single." },

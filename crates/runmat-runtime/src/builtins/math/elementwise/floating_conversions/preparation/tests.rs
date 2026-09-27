@@ -117,6 +117,17 @@ fn invalid_options_prototypes_and_output_counts_never_prepare() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in ["double", "single"] {
         for args in [
+            vec![
+                Value::Num(1.0),
+                Value::CharArray(
+                    runmat_value::CharArray::new_with_shape(
+                        "like".chars().collect(),
+                        vec![1, 2, 2],
+                    )
+                    .unwrap(),
+                ),
+                Value::Num(0.0),
+            ],
             vec![Value::Num(1.0), Value::from("invalid"), Value::Num(0.0)],
             vec![Value::Num(1.0), Value::from("like"), Value::from("invalid")],
             vec![Value::OutputList(vec![])],
@@ -139,12 +150,47 @@ fn deliberate_service_replacement_is_revalidated_by_conversion_body() {
     let events = Events::default();
     let _context = enter(&events, true);
     for name in ["double", "single"] {
+        drop(crate::dispatcher::call_builtin_async(
+            name,
+            &[Value::Num(1.0)],
+        ));
+        assert!(events.borrow().is_empty());
         assert!(block_on(crate::dispatcher::call_builtin_async(
             name,
             &[Value::Num(1.0)]
         ))
         .is_err());
         assert_eq!(&*events.borrow(), &["prepare", "begin", "failure"]);
+        events.borrow_mut().clear();
+    }
+}
+
+#[test]
+fn pending_provider_abandonment_aborts_the_shared_observation_once() {
+    use super::super::test_support::{with_conversion_hook_provider, HookBehavior};
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
+    use std::future::Future;
+    use std::task::{Context, Poll};
+    let events = Events::default();
+    let _context = enter(&events, false);
+    for name in ["double", "single"] {
+        with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.25],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let args = [Value::GpuTensor(input.clone())];
+            let mut call = Box::pin(crate::dispatcher::call_builtin_async(name, &args));
+            let mut context = Context::from_waker(futures::task::noop_waker_ref());
+            assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
+            assert_eq!(&*events.borrow(), &["prepare", "begin"]);
+            drop(call);
+            assert_eq!(&*events.borrow(), &["prepare", "begin", "abort"]);
+            assert!(!runmat_accelerate_api::handle_is_logical(&input));
+            provider.free(&input).unwrap();
+        });
         events.borrow_mut().clear();
     }
 }
