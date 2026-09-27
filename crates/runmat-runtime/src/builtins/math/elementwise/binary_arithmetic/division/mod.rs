@@ -73,6 +73,11 @@ pub(super) async fn execute(
     denominator: Value,
 ) -> BuiltinResult<Value> {
     validate_integer_admission(context, &numerator, &denominator)?;
+    let originals = [source_handle(&numerator), source_handle(&denominator)]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
     let source = preferred_source(&numerator, &denominator);
     let resident = match (&numerator, &denominator) {
         (Value::GpuTensor(numerator), Value::GpuTensor(denominator)) => {
@@ -98,7 +103,7 @@ pub(super) async fn execute(
     let denominator = gather_operand(context, denominator).await?;
     let host = execute_host(context, numerator, denominator)?;
     match source {
-        Some(source) => restore_residency(context, &source, host),
+        Some(source) => restore_residency(context, &source, host, &originals),
         None => Ok(host),
     }
 }
@@ -190,6 +195,7 @@ fn restore_residency(
     context: DivisionContext,
     source: &runmat_accelerate_api::GpuTensorHandle,
     mut host: Value,
+    originals: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     if matches!(host, Value::Num(_) | Value::Int(_) | Value::Bool(_)) {
         host = Value::Tensor(
@@ -197,8 +203,13 @@ fn restore_residency(
                 .map_err(|error| context.internal_error(error))?,
         );
     }
-    let restored =
-        gpu_helpers::restore_class_preserving_value(source, host, context.identity.name)?;
+    let protected = originals.iter().collect::<Vec<_>>();
+    let restored = gpu_helpers::restore_class_preserving_value_protecting(
+        source,
+        host,
+        context.identity.name,
+        &protected,
+    )?;
     if runmat_accelerate_api::handle_is_explicit(source) && !matches!(restored, Value::GpuTensor(_))
     {
         return Err(context.internal_error("provider cannot preserve explicit gpuArray output"));

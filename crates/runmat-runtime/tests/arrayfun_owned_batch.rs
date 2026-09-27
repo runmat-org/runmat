@@ -10,6 +10,8 @@ use std::sync::OnceLock;
 
 #[path = "arrayfun_owned_batch/lifecycle.rs"]
 mod lifecycle;
+#[path = "arrayfun_owned_batch/division_fallback.rs"]
+mod division_fallback;
 
 fn provider() -> &'static InProcessProvider {
     static PROVIDER: OnceLock<InProcessProvider> = OnceLock::new();
