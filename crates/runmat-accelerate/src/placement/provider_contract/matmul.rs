@@ -1,7 +1,7 @@
 //! Physical resources of the admitted ordered matrix route. Borrowed resident
 //! buffers are not new allocations; diagonal extraction retains the full product.
 use super::*;
-use runmat_accelerate_api::{MatmulOffset, MatmulWorkload};
+use runmat_accelerate_api::{MatmulOffset, MatmulWorkload, ProviderMatmulGeometry};
 #[cfg(test)]
 mod tests;
 
@@ -36,6 +36,12 @@ pub(super) fn validate(
                 "fusion.matmul.missing_admitted_route",
             )
         });
+    }
+    if wgpu && provider.matmul_geometry().is_none() {
+        return Some(ProviderFeasibility::rejected(
+            ProviderRejectionCode::UnknownResourceEstimate,
+            "fusion.matmul.missing_kernel_geometry",
+        ));
     }
     Some(match work(provider, wgpu, query) {
         Some(work)
@@ -133,6 +139,18 @@ fn work(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<Work> {
+    work_with_geometry(provider, wgpu, query, provider.matmul_geometry())
+}
+
+fn work_with_geometry(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+    geometry: Option<ProviderMatmulGeometry>,
+) -> Option<Work> {
+    if wgpu && geometry.is_none() {
+        return None;
+    }
     let route = query.workload.matmul.as_ref()?;
     if query.family != ProviderOperationFamily::Fusion
         || query.operation.0
@@ -220,19 +238,13 @@ fn work(
                 0
             };
             let mut uniform_bytes = 0u64;
-            let tile = u64::from(config::effective_matmul_tile());
-            let max_groups = u64::from(config::MAX_DISPATCH_WORKGROUPS);
-            if tile == 0
-                || route.rows > u64::from(u32::MAX)
+            let groups = geometry?.dispatch_groups(route.rows, route.columns, route.diagonal)?;
+            if route.rows > u64::from(u32::MAX)
                 || route.inner > u64::from(u32::MAX)
                 || route.columns > u64::from(u32::MAX)
-                || route.rows.div_ceil(tile) > max_groups
-                || route.columns.div_ceil(tile) > max_groups
-            {
-                return None;
-            }
-            if diagonal_dispatch
-                && diagonal_elements.div_ceil(u64::from(config::WORKGROUP_SIZE)) > max_groups
+                || groups
+                    .into_iter()
+                    .any(|count| count > config::MAX_DISPATCH_WORKGROUPS)
             {
                 return None;
             }

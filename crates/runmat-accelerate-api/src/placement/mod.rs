@@ -10,7 +10,7 @@ mod cost;
 mod execution_inventory;
 mod feasibility;
 mod matmul;
-pub use matmul::{MatmulScaleWork, MatmulWorkload};
+pub use matmul::{MatmulScaleWork, MatmulWorkload, ProviderMatmulGeometry};
 mod representation;
 mod preparation;
 pub use preparation::{

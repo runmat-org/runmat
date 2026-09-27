@@ -1,3 +1,15 @@
+/// Resolve the provider's frozen lane count before a lazy pipeline is stored.
+pub(crate) fn extract_shader(
+    precision: runmat_accelerate_api::ProviderPrecision,
+    lanes: u32,
+) -> String {
+    match precision {
+        runmat_accelerate_api::ProviderPrecision::F32 => DIAG_EXTRACT_SHADER_F32,
+        runmat_accelerate_api::ProviderPrecision::F64 => DIAG_EXTRACT_SHADER_F64,
+    }
+    .replace("@WG@", &lanes.to_string())
+}
+
 pub const DIAG_FROM_VECTOR_SHADER_F64: &str = r#"
 struct Vector {
     data: array<f64>,

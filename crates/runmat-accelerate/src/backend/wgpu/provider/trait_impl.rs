@@ -65,6 +65,12 @@ impl AccelProvider for WgpuProvider {
             }
         }
     }
+    fn matmul_geometry(&self) -> Option<runmat_accelerate_api::ProviderMatmulGeometry> {
+        Some(runmat_accelerate_api::ProviderMatmulGeometry {
+            tile_size: self.workgroup_config.matmul_tile,
+            diagonal_workgroup_size: self.workgroup_config.scalar,
+        })
+    }
 
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
         self.export_context_exec(kind)

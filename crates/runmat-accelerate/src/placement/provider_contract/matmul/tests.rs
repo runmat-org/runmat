@@ -110,7 +110,11 @@ fn workload_serialization_preserves_signed_control_bits_and_old_unknown() {
 fn wgpu_geometry_accounts_diagonal_warmup_uniforms_and_empty_allocation() {
     let provider = crate::simple_provider::InProcessProvider::new();
     let q = query(true, ProviderResidency::Device);
-    let physical = work(&provider, true, &q).unwrap();
+    let geometry = Some(ProviderMatmulGeometry {
+        tile_size: 8,
+        diagonal_workgroup_size: 64,
+    });
+    let physical = work_with_geometry(&provider, true, &q, geometry).unwrap();
     use crate::backend::wgpu::params;
     let uniform = (std::mem::size_of::<params::MatmulParams>()
         + std::mem::size_of::<params::MatmulEpilogueParamsF64>()
@@ -125,9 +129,57 @@ fn wgpu_geometry_accounts_diagonal_warmup_uniforms_and_empty_allocation() {
     empty.inputs[0].shape[0] = 0;
     empty.outputs[0].shape[0] = 0;
     empty.workload.matmul.as_mut().unwrap().rows = 0;
-    let physical = work(&provider, true, &empty).unwrap();
+    let physical = work_with_geometry(&provider, true, &empty, geometry).unwrap();
     assert_eq!(physical.estimate.output_bytes, Some(8));
     assert_eq!(physical.estimate.dispatches, Some(0));
     assert_eq!(physical.uniform_bytes, 0);
     assert_eq!(physical.queue_submissions, 0);
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn physical_work_uses_frozen_provider_geometry_not_global_defaults() {
+    let provider = crate::simple_provider::InProcessProvider::new();
+    let mut q = query(false, ProviderResidency::Device);
+    let rows = 65_535 * 8 + 1;
+    q.inputs[0].shape[0] = rows;
+    q.outputs[0].shape[0] = rows;
+    q.workload.matmul.as_mut().unwrap().rows = rows;
+    let small = ProviderMatmulGeometry {
+        tile_size: 8,
+        diagonal_workgroup_size: 64,
+    };
+    let large = ProviderMatmulGeometry {
+        tile_size: 16,
+        ..small
+    };
+    assert!(work_with_geometry(&provider, true, &q, Some(small)).is_none());
+    assert!(work_with_geometry(&provider, true, &q, Some(large)).is_some());
+    assert!(work_with_geometry(&provider, true, &q, None).is_none());
+    assert!(
+        matches!(validate(&provider, true, &q), Some(ProviderFeasibility::Rejected { rejection })
+        if rejection.code == ProviderRejectionCode::UnknownResourceEstimate)
+    );
+
+    // Metadata-only: isolate diagonal lanes from the matrix tile limit without
+    // allocating the large square product described by this query.
+    let n = 65_535 * 64 + 1;
+    let mut q = query(true, ProviderResidency::Device);
+    q.inputs[0].shape = vec![n, 1];
+    q.inputs[1].shape = vec![1, n];
+    q.outputs[0].shape = vec![n, 1];
+    let route = q.workload.matmul.as_mut().unwrap();
+    route.rows = n;
+    route.columns = n;
+    route.inner = 1;
+    let narrow = ProviderMatmulGeometry {
+        tile_size: 128,
+        diagonal_workgroup_size: 64,
+    };
+    let wide = ProviderMatmulGeometry {
+        diagonal_workgroup_size: 128,
+        ..narrow
+    };
+    assert!(work_with_geometry(&provider, true, &q, Some(narrow)).is_none());
+    assert!(work_with_geometry(&provider, true, &q, Some(wide)).is_some());
 }

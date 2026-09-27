@@ -1,5 +1,8 @@
 /// Both eager and lazy pipeline construction share the owning power policy.
-pub(crate) fn epilogue_shader(precision: runmat_accelerate_api::ProviderPrecision) -> String {
+pub(crate) fn epilogue_shader(
+    precision: runmat_accelerate_api::ProviderPrecision,
+    tile: u32,
+) -> String {
     use runmat_accelerate_api::ProviderPrecision;
     let (source, ty) = match precision {
         ProviderPrecision::F32 => (MATMUL_EPILOGUE_SHADER_F32, "f32"),
@@ -24,7 +27,9 @@ fn rm_matmul_min(a: {ty}, b: {ty}) -> {ty} {{
         "{}\n{}\n{}",
         crate::kernel_math::power::functions(precision),
         clamps,
-        source.replace("@REAL_POWER@", power)
+        source
+            .replace("@REAL_POWER@", power)
+            .replace("@MT@", &tile.to_string())
     )
 }
 

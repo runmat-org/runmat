@@ -374,6 +374,7 @@ impl WgpuProvider {
             precision,
             image_norm_bootstrap,
             workgroup_config.scalar,
+        workgroup_config.matmul_tile,
         );
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();

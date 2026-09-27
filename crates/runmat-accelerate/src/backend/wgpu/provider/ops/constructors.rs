@@ -1097,7 +1097,7 @@ impl WgpuProvider {
             });
         let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
             diag_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
+            self.workgroup_config.scalar,
         );
         crate::backend::wgpu::dispatch::diag::run(
             self.device_ref(),

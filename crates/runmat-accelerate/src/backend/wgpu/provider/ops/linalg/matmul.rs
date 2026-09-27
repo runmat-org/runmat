@@ -463,9 +463,13 @@ impl WgpuProvider {
             flags |= MATMUL_EPILOGUE_FLAG_DIAG_WRITE;
         }
 
-        let tile = crate::backend::wgpu::config::effective_matmul_tile();
-        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, tile);
-        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile);
+        let geometry = self
+            .matmul_geometry()
+            .ok_or_else(|| anyhow!("missing matrix kernel geometry"))?;
+        let tile = geometry.tile_size;
+        let [groups_x, groups_y, _] = geometry
+            .dispatch_groups(m as u64, n as u64, false)
+            .ok_or_else(|| anyhow!("matrix dispatch geometry overflows"))?;
 
         let layout_tag = format!("runmat-matmul-epilogue-layout-flags-{flags:08x}");
         let (shader_src, ep_buf, pipeline_layout) = match self.provider_precision_exec() {
@@ -490,7 +494,10 @@ impl WgpuProvider {
                     &self.pipelines.matmul_epilogue.layout,
                 );
                 (
-                    crate::backend::wgpu::shaders::matmul::epilogue_shader(ProviderPrecision::F64),
+                    crate::backend::wgpu::shaders::matmul::epilogue_shader(
+                        ProviderPrecision::F64,
+                        tile,
+                    ),
                     ep_buf,
                     pl,
                 )
@@ -515,13 +522,18 @@ impl WgpuProvider {
                     &self.pipelines.matmul_epilogue.layout,
                 );
                 (
-                    crate::backend::wgpu::shaders::matmul::epilogue_shader(ProviderPrecision::F32),
+                    crate::backend::wgpu::shaders::matmul::epilogue_shader(
+                        ProviderPrecision::F32,
+                        tile,
+                    ),
                     ep_buf,
                     pl,
                 )
             }
         };
 
+        // Resolve the recipe before module creation AND cache hashing. The
+        // generic module helper must not reread mutable global matrix tuning.
         let module = crate::backend::wgpu::pipelines::create_shader_module(
             self.device_ref(),
             "runmat-matmul-epilogue-module",

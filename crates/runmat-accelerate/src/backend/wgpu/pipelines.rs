@@ -159,8 +159,6 @@ const DIAG_FROM_VECTOR_SHADER_F64: &str =
     crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F64;
 const DIAG_FROM_VECTOR_SHADER_F32: &str =
     crate::backend::wgpu::shaders::diag::DIAG_FROM_VECTOR_SHADER_F32;
-const DIAG_EXTRACT_SHADER_F64: &str = crate::backend::wgpu::shaders::diag::DIAG_EXTRACT_SHADER_F64;
-const DIAG_EXTRACT_SHADER_F32: &str = crate::backend::wgpu::shaders::diag::DIAG_EXTRACT_SHADER_F32;
 const FIND_SHADER_F64: &str = crate::backend::wgpu::shaders::find::FIND_SHADER_F64;
 const FIND_SHADER_F32: &str = crate::backend::wgpu::shaders::find::FIND_SHADER_F32;
 const TRIL_SHADER_F64: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F64;
@@ -350,6 +348,7 @@ impl WgpuPipelines {
         precision: NumericPrecision,
         image_norm_bootstrap: ImageNormalizeBootstrap,
         scalar_workgroup: u32,
+        matmul_tile: u32,
     ) -> Self {
         #[cfg(target_os = "windows")]
         let _ = &image_norm_bootstrap;
@@ -1102,10 +1101,13 @@ impl WgpuPipelines {
                 storage_read_entry(5),
                 uniform_entry(6),
             ],
-            crate::backend::wgpu::shaders::matmul::epilogue_shader(match precision {
-                NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
-                NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-            }),
+            crate::backend::wgpu::shaders::matmul::epilogue_shader(
+                match precision {
+                    NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+                    NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+                },
+                matmul_tile,
+            ),
         );
 
         let centered_gram = create_pipeline(
@@ -1515,10 +1517,13 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
-                NumericPrecision::F64 => DIAG_EXTRACT_SHADER_F64,
-                NumericPrecision::F32 => DIAG_EXTRACT_SHADER_F32,
-            },
+            crate::backend::wgpu::shaders::diag::extract_shader(
+                match precision {
+                    NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+                    NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+                },
+                scalar_workgroup,
+            ),
         );
 
         let interp1 = create_pipeline(
@@ -1833,3 +1838,7 @@ pub fn create_pipeline_layout(
         push_constant_ranges: &[],
     })
 }
+
+#[cfg(test)]
+#[path = "pipelines/frozen_matmul_geometry_tests.rs"]
+mod frozen_matmul_geometry_tests;

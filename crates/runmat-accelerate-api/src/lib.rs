@@ -1993,6 +1993,12 @@ pub trait AccelProvider: Send + Sync {
         ProviderPrecision::F64
     }
 
+    /// Physical matrix/diagonal launch geometry, when this provider exposes
+    /// that kernel recipe. Absence is unknown, never a global tuning fallback.
+    fn matmul_geometry(&self) -> Option<ProviderMatmulGeometry> {
+        None
+    }
+
     /// Read a single scalar at linear index from a device tensor, returning it as f64.
     fn read_scalar(&self, _h: &GpuTensorHandle, _linear_index: usize) -> anyhow::Result<f64> {
         Err(anyhow::anyhow!("read_scalar not supported by provider"))
