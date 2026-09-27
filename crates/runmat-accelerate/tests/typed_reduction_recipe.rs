@@ -432,6 +432,70 @@ fn resident_binding_limits_use_authentic_allocation_not_smaller_view_bytes() {
     assert_eq!(allocation.probe.retirements(), 1);
 }
 
+#[test]
+fn real_recipe_projects_one_checked_physical_authority_for_both_strategies() {
+    use runmat_accelerate_api::reduction::{
+        ReductionSelection, ReductionStrategy, ReductionSubmission,
+    };
+    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![25, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let recipe = recipe(
+        "mean",
+        vec![Value::GpuTensor(input.handle.clone())],
+        axes("mean", Value::Num(1.0), true),
+        None,
+        config(),
+    );
+    let physical = recipe.physical();
+    assert_eq!(physical.identity(), recipe.identity());
+    assert!(std::ptr::eq(
+        &physical.descriptor().geometry,
+        recipe.geometry()
+    ));
+    assert!(std::ptr::eq(&physical.descriptor().work, recipe.work()));
+    assert_eq!(physical.sources().single, recipe.single_source());
+    assert_eq!(physical.sources().pass1, recipe.pass1_source());
+    assert_eq!(physical.sources().pass2, recipe.pass2_source());
+    assert_eq!(
+        physical.descriptor().inputs[0].precision,
+        ProviderPrecision::F32
+    );
+    assert_eq!(
+        physical.descriptor().partial.precision,
+        ProviderPrecision::F64
+    );
+    assert_eq!(
+        physical.descriptor().output_precision,
+        ProviderPrecision::F32
+    );
+    let inputs = [input.handle];
+    let mut identities = Vec::new();
+    for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
+        let selection = ReductionSelection::new(physical, strategy).unwrap();
+        identities.push(selection.identity());
+        let submission = ReductionSubmission::new(selection, &inputs, owner.device_id()).unwrap();
+        assert_eq!(
+            submission.selection().recipe().identity(),
+            recipe.identity()
+        );
+        assert_eq!(
+            submission.selection().work().partial_requested_bytes,
+            if strategy == ReductionStrategy::TwoPass {
+                recipe.work().partial_requested_bytes
+            } else {
+                0
+            }
+        );
+    }
+    assert_ne!(identities[0], identities[1]);
+    drop(inputs);
+    assert_eq!(input.probe.retirements(), 1);
+    // Neither the semantic recipe nor its provider projection retains inputs.
+    assert_eq!(recipe.inputs()[0].source_payload_bytes, 200);
+}
+
 #[cfg(feature = "wgpu")]
 #[test]
 fn naga_validates_all_three_real_shaders_at_both_precisions() {

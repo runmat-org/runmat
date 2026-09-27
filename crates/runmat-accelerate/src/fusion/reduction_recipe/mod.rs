@@ -3,6 +3,14 @@
 //! must authenticate operands and implement every declared adapter before use.
 use crate::fusion_exec::ResolvedReductionProgram;
 use anyhow::{anyhow, ensure, Result};
+use runmat_accelerate_api::reduction::{
+    ProviderReductionRecipe, ReductionInputBinding, ReductionRecipeDescriptor,
+    ReductionShaderSources,
+};
+pub use runmat_accelerate_api::reduction::{
+    ReductionDispatch, ReductionGeometry, ReductionPartialLayout, ReductionRecipeConfig,
+    ReductionRecipeWork,
+};
 use runmat_accelerate_api::{
     GpuPhysicalDescriptor, GpuTensorLayout, ProviderPrecision, ProviderResidency,
 };
@@ -14,18 +22,6 @@ use serde::Serialize;
 mod indexing;
 mod state;
 mod shader;
-
-/// Frozen dimensions/limits supplied by the provider owner, not ambient knobs.
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct ReductionRecipeConfig {
-    pub workgroup_size: u32,
-    pub chunk_elements: u32,
-    pub max_workgroup_size: u32,
-    pub max_workgroup_storage_bytes: u64,
-    pub max_dispatch_dimension: u32,
-    pub max_storage_binding_bytes: u64,
-    pub max_rank: usize,
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReductionInputLayout {
@@ -54,61 +50,17 @@ impl ReductionInputLayout {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct ReductionPartialLayout {
-    pub precision: ProviderPrecision,
-    pub alignment: u32,
-    pub stride: u32,
-    pub count_offset: u32,
-    pub flags_offset: u32,
-}
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct ReductionDispatch {
-    pub workgroups: [u32; 3],
-    pub logical_groups: u32,
-}
-#[derive(Debug, Clone, Serialize)]
-pub struct ReductionGeometry {
-    pub reduce_elements: u32,
-    pub slices: u32,
-    pub chunks: u32,
-    pub partial_elements: u32,
-    pub single: ReductionDispatch,
-    pub pass1: ReductionDispatch,
-    pub pass2: ReductionDispatch,
-}
-#[derive(Debug, Clone, Serialize)]
-pub struct ReductionRecipeWork {
-    /// Producer work is the existing operation-owned prior, not measured time.
-    pub producer_scalar_work_units: u64,
-    pub output_payload_bytes: u64,
-    pub output_requested_bytes: u64,
-    pub partial_payload_bytes: u64,
-    pub partial_requested_bytes: u64,
-    pub workgroup_bytes: u64,
-    pub single_dispatches: u32,
-    pub two_pass_dispatches: u32,
-    pub uniform_bytes: u64,
-}
-
 pub struct ReductionRecipe {
-    identity: Digest,
-    config: ReductionRecipeConfig,
     inputs: Vec<ReductionInputLayout>,
     contract: FusionReductionContract,
-    geometry: ReductionGeometry,
-    partial: ReductionPartialLayout,
-    work: ReductionRecipeWork,
-    single: String,
-    pass1: String,
-    pass2: String,
+    physical: ProviderReductionRecipe,
 }
 impl ReductionRecipe {
     pub fn identity(&self) -> Digest {
-        self.identity
+        self.physical.identity()
     }
     pub fn config(&self) -> ReductionRecipeConfig {
-        self.config
+        self.physical.descriptor().config
     }
     pub fn inputs(&self) -> &[ReductionInputLayout] {
         &self.inputs
@@ -117,22 +69,25 @@ impl ReductionRecipe {
         &self.contract
     }
     pub fn geometry(&self) -> &ReductionGeometry {
-        &self.geometry
+        &self.physical.descriptor().geometry
     }
     pub fn partial_layout(&self) -> ReductionPartialLayout {
-        self.partial
+        self.physical.descriptor().partial
     }
     pub fn work(&self) -> &ReductionRecipeWork {
-        &self.work
+        &self.physical.descriptor().work
     }
     pub fn single_source(&self) -> &str {
-        &self.single
+        &self.physical.sources().single
     }
     pub fn pass1_source(&self) -> &str {
-        &self.pass1
+        &self.physical.sources().pass1
     }
     pub fn pass2_source(&self) -> &str {
-        &self.pass2
+        &self.physical.sources().pass2
+    }
+    pub fn physical(&self) -> &ProviderReductionRecipe {
+        &self.physical
     }
 }
 
@@ -195,28 +150,50 @@ pub fn build(
         uniform_bytes: 0, // All recipe geometry is specialized in source.
     };
     let sources = shader::sources(program, &inputs, &geometry, partial, config)?;
-    let identity = Digest::sha256(serde_json::to_vec(&(
-        "typed-reduction-physical-v1",
-        program.identity(),
+    let descriptor = ReductionRecipeDescriptor {
         config,
-        &inputs,
-        contract,
-        &geometry,
-        partial,
-        &work,
-        &sources,
-    ))?);
-    Ok(ReductionRecipe {
-        identity,
-        config,
-        inputs,
-        contract: contract.clone(),
+        inputs: inputs
+            .iter()
+            .map(|input| ReductionInputBinding {
+                precision: input.bound_precision,
+                shape: input.shape.clone(),
+                layout: if input.requires_cast() {
+                    GpuTensorLayout::Contiguous
+                } else {
+                    input.source_layout
+                },
+                broadcast_shape: input.broadcast_shape.clone(),
+                strides: input.strides.clone(),
+                payload_bytes: input.bound_payload_bytes,
+            })
+            .collect(),
+        iteration_shape: contract.input_shape.clone(),
+        output_shape: contract.output_shape.clone(),
+        output_precision,
         geometry,
         partial,
         work,
-        single: sources.0,
-        pass1: sources.1,
-        pass2: sources.2,
+    };
+    // Include the original-to-prepared mapping as well as captured semantic
+    // identity. Physical source ownership stays upstream of the provider ABI.
+    let semantic_identity = Digest::sha256(serde_json::to_vec(&(
+        program.identity(),
+        &inputs,
+        contract,
+    ))?);
+    let physical = ProviderReductionRecipe::new(
+        semantic_identity,
+        descriptor,
+        ReductionShaderSources {
+            single: sources.0,
+            pass1: sources.1,
+            pass2: sources.2,
+        },
+    )?;
+    Ok(ReductionRecipe {
+        inputs,
+        contract: contract.clone(),
+        physical,
     })
 }
 

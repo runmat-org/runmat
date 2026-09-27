@@ -33,6 +33,7 @@ pub use provider_execution::{
 mod placement;
 mod power;
 mod numerical_domain;
+pub mod reduction;
 
 pub use fusion_outputs::validate_fused_output_classes;
 pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
