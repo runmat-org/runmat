@@ -1488,7 +1488,8 @@ mod tests {
                 Some("RunMat:compatibility:Ind2wordResidentExtension")
             );
             assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
-            let _ = provider.free(&handle);
+            handle.allocation_lease().validate_live().unwrap();
+            handle.release().expect("release owned resident indices");
         });
     }
 

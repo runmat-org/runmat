@@ -909,12 +909,16 @@ mod tests {
 
     #[test]
     fn resident_numeric_documents_reject_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         let err = run_encode(vec![bag_of_words(&["alpha"]), resident]).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:encode:InvalidInput"));
     }
@@ -922,12 +926,16 @@ mod tests {
     #[test]
     fn resident_force_cell_output_rejects_before_provider_access_in_matlab_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         let err = run_encode(vec![
             bag_of_words(&["alpha"]),
             Value::from("alpha"),
@@ -944,17 +952,30 @@ mod tests {
     #[test]
     fn encode_dispatch_preserves_residency_until_builtin_preflight() {
         assert_eq!(GPU_SPEC.residency, ResidencyPolicy::NewHandle);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 2,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident numeric admission fixture");
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let resident = Value::GpuTensor(allocation.handle);
         let prepared = futures::executor::block_on(runmat_accelerate::prepare_builtin_args(
             "encode",
             &[resident],
         ))
         .expect("dispatcher must retain resident argument");
         assert!(matches!(prepared.as_slice(), [Value::GpuTensor(_)]));
+        assert_eq!(allocation.probe.retirements(), 0);
+        let Value::GpuTensor(retained) = &prepared[0] else {
+            unreachable!()
+        };
+        retained.allocation_lease().validate_live().unwrap();
+        drop(prepared);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

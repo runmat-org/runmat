@@ -3828,12 +3828,14 @@ mod tests {
 
     #[test]
     fn bag_of_words_rejects_resident_inputs_before_provider_access() {
-        let resident = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_363_001,
-            descriptor: Default::default(),
-        };
+        let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident numeric admission fixture")
+            .handle;
         let error =
             run_bag(vec![Value::GpuTensor(resident)]).expect_err("resident input must reject");
         assert_eq!(error.identifier(), Some("RunMat:bagOfWords:InvalidInput"));
@@ -4086,12 +4088,16 @@ mod tests {
 
     #[test]
     fn remove_stop_words_rejects_integer_and_resident_inputs_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_446_002,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         for invalid in [Value::Int(runmat_value::IntValue::U8(1)), resident] {
             let error = run_remove_stop(vec![invalid]).expect_err("numeric input must reject");
             assert!(!error.message().to_ascii_lowercase().contains("provider"));

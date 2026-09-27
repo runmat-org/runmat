@@ -3688,12 +3688,16 @@ mod tests {
         };
         let emb = embedding_object(model).unwrap();
         let documents = Value::Object(tokenized_document_object(vec![vec!["alpha"]]));
-        let resident_length = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident_length = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("resident numeric admission fixture")
+                .handle,
+        );
         let error =
             doc2sequence_builtin(vec![emb, documents, Value::from("Length"), resident_length])
                 .await
@@ -3739,7 +3743,8 @@ mod tests {
                 .message()
                 .contains("gpuArray inputs are not supported"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            provider.free(&vectors).expect("free resident vectors");
+            vectors.allocation_lease().validate_live().unwrap();
+            vectors.release().expect("release owned resident vectors");
         });
     }
 

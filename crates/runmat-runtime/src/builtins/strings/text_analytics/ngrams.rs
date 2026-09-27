@@ -883,15 +883,22 @@ mod tests {
 
     #[test]
     fn rejects_resident_inputs_before_provider_access() {
-        let resident = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_362_001,
-            descriptor: Default::default(),
-        };
-        let error = run(vec![Value::GpuTensor(resident)])
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident numeric admission fixture");
+        let caller_alias = allocation.handle.clone();
+        let error = run(vec![Value::GpuTensor(allocation.handle)])
             .expect_err("resident text-model input must reject");
         assert_eq!(error.identifier(), Some("RunMat:bagOfNgrams:InvalidInput"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        caller_alias.allocation_lease().validate_live().unwrap();
+        drop(error);
+        drop(caller_alias);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
