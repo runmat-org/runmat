@@ -2996,7 +2996,7 @@ mod tests {
     #[test]
     fn subsref_uses_default_indexing_for_non_object_receiver() {
         let err = block_on(
-            crate::builtins::introspection::object_indexing::dispatch_subsref(
+            crate::builtins::introspection::object_indexing::subsref_builtin(
                 Value::Num(1.0),
                 standard_subscript(
                     OBJECT_INDEX_PAREN,
@@ -3031,7 +3031,7 @@ mod tests {
     #[test]
     fn subsref_missing_protocol_uses_default_object_indexing() {
         let result = block_on(
-            crate::builtins::introspection::object_indexing::dispatch_subsref(
+            crate::builtins::introspection::object_indexing::subsref_builtin(
                 Value::Object(runmat_value::ObjectInstance::new(
                     "NoSubsrefProtocolClass".to_string(),
                 )),

@@ -47,11 +47,6 @@ async fn dispatch_num_arguments_overload(
     }
 }
 
-pub(crate) async fn dispatch_subsref(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
-    let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::read_subscript_path(obj, path, None).await
-}
-
 pub(crate) async fn dispatch_subsasgn(
     obj: Value,
     subscript: Value,
