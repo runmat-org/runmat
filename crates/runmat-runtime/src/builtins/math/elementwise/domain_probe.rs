@@ -127,3 +127,7 @@ pub(super) async fn probe_gpu_lower_bound(
 #[cfg(test)]
 #[path = "domain_probe/owning_tests.rs"]
 mod owning_tests;
+
+#[cfg(test)]
+#[path = "domain_probe/error_tests.rs"]
+mod error_tests;

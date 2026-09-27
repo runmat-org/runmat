@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::elementwise::domain_probe::{
-    probe_gpu_lower_bound, GpuDomainProbeError, GpuLowerBoundResult,
+    probe_gpu_lower_bound, GpuLowerBoundResult,
 };
 use crate::builtins::math::resident_real_unary;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -191,12 +191,13 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             },
             Ok(GpuLowerBoundResult::Unknown) => {}
-            Err(GpuDomainProbeError::ProviderDownload(error)) => return Err(*error),
             Err(error) => {
-                return Err(terminal_error(
+                let mut failure = terminal_error(
                     &GAMMALN_ERROR_INTERNAL,
                     format!("provider domain proof failed: {error}"),
-                ))
+                );
+                failure.source = Some(Box::new(error));
+                return Err(failure);
             }
         }
     }

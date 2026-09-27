@@ -34,13 +34,22 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
                 Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
                     fallback(&input, provider).await
                 }
-                Err(error) => Err(errors::internal(format!(
-                    "provider unary_sqrt failed: {error}"
-                ))),
+                Err(error) => {
+                    let mut failure =
+                        errors::internal(format!("provider unary_sqrt failed: {error}"));
+                    failure.source = Some(error.into_boxed_dyn_error());
+                    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    Err(failure)
+                }
             }
         }
         Ok(GpuLowerBoundResult::Unknown) => fallback(&input, provider).await,
-        Err(error) => Err(errors::internal(error)),
+        Err(error) => {
+            let mut failure = errors::internal(&error);
+            failure.source = Some(Box::new(error));
+            failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(failure)
+        }
     }
 }
 
