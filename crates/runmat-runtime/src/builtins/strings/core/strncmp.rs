@@ -652,7 +652,16 @@ pub(crate) mod tests {
         )
         .expect("strncmp");
         assert_eq!(result, Value::Bool(true));
-        let _ = provider.free(&handle);
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("borrowed input remains live");
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().expect("release final fixture reference");
+        assert!(
+            physical.acquire().is_none(),
+            "physical lease must expire after final release"
+        );
     }
 
     #[test]

@@ -142,7 +142,16 @@ fn fillmissing_nested_resident_integer_is_gated_before_provider_access() {
             error.identifier(),
             Some("RunMat:compatibility:FillmissingAggregateIntegerDataExtension")
         );
-        provider.free(&handle).ok();
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("borrowed input remains live");
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().expect("release final fixture reference");
+        assert!(
+            physical.acquire().is_none(),
+            "physical lease must expire after final release"
+        );
     });
 }
 
