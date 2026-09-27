@@ -69,16 +69,19 @@ impl WgpuProvider {
         let (pipeline, bind_group, workgroups) =
             self.with_emission(|emission, _| prepare(emission))??;
         let mut pending = PendingSubmissions::new(self.access.clone());
-        let receipt = self.access.with_scoped(|emission| {
-            crate::backend::wgpu::dispatch::fft::run(
-                emission,
-                &mut pending,
-                pipeline,
-                &bind_group,
-                workgroups,
-                label,
-            )
-        })?;
+        let receipt = self
+            .access
+            .with_scoped(|emission| {
+                crate::backend::wgpu::dispatch::fft::run(
+                    emission,
+                    &mut pending,
+                    pipeline,
+                    &bind_group,
+                    workgroups,
+                    label,
+                )
+            })
+            .map_err(ProviderExecutionError::from_source)?;
         // Submission progress, including legacy exact-index waits on native,
         // must not run under the exclusive scope gate.
         pending.commit();
