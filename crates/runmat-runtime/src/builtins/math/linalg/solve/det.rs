@@ -455,7 +455,7 @@ async fn det_gpu_via_provider(
         Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => return Ok(None),
         Err(source) => {
             let mut error = builtin_error(format!("{NAME}: provider LU failed: {source}"));
-            error.source = Some(source.into_boxed_dyn_error());
+            error = crate::runtime_error::with_provider_execution_source(error, source.into());
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
             return Err(error);
         }
@@ -475,6 +475,10 @@ async fn det_gpu_via_provider(
     let output = upload_scalar(provider, determinant * sign, handle)?;
     gpu_helpers::resident_gpu_value(output).map(Some)
 }
+
+#[cfg(test)]
+#[path = "det/failure_tests.rs"]
+mod failure_tests;
 
 fn lu_handles(result: &runmat_accelerate_api::ProviderLuResult) -> [&GpuTensorHandle; 5] {
     [
