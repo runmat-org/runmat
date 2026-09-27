@@ -1,45 +1,28 @@
 use super::*;
 
 #[test]
-fn underlying_type_keeps_exact_owner_precision_admission() {
-    use runmat_accelerate_api::{GpuTensorStorage, NumericElementType, ProviderPrecision};
+fn underlying_type_uses_allocation_class_not_owner_preference() {
+    use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
     test_support::with_test_provider(|provider| {
-        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let source =
-            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-        let (wrong_type, wrong_class) = match provider.precision() {
-            ProviderPrecision::F64 => (NumericElementType::F32, runmat_types::standard::SINGLE),
-            ProviderPrecision::F32 => (NumericElementType::F64, runmat_types::standard::DOUBLE),
-        };
-        let malformed = source
-            .clone()
-            .with_numeric_descriptor(wrong_type, GpuTensorStorage::Real);
-        runmat_accelerate_api::set_handle_class_identity(&malformed, wrong_class);
-        let value = Value::GpuTensor(malformed);
-        assert!(
-            !value_underlying_type_matches(&value, vec![wrong_class.display_name().into()])
-                .unwrap()
-        );
-        let error = crate::builtins::introspection::underlying_type::underlying_class_identity_for_value_checked(&value).unwrap_err();
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:isUnderlyingType:ProviderPayloadMismatch")
-        );
-        let error = must_be_underlying_type::evaluate(vec![
-            value,
-            Value::String(wrong_class.display_name().into()),
-        ])
-        .unwrap_err();
+        let source = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.0]),
+                shape: &[1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let weak = source.downgrade();
+        let value = Value::GpuTensor(source);
+        assert!(value_underlying_type_matches(&value, vec!["single".into()]).unwrap());
+        assert!(!value_underlying_type_matches(&value, vec!["double".into()]).unwrap());
+        must_be_underlying_type::evaluate(vec![value.clone(), Value::from("single")]).unwrap();
+        let error =
+            must_be_underlying_type::evaluate(vec![value, Value::from("double")]).unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:mustBeUnderlyingType:ValidationFailed")
         );
-        runmat_accelerate_api::set_handle_class_identity(
-            &source,
-            source.descriptor.element_type.unwrap().class_identity(),
-        );
-        provider.free(&source).unwrap();
-        runmat_accelerate_api::clear_handle_metadata(&source);
+        assert!(weak.acquire().is_err());
     });
 }
 
@@ -114,23 +97,31 @@ fn class_queries_preserve_custom_name_and_underlying_case_rules() {
 }
 
 #[test]
-fn resident_nd_and_class_queries_never_download_payloads() {
+fn resident_nd_and_class_queries_preserve_owning_facts() {
     test_support::with_test_provider(|provider| {
         for (shape, expected) in [(vec![1, 1, 2], false), (vec![1, 1, 1], true)] {
             let tensor = Tensor::new(vec![1.0; shape.iter().product()], shape).unwrap();
             let handle =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-            provider.free(&handle).unwrap();
             let value = Value::GpuTensor(handle.clone());
             assert_eq!(value_is_scalar_or_empty(&value), expected);
             assert!(value_matches_class(&value, "double"));
             assert!(value_underlying_type_matches(&value, vec!["double".into()]).unwrap());
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let logical = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &vec![1; tensor.shape.iter().product()],
+                    shape: &tensor.shape,
+                })
+                .unwrap();
+            let logical_weak = logical.downgrade();
+            let value = Value::GpuTensor(logical);
             assert!(!value_is_numeric(&value));
             assert!(!value_is_float(&value));
             assert!(value_matches_class(&value, "logical"));
             assert!(value_underlying_type_matches(&value, vec!["logical".into()]).unwrap());
-            runmat_accelerate_api::clear_handle_metadata(&handle);
+            drop(value);
+            assert!(logical_weak.acquire().is_err());
+            handle.allocation_lease().validate_live().unwrap();
         }
     });
 }
