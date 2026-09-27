@@ -1,5 +1,4 @@
 use crate::accel::fusion as accel_fusion;
-use crate::accel::residency as accel_residency;
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
 use crate::interpreter::api::{InterpreterOutcome, InterpreterResumeState, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
@@ -82,13 +81,6 @@ fn ensure_wasm_builtins_registered() {
         REGISTER.call_once(|| {
             runmat_runtime::builtins::wasm_registry::register_all();
         });
-    }
-}
-
-#[cfg(feature = "native-accel")]
-fn clear_residency(value: &Value) {
-    if let Err(err) = accel_residency::clear_value(value) {
-        log::warn!("failed to clear GPU residency: {err}");
     }
 }
 
@@ -907,10 +899,6 @@ async fn run_interpreter_inner(
                 Instr::StoreLocal(_) => Some(global_aliases.clone()),
                 _ => None,
             };
-            let mut clear_value_residency = |value: &Value| {
-                #[cfg(feature = "native-accel")]
-                clear_residency(value);
-            };
             let mut store_var_before_overwrite = |_current: &Value, _incoming: &Value| {};
             let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
                 if let Some(assigned_slots) = completion_assigned_slots.as_mut() {
@@ -980,7 +968,6 @@ async fn run_interpreter_inner(
                     pc: &mut pc,
                 },
                 interp_dispatch::DispatchHooks {
-                    clear_value_residency: &mut clear_value_residency,
                     store_var_before_overwrite: &mut store_var_before_overwrite,
                     store_var_after_store: &mut store_var_after_store,
                     store_local_before_local_overwrite: &mut store_local_before_local_overwrite,

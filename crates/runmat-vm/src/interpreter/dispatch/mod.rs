@@ -462,7 +462,6 @@ impl SequenceState {
 }
 
 pub struct DispatchHooks<'a> {
-    pub clear_value_residency: &'a mut dyn FnMut(&Value),
     pub store_var_before_overwrite: &'a mut dyn FnMut(&Value, &Value),
     pub store_var_after_store: &'a mut dyn FnMut(usize, &Value),
     pub store_local_before_local_overwrite: &'a mut dyn FnMut(&Value, &Value),
@@ -654,7 +653,6 @@ pub async fn dispatch_instruction(
         pc,
     } = state;
     let DispatchHooks {
-        clear_value_residency: _fallback_clear_value_residency,
         store_var_before_overwrite,
         store_var_after_store,
         store_local_before_local_overwrite,
@@ -890,10 +888,6 @@ pub async fn dispatch_instruction(
                     "stack underflow",
                 ))?;
             debug::trace_store_var(*pc, *index, &preview);
-            #[cfg(feature = "native-accel")]
-            let _retired = vars.get(*index).map(|value| {
-                super::resident_ownership::ConsumedValues::new(std::slice::from_ref(value))
-            });
             store_var(
                 stack,
                 vars,
@@ -908,17 +902,6 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::StoreLocal(offset) => {
-            #[cfg(feature = "native-accel")]
-            let _retired = context
-                .call_stack
-                .last()
-                .map_or_else(
-                    || vars.get(*offset),
-                    |frame| context.locals.get(frame.locals_start + *offset),
-                )
-                .map(|value| {
-                    super::resident_ownership::ConsumedValues::new(std::slice::from_ref(value))
-                });
             if context.call_stack.last().is_none() {
                 store_var(
                     stack,
@@ -954,12 +937,7 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::Pop => {
-            if let Some(value) = stack.pop() {
-                #[cfg(feature = "native-accel")]
-                drop(super::resident_ownership::ConsumedValues::new(
-                    std::slice::from_ref(&value),
-                ));
-            }
+            drop(stack.pop());
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1029,14 +1007,7 @@ pub async fn dispatch_instruction(
         }
         Instr::ExitScope(local_count) => {
             for _ in 0..*local_count {
-                if let Some(value) = context.locals.pop() {
-                    #[cfg(feature = "native-accel")]
-                    drop(super::resident_ownership::ConsumedValues::new(
-                        std::slice::from_ref(&value),
-                    ));
-                    #[cfg(not(feature = "native-accel"))]
-                    _fallback_clear_value_residency(&value);
-                }
+                drop(context.locals.pop());
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
