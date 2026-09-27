@@ -102,9 +102,12 @@ impl BindGroupCache {
                 let bind_group = create();
                 let layout_ptr = key.layout_ptr;
                 let key_clone = key.clone();
-                if let Ok(mut map) = self.inner.lock() {
-                    map.insert(key, bind_group.clone());
-                }
+                let replaced = self
+                    .inner
+                    .lock()
+                    .ok()
+                    .and_then(|mut map| map.insert(key, bind_group.clone()));
+                drop(replaced);
                 if let Ok(mut index) = self.index.lock() {
                     for binding in &key_clone.bindings {
                         index
@@ -182,11 +185,13 @@ impl BindGroupCache {
             keys_to_remove
         };
 
-        if let Ok(mut map) = self.inner.lock() {
-            for key in removed_keys {
-                map.remove(&key);
-            }
-        }
+        let removed = self.inner.lock().ok().map(|mut map| {
+            removed_keys
+                .into_iter()
+                .filter_map(|key| map.remove(&key))
+                .collect::<Vec<_>>()
+        });
+        drop(removed);
     }
 
     fn make_key(

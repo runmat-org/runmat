@@ -19,7 +19,10 @@ impl WgpuProvider {
                 }
                 // Build a handle for the base buffer id
                 let base_entry = {
-                    let guard = self.buffers.lock().expect("buffer mutex poisoned");
+                    let guard = self
+                        .allocations
+                        .lock_entries()
+                        .expect("buffer mutex poisoned");
                     guard.get(&base_id).cloned()
                 };
                 if let Some(entry) = base_entry {

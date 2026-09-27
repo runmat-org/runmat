@@ -159,9 +159,7 @@ impl WgpuProvider {
             allocated_bytes,
             usage,
         } = registration;
-        let id = self
-            .next_id
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         let entry = BufferEntry {
             buffer,
             len,
@@ -177,10 +175,7 @@ impl WgpuProvider {
             usage,
             last_submission_id: None,
         };
-        self.buffers
-            .lock()
-            .expect("buffer mutex poisoned")
-            .insert(id, entry);
+        let id = self.allocations.register(entry);
         log::trace!(
             "wgpu register id={} len={} shape={:?} element_type={:?} storage={:?}",
             id,
@@ -242,7 +237,7 @@ impl WgpuProvider {
     }
 
     pub(super) fn mark_buffer_usage(&self, handle: &GpuTensorHandle, usage: BufferUsageClass) {
-        if let Ok(mut guard) = self.buffers.lock() {
+        if let Ok(mut guard) = self.allocations.lock_entries() {
             if let Some(entry) = guard.get_mut(&handle.buffer_id) {
                 entry.usage = usage;
             }
@@ -250,7 +245,7 @@ impl WgpuProvider {
     }
 
     pub(super) fn record_buffer_submission(&self, buffer_id: u64, submission_id: u32) {
-        if let Ok(mut guard) = self.buffers.lock() {
+        if let Ok(mut guard) = self.allocations.lock_entries() {
             if let Some(entry) = guard.get_mut(&buffer_id) {
                 entry.last_submission_id = Some(submission_id);
             }
@@ -263,7 +258,7 @@ impl WgpuProvider {
         len: usize,
         label: &str,
     ) -> (Arc<wgpu::Buffer>, bool) {
-        self.buffer_residency
+        self.allocations
             .acquire(self.device_ref(), usage, len, self.element_size, label)
     }
 
@@ -418,7 +413,10 @@ impl WgpuProvider {
                 handle.device_id
             ));
         }
-        let guard = self.buffers.lock().expect("buffer mutex poisoned");
+        let guard = self
+            .allocations
+            .lock_entries()
+            .expect("buffer mutex poisoned");
         let handle_storage = runmat_accelerate_api::handle_storage(handle);
         guard
             .get(&handle.buffer_id)

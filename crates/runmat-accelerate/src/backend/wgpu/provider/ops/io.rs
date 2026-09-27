@@ -677,48 +677,7 @@ impl WgpuProvider {
     }
 
     pub(crate) fn free_exec(&self, handle: &GpuTensorHandle) -> Result<()> {
-        if handle.device_id != self.runtime_device_id {
-            return Err(anyhow!(
-                "free: handle belongs to device {}, but this provider owns device {}",
-                handle.device_id,
-                self.runtime_device_id
-            ));
-        }
-        log::trace!("wgpu free id={}", handle.buffer_id);
-        let entry = self
-            .buffers
-            .lock()
-            .expect("buffer mutex poisoned")
-            .remove(&handle.buffer_id);
-        if let Some(entry) = entry {
-            if entry.len > 0 {
-                let size_bytes = entry.allocated_bytes;
-                let poolable_by_size = self.buffer_residency_max_poolable_bytes > 0
-                    && size_bytes <= self.buffer_residency_max_poolable_bytes;
-                let buffer_ptr = entry.buffer.as_ref() as *const wgpu::Buffer as usize;
-                self.bind_group_cache.invalidate_buffer(buffer_ptr);
-                let strong_count = Arc::strong_count(&entry.buffer);
-                if poolable_by_size && strong_count == 1 {
-                    self.buffer_residency.release(
-                        entry.usage,
-                        entry.allocated_bytes,
-                        entry.buffer.clone(),
-                    );
-                } else {
-                    log::trace!(
-                        "buffer_residency: not pooling buffer id={} len={} bytes={} strong_count={} poolable_by_size={}",
-                        handle.buffer_id,
-                        entry.len,
-                        size_bytes,
-                        strong_count,
-                        poolable_by_size
-                    );
-                }
-            }
-        }
-        self.kernel_resources.clear_matmul_source(handle.buffer_id);
-        runmat_accelerate_api::clear_handle_metadata(handle);
-        Ok(())
+        self.allocations.free(handle)
     }
 
     pub(crate) fn device_info_exec(&self) -> String {

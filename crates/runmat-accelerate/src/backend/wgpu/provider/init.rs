@@ -4,7 +4,6 @@ use log::{info, warn};
 use pollster::block_on;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 use super::{
@@ -18,7 +17,6 @@ use crate::backend::wgpu::config::{
     self, DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD, MATMUL_TILE, WORKGROUP_SIZE,
 };
 use crate::backend::wgpu::pipelines::{ImageNormalizeBootstrap, WgpuPipelines};
-use crate::backend::wgpu::residency::BufferResidency;
 use crate::backend::wgpu::resources::KernelResourceRegistry;
 use crate::telemetry::AccelTelemetry;
 
@@ -390,6 +388,8 @@ impl WgpuProvider {
         .map_err(|error| log::warn!("provider observation progress unavailable: {error}"))
         .ok();
 
+        let bind_group_cache = Arc::new(BindGroupCache::default());
+        let kernel_resources = Arc::new(KernelResourceRegistry::default());
         Ok(Self {
             instance,
             device,
@@ -398,10 +398,13 @@ impl WgpuProvider {
             adapter_info,
             adapter_limits: satisfied_limits,
             workgroup_config,
-            buffers: Mutex::new(HashMap::new()),
-            buffer_residency: BufferResidency::new(buffer_pool_limit),
-            buffer_residency_max_poolable_bytes: max_poolable_bytes,
-            next_id: AtomicU64::new(1),
+            allocations: Arc::new(super::allocation_state::AllocationState::new(
+                runtime_device_id,
+                buffer_pool_limit,
+                max_poolable_bytes,
+                bind_group_cache.clone(),
+                Arc::downgrade(&kernel_resources),
+            )),
             pipelines,
             runtime_device_id,
             #[cfg(not(target_arch = "wasm32"))]
@@ -418,8 +421,8 @@ impl WgpuProvider {
             fused_pipeline_cache: Mutex::new(HashMap::new()),
             bind_group_layout_cache: Mutex::new(HashMap::new()),
             bind_group_layout_tags: Mutex::new(HashMap::new()),
-            bind_group_cache: BindGroupCache::default(),
-            kernel_resources: KernelResourceRegistry::default(),
+            bind_group_cache,
+            kernel_resources,
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
             telemetry: AccelTelemetry::default(),
             reduction_two_pass_mode,

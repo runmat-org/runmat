@@ -139,9 +139,12 @@ impl KernelResourceRegistry {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
     ) {
-        if let Ok(mut map) = self.matmul_sources.lock() {
-            map.insert(product.buffer_id, (lhs.clone(), rhs.clone()));
-        }
+        let replaced = self
+            .matmul_sources
+            .lock()
+            .ok()
+            .and_then(|mut map| map.insert(product.buffer_id, (lhs.clone(), rhs.clone())));
+        drop(replaced);
     }
 
     pub fn take_matmul_sources(
@@ -155,8 +158,11 @@ impl KernelResourceRegistry {
     }
 
     pub fn clear_matmul_source(&self, product_id: u64) {
-        if let Ok(mut map) = self.matmul_sources.lock() {
-            map.remove(&product_id);
-        }
+        let removed = self
+            .matmul_sources
+            .lock()
+            .ok()
+            .and_then(|mut map| map.remove(&product_id));
+        drop(removed);
     }
 }

@@ -1,4 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
+#[path = "allocation_state.rs"]
+mod allocation_state;
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use futures::channel::oneshot;
 use log::{debug, error};
@@ -54,7 +56,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 use tracing::info_span;
 use wgpu::util::DeviceExt;
@@ -137,7 +139,7 @@ use crate::backend::wgpu::params::{
     SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
-use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
+use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::{KernelResourceRegistry, UniformBufferKey};
 use crate::backend::wgpu::types::NumericPrecision;
 const QR_DEVICE_MAX_COLS: usize = 64;

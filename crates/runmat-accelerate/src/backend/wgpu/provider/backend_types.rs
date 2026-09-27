@@ -28,10 +28,7 @@ pub struct WgpuProvider {
     pub(super) adapter_info: wgpu::AdapterInfo,
     pub(super) adapter_limits: wgpu::Limits,
     pub(super) workgroup_config: WorkgroupConfig,
-    pub(super) buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
-    pub(super) buffer_residency: BufferResidency,
-    pub(super) buffer_residency_max_poolable_bytes: u64,
-    pub(super) next_id: AtomicU64,
+    pub(super) allocations: Arc<super::allocation_state::AllocationState>,
     pub(super) pipelines: WgpuPipelines,
     pub(super) runtime_device_id: u32,
     #[cfg(not(target_arch = "wasm32"))]
@@ -45,8 +42,8 @@ pub struct WgpuProvider {
     pub(super) fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
     pub(super) bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
     pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
-    pub(super) bind_group_cache: BindGroupCache,
-    pub(super) kernel_resources: KernelResourceRegistry,
+    pub(super) bind_group_cache: Arc<BindGroupCache>,
+    pub(super) kernel_resources: Arc<KernelResourceRegistry>,
     pub(super) metrics: crate::backend::wgpu::metrics::WgpuMetrics,
     pub(super) telemetry: AccelTelemetry,
     pub(super) reduction_two_pass_mode: ReductionTwoPassMode,

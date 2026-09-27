@@ -214,7 +214,10 @@ impl WgpuProvider {
             };
             return Ok(reshaped);
         }
-        let mut buffers = self.buffers.lock().expect("buffer mutex poisoned");
+        let mut buffers = self
+            .allocations
+            .lock_entries()
+            .expect("buffer mutex poisoned");
         let entry = buffers
             .get_mut(&handle.buffer_id)
             .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id))?;
@@ -243,6 +246,7 @@ impl WgpuProvider {
         let mut updated = handle.clone();
         updated.shape = new_shape.to_vec();
         updated.descriptor.storage = Some(storage);
+        drop(buffers);
         runmat_accelerate_api::clear_handle_transpose(&updated);
         Ok(updated)
     }

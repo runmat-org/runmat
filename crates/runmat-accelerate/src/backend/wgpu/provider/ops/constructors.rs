@@ -334,7 +334,10 @@ impl WgpuProvider {
             NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
         };
         let entries = {
-            let guard = self.buffers.lock().expect("buffer mutex poisoned");
+            let guard = self
+                .allocations
+                .lock_entries()
+                .expect("buffer mutex poisoned");
             let mut entries = Vec::with_capacity(request.output_count);
             for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
                 ensure!(
