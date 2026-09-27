@@ -172,7 +172,10 @@ fn summarize_value(
                     summary.unknown_values = summary.unknown_values.saturating_add(1);
                     0
                 });
-                let entry = summary.provider_bytes.entry(handle.device_id).or_default();
+                let entry = summary
+                    .provider_bytes
+                    .entry(handle.device_id())
+                    .or_default();
                 *entry = entry.saturating_add(bytes);
             }
         }
@@ -262,7 +265,7 @@ fn int_byte_size(value: &IntValue) -> usize {
 }
 
 fn gpu_handle_bytes(handle: &GpuTensorHandle) -> Option<u64> {
-    let elements = handle.shape.iter().try_fold(1_u64, |total, dimension| {
+    let elements = handle.shape().iter().try_fold(1_u64, |total, dimension| {
         total.checked_mul(u64::try_from(*dimension).ok()?)
     })?;
     let width = handle_integer_type(handle)

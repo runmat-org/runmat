@@ -1,9 +1,9 @@
 //! Request-local output validation. Actual Values own allocation lifetimes.
 use anyhow::anyhow;
 use runmat_accelerate_api::{
-    allocation::GpuHandleReleaseError, AccelProvider, GpuTensorHandle, GpuTensorStorage,
-    NumericElementType, ProviderExecutionError, ProviderExecutionResult as Result,
-    ProviderPrecision, WeakGpuTensorHandle,
+    allocation::{GpuHandleReleaseError, WeakGpuTensorHandle},
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, NumericElementType, ProviderExecutionError,
+    ProviderExecutionResult as Result, ProviderPrecision,
 };
 use runmat_runtime::builtins::common::gpu_helpers::{
     exact_provider_for_handle, gpu_class_metadata_matches,

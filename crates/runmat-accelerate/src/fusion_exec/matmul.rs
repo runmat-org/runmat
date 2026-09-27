@@ -1,5 +1,5 @@
 //! Matrix-product fusion publishes only an admitted, ordered epilogue.
-use super::outputs::FusionAllocations;
+use super::outputs::{reject_outputs, FusionOutputAdmission};
 use super::*;
 
 mod plan;
@@ -61,7 +61,7 @@ pub async fn execute_matmul_epilogue_placed(
             return Ok(FusionExecutionOutcome::SharedRuntime(observation))
         }
     };
-    let mut allocations = FusionAllocations::new(&request.inputs);
+    let mut allocations = FusionOutputAdmission::new(&request.inputs);
     let mut handles = HashMap::new();
     for id in admitted.data_inputs() {
         if handles.contains_key(&id) {
@@ -85,7 +85,10 @@ pub async fn execute_matmul_epilogue_placed(
     }
     let epilogue = admitted.descriptor(&handles);
     let output = {
-        let _metadata = allocations.protect_metadata();
+        let _metadata: Vec<_> = handles
+            .values()
+            .map(runmat_accelerate_api::ResidencyRestoreGuard::new)
+            .collect();
         selection.observer.queue_unmeasured();
         let output = provider
             .matmul_epilogue(
@@ -101,27 +104,31 @@ pub async fn execute_matmul_epilogue_placed(
     // upload owned by this request. Metadata restoration is not an alias proof.
     if handles
         .values()
-        .any(|input| runmat_runtime::builtins::common::gpu_helpers::same_gpu_handle(input, &output))
+        .any(|input| input.shares_allocation_with(&output))
     {
-        allocations.reject(&output, provider);
-        return Err(anyhow!("matmul provider returned an operand alias"));
+        return Err(
+            reject_outputs(vec![output], "matmul provider returned an operand alias").into(),
+        );
     }
     let mut output = allocations.admit(output, provider, &admitted.shape, provider.precision())?;
     if admitted.diagonal {
         let diagonal = {
-            let _metadata = allocations.protect_metadata();
+            let _metadata = runmat_accelerate_api::ResidencyRestoreGuard::new(&output);
             selection.observer.queue_unmeasured();
             let diagonal = provider.diag_extract(&output, 0)?;
             selection.observer.kernel_unmeasured();
             diagonal
         };
-        if runmat_runtime::builtins::common::gpu_helpers::same_gpu_handle(&output, &diagonal)
-            || handles.values().any(|input| {
-                runmat_runtime::builtins::common::gpu_helpers::same_gpu_handle(input, &diagonal)
-            })
+        if output.shares_allocation_with(&diagonal)
+            || handles
+                .values()
+                .any(|input| input.shares_allocation_with(&diagonal))
         {
-            allocations.reject(&diagonal, provider);
-            return Err(anyhow!("diagonal provider returned an operand alias"));
+            return Err(reject_outputs(
+                vec![diagonal],
+                "diagonal provider returned an operand alias",
+            )
+            .into());
         }
         output = allocations.admit(
             diagonal,
@@ -131,7 +138,6 @@ pub async fn execute_matmul_epilogue_placed(
         )?;
     }
     mark_fusion_output(&mut output, &request.inputs)?;
-    allocations.publish(&[&output]);
     selection.submitted();
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }

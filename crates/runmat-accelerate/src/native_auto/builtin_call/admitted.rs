@@ -57,16 +57,15 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
         Box::pin(async move {
             if let Operation::Sink(mode) = request.form().operation {
-                for value in request.operands() {
-                    runmat_runtime::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
-                        fusion_residency::clear(handle);
-                    })?;
-                }
+                fusion_residency::clear_inputs(
+                    request.operands(),
+                    request.admission().binding.builtin.name,
+                )?;
                 let operands = match mode {
                     BuiltinSinkPreparation::Barrier => request.into_operands(),
                     BuiltinSinkPreparation::Gather => gather_args(request.operands())
                         .await
-                        .map_err(|error| RuntimeError::new(error.to_string()))?,
+                        .map_err(|error| preparation_error(error.into()))?,
                 };
                 return Ok(PreparedBuiltinOperands::passthrough(operands));
             }
@@ -114,7 +113,7 @@ pub(super) fn prepare_with(
             runmat_types::NumericClass::Double => ProviderPrecision::F64,
             _ => {
                 return Err(Box::new(preparation_error(
-                    "invalid admitted floating cast target",
+                    anyhow::anyhow!("invalid admitted floating cast target").into(),
                 )))
             }
         }),
@@ -134,7 +133,8 @@ pub(super) fn prepare_with(
                 .transpose()
                 .map_err(|_| {
                     Box::new(preparation_error(
-                        "requested output count exceeds workload representation",
+                        anyhow::anyhow!("requested output count exceeds workload representation")
+                            .into(),
                     ))
                 })?,
         },

@@ -1640,14 +1640,6 @@ async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
     Ok(out)
 }
 
-fn clear_sink_inputs(args: &[Value]) {
-    for value in args {
-        if let Value::GpuTensor(handle) = value {
-            fusion_residency::clear(handle);
-        }
-    }
-}
-
 fn should_gather_sink_args(name: &str) -> bool {
     matches!(
         builtin_residency_policy(name),

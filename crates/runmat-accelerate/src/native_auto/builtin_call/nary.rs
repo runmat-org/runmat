@@ -7,7 +7,7 @@ pub(super) fn broadcast_elements(values: &[Value]) -> Option<usize> {
         let dimensions = match value {
             Value::Num(_) => vec![1, 1],
             Value::Tensor(tensor) => tensor.shape.clone(),
-            Value::GpuTensor(handle) => handle.shape.clone(),
+            Value::GpuTensor(handle) => handle.shape().to_vec(),
             _ => return None,
         };
         shape = runmat_runtime::builtins::common::broadcast::broadcast_shapes(

@@ -95,7 +95,7 @@ pub(crate) fn tensor_representation(
             (
                 element_type,
                 storage,
-                handle.shape.clone(),
+                handle.shape().to_vec(),
                 ProviderResidency::Device,
             )
         }

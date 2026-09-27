@@ -137,7 +137,7 @@ pub(super) async fn prepare(
         return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
     }
     if builtin_policy(name).is_some_and(|policy| policy.is_sink) {
-        clear_sink_inputs(args);
+        fusion_residency::clear_inputs(args, name).map_err(ProviderExecutionError::from_source)?;
         return Ok(PreparedBuiltinCall::unobserved(
             if should_gather_sink_args(name) {
                 gather_args(args).await?

@@ -6,7 +6,7 @@ use runmat_runtime::builtins::common::gpu_helpers::{
 
 pub(super) fn shape(value: &Value, provider: &'static dyn AccelProvider) -> Option<[usize; 2]> {
     let precision = provider.precision();
-    let dims = match value {
+    let dims: &[usize] = match value {
         Value::Tensor(tensor)
             if tensor.numeric_dtype()
                 == match precision {
@@ -29,8 +29,8 @@ pub(super) fn shape(value: &Value, provider: &'static dyn AccelProvider) -> Opti
                 ProviderPrecision::F32 => NumericElementType::F32,
                 ProviderPrecision::F64 => NumericElementType::F64,
             };
-            if handle.descriptor.storage != Some(GpuTensorStorage::Real)
-                || handle.descriptor.element_type != Some(element)
+            if handle.physical().storage() != GpuTensorStorage::Real
+                || handle.physical().element_type() != element
                 || runmat_accelerate_api::handle_is_transposed(handle)
                 || !gpu_class_metadata_matches(handle, Some(precision), None, false)
                 || !exact_provider_for_handle(handle)
@@ -38,11 +38,11 @@ pub(super) fn shape(value: &Value, provider: &'static dyn AccelProvider) -> Opti
             {
                 return None;
             }
-            &handle.shape
+            handle.shape()
         }
         _ => return None,
     };
-    let [rows, cols] = dims.as_slice() else {
+    let [rows, cols] = dims else {
         return None;
     };
     rows.checked_mul(*cols)?;
