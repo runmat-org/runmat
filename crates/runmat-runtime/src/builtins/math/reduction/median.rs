@@ -651,6 +651,17 @@ fn median_logical_host(logical: LogicalArray, args: &ParsedArguments) -> Builtin
 }
 
 fn logical_value_from_reduction(tensor: Tensor) -> BuiltinResult<Value> {
+    let logical = logical_array_from_reduction(tensor)?;
+    if logical.data.len() == 1 {
+        Ok(Value::Bool(logical.data[0] != 0))
+    } else {
+        Ok(Value::LogicalArray(logical))
+    }
+}
+
+// Consume the native payload while retaining the complete reduction shape.
+// Resident restoration must not apply the host wrapper's scalar collapse.
+fn logical_array_from_reduction(tensor: Tensor) -> BuiltinResult<LogicalArray> {
     let shape = tensor.shape.clone();
     let storage = tensor
         .into_numeric_storage()
@@ -660,13 +671,7 @@ fn logical_value_from_reduction(tensor: Tensor) -> BuiltinResult<Value> {
             "median: logical reduction did not preserve its logical payload",
         ));
     };
-    if values.len() == 1 {
-        Ok(Value::Bool(values[0] != 0))
-    } else {
-        LogicalArray::new(values, shape)
-            .map(Value::LogicalArray)
-            .map_err(median_internal_error)
-    }
+    LogicalArray::new(values, shape).map_err(median_internal_error)
 }
 
 fn logical_tensor_from_gathered(tensor: Tensor) -> BuiltinResult<Tensor> {
@@ -677,21 +682,6 @@ fn logical_tensor_from_gathered(tensor: Tensor) -> BuiltinResult<Tensor> {
         .map(|value| u8::from(value != 0.0))
         .collect();
     Tensor::new_integer(IntegerStorage::U8(values), shape)
-        .map_err(|error| median_internal_error(format!("median: {error}")))
-}
-
-fn logical_value_from_reduction(tensor: &Tensor) -> BuiltinResult<Value> {
-    let values = tensor
-        .integer_storage()
-        .and_then(|storage| match storage {
-            IntegerStorage::U8(values) => Some(values.clone()),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            median_internal_error("median: logical GPU reduction did not preserve logical values")
-        })?;
-    LogicalArray::new(values, tensor.shape.clone())
-        .map(Value::LogicalArray)
         .map_err(|error| median_internal_error(format!("median: {error}")))
 }
 
@@ -728,7 +718,7 @@ async fn median_gpu(
         args.weights.as_ref(),
     )?;
     let result = if is_logical {
-        logical_value_from_reduction(&reduced)?
+        Value::LogicalArray(logical_array_from_reduction(reduced)?)
     } else {
         Value::Tensor(reduced)
     };
@@ -1483,6 +1473,34 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerStorage, NumericStorage};
+
+    #[test]
+    fn logical_reduction_payload_preserves_resident_shape_and_host_scalar_policy() {
+        for (values, shape) in [
+            (vec![1], vec![1, 1, 1]),
+            (vec![0, 1], vec![1, 2, 1]),
+            (vec![], vec![0, 1, 1]),
+        ] {
+            let reduced =
+                || Tensor::new_integer(IntegerStorage::U8(values.clone()), shape.clone()).unwrap();
+            let logical = logical_array_from_reduction(reduced()).unwrap();
+            assert_eq!(logical.shape, shape);
+            assert_eq!(logical.data.as_slice(), values.as_slice());
+            match logical_value_from_reduction(reduced()).unwrap() {
+                Value::Bool(bit) => {
+                    assert_eq!(values.len(), 1);
+                    assert_eq!(bit, values[0] != 0);
+                }
+                Value::LogicalArray(array) => {
+                    assert_ne!(values.len(), 1);
+                    assert_eq!(array.shape, shape);
+                    assert_eq!(array.data.as_slice(), values.as_slice());
+                }
+                other => panic!("unexpected logical reduction: {other:?}"),
+            }
+        }
+        assert!(logical_array_from_reduction(Tensor::new(vec![1.0], vec![1, 1]).unwrap()).is_err());
+    }
 
     #[test]
     fn median_type_reduces_first_dim() {
