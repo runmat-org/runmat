@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn trig_execution_conversion_and_range_failures_are_terminal_and_typed() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for (name, hook) in [
         ("sin", "unary_sin"),
         ("cos", "unary_cos"),

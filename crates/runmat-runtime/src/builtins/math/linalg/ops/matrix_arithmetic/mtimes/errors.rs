@@ -24,7 +24,9 @@ pub(super) fn internal(message: impl Into<String>) -> RuntimeError {
 }
 
 pub(super) fn map_control_flow(error: RuntimeError) -> RuntimeError {
-    let mut builder = build_runtime_error(error.message()).with_builtin(NAME);
+    let mut builder = build_runtime_error(error.message())
+        .with_builtin(NAME)
+        .with_gpu_gather_retry(error.gpu_gather_retry);
     if let Some(identifier) = error.identifier() {
         builder = builder.with_identifier(identifier.to_string());
     }

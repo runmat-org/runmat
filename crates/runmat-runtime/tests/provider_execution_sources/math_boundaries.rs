@@ -136,7 +136,8 @@ fn check_case(
     assert_eq!(
         error.gpu_gather_retry,
         runmat_runtime::GpuGatherRetry::Never,
-        "{name}"
+        "{name} targeting {hook}: {error:?}; trace={:?}",
+        provider.trace.lock().unwrap()
     );
     let mut source: &(dyn std::error::Error + 'static) = &error;
     let mut carrier = false;
