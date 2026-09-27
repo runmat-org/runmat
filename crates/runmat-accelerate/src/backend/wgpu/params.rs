@@ -685,7 +685,6 @@ pub const MATMUL_EPILOGUE_FLAG_CLAMP_MIN: u32 = 1 << 4;
 pub const MATMUL_EPILOGUE_FLAG_CLAMP_MAX: u32 = 1 << 5;
 pub const MATMUL_EPILOGUE_FLAG_POW: u32 = 1 << 6;
 pub const MATMUL_EPILOGUE_FLAG_DIAG_WRITE: u32 = 1 << 7;
-pub const MATMUL_EPILOGUE_FLAG_ORDERED_AFFINE: u32 = 1 << 8;
 pub const MATMUL_EPILOGUE_FLAG_MULTIPLY: u32 = 1 << 9;
 pub const MATMUL_EPILOGUE_FLAG_ADD: u32 = 1 << 10;
 pub const MATMUL_EPILOGUE_FLAG_SUBTRACT: u32 = 1 << 11;
@@ -693,31 +692,27 @@ pub const MATMUL_EPILOGUE_FLAG_SUBTRACT_FROM: u32 = 1 << 12;
 
 pub(crate) fn matmul_affine_params(ep: &runmat_accelerate_api::MatmulEpilogue) -> (u32, f64, f64) {
     use runmat_accelerate_api::{MatmulAffine, MatmulOffset};
-    match ep.affine {
-        MatmulAffine::Legacy => (0, ep.alpha, ep.beta),
-        MatmulAffine::Ordered { scale, offset } => {
-            let mut flags = MATMUL_EPILOGUE_FLAG_ORDERED_AFFINE;
-            if scale.is_some() {
-                flags |= MATMUL_EPILOGUE_FLAG_MULTIPLY;
-            }
-            let value = match offset {
-                None => 0.0,
-                Some(MatmulOffset::Add(v)) => {
-                    flags |= MATMUL_EPILOGUE_FLAG_ADD;
-                    v
-                }
-                Some(MatmulOffset::Subtract(v)) => {
-                    flags |= MATMUL_EPILOGUE_FLAG_SUBTRACT;
-                    v
-                }
-                Some(MatmulOffset::SubtractFrom(v)) => {
-                    flags |= MATMUL_EPILOGUE_FLAG_SUBTRACT_FROM;
-                    v
-                }
-            };
-            (flags, scale.unwrap_or(1.0), value)
-        }
+    let MatmulAffine { scale, offset } = ep.affine;
+    let mut flags = 0;
+    if scale.is_some() {
+        flags |= MATMUL_EPILOGUE_FLAG_MULTIPLY;
     }
+    let value = match offset {
+        None => 0.0,
+        Some(MatmulOffset::Add(v)) => {
+            flags |= MATMUL_EPILOGUE_FLAG_ADD;
+            v
+        }
+        Some(MatmulOffset::Subtract(v)) => {
+            flags |= MATMUL_EPILOGUE_FLAG_SUBTRACT;
+            v
+        }
+        Some(MatmulOffset::SubtractFrom(v)) => {
+            flags |= MATMUL_EPILOGUE_FLAG_SUBTRACT_FROM;
+            v
+        }
+    };
+    (flags, scale.unwrap_or(1.0), value)
 }
 
 #[repr(C, align(16))]

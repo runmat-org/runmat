@@ -9834,11 +9834,11 @@ impl AccelProvider for InProcessProvider {
                 }
             }
 
-            // Apply epilogue: alpha/beta, then per-row/col scales (matches GPU epilogue ordering)
+            // Preserve each ordered affine operation, then row/column scales.
             for j in 0..cols {
                 for i in 0..rows {
                     let idx = i + j * rows;
-                    let mut v = ep.affine.apply(data[idx], ep.alpha, ep.beta);
+                    let mut v = ep.affine.apply(data[idx]);
                     if let Some(ref rs) = row_scale {
                         let s = *rs.get(i).unwrap_or(&1.0);
                         v = match ep.row_op {
@@ -9854,12 +9854,9 @@ impl AccelProvider for InProcessProvider {
                         };
                     }
                     if let Some(min_v) = ep.clamp_min {
-                        v = if matches!(
-                            ep.affine,
-                            runmat_accelerate_api::MatmulAffine::Ordered { .. }
-                        ) {
-                            if v.is_nan() {
-                                v
+                        v = {
+                            if v.is_nan() || min_v.is_nan() {
+                                f64::NAN
                             } else if min_v > v
                                 || (min_v == 0.0 && v == 0.0 && min_v.is_sign_positive())
                             {
@@ -9867,17 +9864,12 @@ impl AccelProvider for InProcessProvider {
                             } else {
                                 v
                             }
-                        } else {
-                            v.max(min_v)
                         };
                     }
                     if let Some(max_v) = ep.clamp_max {
-                        v = if matches!(
-                            ep.affine,
-                            runmat_accelerate_api::MatmulAffine::Ordered { .. }
-                        ) {
-                            if v.is_nan() {
-                                v
+                        v = {
+                            if v.is_nan() || max_v.is_nan() {
+                                f64::NAN
                             } else if max_v < v
                                 || (max_v == 0.0 && v == 0.0 && max_v.is_sign_negative())
                             {
@@ -9885,16 +9877,10 @@ impl AccelProvider for InProcessProvider {
                             } else {
                                 v
                             }
-                        } else {
-                            v.min(max_v)
                         };
                     }
                     if let Some(pow_v) = ep.pow_exponent {
-                        v = if matches!(
-                            ep.affine,
-                            runmat_accelerate_api::MatmulAffine::Ordered { .. }
-                        ) && (v.is_nan() || pow_v.is_nan())
-                        {
+                        v = if v.is_nan() || pow_v.is_nan() {
                             f64::NAN
                         } else {
                             v.powf(pow_v)

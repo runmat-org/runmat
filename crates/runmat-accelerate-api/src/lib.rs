@@ -4705,7 +4705,7 @@ pub struct ProviderCrossentropyResult {
 /// Descriptor for GEMM epilogues applied to `C = A * B` before storing to `C`.
 ///
 /// Supported operations:
-/// - Scale by `alpha` and add scalar `beta`.
+/// - Apply the explicitly ordered scalar affine operations.
 /// - Multiply output by per-row and/or per-column scale vectors (broadcasted).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScaleOp {
@@ -4714,14 +4714,11 @@ pub enum ScaleOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MatmulEpilogue {
-    /// Ordered mode is authoritative; alpha/beta are compatibility-only then.
+    /// Exact ordered arithmetic. Missing phases perform no arithmetic.
     #[serde(default)]
     pub affine: MatmulAffine,
-    /// Scalar multiply applied to each output element.
-    pub alpha: f64,
-    /// Scalar add applied to each output element after scaling.
-    pub beta: f64,
     /// Optional per-row scale (length m). When present, output[row, col] *= row_scale[row].
     pub row_scale: Option<GpuTensorHandle>,
     /// Optional per-column scale (length n). When present, output[row, col] *= col_scale[col].
@@ -4747,9 +4744,7 @@ pub struct MatmulEpilogue {
 impl MatmulEpilogue {
     pub fn noop() -> Self {
         Self {
-            affine: MatmulAffine::Legacy,
-            alpha: 1.0,
-            beta: 0.0,
+            affine: MatmulAffine::default(),
             row_scale: None,
             col_scale: None,
             row_op: ScaleOp::Multiply,
@@ -4761,10 +4756,9 @@ impl MatmulEpilogue {
         }
     }
     pub fn is_noop(&self) -> bool {
-        (match self.affine {
-            MatmulAffine::Legacy => self.alpha == 1.0 && self.beta == 0.0,
-            MatmulAffine::Ordered { scale, offset } => scale.is_none() && offset.is_none(),
-        }) && self.row_scale.is_none()
+        self.affine.scale.is_none()
+            && self.affine.offset.is_none()
+            && self.row_scale.is_none()
             && self.col_scale.is_none()
             && self.clamp_min.is_none()
             && self.clamp_max.is_none()

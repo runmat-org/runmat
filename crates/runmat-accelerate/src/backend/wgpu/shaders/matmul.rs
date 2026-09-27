@@ -350,8 +350,7 @@ fn main(
     }
     let flags = ep.flags;
     var val = acc;
-    if ((flags & 256u) == 0u) { val = acc * ep.alpha + ep.beta; }
-    else {
+    {
         if ((flags & 512u) != 0u) { val = val * ep.alpha; }
         if ((flags & 1024u) != 0u) { val = val + ep.beta; }
         if ((flags & 2048u) != 0u) { val = val - ep.beta; }
@@ -366,16 +365,13 @@ fn main(
         if ((flags & 8u) != 0u) { val = val / s; } else { val = val * s; }
     }
     if ((flags & 16u) != 0u) {
-        if ((flags & 256u) != 0u) { val = rm_matmul_max(val, ep.clamp_min); }
-        else { val = max(val, ep.clamp_min); }
+        val = rm_matmul_max(val, ep.clamp_min);
     }
     if ((flags & 32u) != 0u) {
-        if ((flags & 256u) != 0u) { val = rm_matmul_min(val, ep.clamp_max); }
-        else { val = min(val, ep.clamp_max); }
+        val = rm_matmul_min(val, ep.clamp_max);
     }
     if ((flags & 64u) != 0u) {
-        if ((flags & 256u) != 0u) { val = @REAL_POWER@(val, ep.pow_exponent); }
-        else { val = pow(val, ep.pow_exponent); }
+        val = @REAL_POWER@(val, ep.pow_exponent);
     }
     let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = val;
@@ -448,8 +444,7 @@ fn main(
     }
     let flags = ep.flags;
     var val = acc;
-    if ((flags & 256u) == 0u) { val = acc * ep.alpha + ep.beta; }
-    else {
+    {
         if ((flags & 512u) != 0u) { val = val * ep.alpha; }
         if ((flags & 1024u) != 0u) { val = val + ep.beta; }
         if ((flags & 2048u) != 0u) { val = val - ep.beta; }
@@ -464,16 +459,13 @@ fn main(
         if ((flags & 8u) != 0u) { val = val / s; } else { val = val * s; }
     }
     if ((flags & 16u) != 0u) {
-        if ((flags & 256u) != 0u) { val = rm_matmul_max(val, ep.clamp_min); }
-        else { val = max(val, ep.clamp_min); }
+        val = rm_matmul_max(val, ep.clamp_min);
     }
     if ((flags & 32u) != 0u) {
-        if ((flags & 256u) != 0u) { val = rm_matmul_min(val, ep.clamp_max); }
-        else { val = min(val, ep.clamp_max); }
+        val = rm_matmul_min(val, ep.clamp_max);
     }
     if ((flags & 64u) != 0u) {
-        if ((flags & 256u) != 0u) { val = @REAL_POWER@(val, ep.pow_exponent); }
-        else { val = pow(val, ep.pow_exponent); }
+        val = @REAL_POWER@(val, ep.pow_exponent);
     }
     let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = val;

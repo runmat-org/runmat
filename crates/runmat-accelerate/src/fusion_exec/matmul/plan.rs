@@ -263,7 +263,7 @@ impl AdmittedMatmul {
 
     pub fn descriptor(&self, handles: &HashMap<ValueId, GpuTensorHandle>) -> MatmulEpilogue {
         let mut descriptor = MatmulEpilogue::noop();
-        descriptor.affine = MatmulAffine::Ordered {
+        descriptor.affine = MatmulAffine {
             scale: self.scale,
             offset: self.offset,
         };
