@@ -840,7 +840,7 @@ mod tests {
         let err = block_on(matfile_subsref(
             object,
             "()".to_string(),
-            Value::String("A".into()),
+            Value::Cell(runmat_value::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
         ))
         .expect_err("partial indexing should fail");
         assert!(err.message().contains("whole-variable"));
