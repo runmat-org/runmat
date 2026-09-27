@@ -8,12 +8,14 @@ use crate::bytecode::program::FunctionBytecode;
 use crate::bytecode::{Bytecode, FunctionRegistry};
 use crate::compiler::{CompileError, Compiler};
 use crate::layout::derive_layout;
-#[cfg(feature = "native-accel")]
-use runmat_builtins::{builtin_functions, AccelTag, BuiltinSemanticKind};
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
 use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
 use std::collections::{HashMap, HashSet};
+
+#[cfg(all(test, feature = "native-accel"))]
+#[path = "compile/fusion_admission_tests.rs"]
+mod fusion_admission_tests;
 
 pub fn compile(
     hir: &HirAssembly,
@@ -354,45 +356,7 @@ fn candidates_touch_accel_capable_instruction(
 
 #[cfg(all(feature = "native-accel", test))]
 fn instr_is_accel_capable(instr: &Instr) -> bool {
-    match instr {
-        Instr::Add
-        | Instr::Sub
-        | Instr::Mul
-        | Instr::RightDiv
-        | Instr::LeftDiv
-        | Instr::Pow
-        | Instr::Neg
-        | Instr::UPlus
-        | Instr::Transpose
-        | Instr::ConjugateTranspose
-        | Instr::ElemMul
-        | Instr::ElemDiv
-        | Instr::ElemPow
-        | Instr::ElemLeftDiv
-        | Instr::LessEqual
-        | Instr::Less
-        | Instr::Greater
-        | Instr::GreaterEqual
-        | Instr::Equal
-        | Instr::NotEqual => true,
-        Instr::CallBuiltinMulti(name, _, _) => builtin_functions()
-            .iter()
-            .find(|func| func.name == name.as_str())
-            .map(|func| {
-                func.accel_tags.iter().any(|tag| {
-                    matches!(
-                        tag,
-                        AccelTag::Unary
-                            | AccelTag::Elementwise
-                            | AccelTag::Reduction
-                            | AccelTag::MatMul
-                            | AccelTag::Transpose
-                    )
-                })
-            })
-            .unwrap_or(false),
-        _ => false,
-    }
+    instr_fusion_signal_kind(instr).is_some()
 }
 
 #[cfg(feature = "native-accel")]
@@ -719,32 +683,9 @@ fn instr_fusion_signal_kind(instr: &Instr) -> Option<crate::bytecode::FusionInst
         | Instr::GreaterEqual
         | Instr::Equal
         | Instr::NotEqual => Some(crate::bytecode::FusionInstructionKind::Elementwise),
-        Instr::CallBuiltinMulti(name, _, _) => builtin_functions()
-            .iter()
-            .find(|func| func.name == name.as_str())
-            .and_then(|func| {
-                let has_matmul = func
-                    .accel_tags
-                    .iter()
-                    .any(|tag| matches!(tag, AccelTag::MatMul));
-                if has_matmul {
-                    return Some(crate::bytecode::FusionInstructionKind::Matmul);
-                }
-                let has_reduction = func
-                    .accel_tags
-                    .iter()
-                    .any(|tag| matches!(tag, AccelTag::Reduction));
-                if has_reduction {
-                    return Some(crate::bytecode::FusionInstructionKind::Reduction);
-                }
-                let has_elementwise = func.accel_tags.iter().any(|tag| {
-                    matches!(
-                        tag,
-                        AccelTag::Unary | AccelTag::Elementwise | AccelTag::Transpose
-                    )
-                });
-                has_elementwise.then_some(crate::bytecode::FusionInstructionKind::Elementwise)
-            }),
+        Instr::CallBuiltinMulti(name, arguments, outputs) => {
+            crate::accel::fusion_declaration::call_kind(name, *arguments, *outputs)
+        }
         _ => None,
     }
 }
@@ -767,16 +708,38 @@ fn infer_semantic_fusion_kind(
 }
 
 #[cfg(feature = "native-accel")]
+fn mir_call_has_fusion_signal(call: &runmat_mir::MirCall) -> bool {
+    use runmat_hir::{CallableIdentity, RequestedOutputCount};
+    use runmat_mir::{AsyncBehaviorFact, MirCallArg, MirCallee};
+
+    if call.purity != runmat_builtins::BuiltinPurity::Pure
+        || call.effects != runmat_builtins::BuiltinEffects::none()
+        || call.workspace_effect.is_some()
+        || call.environment_effect.is_some()
+        || call.workspace_first_name.is_some()
+        || call.async_behavior == AsyncBehaviorFact::RequiresAsyncRuntime
+        || !matches!(
+            call.requested_outputs,
+            RequestedOutputCount::One | RequestedOutputCount::Exactly(1)
+        )
+        || !call
+            .args
+            .iter()
+            .all(|arg| matches!(arg, MirCallArg::Single(_)))
+    {
+        return false;
+    }
+    let MirCallee::Static(CallableIdentity::Builtin(identity)) = &call.callee else {
+        return false;
+    };
+    crate::accel::fusion_declaration::call_kind(&identity.0, call.args.len(), 1).is_some()
+}
+
+#[cfg(feature = "native-accel")]
 fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
     match value {
         MirRvalue::Unary(_, _) | MirRvalue::Binary(_, _, _) => true,
-        MirRvalue::Call(call) => matches!(
-            call.semantic_kind,
-            BuiltinSemanticKind::Elementwise
-                | BuiltinSemanticKind::Reduction
-                | BuiltinSemanticKind::LinearAlgebra
-                | BuiltinSemanticKind::ShapeTransform(_)
-        ),
+        MirRvalue::Call(call) => mir_call_has_fusion_signal(call),
         MirRvalue::ShortCircuit { .. } => false,
         MirRvalue::Use(_)
         | MirRvalue::Range { .. }

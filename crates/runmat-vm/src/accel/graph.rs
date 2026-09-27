@@ -67,22 +67,16 @@ impl<'a> GraphBuilder<'a> {
                 category: AccelOpCategory::Other,
                 tags: Vec::new(),
             };
-            if entry.placement.fusion == runmat_builtins::BuiltinFusionPolicy::Candidate {
-                if let [binding] = entry.bindings {
-                    if let Some(spec) =
-                        runmat_runtime::builtins::common::spec::canonical_fusion_spec(
-                            entry.binding_identity(binding),
-                        )
-                    {
-                        if spec.elementwise.is_some() {
-                            info.category = AccelOpCategory::Elementwise;
-                            info.tags.push(AccelGraphTag::Elementwise);
-                        } else if spec.reduction.is_some() {
-                            info.category = AccelOpCategory::Reduction;
-                            info.tags.push(AccelGraphTag::Reduction);
-                        }
-                    }
+            match super::fusion_declaration::canonical_kind(entry, None) {
+                Some(crate::bytecode::FusionInstructionKind::Elementwise) => {
+                    info.category = AccelOpCategory::Elementwise;
+                    info.tags.push(AccelGraphTag::Elementwise);
                 }
+                Some(crate::bytecode::FusionInstructionKind::Reduction) => {
+                    info.category = AccelOpCategory::Reduction;
+                    info.tags.push(AccelGraphTag::Reduction);
+                }
+                Some(crate::bytecode::FusionInstructionKind::Matmul) | None => {}
             }
             builtin_cache.insert(entry.identity.name.to_ascii_lowercase(), info);
         }
