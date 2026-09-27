@@ -40,7 +40,7 @@ use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::perf::scatter3_lod_stride;
 use super::plotting_error;
 use super::point::{
-    convert_rgb_color_matrix, convert_scalar_color_values_async, convert_size_vector,
+    convert_rgb_color_matrix_async, convert_scalar_color_values_async, convert_size_vector_async,
     default_marker_diameter_px, map_scalar_values_to_colors, marker_area_points2_to_diameter_px,
     validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs, PointColorArg, PointGpuColor,
     PointSizeArg,
@@ -837,7 +837,8 @@ async fn resolve_scatter3_style(
                 style.gpu_sizes = Some(handle.clone());
             }
             _ => {
-                style.per_point_sizes = Some(convert_size_vector(value, point_count, context)?);
+                style.per_point_sizes =
+                    Some(convert_size_vector_async(value, point_count, context).await?);
             }
         }
     }
@@ -860,7 +861,7 @@ async fn resolve_scatter3_style(
             }
             _ => {
                 style.per_point_colors =
-                    Some(convert_rgb_color_matrix(value, point_count, context)?);
+                    Some(convert_rgb_color_matrix_async(value, point_count, context).await?);
             }
         },
         _ => {}
@@ -1155,7 +1156,8 @@ async fn ensure_scatter3_host_metadata(
         if let Some(handle) = style.gpu_sizes.clone() {
             let tensor = gather_tensor_from_gpu_async(handle, "scatter3").await?;
             let value = Value::Tensor(tensor);
-            style.per_point_sizes = Some(convert_size_vector(&value, point_count, "scatter3")?);
+            style.per_point_sizes =
+                Some(convert_size_vector_async(&value, point_count, "scatter3").await?);
         }
     }
     if style.per_point_colors.is_none() {
@@ -1163,7 +1165,7 @@ async fn ensure_scatter3_host_metadata(
             let tensor = gather_tensor_from_gpu_async(gpu_color.handle.clone(), "scatter3").await?;
             let value = Value::Tensor(tensor);
             style.per_point_colors =
-                Some(convert_rgb_color_matrix(&value, point_count, "scatter3")?);
+                Some(convert_rgb_color_matrix_async(&value, point_count, "scatter3").await?);
         }
     }
     Ok(())
