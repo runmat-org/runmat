@@ -98,6 +98,15 @@ async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
     )
     .await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "tanh")?;
+    super::inverse_helpers::preparation::unary(
+        runmat_builtins::TANH_CATALOG_ENTRY.identity,
+        value,
+        tanh_admitted,
+    )
+    .await
+}
+
+async fn tanh_admitted(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => tanh_gpu(handle).await,
         Value::Complex(re, im) => {

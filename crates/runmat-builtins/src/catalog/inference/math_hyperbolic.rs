@@ -80,5 +80,13 @@ pub(super) fn infer_hyperbolic(
             output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
         }
     }
+    if matches!(input.kind, ValueKindFact::Numeric(numeric)
+        if matches!(numeric.class, NumericClass::Single | NumericClass::Double)
+            && numeric.domain != NumericDomain::Complex)
+    {
+        // Automatic admitted preparation may select host or provider execution.
+        // Class and shape are invariant; input placement is not output proof.
+        output.residency = runmat_types::ResidencyFact::Unknown;
+    }
     finish_fixed(entry, request, output, diagnostics)
 }

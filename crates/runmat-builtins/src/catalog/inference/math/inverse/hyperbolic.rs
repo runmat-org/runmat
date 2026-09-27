@@ -136,5 +136,15 @@ pub(super) fn infer_inverse_hyperbolic(
             output = ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
         }
     }
+    if function == InverseHyperbolicFunction::Sine
+        && matches!(input.kind, ValueKindFact::Numeric(numeric)
+            if matches!(numeric.class, NumericClass::Single | NumericClass::Double)
+                && numeric.domain != NumericDomain::Complex)
+    {
+        output.residency = runmat_types::ResidencyFact::Unknown;
+    }
+    if function == InverseHyperbolicFunction::Sine && matches!(input.kind, ValueKindFact::Unknown) {
+        output.residency = runmat_types::ResidencyFact::Unknown;
+    }
     finish_fixed(entry, request, output, diagnostics)
 }

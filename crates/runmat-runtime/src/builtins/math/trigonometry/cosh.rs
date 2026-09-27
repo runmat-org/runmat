@@ -98,6 +98,15 @@ async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
     )
     .await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "cosh")?;
+    super::inverse_helpers::preparation::unary(
+        runmat_builtins::COSH_CATALOG_ENTRY.identity,
+        value,
+        cosh_admitted,
+    )
+    .await
+}
+
+async fn cosh_admitted(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => cosh_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(

@@ -2,6 +2,45 @@ use crate::*;
 use runmat_types::EffectKind;
 
 #[test]
+fn admitted_hyperbolic_float_facts_keep_class_shape_but_not_input_placement() {
+    use runmat_types::*;
+    for entry in [
+        &SINH_CATALOG_ENTRY,
+        &COSH_CATALOG_ENTRY,
+        &ASINH_CATALOG_ENTRY,
+        &TANH_CATALOG_ENTRY,
+    ] {
+        assert!(validate_builtin_preparation(entry).is_empty());
+        let BuiltinOperandPreparation::Forms(forms) = entry.placement.preparation else {
+            panic!("admitted unary form")
+        };
+        assert_eq!(forms[0].data_arguments, &[0]);
+        assert_eq!(forms[0].operation, BuiltinPreparationOperation::Unary);
+        for class in [NumericClass::Single, NumericClass::Double] {
+            let mut input = ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class,
+                    domain: NumericDomain::Real,
+                }),
+                ShapeFact::from(vec![Some(0), Some(2), Some(3)]),
+                StorageFact::Dense,
+            );
+            input.residency = ResidencyFact::Host;
+            let request = CallRequest {
+                arguments: vec![input.clone()],
+                literals: LiteralContext::new(vec![LiteralValue::Unknown]),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+            };
+            let result = crate::catalog::inference::infer_catalog_call(entry, &request);
+            assert!(result.diagnostics.is_empty());
+            assert_eq!(result.outputs[0].kind, input.kind);
+            assert_eq!(result.outputs[0].shape, input.shape);
+            assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
+        }
+    }
+}
+
+#[test]
 fn trigonometric_provider_routes_declare_suspension_and_fixed_output_errors() {
     for entry in [
         &ACOS_CATALOG_ENTRY,

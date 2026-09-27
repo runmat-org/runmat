@@ -5,6 +5,7 @@ use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::{build_runtime_error, BuiltinResult};
 
 pub(super) mod resident_range;
+pub(super) mod preparation;
 pub(super) mod resident_complex;
 
 pub(crate) fn ensure_input_extensions(

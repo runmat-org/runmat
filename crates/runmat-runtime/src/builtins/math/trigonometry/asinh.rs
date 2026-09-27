@@ -92,6 +92,15 @@ async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
         &ASINH_CHARACTER_INPUT_EXTENSION,
     )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "asinh")?;
+    super::inverse_helpers::preparation::unary(
+        runmat_builtins::ASINH_CATALOG_ENTRY.identity,
+        value,
+        asinh_admitted,
+    )
+    .await
+}
+
+async fn asinh_admitted(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => asinh_gpu(handle).await,
         Value::Complex(re, im) => Ok(complex_asinh_scalar(re, im)),

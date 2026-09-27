@@ -96,6 +96,15 @@ async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
     )
     .await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "sinh")?;
+    super::inverse_helpers::preparation::unary(
+        runmat_builtins::SINH_CATALOG_ENTRY.identity,
+        value,
+        sinh_admitted,
+    )
+    .await
+}
+
+async fn sinh_admitted(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => sinh_gpu(handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(
