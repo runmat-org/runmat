@@ -1,6 +1,11 @@
 use std::ffi::c_void;
 
-use runmat_accelerate_api::{NativeDeviceApi, NativeDeviceComponent, NativeDeviceContextGuard};
+use runmat_accelerate_api::{NativeDeviceApi, NativeDeviceComponent};
+
+mod context;
+use context::NativeInvocationContext;
+#[cfg(test)]
+mod tests;
 
 use super::abi::{MexCallState, MexCallStateInner};
 use crate::{MxArray, MxClassId};
@@ -56,11 +61,7 @@ pub(super) unsafe extern "C" fn context_enter(host: *mut c_void) -> *mut c_void 
             "GPU MEX requires a registered CUDA provider; WGPU storage is not CUDA memory"
                 .to_string()
         })
-        .and_then(|provider| {
-            provider
-                .enter_native_device_context()
-                .map_err(|error| error.to_string())
-        });
+        .and_then(NativeInvocationContext::enter);
     match result {
         Ok(guard) => Box::into_raw(Box::new(guard)).cast(),
         Err(error) => {
@@ -76,32 +77,12 @@ pub(super) unsafe extern "C" fn context_leave(host: *mut c_void, guard: *mut c_v
     if guard.is_null() {
         return 0;
     }
-    let synchronize = runmat_accelerate_api::provider_for_native_device(NativeDeviceApi::Cuda)
-        .ok_or_else(|| "CUDA provider became unavailable during MEX invocation".to_string())
-        .and_then(|provider| {
-            provider
-                .synchronize_native_device()
-                .map_err(|error| error.to_string())
-        });
     // SAFETY: context_enter returns exactly one boxed guard to the C support
     // layer, which calls context_leave once on every invocation exit path.
-    let guard = unsafe { Box::from_raw(guard.cast::<NativeDeviceContextGuard>()) };
-    let leave = guard.leave().map_err(|error| error.to_string());
-    match (synchronize, leave) {
-        (Ok(()), Ok(())) => 0,
-        (synchronize, leave) => {
-            let error = match (synchronize.err(), leave.err()) {
-                (Some(synchronize), Some(leave)) => {
-                    format!(
-                        "CUDA synchronization failed: {synchronize}; context exit failed: {leave}"
-                    )
-                }
-                (Some(synchronize), None) => {
-                    format!("CUDA synchronization failed: {synchronize}")
-                }
-                (None, Some(leave)) => format!("CUDA context exit failed: {leave}"),
-                (None, None) => unreachable!("matched at least one CUDA teardown failure"),
-            };
+    let guard = unsafe { Box::from_raw(guard.cast::<NativeInvocationContext>()) };
+    match guard.leave() {
+        Ok(()) => 0,
+        Err(error) => {
             if let Some(mut state) = state(host) {
                 state.fail(error);
             }
