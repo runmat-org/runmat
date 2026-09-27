@@ -1,6 +1,5 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     builtin_function_by_name, BuiltinIntegerOutputClassRule, GAUSPULS_INTEGER_CAPABILITIES,
 };

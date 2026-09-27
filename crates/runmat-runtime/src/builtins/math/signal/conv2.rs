@@ -403,7 +403,12 @@ fn restore_to_owner(
     match value {
         Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
             .and_then(gpu_helpers::resident_gpu_value)
-            .map_err(|error| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, error)),
+            .map_err(|error| {
+                let mut wrapped =
+                    conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, error.message());
+                wrapped.source = Some(Box::new(error));
+                wrapped
+            }),
         Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
             .and_then(gpu_helpers::complex_gpu_value),
         other => Ok(other),
@@ -461,11 +466,11 @@ fn try_conv2_gpu(
         return Ok(None);
     }
 
-    let lhs_dims = match conv2_dimensions(&lhs.shape) {
+    let lhs_dims = match conv2_dimensions(lhs.shape()) {
         Some(dims) => dims,
         None => return Ok(None),
     };
-    let rhs_dims = match conv2_dimensions(&rhs.shape) {
+    let rhs_dims = match conv2_dimensions(rhs.shape()) {
         Some(dims) => dims,
         None => return Ok(None),
     };

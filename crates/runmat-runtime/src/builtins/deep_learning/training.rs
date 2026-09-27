@@ -1,6 +1,5 @@
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderAdamUpdateRequest,
-    ProviderAdamUpdateResult,
+    GpuTensorHandle, GpuTensorStorage, ProviderAdamUpdateRequest, ProviderAdamUpdateResult,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{

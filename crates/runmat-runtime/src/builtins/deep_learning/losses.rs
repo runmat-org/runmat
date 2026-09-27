@@ -1127,7 +1127,7 @@ fn reduce_mask_included(
         .map(|dim| predictions.shape[dim])
         .unwrap_or(1)
         .max(1);
-    let pred_strides = column_major_strides(predictions.shape());
+    let pred_strides = column_major_strides(&predictions.shape);
     let mut included = vec![0usize; batch_count];
     let mut totals = vec![0.0; batch_count];
     for idx in 0..weighted_losses.len() {
