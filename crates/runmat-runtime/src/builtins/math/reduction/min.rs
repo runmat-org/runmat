@@ -1716,47 +1716,18 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
 
 async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<MinEvaluation> {
     let ElementwiseArgs { other, comparison } = args;
-    let integer_comparison = match comparison {
-        ComparisonMethod::Auto | ComparisonMethod::Real => {
-            crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural
-        }
-        ComparisonMethod::Abs => {
-            crate::builtins::math::reduction::integer_native::ExtremaComparison::Absolute
-        }
-    };
-    if let Some(eval) = crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
-        &value,
-        &other,
-        crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
-        integer_comparison,
-        false,
-    )
-    .map_err(|error| min_size_mismatch(format!("min: {error}")))?
-    {
-        return Ok(MinEvaluation {
-            values: eval.values,
-            indices: eval.indices,
-        });
-    }
-    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&value)
-        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&other)
-    {
-        return Err(min_invalid_input(
-            "min: integer pairwise inputs require the same integer class or a scalar double",
-        ));
-    }
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             if let Some(eval) = elementwise_min_gpu_pair(&handle_a, &handle_b, comparison).await? {
                 return Ok(eval);
             }
             let ta = super::extrema_provider::ExtremaKind::Min
-                .gather_tensor(&handle_a)
+                .gather(&handle_a)
                 .await?;
             let tb = super::extrema_provider::ExtremaKind::Min
-                .gather_tensor(&handle_b)
+                .gather(&handle_b)
                 .await?;
-            elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), comparison)
+            elementwise_real_or_complex(ta, tb, comparison)
         }
         (Value::GpuTensor(handle), other) => {
             if let Some(eval) = elementwise_min_gpu_scalar_left(&handle, &other, comparison).await?
@@ -1764,9 +1735,9 @@ async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                 return Ok(eval);
             }
             let t = super::extrema_provider::ExtremaKind::Min
-                .gather_tensor(&handle)
+                .gather(&handle)
                 .await?;
-            elementwise_real_or_complex(Value::Tensor(t), other, comparison)
+            elementwise_real_or_complex(t, other, comparison)
         }
         (other, Value::GpuTensor(handle)) => {
             if let Some(eval) =
@@ -1775,9 +1746,9 @@ async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                 return Ok(eval);
             }
             let t = super::extrema_provider::ExtremaKind::Min
-                .gather_tensor(&handle)
+                .gather(&handle)
                 .await?;
-            elementwise_real_or_complex(other, Value::Tensor(t), comparison)
+            elementwise_real_or_complex(other, t, comparison)
         }
         (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
     }
@@ -1915,6 +1886,9 @@ async fn elementwise_min_gpu_scalar_left(
         return Ok(None);
     }
     let provider = kind.owner(a)?;
+    if !super::extrema_provider::scalar_hook_preserves_class(a, other) {
+        return Ok(None);
+    }
     let Some(scalar) = extract_scalar(other) else {
         return Ok(None);
     };
@@ -1967,6 +1941,9 @@ async fn elementwise_min_gpu_scalar_right(
         return Ok(None);
     }
     let provider = kind.owner(b)?;
+    if !super::extrema_provider::scalar_hook_preserves_class(b, other) {
+        return Ok(None);
+    }
     let Some(scalar) = extract_scalar(other) else {
         return Ok(None);
     };
@@ -2025,6 +2002,35 @@ fn elementwise_real_or_complex(
     rhs: Value,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MinEvaluation> {
+    let integer_comparison = match comparison {
+        ComparisonMethod::Auto | ComparisonMethod::Real => {
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural
+        }
+        ComparisonMethod::Abs => {
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Absolute
+        }
+    };
+    if let Some(eval) = crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
+        &lhs,
+        &rhs,
+        crate::builtins::math::reduction::integer_native::ExtremaDirection::Min,
+        integer_comparison,
+        false,
+    )
+    .map_err(|error| min_size_mismatch(format!("min: {error}")))?
+    {
+        return Ok(MinEvaluation {
+            values: eval.values,
+            indices: eval.indices,
+        });
+    }
+    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&lhs)
+        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&rhs)
+    {
+        return Err(min_invalid_input(
+            "min: integer pairwise inputs require the same integer class or a scalar double",
+        ));
+    }
     if let Some(eval) = scalar_elementwise_min(&lhs, &rhs, comparison) {
         return Ok(eval);
     }

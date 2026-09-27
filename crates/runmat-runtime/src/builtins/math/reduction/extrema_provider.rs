@@ -17,6 +17,27 @@ pub(super) fn needs_typed_scalar_selection(value: &Value) -> bool {
     }
 }
 
+/// The legacy scalar hook returns the input's real floating class. Admit it
+/// only when that is also the host pairwise result class; integer comparisons
+/// need the exact integer domain, not a double scalar extraction.
+pub(super) fn scalar_hook_preserves_class(input: &GpuTensorHandle, other: &Value) -> bool {
+    use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
+    use runmat_value::NumericDType;
+    if input.view().is_logical() || input.physical().storage() != GpuTensorStorage::Real {
+        return false;
+    }
+    let scalar_class = match other {
+        Value::Num(_) | Value::Bool(_) | Value::LogicalArray(_) => NumericDType::F64,
+        Value::Tensor(tensor) => tensor.numeric_dtype(),
+        _ => return false,
+    };
+    match input.physical().element_type() {
+        NumericElementType::F32 => scalar_class == NumericDType::F32,
+        NumericElementType::F64 => matches!(scalar_class, NumericDType::F32 | NumericDType::F64),
+        _ => false,
+    }
+}
+
 macro_rules! supported {
     ($kind:expr, $operation:expr, $result:expr) => {
         match $kind.optional($operation, $result)? {
@@ -128,3 +149,6 @@ impl ExtremaKind {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod typed_fallback_tests;

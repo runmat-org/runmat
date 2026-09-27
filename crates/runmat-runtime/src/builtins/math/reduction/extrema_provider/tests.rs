@@ -115,6 +115,7 @@ impl AccelProvider for Provider {
             Ok(HostTensorOwned {
                 data: vec![0.0; input.shape().iter().product()],
                 shape: input.shape().to_vec(),
+                storage: input.physical().storage(),
             })
         })
     }

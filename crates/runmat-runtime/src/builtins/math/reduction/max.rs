@@ -1949,35 +1949,6 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
         nan_mode,
         comparison,
     } = args;
-    let integer_comparison = match comparison {
-        ComparisonMethod::Auto | ComparisonMethod::Real => {
-            crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural
-        }
-        ComparisonMethod::Abs => {
-            crate::builtins::math::reduction::integer_native::ExtremaComparison::Absolute
-        }
-    };
-    if let Some(eval) = crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
-        &value,
-        &other,
-        crate::builtins::math::reduction::integer_native::ExtremaDirection::Max,
-        integer_comparison,
-        nan_mode == ReductionNaN::Omit,
-    )
-    .map_err(|error| max_size_mismatch(format!("max: {error}")))?
-    {
-        return Ok(MaxEvaluation {
-            values: eval.values,
-            indices: eval.indices,
-        });
-    }
-    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&value)
-        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&other)
-    {
-        return Err(max_invalid_input(
-            "max: integer pairwise inputs require the same integer class or a scalar double",
-        ));
-    }
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
             if gpu_tensor_is_scalar(&handle_b) {
@@ -1991,14 +1962,9 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                         }
                     }
                     let t = super::extrema_provider::ExtremaKind::Max
-                        .gather_tensor(&handle_a)
+                        .gather(&handle_a)
                         .await?;
-                    return elementwise_real_or_complex(
-                        Value::Tensor(t),
-                        scalar,
-                        nan_mode,
-                        comparison,
-                    );
+                    return elementwise_real_or_complex(t, scalar, nan_mode, comparison);
                 }
             }
             if gpu_tensor_is_scalar(&handle_a) {
@@ -2012,14 +1978,9 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                         }
                     }
                     let t = super::extrema_provider::ExtremaKind::Max
-                        .gather_tensor(&handle_b)
+                        .gather(&handle_b)
                         .await?;
-                    return elementwise_real_or_complex(
-                        scalar,
-                        Value::Tensor(t),
-                        nan_mode,
-                        comparison,
-                    );
+                    return elementwise_real_or_complex(scalar, t, nan_mode, comparison);
                 }
             }
             if nan_mode == ReductionNaN::Include {
@@ -2030,12 +1991,12 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                 }
             }
             let ta = super::extrema_provider::ExtremaKind::Max
-                .gather_tensor(&handle_a)
+                .gather(&handle_a)
                 .await?;
             let tb = super::extrema_provider::ExtremaKind::Max
-                .gather_tensor(&handle_b)
+                .gather(&handle_b)
                 .await?;
-            elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), nan_mode, comparison)
+            elementwise_real_or_complex(ta, tb, nan_mode, comparison)
         }
         (Value::GpuTensor(handle), other) => {
             if nan_mode == ReductionNaN::Include {
@@ -2046,9 +2007,9 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                 }
             }
             let t = super::extrema_provider::ExtremaKind::Max
-                .gather_tensor(&handle)
+                .gather(&handle)
                 .await?;
-            elementwise_real_or_complex(Value::Tensor(t), other, nan_mode, comparison)
+            elementwise_real_or_complex(t, other, nan_mode, comparison)
         }
         (other, Value::GpuTensor(handle)) => {
             if nan_mode == ReductionNaN::Include {
@@ -2059,9 +2020,9 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                 }
             }
             let t = super::extrema_provider::ExtremaKind::Max
-                .gather_tensor(&handle)
+                .gather(&handle)
                 .await?;
-            elementwise_real_or_complex(other, Value::Tensor(t), nan_mode, comparison)
+            elementwise_real_or_complex(other, t, nan_mode, comparison)
         }
         (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, nan_mode, comparison),
     }
@@ -2194,6 +2155,9 @@ async fn elementwise_max_gpu_scalar_left(
         return Ok(None);
     }
     let provider = kind.owner(a)?;
+    if !super::extrema_provider::scalar_hook_preserves_class(a, other) {
+        return Ok(None);
+    }
     let Some(scalar) = extract_scalar(other) else {
         return Ok(None);
     };
@@ -2253,6 +2217,9 @@ async fn elementwise_max_gpu_scalar_right(
         return Ok(None);
     }
     let provider = kind.owner(b)?;
+    if !super::extrema_provider::scalar_hook_preserves_class(b, other) {
+        return Ok(None);
+    }
     let Some(scalar) = extract_scalar(other) else {
         return Ok(None);
     };
@@ -2317,6 +2284,14 @@ fn gpu_tensor_is_scalar(handle: &GpuTensorHandle) -> bool {
 }
 
 async fn gpu_tensor_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
+    // Only an actual real Double can enter the double scalar hook ABI. Single,
+    // integer, logical and complex resident scalars retain the typed pair route.
+    if handle.view().is_logical()
+        || handle.physical().element_type() != runmat_accelerate_api::NumericElementType::F64
+        || handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        return Ok(None);
+    }
     let tensor = super::extrema_provider::ExtremaKind::Max
         .gather_tensor(handle)
         .await?;
@@ -2341,6 +2316,35 @@ fn elementwise_real_or_complex(
     nan_mode: ReductionNaN,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MaxEvaluation> {
+    let integer_comparison = match comparison {
+        ComparisonMethod::Auto | ComparisonMethod::Real => {
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Natural
+        }
+        ComparisonMethod::Abs => {
+            crate::builtins::math::reduction::integer_native::ExtremaComparison::Absolute
+        }
+    };
+    if let Some(eval) = crate::builtins::math::reduction::integer_native::elementwise_value_extrema(
+        &lhs,
+        &rhs,
+        crate::builtins::math::reduction::integer_native::ExtremaDirection::Max,
+        integer_comparison,
+        nan_mode == ReductionNaN::Omit,
+    )
+    .map_err(|error| max_size_mismatch(format!("max: {error}")))?
+    {
+        return Ok(MaxEvaluation {
+            values: eval.values,
+            indices: eval.indices,
+        });
+    }
+    if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&lhs)
+        || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&rhs)
+    {
+        return Err(max_invalid_input(
+            "max: integer pairwise inputs require the same integer class or a scalar double",
+        ));
+    }
     if let Some(eval) = scalar_elementwise_max(&lhs, &rhs, nan_mode, comparison) {
         return Ok(eval);
     }
