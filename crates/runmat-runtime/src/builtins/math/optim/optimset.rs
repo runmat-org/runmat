@@ -399,8 +399,9 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("automatic upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
 
             let automatic_result = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
@@ -413,14 +414,17 @@ mod tests {
                     if matches!(options.fields.get("TolX"), Some(Value::Tensor(tensor)) if tensor.materialize_f64() == [3.5])
             ));
 
-            let explicit = provider
+            let explicit_input = provider
                 .upload(&HostTensorView {
                     data: &values,
                     shape: &shape,
                 })
                 .expect("explicit upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit_input
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
+            drop(explicit_input);
+            let physical = explicit.allocation_lease().downgrade();
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
@@ -441,7 +445,8 @@ mod tests {
                 })
                 .expect("mixed automatic upload");
             let mixed_automatic = mixed_automatic
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let explicit_result = block_on(optimset_builtin(vec![
                 Value::from("TolX"),
                 Value::GpuTensor(explicit),
@@ -455,6 +460,30 @@ mod tests {
                     if matches!(options.fields.get("TolX"), Some(Value::GpuTensor(_)))
                         && matches!(options.fields.get("MaxFunEvals"), Some(Value::Tensor(tensor)) if tensor.materialize_f64() == [3.5])
             ));
+            assert!(
+                physical.acquire().is_some(),
+                "returned option owns explicit payload"
+            );
+            let retained = explicit_result.clone();
+            drop(explicit_result);
+            assert!(
+                physical.acquire().is_some(),
+                "cloned option retains physical ownership"
+            );
+            let Value::Struct(options) = &retained else {
+                unreachable!()
+            };
+            let Some(Value::GpuTensor(handle)) = options.fields.get("TolX") else {
+                unreachable!()
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(handle));
+            let payload = test_support::gather(Value::GpuTensor(handle.clone())).unwrap();
+            assert_eq!(payload.materialize_f64(), vec![3.5]);
+            drop(retained);
+            assert!(
+                physical.acquire().is_none(),
+                "final returned option releases its allocation"
+            );
         });
     }
 }
