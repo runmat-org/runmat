@@ -73,7 +73,7 @@ fn matrix_dispatch_preserves_each_provider_boundary_and_owned_transpose() {
         ),
         (
             "permute",
-            vec![2, 3, 2],
+            vec![2, 3, 1],
             GpuTensorStorage::Real,
             vec!["permute"],
         ),
