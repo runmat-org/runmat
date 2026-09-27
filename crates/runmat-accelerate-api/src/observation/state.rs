@@ -11,6 +11,7 @@ struct State {
     failure: Option<ProviderObservationFailure>,
     taken: bool,
     selected_execution: Option<bool>,
+    expected_execution: Option<(u32, crate::ProviderOperationIdentity)>,
     stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     pipelines: ProviderPipelineObservations,
     waiter: Option<Waker>,
@@ -145,6 +146,7 @@ impl ProviderOperationReceipt {
                         .then_some(ProviderObservationFailure::InvalidTiming),
                     taken: false,
                     selected_execution: None,
+                    expected_execution: None,
                     stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
                     pipelines: ProviderPipelineObservations::default(),
                     waiter: None,
@@ -174,6 +176,28 @@ impl ProviderOperationReceipt {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
             } else {
                 state.selected_execution = Some(false);
+            }
+        });
+    }
+
+    /// Bind a direct body's route witness to the selected device registration
+    /// and canonical operation. Device IDs use the provider registry's existing
+    /// process-lifetime uniqueness authority; no provider pointer is retained.
+    pub fn require_provider_execution(
+        &mut self,
+        device_id: u32,
+        operation: crate::ProviderOperationIdentity,
+    ) {
+        self.0.with(|state| {
+            if state.registered != 0
+                || state.publication.is_some()
+                || state.taken
+                || state.expected_execution.is_some()
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.selected_execution = Some(false);
+                state.expected_execution = Some((device_id, operation));
             }
         });
     }
@@ -279,7 +303,9 @@ impl ProviderOperationRecorder {
     pub fn execution_disposition(&self, disposition: ProviderExecutionDisposition) {
         self.0.with(|state| match disposition {
             ProviderExecutionDisposition::SelectedProvider => {
-                if state.publication.is_none() && state.selected_execution.is_some() {
+                if state.expected_execution.is_some() {
+                    state.fail(ProviderObservationFailure::ExecutionUnproven);
+                } else if state.publication.is_none() && state.selected_execution.is_some() {
                     state.selected_execution = Some(true);
                 }
             }
@@ -288,6 +314,30 @@ impl ProviderOperationRecorder {
             }
             ProviderExecutionDisposition::Unproven => {
                 state.fail(ProviderObservationFailure::ExecutionUnproven);
+            }
+        });
+    }
+
+    /// Called only by the actual operation owner after validated execution.
+    /// Same-owner facades share the registry identity, not a vtable address.
+    /// A mismatched or missing planned route fails closed and cannot be repaired.
+    pub fn confirm_provider_execution(
+        &self,
+        device_id: u32,
+        operation: &crate::ProviderOperationIdentity,
+    ) {
+        self.0.with(|state| {
+            if state.publication.is_some()
+                || state.taken
+                || state.expected_execution.as_ref().is_none_or(
+                    |(expected_device, expected_operation)| {
+                        *expected_device != device_id || expected_operation != operation
+                    },
+                )
+            {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else if state.failure.is_none() {
+                state.selected_execution = Some(true);
             }
         });
     }
