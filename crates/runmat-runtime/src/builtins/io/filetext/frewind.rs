@@ -169,7 +169,7 @@ fn frewind_error_with_message(
 fn frewind_error_with_source(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -183,7 +183,7 @@ fn frewind_error_with_source(
 fn frewind_error_with_source_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     frewind_error_with_source(
         format!("{}: {}", error.message, detail.as_ref()),

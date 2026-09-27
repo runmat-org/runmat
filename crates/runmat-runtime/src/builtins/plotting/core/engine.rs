@@ -32,7 +32,7 @@ fn engine_error(message: impl Into<String>) -> RuntimeError {
 
 fn engine_error_with_source(
     message: impl Into<String>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     build_runtime_error(message)
         .with_identifier("RunMat:plot:EngineError")

@@ -202,7 +202,7 @@ fn sinc_error_with_message(
 fn sinc_error_with_source(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)

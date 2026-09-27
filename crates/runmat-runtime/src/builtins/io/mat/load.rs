@@ -319,7 +319,7 @@ fn load_error_with(
 fn load_error_with_source(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)

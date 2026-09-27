@@ -2261,7 +2261,7 @@ mod imp {
 
     fn io_error<E>(builtin: &'static str, message: impl Into<String>, source: E) -> RuntimeError
     where
-        E: std::error::Error + Send + Sync + 'static,
+        E: crate::runtime_error::RuntimeErrorSourceBound,
     {
         let mut builder = build_runtime_error(message)
             .with_builtin(builtin)

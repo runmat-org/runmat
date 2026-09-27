@@ -618,7 +618,7 @@ fn print_error_with_message(
 fn print_error_with_source(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)

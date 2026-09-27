@@ -2913,7 +2913,7 @@ fn embedding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeE
 fn embedding_error_with_source(
     fn_name: &str,
     message: impl Into<String>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> crate::RuntimeError {
     let descriptor = match fn_name {
         "readWordEmbedding" => ERROR_READ_IO,

@@ -366,7 +366,7 @@ fn invalid(message: impl Into<String>) -> RuntimeError {
     builder.build()
 }
 
-fn map_internal(err: impl std::error::Error + Send + Sync + 'static) -> RuntimeError {
+fn map_internal(err: impl crate::runtime_error::RuntimeErrorSourceBound) -> RuntimeError {
     let mut builder = crate::build_runtime_error(format!("{}: {err}", ERROR_INTERNAL.message))
         .with_builtin(BUILTIN_NAME);
     if let Some(identifier) = ERROR_INTERNAL.identifier {
