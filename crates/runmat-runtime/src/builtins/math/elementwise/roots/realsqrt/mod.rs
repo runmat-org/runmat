@@ -29,7 +29,7 @@ async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {
         &runmat_builtins::REALSQRT_ERROR_TOO_MANY_OUTPUTS,
         "realsqrt",
     )?;
-    super::super::real_unary_preparation::execute(
+    crate::builtins::common::real_unary_preparation::execute(
         &runmat_builtins::REALSQRT_CATALOG_ENTRY,
         runmat_types::RealUnaryPredicate::Nonnegative,
         value,

@@ -9,7 +9,7 @@ use runmat_types::{RealUnaryClassification, RealUnaryPredicate};
 use runmat_value::{NumericDType, Tensor, Value};
 use std::future::Future;
 
-pub(super) async fn execute<F, Fut>(
+pub(crate) async fn execute<F, Fut>(
     entry: &'static BuiltinCatalogEntry,
     predicate: RealUnaryPredicate,
     value: Value,

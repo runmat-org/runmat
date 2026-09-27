@@ -24,7 +24,7 @@ pub(super) async fn execute_non_table(
     value: Value,
 ) -> BuiltinResult<Value> {
     super::extensions::ensure(operation, &value).await?;
-    super::super::real_unary_preparation::execute(
+    crate::builtins::common::real_unary_preparation::execute(
         operation.catalog_entry(),
         operation.real_predicate(),
         value,

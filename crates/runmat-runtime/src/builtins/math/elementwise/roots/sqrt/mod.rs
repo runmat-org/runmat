@@ -41,7 +41,7 @@ async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sqrt) {
         return Ok(symbolic);
     }
-    super::super::real_unary_preparation::execute(
+    crate::builtins::common::real_unary_preparation::execute(
         &runmat_builtins::SQRT_CATALOG_ENTRY,
         runmat_types::RealUnaryPredicate::Nonnegative,
         value,
