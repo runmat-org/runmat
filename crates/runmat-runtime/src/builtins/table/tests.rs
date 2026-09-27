@@ -889,12 +889,8 @@ fn detect_import_options_integer_num_header_lines_is_gated_before_file_access() 
 
 #[test]
 fn detect_import_options_rejects_nested_resident_input_before_provider_access() {
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let allocation = unregistered_table_allocation(vec![1, 1]);
+    let resident = Value::GpuTensor(allocation.handle.clone());
     let mut options = runmat_value::StructValue::new();
     options.fields.insert("Range".to_string(), resident);
     let error = block_on(detect_import_options_builtin(
@@ -904,6 +900,26 @@ fn detect_import_options_rejects_nested_resident_input_before_provider_access() 
     .expect_err("nested resident option must reject before gather");
     assert!(error.message().contains("resident arguments"));
     assert!(!error.message().to_ascii_lowercase().contains("provider"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+fn unregistered_table_allocation(
+    shape: Vec<usize>,
+) -> runmat_accelerate_api::test_support::TestAllocation {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            shape,
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    allocation
 }
 
 #[test]
@@ -2896,12 +2912,8 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
 
 #[test]
 fn head_strict_gpu_row_count_extension_rejects_before_provider_access() {
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 2],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let allocation = unregistered_table_allocation(vec![2, 2]);
+    let resident = Value::GpuTensor(allocation.handle.clone());
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let count_error = block_on(head_builtin(Value::Num(1.0), vec![resident]))
         .expect_err("resident row count must be gated");
@@ -2909,6 +2921,9 @@ fn head_strict_gpu_row_count_extension_rejects_before_provider_access() {
         count_error.identifier(),
         HEAD_EXTENSIONS[0].error_identifier
     );
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
@@ -2923,14 +2938,15 @@ fn head_preserves_resident_integer_class_owner_and_source() {
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
             .expect("upload exact integer source");
         let result = block_on(head_builtin(
-            crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone()),
+            crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone())
+                .expect("resident view"),
             vec![Value::Num(1.0)],
         ))
         .expect("resident head");
         let Value::GpuTensor(result) = result else {
             panic!("expected resident result")
         };
-        assert_ne!(result.buffer_id, handle.buffer_id);
+        assert!(!result.shares_allocation_with(&handle));
         assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
         assert!(runmat_accelerate_api::provider_for_handle(&result)
             .is_some_and(|owner| std::ptr::eq(owner, provider)));
@@ -2944,9 +2960,10 @@ fn head_preserves_resident_integer_class_owner_and_source() {
             downloaded.data,
             runmat_accelerate_api::HostIntegerDataOwned::U64(vec![9_007_199_254_740_993, 7])
         );
-        for output in [&result, &handle] {
-            provider.free(output).ok();
-            runmat_accelerate_api::clear_residency(output);
+        for output in [result, handle] {
+            let lease = output.allocation_lease().downgrade();
+            output.release().unwrap();
+            assert!(lease.acquire().is_none());
         }
     });
 }
@@ -2974,7 +2991,8 @@ fn head_wgpu_preserves_every_integer_class_exactly() {
         let handle =
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &source).unwrap();
         let output = block_on(head_builtin(
-            crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone()),
+            crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone())
+                .expect("resident view"),
             vec![Value::Num(1.0)],
         ))
         .expect("resident integer head");
@@ -3000,9 +3018,10 @@ fn head_wgpu_preserves_every_integer_class_exactly() {
         };
         assert_eq!(actual, expected);
         assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
-        for resident in [&output, &handle] {
-            provider.free(resident).ok();
-            runmat_accelerate_api::clear_residency(resident);
+        for resident in [output, handle] {
+            let lease = resident.allocation_lease().downgrade();
+            resident.release().unwrap();
+            assert!(lease.acquire().is_none());
         }
     }
 }
@@ -3074,12 +3093,8 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
         );
     });
 
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let allocation = unregistered_table_allocation(vec![1, 1]);
+    let resident = Value::GpuTensor(allocation.handle.clone());
     let nested = crate::make_cell(vec![resident], 1, 1).unwrap();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(dictionary_builtin(vec![
@@ -3092,6 +3107,8 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
         DICTIONARY_GPU_INPUT_EXTENSION.error_identifier
     );
     assert!(!error.message().to_ascii_lowercase().contains("provider"));
+    // The managed nested cell can retain its field until collection.
+    assert_eq!(allocation.probe.retirements(), 0);
 }
 
 #[test]
@@ -4359,12 +4376,8 @@ fn vartype_accepts_text_and_rejects_integer_or_resident_values_before_gather() {
         Some(&Value::from("integer"))
     );
 
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let allocation = unregistered_table_allocation(vec![1, 1]);
+    let resident = Value::GpuTensor(allocation.handle.clone());
     for invalid in [Value::Int(IntValue::U64(u64::MAX)), resident] {
         let error = block_on(vartype_builtin(invalid)).expect_err("invalid vartype input");
         assert!(error
@@ -4372,6 +4385,9 @@ fn vartype_accepts_text_and_rejects_integer_or_resident_values_before_gather() {
             .contains("host string scalar or character vector"));
         assert!(!error.message().to_ascii_lowercase().contains("provider"));
     }
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

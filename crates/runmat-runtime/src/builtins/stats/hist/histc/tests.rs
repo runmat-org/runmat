@@ -61,17 +61,23 @@ fn wide_complex_integer_data_and_edges_obey_compatibility_gate() {
 
 #[test]
 fn excess_outputs_and_zero_dimension_fail_before_provider_access() {
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-        vec![2, 1],
-        u32::MAX,
-        u64::MAX,
-    ));
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let resident = Value::GpuTensor(allocation.handle.clone());
     let _outputs = crate::output_count::push_output_count(Some(3));
     let error = block_on(histc_builtin(resident.clone(), Value::Num(0.0), vec![])).unwrap_err();
     assert!(error.message().contains("too many output"));
     drop(_outputs);
     let error = block_on(evaluate(resident, Value::Num(0.0), Some(0))).unwrap_err();
     assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

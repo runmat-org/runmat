@@ -3,13 +3,19 @@ use super::*;
 #[test]
 fn invalid_histogram_control_precedes_unavailable_provider_access() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let input = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-        vec![1, 2],
-        u32::MAX - 31,
-        91821,
-    ));
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 2],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let input = Value::GpuTensor(allocation.handle.clone());
     let error = block_on(histc_builtin(input, Value::Num(1.0), vec![Value::Num(0.0)])).unwrap_err();
     assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

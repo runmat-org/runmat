@@ -2855,7 +2855,7 @@ mod tests {
             .expect("resident integer population") else {
                 panic!("expected resident output");
             };
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), &[1, 2]);
             assert!(runmat_accelerate_api::handle_is_explicit(&output));
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&output),
