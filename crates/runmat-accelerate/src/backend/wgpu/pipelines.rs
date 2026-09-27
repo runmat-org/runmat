@@ -1100,7 +1100,7 @@ impl WgpuPipelines {
                 storage_read_entry(5),
                 uniform_entry(6),
             ],
-            &crate::backend::wgpu::shaders::matmul::epilogue_shader(match precision {
+            crate::backend::wgpu::shaders::matmul::epilogue_shader(match precision {
                 NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
                 NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
             }),
