@@ -6,8 +6,11 @@ use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_value::{Tensor, Value};
 
-mod indices;
+mod demand;
+mod elementwise;
+mod output;
 mod reduction;
+pub(super) use demand::{ExtremaDemand, ExtremaResult};
 
 /// Single has no immediate scalar `Value` representation. Its scalar extrema
 /// must use the same typed storage selection as its nonscalar extrema, not the
@@ -41,16 +44,6 @@ pub(super) fn scalar_hook_preserves_class(input: &GpuTensorHandle, other: &Value
     }
 }
 
-macro_rules! supported {
-    ($kind:expr, $operation:expr, $result:expr) => {
-        match $kind.optional($operation, $result)? {
-            Some(value) => value,
-            None => return Ok(None),
-        }
-    };
-}
-pub(super) use supported;
-
 #[derive(Clone, Copy)]
 pub(super) enum ExtremaKind {
     Min,
@@ -83,6 +76,13 @@ impl ExtremaKind {
         self,
         input: &GpuTensorHandle,
     ) -> BuiltinResult<&'static dyn AccelProvider> {
+        if let Err(source) = input.allocation_lease().validate_live() {
+            let mut error = self.contract_error(format!(
+                "resident input allocation is unavailable: {source}"
+            ));
+            error.source = Some(Box::new(source));
+            return Err(error);
+        }
         gpu_helpers::exact_provider_for_handle(input)
             .ok_or_else(|| self.contract_error("resident input has no exact owning provider"))
     }
@@ -106,7 +106,8 @@ impl ExtremaKind {
         self,
         input: &GpuTensorHandle,
         dimension: usize,
-    ) -> BuiltinResult<Option<(Value, Value)>> {
+        demand: ExtremaDemand,
+    ) -> BuiltinResult<Option<ExtremaResult>> {
         let provider = self.owner(input)?;
         let result = match self {
             Self::Min => provider.reduce_min_dim(input, dimension).await,
@@ -115,7 +116,7 @@ impl ExtremaKind {
         let Some(result) = self.optional("dimensional extrema reduction", result)? else {
             return Ok(None);
         };
-        self.adopt_reduction_result(provider, input, dimension, result)
+        self.adopt_reduction_result(provider, input, dimension, result, demand)
             .await
             .map(Some)
     }
@@ -152,6 +153,13 @@ impl ExtremaKind {
                 error.gpu_gather_retry = GpuGatherRetry::Never;
                 error
             })
+    }
+
+    pub(super) async fn gather_input(self, value: Value) -> BuiltinResult<Value> {
+        match value {
+            Value::GpuTensor(input) => self.gather(&input).await,
+            value => Ok(value),
+        }
     }
 }
 

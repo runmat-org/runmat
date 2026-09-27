@@ -607,7 +607,7 @@ async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         return crate::builtins::table::categorical_extrema_to_value(eval?);
     }
     reject_pairwise_multiple_outputs(&rest)?;
-    let eval = evaluate(value, &rest).await?;
+    let eval = evaluate_for_demand(value, &rest, builtin_demand()).await?;
     evaluation_to_value(eval)
 }
 
@@ -631,7 +631,7 @@ async fn nanmax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     }
     let adjusted = nanmax_rest(rest);
     reject_pairwise_multiple_outputs(&adjusted)?;
-    let eval = evaluate(value, &adjusted).await?;
+    let eval = evaluate_for_demand(value, &adjusted, builtin_demand()).await?;
     evaluation_to_value(eval)
 }
 
@@ -658,7 +658,15 @@ fn reject_pairwise_multiple_outputs(rest: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn evaluation_to_value(eval: MaxEvaluation) -> BuiltinResult<Value> {
+fn builtin_demand() -> super::extrema_provider::ExtremaDemand {
+    if crate::output_count::current_output_count().unwrap_or(1) > 1 {
+        super::extrema_provider::ExtremaDemand::ValuesAndIndices
+    } else {
+        super::extrema_provider::ExtremaDemand::ValuesOnly
+    }
+}
+
+fn evaluation_to_value(eval: super::extrema_provider::ExtremaResult) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -666,7 +674,7 @@ fn evaluation_to_value(eval: MaxEvaluation) -> BuiltinResult<Value> {
         if out_count == 1 {
             return Ok(Value::OutputList(vec![eval.into_value()]));
         }
-        let (values, indices) = eval.into_pair();
+        let (values, indices) = eval.into_pair(super::extrema_provider::ExtremaKind::Max)?;
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![values, indices],
@@ -691,6 +699,21 @@ fn empty_placeholder() -> Value {
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluation> {
+    let evaluated = evaluate_for_demand(
+        value,
+        rest,
+        super::extrema_provider::ExtremaDemand::ValuesAndIndices,
+    )
+    .await?;
+    let (values, indices) = evaluated.into_pair(super::extrema_provider::ExtremaKind::Max)?;
+    Ok(MaxEvaluation { values, indices })
+}
+
+async fn evaluate_for_demand(
+    value: Value,
+    rest: &[Value],
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(max_invalid_input(
             "operations involving complex numbers with integer types are not supported",
@@ -711,8 +734,8 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluati
         );
     }
     match parsed {
-        ParsedCall::Elementwise(args) => elementwise_max(value, args).await,
-        ParsedCall::Reduction(args) => reduction_max(value, args).await,
+        ParsedCall::Elementwise(args) => elementwise_max(value, args, demand).await,
+        ParsedCall::Reduction(args) => reduction_max(value, args, demand).await,
     }
 }
 
@@ -1080,26 +1103,35 @@ fn map_vector_dim_error(message: String) -> RuntimeError {
     max_invalid_argument(message)
 }
 
-async fn reduction_max(value: Value, args: ReductionArgs) -> BuiltinResult<MaxEvaluation> {
+async fn reduction_max(
+    value: Value,
+    args: ReductionArgs,
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = reduction_max_gpu(handle.clone(), &args).await? {
+            if let Some(eval) = reduction_max_gpu(handle.clone(), &args, demand).await? {
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
             let value = super::extrema_provider::ExtremaKind::Max
                 .gather(&handle)
                 .await?;
-            reduction_max_host(value, &args)
+            reduction_max_host(value, &args).map(|eval| {
+                super::extrema_provider::ExtremaResult::from_pair(demand, eval.values, eval.indices)
+            })
         }
-        other => reduction_max_host(other, &args),
+        other => reduction_max_host(other, &args).map(|eval| {
+            super::extrema_provider::ExtremaResult::from_pair(demand, eval.values, eval.indices)
+        }),
     }
 }
 
 async fn reduction_max_gpu(
     handle: GpuTensorHandle,
     args: &ReductionArgs,
-) -> BuiltinResult<Option<MaxEvaluation>> {
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<Option<super::extrema_provider::ExtremaResult>> {
     if args.nan_mode == ReductionNaN::Omit {
         log::trace!("max: gpu path disabled (nan_mode=omit)");
         return Ok(None);
@@ -1140,10 +1172,9 @@ async fn reduction_max_gpu(
         handle.shape(),
         handle.device_id()
     );
-    Ok(super::extrema_provider::ExtremaKind::Max
-        .reduce_dim(&handle, zero_based)
-        .await?
-        .map(|(values, indices)| MaxEvaluation { values, indices }))
+    super::extrema_provider::ExtremaKind::Max
+        .reduce_dim(&handle, zero_based, demand)
+        .await
 }
 
 fn reduction_max_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MaxEvaluation> {
@@ -1940,353 +1971,70 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
     1
 }
 
-async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<MaxEvaluation> {
+async fn elementwise_max(
+    value: Value,
+    args: ElementwiseArgs,
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
+    use super::extrema_provider::{ExtremaDemand, ExtremaKind, ExtremaResult};
     let ElementwiseArgs {
         other,
         nan_mode,
         comparison,
     } = args;
-    match (value, other) {
-        (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            if gpu_tensor_is_scalar(&handle_b) {
-                if let Some(num) = gpu_tensor_scalar_value(&handle_b).await? {
-                    let scalar = Value::Num(num);
-                    if nan_mode == ReductionNaN::Include {
-                        if let Some(eval) =
-                            elementwise_max_gpu_scalar_left(&handle_a, &scalar, comparison).await?
-                        {
-                            return Ok(eval);
-                        }
-                    }
-                    let t = super::extrema_provider::ExtremaKind::Max
-                        .gather(&handle_a)
-                        .await?;
-                    return elementwise_real_or_complex(t, scalar, nan_mode, comparison);
-                }
+    let kind = ExtremaKind::Max;
+    let resident = if comparison == ComparisonMethod::Auto && nan_mode == ReductionNaN::Include {
+        match (&value, &other) {
+            (Value::GpuTensor(left), Value::GpuTensor(right)) => {
+                kind.pair_values(left, right).await?
             }
-            if gpu_tensor_is_scalar(&handle_a) {
-                if let Some(num) = gpu_tensor_scalar_value(&handle_a).await? {
-                    let scalar = Value::Num(num);
-                    if nan_mode == ReductionNaN::Include {
-                        if let Some(eval) =
-                            elementwise_max_gpu_scalar_right(&scalar, &handle_b, comparison).await?
-                        {
-                            return Ok(eval);
-                        }
-                    }
-                    let t = super::extrema_provider::ExtremaKind::Max
-                        .gather(&handle_b)
-                        .await?;
-                    return elementwise_real_or_complex(scalar, t, nan_mode, comparison);
-                }
-            }
-            if nan_mode == ReductionNaN::Include {
-                if let Some(eval) =
-                    elementwise_max_gpu_pair(&handle_a, &handle_b, comparison).await?
-                {
-                    return Ok(eval);
-                }
-            }
-            let ta = super::extrema_provider::ExtremaKind::Max
-                .gather(&handle_a)
-                .await?;
-            let tb = super::extrema_provider::ExtremaKind::Max
-                .gather(&handle_b)
-                .await?;
-            elementwise_real_or_complex(ta, tb, nan_mode, comparison)
-        }
-        (Value::GpuTensor(handle), other) => {
-            if nan_mode == ReductionNaN::Include {
-                if let Some(eval) =
-                    elementwise_max_gpu_scalar_left(&handle, &other, comparison).await?
-                {
-                    return Ok(eval);
-                }
-            }
-            let t = super::extrema_provider::ExtremaKind::Max
-                .gather(&handle)
-                .await?;
-            elementwise_real_or_complex(t, other, nan_mode, comparison)
-        }
-        (other, Value::GpuTensor(handle)) => {
-            if nan_mode == ReductionNaN::Include {
-                if let Some(eval) =
-                    elementwise_max_gpu_scalar_right(&other, &handle, comparison).await?
-                {
-                    return Ok(eval);
-                }
-            }
-            let t = super::extrema_provider::ExtremaKind::Max
-                .gather(&handle)
-                .await?;
-            elementwise_real_or_complex(other, t, nan_mode, comparison)
-        }
-        (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, nan_mode, comparison),
-    }
-}
-
-async fn elementwise_max_gpu_pair(
-    a: &GpuTensorHandle,
-    b: &GpuTensorHandle,
-    comparison: ComparisonMethod,
-) -> BuiltinResult<Option<MaxEvaluation>> {
-    let kind = super::extrema_provider::ExtremaKind::Max;
-    if comparison != ComparisonMethod::Auto {
-        return Ok(None);
-    }
-    let Some(provider) = kind.pair_owner(a, b)? else {
-        return Ok(None);
-    };
-    // Equal-shape fast path
-    if a.shape() == b.shape() {
-        let values =
-            super::extrema_provider::supported!(kind, "elem_max", provider.elem_max(a, b).await);
-        // Try device mask first; if unavailable, compute indices on host while keeping values on device
-        if let Some(mask) = kind.optional("elem_ge", provider.elem_ge(a, b).await)? {
-            let indices = kind.mask_indices(provider, mask).await?;
-            return Ok(Some(MaxEvaluation {
-                values: Value::GpuTensor(values),
-                indices,
-            }));
-        } else {
-            // Host path for indices only
-            let ta = kind.gather_tensor(a).await?;
-            let tb = kind.gather_tensor(b).await?;
-            let a_values = tensor::tensor_values_f64_cow(&ta);
-            let b_values = tensor::tensor_values_f64_cow(&tb);
-            let mut indices = Vec::with_capacity(a_values.len());
-            for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
-                indices.push(if a_value >= b_value { 1.0 } else { 2.0 });
-            }
-            let index_tensor = Tensor::new(indices, ta.shape.clone())
-                .map_err(|error| kind.contract_error(error))?;
-            return Ok(Some(MaxEvaluation {
-                values: Value::GpuTensor(values),
-                indices: tensor::tensor_into_value(index_tensor),
-            }));
-        }
-    }
-    // Broadcast-compatible path via repmat, then device compare
-    let Some((out_shape, reps_a, reps_b)) = broadcast_reps(a.shape(), b.shape()) else {
-        return Ok(None);
-    };
-    let a_exp = if reps_a.iter().any(|&r| r != 1) {
-        super::extrema_provider::supported!(kind, "repmat", provider.repmat(a, &reps_a))
-    } else {
-        a.clone()
-    };
-    let b_exp = if reps_b.iter().any(|&r| r != 1) {
-        super::extrema_provider::supported!(kind, "repmat", provider.repmat(b, &reps_b))
-    } else {
-        b.clone()
-    };
-    let values = kind.optional("elem_max", provider.elem_max(&a_exp, &b_exp).await)?;
-    let Some(values) = values else {
-        return Ok(None);
-    };
-    let mask = kind.optional("elem_ge", provider.elem_ge(&a_exp, &b_exp).await)?;
-    if values.shape() != out_shape {
-        return Err(kind.contract_error("provider extrema output has incorrect broadcast shape"));
-    }
-    let index_tensor = if let Some(mask) = mask {
-        let mask_host = kind.gather_tensor(&mask).await?;
-        let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-        let mut indices = Vec::with_capacity(mask_values.len());
-        for &m in mask_values.iter() {
-            indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, out_shape).map_err(|error| kind.contract_error(error))?
-    } else {
-        // Host indices fallback
-        let ta = kind.gather_tensor(&a_exp).await?;
-        let tb = kind.gather_tensor(&b_exp).await?;
-        let a_values = tensor::tensor_values_f64_cow(&ta);
-        let b_values = tensor::tensor_values_f64_cow(&tb);
-        let mut indices = Vec::with_capacity(a_values.len());
-        for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
-            indices.push(if a_value >= b_value { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, out_shape).map_err(|error| kind.contract_error(error))?
-    };
-    Ok(Some(MaxEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    }))
-}
-
-fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
-    let rank = a.len().max(b.len()).max(1);
-    let mut out = vec![1usize; rank];
-    let aa = crate::builtins::common::broadcast::align_shape(a, rank);
-    let bb = crate::builtins::common::broadcast::align_shape(b, rank);
-    for i in 0..rank {
-        let (ad, bd) = (aa[i], bb[i]);
-        if ad == bd {
-            out[i] = ad;
-        } else if ad == 1 {
-            out[i] = bd;
-        } else if bd == 1 {
-            out[i] = ad;
-        } else {
-            return None;
-        }
-    }
-    let reps_a: Vec<usize> = (0..rank)
-        .map(|i| if aa[i] == out[i] { 1 } else { out[i] })
-        .collect();
-    let reps_b: Vec<usize> = (0..rank)
-        .map(|i| if bb[i] == out[i] { 1 } else { out[i] })
-        .collect();
-    Some((out, reps_a, reps_b))
-}
-
-async fn elementwise_max_gpu_scalar_left(
-    a: &GpuTensorHandle,
-    other: &Value,
-    comparison: ComparisonMethod,
-) -> BuiltinResult<Option<MaxEvaluation>> {
-    let kind = super::extrema_provider::ExtremaKind::Max;
-    if comparison != ComparisonMethod::Auto {
-        return Ok(None);
-    }
-    let provider = kind.owner(a)?;
-    if !super::extrema_provider::scalar_hook_preserves_class(a, other) {
-        return Ok(None);
-    }
-    let Some(scalar) = extract_scalar(other) else {
-        return Ok(None);
-    };
-    // Prefer tensorize + elem_max for broader provider compatibility
-    let values = if let Some(fill) = kind.optional("fill_like", provider.fill_like(a, scalar))? {
-        let vals = kind.optional("elem_max", provider.elem_max(a, &fill).await)?;
-        let Some(vals) = vals else {
-            return Ok(None);
-        };
-        vals
-    } else {
-        super::extrema_provider::supported!(kind, "scalar_max", provider.scalar_max(a, scalar))
-    };
-    // Try device mask; if unavailable, compute on host
-    let index_tensor = if let Some(fill) =
-        kind.optional("fill_like", provider.fill_like(a, scalar))?
-    {
-        if let Some(mask) = kind.optional("elem_ge", provider.elem_ge(a, &fill).await)? {
-            let indices = kind.mask_indices(provider, mask).await?;
-            return Ok(Some(MaxEvaluation {
-                values: Value::GpuTensor(values),
-                indices,
-            }));
-        } else {
-            let ta = kind.gather_tensor(a).await?;
-            let values = tensor::tensor_values_f64_cow(&ta);
-            let mut indices = Vec::with_capacity(values.len());
-            for &v in values.iter() {
-                indices.push(if v >= scalar { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, ta.shape.clone()).map_err(|error| kind.contract_error(error))?
+            (Value::GpuTensor(input), other) => match extract_scalar(other) {
+                Some(scalar) => kind.scalar_values(input, other, scalar, false).await?,
+                None => None,
+            },
+            (other, Value::GpuTensor(input)) => match extract_scalar(other) {
+                Some(scalar) => kind.scalar_values(input, other, scalar, true).await?,
+                None => None,
+            },
+            _ => None,
         }
     } else {
-        let ta = kind.gather_tensor(a).await?;
-        let values = tensor::tensor_values_f64_cow(&ta);
-        let mut indices = Vec::with_capacity(values.len());
-        for &v in values.iter() {
-            indices.push(if v >= scalar { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, ta.shape.clone()).map_err(|error| kind.contract_error(error))?
+        None
     };
-    Ok(Some(MaxEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    }))
-}
-
-async fn elementwise_max_gpu_scalar_right(
-    other: &Value,
-    b: &GpuTensorHandle,
-    comparison: ComparisonMethod,
-) -> BuiltinResult<Option<MaxEvaluation>> {
-    let kind = super::extrema_provider::ExtremaKind::Max;
-    if comparison != ComparisonMethod::Auto {
-        return Ok(None);
+    if let Some(values) = resident {
+        if demand == ExtremaDemand::ValuesOnly {
+            return Ok(ExtremaResult::Values(Value::GpuTensor(values)));
+        }
+        // Generic <=/>= masks do not encode NaN or signed-zero extrema origins.
+        // The existing typed host selector is the sole origin authority.
+        let left = kind.gather_input(value).await?;
+        let right = kind.gather_input(other).await?;
+        let evaluated = elementwise_real_or_complex(left, right, nan_mode, comparison)?;
+        return Ok(ExtremaResult::Pair {
+            values: Value::GpuTensor(values),
+            indices: evaluated.indices,
+        });
     }
-    let provider = kind.owner(b)?;
-    if !super::extrema_provider::scalar_hook_preserves_class(b, other) {
-        return Ok(None);
-    }
-    let Some(scalar) = extract_scalar(other) else {
-        return Ok(None);
-    };
-    let values = if let Some(fill) = kind.optional("fill_like", provider.fill_like(b, scalar))? {
-        let vals = kind.optional("elem_max", provider.elem_max(&fill, b).await)?;
-        let Some(vals) = vals else {
-            return Ok(None);
-        };
-        vals
-    } else {
-        super::extrema_provider::supported!(kind, "scalar_max", provider.scalar_max(b, scalar))
-    };
-    // Try device mask; if unavailable, compute on host (origin 1 if scalar >= b)
-    let index_tensor = if let Some(fill) =
-        kind.optional("fill_like", provider.fill_like(b, scalar))?
-    {
-        if let Some(mask) = kind.optional("elem_ge", provider.elem_ge(&fill, b).await)? {
-            let indices = kind.mask_indices(provider, mask).await?;
-            return Ok(Some(MaxEvaluation {
-                values: Value::GpuTensor(values),
-                indices,
-            }));
-        } else {
-            let tb = kind.gather_tensor(b).await?;
-            let values = tensor::tensor_values_f64_cow(&tb);
-            let mut indices = Vec::with_capacity(values.len());
-            for &v in values.iter() {
-                indices.push(if scalar >= v { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, tb.shape.clone()).map_err(|error| kind.contract_error(error))?
-        }
-    } else {
-        let tb = kind.gather_tensor(b).await?;
-        let values = tensor::tensor_values_f64_cow(&tb);
-        let mut indices = Vec::with_capacity(values.len());
-        for &v in values.iter() {
-            indices.push(if scalar >= v { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, tb.shape.clone()).map_err(|error| kind.contract_error(error))?
-    };
-    Ok(Some(MaxEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    }))
+    let left = kind.gather_input(value).await?;
+    let right = kind.gather_input(other).await?;
+    let evaluated = elementwise_real_or_complex(left, right, nan_mode, comparison)?;
+    Ok(ExtremaResult::from_pair(
+        demand,
+        evaluated.values,
+        evaluated.indices,
+    ))
 }
 
 fn extract_scalar(v: &Value) -> Option<f64> {
     match v {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) && t.integer_storage().is_none() => {
+            Some(tensor::tensor_value_f64(t, 0))
+        }
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }
-}
-
-fn gpu_tensor_is_scalar(handle: &GpuTensorHandle) -> bool {
-    handle.shape().iter().all(|extent| *extent == 1)
-}
-
-async fn gpu_tensor_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Option<f64>> {
-    // Only an actual real Double can enter the double scalar hook ABI. Single,
-    // integer, logical and complex resident scalars retain the typed pair route.
-    if handle.view().is_logical()
-        || handle.physical().element_type() != runmat_accelerate_api::NumericElementType::F64
-        || handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
-    {
-        return Ok(None);
-    }
-    let tensor = super::extrema_provider::ExtremaKind::Max
-        .gather_tensor(handle)
-        .await?;
-    Ok(tensor::tensor_values_f64(&tensor).first().copied())
 }
 
 fn elementwise_real_or_complex(

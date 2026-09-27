@@ -17,9 +17,23 @@ struct Provider {
     owner: TestAllocationOwner,
     records: Mutex<Vec<(u64, RetirementProbe)>>,
     downloads: AtomicUsize,
+    reductions: AtomicUsize,
     pending: bool,
 }
 impl Provider {
+    fn reduce(&self, input: &GpuTensorHandle, dimension: usize) -> ReduceDimResult {
+        self.reductions.fetch_add(1, Ordering::SeqCst);
+        let mut shape = input.shape().to_vec();
+        if !shape.contains(&0) {
+            shape[dimension] = 1;
+        }
+        let values = self.allocate(shape.clone(), input.physical().element_type(), 0.0);
+        let indices = self.allocate(shape, input.physical().element_type(), 1.0);
+        ReduceDimResult {
+            values: values.handle,
+            indices: indices.handle,
+        }
+    }
     fn allocate(
         &self,
         shape: Vec<usize>,
@@ -48,6 +62,20 @@ impl Provider {
     }
 }
 impl AccelProvider for Provider {
+    fn reduce_min_dim<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        dimension: usize,
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move { Ok(self.reduce(input, dimension)) })
+    }
+    fn reduce_max_dim<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        dimension: usize,
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move { Ok(self.reduce(input, dimension)) })
+    }
     fn device_id(&self) -> u32 {
         self.owner.device_id()
     }
@@ -95,6 +123,7 @@ fn provider(pending: bool) -> &'static Provider {
         owner: TestAllocationOwner::new(),
         records: Mutex::new(Vec::new()),
         downloads: AtomicUsize::new(0),
+        reductions: AtomicUsize::new(0),
         pending,
     }))
 }
@@ -132,7 +161,10 @@ fn dimensional_publication_preserves_native_values_and_double_index_contract() {
                                 values: values.handle,
                                 indices: indices.handle,
                             },
+                            ExtremaDemand::ValuesAndIndices,
                         ))
+                        .unwrap()
+                        .into_pair(kind)
                         .unwrap();
                     let Value::GpuTensor(ref output_handle) = output else {
                         panic!("values must stay resident")
@@ -190,6 +222,7 @@ fn dimensional_pending_index_download_owns_both_outputs_until_abandonment() {
             values: values.handle,
             indices: indices.handle,
         },
+        ExtremaDemand::ValuesAndIndices,
     ));
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
     assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
@@ -217,6 +250,7 @@ fn dimensional_malformed_borrowed_result_rejects_without_retiring_caller() {
             values: input.handle.clone(),
             indices: indices.handle,
         },
+        ExtremaDemand::ValuesAndIndices,
     ))
     .unwrap_err();
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -266,6 +300,7 @@ fn dimensional_owned_output_contract_rejects_wrong_class_owner_and_indices() {
                 values: values.handle,
                 indices: indices.handle,
             },
+            ExtremaDemand::ValuesAndIndices,
         ))
         .unwrap_err();
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -299,6 +334,7 @@ fn dimensional_publication_checks_axis_before_shape_access() {
                 values: values.handle,
                 indices: indices.handle,
             },
+            ExtremaDemand::ValuesAndIndices,
         ))
         .unwrap_err();
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -306,6 +342,59 @@ fn dimensional_publication_checks_axis_before_shape_access() {
         assert_eq!(values.probe.retirements(), 1);
         assert_eq!(indices.probe.retirements(), 1);
         assert_eq!(input.probe.retirements(), 0);
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
+    }
+}
+
+#[test]
+fn builtin_dimensional_demand_skips_only_unrequested_index_adaptation() {
+    for name in ["min", "max"] {
+        let provider = provider(false);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider.allocate(vec![2, 3], NumericElementType::F32, 0.0);
+        let source = input
+            .handle
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        for count in [0, 1, 2] {
+            let output = futures::executor::block_on(crate::call_builtin_async_with_outputs(
+                name,
+                &[Value::GpuTensor(source.clone())],
+                count,
+            ))
+            .unwrap();
+            let Value::OutputList(outputs) = output else {
+                panic!("explicit output-count result")
+            };
+            assert_eq!(outputs.len(), count);
+            assert_eq!(provider.reductions.load(Ordering::SeqCst), count + 1);
+            assert_eq!(
+                provider.downloads.load(Ordering::SeqCst),
+                usize::from(count == 2)
+            );
+            if count > 0 {
+                let Value::GpuTensor(ref values) = outputs[0] else {
+                    panic!("resident Single values")
+                };
+                assert_eq!(values.physical().element_type(), NumericElementType::F32);
+                assert!(runmat_accelerate_api::handle_is_explicit(values));
+            }
+            if count == 2 {
+                assert_eq!(
+                    outputs[1],
+                    Value::Tensor(Tensor::new(vec![1.0; 3], vec![1, 3]).unwrap())
+                );
+            }
+            drop(outputs);
+            for (id, probe) in provider.records.lock().unwrap().iter() {
+                assert_eq!(
+                    probe.retirements(),
+                    usize::from(*id != input.handle.buffer_id())
+                );
+            }
+        }
+        drop(source);
         drop(input.handle);
         assert_eq!(input.probe.retirements(), 1);
     }

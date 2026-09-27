@@ -500,7 +500,12 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
             "min: pairwise element-wise form has exactly one output",
         ));
     }
-    let eval = evaluate(value, &rest).await?;
+    let demand = if crate::output_count::current_output_count().unwrap_or(1) > 1 {
+        super::extrema_provider::ExtremaDemand::ValuesAndIndices
+    } else {
+        super::extrema_provider::ExtremaDemand::ValuesOnly
+    };
+    let eval = evaluate_for_demand(value, &rest, demand).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -508,7 +513,7 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
         if out_count == 1 {
             return Ok(Value::OutputList(vec![eval.into_value()]));
         }
-        let (values, indices) = eval.into_pair();
+        let (values, indices) = eval.into_pair(super::extrema_provider::ExtremaKind::Min)?;
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![values, indices],
@@ -519,14 +524,29 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
+    let evaluated = evaluate_for_demand(
+        value,
+        rest,
+        super::extrema_provider::ExtremaDemand::ValuesAndIndices,
+    )
+    .await?;
+    let (values, indices) = evaluated.into_pair(super::extrema_provider::ExtremaKind::Min)?;
+    Ok(MinEvaluation { values, indices })
+}
+
+async fn evaluate_for_demand(
+    value: Value,
+    rest: &[Value],
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(min_invalid_input(
             "operations involving complex numbers with integer types are not supported",
         ));
     }
     match parse_call(rest).await? {
-        ParsedCall::Elementwise(args) => elementwise_min(value, args).await,
-        ParsedCall::Reduction(args) => reduction_min(value, args).await,
+        ParsedCall::Elementwise(args) => elementwise_min(value, args, demand).await,
+        ParsedCall::Reduction(args) => reduction_min(value, args, demand).await,
     }
 }
 
@@ -851,26 +871,35 @@ fn map_vector_dim_error(message: String) -> RuntimeError {
     min_invalid_argument(message)
 }
 
-async fn reduction_min(value: Value, args: ReductionArgs) -> BuiltinResult<MinEvaluation> {
+async fn reduction_min(
+    value: Value,
+    args: ReductionArgs,
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = reduction_min_gpu(handle.clone(), &args).await? {
+            if let Some(eval) = reduction_min_gpu(handle.clone(), &args, demand).await? {
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
             let value = super::extrema_provider::ExtremaKind::Min
                 .gather(&handle)
                 .await?;
-            reduction_min_host(value, &args)
+            reduction_min_host(value, &args).map(|eval| {
+                super::extrema_provider::ExtremaResult::from_pair(demand, eval.values, eval.indices)
+            })
         }
-        other => reduction_min_host(other, &args),
+        other => reduction_min_host(other, &args).map(|eval| {
+            super::extrema_provider::ExtremaResult::from_pair(demand, eval.values, eval.indices)
+        }),
     }
 }
 
 async fn reduction_min_gpu(
     handle: GpuTensorHandle,
     args: &ReductionArgs,
-) -> BuiltinResult<Option<MinEvaluation>> {
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<Option<super::extrema_provider::ExtremaResult>> {
     if args.nan_mode == ReductionNaN::Omit {
         log::trace!("min: gpu path disabled (nan_mode=omit)");
         return Ok(None);
@@ -911,10 +940,9 @@ async fn reduction_min_gpu(
         handle.shape(),
         handle.device_id()
     );
-    Ok(super::extrema_provider::ExtremaKind::Min
-        .reduce_dim(&handle, zero_based)
-        .await?
-        .map(|(values, indices)| MinEvaluation { values, indices }))
+    super::extrema_provider::ExtremaKind::Min
+        .reduce_dim(&handle, zero_based, demand)
+        .await
 }
 
 fn reduction_min_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MinEvaluation> {
@@ -1711,284 +1739,63 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
     1
 }
 
-async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<MinEvaluation> {
+async fn elementwise_min(
+    value: Value,
+    args: ElementwiseArgs,
+    demand: super::extrema_provider::ExtremaDemand,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
+    use super::extrema_provider::{ExtremaDemand, ExtremaKind, ExtremaResult};
     let ElementwiseArgs { other, comparison } = args;
-    match (value, other) {
-        (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            if let Some(eval) = elementwise_min_gpu_pair(&handle_a, &handle_b, comparison).await? {
-                return Ok(eval);
+    let kind = ExtremaKind::Min;
+    let resident = if comparison == ComparisonMethod::Auto {
+        match (&value, &other) {
+            (Value::GpuTensor(left), Value::GpuTensor(right)) => {
+                kind.pair_values(left, right).await?
             }
-            let ta = super::extrema_provider::ExtremaKind::Min
-                .gather(&handle_a)
-                .await?;
-            let tb = super::extrema_provider::ExtremaKind::Min
-                .gather(&handle_b)
-                .await?;
-            elementwise_real_or_complex(ta, tb, comparison)
-        }
-        (Value::GpuTensor(handle), other) => {
-            if let Some(eval) = elementwise_min_gpu_scalar_left(&handle, &other, comparison).await?
-            {
-                return Ok(eval);
-            }
-            let t = super::extrema_provider::ExtremaKind::Min
-                .gather(&handle)
-                .await?;
-            elementwise_real_or_complex(t, other, comparison)
-        }
-        (other, Value::GpuTensor(handle)) => {
-            if let Some(eval) =
-                elementwise_min_gpu_scalar_right(&other, &handle, comparison).await?
-            {
-                return Ok(eval);
-            }
-            let t = super::extrema_provider::ExtremaKind::Min
-                .gather(&handle)
-                .await?;
-            elementwise_real_or_complex(other, t, comparison)
-        }
-        (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
-    }
-}
-
-async fn elementwise_min_gpu_pair(
-    a: &GpuTensorHandle,
-    b: &GpuTensorHandle,
-    comparison: ComparisonMethod,
-) -> BuiltinResult<Option<MinEvaluation>> {
-    let kind = super::extrema_provider::ExtremaKind::Min;
-    if comparison != ComparisonMethod::Auto {
-        return Ok(None);
-    }
-    let Some(provider) = kind.pair_owner(a, b)? else {
-        return Ok(None);
-    };
-    // Equal-shape fast path
-    if a.shape() == b.shape() {
-        let values =
-            super::extrema_provider::supported!(kind, "elem_min", provider.elem_min(a, b).await);
-        // Try device mask first; if unavailable, compute indices on host while keeping values on device
-        if let Some(mask) = kind.optional("elem_le", provider.elem_le(a, b).await)? {
-            let mask_host = kind.gather_tensor(&mask).await?;
-            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-            let mut indices = Vec::with_capacity(mask_values.len());
-            for &m in mask_values.iter() {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            let index_tensor = Tensor::new(indices, mask_host.shape.clone())
-                .map_err(|error| kind.contract_error(error))?;
-            return Ok(Some(MinEvaluation {
-                values: Value::GpuTensor(values),
-                indices: tensor::tensor_into_value(index_tensor),
-            }));
-        } else {
-            // Host indices only
-            let ta = kind.gather_tensor(a).await?;
-            let tb = kind.gather_tensor(b).await?;
-            let a_values = tensor::tensor_values_f64_cow(&ta);
-            let b_values = tensor::tensor_values_f64_cow(&tb);
-            let mut indices = Vec::with_capacity(a_values.len());
-            for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
-                indices.push(if a_value <= b_value { 1.0 } else { 2.0 });
-            }
-            let index_tensor = Tensor::new(indices, ta.shape.clone())
-                .map_err(|error| kind.contract_error(error))?;
-            return Ok(Some(MinEvaluation {
-                values: Value::GpuTensor(values),
-                indices: tensor::tensor_into_value(index_tensor),
-            }));
-        }
-    }
-    // Broadcast-compatible path via repmat, then device compare
-    let Some((out_shape, reps_a, reps_b)) = broadcast_reps(a.shape(), b.shape()) else {
-        return Ok(None);
-    };
-    let a_exp = if reps_a.iter().any(|&r| r != 1) {
-        super::extrema_provider::supported!(kind, "repmat", provider.repmat(a, &reps_a))
-    } else {
-        a.clone()
-    };
-    let b_exp = if reps_b.iter().any(|&r| r != 1) {
-        super::extrema_provider::supported!(kind, "repmat", provider.repmat(b, &reps_b))
-    } else {
-        b.clone()
-    };
-    let values = kind.optional("elem_min", provider.elem_min(&a_exp, &b_exp).await)?;
-    let Some(values) = values else {
-        return Ok(None);
-    };
-    let mask = kind.optional("elem_le", provider.elem_le(&a_exp, &b_exp).await)?;
-    if values.shape() != out_shape {
-        return Err(kind.contract_error("provider extrema output has incorrect broadcast shape"));
-    }
-    let index_tensor = if let Some(mask) = mask {
-        let mask_host = kind.gather_tensor(&mask).await?;
-        let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-        let mut indices = Vec::with_capacity(mask_values.len());
-        for &m in mask_values.iter() {
-            indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, out_shape).map_err(|error| kind.contract_error(error))?
-    } else {
-        // Host indices fallback
-        let ta = kind.gather_tensor(&a_exp).await?;
-        let tb = kind.gather_tensor(&b_exp).await?;
-        let a_values = tensor::tensor_values_f64_cow(&ta);
-        let b_values = tensor::tensor_values_f64_cow(&tb);
-        let mut indices = Vec::with_capacity(a_values.len());
-        for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
-            indices.push(if a_value <= b_value { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, out_shape).map_err(|error| kind.contract_error(error))?
-    };
-    Ok(Some(MinEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    }))
-}
-
-fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
-    let rank = a.len().max(b.len()).max(1);
-    let mut out = vec![1usize; rank];
-    let aa = crate::builtins::common::broadcast::align_shape(a, rank);
-    let bb = crate::builtins::common::broadcast::align_shape(b, rank);
-    for i in 0..rank {
-        let (ad, bd) = (aa[i], bb[i]);
-        if ad == bd {
-            out[i] = ad;
-        } else if ad == 1 {
-            out[i] = bd;
-        } else if bd == 1 {
-            out[i] = ad;
-        } else {
-            return None;
-        }
-    }
-    let reps_a: Vec<usize> = (0..rank)
-        .map(|i| if aa[i] == out[i] { 1 } else { out[i] })
-        .collect();
-    let reps_b: Vec<usize> = (0..rank)
-        .map(|i| if bb[i] == out[i] { 1 } else { out[i] })
-        .collect();
-    Some((out, reps_a, reps_b))
-}
-
-async fn elementwise_min_gpu_scalar_left(
-    a: &GpuTensorHandle,
-    other: &Value,
-    comparison: ComparisonMethod,
-) -> BuiltinResult<Option<MinEvaluation>> {
-    let kind = super::extrema_provider::ExtremaKind::Min;
-    if comparison != ComparisonMethod::Auto {
-        return Ok(None);
-    }
-    let provider = kind.owner(a)?;
-    if !super::extrema_provider::scalar_hook_preserves_class(a, other) {
-        return Ok(None);
-    }
-    let Some(scalar) = extract_scalar(other) else {
-        return Ok(None);
-    };
-    let values =
-        super::extrema_provider::supported!(kind, "scalar_min", provider.scalar_min(a, scalar));
-    // Try device mask; if unavailable, compute on host
-    let index_tensor = if let Some(fill) =
-        kind.optional("fill_like", provider.fill_like(a, scalar))?
-    {
-        if let Some(mask) = kind.optional("elem_le", provider.elem_le(a, &fill).await)? {
-            let mask_host = kind.gather_tensor(&mask).await?;
-            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-            let mut indices = Vec::with_capacity(mask_values.len());
-            for &m in mask_values.iter() {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, mask_host.shape.clone())
-                .map_err(|error| kind.contract_error(error))?
-        } else {
-            let ta = kind.gather_tensor(a).await?;
-            let values = tensor::tensor_values_f64_cow(&ta);
-            let mut indices = Vec::with_capacity(values.len());
-            for &v in values.iter() {
-                indices.push(if v <= scalar { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, ta.shape.clone()).map_err(|error| kind.contract_error(error))?
+            (Value::GpuTensor(input), other) => match extract_scalar(other) {
+                Some(scalar) => kind.scalar_values(input, other, scalar, false).await?,
+                None => None,
+            },
+            (other, Value::GpuTensor(input)) => match extract_scalar(other) {
+                Some(scalar) => kind.scalar_values(input, other, scalar, true).await?,
+                None => None,
+            },
+            _ => None,
         }
     } else {
-        let ta = kind.gather_tensor(a).await?;
-        let values = tensor::tensor_values_f64_cow(&ta);
-        let mut indices = Vec::with_capacity(values.len());
-        for &v in values.iter() {
-            indices.push(if v <= scalar { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, ta.shape.clone()).map_err(|error| kind.contract_error(error))?
+        None
     };
-    Ok(Some(MinEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    }))
-}
-
-async fn elementwise_min_gpu_scalar_right(
-    other: &Value,
-    b: &GpuTensorHandle,
-    comparison: ComparisonMethod,
-) -> BuiltinResult<Option<MinEvaluation>> {
-    let kind = super::extrema_provider::ExtremaKind::Min;
-    if comparison != ComparisonMethod::Auto {
-        return Ok(None);
+    if let Some(values) = resident {
+        if demand == ExtremaDemand::ValuesOnly {
+            return Ok(ExtremaResult::Values(Value::GpuTensor(values)));
+        }
+        // Generic <=/>= masks do not encode NaN or signed-zero extrema origins.
+        // The existing typed host selector is the sole origin authority.
+        let left = kind.gather_input(value).await?;
+        let right = kind.gather_input(other).await?;
+        let evaluated = elementwise_real_or_complex(left, right, comparison)?;
+        return Ok(ExtremaResult::Pair {
+            values: Value::GpuTensor(values),
+            indices: evaluated.indices,
+        });
     }
-    let provider = kind.owner(b)?;
-    if !super::extrema_provider::scalar_hook_preserves_class(b, other) {
-        return Ok(None);
-    }
-    let Some(scalar) = extract_scalar(other) else {
-        return Ok(None);
-    };
-    let values =
-        super::extrema_provider::supported!(kind, "scalar_min", provider.scalar_min(b, scalar));
-    // Try device mask; if unavailable, compute on host
-    let index_tensor = if let Some(fill) =
-        kind.optional("fill_like", provider.fill_like(b, scalar))?
-    {
-        if let Some(mask) = kind.optional("elem_le", provider.elem_le(&fill, b).await)? {
-            let mask_host = kind.gather_tensor(&mask).await?;
-            let mask_values = tensor::tensor_values_f64_cow(&mask_host);
-            let mut indices = Vec::with_capacity(mask_values.len());
-            for &m in mask_values.iter() {
-                indices.push(if m != 0.0 { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, mask_host.shape.clone())
-                .map_err(|error| kind.contract_error(error))?
-        } else {
-            let tb = kind.gather_tensor(b).await?;
-            let values = tensor::tensor_values_f64_cow(&tb);
-            let mut indices = Vec::with_capacity(values.len());
-            for &v in values.iter() {
-                indices.push(if scalar <= v { 1.0 } else { 2.0 });
-            }
-            Tensor::new(indices, tb.shape.clone()).map_err(|error| kind.contract_error(error))?
-        }
-    } else {
-        let tb = kind.gather_tensor(b).await?;
-        let values = tensor::tensor_values_f64_cow(&tb);
-        let mut indices = Vec::with_capacity(values.len());
-        for &v in values.iter() {
-            indices.push(if scalar <= v { 1.0 } else { 2.0 });
-        }
-        Tensor::new(indices, tb.shape.clone()).map_err(|error| kind.contract_error(error))?
-    };
-    Ok(Some(MinEvaluation {
-        values: Value::GpuTensor(values),
-        indices: tensor::tensor_into_value(index_tensor),
-    }))
+    let left = kind.gather_input(value).await?;
+    let right = kind.gather_input(other).await?;
+    let evaluated = elementwise_real_or_complex(left, right, comparison)?;
+    Ok(ExtremaResult::from_pair(
+        demand,
+        evaluated.values,
+        evaluated.indices,
+    ))
 }
 
 fn extract_scalar(v: &Value) -> Option<f64> {
     match v {
         Value::Num(n) => Some(*n),
-        Value::Int(i) => Some(i.to_f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) && t.integer_storage().is_none() => {
+            Some(tensor::tensor_value_f64(t, 0))
+        }
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
         _ => None,
     }

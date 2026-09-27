@@ -1,5 +1,5 @@
 //! Dimensional extrema publication: typed values and public Double indices.
-use super::{gpu_helpers, ExtremaKind};
+use super::{gpu_helpers, ExtremaDemand, ExtremaKind, ExtremaResult};
 use crate::BuiltinResult;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, NumericElementType, ProviderPrecision,
@@ -14,7 +14,8 @@ impl ExtremaKind {
         input: &GpuTensorHandle,
         dimension: usize,
         result: ReduceDimResult,
-    ) -> BuiltinResult<(Value, Value)> {
+        demand: ExtremaDemand,
+    ) -> BuiltinResult<ExtremaResult> {
         let ReduceDimResult {
             mut values,
             mut indices,
@@ -102,6 +103,12 @@ impl ExtremaKind {
                 gpu_helpers::reject_gpu_output(values, error),
             ));
         }
+        if demand == ExtremaDemand::ValuesOnly {
+            // The provider still produced both outputs; only adaptation work
+            // is omitted. The unused index reference retires normally here.
+            drop(indices);
+            return Ok(ExtremaResult::Values(Value::GpuTensor(values)));
+        }
         let indices = if index_precision == Some(ProviderPrecision::F32) {
             // Physical F32 is not public Double. This supported mixed-residency
             // result performs a real download, retaining device values and exact
@@ -144,7 +151,10 @@ impl ExtremaKind {
         } else {
             Value::GpuTensor(indices)
         };
-        Ok((Value::GpuTensor(values), indices))
+        Ok(ExtremaResult::Pair {
+            values: Value::GpuTensor(values),
+            indices,
+        })
     }
 }
 
