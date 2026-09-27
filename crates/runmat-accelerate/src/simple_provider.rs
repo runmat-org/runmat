@@ -5151,7 +5151,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn ones_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.ones(&prototype.shape())
+        self.fill_like(prototype, 1.0)
     }
 
     fn eye(&self, shape: &[usize]) -> Result<GpuTensorHandle> {

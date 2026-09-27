@@ -1953,7 +1953,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Allocate a one-initialised tensor with the provided shape on the device.
     fn ones(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("ones not supported by provider"))
+        Err(unsupported_provider_operation(
+            "ones not supported by provider",
+        ))
     }
 
     /// Allocate zeros with the requested shape and the prototype's exact class/storage.
@@ -2030,7 +2032,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Allocate a one-initialised tensor matching the prototype tensor.
     fn ones_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        self.ones(prototype.shape())
+        self.fill_like(prototype, 1.0)
     }
 
     /// Allocate an identity tensor with ones along the leading diagonal of the first two axes.
@@ -4791,6 +4793,12 @@ mod tests {
         ));
         assert!(is_unsupported_provider_operation(
             &provider.fill_like(&prototype, 2.0).unwrap_err()
+        ));
+        assert!(is_unsupported_provider_operation(
+            &provider.ones_like(&prototype).unwrap_err()
+        ));
+        assert!(is_unsupported_provider_operation(
+            &provider.ones(&[2, 3]).unwrap_err()
         ));
         assert!(is_unsupported_provider_operation(
             &provider.flip(&prototype, &[0]).unwrap_err()

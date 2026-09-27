@@ -25,6 +25,14 @@ fn fill_like_and_flip_keep_class_or_explicitly_request_typed_fallback() {
         })
         .unwrap();
     let filled = provider.fill_like(&real, 3.0).unwrap();
+    let ones = provider.ones_like(&real).unwrap();
+    assert_eq!(
+        block_on(provider.download(&ones)).unwrap().data,
+        vec![1.0; 2]
+    );
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider.ones_like(&single).unwrap_err()
+    ));
     assert_eq!(
         block_on(provider.download(&filled)).unwrap().data,
         vec![3.0; 2]
