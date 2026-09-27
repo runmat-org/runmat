@@ -58,6 +58,28 @@ The VM maps semantic instruction windows into `FusionKind` variants, then runtim
 
 Specialized patterns are detected before generic elementwise grouping so they are not swallowed by a broader chain.
 
+Matrix epilogues are admitted in source order before uploads. The provider
+descriptor has one arithmetic authority, `MatmulAffine`: optional multiplication
+followed by `Add`, `Subtract`, or `SubtractFrom`. An absent phase performs no
+arithmetic (including no implicit `+0`); legacy `alpha`/`beta` descriptor fields
+are rejected on deserialization. Provider implementations must consume this
+ordered descriptor rather than algebraically combine operations.
+
+Binding-owned clamp/power/diagonal declarations do not authorize arbitrary
+overloads. Execution validates exact arity, floating representation, source
+order, single-consumer publication, and selected builtin-service authority.
+Fractional real powers require an established nonnegative base; integral powers
+use the same exceptional-value policy as standalone power. The WGPU diagonal
+route retains the full matrix and then calls diagonal extraction; it is not
+represented as a single matmul dispatch.
+
+The request-local `ProviderWorkload.matmul` records data operand roles, geometry,
+and exact scalar-control bits. Feasibility derives and checks the output shape;
+costing includes retained product storage, diagonal warmup submission, uniforms,
+and data-only uploads. These are checked resource counts and static cost priors,
+not completed-device timing evidence. Matrix preparation remains conservatively
+cold until its exact provider cache-readiness inventory is available.
+
 ## Runtime Gating
 
 The interpreter only executes a fusion group when the current program counter matches the group's span start and the group is safe to replace. A group is skipped if the span contains VM barriers such as indexed assignment, member writes, or stack shapes that do not produce one live result.

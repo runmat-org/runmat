@@ -11,6 +11,7 @@ mod provider_cost;
 mod recorder;
 mod residency;
 mod session;
+pub(crate) use provider_contract::matmul::scalar_work_units as matmul_scalar_work_units;
 
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::observation_capability as provider_observation_capability;

@@ -194,6 +194,7 @@ fn select_fusion_provider(
             .collect(),
         None,
         None,
+        None,
     )
 }
 
@@ -203,10 +204,29 @@ fn select_fusion_provider_with_contract(
     outputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
     semantic_identity: Option<runmat_execution::Digest>,
     scalar_work_units: Option<u64>,
+    matmul: Option<matmul::workload::Selection<'_>>,
 ) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
+    let scalar_work_units = if let Some(contract) = &matmul {
+        Some(
+            crate::placement::matmul_scalar_work_units(&contract.workload, provider.precision())
+                .ok_or_else(|| anyhow!("matrix work estimate overflows"))?,
+        )
+    } else {
+        scalar_work_units
+    };
     let observer = FusionPlacementObserver::new(request.placement);
     let typed_elementwise = semantic_identity.is_some() && request.plan.group.kind.is_elementwise();
-    let elements = if typed_elementwise {
+    let input_refs = matmul.as_ref().map_or_else(
+        || request.inputs.iter().collect::<Vec<_>>(),
+        |contract| contract.inputs.clone(),
+    );
+    let elements = if let Some(contract) = &matmul {
+        contract
+            .workload
+            .rows
+            .checked_mul(contract.workload.columns)
+            .and_then(|n| usize::try_from(n).ok())
+    } else if typed_elementwise {
         outputs
             .first()
             .and_then(|output| output.checked_element_count())
@@ -214,7 +234,9 @@ fn select_fusion_provider_with_contract(
     } else {
         fusion_input_elements(&request.inputs)
     };
-    let required_upload_bytes = if typed_elementwise {
+    let required_upload_bytes = if let Some(contract) = &matmul {
+        Some(contract.upload_bytes)
+    } else if typed_elementwise {
         let width = match provider.precision() {
             ProviderPrecision::F32 => 4u64,
             ProviderPrecision::F64 => 8u64,
@@ -241,11 +263,14 @@ fn select_fusion_provider_with_contract(
         let _ = observer.select_provider(
             provider,
             &request.plan.group.kind,
-            &request.inputs,
+            &input_refs,
             &outputs,
-            elements,
-            None,
-            scalar_work_units,
+            ProviderWorkload {
+                elements: elements.and_then(|n| u64::try_from(n).ok()),
+                scalar_work_units,
+                matmul: matmul.as_ref().map(|contract| contract.workload.clone()),
+                ..Default::default()
+            },
         )?;
         observer.selected(PlacementVariant::ProviderFusion, "direct_request", None);
         return Ok(FusionExecutionOutcome::Executed(
@@ -275,7 +300,6 @@ fn select_fusion_provider_with_contract(
         output_residency: CandidateOutputResidency::Host,
         guards: Vec::new(),
     };
-    let input_refs = request.inputs.iter().collect::<Vec<_>>();
     let provider_fallback = ExecutionCostEstimate {
         components: ExecutionCostComponents {
             compile_or_prepare_ns: 20_000,
@@ -298,6 +322,7 @@ fn select_fusion_provider_with_contract(
             inputs: &input_refs,
             outputs,
             workload: ProviderWorkload {
+                matmul: matmul.as_ref().map(|contract| contract.workload.clone()),
                 elements: Some(element_count),
                 flops: None,
                 scalar_work_units,
@@ -305,7 +330,13 @@ fn select_fusion_provider_with_contract(
                 numerical_domain: Default::default(),
                 requested_outputs: None,
             },
-            preparation: CandidatePreparationState::Warm,
+            // Without an exact shader-cache readiness receipt, charge the
+            // conservative preparation prior, never invent a warm matrix path.
+            preparation: if matmul.is_some() {
+                CandidatePreparationState::Cold
+            } else {
+                CandidatePreparationState::Warm
+            },
             cpu,
             provider_fallback,
             required_upload_bytes,

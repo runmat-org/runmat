@@ -178,6 +178,7 @@ async fn execute_elementwise_outputs(
         representations,
         Some(semantic_identity),
         Some(scalar_work_units),
+        None,
     )?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,

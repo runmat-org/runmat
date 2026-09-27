@@ -39,11 +39,9 @@ impl FusionPlacementObserver {
         &self,
         provider: &dyn AccelProvider,
         kind: &FusionKind,
-        inputs: &[Value],
+        inputs: &[&Value],
         outputs: &[ProviderRepresentation],
-        elements: Option<usize>,
-        batch: Option<usize>,
-        scalar_work_units: Option<u64>,
+        workload: ProviderWorkload,
     ) -> Result<ProviderFeasibilityQuery> {
         let started = Instant::now();
         let inputs = inputs
@@ -55,14 +53,7 @@ impl FusionPlacementObserver {
             family: ProviderOperationFamily::Fusion,
             inputs,
             outputs: outputs.to_vec(),
-            workload: ProviderWorkload {
-                elements: elements.and_then(|value| u64::try_from(value).ok()),
-                flops: None,
-                scalar_work_units,
-                batch: batch.and_then(|value| u64::try_from(value).ok()),
-                numerical_domain: Default::default(),
-                requested_outputs: None,
-            },
+            workload,
         };
         let feasibility = provider.query_feasibility(&query);
         let duration_ns = Some(duration_ns_saturating(started.elapsed()));

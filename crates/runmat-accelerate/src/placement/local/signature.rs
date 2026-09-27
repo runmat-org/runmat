@@ -78,6 +78,7 @@ mod tests {
                 inputs: vec![],
                 outputs: vec![],
                 workload: ProviderWorkload {
+                    matmul: None,
                     elements: Some(4),
                     flops: Some(8),
                     scalar_work_units: None,

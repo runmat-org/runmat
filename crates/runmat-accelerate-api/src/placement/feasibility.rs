@@ -24,6 +24,9 @@ impl ProviderOperationIdentity {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderWorkload {
+    /// Exact admitted matrix/epilogue route. None is unknown, not a bare GEMM.
+    #[serde(default)]
+    pub matmul: Option<super::MatmulWorkload>,
     pub elements: Option<u64>,
     pub flops: Option<u64>,
     /// Total operation-owned scalar work prior, not a FLOP count or a timing.

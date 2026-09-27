@@ -1,17 +1,17 @@
 //! Ordered floating-point operations; absent phases are not identity arithmetic.
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum MatmulOffset {
-    Add(f64),
-    Subtract(f64),
-    SubtractFrom(f64),
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MatmulOffset<T = f64> {
+    Add(T),
+    Subtract(T),
+    SubtractFrom(T),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
-pub struct MatmulAffine {
-    pub scale: Option<f64>,
-    pub offset: Option<MatmulOffset>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct MatmulAffine<T = f64> {
+    pub scale: Option<T>,
+    pub offset: Option<MatmulOffset<T>>,
 }
 
 impl MatmulAffine {

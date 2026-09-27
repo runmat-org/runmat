@@ -13,8 +13,8 @@ pub(super) struct AdmittedMatmul {
     pub shape: [usize; 2],
     scale: Option<f64>,
     offset: Option<MatmulOffset>,
-    row: Option<(ValueId, ScaleOp)>,
-    column: Option<(ValueId, ScaleOp)>,
+    pub(super) row: Option<(ValueId, ScaleOp)>,
+    pub(super) column: Option<(ValueId, ScaleOp)>,
     clamp_min: Option<f64>,
     clamp_max: Option<f64>,
     exponent: Option<f64>,
@@ -262,14 +262,7 @@ impl AdmittedMatmul {
     }
 
     pub fn descriptor(&self, handles: &HashMap<ValueId, GpuTensorHandle>) -> MatmulEpilogue {
-        let mut descriptor = MatmulEpilogue::noop();
-        descriptor.affine = MatmulAffine {
-            scale: self.scale,
-            offset: self.offset,
-        };
-        descriptor.clamp_min = self.clamp_min;
-        descriptor.clamp_max = self.clamp_max;
-        descriptor.pow_exponent = self.exponent;
+        let mut descriptor = self.scalar_descriptor();
         if let Some((id, operation)) = self.row {
             descriptor.row_scale = Some(handles[&id].clone());
             descriptor.row_op = operation;
@@ -278,6 +271,18 @@ impl AdmittedMatmul {
             descriptor.col_scale = Some(handles[&id].clone());
             descriptor.col_op = operation;
         }
+        descriptor
+    }
+
+    pub(super) fn scalar_descriptor(&self) -> MatmulEpilogue {
+        let mut descriptor = MatmulEpilogue::noop();
+        descriptor.affine = MatmulAffine {
+            scale: self.scale,
+            offset: self.offset,
+        };
+        descriptor.clamp_min = self.clamp_min;
+        descriptor.clamp_max = self.clamp_max;
+        descriptor.pow_exponent = self.exponent;
         descriptor
     }
 }

@@ -4,6 +4,7 @@ use super::*;
 
 mod plan;
 mod representation;
+pub(super) mod workload;
 
 pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Value> {
     match execute_matmul_epilogue_placed(request).await? {
@@ -27,7 +28,25 @@ pub async fn execute_matmul_epilogue_placed(
             FusionCpuObservation::new(None),
         ));
     };
-    let selection = match select_fusion_provider(&request, provider, &[admitted.shape.to_vec()])? {
+    let contract = admitted
+        .selection(&request, provider)
+        .ok_or_else(|| anyhow!("matrix workload overflow"))?;
+    let output_shape = if admitted.diagonal {
+        vec![admitted.shape[0].min(admitted.shape[1]), 1]
+    } else {
+        admitted.shape.to_vec()
+    };
+    let selection = match select_fusion_provider_with_contract(
+        &request,
+        provider,
+        vec![dense_output_representation(
+            provider.precision(),
+            &output_shape,
+        )],
+        None,
+        None,
+        Some(contract),
+    )? {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {
             return Ok(FusionExecutionOutcome::SharedRuntime(observation))

@@ -9,6 +9,8 @@ mod capability;
 mod cost;
 mod execution_inventory;
 mod feasibility;
+mod matmul;
+pub use matmul::{MatmulScaleWork, MatmulWorkload};
 mod representation;
 
 pub use capability::{

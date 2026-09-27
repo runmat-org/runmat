@@ -19,6 +19,7 @@ pub(crate) fn wgpu_cost_estimate(
     provider: &dyn AccelProvider,
     query: &ProviderCostQuery,
 ) -> ProviderCostEstimate {
+    let matrix_work = super::provider_contract::matmul::physical_work(provider, &query.operation);
     let fusion_work =
         super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
     let fusion_empty = fusion_work
@@ -155,6 +156,7 @@ pub(crate) fn wgpu_cost_estimate(
         || coordinate_work.is_some()
         || digit_work.is_some()
         || remainder_work.is_some()
+        || matrix_work.is_some()
         || query.operation.workload.scalar_work_units.is_some()
     {
         None
@@ -240,6 +242,28 @@ pub(crate) fn wgpu_cost_estimate(
         CandidatePreparationState::Ready | CandidatePreparationState::Warm => 0,
         CandidatePreparationState::Cold => 100_000,
         CandidatePreparationState::Preparing => 50_000,
+    };
+    let execution_ns = matrix_work
+        .as_ref()
+        .map_or(execution_ns, |work| work.scalar_units.saturating_mul(2));
+    let allocations = matrix_work
+        .as_ref()
+        .map_or(allocations, |work| work.allocations);
+    let queue_submissions = matrix_work
+        .as_ref()
+        .map_or(queue_submissions, |work| work.queue_submissions);
+    let scratch_bytes = matrix_work
+        .as_ref()
+        .map_or(scratch_bytes, |work| work.scratch_bytes);
+    let upload_bytes =
+        upload_bytes.saturating_add(matrix_work.as_ref().map_or(0, |work| work.uniform_bytes));
+    let compile_or_prepare_ns = if matrix_work
+        .as_ref()
+        .is_some_and(|work| work.estimate.dispatches == Some(0))
+    {
+        0
+    } else {
+        compile_or_prepare_ns
     };
     let compile_or_prepare_ns = if fusion_empty {
         0
