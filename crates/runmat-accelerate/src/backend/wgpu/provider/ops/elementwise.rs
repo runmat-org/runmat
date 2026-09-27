@@ -10,6 +10,7 @@ use super::backend_shared::{
 use super::backend_types::WgpuProvider;
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
+use crate::backend::wgpu::shaders::classification::classification_shader;
 use crate::backend::wgpu::shaders::elementwise::{
     complex_binary_broadcast_shader, complex_binary_shader, complex_from_real_imag_shader,
     complex_from_real_shader, complex_unary_shader, real_unary_shader, round_digits_shader,
@@ -19,11 +20,8 @@ use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
     ELEM_GT_SHADER_F32, ELEM_GT_SHADER_F64, ELEM_LE_SHADER_F32, ELEM_LE_SHADER_F64,
     ELEM_LT_SHADER_F32, ELEM_LT_SHADER_F64, ELEM_NE_SHADER_F32, ELEM_NE_SHADER_F64,
-    LOGICAL_AND_SHADER_F32, LOGICAL_AND_SHADER_F64, LOGICAL_ISFINITE_SHADER_F32,
-    LOGICAL_ISFINITE_SHADER_F64, LOGICAL_ISINF_SHADER_F32, LOGICAL_ISINF_SHADER_F64,
-    LOGICAL_ISNAN_SHADER_F32, LOGICAL_ISNAN_SHADER_F64, LOGICAL_NOT_SHADER_F32,
-    LOGICAL_NOT_SHADER_F64, LOGICAL_OR_SHADER_F32, LOGICAL_OR_SHADER_F64, LOGICAL_XOR_SHADER_F32,
-    LOGICAL_XOR_SHADER_F64,
+    LOGICAL_AND_SHADER_F32, LOGICAL_AND_SHADER_F64, LOGICAL_NOT_SHADER_F32, LOGICAL_NOT_SHADER_F64,
+    LOGICAL_OR_SHADER_F32, LOGICAL_OR_SHADER_F64, LOGICAL_XOR_SHADER_F32, LOGICAL_XOR_SHADER_F64,
 };
 use crate::backend::wgpu::types::NumericPrecision;
 
@@ -951,12 +949,12 @@ impl WgpuProvider {
             let out = self.create_storage_buffer(0, "runmat-logical-isfinite-empty");
             self.register_existing_buffer(out, entry.shape, 0)
         } else {
-            let shader = match self.precision {
-                NumericPrecision::F64 => LOGICAL_ISFINITE_SHADER_F64,
-                NumericPrecision::F32 => LOGICAL_ISFINITE_SHADER_F32,
-            };
+            let shader = classification_shader(
+                self.precision,
+                runmat_builtins::NumericClassificationPredicate::Finite,
+            );
             self.fused_elementwise_with_telemetry_exec(
-                shader,
+                &shader,
                 std::slice::from_ref(a),
                 &entry.shape,
                 len,
@@ -973,12 +971,12 @@ impl WgpuProvider {
             let out = self.create_storage_buffer(0, "runmat-logical-isnan-empty");
             self.register_existing_buffer(out, entry.shape, 0)
         } else {
-            let shader = match self.precision {
-                NumericPrecision::F64 => LOGICAL_ISNAN_SHADER_F64,
-                NumericPrecision::F32 => LOGICAL_ISNAN_SHADER_F32,
-            };
+            let shader = classification_shader(
+                self.precision,
+                runmat_builtins::NumericClassificationPredicate::Nan,
+            );
             self.fused_elementwise_with_telemetry_exec(
-                shader,
+                &shader,
                 std::slice::from_ref(a),
                 &entry.shape,
                 len,
@@ -995,12 +993,12 @@ impl WgpuProvider {
             let out = self.create_storage_buffer(0, "runmat-logical-isinf-empty");
             self.register_existing_buffer(out, entry.shape, 0)
         } else {
-            let shader = match self.precision {
-                NumericPrecision::F64 => LOGICAL_ISINF_SHADER_F64,
-                NumericPrecision::F32 => LOGICAL_ISINF_SHADER_F32,
-            };
+            let shader = classification_shader(
+                self.precision,
+                runmat_builtins::NumericClassificationPredicate::Infinite,
+            );
             self.fused_elementwise_with_telemetry_exec(
-                shader,
+                &shader,
                 std::slice::from_ref(a),
                 &entry.shape,
                 len,
