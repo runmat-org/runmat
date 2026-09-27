@@ -549,7 +549,7 @@ async fn randn_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
     if let Some(provider) =
         runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
     {
-        let attempt = if handle.shape == shape {
+        let attempt = if handle.shape() == shape {
             provider.random_normal_like(handle)
         } else {
             provider.random_normal(shape)

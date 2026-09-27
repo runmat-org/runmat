@@ -96,7 +96,7 @@ fn vector_output_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
         Value::LogicalArray(value) => value.shape.clone(),
         Value::StringArray(value) => value.shape.clone(),
         Value::Cell(value) => vec![value.rows, value.cols],
-        Value::GpuTensor(value) => value.shape.clone(),
+        Value::GpuTensor(value) => value.shape().to_vec(),
         Value::Object(object) if object.is_class(runmat_types::standard::DATETIME) => {
             crate::builtins::datetime::serials_from_datetime_value(value)?.shape
         }

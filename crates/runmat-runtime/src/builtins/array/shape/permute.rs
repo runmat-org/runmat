@@ -251,7 +251,7 @@ async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Val
                 .map_err(|error| permute_error("permute", error))
         }
         Value::GpuTensor(handle) => {
-            validate_rank("permute", &order_vec, handle.shape.len())?;
+            validate_rank("permute", &order_vec, handle.shape().len())?;
             Ok(permute_gpu("permute", handle, &order_vec).await?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
@@ -541,7 +541,7 @@ pub(crate) async fn permute_gpu(
 ) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if handle.device_id != 0 {
+        if handle.device_id() != 0 {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
@@ -594,11 +594,11 @@ fn valid_native_permute_output(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     order: &[usize],
 ) -> bool {
-    let mut padded = input.shape.clone();
+    let mut padded = input.shape().to_vec();
     padded.resize(order.len(), 1);
     let expected_shape: Vec<usize> = order.iter().map(|&dim| padded[dim - 1]).collect();
-    output.shape == expected_shape
-        && output.device_id == provider.device_id()
+    output.shape() == expected_shape
+        && output.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && !gpu_helpers::same_gpu_handle(input, output)

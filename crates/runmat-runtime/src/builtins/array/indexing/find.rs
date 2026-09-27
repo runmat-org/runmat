@@ -507,8 +507,12 @@ fn try_provider_find(
     };
     let limit = options.effective_limit();
     let mut result = provider.find(handle, limit, direction).ok()?;
-    if is_row_vector_shape(&handle.shape) {
-        result.linear.shape = vec![1, result.linear.shape.first().copied().unwrap_or(0)];
+    if is_row_vector_shape(handle.shape()) {
+        let shape = vec![1, result.linear.shape().first().copied().unwrap_or(0)];
+        result.linear = result
+            .linear
+            .with_view(result.linear.view().clone().with_shape(shape))
+            .ok()?;
     }
     Some(result)
 }

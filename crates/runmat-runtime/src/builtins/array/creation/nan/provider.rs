@@ -100,7 +100,7 @@ pub(super) async fn nan_like_gpu(
                 "nan: provider cannot preserve explicit complex gpuArray output",
             ));
         }
-        let attempt = if handle.shape == shape {
+        let attempt = if handle.shape() == shape {
             provider.fill_like(handle, f64::NAN)
         } else {
             provider.fill(shape, f64::NAN)

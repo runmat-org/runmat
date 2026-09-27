@@ -457,8 +457,8 @@ async fn sortrows_gpu(
     handle: GpuTensorHandle,
     rest: &[Value],
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
-    ensure_matrix_shape(&handle.shape)?;
-    let (_, cols) = rows_cols_from_shape(&handle.shape);
+    ensure_matrix_shape(handle.shape())?;
+    let (_, cols) = rows_cols_from_shape(handle.shape());
     let args = SortRowsArgs::parse(rest, cols)?;
 
     let plain_real = runmat_accelerate_api::handle_integer_type(&handle).is_none()
@@ -553,7 +553,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::LogicalArray(logical) => logical.shape.clone(),
         Value::ComplexTensor(tensor) => tensor.shape.clone(),
         Value::CharArray(array) => array.shape.clone(),
-        Value::GpuTensor(handle) => handle.shape.clone(),
+        Value::GpuTensor(handle) => handle.shape().to_vec(),
         _ => vec![1, 1],
     }
 }

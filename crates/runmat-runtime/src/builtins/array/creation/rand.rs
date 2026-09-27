@@ -695,7 +695,7 @@ async fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Buil
                 "rand: provider cannot preserve explicit complex gpuArray output",
             ));
         }
-        let attempt = if handle.shape == shape {
+        let attempt = if handle.shape() == shape {
             provider.random_uniform_like(handle)
         } else {
             provider.random_uniform(shape)
@@ -1221,7 +1221,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(handle) = result else {
                 panic!("expected resident gpuArray");
             };
-            assert_eq!(handle.shape, vec![3, 4]);
+            assert_eq!(handle.shape(), vec![3, 4]);
         });
     }
 

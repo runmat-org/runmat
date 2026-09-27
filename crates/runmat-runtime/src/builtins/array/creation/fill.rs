@@ -1033,7 +1033,7 @@ fn fill_like_gpu(
         );
     }
     let value = fill.as_real()?;
-    let attempt = if prototype.shape == shape {
+    let attempt = if prototype.shape() == shape {
         provider.fill_like(prototype, value)
     } else {
         provider.fill(shape, value)
@@ -1059,8 +1059,8 @@ fn validate_like_gpu_owner(
     expected_shape: &[usize],
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
 ) -> anyhow::Result<()> {
-    if output.device_id != prototype.device_id
-        || output.shape != expected_shape
+    if output.device_id() != prototype.device_id()
+        || output.shape() != expected_shape
         || !runmat_accelerate_api::provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
     {
@@ -1453,7 +1453,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert_eq!(handle.shape, vec![2, 2]);
+            assert_eq!(handle.shape(), vec![2, 2]);
             assert!(runmat_accelerate_api::provider_for_handle(&handle)
                 .is_some_and(|owner| std::ptr::eq(owner, provider)));
             let downloaded = block_on(provider.download_integer(&handle))

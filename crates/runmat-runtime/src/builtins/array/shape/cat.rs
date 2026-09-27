@@ -1404,8 +1404,8 @@ async fn cat_gpu_values(
     let has_integer_handle = handles
         .iter()
         .any(|handle| runmat_accelerate_api::handle_integer_type(handle).is_some());
-    let has_empty_handle = handles.iter().any(|handle| handle.shape.contains(&0));
-    let has_nonempty_handle = handles.iter().any(|handle| !handle.shape.contains(&0));
+    let has_empty_handle = handles.iter().any(|handle| handle.shape().contains(&0));
+    let has_nonempty_handle = handles.iter().any(|handle| !handle.shape().contains(&0));
     let must_apply_runtime_empty_omission = has_empty_handle && has_nonempty_handle;
 
     // Native provider hook

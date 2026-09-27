@@ -330,7 +330,7 @@ fn triu_value_is_paged(value: &Value) -> bool {
         Value::Tensor(value) => value.shape.len() > 2,
         Value::LogicalArray(value) => value.shape.len() > 2,
         Value::ComplexTensor(value) => value.shape.len() > 2,
-        Value::GpuTensor(value) => value.shape.len() > 2,
+        Value::GpuTensor(value) => value.shape().len() > 2,
         _ => false,
     }
 }
@@ -502,7 +502,7 @@ fn triu_complex_tensor(
 async fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if handle.device_id != 0 {
+        if handle.device_id() != 0 {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );

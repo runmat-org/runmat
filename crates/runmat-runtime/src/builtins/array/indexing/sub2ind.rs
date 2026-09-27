@@ -329,17 +329,17 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Optio
         let mut saw_non_scalar = false;
 
         for handle in &handles {
-            let len = tensor::element_count(&handle.shape);
+            let len = tensor::element_count(handle.shape());
             let is_scalar = len == 1;
             scalar_mask.push(is_scalar);
             if !is_scalar {
                 saw_non_scalar = true;
                 if let Some(existing) = &target_shape {
-                    if existing != &handle.shape {
+                    if existing != handle.shape() {
                         return Err(sub2ind_error("Subscript inputs must have the same size."));
                     }
                 } else {
-                    target_shape = Some(handle.shape.clone());
+                    target_shape = Some(handle.shape().to_vec());
                     result_len = len;
                 }
             }

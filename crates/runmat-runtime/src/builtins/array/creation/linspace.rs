@@ -263,7 +263,7 @@ async fn linspace_builtin(
     if start_source
         .as_ref()
         .zip(stop_source.as_ref())
-        .is_some_and(|(left, right)| left.device_id != right.device_id)
+        .is_some_and(|(left, right)| left.device_id() != right.device_id())
     {
         return Err(builtin_error(
             "linspace: GPU endpoints must belong to the same provider",
@@ -701,8 +701,8 @@ fn validated_sequence_output(
         _ => runmat_accelerate_api::ProviderPrecision::F64,
     };
     let valid = !gpu_helpers::same_gpu_handle(source, &output)
-        && output.shape == shape
-        && output.device_id == source.device_id
+        && output.shape() == shape
+        && output.device_id() == source.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(&output)
@@ -736,8 +736,8 @@ fn validated_unowned_sequence_output(
         NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
         _ => runmat_accelerate_api::ProviderPrecision::F64,
     };
-    let valid = output.shape == shape
-        && output.device_id == provider.device_id()
+    let valid = output.shape() == shape
+        && output.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(&output)

@@ -54,7 +54,7 @@ fn resident_exact_integer_construction_preserves_values_and_owner() {
         else {
             panic!("resident output");
         };
-        assert_eq!(output.device_id, handle.device_id);
+        assert_eq!(output.device_id, handle.device_id());
         let Value::Tensor(host) = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
             output.clone(),
         )))

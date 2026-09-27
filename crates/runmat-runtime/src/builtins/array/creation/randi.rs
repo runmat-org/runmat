@@ -1164,7 +1164,7 @@ async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>>
         return Ok(None);
     }
     let gpu_scalar = match value {
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+        Value::GpuTensor(handle) => tensor::element_count(handle.shape()) == 1,
         _ => false,
     };
     match tensor::dims_from_value_async(value).await {
@@ -1188,7 +1188,7 @@ fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             Err(builtin_error("randi: complex prototypes are not supported"))
         }
         Value::LogicalArray(l) => Ok(l.shape.clone()),
-        Value::GpuTensor(h) => Ok(h.shape.clone()),
+        Value::GpuTensor(h) => Ok(h.shape().to_vec()),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
         Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(vec![1, 1]),

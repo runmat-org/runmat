@@ -100,7 +100,7 @@ pub(super) async fn inf_like_gpu(
                 "inf: provider cannot preserve explicit complex gpuArray output",
             ));
         }
-        let attempt = if handle.shape == shape {
+        let attempt = if handle.shape() == shape {
             provider.fill_like(handle, f64::INFINITY)
         } else {
             provider.fill(shape, f64::INFINITY)

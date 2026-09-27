@@ -70,7 +70,7 @@ fn handle(value: &Value) -> Option<GpuTensorHandle> {
 }
 
 fn same(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+    left.device_id() == right.device_id() && left.buffer_id() == right.buffer_id()
 }
 
 fn free_if_fresh(handle: &GpuTensorHandle, prototype: &GpuTensorHandle, protected: &[Value]) {
@@ -90,7 +90,7 @@ fn free_if_fresh(handle: &GpuTensorHandle, prototype: &GpuTensorHandle, protecte
 fn free_outputs(outputs: &[Value], prototype: &GpuTensorHandle) {
     let mut freed = std::collections::BTreeSet::new();
     for handle in outputs.iter().filter_map(self::handle) {
-        if same(&handle, prototype) || !freed.insert((handle.device_id, handle.buffer_id)) {
+        if same(&handle, prototype) || !freed.insert((handle.device_id(), handle.buffer_id())) {
             continue;
         }
         if let Some(owner) = runmat_accelerate_api::provider_for_handle(&handle) {

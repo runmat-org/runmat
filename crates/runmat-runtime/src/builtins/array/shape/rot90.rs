@@ -563,7 +563,7 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
     }
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if handle.device_id != 0 {
+        if handle.device_id() != 0 {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
@@ -592,7 +592,7 @@ fn rot90_gpu_via_provider(
     handle: &GpuTensorHandle,
     steps: usize,
 ) -> Option<GpuTensorHandle> {
-    let rank = handle.shape.len();
+    let rank = handle.shape().len();
     if rank < 2 {
         return None;
     }

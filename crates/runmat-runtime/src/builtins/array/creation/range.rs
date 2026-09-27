@@ -623,9 +623,9 @@ async fn range_gpu(
         return range_gpu_fallback(&handle, selection, nan_mode).await;
     };
 
-    let resolved = resolve_dims(&handle.shape, &selection)?;
+    let resolved = resolve_dims(handle.shape(), &selection)?;
 
-    if should_use_global_reduce(&handle.shape, &selection, &resolved) {
+    if should_use_global_reduce(handle.shape(), &selection, &resolved) {
         if let Some(diff) = range_gpu_all(provider, &handle).await {
             return Ok(Value::GpuTensor(diff));
         }
@@ -637,7 +637,7 @@ async fn range_gpu(
     }
 
     let dim = resolved.dims_in_bounds[0];
-    let expected_shape = reduced_shape(&handle.shape, &[dim]);
+    let expected_shape = reduced_shape(handle.shape(), &[dim]);
 
     if expected_shape.is_empty() {
         return range_gpu_fallback(&handle, selection, nan_mode).await;
@@ -721,7 +721,7 @@ async fn range_gpu_single_dim(
             Ok(res) => res,
             Err(_) => continue,
         };
-        if min_result.values.shape != expected_shape {
+        if min_result.values.shape() != expected_shape {
             let _ = provider.free(&min_result.values);
             let _ = provider.free(&min_result.indices);
             continue;
@@ -734,7 +734,7 @@ async fn range_gpu_single_dim(
                 continue;
             }
         };
-        if max_result.values.shape != expected_shape {
+        if max_result.values.shape() != expected_shape {
             let _ = provider.free(&min_result.values);
             let _ = provider.free(&min_result.indices);
             let _ = provider.free(&max_result.values);

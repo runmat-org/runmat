@@ -412,7 +412,7 @@ async fn sort_gpu(
     handle: GpuTensorHandle,
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = handle.shape.clone();
+    let shape = handle.shape().to_vec();
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
         .or_else(runmat_accelerate_api::provider);
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));

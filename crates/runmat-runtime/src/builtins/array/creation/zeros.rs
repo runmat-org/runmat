@@ -589,7 +589,7 @@ async fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
             "zeros: provider cannot preserve explicit complex gpuArray output",
         ));
     }
-    let attempt = if handle.shape == shape {
+    let attempt = if handle.shape() == shape {
         provider.zeros_like(handle)
     } else {
         provider.zeros(shape)
@@ -1192,7 +1192,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(IntegerElementType::U64)
             );
-            assert_eq!(handle.shape, vec![2, 2]);
+            assert_eq!(handle.shape(), vec![2, 2]);
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(
                 gathered.integer_storage(),

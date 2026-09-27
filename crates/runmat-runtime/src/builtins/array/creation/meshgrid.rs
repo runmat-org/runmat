@@ -609,7 +609,7 @@ impl ParsedMeshgrid {
         let mut axes = Vec::with_capacity(max(axis_values.len(), 2));
         for (i, value) in axis_values.into_iter().enumerate() {
             if let Value::GpuTensor(handle) = &value {
-                preferred_device_id.get_or_insert(handle.device_id);
+                preferred_device_id.get_or_insert(handle.device_id());
             }
             let mut consumed_gpu = false;
             let data = axis_from_value(value, i, &mut consumed_gpu).await?;
@@ -692,7 +692,7 @@ fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> 
                 PrototypeClass::Real
             };
             Ok(PrototypeSpec {
-                residency: DevicePreference::Gpu(handle.device_id),
+                residency: DevicePreference::Gpu(handle.device_id()),
                 class,
             })
         }
@@ -857,10 +857,10 @@ async fn axis_from_value(
                 == GpuTensorStorage::ComplexInterleaved;
             // Fast path: if the gpuArray is vector-like, keep it on-device and avoid a download.
             // We'll validate any non-vector shapes by gathering below.
-            if is_vector_shape(&handle.shape) && !is_complex {
+            if is_vector_shape(handle.shape()) && !is_complex {
                 *prefer_gpu = true;
                 return Ok(AxisData {
-                    len: vector_len_from_shape(&handle.shape),
+                    len: vector_len_from_shape(handle.shape()),
                     is_complex,
                     storage: AxisStorage::GpuReal(handle),
                 });

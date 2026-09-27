@@ -354,9 +354,9 @@ fn ensure_eye_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
             }
             Value::GpuTensor(value) => {
                 let len = tensor::element_count(&value.shape);
-                let row = value.shape.len() >= 2 && value.shape[0] == 1;
-                let column = value.shape.len() >= 2 && value.shape[1] == 1;
-                if len <= 1 || row || column || value.shape.len() == 1 {
+                let row = value.shape().len() >= 2 && value.shape()[0] == 1;
+                let column = value.shape().len() >= 2 && value.shape()[1] == 1;
+                if len <= 1 || row || column || value.shape().len() == 1 {
                     if column && !row && len > 1 {
                         crate::compatibility::ensure_builtin_extension_enabled(
                             &EYE_COLUMN_SIZE_VECTOR_EXTENSION,
@@ -829,8 +829,8 @@ fn valid_eye_gpu_result(
     let same_owner = runmat_accelerate_api::provider_for_handle(output)
         .is_some_and(|owner| std::ptr::eq(owner, provider));
     same_owner
-        && output.device_id == prototype.device_id
-        && output.shape == shape
+        && output.device_id() == prototype.device_id()
+        && output.shape() == shape
         && gpu_helpers::numeric_descriptor_matches_source(prototype, output)
         && runmat_accelerate_api::handle_is_logical(output)
             == runmat_accelerate_api::handle_is_logical(prototype)
@@ -939,7 +939,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::Tensor(t) => Ok(t.shape.clone()),
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
-        Value::GpuTensor(h) => Ok(h.shape.clone()),
+        Value::GpuTensor(h) => Ok(h.shape().to_vec()),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
         Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),

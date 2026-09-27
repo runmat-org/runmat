@@ -948,7 +948,7 @@ async fn circshift_gpu(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Value> {
-    let plan = build_shift_plan(&handle.shape, dims, shifts)?;
+    let plan = build_shift_plan(handle.shape(), dims, shifts)?;
     if plan.is_noop() {
         return Ok(Value::GpuTensor(handle));
     }
@@ -956,7 +956,7 @@ async fn circshift_gpu(
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let mut working = handle.clone();
         if runmat_accelerate_api::handle_integer_type(&handle).is_none()
-            && plan.ext_shape != working.shape
+            && plan.ext_shape != working.shape()
         {
             match provider.reshape(&working, &plan.ext_shape) {
                 Ok(reshaped) => working = reshaped,

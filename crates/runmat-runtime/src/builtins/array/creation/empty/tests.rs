@@ -34,7 +34,7 @@ fn explicit_gpu_empty_keeps_shape_and_device_intent() {
             panic!("expected device empty");
         };
         assert!(runmat_accelerate_api::handle_is_explicit(&handle));
-        assert_eq!(handle.shape, vec![0, 3]);
+        assert_eq!(handle.shape(), vec![0, 3]);
         let host = crate::builtins::common::test_support::gather(Value::GpuTensor(handle)).unwrap();
         assert!(host.is_empty());
         assert_eq!(host.shape, vec![0, 3]);

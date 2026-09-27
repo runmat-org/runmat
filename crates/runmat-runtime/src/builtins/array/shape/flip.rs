@@ -312,7 +312,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
-            let dims = resolve_dims(&spec, &handle.shape);
+            let dims = resolve_dims(&spec, handle.shape());
             Ok(flip_gpu(handle, &dims).await?)
         }
         Value::Cell(_) => Err(flip_error_with_message(
@@ -804,8 +804,8 @@ fn flip_native_output_matches(
     output: &GpuTensorHandle,
     provider: &dyn runmat_accelerate_api::AccelProvider,
 ) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
+    output.shape() == input.shape()
+        && output.device_id() == input.device_id()
         && !gpu_handles_alias(output, input)
         && runmat_accelerate_api::handle_storage(output)
             == runmat_accelerate_api::handle_storage(input)
@@ -817,7 +817,7 @@ fn flip_native_output_matches(
 }
 
 fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
 }
 
 fn flip_generic<T: Clone>(

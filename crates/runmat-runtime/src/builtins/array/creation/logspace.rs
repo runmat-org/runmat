@@ -644,8 +644,8 @@ fn valid_uploaded_sequence_handle(
     owner: &'static dyn runmat_accelerate_api::AccelProvider,
     storage: runmat_accelerate_api::GpuTensorStorage,
 ) -> bool {
-    output.shape == [1, count]
-        && output.device_id == owner.device_id()
+    output.shape() == [1, count]
+        && output.device_id() == owner.device_id()
         && runmat_accelerate_api::handle_storage(output) == storage
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
@@ -677,8 +677,8 @@ fn valid_sequence_handle(
         .first()
         .and_then(|input| runmat_accelerate_api::handle_precision(input))
         .unwrap_or_else(|| owner.precision());
-    output.shape == [1, count]
-        && output.device_id == owner.device_id()
+    output.shape() == [1, count]
+        && output.device_id() == owner.device_id()
         && protected
             .iter()
             .all(|input| !gpu_helpers::same_gpu_handle(output, input))

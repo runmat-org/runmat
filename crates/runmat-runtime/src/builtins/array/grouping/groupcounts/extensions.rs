@@ -38,7 +38,7 @@ fn is_fixed_width_integer_scalar(value: &Value) -> bool {
         }
         _ => {
             tensor::scalar_integer_value(value).is_some()
-                || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() == 1 && runmat_accelerate_api::handle_integer_type(handle).is_some())
+                || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().product::<usize>() == 1 && runmat_accelerate_api::handle_integer_type(handle).is_some())
         }
     }
 }

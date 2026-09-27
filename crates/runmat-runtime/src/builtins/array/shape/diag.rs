@@ -796,7 +796,7 @@ fn ensure_diag_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()>
         Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
         Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
         Value::LogicalArray(array) => Some(array.shape.as_slice()),
-        Value::GpuTensor(handle) => Some(handle.shape.as_slice()),
+        Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
     };
     if shape.is_some_and(|shape| shape.len() > 2 && shape[2..].iter().all(|dim| *dim == 1)) {
@@ -820,7 +820,7 @@ async fn evaluate_diag_host(value: Value, parsed: &ParsedDiagArgs) -> BuiltinRes
 }
 
 async fn diag_resident(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    let input_device = handle.device_id;
+    let input_device = handle.device_id();
     let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
         diag_error(
             MESSAGE_ID_INVALID_INPUT,
@@ -995,8 +995,8 @@ fn validate_uploaded_diag_result(
     expected_logical: bool,
     expected_precision: ProviderPrecision,
 ) -> BuiltinResult<()> {
-    let valid = handle.device_id == input_device
-        && handle.shape == expected_shape
+    let valid = handle.device_id() == input_device
+        && handle.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(handle) == expected_storage
@@ -1040,7 +1040,7 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
         return Ok(None);
     };
 
-    let (rows, cols) = matrix_dims(&handle.shape)?;
+    let (rows, cols) = matrix_dims(handle.shape())?;
     let is_vector = rows == 1 || cols == 1;
     validate_vector_mode(is_vector, parsed)?;
 
@@ -1107,8 +1107,8 @@ fn native_diag_output_matches(
     expected_shape: &[usize],
     template: GpuDiagTemplate,
 ) -> bool {
-    output.device_id == input.device_id
-        && output.shape == expected_shape
+    output.device_id() == input.device_id()
+        && output.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
@@ -1745,8 +1745,8 @@ async fn apply_gpu_like_template(
     };
 
     runmat_accelerate_api::set_handle_logical(&uploaded, logical_target);
-    let valid = uploaded.device_id == prototype.device_id
-        && uploaded.shape == expected_shape
+    let valid = uploaded.device_id() == prototype.device_id()
+        && uploaded.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(&uploaded)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(&uploaded) == expected_storage

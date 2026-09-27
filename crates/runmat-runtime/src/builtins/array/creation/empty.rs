@@ -240,7 +240,7 @@ async fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
 
 async fn host_size_value(value: &Value) -> BuiltinResult<Value> {
     if let Value::GpuTensor(handle) = value {
-        validate_row_or_scalar_shape(&handle.shape)?;
+        validate_row_or_scalar_shape(handle.shape())?;
         crate::compatibility::ensure_builtin_extension_enabled(
             &EMPTY_RESIDENT_SIZE_EXTENSION,
             LABEL,

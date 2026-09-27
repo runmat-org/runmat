@@ -288,7 +288,7 @@ fn try_kron_gpu_pair(
     let Some(right_owner) = gpu_helpers::exact_provider_for_handle(right) else {
         return Ok(None);
     };
-    if !std::ptr::eq(owner, right_owner) || left.device_id != right.device_id {
+    if !std::ptr::eq(owner, right_owner) || left.device_id() != right.device_id() {
         return Ok(None);
     }
     let expected_shape = aligned_shapes(&left.shape, &right.shape)?.2;
@@ -302,8 +302,8 @@ fn try_kron_gpu_pair(
         Ok(output) => output,
         Err(_) => return Ok(None),
     };
-    let valid = output.shape == expected_shape
-        && output.device_id == left.device_id
+    let valid = output.shape() == expected_shape
+        && output.device_id() == left.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
         && !gpu_helpers::same_gpu_handle(&output, left)
@@ -364,7 +364,7 @@ fn try_kron_gpu_host(
         Ok(uploaded) => uploaded,
         Err(_) => return Ok(None),
     };
-    let uploaded_valid = uploaded.device_id == source.device_id
+    let uploaded_valid = uploaded.device_id() == source.device_id()
         && gpu_helpers::exact_provider_for_handle(&uploaded)
             .is_some_and(|uploaded_owner| std::ptr::eq(uploaded_owner, owner))
         && runmat_accelerate_api::handle_storage(&uploaded)
@@ -398,8 +398,8 @@ fn try_kron_gpu_host(
         gpu_helpers::free_unprotected_exact_owner(&uploaded, &[source]);
         return Ok(None);
     };
-    let valid = output.shape == expected_shape
-        && output.device_id == source.device_id
+    let valid = output.shape() == expected_shape
+        && output.device_id() == source.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
         && !gpu_helpers::same_gpu_handle(&output, source)
@@ -425,7 +425,7 @@ fn value_shape(value: &Value) -> Option<&[usize]> {
         Value::Tensor(tensor) => Some(&tensor.shape),
         Value::ComplexTensor(tensor) => Some(&tensor.shape),
         Value::LogicalArray(array) => Some(&array.shape),
-        Value::GpuTensor(handle) => Some(&handle.shape),
+        Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
     }
 }
@@ -470,7 +470,7 @@ fn is_kron_scalar_double(value: &Value) -> bool {
             tensor::is_scalar_tensor(tensor) && tensor.numeric_dtype() == NumericDType::F64
         }
         Value::GpuTensor(handle) => {
-            handle.shape.iter().product::<usize>() == 1
+            handle.shape().iter().product::<usize>() == 1
                 && runmat_accelerate_api::handle_integer_type(handle).is_none()
                 && !runmat_accelerate_api::handle_is_logical(handle)
                 && runmat_accelerate_api::handle_storage(handle)

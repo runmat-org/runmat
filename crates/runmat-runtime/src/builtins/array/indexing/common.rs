@@ -26,7 +26,7 @@ pub(crate) async fn parse_dims(value: &Value, builtin: &str) -> BuiltinResult<Ve
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             parse_scalar_dims(value, builtin).await
         }
-        Value::GpuTensor(handle) if tensor::element_count(&handle.shape) == 1 => {
+        Value::GpuTensor(handle) if tensor::element_count(handle.shape()) == 1 => {
             parse_scalar_dims(value, builtin).await
         }
         Value::Tensor(_) | Value::GpuTensor(_) => parse_vector_dims(value, builtin).await,

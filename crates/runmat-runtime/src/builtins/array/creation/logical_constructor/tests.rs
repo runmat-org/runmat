@@ -272,7 +272,7 @@ fn logical_wgpu_like_integer_prototype_preserves_owner_and_logical_storage() {
     let Value::GpuTensor(handle) = output else {
         panic!("expected resident logical output");
     };
-    assert_eq!(handle.shape, vec![2, 2]);
+    assert_eq!(handle.shape(), vec![2, 2]);
     assert!(runmat_accelerate_api::handle_is_logical(&handle));
     assert!(runmat_accelerate_api::provider_for_handle(&handle)
         .is_some_and(|owner| std::ptr::eq(owner, provider)));
@@ -289,7 +289,7 @@ fn logical_wgpu_like_integer_prototype_preserves_owner_and_logical_storage() {
     let Value::GpuTensor(handle) = output else {
         panic!("expected resident logical output");
     };
-    assert_eq!(handle.shape, vec![2, 2]);
+    assert_eq!(handle.shape(), vec![2, 2]);
     assert!(runmat_accelerate_api::handle_is_logical(&handle));
     assert!(runmat_accelerate_api::provider_for_handle(&handle)
         .is_some_and(|owner| std::ptr::eq(owner, provider)));

@@ -66,7 +66,7 @@ impl AccelProvider for GuardProvider {
         self.result(shape)
     }
     fn fill_like(&self, handle: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
-        self.result(&handle.shape)
+        self.result(handle.shape())
     }
 }
 
@@ -176,7 +176,7 @@ fn logical_constructors_upload_native_single_when_f32_provider_has_no_fill_hooks
             let Value::GpuTensor(handle) = output else {
                 panic!("expected resident logical output");
             };
-            assert_eq!(handle.shape, vec![2, 3]);
+            assert_eq!(handle.shape(), vec![2, 3]);
             assert_eq!(
                 handle.descriptor.element_type,
                 Some(runmat_accelerate_api::NumericElementType::F32)

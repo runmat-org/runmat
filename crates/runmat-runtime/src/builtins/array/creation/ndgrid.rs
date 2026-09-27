@@ -470,20 +470,20 @@ async fn axis_from_value(
                 if runmat_accelerate_api::handle_storage(&handle)
                     == GpuTensorStorage::ComplexInterleaved
                 {
-                    if !is_vector_shape(&handle.shape) {
+                    if !is_vector_shape(handle.shape()) {
                         return Err(ndgrid_error_with_detail(
                             &NDGRID_ERROR_INVALID_AXIS,
                             format!(
                                 "argument {} must be a vector, got shape {:?}",
                                 index + 1,
-                                handle.shape
+                                handle.shape()
                             ),
                         ));
                     }
                     *prefer_gpu = true;
-                    gpu_device_id.get_or_insert(handle.device_id);
+                    gpu_device_id.get_or_insert(handle.device_id());
                     return Ok(AxisData {
-                        len: vector_len_from_shape(&handle.shape),
+                        len: vector_len_from_shape(handle.shape()),
                         storage: AxisStorage::GpuReal {
                             handle,
                             class: OutputClass::Complex,
@@ -509,8 +509,8 @@ async fn axis_from_value(
                 };
             }
             *prefer_gpu = true;
-            gpu_device_id.get_or_insert(handle.device_id);
-            if is_vector_shape(&handle.shape)
+            gpu_device_id.get_or_insert(handle.device_id());
+            if is_vector_shape(handle.shape())
                 && runmat_accelerate_api::handle_storage(&handle)
                     != GpuTensorStorage::ComplexInterleaved
             {
@@ -524,7 +524,7 @@ async fn axis_from_value(
                     )
                 };
                 return Ok(AxisData {
-                    len: vector_len_from_shape(&handle.shape),
+                    len: vector_len_from_shape(handle.shape()),
                     storage: AxisStorage::GpuReal { handle, class },
                 });
             }

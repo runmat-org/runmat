@@ -352,8 +352,8 @@ fn issorted_internal(message: impl Into<String>) -> crate::RuntimeError {
 async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (input, args) = match value {
         Value::GpuTensor(handle) => {
-            let args = IssortedArgs::parse(&rest, &handle.shape)?;
-            if !gpu_shape_is_vector(&handle.shape) {
+            let args = IssortedArgs::parse(&rest, handle.shape())?;
+            if !gpu_shape_is_vector(handle.shape()) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &ISSORTED_GPU_NONVECTOR_EXTENSION,
                     BUILTIN_NAME,

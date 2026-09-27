@@ -231,7 +231,7 @@ async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Va
                 .map_err(ipermute_error)
         }
         Value::GpuTensor(handle) => {
-            validate_rank("ipermute", &order_vec, handle.shape.len())?;
+            validate_rank("ipermute", &order_vec, handle.shape().len())?;
             Ok(ipermute_gpu(handle, &inverse).await?)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {

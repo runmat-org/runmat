@@ -548,7 +548,7 @@ async fn parse_size_argument(
 ) -> crate::BuiltinResult<usize> {
     let is_vector = match value {
         Value::Tensor(t) => tensor::tensor_element_len(t) != 1,
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) != 1,
+        Value::GpuTensor(handle) => tensor::element_count(handle.shape()) != 1,
         _ => false,
     };
 

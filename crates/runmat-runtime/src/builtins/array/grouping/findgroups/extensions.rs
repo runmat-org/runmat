@@ -34,11 +34,11 @@ fn require(extension: &runmat_builtins::BuiltinExtensionDescriptor) -> BuiltinRe
 }
 
 fn is_matrix(value: &Value) -> bool {
-    let shape = match value {
+    let shape: &[usize] = match value {
         Value::Tensor(value) => &value.shape,
         Value::LogicalArray(value) => &value.shape,
         Value::StringArray(value) => &value.shape,
-        Value::GpuTensor(value) => &value.shape,
+        Value::GpuTensor(value) => value.shape(),
         _ => return false,
     };
     shape.first().copied().unwrap_or(1) > 1 && shape.get(1).copied().unwrap_or(1) > 1

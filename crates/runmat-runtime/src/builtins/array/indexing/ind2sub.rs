@@ -371,10 +371,10 @@ fn try_gpu_ind2sub(
         {
             return Ok(None);
         }
-        let len = if handle.shape.is_empty() {
+        let len = if handle.shape().is_empty() {
             1usize
         } else {
-            handle.shape.iter().copied().product()
+            handle.shape().iter().copied().product()
         };
         if total == 0 && len > 0 {
             return Err(ind2sub_error(
@@ -384,10 +384,10 @@ fn try_gpu_ind2sub(
         if len > u32::MAX as usize {
             return Ok(None);
         }
-        let output_shape = if handle.shape.is_empty() {
+        let output_shape = if handle.shape().is_empty() {
             vec![len, 1]
         } else {
-            handle.shape.clone()
+            handle.shape().to_vec()
         };
         let source_metadata = gpu_helpers::snapshot_handle_metadata(handle);
         let result = provider.ind2sub(dims, strides, handle, total, len, &output_shape);
@@ -400,8 +400,8 @@ fn try_gpu_ind2sub(
                     ));
                 }
                 let valid = handles.iter().enumerate().all(|(index, output)| {
-                    output.shape == output_shape
-                        && output.device_id == provider.device_id()
+                    output.shape() == output_shape
+                        && output.device_id() == provider.device_id()
                         && gpu_helpers::exact_provider_for_handle(output)
                             .is_some_and(|owner| std::ptr::eq(owner, provider))
                         && runmat_accelerate_api::handle_storage(output)
