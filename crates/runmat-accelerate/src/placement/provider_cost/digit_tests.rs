@@ -88,8 +88,8 @@ fn digit_estimator_preserves_chunk_allocations_uniform_uploads_and_static_prior(
 fn digit_estimator_empty_cold_path_allocates_only_output_without_kernel_or_uniform() {
     let provider = crate::simple_provider::InProcessProvider::new();
     let mut query = query();
-    query.operation.inputs[0].shape = vec![0, usize::MAX];
-    query.operation.outputs[0].shape = vec![0, usize::MAX];
+    query.operation.inputs[0].shape = vec![0, u64::MAX];
+    query.operation.outputs[0].shape = vec![0, u64::MAX];
     query.operation.workload.elements = Some(0);
     query.required_upload_bytes = 0;
     for mode in [RoundDigitsMode::Decimals, RoundDigitsMode::Significant] {
