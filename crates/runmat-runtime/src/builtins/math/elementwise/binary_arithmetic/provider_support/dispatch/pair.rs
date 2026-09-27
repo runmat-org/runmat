@@ -75,6 +75,15 @@ async fn try_broadcast(
         .apply(provider, &expanded.left, &expanded.right)
         .await
     {
+        Ok(output)
+            if gpu_helpers::same_gpu_handle(&output, left)
+                || gpu_helpers::same_gpu_handle(&output, right) =>
+        {
+            Err(provider_contract_error(
+                operation,
+                "provider result aliases a borrowed original operand",
+            ))
+        }
         Ok(output) => accept_output(
             operation,
             output,
@@ -103,16 +112,16 @@ async fn try_device_scalar(
     if !float_handle_supported(left) || !float_handle_supported(right) {
         return Ok(None);
     }
-    let (result, class_source) = if left.shape.iter().product::<usize>() <= 1 {
+    let (result, class_source, other_source) = if left.shape.iter().product::<usize>() <= 1 {
         let Some(scalar) = device_real_scalar(identity, left).await? else {
             return Ok(None);
         };
-        (operation.scalar_left(provider, right, scalar), right)
+        (operation.scalar_left(provider, right, scalar), right, left)
     } else if right.shape.iter().product::<usize>() <= 1 {
         let Some(scalar) = device_real_scalar(identity, right).await? else {
             return Ok(None);
         };
-        (operation.scalar_right(provider, left, scalar), left)
+        (operation.scalar_right(provider, left, scalar), left, right)
     } else {
         return Ok(None);
     };
@@ -121,7 +130,7 @@ async fn try_device_scalar(
             operation,
             output,
             class_source,
-            None,
+            Some(other_source),
             provider,
             &class_source.shape,
         ),
@@ -138,63 +147,55 @@ fn expand_pair<'a>(
     left_repetitions: &[usize],
     right_repetitions: &[usize],
 ) -> BuiltinResult<Option<ExpandedPair<'a>>> {
-    let owns_left = left_repetitions.iter().any(|&count| count != 1);
-    let owns_right = right_repetitions.iter().any(|&count| count != 1);
-    let expanded_left = if owns_left {
-        match provider.repmat(left, left_repetitions) {
-            Ok(output) => output,
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-            Err(error) => return Err(provider_error(operation, error)),
-        }
-    } else {
-        left.clone()
-    };
-    let expanded_right = if owns_right {
-        match provider.repmat(right, right_repetitions) {
-            Ok(output) => output,
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                if owns_left {
-                    gpu_helpers::free_rejected_provider_output(&expanded_left, &[left], provider);
-                }
-                return Ok(None);
-            }
-            Err(error) => {
-                if owns_left {
-                    gpu_helpers::free_rejected_provider_output(&expanded_left, &[left], provider);
-                }
-                return Err(provider_error(operation, error));
-            }
-        }
-    } else {
-        right.clone()
-    };
-    Ok(Some(ExpandedPair {
+    let _left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(left);
+    let _right_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(right);
+    let mut expanded = ExpandedPair {
         provider,
         original_left: left,
         original_right: right,
-        left: expanded_left,
-        right: expanded_right,
-        owns_left,
-        owns_right,
-    }))
+        left: left.clone(),
+        right: right.clone(),
+        owns_left: false,
+        owns_right: false,
+    };
+    if left_repetitions.iter().any(|&count| count != 1) {
+        expanded.left = match provider.repmat(left, left_repetitions) {
+            Ok(output) => output,
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+            Err(error) => return Err(provider_error(operation, error)),
+        };
+        expanded.owns_left = true;
+    }
+    if right_repetitions.iter().any(|&count| count != 1) {
+        expanded.right = match provider.repmat(right, right_repetitions) {
+            Ok(output) => output,
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+            Err(error) => return Err(provider_error(operation, error)),
+        };
+        expanded.owns_right = true;
+    }
+    Ok(Some(expanded))
 }
 
 fn expanded_inputs_are_valid(expanded: &ExpandedPair<'_>, expected_shape: &[usize]) -> bool {
     use super::super::valid_real_binary_output;
 
-    (!expanded.owns_left
-        || valid_real_binary_output(
-            &expanded.left,
-            expanded.original_left,
-            None,
-            expanded.provider,
-            expected_shape,
-        ))
+    !(expanded.owns_left
+        && expanded.owns_right
+        && gpu_helpers::same_gpu_handle(&expanded.left, &expanded.right))
+        && (!expanded.owns_left
+            || valid_real_binary_output(
+                &expanded.left,
+                expanded.original_left,
+                Some(expanded.original_right),
+                expanded.provider,
+                expected_shape,
+            ))
         && (!expanded.owns_right
             || valid_real_binary_output(
                 &expanded.right,
                 expanded.original_right,
-                None,
+                Some(expanded.original_left),
                 expanded.provider,
                 expected_shape,
             ))

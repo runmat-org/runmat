@@ -3,7 +3,9 @@ use runmat_value::Value;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::gpu_helpers;
-use crate::builtins::math::elementwise::binary_arithmetic::provider_support::valid_real_binary_output;
+use crate::builtins::math::elementwise::binary_arithmetic::provider_support::{
+    valid_real_binary_output, Temporary,
+};
 use crate::BuiltinResult;
 
 use super::DivisionContext;
@@ -23,7 +25,7 @@ pub(super) async fn try_pair(
         .map_err(|detail| context.error_with_detail(context.size_mismatch, detail))?
         .output_shape()
         .to_vec();
-    let output = match provider.elem_div(numerator, denominator).await {
+    let output = match divide(provider, numerator, denominator).await {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
         Err(error) => return Err(context.internal_error(error)),
@@ -60,11 +62,12 @@ pub(super) async fn try_resident_numerator(
         else {
             return Ok(None);
         };
-        let result = match provider.elem_div(numerator, &uploaded).await {
+        let temporary = Temporary::new(uploaded, provider, &[numerator]);
+        let uploaded = &temporary.handle;
+        let result = match divide(provider, numerator, uploaded).await {
             Ok(output) => Some(output),
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
             Err(error) => {
-                gpu_helpers::free_unprotected_exact_owner(&uploaded, &[numerator]);
                 return Err(context.internal_error(error));
             }
         };
@@ -72,15 +75,14 @@ pub(super) async fn try_resident_numerator(
             valid_real_binary_output(
                 output,
                 numerator,
-                Some(&uploaded),
+                Some(uploaded),
                 provider,
                 &numerator.shape,
             )
         });
         if let Some(output) = result.as_ref().filter(|_| !valid) {
-            gpu_helpers::free_rejected_provider_output(output, &[numerator, &uploaded], provider);
+            gpu_helpers::free_rejected_provider_output(output, &[numerator, uploaded], provider);
         }
-        gpu_helpers::free_unprotected_exact_owner(&uploaded, &[numerator]);
         if result.is_none() {
             return Ok(None);
         }
@@ -92,7 +94,11 @@ pub(super) async fn try_resident_numerator(
         );
     }
     if float_handle_supported(numerator) {
-        match provider.scalar_div(numerator, *scalar) {
+        let result = {
+            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(numerator);
+            provider.scalar_div(numerator, *scalar)
+        };
+        match result {
             Ok(output) => {
                 if valid_real_binary_output(&output, numerator, None, provider, &numerator.shape) {
                     return Ok(Some(output));
@@ -127,11 +133,12 @@ pub(super) async fn try_resident_denominator(
         else {
             return Ok(None);
         };
-        let result = match provider.elem_div(&uploaded, denominator).await {
+        let temporary = Temporary::new(uploaded, provider, &[denominator]);
+        let uploaded = &temporary.handle;
+        let result = match divide(provider, uploaded, denominator).await {
             Ok(output) => Some(output),
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
             Err(error) => {
-                gpu_helpers::free_unprotected_exact_owner(&uploaded, &[denominator]);
                 return Err(context.internal_error(error));
             }
         };
@@ -145,9 +152,8 @@ pub(super) async fn try_resident_denominator(
             )
         });
         if let Some(output) = result.as_ref().filter(|_| !valid) {
-            gpu_helpers::free_rejected_provider_output(output, &[denominator, &uploaded], provider);
+            gpu_helpers::free_rejected_provider_output(output, &[denominator, uploaded], provider);
         }
-        gpu_helpers::free_unprotected_exact_owner(&uploaded, &[denominator]);
         if result.is_none() {
             return Ok(None);
         }
@@ -159,7 +165,11 @@ pub(super) async fn try_resident_denominator(
         );
     }
     if float_handle_supported(denominator) {
-        match provider.scalar_rdiv(denominator, *scalar) {
+        let result = {
+            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(denominator);
+            provider.scalar_rdiv(denominator, *scalar)
+        };
+        match result {
             Ok(output) => {
                 if valid_real_binary_output(
                     &output,
@@ -190,6 +200,16 @@ fn common_owner(
     let right_owner = gpu_helpers::exact_provider_for_handle(right)?;
     (std::ptr::eq(left_owner, right_owner) && left.device_id == right.device_id)
         .then_some(left_owner)
+}
+
+async fn divide(
+    provider: &dyn AccelProvider,
+    left: &GpuTensorHandle,
+    right: &GpuTensorHandle,
+) -> anyhow::Result<GpuTensorHandle> {
+    let _left = gpu_helpers::HandleMetadataRestoreGuard::new(left);
+    let _right = gpu_helpers::HandleMetadataRestoreGuard::new(right);
+    provider.elem_div(left, right).await
 }
 
 fn float_handle_supported(handle: &GpuTensorHandle) -> bool {

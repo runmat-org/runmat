@@ -112,6 +112,34 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
             vec![7.0, 8.0]
         );
     }
+    // Construction uploads a host component alongside a borrowed resident
+    // component. Either argument order must protect the resident allocation.
+    for mode in 0..3 {
+        provider.mode.store(mode, Ordering::SeqCst);
+        for resident_first in [false, true] {
+            let before = provider.frees.load(Ordering::SeqCst);
+            let host = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+            let resident = Value::GpuTensor(prototype.clone());
+            let args = if resident_first {
+                vec![resident, host]
+            } else {
+                vec![host, resident]
+            };
+            assert!(block_on(runmat_runtime::call_builtin_async_with_outputs(
+                "complex", &args, 1
+            ))
+            .is_err());
+            assert_eq!(
+                provider.frees.load(Ordering::SeqCst) - before,
+                usize::from(mode == 2)
+            );
+            assert!(!runmat_accelerate_api::handle_is_logical(&prototype));
+            assert_eq!(
+                block_on(provider.inner.download(&prototype)).unwrap().data,
+                vec![7.0, 8.0]
+            );
+        }
+    }
     provider.inner.free(&prototype).unwrap();
     *provider.borrowed.lock().unwrap() = None;
 }

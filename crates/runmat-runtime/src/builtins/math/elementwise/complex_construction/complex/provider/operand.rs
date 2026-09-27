@@ -13,12 +13,14 @@ use super::super::{error, host};
 pub(super) struct RealGpuOperand {
     pub(super) handle: GpuTensorHandle,
     owned: bool,
+    protected: Vec<GpuTensorHandle>,
 }
 
 impl RealGpuOperand {
     pub(super) fn from_value(
         value: &Value,
         provider: &'static dyn AccelProvider,
+        protected: &[&GpuTensorHandle],
     ) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
@@ -37,16 +39,23 @@ impl RealGpuOperand {
                 Ok(Self {
                     handle: handle.clone(),
                     owned: false,
+                    protected: Vec::new(),
                 })
             }
             value => {
                 let input = host::from_value(value.clone())?;
-                let handle = gpu_helpers::upload_tensor(provider, &input.tensor)
-                    .map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?;
+                let _metadata: Vec<_> = protected
+                    .iter()
+                    .map(|handle| gpu_helpers::HandleMetadataRestoreGuard::new(handle))
+                    .collect();
+                let handle =
+                    gpu_helpers::upload_tensor_protecting(provider, &input.tensor, protected)
+                        .map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?;
                 runmat_accelerate_api::set_handle_logical(&handle, false);
                 Ok(Self {
                     handle,
                     owned: true,
+                    protected: protected.iter().map(|handle| (*handle).clone()).collect(),
                 })
             }
         }
@@ -56,7 +65,10 @@ impl RealGpuOperand {
 impl Drop for RealGpuOperand {
     fn drop(&mut self) {
         if self.owned {
-            gpu_helpers::free_unprotected_exact_owner(&self.handle, &[]);
+            gpu_helpers::free_unprotected_exact_owner(
+                &self.handle,
+                &self.protected.iter().collect::<Vec<_>>(),
+            );
         }
     }
 }

@@ -68,10 +68,16 @@ pub(super) async fn binary(real: Value, imaginary: Value) -> BuiltinResult<Value
         return Ok(output);
     }
 
-    let real = gather(&real).await?;
-    let imaginary = gather(&imaginary).await?;
-    let output = host::binary(real, imaginary)?;
-    gpu_helpers::restore_class_preserving_value(&source, output, BUILTIN_NAME)
+    let protected = resident_inputs(&real, &imaginary);
+    let real_host = gather(&real).await?;
+    let imaginary_host = gather(&imaginary).await?;
+    let output = host::binary(real_host, imaginary_host)?;
+    gpu_helpers::restore_class_preserving_value_protecting(
+        &source,
+        output,
+        BUILTIN_NAME,
+        &protected,
+    )
 }
 
 async fn try_unary_provider(
@@ -115,8 +121,10 @@ async fn try_binary_provider(
     if expected_precision != Some(owner.precision()) {
         return Ok(None);
     }
-    let real = operand::RealGpuOperand::from_value(real, owner)?;
-    let imaginary = operand::RealGpuOperand::from_value(imaginary, owner)?;
+    let mut protected = resident_inputs(real, imaginary);
+    let real = operand::RealGpuOperand::from_value(real, owner, &protected)?;
+    protected.push(&real.handle);
+    let imaginary = operand::RealGpuOperand::from_value(imaginary, owner, &protected)?;
     let Some(shape) = output::compatible_shape(&real.handle.shape, &imaginary.handle.shape) else {
         return Ok(None);
     };
@@ -159,6 +167,16 @@ async fn try_binary_provider(
             format!("provider complex_from_real_imag failed: {detail}"),
         )),
     }
+}
+
+fn resident_inputs<'a>(real: &'a Value, imaginary: &'a Value) -> Vec<&'a GpuTensorHandle> {
+    [real, imaginary]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect()
 }
 
 async fn unary_fallback(

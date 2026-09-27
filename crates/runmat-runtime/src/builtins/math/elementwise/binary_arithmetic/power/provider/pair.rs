@@ -24,7 +24,7 @@ pub(in super::super) async fn power_gpu_pair(
             return gather_pair_and_evaluate(lhs, rhs).await;
         }
         if lhs.shape == rhs.shape {
-            match provider.elem_pow(&lhs, &rhs).await {
+            match power(provider, &lhs, &rhs).await {
                 Ok(handle)
                     if valid_real_binary_output(
                         &handle,
@@ -53,73 +53,73 @@ pub(in super::super) async fn power_gpu_pair(
         {
             let expanded_lhs = lhs_repetitions.iter().any(|&count| count != 1);
             let expanded_rhs = rhs_repetitions.iter().any(|&count| count != 1);
-            let expanded_lhs_handle = if expanded_lhs {
-                match provider.repmat(&lhs, &lhs_repetitions) {
-                    Ok(handle) => handle,
-                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                        return gather_pair_and_evaluate(lhs, rhs).await
-                    }
-                    Err(error) => return Err(builtin_error(format!("power: {error}"))),
-                }
-            } else {
-                lhs.clone()
-            };
-            let expanded_rhs_handle = if expanded_rhs {
-                match provider.repmat(&rhs, &rhs_repetitions) {
-                    Ok(handle) => handle,
-                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                        if expanded_lhs {
-                            gpu_helpers::free_rejected_provider_output(
-                                &expanded_lhs_handle,
-                                &[&lhs],
-                                provider,
-                            );
-                        }
-                        return gather_pair_and_evaluate(lhs, rhs).await;
-                    }
-                    Err(error) => {
-                        if expanded_lhs {
-                            gpu_helpers::free_rejected_provider_output(
-                                &expanded_lhs_handle,
-                                &[&lhs],
-                                provider,
-                            );
-                        }
-                        return Err(builtin_error(format!("power: {error}")));
-                    }
-                }
-            } else {
-                rhs.clone()
-            };
-            let expanded = ExpandedPair {
+            let mut expanded = ExpandedPair {
                 provider,
                 original_left: &lhs,
                 original_right: &rhs,
-                left: expanded_lhs_handle,
-                right: expanded_rhs_handle,
-                owns_left: expanded_lhs,
-                owns_right: expanded_rhs,
+                left: lhs.clone(),
+                right: rhs.clone(),
+                owns_left: false,
+                owns_right: false,
             };
+            if expanded_lhs {
+                expanded.left = match replicate(provider, &lhs, &lhs_repetitions, &[&lhs, &rhs]) {
+                    Ok(handle) => handle,
+                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                        return gather_pair_and_evaluate(lhs.clone(), rhs.clone()).await;
+                    }
+                    Err(error) => return Err(builtin_error(format!("power: {error}"))),
+                };
+                expanded.owns_left = true;
+            }
+            if expanded_rhs {
+                expanded.right = match replicate(provider, &rhs, &rhs_repetitions, &[&lhs, &rhs]) {
+                    Ok(handle) => handle,
+                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                        drop(expanded);
+                        return gather_pair_and_evaluate(lhs, rhs).await;
+                    }
+                    Err(error) => return Err(builtin_error(format!("power: {error}"))),
+                };
+                expanded.owns_right = true;
+            }
             if (expanded_lhs
-                && !valid_real_binary_output(&expanded.left, &lhs, None, provider, &out_shape))
+                && !valid_real_binary_output(
+                    &expanded.left,
+                    &lhs,
+                    Some(&rhs),
+                    provider,
+                    &out_shape,
+                ))
                 || (expanded_rhs
-                    && !valid_real_binary_output(&expanded.right, &rhs, None, provider, &out_shape))
+                    && !valid_real_binary_output(
+                        &expanded.right,
+                        &rhs,
+                        Some(&lhs),
+                        provider,
+                        &out_shape,
+                    ))
+                || (expanded_lhs
+                    && expanded_rhs
+                    && gpu_helpers::same_gpu_handle(&expanded.left, &expanded.right))
             {
                 expanded.release(&[]);
                 return Err(builtin_error(
                     "power: provider returned invalid singleton-expanded input metadata",
                 ));
             }
-            let result = provider.elem_pow(&expanded.left, &expanded.right).await;
+            let result = power(provider, &expanded.left, &expanded.right).await;
             match result {
                 Ok(handle)
-                    if valid_real_binary_output(
-                        &handle,
-                        &expanded.left,
-                        Some(&expanded.right),
-                        provider,
-                        &out_shape,
-                    ) =>
+                    if !gpu_helpers::same_gpu_handle(&handle, &lhs)
+                        && !gpu_helpers::same_gpu_handle(&handle, &rhs)
+                        && valid_real_binary_output(
+                            &handle,
+                            &expanded.left,
+                            Some(&expanded.right),
+                            provider,
+                            &out_shape,
+                        ) =>
                 {
                     expanded.release(&[&handle]);
                     return Ok(Value::GpuTensor(handle));
@@ -127,7 +127,7 @@ pub(in super::super) async fn power_gpu_pair(
                 Ok(handle) => {
                     gpu_helpers::free_rejected_provider_output(
                         &handle,
-                        &[&expanded.left, &expanded.right],
+                        &[&expanded.left, &expanded.right, &lhs, &rhs],
                         provider,
                     );
                     expanded.release(&[]);
@@ -156,6 +156,29 @@ fn common_owner(
     let lhs_owner = gpu_helpers::exact_provider_for_handle(lhs)?;
     let rhs_owner = gpu_helpers::exact_provider_for_handle(rhs)?;
     (std::ptr::eq(lhs_owner, rhs_owner) && lhs.device_id == rhs.device_id).then_some(lhs_owner)
+}
+
+async fn power(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    left: &GpuTensorHandle,
+    right: &GpuTensorHandle,
+) -> anyhow::Result<GpuTensorHandle> {
+    let _left = gpu_helpers::HandleMetadataRestoreGuard::new(left);
+    let _right = gpu_helpers::HandleMetadataRestoreGuard::new(right);
+    provider.elem_pow(left, right).await
+}
+
+fn replicate(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+    repetitions: &[usize],
+    protected: &[&GpuTensorHandle],
+) -> anyhow::Result<GpuTensorHandle> {
+    let _metadata: Vec<_> = protected
+        .iter()
+        .map(|handle| gpu_helpers::HandleMetadataRestoreGuard::new(handle))
+        .collect();
+    provider.repmat(input, repetitions)
 }
 
 fn compatible_real_inputs(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {

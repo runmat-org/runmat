@@ -22,6 +22,8 @@ impl ArithmeticProviderOperation {
         left: &GpuTensorHandle,
         right: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
+        let _left = crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(left);
+        let _right = crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(right);
         match self {
             Self::Add => provider.elem_add(left, right).await,
             Self::Subtract => provider.elem_sub(left, right).await,
@@ -35,6 +37,7 @@ impl ArithmeticProviderOperation {
         right: &GpuTensorHandle,
         scalar: f64,
     ) -> anyhow::Result<GpuTensorHandle> {
+        let _right = crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(right);
         match self {
             Self::Add => provider.scalar_add(right, scalar),
             Self::Subtract => provider.scalar_rsub(right, scalar),
@@ -48,6 +51,7 @@ impl ArithmeticProviderOperation {
         left: &GpuTensorHandle,
         scalar: f64,
     ) -> anyhow::Result<GpuTensorHandle> {
+        let _left = crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(left);
         match self {
             Self::Add => provider.scalar_add(left, scalar),
             Self::Subtract => provider.scalar_sub(left, scalar),
