@@ -6,6 +6,11 @@ use super::super::{error, names::*};
 const IDENTITY: &str = "isenv";
 
 pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::ISENV_DESCRIPTOR,
+        &runmat_builtins::ISENV_ERROR_TOO_MANY_OUTPUTS,
+        IDENTITY,
+    )?;
     let [value] = args.as_slice() else {
         return Err(error::builtin(IDENTITY, &ISENV_ERROR_ARITY));
     };

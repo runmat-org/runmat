@@ -46,11 +46,22 @@ pub const WHAT_ERROR_FILESYSTEM: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     message: "what: unable to inspect folder",
 };
 
+pub const WHAT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WHAT.OUTPUTS",
+    identifier: Some("RunMat:what:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "what: too many output arguments",
+};
 pub const WHAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[WHAT_ERROR_ARITY, WHAT_ERROR_FOLDER, WHAT_ERROR_FILESYSTEM],
+    errors: &[
+        WHAT_ERROR_ARITY,
+        WHAT_ERROR_FOLDER,
+        WHAT_ERROR_FILESYSTEM,
+        WHAT_ERROR_TOO_MANY_OUTPUTS,
+    ],
 };
 pub const WHAT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,

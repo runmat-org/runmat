@@ -7,6 +7,33 @@ fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 #[test]
+fn direct_requested_output_boundary_rejects_before_name_parsing() {
+    let descriptor = &runmat_builtins::GETENV_DESCRIPTOR;
+    assert_eq!(
+        descriptor.output_mode,
+        runmat_builtins::BuiltinOutputMode::Fixed
+    );
+    assert_eq!(
+        descriptor
+            .signatures
+            .iter()
+            .map(|signature| signature.outputs.len())
+            .max(),
+        Some(1)
+    );
+    for scoped in [false, true] {
+        let context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _context = scoped.then(|| context.enter());
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        assert_eq!(crate::output_count::current_output_count(), Some(2));
+        let direct = run(vec![Value::Num(1.0)]).unwrap_err();
+        assert_eq!(direct.identifier(), Some("RunMat:getenv:TooManyOutputs"));
+    }
+}
+
+#[test]
 fn scalar_and_shaped_queries_preserve_public_result_forms() {
     let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
     crate::builtins::common::env::set_var("RUNMAT_GETENV_TEST_A", "alpha");

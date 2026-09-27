@@ -3,21 +3,36 @@ use std::io;
 use std::path::PathBuf;
 
 use super::super::outcome::TransferOutcome;
-use super::plan::MovePlanEntry;
+use super::plan::{DestinationPolicy, MovePlanEntry};
 
 pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> TransferOutcome {
     let source_path = PathBuf::from(source);
-    if vfs::metadata_async(&source_path).await.is_err() {
-        return super::result::source_not_found(source);
+    match vfs::symlink_metadata_async(&source_path).await {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return super::result::source_not_found(source)
+        }
+        Err(error) => return super::result::filesystem(source, destination, &error),
     }
     let destination_path = PathBuf::from(destination);
-    if source_path == destination_path {
+    if super::super::target::same_path(&source_path, &destination_path).await {
         return super::result::success();
     }
 
     let mut target = destination_path.clone();
-    let mut replace_directory = None;
-    if let Ok(destination_metadata) = vfs::metadata_async(&destination_path).await {
+    let mut destination_policy = DestinationPolicy::New;
+    let destination_metadata = match vfs::metadata_async(&destination_path).await {
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            match vfs::symlink_metadata_async(&destination_path).await {
+                Ok(metadata) => Some(metadata),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return super::result::filesystem(source, destination, &error),
+            }
+        }
+        Err(error) => return super::result::filesystem(source, destination, &error),
+    };
+    if let Some(destination_metadata) = destination_metadata {
         if destination_metadata.is_dir() {
             let Some(name) = source_path.file_name() else {
                 return super::result::filesystem(
@@ -27,17 +42,17 @@ pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> T
                 );
             };
             target = destination_path.join(name);
-            if target == source_path {
+            if super::super::target::same_path(&target, &source_path).await {
                 return super::result::success();
             }
-            replace_directory = match vfs::metadata_async(&target).await {
+            destination_policy = match vfs::symlink_metadata_async(&target).await {
                 Ok(_) if !force => {
                     return super::result::destination_exists(&super::super::target::display(
                         &target,
                     ));
                 }
-                Ok(metadata) => Some(metadata.is_dir()),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Ok(_) => DestinationPolicy::ReplaceCompatible,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => DestinationPolicy::New,
                 Err(error) => {
                     return super::result::filesystem(
                         source,
@@ -49,7 +64,7 @@ pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> T
         } else if !force {
             return super::result::destination_exists(destination);
         } else {
-            replace_directory = Some(false);
+            destination_policy = DestinationPolicy::ReplaceCompatible;
         }
     }
     let entry = MovePlanEntry {
@@ -57,7 +72,7 @@ pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> T
         source_display: super::super::target::display(&source_path),
         target: target.clone(),
         target_display: super::super::target::display(&target),
-        replace_directory,
+        destination_policy,
     };
     complete(super::plan::execute(&[entry]).await)
 }

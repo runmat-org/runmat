@@ -260,8 +260,10 @@ function desktopHost(value, label) {
 }
 
 function desktopInteraction(value, workspace, label) {
-  const [tag, interaction] = tagged(value, ["OpenFileDialog", "SaveFileDialog", "DirectoryDialog", "LineInput", "KeyInput", "FigurePresentation"], `${label} desktop interaction`);
-  if (tag === "OpenFileDialog") {
+  const [tag, interaction] = tagged(value, ["Document", "OpenFileDialog", "SaveFileDialog", "DirectoryDialog", "LineInput", "KeyInput", "FigurePresentation"], `${label} desktop interaction`);
+  if (tag === "Document") {
+    desktopDocument(interaction, workspace, label);
+  } else if (tag === "OpenFileDialog") {
     exact(interaction, ["request", "outcome"], `${label} open-file interaction`);
     desktopDialogRequest(interaction.request, label, true);
     const [outcome, payload] = desktopOutcome(interaction.outcome, label);
@@ -316,6 +318,26 @@ function desktopInteraction(value, workspace, label) {
       integer(interaction.snapshot.axes_cols, `${label} figure axes columns`);
     }
     if (interaction.event === "Created" && interaction.snapshot === null) throw new Error(`${label} created figure requires a snapshot`);
+  }
+}
+
+function desktopDocument(value, workspace, label) {
+  const [tag, request] = tagged(value, ["OpenFile", "OpenVariable", "Navigate"], `${label} document request`);
+  if (tag === "OpenVariable") {
+    exact(request, ["name"], `${label} variable request`);
+    boundedText(request.name, `${label} variable name`, false);
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/u.test(request.name)) throw new Error(`${label} variable must be a language identifier`);
+    return;
+  }
+  exact(request, tag === "Navigate" ? ["relative_path", "line", "column", "selection"] : ["relative_path"], `${label} document request`);
+  relativePath(request.relative_path, `${label} document path`);
+  if (!workspace.files.has(request.relative_path)) throw new Error(`${label} document must name a declared file`);
+  if (tag === "Navigate") {
+    for (const field of ["line", "column"]) {
+      integer(request[field], `${label} document ${field}`);
+      if (request[field] < 1) throw new Error(`${label} document position must be one-based`);
+    }
+    member(request.selection, ["Caret", "Select"], `${label} document selection`);
   }
 }
 

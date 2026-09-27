@@ -1,5 +1,12 @@
 use crate::*;
 
+pub const TEMPNAME_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEMPNAME.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:tempname:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "tempname: too many output arguments",
+};
+
 const FOLDER: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "folder",
     ty: BuiltinParamType::StringScalar,
@@ -60,7 +67,7 @@ pub const TEMPNAME_ERROR_TEMP_DIR_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinE
 pub const TEMPNAME_ERROR_UNABLE_TO_GENERATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TEMPNAME.UNABLE_TO_GENERATE",
     identifier: Some("RunMat:tempname:UnableToGenerate"),
-    when: "No unused candidate is found within the bounded retry budget.",
+    when: "A filesystem error prevents checking a candidate, or no unused candidate is found within the bounded retry budget.",
     message: "tempname: unable to generate a unique name",
 };
 
@@ -70,6 +77,7 @@ pub const TEMPNAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
         TEMPNAME_ERROR_TOO_MANY_INPUTS,
+        TEMPNAME_ERROR_TOO_MANY_OUTPUTS,
         TEMPNAME_ERROR_FOLDER_TYPE,
         TEMPNAME_ERROR_FOLDER_EMPTY,
         TEMPNAME_ERROR_FOLDER_RESOLVE,

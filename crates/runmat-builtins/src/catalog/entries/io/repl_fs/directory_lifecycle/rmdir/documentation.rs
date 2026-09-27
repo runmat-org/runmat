@@ -13,7 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "`ResolveSymbolicLinks=false` removes a symbolic link itself and leaves its target in place. `ResolveSymbolicLinks=true` removes the resolved target and leaves the link. The option accepts logical scalars and exact numeric zero or one; it may follow the optional `'s'` flag.",
             "The `'s'` flag and `ResolveSymbolicLinks` option name are case-insensitive. Relative paths use the current folder, a leading `~` expands through the active environment, and native Windows paths may use drive-letter or UNC syntax.",
-            "Removal runs through the host or browser filesystem service and is never sent to an acceleration provider. Provider-resident arguments gather before parsing and filesystem access.",
+            "Removal runs through the host or browser filesystem service and is never sent to an acceleration provider. Folder and option names must be host text. A provider-resident ResolveSymbolicLinks control is gathered only after those names and the option grammar have been validated.",
         ],
     },
 ];

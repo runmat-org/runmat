@@ -35,6 +35,43 @@ fn character_row() -> ValueFact {
 }
 
 #[test]
+fn unknown_name_shape_is_not_inferred_as_scalar() {
+    let result = infer(
+        "isenv",
+        vec![ValueFact::unknown(DynamicReason::DynamicDispatch)],
+        RequestedOutputCount::One,
+    );
+    assert_eq!(result.outputs[0].shape, ShapeFact::Unknown);
+}
+
+#[test]
+fn nd_character_names_reject_but_nd_cell_shapes_are_preserved() {
+    for name in ["getenv", "isenv"] {
+        let rejected = infer(
+            name,
+            vec![shaped(ValueKindFact::Character, &[1, 2, 3])],
+            RequestedOutputCount::One,
+        );
+        assert!(!rejected.diagnostics.is_empty());
+        let cell = CellFact {
+            element: Box::new(character_row()),
+            elements: vec![],
+            elements_complete: false,
+        };
+        let accepted = infer(
+            name,
+            vec![shaped(ValueKindFact::Cell(cell), &[2, 2, 2])],
+            RequestedOutputCount::One,
+        );
+        assert!(accepted.diagnostics.is_empty());
+        assert_eq!(
+            accepted.outputs[0].shape,
+            ShapeFact::from(vec![Some(2), Some(2), Some(2)])
+        );
+    }
+}
+
+#[test]
 fn getenv_distinguishes_dictionary_scalar_and_container_results() {
     let all = infer("getenv", vec![], RequestedOutputCount::One);
     assert!(matches!(

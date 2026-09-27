@@ -12,7 +12,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Resolution and supported input forms",
         paragraphs: &[
             "Changes apply immediately to later function, script, class, package, MEX, and file discovery in the same RunMat session. Each session owns its path state, so one session does not change another session's resolution order.",
-            "Portable code should pass character rows or string scalars. RunMat compatibility mode also accepts a dense real numeric row of Unicode scalar values. A resident numeric row is admitted by compatibility policy before it is gathered; the resulting path and return value remain host text.",
+            "Portable code should pass character rows or string scalars. RunMat compatibility mode also accepts a dense real numeric row of Unicode scalar values, including an empty numeric array to clear the explicit path. Trailing singleton dimensions do not change a row into a page array. All input arguments are admitted before resident character codes are gathered; the resulting path and return value remain host text.",
         ],
     },
 ];

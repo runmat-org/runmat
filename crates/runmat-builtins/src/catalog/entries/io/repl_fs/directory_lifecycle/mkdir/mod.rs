@@ -11,6 +11,7 @@ const EFFECTS: &[EffectKind] = &[
     EffectKind::EnvironmentRead,
     EffectKind::FilesystemRead,
     EffectKind::FilesystemWrite,
+    EffectKind::UserInterface,
     EffectKind::MaySuspend,
     EffectKind::MayThrow,
 ];

@@ -80,3 +80,12 @@ fn rejects_arguments_with_stable_error() {
     assert_eq!(error.message(), "pwd: too many input arguments");
     assert_eq!(error.identifier(), Some("RunMat:pwd:TooManyInputs"));
 }
+
+#[test]
+fn rejects_multiple_outputs_before_query() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    assert_eq!(
+        call(Vec::new()).unwrap_err().identifier(),
+        Some("RunMat:pwd:TooManyOutputs")
+    );
+}

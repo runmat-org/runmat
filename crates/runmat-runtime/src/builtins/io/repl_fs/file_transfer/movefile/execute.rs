@@ -14,8 +14,7 @@ const BUILTIN: &str = "movefile";
 pub(in crate::builtins::io::repl_fs::file_transfer) async fn evaluate(
     args: &[Value],
 ) -> BuiltinResult<TransferOutcome> {
-    let gathered = super::super::input::gather(args, BUILTIN).await?;
-    let force = match gathered.as_slice() {
+    let force = match args {
         [_, _] => false,
         [_, _, flag] => super::super::input::force_flag(flag, &MOVEFILE_ERROR_FLAG_ARG, BUILTIN)?,
         [] | [_] => {
@@ -31,7 +30,7 @@ pub(in crate::builtins::io::repl_fs::file_transfer) async fn evaluate(
             ))
         }
     };
-    transfer(&gathered[0], &gathered[1], force).await
+    transfer(&args[0], &args[1], force).await
 }
 
 async fn transfer(

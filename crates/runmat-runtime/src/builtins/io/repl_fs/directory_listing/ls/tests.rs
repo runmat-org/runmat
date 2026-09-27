@@ -106,3 +106,39 @@ fn invalid_numeric_input_rejects_without_gathering() {
     let error = run(vec![Value::Tensor(tensor)]).expect_err("invalid input");
     assert_eq!(error.message(), runmat_builtins::LS_ERROR_NAME.message);
 }
+
+#[test]
+fn output_and_character_shape_admission_precede_enumeration() {
+    let outputs = crate::output_count::push_output_count(Some(2));
+    assert_eq!(
+        run(vec![Value::Num(1.0)]).unwrap_err().identifier(),
+        runmat_builtins::LS_ERROR_TOO_MANY_OUTPUTS.identifier
+    );
+    drop(outputs);
+    let pages = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    assert_eq!(
+        run(vec![Value::CharArray(pages)]).unwrap_err().identifier(),
+        runmat_builtins::LS_ERROR_NAME.identifier
+    );
+}
+
+#[test]
+fn console_listing_occurs_only_without_captured_outputs() {
+    let _lock = REPL_FS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let filesystem = MemoryFsProvider::with_current_dir("/workspace");
+    filesystem
+        .write_project_path("/workspace/listed.m", b"")
+        .unwrap();
+    runmat_filesystem::with_provider_override(Arc::new(filesystem), || {
+        for count in [0, 1] {
+            let _requested = crate::output_count::push_output_count(Some(count));
+            let _presentation = crate::output_context::push_output_count(count);
+            let capture = crate::console::begin_capture();
+            run(vec![]).unwrap();
+            let text = capture.finish();
+            assert_eq!(text.contains("listed.m"), count == 0);
+        }
+    });
+}

@@ -85,3 +85,46 @@ fn wildcard_requires_existing_directory_and_valid_pattern() {
         MOVEFILE_RESULT_PATTERN_ERROR.identifier.unwrap()
     );
 }
+
+#[test]
+fn resident_paths_reject_without_provider_access_and_character_pages_do_not_flatten() {
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+        descriptor: Default::default(),
+    });
+    let pages = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+    for source in [resident, pages] {
+        assert_eq!(
+            evaluate(&[source, Value::from("unused")])
+                .unwrap_err()
+                .identifier(),
+            runmat_builtins::MOVEFILE_ERROR_SOURCE_ARG.identifier
+        );
+    }
+}
+
+#[test]
+fn no_output_failure_throws_and_success_still_moves() {
+    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+        .lock()
+        .unwrap();
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("source");
+    let target = temp.path().join("target");
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    let run = |args| futures::executor::block_on(super::super::movefile_builtin(args));
+    assert_eq!(
+        run(vec![text(&source), text(&target)])
+            .unwrap_err()
+            .identifier(),
+        MOVEFILE_RESULT_SOURCE_NOT_FOUND.identifier
+    );
+    File::create(&source).unwrap();
+    assert_eq!(
+        run(vec![text(&source), text(&target)]).unwrap(),
+        Value::OutputList(vec![])
+    );
+    assert!(!source.exists() && target.exists());
+}

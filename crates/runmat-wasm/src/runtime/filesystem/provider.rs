@@ -99,6 +99,10 @@ impl FsProvider for JsFsProvider {
         self.funcs.rename_async(from, to).await
     }
 
+    async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.funcs.rename_replace_async(from, to).await
+    }
+
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
         self.funcs.set_readonly_async(path, readonly).await
     }

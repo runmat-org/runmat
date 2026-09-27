@@ -19,8 +19,9 @@ fn valid_cell_element(input: &ValueFact) -> bool {
 }
 
 fn known_character_matrix(shape: &ShapeFact) -> bool {
-    matches!(
-        shape.known_dims().and_then(|dims| dims.first().copied().flatten()),
-        Some(rows) if rows > 1
-    )
+    shape.known_dims().is_some_and(|dims| {
+        dims.first()
+            .is_some_and(|rows| rows.is_some_and(|n| n != 1))
+            || dims.iter().skip(2).any(|n| n.is_some_and(|n| n != 1))
+    })
 }

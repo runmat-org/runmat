@@ -15,6 +15,9 @@ use super::convert::{
     save_file_request_to_js,
 };
 
+#[cfg(test)]
+mod replacement_tests;
+
 #[derive(Clone)]
 pub(super) struct JsFsFuncs {
     bindings: JsValue,
@@ -31,6 +34,7 @@ pub(super) struct JsFsFuncs {
     remove_dir: Option<Function>,
     remove_dir_all: Option<Function>,
     rename: Option<Function>,
+    rename_replace: Option<Function>,
     set_readonly: Option<Function>,
     select_file_open: Option<Function>,
     select_file_save: Option<Function>,
@@ -56,6 +60,7 @@ impl JsFsFuncs {
             remove_dir: get_fn(bindings, "removeDir")?,
             remove_dir_all: get_fn(bindings, "removeDirAll")?,
             rename: get_fn(bindings, "rename")?,
+            rename_replace: get_fn(bindings, "renameReplace")?,
             set_readonly: get_fn(bindings, "setReadonly")?,
             select_file_open: get_fn(bindings, "selectFileOpen")?,
             select_file_save: get_fn(bindings, "selectFileSave")?,
@@ -282,6 +287,19 @@ impl JsFsFuncs {
                 "fsProvider.rename not implemented",
             ))
         }
+    }
+
+    pub(super) async fn rename_replace_async(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let func = self.require_fn(&self.rename_replace, "renameReplace")?;
+        let value = func
+            .call2(
+                &self.bindings,
+                &JsValue::from(path_to_string(from)),
+                &JsValue::from(path_to_string(to)),
+            )
+            .map_err(|error| map_js_error("renameReplace", error))?;
+        resolve_maybe_promise(value, "renameReplace").await?;
+        Ok(())
     }
 
     pub(super) async fn set_readonly_async(&self, path: &Path, readonly: bool) -> io::Result<()> {

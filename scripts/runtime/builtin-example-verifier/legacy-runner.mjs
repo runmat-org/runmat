@@ -68,6 +68,7 @@ import { buildReportHtml, buildReportMarkdown, filterReportRows, formatExecution
  * @property {string} [figurePngBase64]
  * @property {string} [figureImageError]
  * @property {boolean} [figureVerified]
+ * @property {number} [renderedFigureCount]
  */
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));

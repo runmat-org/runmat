@@ -332,14 +332,6 @@ pub(crate) fn default_marker_diameter_px() -> f32 {
     marker_area_points2_to_diameter_px(DEFAULT_MARKER_AREA_POINTS2)
 }
 
-pub(crate) fn convert_scalar_color_values(
-    value: &Value,
-    point_count: usize,
-    context: &'static str,
-) -> BuiltinResult<Vec<f64>> {
-    convert_scalar_color_tensor(tensor_from_value(value, context)?, point_count, context)
-}
-
 pub(crate) async fn convert_scalar_color_values_async(
     value: &Value,
     point_count: usize,
@@ -575,7 +567,8 @@ mod tests {
         );
 
         let size_px = convert_size_vector(&sizes, 2, "scatter").expect("sizes");
-        let color_values = convert_scalar_color_values(&colors, 2, "scatter").expect("colors");
+        let color_values =
+            block_on(convert_scalar_color_values_async(&colors, 2, "scatter")).expect("colors");
 
         assert_eq!(size_px.len(), 2);
         assert_eq!(color_values, vec![7.0, 8.0]);

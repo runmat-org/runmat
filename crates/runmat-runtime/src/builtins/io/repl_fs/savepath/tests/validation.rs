@@ -80,3 +80,26 @@ fn empty_default_override_is_a_status_failure() {
     let value = super::support::run(Vec::new(), 1, false).expect("status result");
     assert_eq!(super::support::status(&value), 1.0);
 }
+
+#[test]
+fn accepts_trailing_singletons_but_rejects_character_pages_without_writing() {
+    let _lock = super::support::lock();
+    let directory = tempdir().unwrap();
+    let filename = directory
+        .path()
+        .join("pathdef.m")
+        .to_string_lossy()
+        .into_owned();
+    let chars: Vec<char> = filename.chars().collect();
+    let row = CharArray::new_with_shape(chars.clone(), vec![1, chars.len(), 1]).unwrap();
+    let result = super::support::run(vec![Value::CharArray(row)], 1, false).unwrap();
+    assert_eq!(super::support::status(&result), 0.0);
+    assert!(directory.path().join("pathdef.m").is_file());
+    let page = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    assert_eq!(
+        super::support::run(vec![Value::CharArray(page)], 1, false)
+            .unwrap_err()
+            .identifier(),
+        runmat_builtins::SAVEPATH_ERROR_ARGUMENT_TYPE.identifier
+    );
+}

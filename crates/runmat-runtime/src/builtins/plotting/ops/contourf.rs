@@ -840,6 +840,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_target_axes_and_does_not_alias_integer_z_as_a_handle() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let ax = crate::builtins::plotting::axes::axes_builtin(Vec::new()).expect("axes");
         let z = Value::Tensor(

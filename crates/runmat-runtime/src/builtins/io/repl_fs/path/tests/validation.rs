@@ -49,3 +49,62 @@ fn rejects_malformed_numeric_character_code_rows() {
         assert_eq!(error.identifier(), Some("RunMat:path:InvalidInput"));
     }
 }
+
+#[test]
+fn rejects_multiple_outputs_before_mutation() {
+    let (_lock, guard) = locked();
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    assert_eq!(
+        call(vec![Value::from("new")]).unwrap_err().identifier(),
+        Some("RunMat:path:TooManyOutputs")
+    );
+    assert_eq!(
+        crate::builtins::common::path_state::current_path_string(),
+        guard.previous
+    );
+}
+
+#[test]
+fn validates_later_arguments_before_resident_access() {
+    let (_lock, guard) = locked();
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: 0,
+        buffer_id: 9_343_110,
+        descriptor: Default::default(),
+    });
+    let error = call(vec![resident, Value::Bool(false)]).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:path:InvalidInput"));
+    assert_eq!(
+        crate::builtins::common::path_state::current_path_string(),
+        guard.previous
+    );
+}
+
+#[test]
+fn semantic_character_rank_and_empty_numeric_rows_are_preserved() {
+    let (_lock, _guard) = locked();
+    let chars = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap();
+    call(vec![Value::CharArray(chars)]).unwrap();
+    assert_eq!(
+        crate::builtins::common::path_state::current_path_string(),
+        "ab"
+    );
+    let pages = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    assert_eq!(
+        call(vec![Value::CharArray(pages)])
+            .unwrap_err()
+            .identifier(),
+        Some("RunMat:path:InvalidInput")
+    );
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    call(vec![Value::Tensor(
+        Tensor::new(Vec::new(), vec![0, 0]).unwrap(),
+    )])
+    .unwrap();
+    assert_eq!(
+        crate::builtins::common::path_state::current_path_string(),
+        ""
+    );
+}

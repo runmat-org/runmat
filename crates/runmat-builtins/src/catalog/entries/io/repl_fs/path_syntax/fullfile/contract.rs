@@ -1,5 +1,12 @@
 use crate::*;
 
+pub const FULLFILE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FULLFILE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:fullfile:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "fullfile: too many output arguments",
+};
+
 const FIRST: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "filepart1",
     ty: BuiltinParamType::Any,
@@ -66,6 +73,7 @@ pub const FULLFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
         FULLFILE_ERROR_NOT_ENOUGH_INPUTS,
+        FULLFILE_ERROR_TOO_MANY_OUTPUTS,
         FULLFILE_ERROR_ARGUMENT_TYPE,
         FULLFILE_ERROR_SHAPE,
         FULLFILE_ERROR_PROVIDER,

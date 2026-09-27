@@ -8,3 +8,6 @@ mod output;
 pub(crate) mod setenv;
 pub(crate) mod unsetenv;
 mod values;
+
+#[cfg(test)]
+mod shape_tests;

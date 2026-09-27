@@ -34,6 +34,8 @@ use crate::builtins::stats::summary::binscatter;
 use crate::BuiltinResult;
 
 const MAX_AXES_FONT_SIZE_POINTS: f64 = 512.0;
+#[path = "properties/colorbar.rs"]
+mod colorbar;
 
 #[derive(Clone, Debug)]
 pub enum PlotHandle {
@@ -416,7 +418,8 @@ fn get_figure_property(
 ) -> BuiltinResult<Value> {
     let figure = super::state::clone_figure(handle)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
-    let axes = axes_handles_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
+    let mut axes = axes_handles_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
+    axes.extend(super::state::colorbar_handles_for_figure(handle));
     let current_axes =
         current_axes_handle_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
     let sg_title_handle =
@@ -904,6 +907,7 @@ fn get_axes_property(
                 Value::String(if meta.y_log { "log" } else { "linear" }.into()),
             );
             st.insert("YAxisLocation", Value::String(meta.y_axis_location.clone()));
+            st.insert("YDir", Value::String(meta.y_direction.as_str().into()));
             Ok(Value::Struct(st))
         }
         Some("title") => Ok(Value::Num(super::state::encode_plot_object_handle(
@@ -1012,6 +1016,7 @@ fn get_axes_property(
             if meta.y_log { "log" } else { "linear" }.into(),
         )),
         Some("yaxislocation") => Ok(Value::String(meta.y_axis_location)),
+        Some("ydir") => Ok(Value::String(meta.y_direction.as_str().into())),
         Some("type") => Ok(Value::String("axes".into())),
         Some("parent") => Ok(Value::Num(handle.as_u32() as f64)),
         Some("position") => Ok(figure_position_value(meta.position)),
@@ -1422,6 +1427,7 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
         "yaxislocation" => Cow::Borrowed("yaxislocation"),
+        "ydir" => Cow::Borrowed("ydir"),
         "currentaxes" => Cow::Borrowed("currentaxes"),
         "currentfigure" => Cow::Borrowed("currentfigure"),
         "sgtitle" | "supertitle" => Cow::Borrowed("sgtitle"),
@@ -1605,6 +1611,13 @@ fn apply_legend_property(
     Ok(())
 }
 
+/// The camera stores binary32 angles; finite host input must remain finite
+/// after crossing that representation boundary.
+pub(crate) fn finite_camera_angle(value: f64) -> Option<f32> {
+    let angle = value as f32;
+    angle.is_finite().then_some(angle)
+}
+
 fn apply_axes_property(
     handle: FigureHandle,
     axes_index: usize,
@@ -1638,17 +1651,20 @@ fn apply_axes_property(
             let tensor = runmat_value::Tensor::try_from(value)
                 .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
             let data = tensor::tensor_values_f64(&tensor);
-            if data.len() != 2 || !data[0].is_finite() || !data[1].is_finite() {
+            if data.len() != 2
+                || finite_camera_angle(data[0]).is_none()
+                || finite_camera_angle(data[1]).is_none()
+            {
                 return Err(plotting_error(
                     builtin,
-                    format!("{builtin}: View must be a 2-element finite numeric vector"),
+                    format!("{builtin}: View must be a 2-element numeric vector finite in single-precision camera state"),
                 ));
             }
             crate::builtins::plotting::state::set_view_for_axes(
                 handle,
                 axes_index,
-                data[0] as f32,
-                data[1] as f32,
+                finite_camera_angle(data[0]).expect("validated camera angle"),
+                finite_camera_angle(data[1]).expect("validated camera angle"),
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
@@ -2012,6 +2028,23 @@ fn apply_axes_property(
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
+        }
+        "ydir" => {
+            let direction = match value_as_string(value)
+                .map(|text| text.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("normal") => runmat_plot::plots::figure::YDirection::Normal,
+                Some("reverse") => runmat_plot::plots::figure::YDirection::Reverse,
+                _ => {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: YDir must be 'normal' or 'reverse'"),
+                    ))
+                }
+            };
+            super::state::set_y_direction_for_axes(handle, axes_index, direction)
+                .map_err(|err| map_figure_error(builtin, err))
         }
         "yaxislocation" => {
             let location = value_as_string(value)
@@ -2482,6 +2515,7 @@ fn get_plot_child_property(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match state {
+        super::state::PlotChildHandleState::ColorBar(bar) => colorbar::get(bar, property, builtin),
         super::state::PlotChildHandleState::Histogram(hist) => {
             get_histogram_property(hist, property, builtin)
         }
@@ -2581,6 +2615,9 @@ fn apply_plot_child_property(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     match state {
+        super::state::PlotChildHandleState::ColorBar(_) => {
+            colorbar::set(handle, key, value, builtin)
+        }
         super::state::PlotChildHandleState::Histogram(hist) => {
             apply_histogram_property(hist, key, value, builtin)
         }
@@ -5218,6 +5255,11 @@ fn apply_image_property(
             })
         };
         super::state::update_image_plot(image_handle.figure, image_handle.plot_index, |surface| {
+            surface.color_mapping = if mapping == "direct" {
+                runmat_plot::plots::surface::SurfaceColorMapping::Direct
+            } else {
+                runmat_plot::plots::surface::SurfaceColorMapping::Scaled
+            };
             surface.set_color_limits(renderer_limits);
         })
         .map_err(|err| map_figure_error(builtin, err))?;

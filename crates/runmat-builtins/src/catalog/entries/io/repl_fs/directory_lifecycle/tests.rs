@@ -50,3 +50,31 @@ fn inference_returns_logical_status_and_character_diagnostics() {
         assert!(inference.diagnostics.is_empty());
     }
 }
+
+#[test]
+fn text_shapes_reject_only_proven_non_rows() {
+    for entry in [&MKDIR_CATALOG_ENTRY, &RMDIR_CATALOG_ENTRY] {
+        for (dimensions, invalid) in [
+            (vec![Some(1), Some(3), Some(1)], false),
+            (vec![Some(1), Some(1), Some(3)], true),
+            (vec![None, Some(3), None], false),
+            (vec![Some(2), Some(3)], true),
+        ] {
+            let request = CallRequest {
+                arguments: vec![ValueFact::proven(
+                    ValueKindFact::Character,
+                    runmat_types::ShapeFact::from(dimensions),
+                    runmat_types::StorageFact::Dense,
+                )],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+            };
+            assert_eq!(
+                !crate::infer_catalog_call(entry, &request)
+                    .diagnostics
+                    .is_empty(),
+                invalid
+            );
+        }
+    }
+}

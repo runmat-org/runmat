@@ -5,14 +5,38 @@ use crate::{runtime_descriptor_error, runtime_descriptor_error_with_detail, Buil
 
 const BUILTIN_NAME: &str = "path";
 
-pub(super) async fn text(value: Value) -> BuiltinResult<String> {
+pub(super) enum AdmittedText {
+    Text(String),
+    Resident(Value),
+}
+
+pub(super) fn admit(value: Value) -> BuiltinResult<AdmittedText> {
     match value {
-        Value::String(text) => Ok(text),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::Tensor(tensor) => numeric_text(tensor),
-        Value::GpuTensor(_) => resident_numeric_text(value).await,
+        Value::String(text) => Ok(AdmittedText::Text(text)),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(AdmittedText::Text(array.data[0].clone()))
+        }
+        Value::CharArray(chars)
+            if chars.rows == 1
+                && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
+        {
+            Ok(AdmittedText::Text(chars.data.iter().collect()))
+        }
+        Value::Tensor(tensor) => numeric_text(tensor).map(AdmittedText::Text),
+        Value::GpuTensor(ref handle) if numeric_row(&handle.shape) => {
+            require_numeric_extension()?;
+            Ok(AdmittedText::Resident(value))
+        }
         _ => Err(invalid_input()),
+    }
+}
+
+impl AdmittedText {
+    pub(super) async fn resolve(self) -> BuiltinResult<String> {
+        match self {
+            Self::Text(text) => Ok(text),
+            Self::Resident(value) => resident_numeric_text(value).await,
+        }
     }
 }
 
@@ -22,7 +46,6 @@ fn numeric_text(tensor: Tensor) -> BuiltinResult<String> {
 }
 
 async fn resident_numeric_text(value: Value) -> BuiltinResult<String> {
-    require_numeric_extension()?;
     let gathered = crate::gather_if_needed_async(&value)
         .await
         .map_err(|error| {
@@ -46,10 +69,15 @@ fn require_numeric_extension() -> BuiltinResult<()> {
 }
 
 fn decode_numeric_row(tensor: &Tensor) -> BuiltinResult<String> {
-    if tensor.shape.len() > 2 || tensor.rows() > 1 {
+    if !numeric_row(&tensor.shape) {
         return Err(invalid_input());
     }
     tensor_char_codes_to_string(tensor).ok_or_else(invalid_input)
+}
+
+fn numeric_row(shape: &[usize]) -> bool {
+    crate::builtins::common::shape::effective_rank(shape) <= 2
+        && shape.first().copied().unwrap_or(1) <= 1
 }
 
 fn invalid_input() -> crate::RuntimeError {

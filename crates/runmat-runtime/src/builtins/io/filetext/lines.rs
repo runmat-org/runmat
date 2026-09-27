@@ -1,105 +1,38 @@
 //! MATLAB-compatible `readlines` and `writelines` helpers.
 
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+mod options;
+use options::{parse_empty_line_rule, parse_newline};
+
 use std::path::PathBuf;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, StringArray, Value};
 
 use crate::builtins::common::fs::expand_user_path;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::builtins::common::shape::effective_rank;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 fn line_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(name).build()
-}
-
-const READLINES_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text file to read.",
-}];
-const WRITELINES_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "lines",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text lines to write.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Destination text file.",
-    },
-];
-const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Result value.",
-}];
-const READLINES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "lines = readlines(filename)",
-    inputs: &READLINES_INPUTS,
-    outputs: &OUTPUT_VALUE,
-}];
-pub const READLINES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &READLINES_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-const WRITELINES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "status = writelines(lines, filename)",
-    inputs: &WRITELINES_INPUTS,
-    outputs: &OUTPUT_VALUE,
-}];
-pub const WRITELINES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WRITELINES_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-pub const WRITELINES_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "writelines accepts textual lines, a host text filename, and text-valued options. Integer and resident numeric values are invalid and reject before provider or filesystem access.",
-    };
-
-fn map_control_flow(name: &str, err: RuntimeError) -> RuntimeError {
-    build_runtime_error(format!("{name}: {}", err.message()))
+    build_runtime_error(message)
         .with_builtin(name)
-        .with_source(err)
+        .with_identifier(format!("RunMat:{name}:RuntimeError"))
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
 }
 
-async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(|err| map_control_flow(name, err))?,
-        );
-    }
-    Ok(out)
-}
+pub use runmat_builtins::{
+    READLINES_DESCRIPTOR, READLINES_ERROR_OUTPUTS, READLINES_INTEGER_AUDIT,
+    WRITELINES_BYTE_COUNT_EXTENSION, WRITELINES_DESCRIPTOR, WRITELINES_ERROR_OUTPUTS,
+    WRITELINES_INTEGER_AUDIT,
+};
 
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
+            Ok(array.data.iter().collect())
+        }
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         _ => Err(line_error(
             name,
@@ -117,25 +50,25 @@ fn path_from_value(value: &Value, name: &str) -> BuiltinResult<PathBuf> {
 
 #[runtime_builtin(
     name = "readlines",
-    category = "io/filetext",
-    summary = "Read text file lines into a string array.",
-    keywords = "readlines,text,file,string array,lines",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::readlines_type),
-    descriptor(crate::builtins::io::filetext::lines::READLINES_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::filetext::lines"
 )]
 async fn readlines_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("readlines", &args).await?;
+    crate::output_count::validate_fixed_outputs(
+        &READLINES_DESCRIPTOR,
+        &READLINES_ERROR_OUTPUTS,
+        "readlines",
+    )?;
     if args.is_empty() || args.len() > 3 {
         return Err(line_error("readlines", "readlines: filename is required"));
     }
     let path = path_from_value(&args[0], "readlines")?;
+    let omit_empty = parse_empty_line_rule(&args[1..])?;
     let text = vfs::read_to_string_async(&path)
         .await
         .map_err(|err| line_error("readlines", format!("readlines: {err}")))?;
     let mut lines = split_lines_preserving_content(&text);
-    if parse_empty_line_rule(&args[1..])? {
+    if omit_empty {
         lines.retain(|line| !line.is_empty());
     }
     let rows = lines.len();
@@ -156,40 +89,23 @@ fn split_lines_preserving_content(text: &str) -> Vec<String> {
     lines
 }
 
-fn parse_empty_line_rule(args: &[Value]) -> BuiltinResult<bool> {
-    let mut omit_empty = false;
-    let mut idx = 0usize;
-    while idx < args.len() {
-        if idx + 1 >= args.len() {
-            return Err(line_error(
-                "readlines",
-                "readlines: name-value options must be paired",
-            ));
-        }
-        let name = scalar_text(&args[idx], "readlines", "option")?;
-        if name.eq_ignore_ascii_case("EmptyLineRule") {
-            let value = scalar_text(&args[idx + 1], "readlines", "EmptyLineRule")?;
-            omit_empty = value.eq_ignore_ascii_case("skip")
-                || value.eq_ignore_ascii_case("omit")
-                || value.eq_ignore_ascii_case("omitempty");
-        }
-        idx += 2;
-    }
-    Ok(omit_empty)
-}
-
 #[runtime_builtin(
     name = "writelines",
-    category = "io/filetext",
-    summary = "Write strings or text lines to a file.",
-    keywords = "writelines,text,file,string array,lines",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::num_type),
-    descriptor(crate::builtins::io::filetext::lines::WRITELINES_DESCRIPTOR),
-    integer_audit(crate::builtins::io::filetext::lines::WRITELINES_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::filetext::lines"
 )]
 async fn writelines_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &WRITELINES_DESCRIPTOR,
+        &WRITELINES_ERROR_OUTPUTS,
+        "writelines",
+    )?;
+    if crate::output_count::current_output_count().is_some_and(|count| count > 0) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &WRITELINES_BYTE_COUNT_EXTENSION,
+            "writelines",
+        )?;
+    }
     if args.iter().any(|value| {
         crate::builtins::common::validation::value_contains_native_integer_class(value)
             || crate::value_contains_gpu(value)
@@ -199,7 +115,6 @@ async fn writelines_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "writelines: lines, filename, and options must be host text values",
         ));
     }
-    let args = gather_args("writelines", &args).await?;
     if args.len() < 2 {
         return Err(line_error(
             "writelines",
@@ -220,8 +135,10 @@ async fn writelines_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 fn lines_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::CharArray(array) if array.rows == 1 => Ok(vec![array.data.iter().collect()]),
-        Value::CharArray(array) => {
+        Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
+            Ok(vec![array.data.iter().collect()])
+        }
+        Value::CharArray(array) if effective_rank(&array.shape) <= 2 => {
             let mut lines = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
                 let start = row * array.cols;
@@ -240,34 +157,10 @@ fn lines_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
 
 fn cell_lines(array: &CellArray) -> BuiltinResult<Vec<String>> {
     let mut out = Vec::with_capacity(array.data.len());
-    for value in &array.data {
-        out.push(scalar_text(value, "writelines", "cell element")?);
+    for value in crate::object::cell::expand_all_cell_values(array)? {
+        out.push(scalar_text(&value, "writelines", "cell element")?);
     }
     Ok(out)
-}
-
-fn parse_newline(args: &[Value]) -> BuiltinResult<Option<String>> {
-    let mut newline = None;
-    let mut idx = 0usize;
-    while idx < args.len() {
-        if idx + 1 >= args.len() {
-            return Err(line_error(
-                "writelines",
-                "writelines: name-value options must be paired",
-            ));
-        }
-        let name = scalar_text(&args[idx], "writelines", "option")?;
-        if name.eq_ignore_ascii_case("LineEnding") {
-            let value = scalar_text(&args[idx + 1], "writelines", "LineEnding")?;
-            newline = Some(match value.to_ascii_lowercase().as_str() {
-                "windows" | "crlf" => "\r\n".to_string(),
-                "mac" | "cr" => "\r".to_string(),
-                _ => "\n".to_string(),
-            });
-        }
-        idx += 2;
-    }
-    Ok(newline)
 }
 
 #[cfg(test)]
@@ -320,5 +213,150 @@ mod tests {
         ]))
         .expect_err("integer lines are outside the text-only surface");
         assert!(error.message().contains("must be host text values"));
+    }
+
+    #[test]
+    fn invalid_read_options_precede_missing_file_errors() {
+        for options in [
+            vec![Value::String("EmptyLineRule".into())],
+            vec![
+                Value::String("Encoding".into()),
+                Value::String("UTF-8".into()),
+            ],
+            vec![
+                Value::String("EmptyLineRule".into()),
+                Value::String("invalid".into()),
+            ],
+        ] {
+            let mut args = vec![Value::String("/missing/readlines-admission-test".into())];
+            args.extend(options);
+            let error = run(readlines_builtin(args)).unwrap_err();
+            assert!(
+                error.message().contains("paired") || error.message().contains("unsupported"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_write_options_do_not_modify_existing_file() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("unchanged.txt");
+        std::fs::write(&path, "original").unwrap();
+        for (name, value) in [
+            ("WriteMode", "append"),
+            ("LineEnding", "invalid"),
+            ("Encoding", "UTF-8"),
+        ] {
+            assert!(run(writelines_builtin(vec![
+                Value::String("new".into()),
+                Value::String(path.to_string_lossy().into_owned()),
+                Value::String(name.into()),
+                Value::String(value.into())
+            ]))
+            .is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "original");
+        }
+    }
+
+    #[test]
+    fn line_ending_aliases_and_empty_line_rules_are_explicit() {
+        for alias in ["windows", "pc", "crlf", "PC"] {
+            assert_eq!(
+                parse_newline(&[
+                    Value::String("LineEnding".into()),
+                    Value::String(alias.into())
+                ])
+                .unwrap(),
+                Some("\r\n".into())
+            );
+        }
+        for alias in ["skip", "omit", "omitempty"] {
+            assert!(parse_empty_line_rule(&[
+                Value::String("EmptyLineRule".into()),
+                Value::String(alias.into())
+            ])
+            .unwrap());
+        }
+        assert!(!parse_empty_line_rule(&[
+            Value::String("EmptyLineRule".into()),
+            Value::String("read".into())
+        ])
+        .unwrap());
+        assert_eq!(
+            split_lines_preserving_content("a\r\n\r\nb\rc\n"),
+            vec!["a", "", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn cell_text_uses_shared_matlab_linear_order() {
+        let cell = CellArray::new(
+            ["a", "b", "c", "d"]
+                .into_iter()
+                .map(|text| Value::String(text.into()))
+                .collect(),
+            2,
+            2,
+        )
+        .unwrap();
+        assert_eq!(cell_lines(&cell).unwrap(), vec!["a", "c", "b", "d"]);
+    }
+
+    #[test]
+    fn text_shape_checks_preserve_trailing_singletons_but_reject_pages() {
+        let row = Value::CharArray(
+            runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+        );
+        let pages = Value::CharArray(
+            runmat_value::CharArray::new_with_shape(vec!['a', 'b', 'c', 'd'], vec![1, 2, 2])
+                .unwrap(),
+        );
+        assert_eq!(scalar_text(&row, "readlines", "filename").unwrap(), "ab");
+        assert_eq!(lines_from_value(&row).unwrap(), vec!["ab"]);
+        assert!(scalar_text(&pages, "readlines", "filename").is_err());
+        assert!(lines_from_value(&pages).is_err());
+    }
+
+    #[test]
+    fn output_bounds_and_byte_count_gate_precede_filesystem_effects() {
+        let _lock = REPL_FS_TEST_LOCK.lock().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("lines.txt");
+        let args = || {
+            vec![
+                Value::String("alpha".into()),
+                Value::String(path.to_string_lossy().into_owned()),
+            ]
+        };
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        {
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            assert_eq!(
+                run(writelines_builtin(args())).unwrap_err().identifier(),
+                WRITELINES_ERROR_OUTPUTS.identifier
+            );
+            assert_eq!(
+                run(readlines_builtin(vec![])).unwrap_err().identifier(),
+                READLINES_ERROR_OUTPUTS.identifier
+            );
+        }
+        {
+            let _outputs = crate::output_count::push_output_count(Some(1));
+            assert_eq!(
+                run(writelines_builtin(args())).unwrap_err().identifier(),
+                WRITELINES_BYTE_COUNT_EXTENSION.error_identifier
+            );
+            assert!(!path.exists());
+        }
+        for count in [None, Some(0)] {
+            let _outputs = crate::output_count::push_output_count(count);
+            assert_eq!(run(writelines_builtin(args())).unwrap(), Value::Num(6.0));
+            assert_eq!(std::fs::read(&path).unwrap(), b"alpha\n");
+        }
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _outputs = crate::output_count::push_output_count(Some(1));
+        assert_eq!(run(writelines_builtin(args())).unwrap(), Value::Num(6.0));
     }
 }

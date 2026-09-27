@@ -18,10 +18,12 @@ pub(super) fn is_text_container(value: &ValueFact) -> bool {
 }
 
 fn is_character_row(value: &ValueFact) -> bool {
-    value
-        .shape
-        .known_dims()
-        .is_none_or(|dimensions| dimensions.len() <= 2 && dimensions.first() == Some(&Some(1)))
+    value.shape.known_dims().is_none_or(|dimensions| {
+        dimensions.iter().skip(2).all(|n| n.is_none_or(|n| n == 1))
+            && dimensions
+                .first()
+                .is_none_or(|rows| rows.is_none_or(|rows| rows == 1))
+    })
 }
 
 pub(super) fn is_numeric_character_row(value: &ValueFact) -> bool {
@@ -31,11 +33,22 @@ pub(super) fn is_numeric_character_row(value: &ValueFact) -> bool {
     numeric.domain == NumericDomain::Real
         && matches!(value.storage, StorageFact::Dense | StorageFact::Unknown)
         && value.shape.known_dims().is_none_or(|dimensions| {
-            dimensions.len() <= 2 && dimensions.first().is_none_or(|rows| *rows == Some(1))
+            dimensions.iter().skip(2).all(|n| n.is_none_or(|n| n == 1))
+                && dimensions
+                    .first()
+                    .is_none_or(|rows| rows.is_none_or(|rows| rows == 1))
         })
 }
 
 pub(super) fn broadcast_shape(arguments: &[ValueFact]) -> Option<ShapeFact> {
+    if arguments.iter().any(|argument| {
+        matches!(
+            argument.kind,
+            ValueKindFact::String | ValueKindFact::Cell(_)
+        ) && argument.shape.element_count().is_none()
+    }) {
+        return Some(ShapeFact::Unknown);
+    }
     let mut selected: Option<ShapeFact> = None;
     for argument in arguments {
         if !matches!(
@@ -77,8 +90,44 @@ pub(super) fn has_known_shape_mismatch(arguments: &[ValueFact]) -> bool {
 }
 
 fn known_mismatch(left: &ShapeFact, right: &ShapeFact) -> bool {
+    if left.element_count().is_none() || right.element_count().is_none() {
+        return false;
+    }
     match (left.known_dims(), right.known_dims()) {
         (Some(left), Some(right)) => left != right,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_dimensions_do_not_prove_a_shape_error_or_a_broadcast_shape() {
+        let unknown = ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::from(vec![Some(1), None]),
+            StorageFact::Dense,
+        );
+        let known = ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::from(vec![Some(2), Some(2)]),
+            StorageFact::Dense,
+        );
+        assert!(!has_known_shape_mismatch(&[unknown.clone(), known.clone()]));
+        assert_eq!(broadcast_shape(&[unknown, known]), Some(ShapeFact::Unknown));
+        let row = ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![None, Some(4)]),
+            StorageFact::Dense,
+        );
+        assert!(is_text_container(&row));
+        let nd = ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(1), Some(2), Some(2)]),
+            StorageFact::Dense,
+        );
+        assert!(!is_text_container(&nd));
     }
 }

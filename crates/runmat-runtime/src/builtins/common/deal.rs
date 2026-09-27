@@ -1,107 +1,42 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use crate::build_runtime_error;
+pub use runmat_builtins::{
+    DEAL_DESCRIPTOR, DEAL_EXTENSIONS, DEAL_INTEGER_CAPABILITIES, DEAL_RESIDENT_INPUT_EXTENSION,
 };
 use runmat_value::Value;
-
-pub const DEAL_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "deal-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "deal with a resident input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DealResidentInputExtension"),
-};
-
-pub const DEAL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [DEAL_RESIDENT_INPUT_EXTENSION];
-
-const DEAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "varargout",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Distributed output values.",
-}];
-
-const DEAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "varargin",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Input values to distribute.",
-}];
-
-const DEAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[varargout] = deal(varargin)",
-    inputs: &DEAL_INPUTS,
-    outputs: &DEAL_OUTPUT,
-}];
-
-const DEAL_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
-    code: "RM.DEAL.INPUT_OUTPUT_COUNT_MISMATCH",
-    identifier: Some("RunMat:deal:InputOutputCountMismatch"),
-    when: "The call has multiple inputs and the requested output count differs from the input count, or has no input and a nonzero output count.",
-    message: "deal: the number of outputs must match the number of inputs unless there is exactly one input",
-}];
-
-pub const DEAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DEAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DEAL_ERRORS,
-};
-
-const DEAL_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "A",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "deal copies input arrays to outputs without numeric conversion; every integer class, shape, and value is preserved.",
-}];
-
-const DEAL_RESIDENT_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "resident integer A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode passes resident integer handles through structurally without gather, allocation, provider dispatch, or floating conversion.",
-    }];
-
-pub const DEAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[B1,...,Bn] = deal(integer_A1,...,integer_An) or deal(integer_A)",
-        inputs: &DEAL_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Matching inputs are distributed positionally; one input is replicated to every requested output. No integer arithmetic or floating materialization occurs.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "[B1,...,Bn] = deal(resident_integer_A1,...,resident_integer_An) or deal(resident_integer_A)",
-        inputs: &DEAL_RESIDENT_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "This RunMat-only form is gated before provider access and retains each input's original resident handle and owner.",
-    },
-];
-
 #[runmat_macros::runtime_builtin(
     name = "deal",
-    descriptor(self::DEAL_DESCRIPTOR),
-    extensions(self::DEAL_EXTENSIONS),
-    integer_capabilities(self::DEAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::common::deal"
 )]
 pub async fn deal_builtin_registered(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    crate::deal_builtin(rest).await
+    let out_count = crate::output_count::current_output_count().unwrap_or(1);
+    let valid_count = rest.len() == 1 || rest.len() == out_count;
+    if !valid_count {
+        return Err(build_runtime_error(
+            "deal: the number of outputs must match the number of inputs unless there is exactly one input",
+        )
+        .with_builtin("deal")
+        .with_identifier("RunMat:deal:InputOutputCountMismatch")
+        .build());
+    }
+    if rest.iter().any(crate::value_contains_gpu) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DEAL_RESIDENT_INPUT_EXTENSION,
+            "deal",
+        )?;
+    }
+    if out_count == 0 {
+        return Ok(Value::OutputList(Vec::new()));
+    }
+    if rest.len() == 1 {
+        let value = rest.into_iter().next().expect("one deal input");
+        return if out_count == 1 {
+            Ok(value)
+        } else {
+            Ok(Value::OutputList(vec![value; out_count]))
+        };
+    }
+    Ok(Value::OutputList(rest))
 }
 
 #[cfg(test)]
@@ -109,6 +44,37 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, Tensor};
+
+    #[test]
+    fn nested_resident_aliases_pass_without_owner_access_and_counts_fail_first() {
+        let handle = runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        };
+        let nested = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::GpuTensor(handle)], 1, 1).unwrap(),
+        );
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = call(vec![nested.clone(), Value::Num(1.0)], 1).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:deal:InputOutputCountMismatch")
+            );
+            let error = call(vec![nested.clone()], 0).unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                DEAL_RESIDENT_INPUT_EXTENSION.error_identifier
+            );
+        }
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        assert_eq!(
+            call(vec![nested.clone()], 2).unwrap(),
+            Value::OutputList(vec![nested.clone(), nested])
+        );
+    }
 
     fn call(inputs: Vec<Value>, outputs: usize) -> crate::BuiltinResult<Value> {
         let _outputs = crate::output_count::push_output_count(Some(outputs));

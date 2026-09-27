@@ -23,6 +23,34 @@ use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{BuiltinResult, RuntimeError};
 
+#[path = "state/colorbar.rs"]
+mod colorbar;
+#[path = "state/colormap.rs"]
+mod colormap;
+#[cfg(test)]
+pub use colormap::set_colormap_with_length;
+pub use colormap::{
+    colormap_length_for_axes, current_colormap_length, figure_colormap_snapshot,
+    set_colormap_for_axes, set_colormap_for_axes_with_length, set_colormap_for_figure_with_length,
+};
+#[path = "state/clear_axes.rs"]
+mod clear_axes;
+pub use clear_axes::clear_axes_target;
+#[cfg(test)]
+pub use clear_axes::clear_current_axes;
+#[path = "state/axes_modes.rs"]
+mod axes_modes;
+pub use axes_modes::{
+    axis_color_limits_snapshot_for_axes, axis_z_limits_snapshot_for_axes, lock_axes_limits,
+    set_hidden_line_removal_for_axes, set_y_direction_for_axes,
+};
+#[cfg(test)]
+pub use colorbar::colorbar_handle_for_axes;
+pub use colorbar::{
+    colorbar_handles_for_figure, ensure_colorbar_for_axes, set_colorbar_enabled_for_axes,
+    set_colorbar_visible, ColorBarHandleState,
+};
+
 type AxisLimitSnapshot = (Option<(f64, f64)>, Option<(f64, f64)>);
 type AxisTickSnapshot = (Option<Vec<f64>>, Option<Vec<f64>>);
 type AxisTickLabelSnapshot = (Option<Vec<String>>, Option<Vec<String>>);
@@ -322,7 +350,6 @@ struct FigureState {
     line_style_cycles: HashMap<usize, LineStyleCycle>,
     line_color_cycles: HashMap<usize, LineColorCycle>,
     figure_color_order: Option<Vec<Vec4>>,
-    colormap_lengths: HashMap<usize, usize>,
     zoom_mode: ZoomModeState,
     last_enabled_zoom_motion: ZoomMotion,
     zoom_axes_modes: HashMap<usize, ZoomModeState>,
@@ -347,7 +374,6 @@ impl FigureState {
             line_style_cycles: HashMap::new(),
             line_color_cycles: HashMap::new(),
             figure_color_order: None,
-            colormap_lengths: HashMap::new(),
             zoom_mode: ZoomModeState::default(),
             last_enabled_zoom_motion: ZoomMotion::Both,
             zoom_axes_modes: HashMap::new(),
@@ -790,6 +816,7 @@ pub struct StackedPlotHandleState {
 
 #[derive(Clone, Debug)]
 pub enum PlotChildHandleState {
+    ColorBar(ColorBarHandleState),
     Histogram(HistogramHandleState),
     Histogram2(Histogram2HandleState),
     Line(SimplePlotHandleState),
@@ -823,6 +850,7 @@ pub enum PlotChildHandleState {
 impl PlotChildHandleState {
     pub fn figure_axes(&self) -> (FigureHandle, usize) {
         match self {
+            Self::ColorBar(state) => (state.figure, state.axes_index),
             Self::Histogram(state) => (state.figure, state.axes_index),
             Self::Histogram2(state) => (state.figure, state.axes_index),
             Self::Line(state)
@@ -859,6 +887,7 @@ impl PlotChildHandleState {
 
     pub fn plot_index(&self) -> Option<usize> {
         Some(match self {
+            Self::ColorBar(_) => return None,
             Self::Histogram(state) => state.plot_index,
             Self::Histogram2(state) => state.plot_index,
             Self::Line(state)
@@ -1066,6 +1095,7 @@ impl PlotChildHandleState {
                 axes_index,
                 plot_index,
             }),
+            Self::ColorBar(_) => return None,
             Self::Text(_) => return None,
             Self::TextScatter(_) => return None,
             Self::WordCloud(_) => return None,
@@ -1075,6 +1105,7 @@ impl PlotChildHandleState {
 
     pub fn type_name(&self) -> &'static str {
         match self {
+            Self::ColorBar(_) => "colorbar",
             Self::Histogram(_) => "histogram",
             Self::Histogram2(_) => "histogram2",
             Self::Line(_) | Self::Line3(_) => "line",
@@ -1441,20 +1472,6 @@ pub fn set_box_enabled_for_axes(
 ) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_box_enabled(axes_index, enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
-}
-
-pub fn set_hidden_line_removal_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    enabled: bool,
-) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state
-            .figure
-            .set_axes_hidden_line_removal(axes_index, enabled);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
@@ -2632,6 +2649,12 @@ fn display_bounds_for_state_axes(
             (x_min, x_max, y_min, y_max) =
                 data_aspect_adjusted_bounds(x_min, x_max, y_min, y_max, meta.data_aspect_ratio);
         }
+        if meta.x_log {
+            (x_min, x_max) = runmat_plot::plots::figure::positive_log_bounds(x_min, x_max);
+        }
+        if meta.y_log {
+            (y_min, y_max) = runmat_plot::plots::figure::positive_log_bounds(y_min, y_max);
+        }
     }
 
     Some((x_min, x_max, y_min, y_max))
@@ -3297,55 +3320,6 @@ pub fn set_color_limits_for_axes(
     Ok(())
 }
 
-pub fn clear_current_axes() {
-    let (handle, figure_clone) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let axes_index = {
-            let state = get_state_mut(&mut reg, handle);
-            let axes_index = state.active_axes;
-            state.figure.clear_axes(axes_index);
-            state.reset_cycle(axes_index);
-            state.revision = state.revision.wrapping_add(1);
-            axes_index
-        };
-        purge_plot_children_for_axes(&mut reg, handle, axes_index);
-        let figure_clone = reg
-            .figures
-            .get(&handle)
-            .expect("figure exists")
-            .figure
-            .clone();
-        (handle, figure_clone)
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-}
-
-pub fn set_colorbar_enabled(enabled: bool) {
-    let (handle, figure_clone) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let state = get_state_mut(&mut reg, handle);
-        let axes = state.active_axes;
-        state.figure.set_axes_colorbar_enabled(axes, enabled);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-}
-
-pub fn set_colorbar_enabled_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    enabled: bool,
-) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_colorbar_enabled(axes_index, enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
-}
-
 pub fn set_legend_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -3463,137 +3437,6 @@ pub fn legend_entries_snapshot(
     Ok(state.figure.legend_entries_for_axes(axes_index))
 }
 
-pub fn toggle_colorbar() -> bool {
-    let (handle, figure_clone, enabled) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let state = get_state_mut(&mut reg, handle);
-        let axes = state.active_axes;
-        let next = !state
-            .figure
-            .axes_metadata(axes)
-            .map(|m| m.colorbar_enabled)
-            .unwrap_or(false);
-        state.figure.set_axes_colorbar_enabled(axes, next);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone(), next)
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    enabled
-}
-
-pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
-    let (handle, figure_clone) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let direct_images = direct_image_limits_updates(&reg.plot_children, handle, None);
-        let state = get_state_mut(&mut reg, handle);
-        let axes = state.active_axes;
-        state.figure.set_axes_colormap(axes, colormap);
-        state.colormap_lengths.insert(axes, length);
-        refresh_direct_image_limits(&direct_images, axes, length, &mut state.figure);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-}
-
-pub fn set_colormap_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    colormap: ColorMap,
-) -> Result<(), FigureError> {
-    set_colormap_for_axes_with_length(handle, axes_index, colormap, DEFAULT_COLORMAP_LENGTH)
-}
-
-pub fn set_colormap_for_axes_with_length(
-    handle: FigureHandle,
-    axes_index: usize,
-    colormap: ColorMap,
-    length: usize,
-) -> Result<(), FigureError> {
-    with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_colormap(axes_index, colormap);
-        state.colormap_lengths.insert(axes_index, length);
-    })?;
-    let figure_clone = {
-        let mut reg = registry();
-        let direct_images =
-            direct_image_limits_updates(&reg.plot_children, handle, Some(axes_index));
-        if let Some(state) = reg.figures.get_mut(&handle) {
-            refresh_direct_image_limits(&direct_images, axes_index, length, &mut state.figure);
-            state.figure.clone()
-        } else {
-            return Err(FigureError::InvalidHandle(handle.0));
-        }
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
-}
-
-fn direct_image_limits_updates(
-    children: &HashMap<u64, PlotChildHandleState>,
-    figure: FigureHandle,
-    axes_index: Option<usize>,
-) -> Vec<(usize, usize, bool)> {
-    children
-        .values()
-        .filter_map(|child| match child {
-            PlotChildHandleState::Image(image)
-                if image.figure == figure
-                    && axes_index.is_none_or(|axes| image.axes_index == axes)
-                    && image.c_data_mapping == "direct" =>
-            {
-                Some((
-                    image.axes_index,
-                    image.plot_index,
-                    image
-                        .c_data
-                        .as_ref()
-                        .is_some_and(|tensor| tensor.integer_storage().is_some()),
-                ))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn refresh_direct_image_limits(
-    direct_images: &[(usize, usize, bool)],
-    axes_index: usize,
-    length: usize,
-    plot_figure: &mut Figure,
-) {
-    for &(_, plot_index, integer) in direct_images
-        .iter()
-        .filter(|(axes, _, _)| *axes == axes_index)
-    {
-        if let Some(runmat_plot::plots::figure::PlotElement::Surface(surface)) =
-            plot_figure.get_plot_mut(plot_index)
-        {
-            surface.set_color_limits(Some(
-                crate::builtins::plotting::image::direct_colormap_limits(integer, length),
-            ));
-        }
-    }
-}
-
-pub fn colormap_length_for_axes(handle: FigureHandle, axes_index: usize) -> usize {
-    let reg = registry();
-    reg.figures
-        .get(&handle)
-        .and_then(|state| state.colormap_lengths.get(&axes_index).copied())
-        .unwrap_or(DEFAULT_COLORMAP_LENGTH)
-}
-
-pub fn current_colormap_length() -> usize {
-    let reg = registry();
-    reg.figures
-        .get(&reg.current)
-        .and_then(|state| state.colormap_lengths.get(&state.active_axes).copied())
-        .unwrap_or(DEFAULT_COLORMAP_LENGTH)
-}
-
 pub fn set_surface_shading(mode: ShadingMode) {
     let (handle, figure_clone) = {
         let mut reg = registry();
@@ -3601,6 +3444,9 @@ pub fn set_surface_shading(mode: ShadingMode) {
         let state = get_state_mut(&mut reg, handle);
         let plot_count = state.figure.len();
         for idx in 0..plot_count {
+            if state.figure.plot_axes_indices().get(idx).copied() != Some(state.active_axes) {
+                continue;
+            }
             if let Some(PlotElement::Surface(surface)) = state.figure.get_plot_mut(idx) {
                 *surface = surface.clone().with_shading(mode);
             }
@@ -4342,11 +4188,11 @@ where
         let mut reg = registry();
         let handle = target.unwrap_or(reg.current);
         let axes_indices = (0..axes_count).collect::<Vec<_>>();
+        clear_axes::configure_grid(&mut reg, handle, axes_count, 1);
+        clear_axes::clear_registered_axes(&mut reg, handle, &axes_indices);
         {
             let state = get_state_mut(&mut reg, handle);
-            state.figure.set_subplot_grid(axes_count, 1);
             for axes_index in &axes_indices {
-                state.figure.clear_axes(*axes_index);
                 state.figure.set_axes_kind(*axes_index, AxesKind::Cartesian);
                 state.figure.set_axes_limits(*axes_index, None, None);
                 state.figure.set_axes_z_limits(*axes_index, None);
@@ -4357,9 +4203,6 @@ where
             }
             state.active_axes = *axes_indices.last().unwrap_or(&0);
             state.figure.set_active_axes_index(state.active_axes);
-        }
-        for axes_index in &axes_indices {
-            purge_plot_children_for_axes(&mut reg, handle, *axes_index);
         }
         {
             let state = get_state_mut(&mut reg, handle);
@@ -4976,6 +4819,7 @@ fn trim_oldest_xyz(maximum: Option<usize>, x: &mut Vec<f64>, y: &mut Vec<f64>, z
 
 fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) {
     reg.plot_children.retain(|_, state| match state {
+        PlotChildHandleState::ColorBar(bar) => bar.figure != handle,
         PlotChildHandleState::Histogram(hist) => hist.figure != handle,
         PlotChildHandleState::Histogram2(hist) => hist.figure != handle,
         PlotChildHandleState::Line(plot)
@@ -5008,73 +4852,6 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::TextScatter(textscatter) => textscatter.figure != handle,
         PlotChildHandleState::WordCloud(wordcloud) => wordcloud.figure != handle,
         PlotChildHandleState::StackedPlot(stacked) => stacked.figure != handle,
-    });
-}
-
-fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, axes_index: usize) {
-    reg.plot_children.retain(|_, state| match state {
-        PlotChildHandleState::Histogram(hist) => {
-            !(hist.figure == handle && hist.axes_index == axes_index)
-        }
-        PlotChildHandleState::Histogram2(hist) => {
-            !(hist.figure == handle && hist.axes_index == axes_index)
-        }
-        PlotChildHandleState::Line(plot)
-        | PlotChildHandleState::Scatter(plot)
-        | PlotChildHandleState::Bar(plot)
-        | PlotChildHandleState::Stairs(plot)
-        | PlotChildHandleState::Surface(plot)
-        | PlotChildHandleState::Patch(plot)
-        | PlotChildHandleState::Line3(plot)
-        | PlotChildHandleState::Scatter3(plot)
-        | PlotChildHandleState::Contour(plot)
-        | PlotChildHandleState::ContourFill(plot)
-        | PlotChildHandleState::ReferenceLine(plot)
-        | PlotChildHandleState::Pie(plot) => {
-            !(plot.figure == handle && plot.axes_index == axes_index)
-        }
-        PlotChildHandleState::AnimatedLine(animated) => {
-            !(animated.figure == handle && animated.axes_index == axes_index)
-        }
-        PlotChildHandleState::Stem(stem) => {
-            !(stem.figure == handle && stem.axes_index == axes_index)
-        }
-        PlotChildHandleState::ErrorBar(err) => {
-            !(err.figure == handle && err.axes_index == axes_index)
-        }
-        PlotChildHandleState::Quiver(quiver) => {
-            !(quiver.figure == handle && quiver.axes_index == axes_index)
-        }
-        PlotChildHandleState::Image(image) => {
-            !(image.figure == handle && image.axes_index == axes_index)
-        }
-        PlotChildHandleState::Heatmap(heatmap) => {
-            !(heatmap.figure == handle && heatmap.axes_index == axes_index)
-        }
-        PlotChildHandleState::Binscatter(binscatter) => {
-            !(binscatter.figure == handle && binscatter.axes_index == axes_index)
-        }
-        PlotChildHandleState::FunctionSurface(function_surface) => {
-            !(function_surface.figure == handle && function_surface.axes_index == axes_index)
-        }
-        PlotChildHandleState::FunctionContour(function_contour) => {
-            !(function_contour.figure == handle && function_contour.axes_index == axes_index)
-        }
-        PlotChildHandleState::Area(area) => {
-            !(area.figure == handle && area.axes_index == axes_index)
-        }
-        PlotChildHandleState::Text(text) => {
-            !(text.figure == handle && text.axes_index == axes_index)
-        }
-        PlotChildHandleState::TextScatter(textscatter) => {
-            !(textscatter.figure == handle && textscatter.axes_index == axes_index)
-        }
-        PlotChildHandleState::WordCloud(wordcloud) => {
-            !(wordcloud.figure == handle && wordcloud.axes_index == axes_index)
-        }
-        PlotChildHandleState::StackedPlot(stacked) => {
-            !(stacked.figure == handle && stacked.axes_indices.contains(&axes_index))
-        }
     });
 }
 
@@ -5177,6 +4954,7 @@ fn notify_event<'a>(view: FigureEventView<'a>) {
 }
 
 fn notify_with_figure(handle: FigureHandle, figure: &Figure, kind: FigureEventKind) {
+    colorbar::reconcile_publication(handle, figure);
     notify_event(FigureEventView {
         handle,
         kind,
@@ -5364,6 +5142,9 @@ pub fn plot_child_handles_for_axes(handle: FigureHandle, axes_index: usize) -> V
         .plot_children
         .iter()
         .filter_map(|(id, state)| {
+            if matches!(state, PlotChildHandleState::ColorBar(_)) {
+                return None;
+            }
             let (figure, axes) = state.figure_axes();
             (figure == handle && axes == axes_index).then_some(*id as f64)
         })
@@ -5662,8 +5443,8 @@ pub fn configure_subplot(rows: usize, cols: usize, index: usize) -> Result<(), F
     }
     let mut reg = registry();
     let handle = reg.current;
+    clear_axes::configure_grid(&mut reg, handle, rows, cols);
     let state = get_state_mut(&mut reg, handle);
-    state.figure.set_subplot_grid(rows, cols);
     state.active_axes = index;
     state.figure.set_active_axes_index(index);
     Ok(())
@@ -5676,8 +5457,11 @@ pub fn prepare_plotyy_axes() -> Result<(FigureHandle, usize, usize, f64, f64), F
         let state = get_state_mut(&mut reg, handle);
         let left_axes = state.active_axes;
         let right_axes = state.figure.ensure_overlay_axes(left_axes);
-        state.figure.clear_axes(left_axes);
-        state.figure.clear_axes(right_axes);
+        (left_axes, right_axes)
+    };
+    clear_axes::clear_registered_axes(&mut reg, handle, &[left_axes, right_axes]);
+    {
+        let state = get_state_mut(&mut reg, handle);
         state.figure.set_axes_kind(left_axes, AxesKind::Cartesian);
         state.figure.set_axes_kind(right_axes, AxesKind::Cartesian);
         state.figure.set_axes_limits(left_axes, None, None);
@@ -5693,10 +5477,7 @@ pub fn prepare_plotyy_axes() -> Result<(FigureHandle, usize, usize, f64, f64), F
         state.reset_cycle(right_axes);
         state.active_axes = left_axes;
         state.figure.set_active_axes_index(left_axes);
-        (left_axes, right_axes)
-    };
-    purge_plot_children_for_axes(&mut reg, handle, left_axes);
-    purge_plot_children_for_axes(&mut reg, handle, right_axes);
+    }
     Ok((
         handle,
         left_axes,
@@ -5721,19 +5502,18 @@ where
         let handle = reg.current;
         let axes_index = { get_state_mut(&mut reg, handle).active_axes };
         let should_clear = { !get_state_mut(&mut reg, handle).hold() };
+        if should_clear {
+            clear_axes::clear_registered_axes(&mut reg, handle, &[axes_index]);
+        }
         {
             let state = get_state_mut(&mut reg, handle);
             state.figure.set_active_axes_index(axes_index);
             if should_clear {
-                state.figure.clear_axes(axes_index);
                 state.figure.set_axes_kind(axes_index, AxesKind::Cartesian);
                 state.figure.set_axes_limits(axes_index, None, None);
                 state.figure.set_axes_z_limits(axes_index, None);
                 state.reset_cycle(axes_index);
             }
-        }
-        if should_clear {
-            purge_plot_children_for_axes(&mut reg, handle, axes_index);
         }
         {
             let state = get_state_mut(&mut reg, handle);

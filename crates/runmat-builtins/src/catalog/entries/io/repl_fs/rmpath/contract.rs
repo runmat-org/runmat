@@ -70,7 +70,15 @@ error!(
     "rmpath: folder not found"
 );
 
-const ERRORS: [BuiltinErrorDescriptor; 6] = [
+error!(
+    RMPATH_ERROR_TOO_MANY_OUTPUTS,
+    "RM.RMPATH.TOO_MANY_OUTPUTS",
+    "RunMat:rmpath:TooManyOutputs",
+    "More than one output is requested.",
+    "rmpath: too many output arguments"
+);
+const ERRORS: [BuiltinErrorDescriptor; 7] = [
+    RMPATH_ERROR_TOO_MANY_OUTPUTS,
     RMPATH_ERROR_ARGUMENT_TYPE,
     RMPATH_ERROR_TOO_FEW_ARGUMENTS,
     RMPATH_ERROR_CURRENT_FOLDER,

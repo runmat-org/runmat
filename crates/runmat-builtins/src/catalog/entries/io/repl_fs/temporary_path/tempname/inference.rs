@@ -16,10 +16,12 @@ pub(in crate::catalog::entries::io::repl_fs::temporary_path) fn infer(
     }
     if let Some(folder) = request.arguments.first() {
         let valid = match folder.kind {
-            ValueKindFact::Character => folder
-                .shape
-                .known_dims()
-                .is_none_or(|dims| dims.first() == Some(&Some(1))),
+            ValueKindFact::Character => folder.shape.known_dims().is_none_or(|dims| {
+                dims.iter().skip(2).all(|n| n.is_none_or(|n| n == 1))
+                    && dims
+                        .first()
+                        .is_none_or(|rows| rows.is_none_or(|rows| rows == 1))
+            }),
             ValueKindFact::String => folder.shape.element_count().is_none_or(|count| count == 1),
             ValueKindFact::Unknown => true,
             _ => false,
@@ -41,4 +43,32 @@ fn character_row() -> ValueFact {
         ShapeFact::from(vec![Some(1), None]),
         StorageFact::Dense,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_types::{LiteralContext, OutputSelection, RequestedOutputCount};
+
+    #[test]
+    fn unknown_row_count_remains_possible_but_known_nd_folder_is_rejected() {
+        for (shape, rejected) in [
+            (ShapeFact::from(vec![None, Some(3)]), false),
+            (ShapeFact::from(vec![Some(1), Some(2), Some(2)]), true),
+            (ShapeFact::from(vec![Some(1), Some(2), Some(1)]), false),
+            (ShapeFact::from(vec![Some(1), Some(2), None]), false),
+        ] {
+            let request = CallRequest {
+                arguments: vec![ValueFact::proven(
+                    ValueKindFact::Character,
+                    shape,
+                    StorageFact::Dense,
+                )],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            };
+            let result = infer(&request, &super::super::TEMPNAME_CATALOG_ENTRY);
+            assert_eq!(!result.diagnostics.is_empty(), rejected);
+        }
+    }
 }

@@ -1,5 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
+#[path = "support/document_host.rs"]
+mod document_host;
 
 use runmat_accelerate::ShapeInfo;
 use runmat_value::{IntegerStorage, Value};
@@ -209,12 +211,45 @@ fn opentoline_dispatches_editor_navigation_request() {
     let quoted = matlab_single_quoted_path(&path);
     let source = format!("opentoline('{quoted}', 2, 1); ok = 1;");
 
+    let (context, host) = document_host::context();
+    let _context = context.enter();
     let vars = execute_source(&source);
+    assert_eq!(
+        *host.requests.borrow(),
+        vec![runmat_runtime::context::HostDocumentRequest::Navigate {
+            path: std::fs::canonicalize(&path).expect("canonical file"),
+            location: runmat_runtime::context::HostTextLocation {
+                line: std::num::NonZeroUsize::new(2).unwrap(),
+                column: std::num::NonZeroUsize::new(1).unwrap(),
+                selection: runmat_runtime::context::HostTextSelection::Caret,
+            },
+        }]
+    );
     let _ = std::fs::remove_file(&path);
 
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(v) if *v == 1.0)));
+}
+
+#[test]
+fn opentoline_reports_missing_editor_host_instead_of_noop_success() {
+    let path = std::env::temp_dir().join(format!(
+        "runmat_opentoline_no_host_{}_{}.m",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::write(&path, "a = 1;\n").expect("write source");
+    let quoted = matlab_single_quoted_path(&path);
+    let error = execute_source_result(&format!("opentoline('{quoted}', 1);")).unwrap_err();
+    std::fs::remove_file(&path).expect("remove fixture source");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:host:DocumentInteractionUnavailable")
+    );
 }
 
 #[test]
@@ -235,7 +270,12 @@ fn opentoline_command_form_dispatches_text_line_and_column() {
     let source =
         format!("addpath('{quoted_dir}'); opentoline opentoline_command_form 2 1; ok = 1;");
 
+    let (context, host) = document_host::context();
+    let _context = context.enter();
     let vars = execute_source(&source);
+    assert!(matches!(host.requests.borrow().as_slice(), [
+        runmat_runtime::context::HostDocumentRequest::Navigate { location, .. }
+    ] if location.line.get() == 2 && location.column.get() == 1));
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);
 

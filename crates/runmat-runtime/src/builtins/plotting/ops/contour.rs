@@ -3493,6 +3493,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contour_accepts_leading_axes_handle_but_not_typed_integer_handle_aliases() {
+        let _guard = crate::builtins::plotting::lock_plot_test_context();
         setup_plot_tests();
         let ax = crate::builtins::plotting::axes::axes_builtin(Vec::new()).expect("axes");
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));

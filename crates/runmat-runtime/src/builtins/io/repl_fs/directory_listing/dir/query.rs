@@ -60,7 +60,7 @@ async fn path(path: &Path, display: &str) -> BuiltinResult<Vec<Record>> {
         Ok(metadata) => {
             let folder_path = path.parent().unwrap_or_else(|| Path::new("."));
             let folder = absolute_folder(folder_path).await?;
-            let name = super::super::enumeration::filename(path)
+            let name = crate::builtins::common::fs::enumeration::filename(path)
                 .to_string_lossy()
                 .into_owned();
             Ok(vec![Record::from_metadata(folder, name, &metadata)])
@@ -73,7 +73,7 @@ async fn path(path: &Path, display: &str) -> BuiltinResult<Vec<Record>> {
 }
 
 async fn pattern(pattern: &Path, display: &str) -> BuiltinResult<Vec<Record>> {
-    let entries = super::super::enumeration::matching(pattern)
+    let entries = crate::builtins::common::fs::enumeration::matching(pattern)
         .await
         .map_err(|error| {
             super::error::operation(format!(
@@ -83,7 +83,7 @@ async fn pattern(pattern: &Path, display: &str) -> BuiltinResult<Vec<Record>> {
     let mut records = Vec::with_capacity(entries.len());
     for entry in entries {
         let folder = absolute_folder(entry.path.parent().unwrap_or_else(|| Path::new("."))).await?;
-        let name = super::super::enumeration::filename(&entry.path)
+        let name = crate::builtins::common::fs::enumeration::filename(&entry.path)
             .to_string_lossy()
             .into_owned();
         records.push(Record::from_metadata(folder, name, &entry.metadata));
@@ -99,13 +99,13 @@ async fn directory(folder: &Path, include_special: bool) -> BuiltinResult<Vec<Re
         records.push(Record::special(".", &absolute, metadata.as_ref()));
         records.push(Record::special("..", &absolute, metadata.as_ref()));
     }
-    let entries = super::super::enumeration::directory(folder)
+    let entries = crate::builtins::common::fs::enumeration::directory(folder)
         .await
         .map_err(|error| {
             super::error::operation(format!("dir: unable to access '{absolute}' ({error})"))
         })?;
     records.extend(entries.into_iter().map(|entry| {
-        let name = super::super::enumeration::filename(&entry.path)
+        let name = crate::builtins::common::fs::enumeration::filename(&entry.path)
             .to_string_lossy()
             .into_owned();
         Record::from_metadata(absolute.clone(), name, &entry.metadata)

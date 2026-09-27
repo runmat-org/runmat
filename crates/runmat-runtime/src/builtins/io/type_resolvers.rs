@@ -34,19 +34,6 @@ pub fn importdata_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::tensor(), Type::Struct { known_fields: None }])
 }
 
-pub fn open_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Unknown
-}
-
-pub fn opentoline_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Void
-}
-
-pub fn pcode_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Void
-}
-
 pub fn audioread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::tensor()
@@ -209,10 +196,6 @@ pub fn delete_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Void
 }
 
-pub fn exist_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
-
 pub fn fileattrib_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![
         Type::Num,
@@ -228,30 +211,6 @@ pub fn system_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 pub fn getpref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-pub fn readlines_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::String
-}
-
-pub fn uigetfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
-}
-
-pub fn uigetdir_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::String, Type::Num])
-}
-
-pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::String, Type::Num])
-}
-
-pub fn run_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
     Type::Unknown
 }
 
@@ -472,25 +431,6 @@ mod tests {
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
     assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
-    assert_resolver!(exist_type_resolver, exist_type, &[], Type::Num);
-    assert_resolver!(
-        uigetfile_type_resolver,
-        uigetfile_type,
-        &[],
-        Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
-    );
-    assert_resolver!(
-        uigetdir_type_resolver,
-        uigetdir_type,
-        &[],
-        Type::Union(vec![Type::String, Type::Num])
-    );
-    assert_resolver!(
-        uiputfile_type_resolver,
-        uiputfile_type,
-        &[],
-        Type::Union(vec![Type::String, Type::Num])
-    );
     assert_resolver!(
         audioinfo_type_resolver,
         struct_type,

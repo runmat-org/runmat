@@ -124,6 +124,10 @@ Common providers:
 
 The provider contract covers reads, writes, metadata, directory listing, deletion, rename, directory creation, and readonly metadata used by MATLAB-compatible I/O builtins.
 
+The optional `renameReplace(from, to)` hook supports forced `movefile` replacement. Implement it as one provider-owned operation: reject unsupported replacement, incompatible types, and nonempty destination directories before mutation, and preserve both paths on failure. Do not implement it by deleting the destination and then calling `rename`. The built-in memory provider supports compatible file and empty-directory replacement; a host without this hook reports unsupported replacement without calling its ordinary rename or delete hooks. The remote provider does not currently expose this operation.
+
+`MemoryVolume.createProvider(onMutate, onObserverError)` accepts synchronous post-commit notifications. Observer errors go to `onObserverError`, or to best-effort console reporting when no sink is supplied or the sink fails; they do not turn a committed mutation into a failed filesystem operation. IndexedDB persistence remains deferred: successful in-memory replacement does not mean its snapshot has been durably flushed. Use the IndexedDB handle's `flush()` when persistence completion is required.
+
 ## Package Cache
 
 Browser sessions use a separate transactional IndexedDB package cache by default. Package state and content payloads commit atomically, concurrent tabs use revision conflicts instead of overwriting one another, and eviction is reported as a recoverable cache miss. Persistent-storage permission is optional and is never required for correctness.

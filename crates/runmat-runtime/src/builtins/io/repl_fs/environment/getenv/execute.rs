@@ -9,6 +9,11 @@ use super::super::{dictionary, error, names::*};
 const IDENTITY: &str = "getenv";
 
 pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::GETENV_DESCRIPTOR,
+        &runmat_builtins::GETENV_ERROR_TOO_MANY_OUTPUTS,
+        IDENTITY,
+    )?;
     match args.as_slice() {
         [] => all(),
         [value] => one(value),

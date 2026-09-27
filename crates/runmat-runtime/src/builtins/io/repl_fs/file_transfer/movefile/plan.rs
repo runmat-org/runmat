@@ -2,13 +2,19 @@ use runmat_filesystem as vfs;
 use std::io;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy)]
+pub(super) enum DestinationPolicy {
+    New,
+    ReplaceCompatible,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct MovePlanEntry {
     pub(super) source: PathBuf,
     pub(super) source_display: String,
     pub(super) target: PathBuf,
     pub(super) target_display: String,
-    pub(super) replace_directory: Option<bool>,
+    pub(super) destination_policy: DestinationPolicy,
 }
 
 pub(super) struct MoveFailure {
@@ -19,14 +25,25 @@ pub(super) struct MoveFailure {
 
 pub(super) async fn execute(entries: &[MovePlanEntry]) -> Result<(), MoveFailure> {
     for entry in entries {
-        if let Some(directory) = entry.replace_directory {
-            if let Err(error) =
-                super::super::target::remove_existing(&entry.target, directory).await
-            {
-                return Err(failure(entry, error));
-            }
+        if super::super::target::same_path(&entry.source, &entry.target).await {
+            continue;
         }
-        if let Err(error) = vfs::rename_async(&entry.source, &entry.target).await {
+        if super::super::target::is_descendant(&entry.source, &entry.target).await {
+            return Err(failure(
+                entry,
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "cannot move a directory into its own descendant",
+                ),
+            ));
+        }
+        let result = match entry.destination_policy {
+            DestinationPolicy::New => vfs::rename_async(&entry.source, &entry.target).await,
+            DestinationPolicy::ReplaceCompatible => {
+                vfs::rename_replace_async(&entry.source, &entry.target).await
+            }
+        };
+        if let Err(error) = result {
             return Err(failure(entry, error));
         }
     }

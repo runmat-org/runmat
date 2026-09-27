@@ -8,6 +8,11 @@ use crate::{runtime_descriptor_error, BuiltinResult};
 const BUILTIN_NAME: &str = "path";
 
 pub(super) async fn run(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::PATH_DESCRIPTOR,
+        &runmat_builtins::PATH_ERROR_TOO_MANY_OUTPUTS,
+        "path",
+    )?;
     match args.len() {
         0 => Ok(path_value()),
         1 => replace_one(args.into_iter().next().expect("one path argument")).await,
@@ -29,13 +34,15 @@ fn path_value() -> Value {
 }
 
 async fn replace_one(value: Value) -> BuiltinResult<Value> {
-    let replacement = super::input::text(value).await?;
+    let replacement = super::input::admit(value)?.resolve().await?;
     replace(replacement)
 }
 
 async fn replace_two(left: Value, right: Value) -> BuiltinResult<Value> {
-    let left = super::input::text(left).await?;
-    let right = super::input::text(right).await?;
+    let left = super::input::admit(left)?;
+    let right = super::input::admit(right)?;
+    let left = left.resolve().await?;
+    let right = right.resolve().await?;
     replace(join(&left, &right))
 }
 

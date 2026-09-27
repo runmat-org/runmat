@@ -281,7 +281,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             ..BuiltinSemantics::unknown()
         },
 
-        "load" | "run" => BuiltinSemantics {
+        "load" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_filesystem().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::LoadsExternalBindings),
             purity: BuiltinPurity::Impure,
@@ -302,35 +302,12 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Filesystem,
             ..BuiltinSemantics::unknown()
         },
-        "uigetfile" | "uiputfile" => BuiltinSemantics {
-            compatibility: BuiltinCompatibility::InteractiveOnly,
-            async_behavior: BuiltinAsyncBehavior::MaySuspend,
-            effects: BuiltinEffects::none()
-                .with_filesystem()
-                .with_ui()
-                .with_host_callback(),
-            workspace_effect: None,
-            environment_effect: None,
-            purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Filesystem,
-        },
         "webread" | "webwrite" | "tcpclient" | "tcpserver" | "accept" | "read" | "readline"
         | "write" => network_io(),
         "rehash" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment(),
             environment_effect: Some(BuiltinEnvironmentEffect::FunctionCacheInvalidation),
             purity: BuiltinPurity::Impure,
-            semantic_kind: BuiltinSemanticKind::Workspace,
-            ..BuiltinSemantics::unknown()
-        },
-        "exist" => BuiltinSemantics {
-            effects: BuiltinEffects::none()
-                .with_filesystem()
-                .with_workspace()
-                .with_environment(),
-            workspace_effect: Some(BuiltinWorkspaceEffect::ReadsWorkspace),
-            environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
-            purity: BuiltinPurity::DeterministicReadOnly,
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },

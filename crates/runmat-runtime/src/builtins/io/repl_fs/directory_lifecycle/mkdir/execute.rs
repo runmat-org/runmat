@@ -15,7 +15,6 @@ use crate::{build_runtime_error, BuiltinResult};
 use super::super::result::DirectoryOutcome;
 
 pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<DirectoryOutcome> {
-    let args = super::super::input::gather(args, "mkdir").await?;
     let target = match args.as_slice() {
         [folder] => single_target(folder)?,
         [parent, child] => child_target(parent, child)?,

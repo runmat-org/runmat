@@ -1,6 +1,11 @@
 use runmat_value::Value;
 
 pub(super) async fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::RMPATH_DESCRIPTOR,
+        &runmat_builtins::RMPATH_ERROR_TOO_MANY_OUTPUTS,
+        "rmpath",
+    )?;
     if args.is_empty() {
         return Err(super::errors::descriptor(
             &runmat_builtins::RMPATH_ERROR_TOO_FEW_ARGUMENTS,

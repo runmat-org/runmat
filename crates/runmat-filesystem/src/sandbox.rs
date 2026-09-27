@@ -192,6 +192,10 @@ impl FsProvider for SandboxFsProvider {
         fs::rename(src, dst)
     }
 
+    async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fs::rename(self.resolve(from), self.resolve(to))
+    }
+
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
         let target = self.resolve(path);
         let mut perms = fs::metadata(&target)?.permissions();

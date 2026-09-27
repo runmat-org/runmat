@@ -39,3 +39,36 @@ fn inference_preserves_container_shape() {
         assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Logical));
     }
 }
+
+#[test]
+fn unknown_container_shape_is_not_proven_scalar_and_character_pages_reject() {
+    for entry in [&ISFILE_CATALOG_ENTRY, &ISFOLDER_CATALOG_ENTRY] {
+        let request = CallRequest {
+            arguments: vec![ValueFact::unknown(
+                runmat_types::DynamicReason::RuntimeValue,
+            )],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        assert_eq!(
+            crate::infer_catalog_call(entry, &request).outputs[0].shape,
+            ShapeFact::Unknown
+        );
+        for (tail, invalid) in [(Some(1), false), (Some(2), true), (None, false)] {
+            let request = CallRequest {
+                arguments: vec![ValueFact::proven(
+                    ValueKindFact::Character,
+                    ShapeFact::from(vec![Some(1), Some(2), tail]),
+                    runmat_types::StorageFact::Dense,
+                )],
+                ..request.clone()
+            };
+            assert_eq!(
+                !crate::infer_catalog_call(entry, &request)
+                    .diagnostics
+                    .is_empty(),
+                invalid
+            );
+        }
+    }
+}

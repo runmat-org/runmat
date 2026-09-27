@@ -1,7 +1,6 @@
 //! Current-working-folder query.
 
 mod execute;
-pub(crate) mod specification;
 
 #[cfg(test)]
 mod tests;

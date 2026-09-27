@@ -41,7 +41,17 @@ pub const PWD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "The current working directory cannot be resolved.",
     message: "pwd: unable to determine current directory",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [PWD_ERROR_TOO_MANY_INPUTS, PWD_ERROR_INTERNAL];
+pub const PWD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PWD.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:pwd:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "pwd: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] = [
+    PWD_ERROR_TOO_MANY_INPUTS,
+    PWD_ERROR_INTERNAL,
+    PWD_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const PWD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

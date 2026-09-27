@@ -2,7 +2,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_value::{IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::common::{gather_tensor_from_gpu, gather_tensor_from_gpu_async};
+use crate::builtins::plotting::common::gather_tensor_from_gpu_async;
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
@@ -41,13 +41,6 @@ impl NumericInput {
         match self {
             Self::Host(tensor) => tensor_utils::tensor_element_len(tensor),
             Self::Gpu(handle) => handle.shape.iter().product(),
-        }
-    }
-
-    pub fn into_tensor(self, builtin: &'static str) -> BuiltinResult<Tensor> {
-        match self {
-            Self::Host(tensor) => Ok(tensor),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, builtin),
         }
     }
 

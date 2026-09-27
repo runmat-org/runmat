@@ -12,6 +12,7 @@ pub use contract::*;
 const EFFECTS: &[EffectKind] = &[
     EffectKind::EnvironmentRead,
     EffectKind::FilesystemRead,
+    EffectKind::UserInterface,
     EffectKind::MaySuspend,
     EffectKind::MayThrow,
 ];
@@ -31,7 +32,7 @@ pub const LS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
-        purity: BuiltinPurity::DeterministicReadOnly,
+        purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::Filesystem,
         workspace_effect: None,
         environment_effect: None,

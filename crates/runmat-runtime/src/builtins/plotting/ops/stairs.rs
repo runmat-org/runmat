@@ -1,6 +1,5 @@
 //! MATLAB-compatible `stairs` builtin.
 
-use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -28,7 +27,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor as tensor_utils;
 
 use super::common::numeric_plot_data_pair;
-use super::gpu_helpers::gpu_xy_bounds;
+use super::gpu_helpers::gpu_xy_bounds_async;
 use super::op_common::line_inputs::NumericInput as StairsInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
@@ -381,10 +380,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     integer_capabilities(crate::builtins::plotting::stairs::STAIRS_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::stairs"
 )]
-pub fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (axes_target, mut args) =
         split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
-    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
 
     let args_len = args.len();
     let (x, y, rest) = match args_len {
@@ -410,10 +408,43 @@ pub fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 
     let parsed_style = parse_line_style_args(&rest, &LineStyleParseOptions::stairs())
         .map_err(map_stairs_invalid_argument)?;
-    let mut x_input =
-        Some(StairsInput::from_value(x, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?);
-    let mut y_input =
-        Some(StairsInput::from_value(y, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?);
+    let x_input = StairsInput::from_value(x, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
+    let y_input = StairsInput::from_value(y, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
+    let appearance = parsed_style.appearance;
+    let marker_meta = marker_metadata_from_appearance(&appearance);
+    let label = parsed_style.label.unwrap_or_else(|| "Data".to_string());
+    // Provider work may suspend. Finish it before selecting axes or publishing
+    // any plot, so cancellation and failed downloads leave figure state intact.
+    let mut prepared = None;
+    if let (Some(x_gpu), Some(y_gpu)) = (x_input.gpu_handle(), y_input.gpu_handle()) {
+        prepared = build_stairs_gpu_plot(
+            BUILTIN_NAME,
+            x_gpu,
+            y_gpu,
+            &appearance,
+            marker_meta.clone(),
+            &label,
+        )
+        .await?;
+    }
+    let plot = match prepared {
+        Some(plot) => plot,
+        None => {
+            let x = x_input
+                .into_tensor_async(BUILTIN_NAME)
+                .await
+                .map_err(map_stairs_invalid_argument)?;
+            let y = y_input
+                .into_tensor_async(BUILTIN_NAME)
+                .await
+                .map_err(map_stairs_invalid_argument)?;
+            let (x, y) =
+                numeric_plot_data_pair(x, y, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
+            build_stairs_plot(x, y, &appearance, marker_meta, &label)
+                .map_err(map_stairs_invalid_argument)?
+        }
+    };
+    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
     let opts = PlotRenderOptions {
         title: "Stairs",
         x_label: "X",
@@ -423,49 +454,10 @@ pub fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let mut plot = Some(plot);
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let appearance = parsed_style.appearance.clone();
-        let marker_meta = marker_metadata_from_appearance(&appearance);
-        let label = parsed_style
-            .label
-            .clone()
-            .unwrap_or_else(|| "Data".to_string());
-        let x_arg = x_input.take().expect("stairs x consumed once");
-        let y_arg = y_input.take().expect("stairs y consumed once");
-
-        if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
-            match build_stairs_gpu_plot(
-                BUILTIN_NAME,
-                x_gpu,
-                y_gpu,
-                &appearance,
-                marker_meta.clone(),
-                &label,
-            ) {
-                Ok(plot) => {
-                    let plot_index = figure.add_stairs_plot_on_axes(plot, axes);
-                    *plot_index_slot.borrow_mut() = Some((axes, plot_index));
-                    return Ok(());
-                }
-                Err(err) => {
-                    warn!("stairs GPU path unavailable: {err}");
-                }
-            }
-        }
-
-        let (x_tensor, y_tensor) = (
-            x_arg
-                .into_tensor("stairs")
-                .map_err(map_stairs_invalid_argument)?,
-            y_arg
-                .into_tensor("stairs")
-                .map_err(map_stairs_invalid_argument)?,
-        );
-        let (x_data, y_data) = numeric_plot_data_pair(x_tensor, y_tensor, "stairs")
-            .map_err(map_stairs_invalid_argument)?;
-        let plot = build_stairs_plot(x_data, y_data, &appearance, marker_meta, &label)
-            .map_err(map_stairs_invalid_argument)?;
-        let plot_index = figure.add_stairs_plot_on_axes(plot, axes);
+        let plot_index =
+            figure.add_stairs_plot_on_axes(plot.take().expect("stairs plot consumed once"), axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
     });
@@ -508,6 +500,9 @@ fn build_stairs_plot(
         .with_style(appearance.color, appearance.line_width)
         .with_label(label);
     apply_stairs_marker_metadata(&mut plot, marker_meta);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
@@ -526,20 +521,21 @@ fn infer_stairs_x_from_y(y: &Value) -> BuiltinResult<Value> {
     ))
 }
 
-fn build_stairs_gpu_plot(
+async fn build_stairs_gpu_plot(
     name: &'static str,
     x: &GpuTensorHandle,
     y: &GpuTensorHandle,
     appearance: &LineAppearance,
     marker_meta: Option<LineMarkerAppearance>,
     label: &str,
-) -> BuiltinResult<StairsPlot> {
+) -> BuiltinResult<Option<StairsPlot>> {
+    let (Some(x_ref), Some(y_ref)) = (
+        runmat_accelerate_api::export_wgpu_buffer(x),
+        runmat_accelerate_api::export_wgpu_buffer(y),
+    ) else {
+        return Ok(None);
+    };
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
 
     if x_ref.len < 2 {
         return Err(plotting_error(
@@ -554,10 +550,7 @@ fn build_stairs_gpu_plot(
         ));
     }
     if x_ref.precision != y_ref.precision {
-        return Err(plotting_error(
-            name,
-            format!("{name}: X and Y gpuArrays must share the same precision"),
-        ));
+        return Ok(None);
     }
 
     let len_u32 = u32::try_from(x_ref.len).map_err(|_| {
@@ -620,7 +613,7 @@ fn build_stairs_gpu_plot(
         None
     };
 
-    let bounds = gpu_xy_bounds(x, y, "stairs")?;
+    let bounds = gpu_xy_bounds_async(x, y, "stairs").await?;
     let vertex_count = (x_ref.len - 1) * 4;
     let mut plot =
         StairsPlot::from_gpu_buffer(appearance.color, gpu_vertices, vertex_count, bounds)
@@ -629,7 +622,10 @@ fn build_stairs_gpu_plot(
             .with_label(label);
     apply_stairs_marker_metadata(&mut plot, marker_meta);
     plot.set_marker_gpu_vertices(marker_gpu);
-    Ok(plot)
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(Some(plot))
 }
 
 fn apply_stairs_marker_metadata(plot: &mut StairsPlot, marker_meta: Option<LineMarkerAppearance>) {
@@ -643,6 +639,9 @@ fn apply_stairs_marker_metadata(plot: &mut StairsPlot, marker_meta: Option<LineM
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        futures::executor::block_on(super::stairs_builtin(args))
+    }
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::tests::ensure_plot_test_env;

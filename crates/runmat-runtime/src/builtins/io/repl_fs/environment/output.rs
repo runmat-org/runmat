@@ -13,7 +13,7 @@ impl EnvironmentNames {
                     .ok_or_else(|| "missing scalar environment result".to_string());
             }
             Self::Strings { shape, .. } => shape.clone(),
-            Self::Cells { rows, cols, .. } => vec![*rows, *cols],
+            Self::Cells { shape, .. } => shape.clone(),
             Self::CharacterMatrix { rows, .. } => vec![*rows, 1],
         };
         LogicalArray::new(values.into_iter().map(u8::from).collect(), shape)
@@ -28,9 +28,7 @@ impl EnvironmentNames {
             Self::Strings { shape, .. } => {
                 StringArray::new(values, shape.clone()).map(Value::StringArray)
             }
-            Self::Cells {
-                kinds, rows, cols, ..
-            } => cell_text_output(values, kinds, *rows, *cols),
+            Self::Cells { kinds, shape, .. } => cell_text_output(values, kinds, shape),
             Self::CharacterMatrix { rows, .. } => {
                 character_matrix(values, *rows).map(Value::CharArray)
             }
@@ -41,8 +39,7 @@ impl EnvironmentNames {
 fn cell_text_output(
     values: Vec<String>,
     kinds: &[CellNameKind],
-    rows: usize,
-    cols: usize,
+    shape: &[usize],
 ) -> Result<Value, String> {
     let data = values
         .into_iter()
@@ -52,7 +49,7 @@ fn cell_text_output(
             CellNameKind::String => Value::String(value),
         })
         .collect();
-    CellArray::new(data, rows, cols).map(Value::Cell)
+    CellArray::from_column_major(data, shape.to_vec()).map(Value::Cell)
 }
 
 fn character_matrix(rows: Vec<String>, row_count: usize) -> Result<CharArray, String> {

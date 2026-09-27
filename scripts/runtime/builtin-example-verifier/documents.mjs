@@ -97,7 +97,8 @@ export function collectCases(documents) {
             };
             validateBuiltinExampleFixture(fixture, `${builtinKey} example fixture`);
             validateBuiltinExampleRequirements(requirements, `${builtinKey} example requirements`);
-            const isPlotExample = is_plot_example(category);
+            const isPlotExample = is_plot_example(category)
+                || Boolean(verification && typeof verification === "object" && "Figure" in verification);
             const hasExpectedOutput = typeof example.output === "string";
             if (!hasExpectedOutput && !isPlotExample && verification === undefined) {
                 continue;
@@ -150,14 +151,16 @@ export function resolveReportSource(repoRoot) {
  * @param {unknown} verification
  */
 function appendVerificationSource(input, verification) {
-    if (!verification || typeof verification !== "object" || !("Assertions" in verification)) {
+    if (!verification || typeof verification !== "object") {
         return input;
     }
-    const assertions = verification.Assertions;
-    if (!assertions || typeof assertions !== "object" || typeof assertions.source !== "string") {
+    const source = "Assertions" in verification
+        ? verification.Assertions?.source
+        : "Figure" in verification ? verification.Figure?.assertions : undefined;
+    if (typeof source !== "string" || source.length === 0) {
         return input;
     }
-    return `${input.trimEnd()}\n${assertions.source}`;
+    return `${input.trimEnd()}\n${source}`;
 }
 
 /**
@@ -185,7 +188,12 @@ export function matchesVerification(testCase, result, normalizedExpected, normal
                 && result?.errorIdentifier === identifier;
         }
         if ("Figure" in verification) {
-            return !hasExecutionError && (Boolean(imagePath) || result?.figureVerified === true);
+            const minimum = verification.Figure.minimum_figures;
+            return !hasExecutionError && !result?.figureImageError
+                && Number.isSafeInteger(minimum) && minimum > 0
+                && Number.isSafeInteger(result?.renderedFigureCount)
+                && result.renderedFigureCount >= minimum
+                && (Boolean(imagePath) || result?.figureVerified === true);
         }
     }
     return testCase.hasExpectedOutput ? normalizedExpected === normalizedActual : !hasExecutionError;

@@ -25,7 +25,7 @@ pub(super) fn parse(
     };
     match input {
         Value::String(text) => Ok(PathInputs::Scalar(path(text, builtin)?)),
-        Value::CharArray(chars) if chars.rows == 1 => {
+        Value::CharArray(chars) if character_is_row(chars) => {
             Ok(PathInputs::Scalar(path(&character_row(chars), builtin)?))
         }
         Value::StringArray(array) => Ok(PathInputs::Shaped {
@@ -38,10 +38,9 @@ pub(super) fn parse(
         }),
         Value::Cell(array) => Ok(PathInputs::Shaped {
             paths: array
-                .data
-                .iter()
+                .iter_column_major()
                 .map(|value| match value {
-                    Value::CharArray(chars) if chars.rows == 1 => {
+                    Value::CharArray(chars) if character_is_row(chars) => {
                         path(&character_row(chars), builtin)
                     }
                     _ => Err(descriptor_error(path_error, builtin)),
@@ -71,6 +70,10 @@ fn character_row(chars: &CharArray) -> String {
         .collect::<String>()
         .trim_end()
         .to_owned()
+}
+
+fn character_is_row(chars: &CharArray) -> bool {
+    chars.rows == 1 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2
 }
 
 fn descriptor_error(

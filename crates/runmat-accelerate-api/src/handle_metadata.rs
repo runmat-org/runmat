@@ -57,6 +57,11 @@ pub struct HandleMetadataRestoreGuard<'a> {
     snapshot: GpuHandleMetadataSnapshot,
 }
 impl<'a> HandleMetadataRestoreGuard<'a> {
+    /// Restore the captured metadata while retaining cancellation/drop protection.
+    pub fn restore(&self) {
+        restore_handle_metadata(self.handle, &self.snapshot);
+    }
+
     pub fn original_descriptor(&self) -> &GpuTensorDescriptor {
         &self.snapshot.descriptor
     }
@@ -74,6 +79,6 @@ impl<'a> HandleMetadataRestoreGuard<'a> {
 }
 impl Drop for HandleMetadataRestoreGuard<'_> {
     fn drop(&mut self) {
-        restore_handle_metadata(self.handle, &self.snapshot);
+        self.restore();
     }
 }

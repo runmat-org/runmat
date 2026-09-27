@@ -23,8 +23,7 @@ pub(super) enum EnvironmentNames {
     Cells {
         names: Vec<String>,
         kinds: Vec<CellNameKind>,
-        rows: usize,
-        cols: usize,
+        shape: Vec<usize>,
     },
     CharacterMatrix {
         names: Vec<String>,
@@ -41,6 +40,11 @@ pub(super) enum NameError {
 impl EnvironmentNames {
     pub(super) fn decode(value: &Value) -> Result<Self, NameError> {
         match value {
+            Value::CharArray(array)
+                if crate::builtins::common::shape::effective_rank(&array.shape) > 2 =>
+            {
+                Err(NameError::InvalidType)
+            }
             Value::CharArray(array) if array.rows == 1 => {
                 Ok(Self::CharacterRow(character_row(array, 0)))
             }
@@ -64,9 +68,12 @@ impl EnvironmentNames {
     fn decode_cells(array: &CellArray) -> Result<Self, NameError> {
         let mut names = Vec::with_capacity(array.data.len());
         let mut kinds = Vec::with_capacity(array.data.len());
-        for value in &array.data {
+        for value in array.iter_column_major() {
             match value {
-                Value::CharArray(chars) if chars.rows == 1 => {
+                Value::CharArray(chars)
+                    if chars.rows == 1
+                        && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
+                {
                     names.push(character_row(chars, 0));
                     kinds.push(CellNameKind::Character);
                 }
@@ -80,8 +87,7 @@ impl EnvironmentNames {
         Ok(Self::Cells {
             names,
             kinds,
-            rows: array.rows,
-            cols: array.cols,
+            shape: array.shape.clone(),
         })
     }
 
@@ -102,7 +108,7 @@ impl EnvironmentNames {
         match self {
             Self::CharacterRow(_) | Self::StringScalar(_) => None,
             Self::Strings { shape, .. } => Some(shape.clone()),
-            Self::Cells { rows, cols, .. } => Some(vec![*rows, *cols]),
+            Self::Cells { shape, .. } => Some(shape.clone()),
             Self::CharacterMatrix { rows, .. } => Some(vec![*rows, 1]),
         }
     }

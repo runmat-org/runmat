@@ -1,5 +1,4 @@
 mod execute;
-pub(crate) mod specification;
 
 #[cfg(test)]
 mod tests;
@@ -9,6 +8,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "mkdir",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::directory_lifecycle::mkdir"
 )]
 async fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

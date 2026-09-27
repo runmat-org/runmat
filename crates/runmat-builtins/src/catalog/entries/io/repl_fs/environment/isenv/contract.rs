@@ -1,5 +1,12 @@
 use crate::*;
 
+pub const ISENV_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISENV.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:isenv:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "isenv: too many output arguments",
+};
+
 const NAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "name",
     ty: BuiltinParamType::Any,
@@ -30,6 +37,10 @@ pub const ISENV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[ISENV_ERROR_ARITY, ISENV_ERROR_INVALID_NAME],
+    errors: &[
+        ISENV_ERROR_ARITY,
+        ISENV_ERROR_INVALID_NAME,
+        ISENV_ERROR_TOO_MANY_OUTPUTS,
+    ],
 };
 pub const ISENV_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Environment names are text. Integer and provider-resident numeric values reject before provider or environment access." };

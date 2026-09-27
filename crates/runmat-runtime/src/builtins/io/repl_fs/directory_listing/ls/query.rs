@@ -43,7 +43,7 @@ async fn path(path: &Path, display: &str) -> BuiltinResult<Vec<String>> {
 
 async fn directory(folder: &Path) -> BuiltinResult<Vec<String>> {
     let display = path_to_string(folder);
-    let entries = super::super::enumeration::directory(folder)
+    let entries = crate::builtins::common::fs::enumeration::directory(folder)
         .await
         .map_err(|error| {
             super::error::operation(format!("ls: unable to access '{display}' ({error})"))
@@ -51,7 +51,7 @@ async fn directory(folder: &Path) -> BuiltinResult<Vec<String>> {
     let mut rows = entries
         .into_iter()
         .map(|entry| {
-            let mut name = super::super::enumeration::filename(&entry.path)
+            let mut name = crate::builtins::common::fs::enumeration::filename(&entry.path)
                 .to_string_lossy()
                 .into_owned();
             append_directory_suffix(&mut name, entry.metadata.is_dir());
@@ -63,7 +63,7 @@ async fn directory(folder: &Path) -> BuiltinResult<Vec<String>> {
 }
 
 async fn pattern(pattern: &Path, display: &str) -> BuiltinResult<Vec<String>> {
-    let entries = super::super::enumeration::matching(pattern)
+    let entries = crate::builtins::common::fs::enumeration::matching(pattern)
         .await
         .map_err(|error| {
             super::error::operation(format!(

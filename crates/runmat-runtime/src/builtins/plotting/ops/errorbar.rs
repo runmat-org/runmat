@@ -23,7 +23,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
-use super::gpu_helpers::gpu_errorbar_bounds;
+use super::gpu_helpers::axis_bounds_protecting;
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -428,7 +428,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     integer_capabilities(crate::builtins::plotting::errorbar::ERRORBAR_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::errorbar"
 )]
-pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(errorbar_invalid("too many output arguments"));
     }
@@ -447,17 +447,7 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .map_err(map_errorbar_invalid)?;
     let mut n_in = Some(errorbar_numeric_input(y_neg).map_err(map_errorbar_invalid)?);
     let mut p_in = Some(errorbar_numeric_input(y_pos).map_err(map_errorbar_invalid)?);
-    let opts = PlotRenderOptions {
-        title: "Error Bars",
-        x_label: "X",
-        y_label: "Y",
-        ..Default::default()
-    };
-    let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-    let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
-    let figure_handle = crate::builtins::plotting::current_figure_handle();
-    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let axes = target_axes.unwrap_or(axes);
+    let mut prepared = async move {
         let x_arg = x_in.take().expect("x consumed");
         let y_arg = y_in.take().expect("y consumed");
         let yn_arg = n_in.take().expect("yn consumed");
@@ -479,7 +469,7 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 yn_arg.gpu_handle(),
                 yp_arg.gpu_handle(),
             ) {
-                match build_errorbar_gpu_plot(
+                if let Some(plot) = build_errorbar_gpu_plot(
                     BUILTIN_NAME,
                     x_gpu,
                     y_gpu,
@@ -489,41 +479,64 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                     yp_gpu,
                     &parsed,
                     &label,
-                ) {
-                    Ok(plot) => {
-                        let plot_index = figure.add_errorbar_on_axes(plot, axes);
-                        plot_indices_slot.borrow_mut().push((axes, plot_index));
-                        return Ok(());
-                    }
-                    Err(err) => log::warn!("errorbar GPU path unavailable: {err}"),
+                )
+                .await?
+                {
+                    return Ok(vec![plot]);
                 }
             }
         }
         let x = x_arg
-            .into_tensor(BUILTIN_NAME)
+            .into_tensor_async(BUILTIN_NAME)
+            .await
             .map_err(map_errorbar_invalid)?;
         let y = y_arg
-            .into_tensor(BUILTIN_NAME)
+            .into_tensor_async(BUILTIN_NAME)
+            .await
             .map_err(map_errorbar_invalid)?;
-        let xn = xn_in
-            .take()
-            .map(|v| v.into_tensor(BUILTIN_NAME))
-            .transpose()
-            .map_err(map_errorbar_invalid)?;
-        let xp = xp_in
-            .take()
-            .map(|v| v.into_tensor(BUILTIN_NAME))
-            .transpose()
-            .map_err(map_errorbar_invalid)?;
+        let xn = match xn_in.take() {
+            Some(value) => Some(
+                value
+                    .into_tensor_async(BUILTIN_NAME)
+                    .await
+                    .map_err(map_errorbar_invalid)?,
+            ),
+            None => None,
+        };
+        let xp = match xp_in.take() {
+            Some(value) => Some(
+                value
+                    .into_tensor_async(BUILTIN_NAME)
+                    .await
+                    .map_err(map_errorbar_invalid)?,
+            ),
+            None => None,
+        };
         let yn = yn_arg
-            .into_tensor(BUILTIN_NAME)
+            .into_tensor_async(BUILTIN_NAME)
+            .await
             .map_err(map_errorbar_invalid)?;
         let yp = yp_arg
-            .into_tensor(BUILTIN_NAME)
+            .into_tensor_async(BUILTIN_NAME)
+            .await
             .map_err(map_errorbar_invalid)?;
         let plots = build_errorbar_host_plots(x, y, xn, xp, yn, yp, &parsed, &label)
             .map_err(map_errorbar_invalid)?;
-        for plot in plots {
+        Ok::<_, crate::RuntimeError>(plots)
+    }
+    .await?;
+    let opts = PlotRenderOptions {
+        title: "Error Bars",
+        x_label: "X",
+        y_label: "Y",
+        ..Default::default()
+    };
+    let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+        let axes = target_axes.unwrap_or(axes);
+        for plot in prepared.drain(..) {
             let plot_index = figure.add_errorbar_on_axes(plot, axes);
             plot_indices_slot.borrow_mut().push((axes, plot_index));
         }
@@ -774,10 +787,13 @@ fn build_errorbar_series(
     if let Some(marker) = parsed.marker.clone() {
         plot.set_marker(Some(marker));
     }
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
-fn build_errorbar_gpu_plot(
+async fn build_errorbar_gpu_plot(
     name: &'static str,
     x: &runmat_accelerate_api::GpuTensorHandle,
     y: &runmat_accelerate_api::GpuTensorHandle,
@@ -787,26 +803,21 @@ fn build_errorbar_gpu_plot(
     y_pos: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedErrorBarStyle,
     label: &str,
-) -> crate::BuiltinResult<ErrorBar> {
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
+) -> crate::BuiltinResult<Option<ErrorBar>> {
+    let (Some(x_ref), Some(y_ref), Some(yn_ref), Some(yp_ref)) = (
+        runmat_accelerate_api::export_wgpu_buffer(x),
+        runmat_accelerate_api::export_wgpu_buffer(y),
+        runmat_accelerate_api::export_wgpu_buffer(y_neg),
+        runmat_accelerate_api::export_wgpu_buffer(y_pos),
+    ) else {
+        return Ok(None);
+    };
     let xn_ref = x_neg.and_then(runmat_accelerate_api::export_wgpu_buffer);
     let xp_ref = x_pos.and_then(runmat_accelerate_api::export_wgpu_buffer);
-    let yn_ref = runmat_accelerate_api::export_wgpu_buffer(y_neg).ok_or_else(|| {
-        plotting_error(
-            name,
-            format!("{name}: unable to export GPU negative error data"),
-        )
-    })?;
-    let yp_ref = runmat_accelerate_api::export_wgpu_buffer(y_pos).ok_or_else(|| {
-        plotting_error(
-            name,
-            format!("{name}: unable to export GPU positive error data"),
-        )
-    })?;
+    if (x_neg.is_some() && xn_ref.is_none()) || (x_pos.is_some() && xp_ref.is_none()) {
+        return Ok(None);
+    }
+    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
     if x_ref.len != y_ref.len
         || x_ref.len != yn_ref.len
         || x_ref.len != yp_ref.len
@@ -832,23 +843,27 @@ fn build_errorbar_gpu_plot(
             .unwrap_or(x_ref.precision)
             != x_ref.precision
     {
-        return Err(plotting_error(
-            name,
-            format!("{name}: gpuArray precision must match across all errorbar inputs"),
-        ));
+        return Ok(None);
     }
     let scalar =
         ScalarType::from_is_f64(x_ref.precision == runmat_accelerate_api::ProviderPrecision::F64);
-    let bounds = if let (Some(xn), Some(xp)) = (x_neg, x_pos) {
-        let mut b = gpu_errorbar_bounds(x, y, y_neg, y_pos, name)?;
-        let (min_xn, max_xn) = super::gpu_helpers::axis_bounds(xn, name)?;
-        let (min_xp, max_xp) = super::gpu_helpers::axis_bounds(xp, name)?;
-        b.min.x -= max_xn.max(min_xn.abs());
-        b.max.x += max_xp.max(min_xp.abs());
-        b
-    } else {
-        gpu_errorbar_bounds(x, y, y_neg, y_pos, name)?
-    };
+    let mut protected = vec![x, y, y_neg, y_pos];
+    protected.extend(x_neg);
+    protected.extend(x_pos);
+    let (min_x, max_x) = axis_bounds_protecting(x, &protected, name).await?;
+    let (min_y, max_y) = axis_bounds_protecting(y, &protected, name).await?;
+    let (_, max_neg) = axis_bounds_protecting(y_neg, &protected, name).await?;
+    let (_, max_pos) = axis_bounds_protecting(y_pos, &protected, name).await?;
+    let mut bounds = runmat_plot::core::BoundingBox::new(
+        glam::Vec3::new(min_x, min_y - max_neg, 0.0),
+        glam::Vec3::new(max_x, max_y + max_pos, 0.0),
+    );
+    if let (Some(xn), Some(xp)) = (x_neg, x_pos) {
+        let (min_xn, max_xn) = axis_bounds_protecting(xn, &protected, name).await?;
+        let (min_xp, max_xp) = axis_bounds_protecting(xp, &protected, name).await?;
+        bounds.min.x -= max_xn.max(min_xn.abs());
+        bounds.max.x += max_xp.max(min_xp.abs());
+    }
     let inputs = ErrorBarGpuInputs {
         x_buffer: x_ref.buffer.clone(),
         y_buffer: y_ref.buffer.clone(),
@@ -905,10 +920,14 @@ fn build_errorbar_gpu_plot(
         plot.set_marker(Some(marker));
         plot.set_marker_gpu_vertices(Some(marker_gpu));
     }
-    Ok(plot)
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
+    Ok(Some(plot))
 }
 
 struct ParsedErrorBarStyle {
+    visible: Option<bool>,
     color: glam::Vec4,
     line_width: f32,
     line_style: runmat_plot::plots::LineStyle,
@@ -957,6 +976,7 @@ fn parse_errorbar_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedError
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
     let marker = marker_metadata_from_appearance(&parsed.appearance);
     Ok(ParsedErrorBarStyle {
+        visible: parsed.appearance.visible,
         color: parsed.appearance.color,
         line_width: parsed.appearance.line_width,
         line_style: parsed.appearance.line_style,
@@ -1134,6 +1154,9 @@ fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
 
 #[cfg(test)]
 mod tests {
+    fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        futures::executor::block_on(super::errorbar_builtin(args))
+    }
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;

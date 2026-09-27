@@ -40,6 +40,16 @@ impl TransferOutcome {
         ]
     }
 
+    pub(super) fn without_outputs(self, builtin: &'static str) -> crate::BuiltinResult<Value> {
+        if self.status == 0.0 {
+            return Err(crate::build_runtime_error(self.message)
+                .with_builtin(builtin)
+                .with_identifier(self.message_id)
+                .build());
+        }
+        Ok(Value::OutputList(Vec::new()))
+    }
+
     #[cfg(test)]
     pub(super) fn status(&self) -> f64 {
         self.status

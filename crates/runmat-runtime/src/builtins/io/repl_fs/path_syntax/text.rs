@@ -30,10 +30,15 @@ impl TextContainer {
                 values: array.data.clone(),
                 shape: array.shape.clone(),
             }),
-            Value::CharArray(array) if array.rows == 1 => Ok(Self::scalar(
-                TextRepresentation::Character,
-                array.data.iter().take(array.cols).collect(),
-            )),
+            Value::CharArray(array)
+                if array.rows == 1
+                    && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
+            {
+                Ok(Self::scalar(
+                    TextRepresentation::Character,
+                    array.data.iter().take(array.cols).collect(),
+                ))
+            }
             Value::Cell(array) => Self::decode_cell(array, identity, error),
             _ => Err(super::error::catalog(error, identity)),
         }
@@ -53,11 +58,11 @@ impl TextContainer {
         error: &'static runmat_builtins::BuiltinErrorDescriptor,
     ) -> BuiltinResult<Self> {
         let mut values = Vec::with_capacity(array.data.len());
-        for value in &array.data {
+        for value in array.iter_column_major() {
             let Value::CharArray(chars) = value else {
                 return Err(super::error::catalog(error, identity));
             };
-            if chars.rows != 1 {
+            if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2 {
                 return Err(super::error::catalog(error, identity));
             }
             values.push(chars.data.iter().take(chars.cols).collect());
@@ -105,7 +110,7 @@ pub(super) fn output(
                 .into_iter()
                 .map(|text| Value::CharArray(CharArray::new_row(&text)))
                 .collect();
-            CellArray::new_with_shape(cells, shape.to_vec())
+            CellArray::from_column_major(cells, shape.to_vec())
                 .map(Value::Cell)
                 .map_err(|message| super::error::detail(shape_error, identity, message))
         }

@@ -8,6 +8,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "unsetenv",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::environment::unsetenv"
 )]
 async fn unsetenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

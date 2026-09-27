@@ -4,7 +4,6 @@ mod execute;
 mod input;
 mod persistence;
 mod result;
-pub(crate) mod specification;
 mod target;
 
 #[cfg(test)]
@@ -15,6 +14,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "savepath",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::savepath"
 )]
 async fn savepath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

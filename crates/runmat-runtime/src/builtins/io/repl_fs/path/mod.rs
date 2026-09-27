@@ -2,7 +2,6 @@
 
 mod execute;
 mod input;
-pub(crate) mod specification;
 
 #[cfg(test)]
 mod tests;

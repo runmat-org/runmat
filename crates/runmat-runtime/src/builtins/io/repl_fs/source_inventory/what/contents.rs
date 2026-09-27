@@ -54,7 +54,10 @@ fn classify(inventory: &mut Inventory, name: &str, directory: bool) {
         inventory.sources.push(name.to_owned());
     } else if name.ends_with(".mat") {
         inventory.data.push(name.to_owned());
-    } else if name.contains(".mex") {
+    } else if crate::builtins::common::path_search::MEX_EXTENSIONS
+        .iter()
+        .any(|extension| name.ends_with(extension))
+    {
         inventory.extensions.push(name.to_owned());
     }
 }

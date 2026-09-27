@@ -649,6 +649,11 @@ pub(crate) async fn build_indexed_image_surface(
     color_limits: Option<(f64, f64)>,
     mapping: &str,
 ) -> crate::BuiltinResult<SurfacePlot> {
+    let color_mapping = if mapping == "direct" {
+        runmat_plot::plots::surface::SurfaceColorMapping::Direct
+    } else {
+        runmat_plot::plots::surface::SurfaceColorMapping::Scaled
+    };
     let direct_limits = (mapping == "direct").then(|| {
         let integer = match c_input {
             SurfaceDataInput::Host(tensor) => tensor.integer_storage().is_some(),
@@ -678,6 +683,7 @@ pub(crate) async fn build_indexed_image_surface(
                     return Ok(surface
                         .with_flatten_z(true)
                         .with_image_mode(true)
+                        .with_color_mapping(color_mapping)
                         .with_color_limits(effective_limits));
                 }
                 Err(err) => warn!("image GPU path unavailable: {err}"),
@@ -697,6 +703,7 @@ pub(crate) async fn build_indexed_image_surface(
     Ok(super::surf::build_surface(x_host, y_host, grid)?
         .with_flatten_z(true)
         .with_image_mode(true)
+        .with_color_mapping(color_mapping)
         .with_colormap(colormap)
         .with_shading(ShadingMode::None)
         .with_color_limits(effective_limits))
@@ -970,6 +977,14 @@ mod tests {
             panic!("expected image surface");
         };
         assert_eq!(surface.color_limits, Some((0.0, 255.0)));
+        assert_eq!(
+            surface.color_mapping,
+            runmat_plot::plots::surface::SurfaceColorMapping::Direct
+        );
+        assert_eq!(
+            surface.scalar_color_range(),
+            runmat_plot::plots::surface::ScalarColorRange::NotMapped
+        );
 
         set_builtin(vec![
             Value::Num(handle),
@@ -982,6 +997,14 @@ mod tests {
             panic!("expected image surface");
         };
         assert_eq!(surface.color_limits, None);
+        assert_eq!(
+            surface.color_mapping,
+            runmat_plot::plots::surface::SurfaceColorMapping::Scaled
+        );
+        assert_eq!(
+            surface.scalar_color_range(),
+            runmat_plot::plots::surface::ScalarColorRange::Known(0., 1.)
+        );
     }
 
     #[test]

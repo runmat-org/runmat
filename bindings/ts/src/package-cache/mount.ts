@@ -309,6 +309,12 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
     return required(this.workspace.rename, "rename").call(this.workspace, from, to);
   }
 
+  renameReplace(from: string, to: string): void | Promise<void> {
+    this.assertMutable(from);
+    this.assertMutable(to);
+    return required(this.workspace.renameReplace, "renameReplace").call(this.workspace, from, to);
+  }
+
   setReadonly(path: string, readonly: boolean): void | Promise<void> {
     this.assertMutable(path);
     return required(this.workspace.setReadonly, "setReadonly").call(

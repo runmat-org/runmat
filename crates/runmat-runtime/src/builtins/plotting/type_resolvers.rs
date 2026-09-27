@@ -12,14 +12,6 @@ pub fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
-pub fn axis_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args {
-        [] => Type::tensor(),
-        [Type::Num | Type::Int | Type::Unknown] => Type::Unknown,
-        _ => Type::Void,
-    }
-}
-
 pub fn handle_logical_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Logical {
@@ -68,21 +60,6 @@ pub fn get_type(args: &[Type], _context: &ResolveContext) -> Type {
         return Type::Struct { known_fields: None };
     }
     Type::Unknown
-}
-
-pub fn daspect_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let ratio = Type::Tensor {
-        shape: Some(vec![Some(1), Some(3)]),
-    };
-    match args {
-        [] => ratio,
-        [Type::String] => Type::String,
-        [Type::Num | Type::Int] => ratio,
-        [Type::Tensor { .. } | Type::Logical { .. }] => ratio,
-        [Type::Num | Type::Int, Type::String] => Type::String,
-        [Type::Num | Type::Int, Type::Tensor { .. } | Type::Logical { .. }] => ratio,
-        _ => Type::Unknown,
-    }
 }
 
 pub fn set_type(_args: &[Type], _context: &ResolveContext) -> Type {

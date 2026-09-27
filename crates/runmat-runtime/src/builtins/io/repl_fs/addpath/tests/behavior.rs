@@ -57,3 +57,43 @@ fn appends_text_containers_and_character_rows() {
         vec![canonical(first.path()), canonical(second.path())]
     );
 }
+
+#[test]
+fn asymmetric_cell_paths_follow_column_major_order() {
+    let _guard = PathGuard::new();
+    let directories = (0..4).map(|_| tempdir().unwrap()).collect::<Vec<_>>();
+    let cells = CellArray::new(
+        directories
+            .iter()
+            .map(|dir| Value::String(dir.path().to_string_lossy().into_owned()))
+            .collect(),
+        2,
+        2,
+    )
+    .unwrap();
+    crate::builtins::common::path_state::set_path_string("");
+    super::run(vec![Value::Cell(cells), Value::from("-end")]).unwrap();
+    assert_eq!(
+        crate::builtins::common::path_state::current_path_segments(),
+        [0, 2, 1, 3].map(|index| canonical(directories[index].path()))
+    );
+}
+
+#[test]
+fn trailing_singleton_character_folder_is_admitted() {
+    let _guard = PathGuard::new();
+    let directory = tempdir().unwrap();
+    let characters = directory
+        .path()
+        .to_string_lossy()
+        .chars()
+        .collect::<Vec<_>>();
+    let shape = vec![1, characters.len(), 1];
+    let value = CharArray::new_with_shape(characters, shape).unwrap();
+    crate::builtins::common::path_state::set_path_string("");
+    super::run(vec![Value::CharArray(value)]).unwrap();
+    assert_eq!(
+        crate::builtins::common::path_state::current_path_segments(),
+        vec![canonical(directory.path())]
+    );
+}

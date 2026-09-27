@@ -495,6 +495,9 @@ fn style_tokens_are_name_value_only(tokens: &[Value]) -> bool {
 }
 
 fn merge_group_style(target: &mut PolarSeriesPlan, source: &PolarSeriesPlan) {
+    if source.appearance.visible.is_some() {
+        target.appearance.visible = source.appearance.visible;
+    }
     if source.color_explicit {
         target.appearance.color = source.appearance.color;
         target.color_explicit = true;
@@ -641,6 +644,36 @@ mod tests {
         assert_eq!(plans.len(), 2);
         assert!(plans[0].line_style_explicit);
         assert!(plans[1].appearance.line_width > 1.0);
+    }
+
+    #[test]
+    fn trailing_group_visibility_overrides_false_and_unset_does_not() {
+        let (plans, _) = parse_polar_series_specs(vec![
+            tensor(&[0.0, 1.0]),
+            tensor(&[1.0, 2.0]),
+            Value::from("Visible"),
+            Value::from("off"),
+            tensor(&[2.0, 3.0]),
+            Value::from("Visible"),
+            Value::from("on"),
+        ])
+        .unwrap();
+        assert_eq!(plans.len(), 2);
+        assert!(plans
+            .iter()
+            .all(|plan| plan.appearance.visible == Some(true)));
+        let (plans, _) = parse_polar_series_specs(vec![
+            tensor(&[0.0, 1.0]),
+            tensor(&[1.0, 2.0]),
+            Value::from("Visible"),
+            Value::from("off"),
+            tensor(&[2.0, 3.0]),
+            Value::from("LineWidth"),
+            Value::Num(2.0),
+        ])
+        .unwrap();
+        assert_eq!(plans[0].appearance.visible, Some(false));
+        assert_eq!(plans[1].appearance.visible, None);
     }
 
     #[test]

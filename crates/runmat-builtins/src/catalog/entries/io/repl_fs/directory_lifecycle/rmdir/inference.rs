@@ -71,11 +71,13 @@ fn validate_symbolic_link_option(
     let Some(_) = request.arguments.get(option_index) else {
         return;
     };
-    let is_symbolic_link_option = request
-        .literals
-        .literal_string_at(option_index)
-        .is_some_and(|name| name.eq_ignore_ascii_case("ResolveSymbolicLinks"));
-    if !is_symbolic_link_option {
+    let option_name = request.literals.literal_string_at(option_index);
+    if option_name.is_none()
+        && super::super::validation::is_text_scalar(&request.arguments[option_index])
+    {
+        return;
+    }
+    if !option_name.is_some_and(|name| name.eq_ignore_ascii_case("ResolveSymbolicLinks")) {
         if option_index > 1 || request.arguments.len() > option_index + 1 {
             diagnostics.push(argument_error(
                 "RM-CATALOG-RMDIR-OPTION-NAME",

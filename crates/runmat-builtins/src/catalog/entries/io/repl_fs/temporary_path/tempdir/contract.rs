@@ -1,5 +1,12 @@
 use crate::*;
 
+pub const TEMPDIR_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEMPDIR.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:tempdir:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "tempdir: too many output arguments",
+};
+
 const OUTPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "folder",
     ty: BuiltinParamType::StringScalar,
@@ -30,7 +37,11 @@ pub const TEMPDIR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[TEMPDIR_ERROR_TOO_MANY_INPUTS, TEMPDIR_ERROR_UNAVAILABLE],
+    errors: &[
+        TEMPDIR_ERROR_TOO_MANY_INPUTS,
+        TEMPDIR_ERROR_UNAVAILABLE,
+        TEMPDIR_ERROR_TOO_MANY_OUTPUTS,
+    ],
 };
 
 pub const TEMPDIR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {

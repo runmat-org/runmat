@@ -50,6 +50,12 @@ fn classifies_and_sorts_direct_children_through_the_filesystem_provider() {
         .write_project_path("/workspace/project/native.mexa64", b"")
         .unwrap();
     filesystem
+        .write_project_path("/workspace/project/not.mexnotes.txt", b"")
+        .unwrap();
+    filesystem
+        .write_project_path("/workspace/project/native.mexa64.backup", b"")
+        .unwrap();
+    filesystem
         .create_dir_project_path("/workspace/project/@Vehicle", true)
         .unwrap();
     filesystem
@@ -106,4 +112,41 @@ fn rejects_excess_arguments_with_the_catalog_error() {
         error.identifier(),
         runmat_builtins::WHAT_ERROR_ARITY.identifier
     );
+}
+
+#[test]
+fn output_and_character_shape_admission_precede_enumeration() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let error = run(vec![Value::Num(1.0)]).unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::WHAT_ERROR_TOO_MANY_OUTPUTS.identifier
+    );
+    drop(_outputs);
+    let pages = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    assert_eq!(
+        run(vec![Value::CharArray(pages)]).unwrap_err().identifier(),
+        runmat_builtins::WHAT_ERROR_FOLDER.identifier
+    );
+}
+
+#[test]
+fn empty_folder_has_empty_column_groups_even_without_outputs() {
+    let _lock = REPL_FS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let filesystem = MemoryFsProvider::with_current_dir("/workspace");
+    filesystem
+        .create_dir_project_path("/workspace/empty", true)
+        .unwrap();
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    let result = runmat_filesystem::with_provider_override(Arc::new(filesystem), || {
+        run(vec![Value::from("/workspace/empty")]).unwrap()
+    });
+    for name in ["m", "mat", "mex", "classes", "packages"] {
+        let Value::Cell(values) = field(&result, name) else {
+            panic!("cell group")
+        };
+        assert_eq!(values.shape, vec![0, 1]);
+    }
 }

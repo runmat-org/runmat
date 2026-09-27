@@ -1,5 +1,12 @@
 use crate::*;
 
+pub const GETENV_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETENV.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:getenv:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "getenv: too many output arguments",
+};
+
 const VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "value",
     ty: BuiltinParamType::Any,
@@ -55,6 +62,7 @@ pub const GETENV_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor
 };
 const ERRORS: &[BuiltinErrorDescriptor] = &[
     GETENV_ERROR_TOO_MANY_INPUTS,
+    GETENV_ERROR_TOO_MANY_OUTPUTS,
     GETENV_ERROR_INVALID_NAME,
     GETENV_ERROR_CELL_ELEMENT,
     GETENV_ERROR_INTERNAL,

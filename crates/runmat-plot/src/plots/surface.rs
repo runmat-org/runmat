@@ -13,6 +13,9 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use super::NumericPlotData;
+#[path = "surface/color_range.rs"]
+mod color_range;
+pub use color_range::{ScalarColorRange, SurfaceColorMapping};
 
 /// High-performance GPU-accelerated 3D surface plot
 #[derive(Debug, Clone)]
@@ -47,6 +50,8 @@ pub struct SurfacePlot {
 
     /// Optional color limits override for mapping Z -> color (caxis)
     pub color_limits: Option<(f64, f64)>,
+    pub color_mapping: SurfaceColorMapping,
+    scalar_color_extent: Option<(f64, f64)>,
 
     /// Optional per-vertex color grid (for RGB images); if set, overrides colormap mapping
     pub color_grid: Option<Vec<Vec<Vec4>>>, // [x_index][y_index] -> RGBA
@@ -475,6 +480,8 @@ impl SurfacePlot {
             flatten_z: false,
             image_mode: false,
             color_limits: None,
+            color_mapping: SurfaceColorMapping::Scaled,
+            scalar_color_extent: None,
             color_grid: None,
             lighting_enabled: true,
             ambient_strength: 0.2,
@@ -544,6 +551,8 @@ impl SurfacePlot {
             flatten_z: false,
             image_mode: false,
             color_limits: None,
+            color_mapping: SurfaceColorMapping::Scaled,
+            scalar_color_extent: None,
             color_grid: None,
             lighting_enabled: true,
             ambient_strength: 0.2,
@@ -590,6 +599,8 @@ impl SurfacePlot {
             flatten_z: false,
             image_mode: false,
             color_limits: None,
+            color_mapping: SurfaceColorMapping::Scaled,
+            scalar_color_extent: None,
             color_grid: None,
             lighting_enabled: true,
             ambient_strength: 0.2,
@@ -1012,17 +1023,12 @@ impl SurfacePlot {
             let (min_z, max_z) = if let Some((lo, hi)) = self.color_limits {
                 (lo, hi)
             } else {
-                let mut min_z = f64::INFINITY;
-                let mut max_z = f64::NEG_INFINITY;
-                for row in z_rows {
-                    for &z in row {
-                        if z.is_finite() {
-                            min_z = min_z.min(z);
-                            max_z = max_z.max(z);
-                        }
-                    }
+                match self.scalar_color_range() {
+                    ScalarColorRange::Known(lower, upper) => (lower, upper),
+                    ScalarColorRange::NotMapped
+                    | ScalarColorRange::Empty
+                    | ScalarColorRange::Unavailable => (0., 1.),
                 }
-                (min_z, max_z)
             };
             let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
 
@@ -1220,23 +1226,14 @@ impl SurfacePlot {
             .expect("image-mode surfaces require host color data");
         let width = self.x_len.max(1);
         let height = self.y_len.max(1);
-        let color_limits = self.color_limits.or_else(|| {
-            let mut min_z = f64::INFINITY;
-            let mut max_z = f64::NEG_INFINITY;
-            for row in z_rows {
-                for &z in row {
-                    if z.is_finite() {
-                        min_z = min_z.min(z);
-                        max_z = max_z.max(z);
-                    }
-                }
-            }
-            if min_z.is_finite() && max_z.is_finite() {
-                Some((min_z, max_z))
-            } else {
-                None
-            }
-        });
+        let color_limits = self
+            .color_limits
+            .or_else(|| match self.scalar_color_range() {
+                ScalarColorRange::Known(lower, upper) => Some((lower, upper)),
+                ScalarColorRange::NotMapped
+                | ScalarColorRange::Empty
+                | ScalarColorRange::Unavailable => None,
+            });
         let (min_z, max_z) = color_limits.unwrap_or((0.0, 1.0));
         let z_range = (max_z - min_z).max(f64::MIN_POSITIVE);
         let mut data = Vec::with_capacity(width * height * 4);

@@ -1,102 +1,30 @@
-//! MATLAB-compatible `hold` builtin.
-
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
-use runmat_macros::runtime_builtin;
-use runmat_value::Value;
-
+//! Per-axes hold policy through the shared graphics state.
 use super::op_common::axes_target::{apply_axes_target, split_leading_axes_handle};
 use super::op_common::cmd_parsing::parse_hold_mode;
 use super::state::{set_hold, HoldMode};
-
-const HOLD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "state",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Documented numeric scalar states accept every built-in integer class; all classes are inspected exactly and only values 0 and 1 are accepted.",
-}];
-pub const HOLD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor { form: "hold([ax,] integer_state)", inputs: &HOLD_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The scalar state is read without floating conversion and mutates only the selected axes hold policy after validation." }];
-
-const HOLD_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-
-const HOLD_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"toggle\""),
-    description: "Hold mode ('on'|'off'|'all') or numeric/logical scalar.",
-}];
-
-const HOLD_INPUTS_AX_MODE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes.",
-    },
-    BuiltinParamDescriptor {
-        name: "mode",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Hold mode ('on'|'off'|'all') or numeric/logical scalar.",
-    },
-];
-
-const HOLD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "hold()",
-        inputs: &HOLD_INPUTS_NONE,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "hold(mode)",
-        inputs: &HOLD_INPUTS_MODE,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "hold(ax, mode)",
-        inputs: &HOLD_INPUTS_AX_MODE,
-        outputs: &[],
-    },
-];
-
-const HOLD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HOLD.INVALID_ARGUMENT",
-    identifier: Some("RunMat:hold:InvalidArgument"),
-    when: "Hold mode argument is unsupported.",
-    message: "hold: invalid argument",
-};
-
-const HOLD_ERRORS: [BuiltinErrorDescriptor; 1] = [HOLD_ERROR_INVALID_ARGUMENT];
-
-pub const HOLD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HOLD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HOLD_ERRORS,
-};
-
-#[runtime_builtin(
+use runmat_builtins::{HOLD_DESCRIPTOR, HOLD_ERROR_TOO_MANY_OUTPUTS};
+use runmat_value::Value;
+#[runmat_macros::runtime_builtin(
     name = "hold",
-    category = "plotting",
-    summary = "Control plot replacement versus appending.",
-    keywords = "hold,plotting",
-    suppress_auto_output = true,
-    integer_capabilities(crate::builtins::plotting::hold::HOLD_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::plotting::hold::HOLD_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::hold"
 )]
 pub fn hold_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &HOLD_DESCRIPTOR,
+        &HOLD_ERROR_TOO_MANY_OUTPUTS,
+        "hold",
+    )?;
+    hold_state(args).map_err(|mut error| {
+        if error.identifier.is_none() {
+            error.identifier = Some("RunMat:hold:InvalidArgument".into());
+        }
+        error.context = error.context.with_builtin("hold");
+        error
+    })
+}
+
+fn hold_state(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (axes_target, rest) = split_leading_axes_handle(args, "hold")?;
     let mode = match rest.as_slice() {
         [] => HoldMode::Toggle,
@@ -134,6 +62,7 @@ mod tests {
 
     #[test]
     fn hold_toggle_and_explicit_modes_work() {
+        let _lock = crate::builtins::plotting::tests::lock_plot_registry();
         let _ = hold_builtin(Vec::new()).unwrap();
         assert_eq!(
             hold_builtin(vec![Value::String("on".into())]).unwrap(),
@@ -148,8 +77,62 @@ mod tests {
 
     #[test]
     fn hold_typed_integer_state_is_exact_in_compatibility_mode() {
+        let _lock = crate::builtins::plotting::tests::lock_plot_registry();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         assert!(hold_builtin(vec![Value::Int(runmat_value::IntValue::U8(1))]).is_ok());
         assert!(hold_builtin(vec![Value::Int(runmat_value::IntValue::I64(0))]).is_ok());
+    }
+
+    #[test]
+    fn hold_output_admission_precedes_state_creation_and_invalid_mode_preserves_state() {
+        use crate::builtins::plotting::state;
+        let _lock = crate::builtins::plotting::tests::lock_plot_registry();
+        state::reset_plot_state();
+        {
+            let _outputs = crate::output_count::push_output_count(Some(1));
+            assert_eq!(
+                hold_builtin(vec![]).unwrap_err().identifier(),
+                Some("RunMat:hold:TooManyOutputs")
+            );
+            assert!(state::current_figure_handle_if_exists().is_none());
+        }
+        let _outputs = crate::output_count::push_output_count(Some(0));
+        hold_builtin(vec![Value::from("on")]).unwrap();
+        assert!(state::current_hold_enabled());
+        for value in [
+            Value::from("toggle"),
+            Value::Num(0.5),
+            Value::Int(runmat_value::IntValue::U64(u64::MAX)),
+        ] {
+            assert_eq!(
+                hold_builtin(vec![value]).unwrap_err().identifier(),
+                Some("RunMat:hold:InvalidArgument")
+            );
+            assert!(state::current_hold_enabled());
+        }
+        hold_builtin(vec![Value::from("")]).unwrap();
+        assert!(!state::current_hold_enabled());
+        hold_builtin(vec![]).unwrap();
+        assert!(state::current_hold_enabled());
+    }
+
+    #[test]
+    fn hold_explicit_target_is_axes_local() {
+        use crate::builtins::plotting::state;
+        let _lock = crate::builtins::plotting::tests::lock_plot_registry();
+        state::reset_plot_state();
+        let first = state::current_axes_state();
+        let (_, second) = state::create_axes_for_figure(Some(first.handle)).unwrap();
+        hold_builtin(vec![
+            Value::Num(state::encode_axes_handle(first.handle, first.active_index)),
+            Value::from("all"),
+        ])
+        .unwrap();
+        assert!(state::current_hold_enabled());
+        state::select_axes_for_figure(first.handle, second).unwrap();
+        assert!(!state::current_hold_enabled());
+        hold_builtin(vec![Value::Bool(true)]).unwrap();
+        state::select_axes_for_figure(first.handle, first.active_index).unwrap();
+        assert!(state::current_hold_enabled());
     }
 }

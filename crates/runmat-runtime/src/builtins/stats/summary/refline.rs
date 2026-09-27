@@ -582,6 +582,9 @@ fn line_from_spec(
             style.appearance.line_style,
         );
     line.set_marker(marker_metadata_from_appearance(&style.appearance));
+    if let Some(visible) = style.appearance.visible {
+        line.set_visible(visible);
+    }
     if let Some(label) = style.label.clone() {
         line = line.with_label(label);
     }

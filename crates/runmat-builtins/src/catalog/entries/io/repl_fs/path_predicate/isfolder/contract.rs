@@ -1,5 +1,12 @@
 use crate::*;
 
+pub const ISFOLDER_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFOLDER.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:isfolder:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "isfolder: too many output arguments",
+};
+
 const PATH: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "folderName",
     ty: BuiltinParamType::Any,
@@ -31,6 +38,10 @@ pub const ISFOLDER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[ISFOLDER_ERROR_ARITY, ISFOLDER_ERROR_PATH],
+    errors: &[
+        ISFOLDER_ERROR_ARITY,
+        ISFOLDER_ERROR_PATH,
+        ISFOLDER_ERROR_TOO_MANY_OUTPUTS,
+    ],
 };
 pub const ISFOLDER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "Folder names are text. Integer and provider-resident numeric values reject before provider or filesystem access." };

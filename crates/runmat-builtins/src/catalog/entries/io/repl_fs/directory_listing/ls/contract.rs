@@ -38,11 +38,17 @@ pub const LS_ERROR_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "The name input is not a character vector or string scalar.",
     message: "ls: name must be a character vector or string scalar",
 };
+pub const LS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LS.OUTPUTS",
+    identifier: Some("RunMat:ls:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "ls: too many output arguments",
+};
 pub const LS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[LS_ERROR_ARITY, LS_ERROR_NAME],
+    errors: &[LS_ERROR_ARITY, LS_ERROR_NAME, LS_ERROR_TOO_MANY_OUTPUTS],
 };
 pub const LS_PORTABLE_ROWS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "ls-portable-row-layout",

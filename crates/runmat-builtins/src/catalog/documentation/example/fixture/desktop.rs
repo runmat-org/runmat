@@ -17,6 +17,32 @@ pub enum BuiltinDesktopHostInteraction {
     LineInput(BuiltinLineInputInteraction),
     KeyInput(BuiltinKeyInputInteraction),
     FigurePresentation(BuiltinFigurePresentationInteraction),
+    Document(BuiltinDocumentExpectation),
+}
+
+/// Portable expectations for the runtime's typed document host requests.
+/// The runner maps fixture-relative paths to its isolated workspace; this
+/// catalog layer cannot depend on runtime-owned paths or host service objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinDocumentExpectation {
+    OpenFile {
+        relative_path: &'static str,
+    },
+    OpenVariable {
+        name: &'static str,
+    },
+    Navigate {
+        relative_path: &'static str,
+        line: std::num::NonZeroUsize,
+        column: std::num::NonZeroUsize,
+        selection: BuiltinDocumentSelection,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinDocumentSelection {
+    Caret,
+    Select,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

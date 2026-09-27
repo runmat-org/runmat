@@ -51,3 +51,33 @@ fn inference_returns_double_status_and_character_diagnostics() {
         assert!(inference.diagnostics.is_empty());
     }
 }
+
+#[test]
+fn transfer_text_inference_matches_effective_row_admission() {
+    for entry in [&COPYFILE_CATALOG_ENTRY, &MOVEFILE_CATALOG_ENTRY] {
+        for (dims, invalid) in [
+            (vec![Some(1), Some(2), Some(1)], false),
+            (vec![Some(1), Some(1), Some(2)], true),
+            (vec![None, Some(2), None], false),
+        ] {
+            let request = CallRequest {
+                arguments: vec![
+                    ValueFact::proven(
+                        ValueKindFact::Character,
+                        runmat_types::ShapeFact::from(dims),
+                        runmat_types::StorageFact::Dense,
+                    ),
+                    ValueFact::scalar(ValueKindFact::String),
+                ],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(3)),
+            };
+            assert_eq!(
+                !crate::infer_catalog_call(entry, &request)
+                    .diagnostics
+                    .is_empty(),
+                invalid
+            );
+        }
+    }
+}

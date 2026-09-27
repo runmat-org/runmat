@@ -1,18 +1,90 @@
 use runmat_types::{ShapeFact, ValueFact, ValueKindFact};
 
-pub(super) fn scalar(value: &ValueFact) -> bool {
+pub(in crate::catalog::entries::io) fn scalar(value: &ValueFact) -> bool {
     match value.kind {
         ValueKindFact::Character => character_row(&value.shape),
-        ValueKindFact::String | ValueKindFact::Unknown => {
-            value.shape.element_count().is_none_or(|count| count == 1)
-        }
+        ValueKindFact::String => value.shape.element_count().is_none_or(|count| count == 1),
+        ValueKindFact::Unknown => true,
         _ => false,
     }
 }
 
+pub(in crate::catalog::entries::io) fn character_container(shape: &ShapeFact) -> bool {
+    shape.known_dims().is_none_or(|dims| {
+        dims.iter()
+            .skip(2)
+            .all(|extent| extent.is_none_or(|n| n == 1))
+    })
+}
+
 fn character_row(shape: &ShapeFact) -> bool {
-    !matches!(
-        shape.known_dims().and_then(|dims| dims.first().copied().flatten()),
-        Some(rows) if rows > 1
-    )
+    character_container(shape)
+        && !matches!(
+            shape.known_dims().and_then(|dims| dims.first().copied().flatten()),
+            Some(rows) if rows != 1
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_types::{DynamicReason, StorageFact};
+
+    #[test]
+    fn trailing_dimensions_and_unknown_kind_are_conservative() {
+        for (dims, supported) in [
+            (vec![Some(1), Some(3), Some(1)], true),
+            (vec![Some(1), Some(3), Some(2)], false),
+            (vec![Some(1), Some(3), None], true),
+            (vec![Some(0), Some(3)], false),
+        ] {
+            assert_eq!(
+                scalar(&ValueFact::proven(
+                    ValueKindFact::Character,
+                    ShapeFact::from(dims),
+                    StorageFact::Dense
+                )),
+                supported
+            );
+        }
+        let mut unknown = ValueFact::unknown(DynamicReason::Unspecified);
+        unknown.shape = ShapeFact::from(vec![Some(1), Some(5)]);
+        assert!(scalar(&unknown));
+        unknown.kind = ValueKindFact::String;
+        assert!(!scalar(&unknown));
+        unknown.kind = ValueKindFact::Logical;
+        assert!(!scalar(&unknown));
+    }
+
+    #[test]
+    fn scalar_path_consumers_share_conservative_effective_row_validation() {
+        for name in ["ls", "what", "dir"] {
+            let entry = crate::builtin_catalog_entry_by_name(name).unwrap();
+            for (dims, invalid) in [
+                (vec![Some(1), Some(2), Some(1)], false),
+                (vec![Some(1), Some(1), Some(2)], true),
+                (vec![Some(0), Some(0)], true),
+                (vec![None, Some(2), None], false),
+            ] {
+                let request = runmat_types::CallRequest {
+                    arguments: vec![ValueFact::proven(
+                        ValueKindFact::Character,
+                        ShapeFact::from(dims),
+                        runmat_types::StorageFact::Dense,
+                    )],
+                    literals: runmat_types::LiteralContext::default(),
+                    outputs: runmat_types::OutputSelection::new(
+                        runmat_types::RequestedOutputCount::One,
+                    ),
+                };
+                assert_eq!(
+                    !crate::infer_catalog_call(entry, &request)
+                        .diagnostics
+                        .is_empty(),
+                    invalid,
+                    "{name}"
+                );
+            }
+        }
+    }
 }
