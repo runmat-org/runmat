@@ -74,7 +74,7 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
     assert_eq!(output.device_id(), provider.device_id());
     assert_eq!(output.shape(), &[1, 2, 2]);
     assert_eq!(
-        output.descriptor.element_type,
+        output.descriptor().element_type,
         Some(NumericElementType::F32)
     );
     assert_eq!(provider.casts.load(Ordering::Relaxed), 1);

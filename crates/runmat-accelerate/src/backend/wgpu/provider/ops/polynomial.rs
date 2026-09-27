@@ -1,6 +1,7 @@
 use anyhow::{anyhow, ensure, Result};
 
 #[cfg(test)]
+#[path = "polynomial/admission_tests.rs"]
 mod admission_tests;
 use bytemuck::cast_slice;
 use runmat_accelerate_api::{

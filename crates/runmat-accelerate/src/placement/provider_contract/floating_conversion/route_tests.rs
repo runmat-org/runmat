@@ -35,9 +35,6 @@ impl AccelProvider for PlanningProvider {
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         panic!("planning cannot download")
     }
-    fn free(&self, _: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-        panic!("planning cannot free")
-    }
     fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
         validate(self, true, query).unwrap()
     }

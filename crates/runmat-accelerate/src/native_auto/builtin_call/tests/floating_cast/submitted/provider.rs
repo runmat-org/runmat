@@ -122,7 +122,7 @@ impl AccelProvider for SubmittedCast {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         self.casts.fetch_add(1, Ordering::Relaxed);
         assert_eq!(
-            handle.descriptor.element_type,
+            handle.descriptor().element_type,
             Some(NumericElementType::F64)
         );
         self.inner.unary_single(handle)

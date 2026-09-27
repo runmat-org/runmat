@@ -1,6 +1,7 @@
 use super::*;
 
 #[cfg(test)]
+#[path = "indexing/layout_tests.rs"]
 mod layout_tests;
 
 fn linear_storage_lane_factor(
