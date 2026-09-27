@@ -358,6 +358,16 @@ fn pwelch_error_with_detail(
     pwelch_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
+fn pwelch_control_error(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut error = pwelch_error_with_detail(error, source.message());
+    error.source = Some(Box::new(source));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
 fn pwelch_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -392,28 +402,30 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
-    if let Value::GpuTensor(handle) = &x {
-        if runmat_accelerate_api::handle_is_logical(handle) {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &PWELCH_LOGICAL_INPUT_EXTENSION,
-                BUILTIN_NAME,
-            )?;
-        }
-        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &PWELCH_INTEGER_SIGNAL_EXTENSION,
-                BUILTIN_NAME,
-            )?;
-        }
+    ensure_pwelch_class_boundary(&x, &PWELCH_INTEGER_SIGNAL_EXTENSION)?;
+    for value in rest.iter().take(4) {
+        ensure_pwelch_class_boundary(value, &PWELCH_INTEGER_CONTROL_EXTENSION)?;
+    }
+    // All borrowed operands must be admitted before exactness checks or parsers
+    // can download any one of them.
+    let resident_inputs = std::iter::once(&x)
+        .chain(rest.iter())
+        .filter_map(|value| {
+            if let Value::GpuTensor(handle) = value {
+                Some(handle)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for handle in &resident_inputs {
         super::resident_output::owner(handle, || pwelch_error(&PWELCH_ERROR_INTERNAL))?;
     }
-    ensure_pwelch_integer_boundary(
-        &x,
-        &PWELCH_INTEGER_SIGNAL_EXTENSION,
-        "signal",
-        &PWELCH_ERROR_INVALID_SIGNAL,
-    )
-    .await?;
+    let _preflight_guards = resident_inputs
+        .iter()
+        .map(|handle| runmat_accelerate_api::ResidencyRestoreGuard::new(handle))
+        .collect::<Vec<_>>();
+    ensure_pwelch_integer_boundary(&x, "signal", &PWELCH_ERROR_INVALID_SIGNAL).await?;
     for (index, value) in rest.iter().take(4).enumerate() {
         let (role, error) = match index {
             0 => ("window", &PWELCH_ERROR_INVALID_WINDOW),
@@ -421,8 +433,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
             2 => ("frequency or DFT-length", &PWELCH_ERROR_INVALID_NFFT),
             _ => ("sample-rate", &PWELCH_ERROR_INVALID_FS),
         };
-        ensure_pwelch_integer_boundary(value, &PWELCH_INTEGER_CONTROL_EXTENSION, role, error)
-            .await?;
+        ensure_pwelch_integer_boundary(value, role, error).await?;
     }
     let source_handle = match &x {
         Value::GpuTensor(handle) => Some(handle.clone()),
@@ -457,6 +468,8 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     } else {
         None
     };
+    drop(_preflight_guards);
+    drop(resident_inputs);
     let input = value_to_signal_columns(x).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
@@ -473,15 +486,12 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     }
 }
 
-async fn ensure_pwelch_integer_boundary(
+fn ensure_pwelch_class_boundary(
     value: &Value,
     extension: &'static BuiltinExtensionDescriptor,
-    role: &str,
-    error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<()> {
     use crate::builtins::common::validation::{
-        native_integer_value_is_exact_f64_async, value_has_logical_class,
-        value_has_native_integer_class,
+        value_has_logical_class, value_has_native_integer_class,
     };
     if value_has_logical_class(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -489,11 +499,23 @@ async fn ensure_pwelch_integer_boundary(
             BUILTIN_NAME,
         )?;
     }
-    if !value_has_native_integer_class(value) {
-        return Ok(());
+    if value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
     }
-    crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
-    if !native_integer_value_is_exact_f64_async(value).await? {
+    Ok(())
+}
+
+async fn ensure_pwelch_integer_boundary(
+    value: &Value,
+    role: &str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_native_integer_class,
+    };
+    if value_has_native_integer_class(value)
+        && !native_integer_value_is_exact_f64_async(value).await?
+    {
         return Err(pwelch_error_with_detail(
             error,
             format!("integer {role} values must be exactly representable as double"),
@@ -599,6 +621,11 @@ async fn output_gpu(
     };
     let estimate =
         super::resident_output::spectral(estimate, &request, provider, protected, output_error)?;
+    let context = super::resident_output::OutputContext {
+        input: handle,
+        provider,
+        caller_inputs: protected,
+    };
 
     let ps_frames = match provider.reshape(&estimate.ps, &[estimate.rows, segment_count, cols]) {
         Ok(ps_frames) => ps_frames,
@@ -620,14 +647,7 @@ async fn output_gpu(
         vec![estimate.rows, segment_count, cols],
         runmat_accelerate_api::GpuTensorStorage::Real,
     );
-    let ps_frames = super::resident_output::admit(
-        ps_frames,
-        handle,
-        provider,
-        &contract,
-        protected,
-        output_error,
-    )?;
+    let ps_frames = context.admit(ps_frames, &contract, &[], output_error)?;
     let ps_mean = match provider.reduce_mean_nd(&ps_frames, &[1]).await {
         Ok(ps_mean) => ps_mean,
         Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
@@ -644,19 +664,11 @@ async fn output_gpu(
         }
     };
     contract.shape = vec![estimate.rows, 1, cols];
-    let mut protected_mean = protected.to_vec();
-    protected_mean.push(&estimate.s);
+    let mut protected_mean = vec![&estimate.s];
     if segment_count > 1 {
         protected_mean.extend([&ps_frames, &estimate.ps]);
     }
-    let ps_mean = super::resident_output::admit(
-        ps_mean,
-        handle,
-        provider,
-        &contract,
-        &protected_mean,
-        output_error,
-    )?;
+    let ps_mean = context.admit(ps_mean, &contract, &protected_mean, output_error)?;
     drop(protected_mean);
     let pxx = match provider.reshape(&ps_mean, &[estimate.rows, cols]) {
         Ok(pxx) => pxx,
@@ -674,19 +686,11 @@ async fn output_gpu(
         }
     };
     contract.shape = vec![estimate.rows, cols];
-    let mut protected_final = protected.to_vec();
-    protected_final.push(&estimate.s);
+    let mut protected_final = vec![&estimate.s];
     if segment_count > 1 {
         protected_final.extend([&ps_frames, &estimate.ps]);
     }
-    let pxx = super::resident_output::admit(
-        pxx,
-        handle,
-        provider,
-        &contract,
-        &protected_final,
-        output_error,
-    )?;
+    let pxx = context.admit(pxx, &contract, &protected_final, output_error)?;
     drop(protected_final);
 
     drop(ps_frames);
@@ -793,7 +797,7 @@ async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
             columns: vec![vec![Complex::new(re, im)]],
             rows: 1,
             cols: 1,
-            is_complex: im.abs() > EPS,
+            is_complex: true,
             output_dtype: NumericDType::F64,
         }),
         other => Err(pwelch_error_with_detail(
@@ -866,10 +870,7 @@ fn complex_tensor_to_signal_columns(
     } else {
         NumericDType::F64
     };
-    let is_complex = tensor
-        .materialize_f64()
-        .iter()
-        .any(|(_, im)| im.abs() > EPS);
+    let is_complex = true;
     if rows == 1 || cols == 1 {
         return Ok(SignalColumns {
             columns: vec![tensor
@@ -1042,7 +1043,7 @@ async fn parse_frequency_grid(value: Value, window_len: usize) -> BuiltinResult<
 
     let vector = value_to_complex_vector(BUILTIN_NAME, "nfft", value)
         .await
-        .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_NFFT, err.message()))?;
+        .map_err(|source| pwelch_control_error(&PWELCH_ERROR_INVALID_NFFT, source))?;
     if vector.data.is_empty() || vector.data.len() > MAX_NFFT {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_NFFT));
     }
@@ -1090,7 +1091,7 @@ async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
     }
     let vector = value_to_complex_vector(BUILTIN_NAME, "window", value)
         .await
-        .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_WINDOW, err.message()))?;
+        .map_err(|source| pwelch_control_error(&PWELCH_ERROR_INVALID_WINDOW, source))?;
     if vector.data.is_empty() {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_WINDOW));
     }

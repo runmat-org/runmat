@@ -599,7 +599,7 @@ async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
             columns: vec![vec![Complex::new(re, im)]],
             rows: 1,
             cols: 1,
-            is_complex: im.abs() > EPS,
+            is_complex: true,
         }),
         other => Err(periodogram_error_with_detail(
             &PERIODOGRAM_ERROR_INVALID_SIGNAL,
@@ -659,10 +659,7 @@ fn complex_tensor_to_signal_columns(
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
-    let is_complex = tensor
-        .materialize_f64()
-        .iter()
-        .any(|(_, im)| im.abs() > EPS);
+    let is_complex = true;
     if rows == 1 || cols == 1 {
         return Ok(SignalColumns {
             columns: vec![tensor

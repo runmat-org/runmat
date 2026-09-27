@@ -1,7 +1,7 @@
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Mutex,
 };
 
@@ -44,6 +44,8 @@ pub struct Provider {
     pub fail_stage: AtomicUsize,
     pub pending_stage: AtomicUsize,
     pub malformed_stage: AtomicUsize,
+    pub fail_download: AtomicBool,
+    pub pending_download: AtomicBool,
 }
 impl Provider {
     pub fn new(mode: Mode, upload: Upload) -> &'static Self {
@@ -62,6 +64,8 @@ impl Provider {
             fail_stage: AtomicUsize::new(usize::MAX),
             pending_stage: AtomicUsize::new(usize::MAX),
             malformed_stage: AtomicUsize::new(usize::MAX),
+            fail_download: AtomicBool::new(false),
+            pending_download: AtomicBool::new(false),
         }))
     }
     fn step(&self) -> anyhow::Result<usize> {
@@ -214,6 +218,16 @@ impl AccelProvider for Provider {
     ) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
             self.downloads.fetch_add(1, Ordering::SeqCst);
+            if self.fail_download.load(Ordering::SeqCst) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "signal download failed",
+                )
+                .into());
+            }
+            if self.pending_download.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
             self.source
                 .lock()
                 .unwrap()

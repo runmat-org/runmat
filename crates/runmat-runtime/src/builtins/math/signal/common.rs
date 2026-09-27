@@ -2,7 +2,7 @@ use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSpectralRange};
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
-use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
@@ -60,22 +60,43 @@ pub(crate) async fn value_to_complex_vector(
     value: Value,
 ) -> BuiltinResult<ComplexVectorInput> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, builtin)?;
-    match value {
+    let (value, gpu_handle) = match value {
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
+            let provider = super::resident_output::owner(&handle, || {
+                signal_error(
+                    builtin,
+                    None,
+                    format!("{builtin}: invalid resident {label}"),
+                )
+            })?;
+            let value = gpu_helpers::download_value_preserving_residency_async(provider, &handle)
                 .await
-                .map_err(|flow| {
-                    let source = map_control_flow_with_builtin(flow, builtin);
-                    signal_error(
-                        builtin,
-                        None,
-                        format!("{builtin}: failed to gather {label}: {}", source.message()),
-                    )
+                .map_err(|source| {
+                    let mut error = build_runtime_error(format!(
+                        "{builtin}: failed to gather {label}: {}",
+                        source.message()
+                    ))
+                    .with_builtin(builtin)
+                    .with_source(source)
+                    .build();
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
                 })?;
-            let mut input = tensor_to_complex_vector(builtin, label, tensor)?;
-            input.gpu_handle = Some(handle);
-            Ok(input)
+            (value, Some(handle))
         }
+        value => (value, None),
+    };
+    let mut input = host_value_to_complex_vector(builtin, label, value)?;
+    input.gpu_handle = gpu_handle;
+    Ok(input)
+}
+
+fn host_value_to_complex_vector(
+    builtin: &'static str,
+    label: &str,
+    value: Value,
+) -> BuiltinResult<ComplexVectorInput> {
+    match value {
         Value::Tensor(tensor) => tensor_to_complex_vector(builtin, label, tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_complex_vector(builtin, label, tensor),
         Value::LogicalArray(logical) => {

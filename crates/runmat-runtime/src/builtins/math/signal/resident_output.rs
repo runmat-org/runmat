@@ -27,38 +27,57 @@ pub(super) fn owner(
     })
 }
 
-pub(super) fn admit(
-    mut output: GpuTensorHandle,
-    input: &GpuTensorHandle,
-    provider: &'static dyn AccelProvider,
-    contract: &BinaryGpuOutputContract,
-    protected: &[&GpuTensorHandle],
-    error: impl FnOnce() -> RuntimeError,
-) -> BuiltinResult<GpuTensorHandle> {
-    if let Err(cause) = output.allocation_lease().validate_live() {
-        let mut error = error();
-        error.gpu_gather_retry = GpuGatherRetry::Never;
-        let error = crate::runtime_error::with_provider_execution_source(
-            error,
-            ProviderExecutionError::from_source(cause),
-        );
-        return Err(gpu_helpers::reject_gpu_output(output, error));
-    }
-    if !gpu_helpers::binary_gpu_output_matches(&output, input, input, provider, contract)
-        || protected
+/// Caller operands determine placement; provider-produced siblings only exclude aliases.
+pub(super) struct OutputContext<'a> {
+    pub input: &'a GpuTensorHandle,
+    pub provider: &'static dyn AccelProvider,
+    pub caller_inputs: &'a [&'a GpuTensorHandle],
+}
+
+impl OutputContext<'_> {
+    pub(super) fn admit(
+        &self,
+        mut output: GpuTensorHandle,
+        contract: &BinaryGpuOutputContract,
+        siblings: &[&GpuTensorHandle],
+        error: impl FnOnce() -> RuntimeError,
+    ) -> BuiltinResult<GpuTensorHandle> {
+        if let Err(cause) = output.allocation_lease().validate_live() {
+            let mut error = error();
+            error.gpu_gather_retry = GpuGatherRetry::Never;
+            let error = crate::runtime_error::with_provider_execution_source(
+                error,
+                ProviderExecutionError::from_source(cause),
+            );
+            return Err(gpu_helpers::reject_gpu_output(output, error));
+        }
+        if !gpu_helpers::binary_gpu_output_matches(
+            &output,
+            self.input,
+            self.input,
+            self.provider,
+            contract,
+        ) || self
+            .caller_inputs
             .iter()
+            .chain(siblings.iter())
             .any(|value| output.shares_allocation_with(value))
-    {
-        let mut error = error();
-        error.gpu_gather_retry = GpuGatherRetry::Never;
-        return Err(gpu_helpers::reject_gpu_output(output, error));
+        {
+            let mut error = error();
+            error.gpu_gather_retry = GpuGatherRetry::Never;
+            return Err(gpu_helpers::reject_gpu_output(output, error));
+        }
+        // Protected siblings are alias exclusions, not caller intent authorities.
+        gpu_helpers::propagate_output_provenance(
+            &mut output,
+            std::iter::once(self.input).chain(self.caller_inputs.iter().copied()),
+        )
+        .map_err(|mut error| {
+            error.gpu_gather_retry = GpuGatherRetry::Never;
+            error
+        })?;
+        Ok(output)
     }
-    // Protected siblings are alias exclusions, not caller intent authorities.
-    gpu_helpers::propagate_output_provenance(&mut output, [input]).map_err(|mut error| {
-        error.gpu_gather_retry = GpuGatherRetry::Never;
-        error
-    })?;
-    Ok(output)
 }
 
 /// Restore each requested output while protecting borrowed operands and every
@@ -122,28 +141,14 @@ pub(super) fn spectral(
         vec![rows, request.frame_count],
         GpuTensorStorage::ComplexInterleaved,
     );
-    let mut protect = protected.to_vec();
-    protect.push(&result.ps);
-    let s = admit(
-        result.s,
-        request.input,
+    let context = OutputContext {
+        input: request.input,
         provider,
-        &contract,
-        &protect,
-        &error,
-    )?;
-    drop(protect);
+        caller_inputs: protected,
+    };
+    let s = context.admit(result.s, &contract, &[&result.ps], &error)?;
     contract.storage = GpuTensorStorage::Real;
-    let mut protect = protected.to_vec();
-    protect.push(&s);
-    let ps = admit(
-        result.ps,
-        request.input,
-        provider,
-        &contract,
-        &protect,
-        error,
-    )?;
+    let ps = context.admit(result.ps, &contract, &[&s], error)?;
     Ok(runmat_accelerate_api::ProviderSpectralResult {
         s,
         ps,

@@ -464,16 +464,13 @@ async fn try_gpu_envelope(
             "provider envelope returned malformed output",
         )
     };
-    let upper = super::resident_output::admit(
-        result.upper,
-        handle,
+    let context = super::resident_output::OutputContext {
+        input: handle,
         provider,
-        &contract,
-        &[&result.lower],
-        error,
-    )?;
-    let lower =
-        super::resident_output::admit(result.lower, handle, provider, &contract, &[&upper], error)?;
+        caller_inputs: &[],
+    };
+    let upper = context.admit(result.upper, &contract, &[&result.lower], error)?;
+    let lower = context.admit(result.lower, &contract, &[&upper], error)?;
     Ok(Some(gpu_envelope_value(
         ProviderEnvelopeResult { upper, lower },
         out_count,

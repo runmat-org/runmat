@@ -357,10 +357,13 @@ async fn hilbert_gpu_tensor(
             .await
         {
             Ok(out) => {
-                let out = super::resident_output::admit(
-                    out,
-                    &handle,
+                let out = super::resident_output::OutputContext {
+                    input: &handle,
                     provider,
+                    caller_inputs: &[],
+                }
+                .admit(
+                    out,
                     &gpu_helpers::BinaryGpuOutputContract {
                         shape: logical_shape_for_hilbert(&shape, dim_index, target_len),
                         storage: GpuTensorStorage::ComplexInterleaved,
