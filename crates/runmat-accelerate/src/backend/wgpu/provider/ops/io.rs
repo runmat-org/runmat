@@ -502,8 +502,8 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
     ) -> Result<HostNumericTensorOwned> {
         let entry = self.get_entry_raw(handle)?;
-        let bytes = if entry.allocated_bytes == 0 {
-            Vec::new()
+        let mut data = if entry.allocated_bytes == 0 {
+            numeric_data_from_bytes(entry.element_type, &[], entry.len)?
         } else {
             let staging = self.with_emission(|emission, pending| -> Result<_> {
                 let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
@@ -528,10 +528,11 @@ impl WgpuProvider {
                 self.submit(emission, pending, encoder)?;
                 Ok(staging)
             })??;
-            self.map_readback_bytes(staging, entry.allocated_bytes, "numeric download")
-                .await?
+            self.map_readback_with(staging, "numeric download", |bytes| {
+                numeric_data_from_bytes(entry.element_type, bytes, entry.len)
+            })
+            .await?
         };
-        let mut data = numeric_data_from_bytes(entry.element_type, &bytes, entry.len)?;
         let lane_factor = match entry.storage {
             GpuTensorStorage::Real => 1usize,
             GpuTensorStorage::ComplexInterleaved => 2usize,
@@ -791,11 +792,55 @@ mod tests {
             panic!("unpolled decoder must not execute")
         });
         drop(unpolled);
+        #[cfg(panic = "unwind")]
+        {
+            let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                futures::executor::block_on(provider.map_readback_with(
+                    staging(),
+                    "decode unwind",
+                    |_| -> Result<()> { panic!("decode unwind sentinel") },
+                ))
+            }));
+            assert!(panicked.is_err());
+        }
         let host = futures::executor::block_on(provider.download_exec(&handle))
             .expect("source survives both cleanup paths");
         assert_eq!(host.shape, vec![2, 1]);
         assert_eq!(host.data, vec![1.25, -3.5]);
         handle.release().expect("final owner release");
+    }
+
+    #[test]
+    #[ignore = "requires provisioned WGPU adapter; run with --ignored"]
+    fn numeric_readback_decodes_native_storage_without_byte_intermediate() {
+        let provider =
+            WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU adapter");
+        for data in [
+            HostNumericDataOwned::F32(vec![1.25, -3.5]),
+            HostNumericDataOwned::U64(vec![u64::MAX, (1u64 << 53) + 1]),
+        ] {
+            let host = HostNumericTensorOwned {
+                data,
+                shape: vec![2, 1, 1],
+                storage: GpuTensorStorage::Real,
+            };
+            let input = provider
+                .upload_numeric_exec(&host.as_view())
+                .expect("native upload");
+            let actual = futures::executor::block_on(provider.download_numeric_exec(&input))
+                .expect("typed readback");
+            assert_eq!(actual.shape, host.shape);
+            match (actual.data, host.data) {
+                (HostNumericDataOwned::F32(actual), HostNumericDataOwned::F32(expected)) => {
+                    assert_eq!(actual, expected)
+                }
+                (HostNumericDataOwned::U64(actual), HostNumericDataOwned::U64(expected)) => {
+                    assert_eq!(actual, expected)
+                }
+                other => panic!("native storage changed: {other:?}"),
+            }
+            input.release().expect("retire uploaded input");
+        }
     }
 
     #[test]
