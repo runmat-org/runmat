@@ -490,6 +490,10 @@ async fn imfilter_gpu(
             );
         }
     }
+    preflight_resident_input(&image_handle, "A")?;
+    if let Value::GpuTensor(kernel) = &kernel_value {
+        preflight_resident_input(kernel, "H")?;
+    }
     let output_class = ImageOutputClass::from_gpu_handle(&image_handle)?;
     let provider = gpu_helpers::exact_provider_for_handle(&image_handle).ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INTERNAL, "no acceleration provider owns A")
@@ -653,6 +657,30 @@ fn upload_kernel(
     }
 }
 
+fn preflight_resident_input(handle: &GpuTensorHandle, name: &str) -> BuiltinResult<()> {
+    handle
+        .allocation_lease()
+        .validate_live()
+        .map_err(|source| {
+            crate::runtime_error::with_provider_execution_source(
+                imfilter_error_with_detail(
+                    &IMFILTER_ERROR_INVALID_INPUT,
+                    format!("{name} allocation is unavailable"),
+                ),
+                runmat_accelerate_api::ProviderExecutionError::from_source(source),
+            )
+        })?;
+    if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+        let mut error = imfilter_error_with_detail(
+            &IMFILTER_ERROR_INVALID_INPUT,
+            format!("no exact provider owns {name}"),
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn same_handle(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
     lhs.shares_allocation_with(rhs)
 }
@@ -732,9 +760,10 @@ fn valid_provider_output(
 ) -> bool {
     output.shape() == expected_shape
         && output.device_id() == image.device_id()
-        && output.buffer_id() != image.buffer_id()
-        && (output.device_id() != kernel.device_id() || output.buffer_id() != kernel.buffer_id())
-        && runmat_accelerate_api::provider_for_handle(output)
+        && !output.shares_allocation_with(image)
+        && !output.shares_allocation_with(kernel)
+        && output.allocation_lease().validate_live().is_ok()
+        && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)

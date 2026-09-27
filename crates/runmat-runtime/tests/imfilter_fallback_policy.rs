@@ -24,6 +24,7 @@ enum Mode {
     UploadAlias,
     RestoreAlias,
     ResultAlias,
+    ResultKernelView,
     Pending,
 }
 #[derive(Debug)]
@@ -115,7 +116,18 @@ impl AccelProvider for Provider {
                 Mode::Unsupported | Mode::RestoreAlias => Err(unsupported_provider_operation(
                     "imfilter not supported by provider",
                 )),
-                Mode::ResultAlias => Ok(self.alias.lock().unwrap().as_ref().unwrap().clone()),
+                Mode::ResultAlias => {
+                    let guard = self.alias.lock().unwrap();
+                    let original = guard.as_ref().unwrap();
+                    let alias = original.with_view(original.view().clone()).unwrap();
+                    assert_ne!(alias.view_identity(), original.view_identity());
+                    Ok(alias)
+                }
+                Mode::ResultKernelView => {
+                    let alias = kernel.with_view(kernel.view().clone()).unwrap();
+                    assert_ne!(alias.view_identity(), kernel.view_identity());
+                    Ok(alias)
+                }
                 Mode::Pending => futures::future::pending().await,
                 _ => Err(anyhow::Error::new(Operational)),
             }
@@ -279,4 +291,113 @@ fn cancelling_pending_hook_retires_uploaded_kernel_not_borrowed_image() {
     assert!(scratch.acquire().is_err());
     input.allocation_lease().validate_live().unwrap();
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn new_view_over_uploaded_kernel_is_not_a_fresh_output_allocation() {
+    let provider = Provider::new(Mode::ResultKernelView);
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider.input(&[1., 2., 3., 4.], &[2, 2], false);
+    let args = [
+        Value::GpuTensor(input.clone()),
+        Value::Tensor(Tensor::new(vec![1.; 4], vec![2, 2]).unwrap()),
+    ];
+    let error = futures::executor::block_on(runmat_runtime::call_builtin_async("imfilter", &args))
+        .unwrap_err();
+    assert_eq!(
+        error.gpu_gather_retry,
+        runmat_runtime::GpuGatherRetry::Never
+    );
+    assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert!(provider
+        .scratch
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .acquire()
+        .is_err());
+    input.allocation_lease().validate_live().unwrap();
+}
+
+struct PreflightOnly {
+    owner: test_support::TestAllocationOwner,
+}
+impl AccelProvider for PreflightOnly {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "unavailable original preflight fixture".into()
+    }
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        panic!("unavailable original must reject before upload")
+    }
+    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+        panic!("unavailable original must reject before native upload")
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        panic!("unavailable original must reject before download")
+    }
+    fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+        panic!("unavailable original must reject before native download")
+    }
+    fn imfilter<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+        _: &'a ImfilterOptions,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        panic!("unavailable original must reject before execution")
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn unavailable_originals_reject_before_any_download_or_upload() {
+    for dead_image in [false, true] {
+        let provider = Box::leak(Box::new(PreflightOnly {
+            owner: test_support::TestAllocationOwner::new(),
+        }));
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let image = provider
+            .owner
+            .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let kernel = provider
+            .owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        if dead_image {
+            image.probe.mark_unavailable();
+        } else {
+            kernel.probe.mark_unavailable();
+        }
+        let error = futures::executor::block_on(runmat_runtime::call_builtin_async(
+            "imfilter",
+            &[
+                Value::GpuTensor(image.handle.clone()),
+                Value::GpuTensor(kernel.handle.clone()),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.gpu_gather_retry,
+            runmat_runtime::GpuGatherRetry::Never
+        );
+        let mut cursor: &(dyn Error + 'static) = &error;
+        while !cursor.is::<allocation::AllocationAcquisitionError>() {
+            cursor = cursor
+                .source()
+                .expect("original availability error retained");
+        }
+        assert_eq!(image.probe.retirements(), 0);
+        assert_eq!(kernel.probe.retirements(), 0);
+        drop(image.handle);
+        drop(kernel.handle);
+        assert_eq!(image.probe.retirements(), 1);
+        assert_eq!(kernel.probe.retirements(), 1);
+    }
 }
