@@ -85,7 +85,7 @@ const HOST_ADD_INPUTS: [BuiltinParamDescriptor; 2] = [
     },
 ];
 const DOUBLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = double(x)",
+    label: "out = dispatcher_fixture_twice(x)",
     inputs: &DOUBLE_INPUTS,
     outputs: &OUT_VALUE,
 }];
@@ -119,11 +119,11 @@ const HOST_ADD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 #[runtime_builtin(
-    name = "double",
+    name = "dispatcher_fixture_twice",
     descriptor(crate::DOUBLE_DESCRIPTOR),
-    builtin_path = "tests::double_fn"
+    builtin_path = "tests::twice_fn"
 )]
-fn double_fn(x: i32) -> Result<i32, String> {
+fn twice_fn(x: i32) -> Result<i32, String> {
     Ok(x * 2)
 }
 
@@ -175,14 +175,18 @@ fn host_only_add_tensors(a: Value, b: Value) -> Result<Value, TestBuiltinError> 
 
 #[test]
 fn call_registered_builtin() {
-    let result = call_builtin("double", &[Value::Int(runmat_value::IntValue::I32(4))]).unwrap();
+    let result = call_builtin(
+        "dispatcher_fixture_twice",
+        &[Value::Int(runmat_value::IntValue::I32(4))],
+    )
+    .unwrap();
     if let Value::Int(n) = result {
         assert_eq!(n.to_i64(), 8);
     } else {
         panic!();
     }
     let names: Vec<&str> = builtin_functions().into_iter().map(|b| b.name).collect();
-    assert!(names.contains(&"double"));
+    assert!(names.contains(&"dispatcher_fixture_twice"));
 }
 
 fn mark_automatic(value: Value) -> Value {
