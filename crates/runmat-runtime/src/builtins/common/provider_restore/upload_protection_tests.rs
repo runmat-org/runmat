@@ -25,6 +25,12 @@ impl Provider {
     }
 }
 impl AccelProvider for Provider {
+    fn download<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        Box::pin(async { panic!("restore upload must not download") })
+    }
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         Ok(self
             .response

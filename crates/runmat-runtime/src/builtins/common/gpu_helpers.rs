@@ -31,7 +31,7 @@ pub fn integer_storage_from_owned(data: HostIntegerDataOwned) -> IntegerStorage 
 /// device namespace matches the durable handle identity before touching it.
 pub fn exact_provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
     runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|provider| provider.device_id() == handle.device_id)
+        .filter(|provider| provider.device_id() == handle.device_id())
 }
 
 /// Resolve one exact owner for two resident operands.
@@ -47,7 +47,7 @@ pub fn exact_provider_for_binary_inputs(
         .ok_or_else(|| "no provider owns the left resident operand".to_string())?;
     let right_owner = exact_provider_for_handle(right)
         .ok_or_else(|| "no provider owns the right resident operand".to_string())?;
-    if !std::ptr::eq(left_owner, right_owner) || left.device_id != right.device_id {
+    if !std::ptr::eq(left_owner, right_owner) || left.device_id() != right.device_id() {
         return Err("resident operands must share one owning provider and device".to_string());
     }
     Ok(left_owner)
@@ -70,7 +70,7 @@ pub fn select_resident_output_source(
             .build()
         })?;
         if let Some((current, current_owner)) = &selected {
-            if current.device_id != handle.device_id || !std::ptr::eq(*current_owner, owner) {
+            if current.device_id() != handle.device_id() || !std::ptr::eq(*current_owner, owner) {
                 return Err(build_runtime_error(format!(
                     "{builtin}: resident inputs must share one owning provider"
                 ))
@@ -97,6 +97,10 @@ pub(crate) use adoption::propagate_output_provenance;
 pub use adoption::{complex_gpu_value, logical_gpu_value, resident_gpu_value};
 mod rejection;
 pub(crate) use rejection::reject_gpu_output;
+
+#[cfg(test)]
+#[path = "gpu_helpers/owned_encoding_tests.rs"]
+mod owned_encoding_tests;
 
 pub fn expected_gpu_class_identity(
     precision: Option<ProviderPrecision>,
@@ -142,27 +146,13 @@ fn integer_element_type(storage: &IntegerStorage) -> IntegerElementType {
 pub(crate) fn expected_handle_numeric_element_type(
     handle: &GpuTensorHandle,
 ) -> Result<NumericElementType, String> {
-    let precision = runmat_accelerate_api::handle_precision(handle);
-    let integer = runmat_accelerate_api::handle_integer_type(handle);
-    let logical = runmat_accelerate_api::handle_is_logical(handle);
-    let expected_class = expected_gpu_class_identity(precision, integer, logical);
-    if runmat_accelerate_api::handle_class_identity(handle)
-        .is_some_and(|actual| expected_class.as_ref() != Some(&actual))
-    {
-        return Err("class metadata contradicts the physical payload metadata".into());
-    }
-    if logical && integer.is_some() {
-        return Err("logical metadata cannot annotate native integer storage".into());
-    }
-    match (precision, integer) {
-        (Some(ProviderPrecision::F64), None) => Ok(NumericElementType::F64),
-        (Some(ProviderPrecision::F32), None) => Ok(NumericElementType::F32),
-        (None, Some(integer)) => Ok(integer.into()),
-        (Some(_), Some(_)) => {
-            Err("floating precision and integer class metadata are both present".into())
-        }
-        (None, None) => Err("physical numeric element metadata is missing".into()),
-    }
+    handle
+        .allocation_lease()
+        .validate_live()
+        .map_err(|error| error.to_string())?;
+    // Physical class and logical interpretation are immutable owner-admitted
+    // facts. In particular, logical U8 is a supported physical encoding.
+    Ok(handle.physical().element_type())
 }
 
 pub(crate) fn numeric_descriptor_matches(
@@ -170,8 +160,8 @@ pub(crate) fn numeric_descriptor_matches(
     element_type: NumericElementType,
     storage: GpuTensorStorage,
 ) -> bool {
-    handle.descriptor.element_type == Some(element_type)
-        && handle.descriptor.storage == Some(storage)
+    handle.descriptor().element_type == Some(element_type)
+        && handle.descriptor().storage == Some(storage)
 }
 
 pub(crate) fn numeric_descriptor_matches_source(
@@ -215,11 +205,14 @@ pub(crate) fn value_from_numeric_download(
                 .into_iter()
                 .map(|value| u8::from(value != 0.0))
                 .collect(),
+            HostNumericDataOwned::U8(values) => values
+                .into_iter()
+                .map(|value| u8::from(value != 0))
+                .collect(),
             HostNumericDataOwned::I8(_)
             | HostNumericDataOwned::I16(_)
             | HostNumericDataOwned::I32(_)
             | HostNumericDataOwned::I64(_)
-            | HostNumericDataOwned::U8(_)
             | HostNumericDataOwned::U16(_)
             | HostNumericDataOwned::U32(_)
             | HostNumericDataOwned::U64(_) => {
@@ -405,8 +398,8 @@ pub async fn gather_tensor_async(
     #[cfg(all(test, feature = "wgpu"))]
     {
         let active_owner = runmat_accelerate_api::provider()
-            .is_some_and(|provider| provider.device_id() == handle.device_id);
-        if handle.device_id != 0 && !active_owner {
+            .is_some_and(|provider| provider.device_id() == handle.device_id());
+        if handle.device_id() != 0 && !active_owner {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
@@ -443,8 +436,8 @@ pub async fn download_value_preserving_residency_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> crate::BuiltinResult<Value> {
-    let source_guard = ResidencyRestoreGuard::new(handle);
-    if provider.device_id() != handle.device_id {
+    let _source_guard = ResidencyRestoreGuard::new(handle);
+    if provider.device_id() != handle.device_id() {
         return Err(
             build_runtime_error("gpu download: provider does not own the input handle")
                 .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
@@ -464,8 +457,8 @@ pub async fn download_value_preserving_residency_async(
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build()
     })?;
-    if host.shape != handle.shape
-        || Some(host.storage) != source_guard.original_descriptor().storage
+    if host.shape != handle.shape()
+        || Some(host.storage) != handle.descriptor().storage
         || host.data.element_type() != expected_element
     {
         return Err(provider_payload_mismatch(
@@ -476,16 +469,18 @@ pub async fn download_value_preserving_residency_async(
                 host.data.element_type(),
                 host.storage,
                 expected_element,
-                source_guard.original_descriptor().storage
+                handle.descriptor().storage
             ),
         ));
     }
-    value_from_numeric_download(host, source_guard.was_logical()).map_err(|error| {
-        build_runtime_error(format!("gpu download: {error}"))
-            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build()
-    })
+    value_from_numeric_download(host, runmat_accelerate_api::handle_is_logical(handle)).map_err(
+        |error| {
+            build_runtime_error(format!("gpu download: {error}"))
+                .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        },
+    )
 }
 
 /// Exact native scalar values decoded from a provider-owned real numeric payload.
@@ -579,8 +574,8 @@ pub async fn download_floating_projection_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> crate::BuiltinResult<HostTensorOwned> {
-    let source_guard = ResidencyRestoreGuard::new(handle);
-    if provider.device_id() != handle.device_id {
+    let _source_guard = ResidencyRestoreGuard::new(handle);
+    if provider.device_id() != handle.device_id() {
         return Err(build_runtime_error(
             "floating projection: provider does not own the input handle",
         )
@@ -606,8 +601,8 @@ pub async fn download_floating_projection_async(
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build()
     })?;
-    if host.shape != handle.shape
-        || Some(host.storage) != source_guard.original_descriptor().storage
+    if host.shape != handle.shape()
+        || Some(host.storage) != handle.descriptor().storage
         || host.data.element_type() != expected_element
     {
         return Err(provider_payload_mismatch(
@@ -618,7 +613,7 @@ pub async fn download_floating_projection_async(
                 host.data.element_type(),
                 host.storage,
                 expected_element,
-                source_guard.original_descriptor().storage
+                handle.descriptor().storage
             ),
         ));
     }
@@ -655,7 +650,7 @@ fn provider_payload_mismatch(
 ) -> crate::RuntimeError {
     build_runtime_error(format!(
         "gpu download: provider payload mismatch ({detail}; shape {actual_shape:?}, expected {:?})",
-        handle.shape
+        handle.shape()
     ))
     .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
@@ -1421,7 +1416,7 @@ mod preserving_download_tests {
                 runmat_accelerate_api::set_handle_class_identity(handle, "logical");
                 Ok(runmat_accelerate_api::HostTensorOwned {
                     data: vec![1.0],
-                    shape: handle.shape.clone(),
+                    shape: handle.shape().to_vec(),
                     storage: GpuTensorStorage::Real,
                 })
             })
