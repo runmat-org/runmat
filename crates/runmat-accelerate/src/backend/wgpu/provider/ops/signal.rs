@@ -274,15 +274,15 @@ impl WgpuProvider {
     pub(crate) async fn uniform_spectral_estimate_exec(
         &self,
         request: &ProviderSpectralRequest<'_>,
-    ) -> Result<ProviderSpectralResult> {
-        ensure!(
-            !request.window.is_empty()
-                && request.nfft > 0
-                && request.frame_count > 0
-                && request.denominator.is_finite()
-                && request.denominator > 0.0,
-            "uniform_spectral_estimate: invalid request"
-        );
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderSpectralResult> {
+        if !(!request.window.is_empty()
+            && request.nfft > 0
+            && request.frame_count > 0
+            && request.denominator.is_finite()
+            && request.denominator > 0.0)
+        {
+            return Err(anyhow!("uniform_spectral_estimate: invalid request").into());
+        }
 
         let framed_len = request
             .nfft
@@ -317,7 +317,7 @@ impl WgpuProvider {
             Ok(framed) => framed,
             Err(err) => {
                 drop(window);
-                return Err(err);
+                return Err(err.into());
             }
         };
         drop(window);
@@ -351,7 +351,7 @@ impl WgpuProvider {
                 Ok(handle) => handle,
                 Err(err) => {
                     drop(spectrum);
-                    return Err(err);
+                    return Err(err.into());
                 }
             };
             drop(spectrum);
@@ -377,7 +377,7 @@ impl WgpuProvider {
             Ok(ps) => ps,
             Err(err) => {
                 drop(selected);
-                return Err(err);
+                return Err(err.into());
             }
         };
 
@@ -392,7 +392,7 @@ impl WgpuProvider {
     pub(crate) async fn signal_envelope_exec(
         &self,
         request: &ProviderEnvelopeRequest<'_>,
-    ) -> Result<ProviderEnvelopeResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderEnvelopeResult> {
         let output_len = request
             .output_shape
             .iter()
@@ -402,43 +402,48 @@ impl WgpuProvider {
             .channel_len
             .checked_mul(request.channel_count)
             .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
-        ensure!(
-            request.channel_len > 0 && request.channel_count > 0 && output_len == input_len,
-            "signal_envelope: invalid request"
-        );
+        if !(request.channel_len > 0 && request.channel_count > 0 && output_len == input_len) {
+            return Err(anyhow!("signal_envelope: invalid request").into());
+        }
         let entry = self.get_entry(request.input)?;
-        ensure!(
-            entry.precision == self.precision,
-            "signal_envelope: mixed precision tensors are not supported"
-        );
-        ensure!(
-            entry.storage == GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
-            "signal_envelope: complex input tensors are not supported"
-        );
-        ensure!(
-            entry.len == input_len,
-            "signal_envelope: input length mismatch"
-        );
-        ensure!(
-            envelope_input_shape_matches(&entry.shape, request.channel_len, request.channel_count)
-                && envelope_input_shape_matches(
-                    request.input.shape(),
-                    request.channel_len,
-                    request.channel_count
-                ),
-            "signal_envelope: input shape mismatch"
-        );
+        if entry.precision != self.precision {
+            return Err(
+                anyhow!("signal_envelope: mixed precision tensors are not supported").into(),
+            );
+        }
+        if !(entry.storage == GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real)
+        {
+            return Err(anyhow!("signal_envelope: complex input tensors are not supported").into());
+        }
+        if entry.len != input_len {
+            return Err(anyhow!("signal_envelope: input length mismatch").into());
+        }
+        if !(envelope_input_shape_matches(&entry.shape, request.channel_len, request.channel_count)
+            && envelope_input_shape_matches(
+                request.input.shape(),
+                request.channel_len,
+                request.channel_count,
+            ))
+        {
+            return Err(anyhow!("signal_envelope: input shape mismatch").into());
+        }
 
         match request.method {
             ProviderEnvelopeMethod::Analytic => self.signal_envelope_analytic_exec(request).await,
             ProviderEnvelopeMethod::AnalyticFir { filter_len } => {
-                ensure!(filter_len > 0, "signal_envelope: invalid request");
+                if filter_len == 0 {
+                    return Err(anyhow!("signal_envelope: invalid request").into());
+                }
                 self.signal_envelope_analytic_fir_exec(request, filter_len)
+                    .map_err(Into::into)
             }
             ProviderEnvelopeMethod::Rms { window_len } => {
-                ensure!(window_len > 0, "signal_envelope: invalid request");
+                if window_len == 0 {
+                    return Err(anyhow!("signal_envelope: invalid request").into());
+                }
                 self.signal_envelope_rms_exec(request, window_len)
+                    .map_err(Into::into)
             }
         }
     }
@@ -446,18 +451,21 @@ impl WgpuProvider {
     pub(crate) async fn signal_hilbert_exec(
         &self,
         request: &ProviderHilbertRequest<'_>,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let entry = self.get_entry(request.input)?;
-        ensure!(
-            entry.precision == self.precision,
-            "signal_hilbert: mixed precision tensors are not supported"
-        );
-        ensure!(
-            entry.storage == GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
-            "signal_hilbert: complex input tensors are not supported"
-        );
-        ensure!(request.length != Some(0), "signal_hilbert: invalid request");
+        if entry.precision != self.precision {
+            return Err(
+                anyhow!("signal_hilbert: mixed precision tensors are not supported").into(),
+            );
+        }
+        if !(entry.storage == GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real)
+        {
+            return Err(anyhow!("signal_hilbert: complex input tensors are not supported").into());
+        }
+        if request.length == Some(0) {
+            return Err(anyhow!("signal_hilbert: invalid request").into());
+        }
 
         let spectrum = self
             .fft_dim_exec(request.input, request.length, request.dim)
@@ -513,7 +521,7 @@ impl WgpuProvider {
             Ok(filtered) => filtered,
             Err(err) => {
                 drop(spectrum);
-                return Err(err);
+                return Err(err.into());
             }
         };
         drop(spectrum);
@@ -532,7 +540,7 @@ impl WgpuProvider {
     async fn signal_envelope_analytic_exec(
         &self,
         request: &ProviderEnvelopeRequest<'_>,
-    ) -> Result<ProviderEnvelopeResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderEnvelopeResult> {
         let complex_len = request
             .channel_len
             .checked_mul(request.channel_count)
@@ -576,7 +584,7 @@ impl WgpuProvider {
             Ok(filtered) => filtered,
             Err(err) => {
                 drop(spectrum);
-                return Err(err);
+                return Err(err.into());
             }
         };
         drop(spectrum);
@@ -610,11 +618,13 @@ impl WgpuProvider {
             Ok(outputs) => outputs,
             Err(err) => {
                 drop(analytic);
-                return Err(err);
+                return Err(err.into());
             }
         };
         drop(analytic);
-        ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
+        if outputs.len() != 2 {
+            return Err(anyhow!("signal_envelope: missing outputs").into());
+        }
         let lower = outputs.pop().expect("lower output");
         let upper = outputs.pop().expect("upper output");
         Ok(ProviderEnvelopeResult { upper, lower })

@@ -2,9 +2,14 @@ use super::*;
 use crate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate_api::{HostTensorView, WgpuScopeErrors};
 
-fn provider() -> WgpuProvider {
+async fn provider() -> WgpuProvider {
+    #[cfg(not(target_arch = "wasm32"))]
     let provider = WgpuProvider::new(WgpuProviderOptions::default())
         .expect("FFT qualification requires an actual WGPU adapter");
+    #[cfg(target_arch = "wasm32")]
+    let provider = WgpuProvider::new_async(WgpuProviderOptions::default())
+        .await
+        .expect("FFT qualification requires an actual WebGPU adapter");
     if let Ok(requested) = std::env::var("RUNMAT_WGPU_FORCE_PRECISION") {
         let actual = match provider.precision {
             NumericPrecision::F32 => "f32",
@@ -15,10 +20,14 @@ fn provider() -> WgpuProvider {
     provider
 }
 
-#[tokio::test]
-#[ignore = "requires an actual WGPU adapter; run explicitly with --ignored"]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    ignore = "requires an actual WGPU adapter; run explicitly with --ignored"
+)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
 async fn fft_debug_scope_retains_validation_source_and_balances_scopes() {
-    let provider = provider();
+    let provider = provider().await;
     let (layout, pipeline) = provider
         .with_emission(|emission, _| {
             let layout =
@@ -66,10 +75,23 @@ async fn fft_debug_scope_retains_validation_source_and_balances_scopes() {
         .fft_dispatch_with_debug(true, "invalid-workgroup-count", prepare(u32::MAX))
         .await
         .expect_err("invalid dispatch must not publish success");
-    assert!(
-        error.chain().any(|cause| cause.is::<WgpuScopeErrors>()),
-        "{error:#}"
-    );
+    assert!(!error.is_unsupported());
+    assert!(error.to_string().contains("invalid-workgroup-count"));
+    let mut cause: &(dyn std::error::Error + 'static) = &error;
+    let scope = loop {
+        if let Some(scope) = cause.downcast_ref::<WgpuScopeErrors>() {
+            break scope;
+        }
+        cause = cause
+            .source()
+            .expect("original scope errors remain reachable");
+    };
+    scope.with_errors(|errors| {
+        assert!(!errors.is_empty());
+        assert!(errors
+            .iter()
+            .any(|error| matches!(error, wgpu::Error::Validation { .. })));
+    });
     // A later valid emission must not inherit the previous diagnostic scope.
     provider
         .fft_dispatch_with_debug(true, "valid-after-error", prepare(1))
@@ -81,10 +103,14 @@ async fn fft_debug_scope_retains_validation_source_and_balances_scopes() {
         .unwrap();
 }
 
-#[tokio::test]
-#[ignore = "requires an actual WGPU adapter; run explicitly with --ignored"]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    ignore = "requires an actual WGPU adapter; run explicitly with --ignored"
+)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
 async fn fft_stage_families_match_dft_and_preserve_source_ownership() {
-    let provider = provider();
+    let provider = provider().await;
     for len in [4usize, 9, 25, 6, 7] {
         let values = (0..len)
             .map(|index| (index % 5) as f64 - 1.5)

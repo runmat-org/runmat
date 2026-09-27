@@ -1,5 +1,5 @@
 use super::*;
-use anyhow::bail;
+use runmat_accelerate_api::unsupported_provider_operation;
 
 impl WgpuProvider {
     pub(crate) async fn fft_dim_exec(
@@ -7,11 +7,14 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         len: Option<usize>,
         dim: usize,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.get_entry(handle)?.integer_type().is_some()
             || runmat_accelerate_api::handle_is_logical(handle)
         {
-            bail!("fft_dim: nonfloating handles require the runtime typed fallback");
+            return Err(unsupported_provider_operation(
+                "fft_dim: nonfloating handles require the runtime typed fallback",
+            )
+            .into());
         }
         if let Some(native) = self
             .try_fft_dim_exec_native(handle, len, dim, false)
@@ -21,6 +24,7 @@ impl WgpuProvider {
         }
         self.fft_dim_exec_host_fallback(handle, len, dim, false)
             .await
+            .map_err(Into::into)
     }
 
     pub(crate) async fn ifft_dim_exec(
@@ -28,23 +32,27 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         len: Option<usize>,
         dim: usize,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.get_entry(handle)?.integer_type().is_some()
             || runmat_accelerate_api::handle_is_logical(handle)
         {
-            bail!("ifft_dim: nonfloating handles require the runtime typed fallback");
+            return Err(unsupported_provider_operation(
+                "ifft_dim: nonfloating handles require the runtime typed fallback",
+            )
+            .into());
         }
         if let Some(native) = self.try_fft_dim_exec_native(handle, len, dim, true).await? {
             return Ok(native);
         }
         self.fft_dim_exec_host_fallback(handle, len, dim, true)
             .await
+            .map_err(Into::into)
     }
 
     pub(crate) async fn fft_extract_real_exec(
         &self,
         handle: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
         let mut out_shape = handle.shape().to_vec();
         if out_shape.last() != Some(&2) {
@@ -54,10 +62,9 @@ impl WgpuProvider {
         out_shape = normalize_scalar_shape(&out_shape);
 
         let complex_len = entry.len / 2;
-        ensure!(
-            complex_len <= u32::MAX as usize,
-            "fft_extract_real: tensor too large for GPU kernel"
-        );
+        if complex_len > u32::MAX as usize {
+            return Err(anyhow!("fft_extract_real: tensor too large for GPU kernel").into());
+        }
 
         let out_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer(emission, complex_len, "runmat-fft-extract-real-out")
@@ -111,7 +118,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        self.register_existing_buffer(out_buffer, out_shape, complex_len)
+        Ok(self.register_existing_buffer(out_buffer, out_shape, complex_len)?)
     }
 
     async fn try_fft_dim_exec_native(
@@ -120,7 +127,7 @@ impl WgpuProvider {
         len: Option<usize>,
         dim: usize,
         inverse: bool,
-    ) -> Result<Option<GpuTensorHandle>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         if Self::fft_debug_enabled() {
             eprintln!(
                 "[fft-debug] native enter len={len:?} dim={dim} inverse={inverse} shape={:?}",
@@ -177,14 +184,14 @@ impl WgpuProvider {
         let total_out = target_len.saturating_mul(num_slices);
         let copy_len = current_len.min(target_len);
 
-        ensure!(
-            target_len <= u32::MAX as usize
-                && inner_stride <= u32::MAX as usize
-                && current_len <= u32::MAX as usize
-                && copy_len <= u32::MAX as usize
-                && total_out <= u32::MAX as usize,
-            "fft_dim: dimensions exceed native GPU FFT kernel limits"
-        );
+        if !(target_len <= u32::MAX as usize
+            && inner_stride <= u32::MAX as usize
+            && current_len <= u32::MAX as usize
+            && copy_len <= u32::MAX as usize
+            && total_out <= u32::MAX as usize)
+        {
+            return Err(anyhow!("fft_dim: dimensions exceed native GPU FFT kernel limits").into());
+        }
 
         let out_scalar_len = total_out
             .checked_mul(2)
@@ -569,7 +576,7 @@ impl WgpuProvider {
         out_scalar_len: usize,
         complex_axis: bool,
         inverse: bool,
-    ) -> Result<Option<GpuTensorHandle>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         let two_n_minus_1 = target_len
             .checked_mul(2)
             .and_then(|v| v.checked_sub(1))
@@ -942,7 +949,7 @@ impl WgpuProvider {
         complex_axis: bool,
         inverse: bool,
         factors: &[u32],
-    ) -> Result<Option<GpuTensorHandle>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         if factors.len() > 16 {
             return Ok(None);
         }
@@ -1299,7 +1306,7 @@ impl WgpuProvider {
         complex_axis: bool,
         inverse: bool,
         digits: u32,
-    ) -> Result<Option<GpuTensorHandle>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         let (mut stage_a, mut stage_b) = self.with_emission(|emission, _| {
             self.fft_stage_buffer_pair(
                 emission,
@@ -1527,7 +1534,7 @@ impl WgpuProvider {
         complex_axis: bool,
         inverse: bool,
         digits: u32,
-    ) -> Result<Option<GpuTensorHandle>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         let (mut stage_a, mut stage_b) = self.with_emission(|emission, _| {
             self.fft_stage_buffer_pair(
                 emission,

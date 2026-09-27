@@ -1174,19 +1174,19 @@ impl AccelProvider for WgpuProvider {
     fn uniform_spectral_estimate<'a>(
         &'a self,
         request: &'a ProviderSpectralRequest<'a>,
-    ) -> AccelProviderFuture<'a, ProviderSpectralResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderSpectralResult> {
         Box::pin(async move { self.uniform_spectral_estimate_exec(request).await })
     }
     fn signal_envelope<'a>(
         &'a self,
         request: &'a ProviderEnvelopeRequest<'a>,
-    ) -> AccelProviderFuture<'a, ProviderEnvelopeResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderEnvelopeResult> {
         Box::pin(async move { self.signal_envelope_exec(request).await })
     }
     fn signal_hilbert<'a>(
         &'a self,
         request: &'a ProviderHilbertRequest<'a>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.signal_hilbert_exec(request).await })
     }
     fn conv2d(
@@ -1340,7 +1340,7 @@ impl AccelProvider for WgpuProvider {
         handle: &'a GpuTensorHandle,
         len: Option<usize>,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.fft_dim_exec(handle, len, dim).await })
     }
 
@@ -1349,14 +1349,14 @@ impl AccelProvider for WgpuProvider {
         handle: &'a GpuTensorHandle,
         len: Option<usize>,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.ifft_dim_exec(handle, len, dim).await })
     }
 
     fn fft_extract_real<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.fft_extract_real_exec(handle).await })
     }
 

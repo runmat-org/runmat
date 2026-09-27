@@ -3,7 +3,29 @@ use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
 use runmat_accelerate_api::observation::{
     current_provider_observation, ProviderObservationFailure,
 };
-use runmat_accelerate_api::WgpuEmission;
+use runmat_accelerate_api::{
+    ProviderExecutionError, ProviderExecutionResult, WgpuEmission, WgpuScopeErrors,
+};
+
+/// Keep the dispatch identity alongside the original worker-local driver errors.
+/// In a browser those errors cannot enter an `anyhow::Error` (Send + Sync).
+#[derive(Debug)]
+struct FftScopedEmissionError {
+    label: String,
+    source: WgpuScopeErrors,
+}
+
+impl std::fmt::Display for FftScopedEmissionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "FFT dispatch {}: {}", self.label, self.source)
+    }
+}
+
+impl std::error::Error for FftScopedEmissionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
 
 impl WgpuProvider {
     /// Normal chunks prepare and submit within one shared access interval.
@@ -16,7 +38,7 @@ impl WgpuProvider {
             &WgpuEmission<'p>,
         )
             -> Result<(&'a wgpu::ComputePipeline, wgpu::BindGroup, u32)>,
-    ) -> Result<()> {
+    ) -> ProviderExecutionResult<()> {
         self.fft_dispatch_with_debug(Self::fft_debug_enabled(), label, prepare)
             .await
     }
@@ -29,9 +51,9 @@ impl WgpuProvider {
             &WgpuEmission<'p>,
         )
             -> Result<(&'a wgpu::ComputePipeline, wgpu::BindGroup, u32)>,
-    ) -> Result<()> {
+    ) -> ProviderExecutionResult<()> {
         if !debug {
-            return self.with_emission(|emission, pending| {
+            return Ok(self.with_emission(|emission, pending| {
                 let (pipeline, bind_group, workgroups) = prepare(emission)?;
                 crate::backend::wgpu::dispatch::fft::run(
                     emission,
@@ -41,7 +63,7 @@ impl WgpuProvider {
                     workgroups,
                     label,
                 )
-            })?;
+            })??);
         }
 
         let (pipeline, bind_group, workgroups) =
@@ -61,12 +83,17 @@ impl WgpuProvider {
         // must not run under the exclusive scope gate.
         pending.commit();
         match receipt.resolve().await {
-            Ok(result) => result,
+            Ok(result) => result.map_err(Into::into),
             Err(error) => {
                 if let Some(recorder) = current_provider_observation() {
                     recorder.fail(ProviderObservationFailure::ProviderFailed);
                 }
-                Err(anyhow::Error::new(error).context(format!("FFT dispatch {label}")))
+                Err(ProviderExecutionError::from_source(
+                    FftScopedEmissionError {
+                        label: label.to_owned(),
+                        source: error,
+                    },
+                ))
             }
         }
     }

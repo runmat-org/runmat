@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, Result};
 use bytemuck::{bytes_of, cast_slice, Pod};
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
