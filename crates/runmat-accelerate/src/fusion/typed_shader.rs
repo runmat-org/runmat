@@ -111,6 +111,9 @@ impl FusionGroupPlan {
                 FusionMathHelper::Round => {
                     math.push_str(&crate::kernel_math::rounding::functions(precision))
                 }
+                FusionMathHelper::FloatingRemainder => math.push_str(
+                    &crate::kernel_math::floating_remainder::functions(precision),
+                ),
             }
         }
         Ok(format!(

@@ -8,6 +8,7 @@ pub mod creation;
 pub mod diag;
 pub mod diff;
 pub mod elementwise;
+pub(crate) mod remainder;
 pub mod fft;
 pub mod filter;
 pub mod find;

@@ -2,7 +2,7 @@
 
 mod binary;
 pub mod digits;
-mod floating_remainder;
+pub mod floating_remainder;
 mod preparation;
 pub(crate) mod ceil;
 pub(crate) mod fix;

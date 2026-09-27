@@ -44,6 +44,7 @@ pub type FusionAdmission = for<'a> fn(FusionAdmissionContext<'a>) -> FusionAdmis
 pub enum FusionMathHelper {
     RealPower,
     Round,
+    FloatingRemainder,
 }
 
 impl FusionMathHelper {
@@ -53,6 +54,8 @@ impl FusionMathHelper {
             (Self::RealPower, ScalarType::F64) => Ok("rm_power_f64"),
             (Self::Round, ScalarType::F32) => Ok("rm_round_f32"),
             (Self::Round, ScalarType::F64) => Ok("rm_round_f64"),
+            (Self::FloatingRemainder, ScalarType::F32) => Ok("rm_remainder_f32"),
+            (Self::FloatingRemainder, ScalarType::F64) => Ok("rm_remainder_f64"),
             (_, precision) => Err(FusionError::UnsupportedPrecision(precision)),
         }
     }

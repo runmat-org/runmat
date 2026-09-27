@@ -71,6 +71,8 @@ mod core;
 mod deep_learning;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
+#[path = "ops/remainder.rs"]
+mod remainder;
 #[path = "ops/floating_cast.rs"]
 mod floating_cast;
 #[path = "ops/power.rs"]

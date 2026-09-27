@@ -18,8 +18,16 @@ pub(crate) fn wgpu_cost_estimate(
 ) -> ProviderCostEstimate {
     let fusion_work =
         super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
-    let remainder_work: Option<super::provider_contract::remainder::RemainderWork> =
-        super::provider_contract::remainder::wgpu_work(provider.precision(), &query.operation);
+    let remainder_work = {
+        #[cfg(feature = "wgpu")]
+        {
+            super::provider_contract::remainder::wgpu_work(provider.precision(), &query.operation)
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            None::<super::provider_contract::remainder::RemainderWork>
+        }
+    };
     let digit_work = {
         #[cfg(feature = "wgpu")]
         {
