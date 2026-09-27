@@ -234,16 +234,20 @@ fn build_output(
     .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))?;
 
     if let Some(source) = gpu_source {
-        let provider = runmat_accelerate_api::provider_for_handle(&source)
-            .or_else(runmat_accelerate_api::provider)
-            .ok_or_else(|| {
-                trnd_error(
-                    &ERROR_INTERNAL,
-                    "trnd: no acceleration provider registered for GPU output",
+        let provider = runmat_accelerate_api::provider_for_handle(&source).ok_or_else(|| {
+            trnd_error(
+                &ERROR_INTERNAL,
+                "trnd: no acceleration provider registered for GPU output",
+            )
+        })?;
+        let mut handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[&source])
+            .map_err(|err| {
+                crate::runtime_error::with_provider_execution_source(
+                    trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")),
+                    runmat_accelerate_api::ProviderExecutionError::from_source(err),
                 )
             })?;
-        let handle = gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))?;
+        gpu_helpers::propagate_output_provenance(&mut handle, [&source])?;
         return gpu_helpers::resident_gpu_value(handle);
     }
 

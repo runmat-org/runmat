@@ -1018,16 +1018,20 @@ fn finish_cdf(
     }
     .map_err(|err| internal_for(CDF_NAME, format!("cdf: {err}")))?;
     if let Some(source) = gpu_source {
-        let provider = runmat_accelerate_api::provider_for_handle(&source)
-            .or_else(runmat_accelerate_api::provider)
-            .ok_or_else(|| {
-                invalid_for(
-                    CDF_NAME,
-                    "cdf: no acceleration provider registered for GPU output",
+        let provider = runmat_accelerate_api::provider_for_handle(&source).ok_or_else(|| {
+            invalid_for(
+                CDF_NAME,
+                "cdf: no acceleration provider registered for GPU output",
+            )
+        })?;
+        let mut handle = gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[&source])
+            .map_err(|err| {
+                crate::runtime_error::with_provider_execution_source(
+                    invalid_for(CDF_NAME, format!("cdf: {err}")),
+                    runmat_accelerate_api::ProviderExecutionError::from_source(err),
                 )
             })?;
-        let handle = gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|err| invalid_for(CDF_NAME, format!("cdf: {err}")))?;
+        gpu_helpers::propagate_output_provenance(&mut handle, [&source])?;
         return gpu_helpers::resident_gpu_value(handle);
     }
     match precision {

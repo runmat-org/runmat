@@ -2006,16 +2006,22 @@ pub mod binocdf {
         }
         .map_err(|err| super::normal_error("binocdf", format!("binocdf: {err}")))?;
         if let Some(source) = gpu_source {
-            let provider = runmat_accelerate_api::provider_for_handle(&source)
-                .or_else(runmat_accelerate_api::provider)
-                .ok_or_else(|| {
+            let provider =
+                runmat_accelerate_api::provider_for_handle(&source).ok_or_else(|| {
                     super::normal_error(
                         "binocdf",
                         "binocdf: no acceleration provider registered for GPU output",
                     )
                 })?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| super::normal_error("binocdf", format!("binocdf: {err}")))?;
+            let mut handle =
+                gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[&source])
+                    .map_err(|err| {
+                        crate::runtime_error::with_provider_execution_source(
+                            super::normal_error("binocdf", format!("binocdf: {err}")),
+                            runmat_accelerate_api::ProviderExecutionError::from_source(err),
+                        )
+                    })?;
+            gpu_helpers::propagate_output_provenance(&mut handle, [&source])?;
             return gpu_helpers::resident_gpu_value(handle);
         }
         match precision {
@@ -2299,16 +2305,22 @@ pub mod chi2cdf {
         }
         .map_err(|error| super::normal_error("chi2cdf", format!("chi2cdf: {error}")))?;
         if let Some(source) = gpu_source {
-            let provider = runmat_accelerate_api::provider_for_handle(&source)
-                .or_else(runmat_accelerate_api::provider)
-                .ok_or_else(|| {
+            let provider =
+                runmat_accelerate_api::provider_for_handle(&source).ok_or_else(|| {
                     super::normal_error(
                         "chi2cdf",
                         "chi2cdf: no acceleration provider registered for GPU output",
                     )
                 })?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| super::normal_error("chi2cdf", format!("chi2cdf: {error}")))?;
+            let mut handle =
+                gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &[&source])
+                    .map_err(|error| {
+                        crate::runtime_error::with_provider_execution_source(
+                            super::normal_error("chi2cdf", format!("chi2cdf: {error}")),
+                            runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                        )
+                    })?;
+            gpu_helpers::propagate_output_provenance(&mut handle, [&source])?;
             return gpu_helpers::resident_gpu_value(handle);
         }
         match precision {

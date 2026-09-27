@@ -697,8 +697,18 @@ fn restore_ecdf_output(
     };
     let provider = runmat_accelerate_api::provider_for_handle(source)
         .ok_or_else(|| internal_error(ECDF_NAME, "ecdf: source GPU provider is unavailable"))?;
-    let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|err| internal_error(ECDF_NAME, format!("ecdf: {err}")))?;
+    let mut handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+        provider,
+        &tensor,
+        &[source],
+    )
+    .map_err(|err| {
+        crate::runtime_error::with_provider_execution_source(
+            internal_error(ECDF_NAME, format!("ecdf: {err}")),
+            runmat_accelerate_api::ProviderExecutionError::from_source(err),
+        )
+    })?;
+    crate::builtins::common::gpu_helpers::propagate_output_provenance(&mut handle, [source])?;
     crate::builtins::common::gpu_helpers::resident_gpu_value(handle)
 }
 

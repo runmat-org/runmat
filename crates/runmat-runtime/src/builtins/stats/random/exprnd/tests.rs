@@ -416,8 +416,10 @@ fn explicit_single_owner_mismatch_fails_before_sampling() {
     let _guard = reset();
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let mu = Tensor::from_f32(vec![2.0, 3.0], vec![2, 1]).unwrap();
-        let mut handle = gpu_helpers::upload_tensor(provider, &mu).unwrap();
-        runmat_accelerate_api::mark_handle_explicit(&mut handle);
+        let handle = gpu_helpers::upload_tensor(provider, &mu)
+            .unwrap()
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated explicit view");
         let before = random::snapshot().unwrap().state;
         let error = block_on(exprnd_builtin(vec![Value::GpuTensor(handle.clone())])).unwrap_err();
         assert!(error.message().contains("explicit gpuArray"));
