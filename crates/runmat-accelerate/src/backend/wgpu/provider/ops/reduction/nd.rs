@@ -1,11 +1,17 @@
 use super::*;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "nd/lazy_tests.rs"]
+mod lazy_tests;
+
 impl WgpuProvider {
     pub(crate) async fn reduce_nd_mean_exec(
         &self,
         a: &GpuTensorHandle,
         dims_zero_based: &[usize],
     ) -> Result<GpuTensorHandle> {
+        // Cache hits must not bypass the original input's owner/live/precision admission.
+        self.get_entry(a)?;
         // If input is a known square of a base tensor, reuse or compute ex2 via moments
         let base = self
             .pow2_of
@@ -100,6 +106,13 @@ impl WgpuProvider {
         if rows as u64 > u32::MAX as u64 || cols as u64 > u32::MAX as u64 {
             return Err(anyhow!("reduce_mean_nd: tensor exceeds GPU limits"));
         }
+
+        // Geometry above is logical. The stride-based kernel (and sequenced fallback)
+        // needs canonical storage, not the backing order of a lazy transpose.
+        // Keep this owner local; cache identity remains the caller's original view.
+        let materialized = self.materialize_nd_reduction_input(a)?;
+        let a = materialized.as_ref().unwrap_or(a);
+        let entry = self.get_entry(a)?;
 
         // Heuristic fallback: for very large row extents, prefer sequenced dim-reductions.
         if rows >= self.two_pass_threshold() {
@@ -337,6 +350,12 @@ impl WgpuProvider {
             return Err(anyhow!("reduce_moments_nd: tensor exceeds GPU limits"));
         }
 
+        // Mean's normal cache-miss path and direct moments/variance consumers
+        // share this boundary. Validate geometry before issuing the storage move.
+        let materialized = self.materialize_nd_reduction_input(a)?;
+        let a = materialized.as_ref().unwrap_or(a);
+        let entry = self.get_entry(a)?;
+
         let (mean_out, ex2_out, out_shape) =
             self.with_emission(|emission, pending| -> Result<_> {
                 // Allocate outputs
@@ -507,5 +526,18 @@ impl WgpuProvider {
             mean: mean_handle,
             ex2: ex2_handle,
         })
+    }
+
+    fn materialize_nd_reduction_input(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> Result<Option<GpuTensorHandle>> {
+        if runmat_accelerate_api::handle_is_transposed(input) {
+            // reshape owns the bit-preserving GPU permutation and its intermediate
+            // lease; no download, dtype conversion, or caller view mutation.
+            self.reshape_exec(input, input.shape()).map(Some)
+        } else {
+            Ok(None)
+        }
     }
 }
