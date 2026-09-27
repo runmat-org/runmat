@@ -164,7 +164,7 @@ pub(crate) fn restore_resident_numeric_result_for_sources(
         // adapter preserve Num when automatic restoration is unsupported.
         value @ (Value::Tensor(_) | Value::Num(_)) => restore(value),
         Value::Int(integer) => {
-            let tensor = tensor::value_into_tensor_for(name, Value::Int(integer))
+            let tensor = tensor::value_into_tensor_for(name, Value::Int(integer.clone()))
                 .map_err(|error| builtin_error(name, error))?;
             match restore(Value::Tensor(tensor))? {
                 Value::Tensor(_) => Ok(Value::Int(integer)),
