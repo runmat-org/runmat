@@ -3798,7 +3798,8 @@ fn power_step_normalization_matches_cpu() {
 
         let bytecode = compile_semantic(source);
 
-        if let Some(graph) = graph_for_fusion_test(&bytecode) {
+        {
+            let graph = graph_for_fusion_test(&bytecode).expect("power-step acceleration graph");
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -4071,7 +4072,9 @@ fn explained_variance_matches_cpu() {
             }
         }
 
-        let (q_var_idx, g_var_idx) = if let Some(graph) = graph_for_fusion_test(&bytecode) {
+        let (q_var_idx, g_var_idx) = {
+            let graph =
+                graph_for_fusion_test(&bytecode).expect("explained-variance acceleration graph");
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -4099,8 +4102,6 @@ fn explained_variance_matches_cpu() {
                 .var_binding(g_vid)
                 .expect("g binding available for explained variance");
             (q_binding.index, g_binding.index)
-        } else {
-            panic!("expected accel graph")
         };
 
         let eval_index = bytecode

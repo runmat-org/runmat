@@ -145,7 +145,9 @@ impl<'a> GraphBuilder<'a> {
             Instr::Neg => self.handle_unary_primitive(pc, PrimitiveOp::Neg),
             Instr::UPlus => self.handle_unary_primitive(pc, PrimitiveOp::UPlus),
             Instr::Transpose | Instr::ConjugateTranspose => self.handle_transpose(pc),
-            Instr::CallBuiltinMulti(name, argc, _) => self.handle_call_builtin(pc, name, *argc),
+            Instr::CallBuiltinMulti(name, argc, outputs) => {
+                self.handle_call_builtin(pc, name, *argc, *outputs)
+            }
             Instr::Pop => {
                 let _ = self.pop_value();
             }
@@ -730,7 +732,7 @@ impl<'a> GraphBuilder<'a> {
         self.stack.push(out_value);
     }
 
-    fn handle_call_builtin(&mut self, pc: usize, name: &str, argc: usize) {
+    fn handle_call_builtin(&mut self, pc: usize, name: &str, argc: usize, outputs: usize) {
         let mut inputs = Vec::with_capacity(argc);
         for _ in 0..argc {
             if let Some(id) = self.pop_value() {
@@ -741,7 +743,7 @@ impl<'a> GraphBuilder<'a> {
             }
         }
         inputs.reverse();
-        let info = self
+        let mut info = self
             .builtin_cache
             .get(&name.to_ascii_lowercase())
             .cloned()
@@ -749,6 +751,16 @@ impl<'a> GraphBuilder<'a> {
                 category: AccelOpCategory::Other,
                 tags: Vec::new(),
             });
+        if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) {
+            // Cached identity-level candidates do not admit a particular call's
+            // controls. Reuse the compiler's canonical declaration authority.
+            if outputs != 1
+                || super::fusion_declaration::canonical_kind(entry, Some(argc)).is_none()
+            {
+                info.category = AccelOpCategory::Other;
+                info.tags.clear();
+            }
+        }
         let category = self.call_category(name, &inputs, info.category.clone());
         let node_id = self.nodes.len() as NodeId;
         let span = InstrSpan { start: pc, end: pc };
@@ -1323,6 +1335,32 @@ mod tests {
             .tags
             .iter()
             .any(|tag| matches!(tag, AccelGraphTag::Reduction)));
+    }
+
+    #[test]
+    fn canonical_graph_candidates_preserve_unary_controls_and_output_arity() {
+        for name in ["single", "double", "sin", "cos", "tan", "atan"] {
+            for (arguments, outputs, expected) in [
+                (1, 1, AccelOpCategory::Elementwise),
+                (3, 1, AccelOpCategory::Other),
+                (1, 0, AccelOpCategory::Other),
+                (1, 2, AccelOpCategory::Other),
+            ] {
+                let mut instructions = (0..arguments).map(Instr::LoadVar).collect::<Vec<_>>();
+                instructions.push(Instr::CallBuiltinMulti(name.into(), arguments, outputs));
+                let graph = build_accel_graph(&instructions, &vec![Type::Unknown; arguments]);
+                let node = graph.nodes.iter().find(|node| {
+                    matches!(&node.label, AccelNodeLabel::Builtin { name: actual } if actual == name)
+                }).expect("canonical call node");
+                assert_eq!(node.category, expected, "{name}/{arguments}/{outputs}");
+                if expected == AccelOpCategory::Other {
+                    assert!(
+                        node.tags.is_empty(),
+                        "rejected call must not retain fusion tags"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
