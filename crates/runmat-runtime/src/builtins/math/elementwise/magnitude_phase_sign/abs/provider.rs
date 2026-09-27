@@ -19,7 +19,7 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         let result = provider.unary_abs(&handle).await;
         match result {
             Ok(mut output) if valid_output(&output, &handle, provider) => {
-                gpu_helpers::propagate_output_provenance(&mut output, &[&handle])?;
+                gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
@@ -67,7 +67,7 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             ),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, &[&handle])?;
+    gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

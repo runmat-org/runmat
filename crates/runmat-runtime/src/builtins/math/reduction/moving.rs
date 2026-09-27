@@ -986,11 +986,7 @@ async fn moving_gpu(
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let result = moving_real(name, op, tensor, parsed)?;
-    crate::builtins::common::provider_restore::restore_class_preserving_value(
-        &handle,
-        tensor::tensor_into_value(result),
-        name,
-    )
+    gpu_helpers::restore_class_preserving_value(&handle, tensor::tensor_into_value(result), name)
 }
 
 async fn moving_gpu_provider(
@@ -1070,7 +1066,7 @@ async fn moving_gpu_provider(
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(output, error));
             }
-            gpu_helpers::propagate_output_provenance(&mut output, &[handle])?;
+            gpu_helpers::propagate_output_provenance(&mut output, [handle])?;
             Ok(Some(output))
         }
         Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => Ok(None),

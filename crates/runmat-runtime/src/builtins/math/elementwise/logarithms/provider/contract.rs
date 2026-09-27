@@ -18,7 +18,7 @@ pub(super) fn validate(
         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(output, error));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, &[input])?;
+    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

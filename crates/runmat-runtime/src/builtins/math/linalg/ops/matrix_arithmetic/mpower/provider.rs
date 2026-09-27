@@ -65,7 +65,7 @@ fn identity(
         alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if gpu_helpers::unary_gpu_output_matches(&output, prototype, provider, contract) {
-        gpu_helpers::propagate_output_provenance(&mut output, &[prototype])?;
+        gpu_helpers::propagate_output_provenance(&mut output, [prototype])?;
         return Ok(Some(output));
     }
     Err(gpu_helpers::reject_gpu_output(
@@ -127,7 +127,7 @@ async fn multiply(
         alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if gpu_helpers::binary_gpu_output_matches(&output, lhs, rhs, provider, &contract) {
-        gpu_helpers::propagate_output_provenance(&mut output, &[lhs, rhs])?;
+        gpu_helpers::propagate_output_provenance(&mut output, [lhs, rhs])?;
         return Ok(Some(output));
     }
     Err(gpu_helpers::reject_gpu_output(

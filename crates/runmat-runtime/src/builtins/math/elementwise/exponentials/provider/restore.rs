@@ -62,7 +62,7 @@ pub(super) fn real(
             ),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, &[input])?;
+    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -89,6 +89,6 @@ fn complex(
             ),
         ));
     }
-    gpu_helpers::propagate_output_provenance(&mut output, &[input])?;
+    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
     gpu_helpers::complex_gpu_value(output)
 }

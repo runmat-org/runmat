@@ -604,7 +604,7 @@ async fn diff_gpu(
             && runmat_accelerate_api::provider_for_handle(&device_result)
                 .is_some_and(|owner| std::ptr::eq(owner, provider));
         if valid {
-            gpu_helpers::propagate_output_provenance(&mut device_result, &[&handle])?;
+            gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])?;
             return gpu_helpers::resident_gpu_value(device_result);
         }
         let mut error =

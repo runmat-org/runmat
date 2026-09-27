@@ -27,7 +27,7 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         let result = provider.unary_sign(&handle).await;
         match result {
             Ok(mut output) if valid_sign_gpu_output(&output, &handle, provider) => {
-                gpu_helpers::propagate_output_provenance(&mut output, &[&handle])?;
+                gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
                 if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
                     return gpu_helpers::complex_gpu_value(output);
                 }

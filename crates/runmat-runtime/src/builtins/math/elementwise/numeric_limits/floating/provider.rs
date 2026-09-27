@@ -99,6 +99,6 @@ fn validate(
         ));
     }
     let mut output = output;
-    gpu_helpers::propagate_output_provenance(&mut output, &[prototype])?;
+    gpu_helpers::propagate_output_provenance(&mut output, [prototype])?;
     gpu_helpers::resident_gpu_value(output)
 }
