@@ -143,10 +143,42 @@ fn compiled_plan() -> FusionGroupPlan {
 fn request_plan(shape: &[usize], axis: ReductionAxes, add: bool) -> FusionGroupPlan {
     let mut plan = compiled_plan();
     let data = plan.reduction_data.unwrap();
+    // Request a reduction over an already materialized data value. Discard its
+    // former producer; no unreachable operation may retain unbound operands.
+    plan.operations.retain(
+        |operation| matches!(operation, FusionOp::Builtin { output, .. } if *output == plan.output),
+    );
+    assert_eq!(plan.operations.len(), 1, "one compiled reduction binding");
+    let FusionOp::Builtin {
+        inputs: reduction_inputs,
+        ..
+    } = &mut plan.operations[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!(reduction_inputs.first(), Some(&data));
+    reduction_inputs.clear();
+    reduction_inputs.push(data);
     plan.inputs = vec![data];
     plan.const_values.clear();
     plan.constants.clear();
     plan.reduction_dim = None;
+    let dimension = data.max(plan.output.unwrap()) + 100;
+    match &axis {
+        ReductionAxes::Explicit(dims) => {
+            assert_eq!(dims.len(), 1);
+            plan.reduction_dim = Some(dimension);
+            plan.const_values
+                .insert(dimension, Value::Num(dims[0] as f64));
+            reduction_inputs.push(dimension);
+        }
+        ReductionAxes::All => {
+            plan.const_values
+                .insert(dimension, Value::String("all".into()));
+            reduction_inputs.push(dimension);
+        }
+        ReductionAxes::Unspecified => {}
+    }
     plan.reduction_axes = Some(axis);
     // Deliberately stale cached shape must not decide actual runtime geometry.
     plan.group.shape = ShapeInfo::Tensor(vec![Some(99), Some(99)]);
@@ -162,6 +194,10 @@ fn request_plan(shape: &[usize], axis: ReductionAxes, add: bool) -> FusionGroupP
             .unwrap_or(data)
             + 100;
         let output = right + 1;
+        let FusionOp::Builtin { inputs, .. } = &mut plan.operations[0] else {
+            unreachable!()
+        };
+        inputs[0] = output;
         plan.inputs.push(right);
         plan.operations.insert(
             0,
@@ -236,6 +272,8 @@ fn forced_reduction_executes_actual_geometry_and_keeps_cached_plan_unchanged() {
             ),
         ] {
             let plan = request_plan(&shape, axes, add);
+            let original_dimension = plan.reduction_dim;
+            let original_constants = plan.const_values.clone();
             let input = tensor(&shape);
             let inputs = if add {
                 vec![input.clone(), input]
@@ -264,8 +302,8 @@ fn forced_reduction_executes_actual_geometry_and_keeps_cached_plan_unchanged() {
             assert_eq!(data, expected);
             assert_eq!(provider.reductions.load(Ordering::SeqCst), before + 1);
             assert!(stack.is_empty());
-            assert_eq!(plan.reduction_dim, None);
-            assert!(plan.const_values.is_empty());
+            assert_eq!(plan.reduction_dim, original_dimension);
+            assert_eq!(plan.const_values, original_constants);
         }
     });
 }
