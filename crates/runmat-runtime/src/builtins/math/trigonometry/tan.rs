@@ -85,6 +85,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::trigonometry::tan"
 )]
 async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::TAN_DESCRIPTOR,
+        &runmat_builtins::TAN_ERROR_TOO_MANY_OUTPUTS,
+        "tan",
+    )?;
     let template = parse_output_template(&rest)?;
     ensure_tan_extensions(&value, &rest).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "tan")?;

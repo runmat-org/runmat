@@ -93,13 +93,20 @@ pub const TAN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescri
     when: "Provider output was requested through \"like\" but no active provider is available.",
     message: "tan: GPU provider unavailable",
 };
+pub const TAN_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:tan:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "tan: too many output arguments",
+};
 pub const TAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TAN.INTERNAL",
     identifier: Some("RunMat:tan:Internal"),
     when: "Internal tensor conversion, allocation, or provider execution failed.",
     message: "tan: internal error",
 };
-const TAN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const TAN_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    TAN_ERROR_TOO_MANY_OUTPUTS,
     TAN_ERROR_INVALID_INPUT,
     TAN_ERROR_INVALID_OPTION,
     TAN_ERROR_ARG_COUNT,
@@ -165,7 +172,7 @@ pub const TAN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 const TAN_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const TAN_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+const TAN_EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const TAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "tan" },
@@ -178,7 +185,7 @@ pub const TAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             TrigonometricFunction::Tan,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

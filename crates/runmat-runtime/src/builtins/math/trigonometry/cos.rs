@@ -87,6 +87,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::trigonometry::cos"
 )]
 async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::COS_DESCRIPTOR,
+        &runmat_builtins::COS_ERROR_TOO_MANY_OUTPUTS,
+        "cos",
+    )?;
     let template = parse_output_template(&rest)?;
     ensure_cos_extensions(&value, &rest).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "cos")?;

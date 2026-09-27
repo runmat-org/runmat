@@ -44,13 +44,23 @@ pub const TAND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescrip
     when: "Input is not a supported numeric, logical, or character value.",
     message: "tand: invalid input",
 };
+pub const TAND_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAND.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:tand:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "tand: too many output arguments",
+};
 pub const TAND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TAND.INTERNAL",
     identifier: Some("RunMat:tand:Internal"),
     when: "Internal gather, conversion, allocation, or provider restoration failed.",
     message: "tand: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [TAND_ERROR_INVALID_INPUT, TAND_ERROR_INTERNAL];
+const ERRORS: [BuiltinErrorDescriptor; 3] = [
+    TAND_ERROR_INVALID_INPUT,
+    TAND_ERROR_INTERNAL,
+    TAND_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const TAND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -101,7 +111,7 @@ pub const TAND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const TAND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "tand" },
@@ -114,7 +124,7 @@ pub const TAND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             DegreeTrigonometricFunction::Tan,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

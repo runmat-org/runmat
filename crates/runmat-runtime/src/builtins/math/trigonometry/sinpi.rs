@@ -54,6 +54,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::trigonometry::sinpi"
 )]
 async fn sinpi_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SINPI_DESCRIPTOR,
+        &runmat_builtins::SINPI_ERROR_TOO_MANY_OUTPUTS,
+        "sinpi",
+    )?;
     if crate::builtins::common::validation::value_contains_native_integer_class(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SINPI_INTEGER_INPUT_EXTENSION,

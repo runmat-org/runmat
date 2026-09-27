@@ -1,5 +1,9 @@
 //! MATLAB-compatible `sin` builtin with GPU-aware semantics for RunMat.
 
+#[cfg(test)]
+#[path = "sin/admission_tests.rs"]
+mod admission_tests;
+
 use runmat_accelerate_api::GpuTensorHandle;
 #[cfg(test)]
 use runmat_builtins::SIN_DESCRIPTOR;
@@ -85,6 +89,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::trigonometry::sin"
 )]
 async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SIN_DESCRIPTOR,
+        &runmat_builtins::SIN_ERROR_TOO_MANY_OUTPUTS,
+        "sin",
+    )?;
     let output = parse_output_template(&rest)?;
     ensure_sin_extensions(&value, &rest).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "sin")?;

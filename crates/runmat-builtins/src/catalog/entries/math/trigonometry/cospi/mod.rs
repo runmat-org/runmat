@@ -44,13 +44,23 @@ pub const COSPI_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescri
     when: "Input cannot be interpreted as supported numeric, logical, character, or floating-complex data.",
     message: "cospi: invalid input",
 };
+pub const COSPI_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COSPI.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:cospi:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "cospi: too many output arguments",
+};
 pub const COSPI_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.COSPI.INTERNAL",
     identifier: Some("RunMat:cospi:Internal"),
     when: "Internal gather, conversion, allocation, or provider restoration failed.",
     message: "cospi: internal error",
 };
-const COSPI_ERRORS: [BuiltinErrorDescriptor; 2] = [COSPI_ERROR_INVALID_INPUT, COSPI_ERROR_INTERNAL];
+const COSPI_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    COSPI_ERROR_INVALID_INPUT,
+    COSPI_ERROR_INTERNAL,
+    COSPI_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const COSPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &COSPI_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -103,7 +113,7 @@ pub const COSPI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 const COSPI_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const COSPI_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+const COSPI_EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const COSPI_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "cospi" },
@@ -116,7 +126,7 @@ pub const COSPI_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             PiScaledTrigonometricFunction::Cos,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

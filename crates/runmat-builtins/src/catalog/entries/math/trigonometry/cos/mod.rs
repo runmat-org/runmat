@@ -93,13 +93,20 @@ pub const COS_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescri
     when: "Provider output was requested through \"like\" but no active provider is available.",
     message: "cos: GPU provider unavailable",
 };
+pub const COS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COS.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:cos:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "cos: too many output arguments",
+};
 pub const COS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.COS.INTERNAL",
     identifier: Some("RunMat:cos:Internal"),
     when: "Internal tensor conversion, allocation, or provider execution failed.",
     message: "cos: internal error",
 };
-const COS_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const COS_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    COS_ERROR_TOO_MANY_OUTPUTS,
     COS_ERROR_INVALID_INPUT,
     COS_ERROR_INVALID_OPTION,
     COS_ERROR_ARG_COUNT,
@@ -165,7 +172,7 @@ pub const COS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 const COS_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const COS_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+const COS_EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const COS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "cos" },
@@ -178,7 +185,7 @@ pub const COS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             TrigonometricFunction::Cos,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

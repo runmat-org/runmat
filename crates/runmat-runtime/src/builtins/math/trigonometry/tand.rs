@@ -90,6 +90,11 @@ fn tand_complex(re: f64, im: f64) -> (f64, f64) {
     builtin_path = "crate::builtins::math::trigonometry::tand"
 )]
 async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::TAND_DESCRIPTOR,
+        &runmat_builtins::TAND_ERROR_TOO_MANY_OUTPUTS,
+        "tand",
+    )?;
     ensure_tand_extensions(&value)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "tand")?;
     match value {

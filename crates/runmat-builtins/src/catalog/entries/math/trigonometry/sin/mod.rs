@@ -15,6 +15,9 @@ use runmat_types::{EffectKind, ExecutionStackRequirement};
 
 mod documentation;
 
+#[cfg(test)]
+mod tests;
+
 use documentation::SIN_DOCUMENTATION;
 
 const SIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -93,13 +96,20 @@ pub const SIN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescri
     when: "Provider output was requested through \"like\" but no active provider is available.",
     message: "sin: GPU provider unavailable",
 };
+pub const SIN_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIN.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:sin:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "sin: too many output arguments",
+};
 pub const SIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SIN.INTERNAL",
     identifier: Some("RunMat:sin:Internal"),
     when: "Internal tensor conversion, allocation, or provider execution failed.",
     message: "sin: internal error",
 };
-const SIN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const SIN_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    SIN_ERROR_TOO_MANY_OUTPUTS,
     SIN_ERROR_INVALID_INPUT,
     SIN_ERROR_INVALID_OPTION,
     SIN_ERROR_ARG_COUNT,
@@ -165,7 +175,7 @@ pub const SIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 const SIN_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const SIN_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+const SIN_EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const SIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "sin" },
@@ -178,7 +188,7 @@ pub const SIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             TrigonometricFunction::Sin,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

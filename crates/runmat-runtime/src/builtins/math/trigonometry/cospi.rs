@@ -55,6 +55,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::trigonometry::cospi"
 )]
 async fn cospi_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::COSPI_DESCRIPTOR,
+        &runmat_builtins::COSPI_ERROR_TOO_MANY_OUTPUTS,
+        "cospi",
+    )?;
     ensure_extensions(&value)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "cospi")?;
     match value {

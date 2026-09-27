@@ -44,13 +44,23 @@ pub const SINPI_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescri
     when: "Input cannot be interpreted as supported numeric, logical, character, or floating-complex data.",
     message: "sinpi: invalid input",
 };
+pub const SINPI_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINPI.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:sinpi:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "sinpi: too many output arguments",
+};
 pub const SINPI_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SINPI.INTERNAL",
     identifier: Some("RunMat:sinpi:Internal"),
     when: "Internal gather, conversion, or allocation failed.",
     message: "sinpi: internal error",
 };
-const SINPI_ERRORS: [BuiltinErrorDescriptor; 2] = [SINPI_ERROR_INVALID_INPUT, SINPI_ERROR_INTERNAL];
+const SINPI_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    SINPI_ERROR_INVALID_INPUT,
+    SINPI_ERROR_INTERNAL,
+    SINPI_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const SINPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SINPI_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -104,7 +114,7 @@ pub const SINPI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 const SINPI_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const SINPI_EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+const SINPI_EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const SINPI_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "sinpi" },
@@ -117,7 +127,7 @@ pub const SINPI_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             PiScaledTrigonometricFunction::Sin,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

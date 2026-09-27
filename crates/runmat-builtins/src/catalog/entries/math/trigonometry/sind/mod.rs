@@ -45,13 +45,23 @@ pub const SIND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescrip
     when: "Input is not a supported numeric or logical value.",
     message: "sind: invalid input",
 };
+pub const SIND_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIND.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:sind:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "sind: too many output arguments",
+};
 pub const SIND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SIND.INTERNAL",
     identifier: Some("RunMat:sind:Internal"),
     when: "Internal gather, conversion, or allocation failed.",
     message: "sind: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [SIND_ERROR_INVALID_INPUT, SIND_ERROR_INTERNAL];
+const ERRORS: [BuiltinErrorDescriptor; 3] = [
+    SIND_ERROR_INVALID_INPUT,
+    SIND_ERROR_INTERNAL,
+    SIND_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const SIND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -94,7 +104,7 @@ pub const SIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     }];
 
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 pub const SIND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "sind" },
@@ -107,7 +117,7 @@ pub const SIND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             DegreeTrigonometricFunction::Sin,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,

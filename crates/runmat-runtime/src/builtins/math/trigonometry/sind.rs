@@ -85,6 +85,11 @@ fn sind_complex(re: f64, im: f64) -> (f64, f64) {
     builtin_path = "crate::builtins::math::trigonometry::sind"
 )]
 async fn sind_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SIND_DESCRIPTOR,
+        &runmat_builtins::SIND_ERROR_TOO_MANY_OUTPUTS,
+        "sind",
+    )?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &value,
         &SIND_INTEGER_INPUT_EXTENSION,
