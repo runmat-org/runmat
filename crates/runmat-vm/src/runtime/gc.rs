@@ -1,5 +1,5 @@
 use runmat_gc::{
-    gc_register_root, gc_unregister_root, GlobalRoot, RootId, StackRoot, VariableArrayRoot,
+    gc_register_value_root, gc_unregister_root, GlobalRoot, RootId, StackRoot, VariableArrayRoot,
 };
 use runmat_value::Value;
 use std::marker::PhantomData;
@@ -24,9 +24,9 @@ impl<'roots> InterpretContext<'roots> {
             VariableArrayRoot::new(NonNull::from(vars), "interpreter_vars".to_string())
         });
 
-        let stack_root_id = gc_register_root(stack_root)
+        let stack_root_id = gc_register_value_root(stack_root)
             .map_err(|e| format!("Failed to register stack root: {e:?}"))?;
-        let vars_root_id = gc_register_root(vars_root)
+        let vars_root_id = gc_register_value_root(vars_root)
             .map_err(|e| format!("Failed to register vars root: {e:?}"))?;
 
         Ok(InterpretContext {
@@ -46,8 +46,8 @@ impl<'roots> InterpretContext<'roots> {
             return Ok(());
         }
         let root = Box::new(GlobalRoot::new(values, description.to_string()));
-        let id =
-            gc_register_root(root).map_err(|e| format!("Failed to register global root: {e:?}"))?;
+        let id = gc_register_value_root(root)
+            .map_err(|e| format!("Failed to register global root: {e:?}"))?;
         self.extra_root_ids.push(id);
         Ok(())
     }

@@ -831,7 +831,30 @@ impl GcRoot for MapRegistryRoot {
 
     fn is_active(&self) -> bool {
         self.active.load(AtomicOrdering::Acquire)
-            && MAP_REGISTRY.with(|registry| !registry.borrow().is_empty())
+            && MAP_REGISTRY.with(|registry| {
+                registry
+                    .try_borrow()
+                    .map_or(true, |registry| !registry.is_empty())
+            })
+    }
+}
+
+impl runmat_gc::ValueRoot for MapRegistryRoot {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        MAP_REGISTRY.with(|registry| {
+            let registry = registry.try_borrow().ok()?;
+            let mut values = Vec::new();
+            for store in registry.values() {
+                if let Some(storage) = store.storage {
+                    values.push(runmat_gc::gc_clone_value(&storage).ok()?);
+                }
+                for entry in &store.entries {
+                    values.push(entry.key_value.clone());
+                    values.push(entry.value.clone());
+                }
+            }
+            Some(values)
+        })
     }
 }
 
@@ -846,7 +869,7 @@ fn ensure_map_registry_root_registered(builtin: &'static str) -> BuiltinResult<(
         }
 
         let active = Arc::new(AtomicBool::new(true));
-        let root_id = runmat_gc::gc_register_root(Box::new(MapRegistryRoot {
+        let root_id = runmat_gc::gc_register_value_root(Box::new(MapRegistryRoot {
             active: Arc::clone(&active),
         }))
         .map_err(|e| {

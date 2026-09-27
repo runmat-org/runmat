@@ -12,6 +12,10 @@ use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+mod retained;
+use retained::RegisteredRoot;
+pub use retained::ValueRoot;
+
 /// Recursively collect immediate GC roots from an owned Value tree.
 ///
 /// This helper deliberately does not dereference collected `GcHandle`s. Root
@@ -180,7 +184,7 @@ impl GcRoot for GlobalRoot {
 /// Manages all GC roots in the system
 pub struct RootScanner {
     /// Registered roots
-    roots: parking_lot::RwLock<HashMap<RootId, Box<dyn GcRoot>>>,
+    roots: parking_lot::RwLock<HashMap<RootId, RegisteredRoot>>,
 
     /// Next root ID to assign
     next_id: AtomicUsize,
@@ -202,6 +206,25 @@ impl RootScanner {
 
     /// Register a new GC root
     pub fn register_root(&self, root: Box<dyn GcRoot>) -> Result<RootId> {
+        self.register(RegisteredRoot::Opaque(root))
+    }
+
+    pub fn register_value_root(&self, root: Box<dyn ValueRoot>) -> Result<RootId> {
+        self.register(RegisteredRoot::Values(root))
+    }
+
+    /// Snapshot all registered retained values, or fail closed for an opaque
+    /// active root or an unavailable registration lock.
+    pub fn retained_values(&self) -> Option<Vec<Value>> {
+        let roots = self.roots.try_read()?;
+        let mut values = Vec::new();
+        for root in roots.values().filter(|root| root.is_active()) {
+            values.extend(root.retained_values()?);
+        }
+        Some(values)
+    }
+
+    fn register(&self, root: RegisteredRoot) -> Result<RootId> {
         let id = RootId(self.next_id.fetch_add(1, Ordering::Relaxed));
 
         log::debug!("Registering GC root {}: {}", id.0, root.description());

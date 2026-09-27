@@ -127,7 +127,7 @@ pub use collector::MarkSweepCollector;
 pub use config::{GcConfig, GcConfigBuilder};
 // Re-export unified handle from API crate
 pub use generations::{Generation, GenerationStats, GenerationalHeap, GenerationalHeapStats};
-pub use roots::{GlobalRoot, RootScanner, StackRoot, VariableArrayRoot};
+pub use roots::{GlobalRoot, RootScanner, StackRoot, ValueRoot, VariableArrayRoot};
 pub use stats::{CollectionEvent, CollectionType, GcStats};
 
 #[cfg(feature = "pointer-compression")]
@@ -931,6 +931,34 @@ pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
     ROOT_SCANNER.with(|scanner| scanner.unregister_root(root_id))?;
     unregister_active_root_thread();
     Ok(())
+}
+
+/// Register a value-visible root under the same lifetime and removal authority
+/// as all other GC roots.
+pub fn gc_register_value_root(root: Box<dyn ValueRoot>) -> Result<RootId> {
+    register_active_root_thread();
+    match ROOT_SCANNER.with(|scanner| scanner.register_value_root(root)) {
+        Ok(root_id) => Ok(root_id),
+        Err(error) => {
+            unregister_active_root_thread();
+            Err(error)
+        }
+    }
+}
+
+/// Complete current-thread retained Values, or unavailable for opaque roots.
+pub fn gc_retained_values() -> Option<Vec<Value>> {
+    if registered_roots_exist_on_other_threads() || external_roots_exist_on_other_threads() {
+        return None;
+    }
+    let mut values = ROOT_SCANNER.with(RootScanner::retained_values)?;
+    // Snapshot identities before guarded reads; never hold the root table lock
+    // across value traversal or invoke callbacks while holding it.
+    let explicit = GC.root_ptrs.try_lock()?.keys().copied().collect::<Vec<_>>();
+    for handle in explicit {
+        values.push(gc_clone_value(&handle).ok()?);
+    }
+    Some(values)
 }
 
 /// Record a write for GC barriers (approximate old->young tracking)

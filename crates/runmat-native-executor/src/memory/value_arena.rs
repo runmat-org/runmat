@@ -71,11 +71,9 @@ impl ValueArena {
                 "native_value_arena".to_string(),
             )
         };
-        self.root_id = Some(
-            runmat_gc::gc_register_root(Box::new(root)).map_err(|error| {
-                NativeExecutorError::Host(format!("register native GC roots: {error}"))
-            })?,
-        );
+        self.root_id = Some(runmat_gc::gc_register_value_root(Box::new(root)).map_err(
+            |error| NativeExecutorError::Host(format!("register native GC roots: {error}")),
+        )?);
         Ok(())
     }
 
@@ -248,6 +246,19 @@ impl GcRoot for ArenaRoot {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl runmat_gc::ValueRoot for ArenaRoot {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        // Same pinned arena lifetime and exclusive scan as the GC projection.
+        Some(
+            self.entries()
+                .iter()
+                .filter_map(|entry| entry.value.clone())
+                .collect(),
+        )
+    }
+}
+
 /// RAII protection for values while native invocation state is being built.
 /// The root scanner owns the cloned values; this guard owns only registration.
 #[cfg(not(target_arch = "wasm32"))]
@@ -262,7 +273,7 @@ impl ScopedValueRoots {
             return Ok(Self { root_id: None });
         }
         let root = runmat_gc::GlobalRoot::new(values, description.to_string());
-        let root_id = runmat_gc::gc_register_root(Box::new(root)).map_err(|error| {
+        let root_id = runmat_gc::gc_register_value_root(Box::new(root)).map_err(|error| {
             NativeExecutorError::Host(format!("register native GC roots: {error}"))
         })?;
         Ok(Self {
@@ -320,6 +331,22 @@ mod tests {
             arena.get(NativeValueRef::NULL),
             Err(NativeExecutorError::StaleValue)
         ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_arena_values_are_visible_until_their_reference_is_released() {
+        runmat_gc::gc_test_context(|| {
+            let mut arena = ValueArena::new().unwrap();
+            let reference = arena.insert(Value::String("retained-by-native".into()));
+            assert!(runmat_gc::gc_retained_values()
+                .unwrap()
+                .contains(&Value::String("retained-by-native".into())));
+            arena.release(reference).unwrap();
+            assert!(!runmat_gc::gc_retained_values()
+                .unwrap()
+                .contains(&Value::String("retained-by-native".into())));
+        });
     }
 
     #[cfg(not(target_arch = "wasm32"))]
