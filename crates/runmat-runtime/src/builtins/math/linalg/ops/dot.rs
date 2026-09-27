@@ -226,6 +226,10 @@ fn dot_internal_error(message: impl Into<String>) -> RuntimeError {
     dot_error_with_message(message, &DOT_ERROR_INTERNAL)
 }
 
+#[path = "dot/kernel_error.rs"]
+pub mod kernel_error;
+use kernel_error::{DotKernelError, DotKernelResult};
+
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Int(_) | Value::Num(_) | Value::Tensor(_) | Value::LogicalArray(_) => {
@@ -408,7 +412,7 @@ async fn try_provider_dot(
         Err(err) => {
             let mut error = dot_internal_error(format!("dot: provider execution failed: {err}"));
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            error = crate::runtime_error::with_provider_execution_source(error, err.into());
+            error = kernel_error::with_provider_source(error, err.into());
             Err(error)
         }
     }
@@ -513,13 +517,13 @@ fn real_tensor_to_complex(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
         .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
 }
 
-fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<Tensor> {
+fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> DotKernelResult<Tensor> {
     if dim.is_none()
         && is_vector_shape(&canonical_shape_tensor(a))
         && is_vector_shape(&canonical_shape_tensor(b))
     {
         if tensor::tensor_element_len(a) != tensor::tensor_element_len(b) {
-            return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+            return Err(DotKernelError::invalid_input());
         }
         return dot_real_vectors(a, b);
     }
@@ -555,7 +559,7 @@ fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<
                 let idx = before + k * stride_before + after * stride_before * reduce_len;
                 let prod = if exact_integer_operands {
                     exact_integer_product_as_f64(a.numeric_value_at(idx), b.numeric_value_at(idx))
-                        .ok_or_else(|| dot_internal_error("dot: invalid integer storage"))?
+                        .ok_or_else(|| DotKernelError::internal("dot: invalid integer storage"))?
                 } else {
                     let (a_values, b_values) = floating_values
                         .as_ref()
@@ -574,14 +578,14 @@ fn dot_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResult<
     dot_real_output(output, out_shape, dot_real_output_dtype(a, b))
 }
 
-fn dot_real_vectors(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
+fn dot_real_vectors(a: &Tensor, b: &Tensor) -> DotKernelResult<Tensor> {
     let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
     let mut output = 0.0;
     if exact_integer_operands {
         for index in 0..tensor::tensor_element_len(a) {
             output +=
                 exact_integer_product_as_f64(a.numeric_value_at(index), b.numeric_value_at(index))
-                    .ok_or_else(|| dot_internal_error("dot: invalid integer storage"))?;
+                    .ok_or_else(|| DotKernelError::internal("dot: invalid integer storage"))?;
         }
     } else {
         let a_values = tensor::tensor_values_f64_cow(a);
@@ -597,13 +601,13 @@ fn dot_complex_tensor(
     a: &ComplexTensor,
     b: &ComplexTensor,
     dim: Option<usize>,
-) -> BuiltinResult<ComplexTensor> {
+) -> DotKernelResult<ComplexTensor> {
     if dim.is_none()
         && is_vector_shape(&canonical_shape_complex(a))
         && is_vector_shape(&canonical_shape_complex(b))
     {
         if a.materialize_f64().len() != b.materialize_f64().len() {
-            return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+            return Err(DotKernelError::invalid_input());
         }
         let mut output = (0.0, 0.0);
         for ((ar, ai), (br, bi)) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
@@ -615,7 +619,7 @@ fn dot_complex_tensor(
             vec![1, 1],
             dot_complex_output_dtype(a, b),
         )
-        .map_err(|error| dot_internal_error(format!("{DOT_NAME}: {error}")));
+        .map_err(|error| DotKernelError::internal(format!("{DOT_NAME}: {error}")));
     }
     ensure_same_size_complex(a, b)?;
 
@@ -653,14 +657,14 @@ fn dot_complex_tensor(
     let mut out_shape = shape.clone();
     out_shape[dim_index] = 1;
     ComplexTensor::from_f64_values_with_dtype(output, out_shape, dot_complex_output_dtype(a, b))
-        .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
+        .map_err(|e| DotKernelError::internal(format!("{DOT_NAME}: {e}")))
 }
 
 pub fn dot_host_real_for_provider(
     a: &Tensor,
     b: &Tensor,
     dim: Option<usize>,
-) -> BuiltinResult<Tensor> {
+) -> DotKernelResult<Tensor> {
     dot_real_tensor(a, b, dim)
 }
 
@@ -668,18 +672,18 @@ pub fn dot_host_complex_for_provider(
     a: &ComplexTensor,
     b: &ComplexTensor,
     dim: Option<usize>,
-) -> BuiltinResult<ComplexTensor> {
+) -> DotKernelResult<ComplexTensor> {
     dot_complex_tensor(a, b, dim)
 }
 
-fn elementwise_real_product(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
+fn elementwise_real_product(a: &Tensor, b: &Tensor) -> DotKernelResult<Tensor> {
     let mut data = Vec::with_capacity(tensor::tensor_element_len(a));
     let exact_integer_operands = a.integer_storage().is_some() && b.integer_storage().is_some();
     if exact_integer_operands {
         for index in 0..tensor::tensor_element_len(a) {
             data.push(
                 exact_integer_product_as_f64(a.numeric_value_at(index), b.numeric_value_at(index))
-                    .ok_or_else(|| dot_internal_error("dot: invalid integer storage"))?,
+                    .ok_or_else(|| DotKernelError::internal("dot: invalid integer storage"))?,
             );
         }
     } else {
@@ -713,14 +717,14 @@ fn dot_real_output(
     data: Vec<f64>,
     shape: Vec<usize>,
     dtype: NumericDType,
-) -> BuiltinResult<Tensor> {
+) -> DotKernelResult<Tensor> {
     match dtype {
         NumericDType::F32 => {
             Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
         }
         _ => Tensor::new(data, shape),
     }
-    .map_err(|error| dot_internal_error(format!("{DOT_NAME}: {error}")))
+    .map_err(|error| DotKernelError::internal(format!("{DOT_NAME}: {error}")))
 }
 
 fn exact_integer_product_as_f64(
@@ -756,7 +760,7 @@ fn integer_sign_magnitude(value: NumericScalar) -> Option<(bool, u128)> {
 fn elementwise_complex_product(
     a: &ComplexTensor,
     b: &ComplexTensor,
-) -> BuiltinResult<ComplexTensor> {
+) -> DotKernelResult<ComplexTensor> {
     let mut data = Vec::with_capacity(a.materialize_f64().len());
     for ((ar, ai), (br, bi)) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
         let real = ar * br + ai * bi;
@@ -765,25 +769,25 @@ fn elementwise_complex_product(
     }
     let shape = canonical_shape_complex(a);
     ComplexTensor::from_f64_values_with_dtype(data, shape, dot_complex_output_dtype(a, b))
-        .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))
+        .map_err(|e| DotKernelError::internal(format!("{DOT_NAME}: {e}")))
 }
 
-fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
+fn ensure_same_size(a: &Tensor, b: &Tensor) -> DotKernelResult<()> {
     if tensor::tensor_element_len(a) != tensor::tensor_element_len(b) {
-        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+        return Err(DotKernelError::invalid_input());
     }
     if canonical_shape_tensor(a) != canonical_shape_tensor(b) {
-        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+        return Err(DotKernelError::invalid_input());
     }
     Ok(())
 }
 
-fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<()> {
+fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> DotKernelResult<()> {
     if a.materialize_f64().len() != b.materialize_f64().len() {
-        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+        return Err(DotKernelError::invalid_input());
     }
     if canonical_shape_complex(a) != canonical_shape_complex(b) {
-        return Err(dot_error(&DOT_ERROR_INVALID_INPUT));
+        return Err(DotKernelError::invalid_input());
     }
     Ok(())
 }
