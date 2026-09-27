@@ -22,10 +22,7 @@ fn actual_private_fences_survive_cancel_and_unrelated_queue_submission() {
     };
     let provider = WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU device");
     let AccelContextHandle::Wgpu(context) =
-        provider.export_context(AccelContextKind::Plotting).unwrap()
-    else {
-        panic!("required WGPU context");
-    };
+        provider.export_context(AccelContextKind::Plotting).unwrap();
     let value = ProviderRepresentation {
         element_type: ProviderElementType::F32,
         storage: ProviderStorage::DenseReal,
