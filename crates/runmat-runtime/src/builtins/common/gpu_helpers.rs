@@ -1444,8 +1444,9 @@ mod preserving_download_tests {
         let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let error = upload_tensor(&MalformedUploadProvider, &tensor)
             .expect_err("provider upload must publish its physical descriptor");
-        assert!(error.contains("provider returned descriptor"));
-        assert!(error.contains("F32 Real upload"));
+        assert!(error.contains("provider returned an invalid numeric upload descriptor"));
+        assert!(error.contains("element F32, storage Real"));
+        assert!(error.contains("element None, storage None"));
     }
 
     impl runmat_accelerate_api::AccelProvider for MalformedDownloadProvider {
