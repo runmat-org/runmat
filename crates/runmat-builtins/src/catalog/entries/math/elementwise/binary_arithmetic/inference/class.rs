@@ -8,6 +8,13 @@ pub(super) fn result(
     left: &ValueFact,
     right: &ValueFact,
 ) -> Result<ValueKindFact, DynamicReason> {
+    if [left, right].iter().any(|value| {
+        value.numeric().is_some_and(|numeric| {
+            numeric.class.integer_class().is_some() && numeric.domain == NumericDomain::Complex
+        })
+    }) {
+        return Err(DynamicReason::UnsupportedRepresentation);
+    }
     if matches!(left.kind, ValueKindFact::Unknown) || matches!(right.kind, ValueKindFact::Unknown) {
         return Err(DynamicReason::RuntimeValue);
     }
@@ -17,8 +24,22 @@ pub(super) fn result(
     }
     let left_numeric = arithmetic_input(left)?;
     let right_numeric = arithmetic_input(right)?;
+    if left_numeric.class.integer_class().is_some() || right_numeric.class.integer_class().is_some()
+    {
+        if !matches!(left.kind, ValueKindFact::Numeric(_))
+            || !matches!(right.kind, ValueKindFact::Numeric(_))
+            || left_numeric.domain == NumericDomain::Complex
+            || right_numeric.domain == NumericDomain::Complex
+        {
+            return Err(DynamicReason::UnsupportedRepresentation);
+        }
+    }
     let class = output_class(left_numeric.class, right_numeric.class, left, right)?;
-    let domain = output_domain(policy, left_numeric.domain, right_numeric.domain)?;
+    let domain = if class.integer_class().is_some() {
+        NumericDomain::Real
+    } else {
+        output_domain(policy, left_numeric.domain, right_numeric.domain)?
+    };
     Ok(ValueKindFact::Numeric(NumericFact { class, domain }))
 }
 

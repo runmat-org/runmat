@@ -7,6 +7,41 @@ use runmat_types::{
 };
 
 #[test]
+fn integer_inference_rejects_non_numeric_and_complex_pairs() {
+    let integer = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt64,
+        domain: NumericDomain::Real,
+    }));
+    for name in ["plus", "minus", "times", "rdivide", "ldivide", "power"] {
+        let entry = crate::builtin_catalog_entry_by_name(name).unwrap();
+        for other in [
+            ValueFact::scalar(ValueKindFact::Logical),
+            ValueFact::scalar(ValueKindFact::Character),
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Complex,
+            })),
+        ] {
+            for pair in [
+                vec![integer.clone(), other.clone()],
+                vec![other, integer.clone()],
+            ] {
+                assert!(
+                    infer_catalog_call(entry, &request(pair))
+                        .diagnostics
+                        .iter()
+                        .any(|d| d.code == "RM-CATALOG-BINARY-ARITHMETIC-INPUT"),
+                    "{name}"
+                );
+            }
+        }
+        let result = infer_catalog_call(entry, &request(vec![integer.clone(), integer.clone()]));
+        assert!(result.diagnostics.is_empty(), "{name}");
+        assert_eq!(result.outputs[0].kind, integer.kind, "{name}");
+    }
+}
+
+#[test]
 fn sparse_storage_is_not_inferred_as_a_dense_or_scalar_buffer() {
     use runmat_types::StorageFact;
     for name in ["plus", "minus", "times"] {
