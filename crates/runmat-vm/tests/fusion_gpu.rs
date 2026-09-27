@@ -344,6 +344,7 @@ impl AccelProvider for TestProvider {
 
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
+            suspension::pending_download_if_armed(handle).await;
             let (data, shape) = self.pull(handle)?;
             Ok(HostTensorOwned {
                 data,
@@ -358,6 +359,7 @@ impl AccelProvider for TestProvider {
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
+            suspension::pending_download_if_armed(handle).await;
             let (data, shape) = self.pull(handle)?;
             let data = match handle.descriptor.element_type {
                 Some(runmat_accelerate_api::NumericElementType::F32) => {

@@ -18,8 +18,28 @@ pub async fn execute_stochastic_evolution(
     #[cfg(feature = "native-accel")]
     {
         if let Some(provider) = runmat_accelerate_api::provider() {
+            let protected = [&state, &drift, &scale, &steps]
+                .into_iter()
+                .filter_map(|value| match value {
+                    Value::GpuTensor(handle) => Some(handle),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
             let (state_handle, state_owned) =
                 ensure_gpu_tensor_for_stochastic(provider, &state).await?;
+            // Capture the exact allocation owner before any control download
+            // can suspend. The shared guard protects every borrowed operand and
+            // transfers ownership only when the published result aliases it.
+            let state_owner = state_owned
+                .as_ref()
+                .map(|handle| {
+                    runmat_runtime::builtins::common::resident_output::ResidentResultGuard::new(
+                        &Value::GpuTensor(handle.clone()),
+                        &protected,
+                    )
+                })
+                .transpose()
+                .map_err(|error| crate::interpreter::errors::mex("ProviderOwnership", &error))?;
             let drift_scalar =
                 scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
             let scale_scalar =
@@ -36,17 +56,15 @@ pub async fn execute_stochastic_evolution(
                     } else {
                         runmat_accelerate_api::mark_handle_automatic(&mut output);
                     }
-                    if let Some(temp) = state_owned {
-                        let _ = provider.free(&temp);
-                    }
                     fusion_residency::mark(&output);
-                    return Ok(Value::GpuTensor(output));
+                    let output = Value::GpuTensor(output);
+                    if let Some(owner) = state_owner {
+                        owner.publish(&output);
+                    }
+                    return Ok(output);
                 }
                 Err(err) => {
                     log::debug!("stochastic_evolution provider fallback to host: {}", err);
-                    if let Some(temp) = state_owned {
-                        let _ = provider.free(&temp);
-                    }
                     if matches!(&state, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
                     {
                         return Err(format!(
