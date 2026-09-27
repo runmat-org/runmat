@@ -12,6 +12,9 @@ use super::local::transfer_prior_ns;
 #[cfg(all(test, feature = "wgpu"))]
 mod digit_tests;
 
+#[cfg(test)]
+mod fusion_work_tests;
+
 pub(crate) fn wgpu_cost_estimate(
     provider: &dyn AccelProvider,
     query: &ProviderCostQuery,
@@ -152,11 +155,18 @@ pub(crate) fn wgpu_cost_estimate(
         .unwrap_or_else(|| {
             observed_execution_ns
                 .unwrap_or_else(|| {
-                    operation_prior_ns(query).saturating_mul(if fusion_work.is_some() {
-                        u64::from(dispatches)
-                    } else {
-                        1
-                    })
+                    // Declared scalar work already covers every operation and
+                    // logical output element, across all kernel chunks. Adapter
+                    // dispatches must not repeat that primary-program work.
+                    operation_prior_ns(query).saturating_mul(
+                        if fusion_work.is_some()
+                            && query.operation.workload.scalar_work_units.is_none()
+                        {
+                            u64::from(dispatches)
+                        } else {
+                            1
+                        },
+                    )
                 })
                 .saturating_add(probe_elements.saturating_mul(3))
         });
@@ -263,12 +273,11 @@ fn operation_prior_ns(query: &ProviderCostQuery) -> u64 {
     let flops = query.operation.workload.flops.unwrap_or(elements);
     match query.operation.family {
         ProviderOperationFamily::Upload | ProviderOperationFamily::Download => 0,
-        ProviderOperationFamily::Fusion => query
-            .operation
-            .workload
-            .scalar_work_units
-            .unwrap_or(elements)
-            .max(5_000),
+        ProviderOperationFamily::Fusion => match query.operation.workload.scalar_work_units {
+            Some(0) => 0,
+            Some(units) => units.max(5_000),
+            None => elements.max(5_000),
+        },
         ProviderOperationFamily::Graph => elements.max(5_000),
         ProviderOperationFamily::Elementwise => elements.saturating_mul(2).max(5_000),
         ProviderOperationFamily::Reduction => elements.saturating_mul(3).max(8_000),
