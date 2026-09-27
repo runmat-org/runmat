@@ -476,9 +476,10 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     let eval = compute_periodogram(&input.columns, &options)?;
     let output = output_eval(eval, output_precision)?;
     match source {
-        Some(source) => super::resident_output::restore(
+        Some(source) => super::resident_output::restore_named(
             &source,
             output,
+            2,
             BUILTIN_NAME,
             &borrowed.iter().collect::<Vec<_>>(),
         ),

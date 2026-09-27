@@ -507,9 +507,10 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     let eval = compute_spectrogram(&signal.data, &options)?;
     let output = output_eval(eval, options.reassigned, output_precision)?;
     match source {
-        Some(source) => super::resident_output::restore(
+        Some(source) => super::resident_output::restore_named(
             &source,
             output,
+            4,
             BUILTIN_NAME,
             &borrowed.iter().collect::<Vec<_>>(),
         ),

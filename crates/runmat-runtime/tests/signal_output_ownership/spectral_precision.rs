@@ -50,6 +50,48 @@ fn outputs(name: &str) -> usize {
 }
 
 #[test]
+fn surplus_slots_remain_host_double_zero_on_direct_and_fallback_routes() {
+    for name in ["periodogram", "spectrogram"] {
+        for mode in [Mode::Good, Mode::Unsupported] {
+            for single in [false, true] {
+                let provider = Provider::new(mode, Upload::Good);
+                let _scope = ThreadProviderGuard::set(Some(provider));
+                let source = signal(provider, single, true);
+                let args = arguments(name, &source.handle);
+                let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
+                    name,
+                    &args,
+                    outputs(name) + 2,
+                ))
+                .unwrap();
+                let Value::OutputList(values) = result else {
+                    panic!("padded outputs")
+                };
+                assert_eq!(values.len(), outputs(name) + 2);
+                for value in &values[outputs(name)..] {
+                    assert!(matches!(value, Value::Num(number) if *number == 0.0));
+                }
+                assert_eq!(
+                    provider.uploads.load(Ordering::SeqCst),
+                    if matches!(mode, Mode::Good) {
+                        if name == "periodogram" {
+                            1
+                        } else {
+                            2
+                        }
+                    } else {
+                        outputs(name)
+                    }
+                );
+                drop(values);
+                provider.assert_retired();
+                assert_eq!(source.probe.retirements(), 0);
+            }
+        }
+    }
+}
+
+#[test]
 fn unsupported_spectral_hook_restores_all_native_outputs_and_nonzero_payloads() {
     for name in ["periodogram", "spectrogram"] {
         for single in [false, true] {

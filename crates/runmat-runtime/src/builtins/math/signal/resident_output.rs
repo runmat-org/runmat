@@ -141,6 +141,28 @@ pub(super) fn restore(
     Ok(Value::OutputList(outputs))
 }
 
+/// Surplus ABI padding is not a computed spectral output. Keep its existing
+/// host Double scalar representation instead of uploading it as signal data.
+pub(super) fn restore_named(
+    input: &GpuTensorHandle,
+    value: Value,
+    named_outputs: usize,
+    builtin: &str,
+    protected: &[&GpuTensorHandle],
+) -> BuiltinResult<Value> {
+    let Value::OutputList(mut values) = value else {
+        return restore(input, value, builtin, protected);
+    };
+    let padding = values.split_off(values.len().min(named_outputs));
+    let Value::OutputList(mut outputs) =
+        restore(input, Value::OutputList(values), builtin, protected)?
+    else {
+        unreachable!("list restoration preserves its carrier")
+    };
+    outputs.extend(padding);
+    Ok(Value::OutputList(outputs))
+}
+
 /// Validate both members before any consumer can reshape, reduce, or publish
 /// either one. Result-reported dimensions are not a geometry authority.
 pub(super) fn spectral(

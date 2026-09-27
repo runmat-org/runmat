@@ -23,6 +23,35 @@ fn values(value: &Value, dtype: NumericDType) -> Vec<f64> {
 }
 
 #[test]
+fn surplus_host_output_slots_retain_shared_double_scalar_padding() {
+    for name in ["periodogram", "spectrogram"] {
+        for single in [false, true] {
+            let named = if name == "periodogram" { 2 } else { 4 };
+            let mut args = vec![
+                real(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1], single),
+                real(vec![1.0; 4], vec![4, 1], false),
+            ];
+            if name == "spectrogram" {
+                args.push(Value::Num(0.0));
+            }
+            args.push(Value::Num(4.0));
+            let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
+                name,
+                &args,
+                named + 2,
+            ))
+            .unwrap();
+            let Value::OutputList(values) = result else {
+                panic!("padded outputs")
+            };
+            for value in &values[named..] {
+                assert!(matches!(value, Value::Num(number) if *number == 0.0));
+            }
+        }
+    }
+}
+
+#[test]
 fn all_host_spectral_outputs_follow_signal_not_window_or_sampling_class() {
     for name in ["periodogram", "spectrogram"] {
         for single in [false, true] {
