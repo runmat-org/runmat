@@ -1,7 +1,9 @@
 use super::*;
 use crate::builtins::common::test_support;
 use futures::{executor::block_on, task::noop_waker};
-use runmat_accelerate::simple_provider::InProcessProvider;
+#[path = "../test_owner.rs"]
+mod test_owner;
+use runmat_accelerate_api::{test_support::RetirementProbe, WeakGpuTensorHandle};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, HostNumericTensorView, HostTensorView, ThreadProviderGuard,
 };
@@ -23,13 +25,12 @@ enum Fault {
 #[derive(Default)]
 struct State {
     fault: Fault,
-    second: Option<GpuTensorHandle>,
-    outputs: Vec<GpuTensorHandle>,
-    freed: Vec<u64>,
+    second: Option<WeakGpuTensorHandle>,
+    outputs: Vec<(WeakGpuTensorHandle, RetirementProbe)>,
     downloads: usize,
 }
 struct Provider {
-    inner: InProcessProvider,
+    inner: test_owner::Owner,
     state: Mutex<State>,
 }
 impl AccelProvider for Provider {
@@ -37,7 +38,7 @@ impl AccelProvider for Provider {
         self.inner.device_id()
     }
     fn device_info(&self) -> String {
-        self.inner.device_info()
+        "atan2 tabular owning fixture".into()
     }
     fn upload(&self, value: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(value)
@@ -45,14 +46,16 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(&self, value: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         let mut state = self.state.lock().unwrap();
         match state.fault {
-            Fault::BorrowedAlias => return Ok(state.second.as_ref().unwrap().clone()),
+            Fault::BorrowedAlias => return Ok(state.second.as_ref().unwrap().acquire()?),
             Fault::PriorResultAlias if !state.outputs.is_empty() => {
-                return Ok(state.outputs[0].clone())
+                return Ok(state.outputs[0].0.acquire()?)
             }
             _ => {}
         }
         let output = self.inner.upload_numeric(value)?;
-        state.outputs.push(output.clone());
+        state
+            .outputs
+            .push((output.downgrade(), self.inner.probe(&output)));
         Ok(output)
     }
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
@@ -60,11 +63,11 @@ impl AccelProvider for Provider {
             let fault = {
                 let mut state = self.state.lock().unwrap();
                 state.downloads += 1;
-                if state
-                    .second
-                    .as_ref()
-                    .is_some_and(|second| gpu_helpers::same_gpu_handle(second, handle))
-                {
+                if state.second.as_ref().is_some_and(|second| {
+                    second
+                        .acquire()
+                        .is_ok_and(|second| gpu_helpers::same_gpu_handle(&second, handle))
+                }) {
                     state.fault
                 } else {
                     Fault::None
@@ -73,20 +76,16 @@ impl AccelProvider for Provider {
             match fault {
                 Fault::LaterFailure => anyhow::bail!("injected later column failure"),
                 Fault::LaterPending => std::future::pending().await,
-                _ => self.inner.download(handle).await,
+                _ => self.inner.download(handle),
             }
         })
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.state.lock().unwrap().freed.push(handle.buffer_id);
-        self.inner.free(handle)
     }
 }
 
 fn fixture(fault: Fault) -> (&'static Provider, Vec<GpuTensorHandle>, Value) {
     static PROVIDER: OnceLock<Provider> = OnceLock::new();
     let provider = PROVIDER.get_or_init(|| Provider {
-        inner: InProcessProvider::new(),
+        inner: test_owner::Owner::new(),
         state: Mutex::default(),
     });
     let handles: Vec<_> = [[1.0, -1.0], [0.0, 1.0]]
@@ -103,7 +102,7 @@ fn fixture(fault: Fault) -> (&'static Provider, Vec<GpuTensorHandle>, Value) {
         .collect();
     *provider.state.lock().unwrap() = State {
         fault,
-        second: Some(handles[1].clone()),
+        second: Some(handles[1].downgrade()),
         ..State::default()
     };
     let table = crate::builtins::table::table_from_columns(
@@ -144,23 +143,16 @@ fn atan2_tabular_later_failure_drop_and_aliases_release_only_owned_columns() {
             state.outputs.len(),
             usize::from(!matches!(fault, Fault::BorrowedAlias))
         );
-        for output in &state.outputs {
-            assert_eq!(
-                state
-                    .freed
-                    .iter()
-                    .filter(|&&id| id == output.buffer_id)
-                    .count(),
-                1
-            );
+        for (_, probe) in &state.outputs {
+            assert_eq!(probe.retirements(), 1);
         }
         for handle in &borrowed {
-            assert!(!state.freed.contains(&handle.buffer_id));
+            assert_eq!(provider.inner.probe(handle).retirements(), 0);
         }
         drop(state);
         for handle in borrowed {
-            assert!(block_on(provider.inner.download(&handle)).is_ok());
-            provider.inner.free(&handle).unwrap();
+            assert!(provider.inner.download(&handle).is_ok());
+            handle.release().unwrap();
         }
     }
 }
@@ -188,10 +180,12 @@ fn atan2_tabular_admits_every_column_before_first_download() {
     let state = provider.state.lock().unwrap();
     assert_eq!(state.downloads, 0);
     assert!(state.outputs.is_empty());
-    assert!(state.freed.is_empty());
+    assert!(borrowed
+        .iter()
+        .all(|handle| provider.inner.probe(handle).retirements() == 0));
     drop(state);
     for handle in borrowed {
-        provider.inner.free(&handle).unwrap();
+        handle.release().unwrap();
     }
 }
 
@@ -216,14 +210,26 @@ fn atan2_tabular_success_publishes_owned_columns_with_numeric_oracle() {
         let Value::GpuTensor(handle) = &columns.fields[name] else {
             panic!("resident column")
         };
-        let actual = block_on(provider.inner.download(handle)).unwrap();
+        let actual = provider.inner.download(handle).unwrap();
         assert_eq!(actual.data, expected);
     }
-    assert!(provider.state.lock().unwrap().freed.is_empty());
-    for output in provider.state.lock().unwrap().outputs.clone() {
-        provider.inner.free(&output).unwrap();
-    }
+    assert!(provider
+        .state
+        .lock()
+        .unwrap()
+        .outputs
+        .iter()
+        .all(|(_, probe)| probe.retirements() == 0));
+    drop(columns);
+    drop(output);
+    assert!(provider
+        .state
+        .lock()
+        .unwrap()
+        .outputs
+        .iter()
+        .all(|(_, probe)| probe.retirements() == 1));
     for handle in borrowed {
-        provider.inner.free(&handle).unwrap();
+        handle.release().unwrap();
     }
 }
