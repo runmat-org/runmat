@@ -1,47 +1,62 @@
-//! Applies to bounds and both top-k identities: all use restore_pair at their
-//! only resident output boundary. This is fault-injected ownership evidence,
-//! not hardware timing or GPU-kernel evidence.
+//! Fault-injected pair restoration with actual allocation retirement.
 use super::*;
-use runmat_accelerate_api::{AccelProvider, HostNumericTensorView, HostTensorView};
+use runmat_accelerate_api::{
+    test_support::{RetirementProbe, TestAllocationOwner},
+    AccelProvider, GpuHandleProvenance, GpuTensorStorage, HostNumericDataOwned,
+    HostNumericDataView, HostNumericTensorOwned, HostNumericTensorView, HostTensorView,
+};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Mutex,
 };
 
 struct Provider {
-    inner: runmat_accelerate::simple_provider::InProcessProvider,
+    owner: TestAllocationOwner,
     uploads: AtomicUsize,
-    frees: AtomicUsize,
+    results: Mutex<Vec<RetirementProbe>>,
     first: Mutex<Option<GpuTensorHandle>>,
     alias_second: bool,
 }
 impl AccelProvider for Provider {
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.inner.upload(view)
+        Ok(self
+            .owner
+            .allocate_numeric(HostNumericTensorOwned {
+                data: HostNumericDataOwned::F64(view.data.to_vec()),
+                shape: view.shape.to_vec(),
+                storage: GpuTensorStorage::Real,
+            })?
+            .handle)
     }
     fn upload_numeric_raw(&self, view: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         if self.uploads.fetch_add(1, Ordering::SeqCst) == 1 {
             if self.alias_second {
-                return Ok(self.first.lock().unwrap().clone().unwrap());
+                return Ok(self.first.lock().unwrap().take().unwrap());
             }
             anyhow::bail!("injected second-output upload failure");
         }
-        let output = self.inner.upload_numeric(view)?;
-        *self.first.lock().unwrap() = Some(output.clone());
-        Ok(output)
+        let HostNumericDataView::F64(data) = view.data else {
+            anyhow::bail!("fixture expects double scalar restoration");
+        };
+        let output = self.owner.allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(data.to_vec()),
+            shape: view.shape.to_vec(),
+            storage: view.storage,
+        })?;
+        self.results.lock().unwrap().push(output.probe);
+        if self.alias_second {
+            *self.first.lock().unwrap() = Some(output.handle.clone());
+        }
+        Ok(output.handle)
     }
     fn download<'a>(
         &'a self,
-        handle: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-        self.inner.download(handle)
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.frees.fetch_add(1, Ordering::SeqCst);
-        self.inner.free(handle)
+        Box::pin(async { anyhow::bail!("restoration may not gather") })
     }
     fn device_id(&self) -> u32 {
-        self.inner.device_id()
+        self.owner.device_id()
     }
     fn device_info(&self) -> String {
         "reduction output restoration test owner".into()
@@ -49,13 +64,12 @@ impl AccelProvider for Provider {
 }
 fn provider(alias_second: bool) -> &'static Provider {
     let provider = Box::leak(Box::new(Provider {
-        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        owner: TestAllocationOwner::new(),
         uploads: AtomicUsize::new(0),
-        frees: AtomicUsize::new(0),
+        results: Mutex::new(Vec::new()),
         first: Mutex::new(None),
         alias_second,
     }));
-    // Unique device and process-long allocation satisfy registration lifetime.
     unsafe {
         runmat_accelerate_api::register_device_provider(provider);
     }
@@ -67,28 +81,46 @@ fn rejected_second_result_releases_first_without_freeing_source() {
     for alias in [false, true] {
         let provider = provider(alias);
         let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let mut source = provider
-            .upload(&HostTensorView {
-                data: &[1., 2.],
-                shape: &[2, 1],
+        let source = provider
+            .owner
+            .allocate_numeric(HostNumericTensorOwned {
+                data: HostNumericDataOwned::F64(vec![1., 2.]),
+                shape: vec![2, 1],
+                storage: GpuTensorStorage::Real,
             })
             .unwrap();
-        runmat_accelerate_api::mark_handle_explicit(&mut source);
-        let before = gpu_helpers::snapshot_handle_metadata(&source);
+        let handle = source
+            .handle
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        drop(source.handle);
+        let before = handle.wire_descriptor();
         assert!(restore_pair(
-            &source,
+            &handle,
             Value::Num(2.),
             Value::Num(1.),
             2,
             "maxk",
-            &[&source]
+            &[&handle]
         )
         .is_err());
         assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
-        assert_eq!(provider.frees.load(Ordering::SeqCst), 1);
-        assert_eq!(gpu_helpers::snapshot_handle_metadata(&source), before);
-        assert!(futures::executor::block_on(provider.download(&source)).is_ok());
-        provider.free(&source).unwrap();
+        let results = provider.results.lock().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].retirements(), 1);
+        assert_eq!(handle.wire_descriptor(), before);
+        assert_eq!(source.probe.retirements(), 0);
+        source
+            .probe
+            .with_data(&handle, |data| {
+                let HostNumericDataView::F64(values) = data else {
+                    panic!("source class")
+                };
+                assert_eq!(values, &[1., 2.]);
+            })
+            .unwrap();
+        handle.release().unwrap();
+        assert_eq!(source.probe.retirements(), 1);
     }
 }
 #[test]
@@ -114,9 +146,19 @@ fn discarded_and_unrequested_results_are_not_uploaded() {
         .unwrap();
         assert_eq!(provider.uploads.load(Ordering::SeqCst), retained);
         assert!(!matches!(second, Value::GpuTensor(_)));
-        if let Value::GpuTensor(handle) = first {
-            provider.free(&handle).unwrap();
-        }
-        provider.free(&source).unwrap();
+        assert!(provider
+            .results
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|probe| probe.retirements() == 0));
+        drop(first);
+        assert!(provider
+            .results
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|probe| probe.retirements() == 1));
+        source.release().unwrap();
     }
 }

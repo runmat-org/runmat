@@ -657,8 +657,10 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
                             let mut error = cumtrapz_internal_error(format!(
                                 "provider execution failed: {source}"
                             ));
-                            error =
-                                crate::runtime_error::with_provider_execution_source(error, source.into());
+                            error = crate::runtime_error::with_provider_execution_source(
+                                error,
+                                source.into(),
+                            );
                             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                             return Err(error);
                         }
@@ -900,7 +902,6 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
     use runmat_value::{IntValue, IntegerStorage};
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Clone, Copy)]
     enum NativeBehavior {
@@ -910,41 +911,65 @@ pub(crate) mod tests {
     }
 
     struct CountingCumtrapzProvider {
-        inner: runmat_accelerate::simple_provider::InProcessProvider,
-        frees: AtomicUsize,
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        allocations: std::sync::Mutex<Vec<runmat_accelerate_api::test_support::RetirementProbe>>,
         behavior: NativeBehavior,
+    }
+
+    impl CountingCumtrapzProvider {
+        fn values(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> Vec<f64> {
+            self.allocations
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|probe| {
+                    probe
+                        .with_data(handle, |data| {
+                            let runmat_accelerate_api::HostNumericDataView::F64(data) = data else {
+                                panic!("fixture requires native double payload");
+                            };
+                            data.to_vec()
+                        })
+                        .ok()
+                })
+                .expect("live fixture allocation")
+        }
+        fn retired(&self) -> usize {
+            self.allocations
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|probe| probe.retirements())
+                .sum()
+        }
     }
 
     impl runmat_accelerate_api::AccelProvider for CountingCumtrapzProvider {
         fn upload(
             &self,
-            host: &runmat_accelerate_api::HostTensorView,
+            host: &HostTensorView,
         ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-            runmat_accelerate_api::AccelProvider::upload(&self.inner, host)
+            let allocation =
+                self.owner
+                    .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                        data: runmat_accelerate_api::HostNumericDataOwned::F64(host.data.to_vec()),
+                        shape: host.shape.to_vec(),
+                        storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    })?;
+            self.allocations.lock().unwrap().push(allocation.probe);
+            Ok(allocation.handle)
         }
-
         fn download<'a>(
             &'a self,
-            handle: &'a runmat_accelerate_api::GpuTensorHandle,
+            _: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-            runmat_accelerate_api::AccelProvider::download(&self.inner, handle)
+            Box::pin(async { panic!("native completion or terminal failure must not gather") })
         }
-
-        fn free(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            self.frees.fetch_add(1, Ordering::SeqCst);
-            runmat_accelerate_api::AccelProvider::free(&self.inner, handle)
-        }
-
         fn device_info(&self) -> String {
-            runmat_accelerate_api::AccelProvider::device_info(&self.inner)
+            "cumtrapz allocation retirement fixture".into()
         }
-
         fn device_id(&self) -> u32 {
-            runmat_accelerate_api::AccelProvider::device_id(&self.inner)
-        }
-
-        fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
-            runmat_accelerate_api::AccelProvider::precision(&self.inner)
+            self.owner.device_id()
         }
 
         fn cumtrapz_dim(
@@ -954,12 +979,25 @@ pub(crate) mod tests {
             spacing: runmat_accelerate_api::ProviderTrapezoidSpacing<'_>,
         ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
             match self.behavior {
-                NativeBehavior::Success => runmat_accelerate_api::AccelProvider::cumtrapz_dim(
-                    &self.inner,
-                    input,
-                    dim,
-                    spacing,
-                ),
+                NativeBehavior::Success => {
+                    use runmat_accelerate_api::ProviderTrapezoidSpacing as S;
+                    let spacing = match spacing {
+                        S::Unit => SpacingSpec::Unit,
+                        S::Scalar(value) => SpacingSpec::Scalar(value),
+                        S::ScalarHandle(handle) => SpacingSpec::Scalar(self.values(handle)[0]),
+                        S::Vector(handle) => SpacingSpec::Vector(self.values(handle)),
+                        S::Tensor(handle) => SpacingSpec::Tensor(
+                            Tensor::new(self.values(handle), handle.shape().to_vec()).unwrap(),
+                        ),
+                    };
+                    let tensor = Tensor::new(self.values(input), input.shape().to_vec()).unwrap();
+                    let result = cumtrapz_tensor(&tensor, &spacing, dim + 1, false)
+                        .expect("fixture canonical integration");
+                    self.upload(&HostTensorView {
+                        data: &result.materialize_f64(),
+                        shape: &result.shape,
+                    })
+                }
                 NativeBehavior::Error => anyhow::bail!("deliberate cumtrapz failure"),
                 NativeBehavior::Reject => self.upload(&HostTensorView {
                     data: &[0.0],
@@ -975,8 +1013,8 @@ pub(crate) mod tests {
     ) -> R {
         let _guard = test_support::accel_test_lock();
         let provider = Box::leak(Box::new(CountingCumtrapzProvider {
-            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
-            frees: AtomicUsize::new(0),
+            owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+            allocations: std::sync::Mutex::new(Vec::new()),
             behavior,
         }));
         unsafe { runmat_accelerate_api::register_provider(provider) };
@@ -1164,8 +1202,8 @@ pub(crate) mod tests {
             );
             assert_eq!(gathered.shape, vec![1, 3]);
             assert_eq!(gathered.data, vec![0.0, 0.0, 1.5, 1.5, 4.0, 4.0]);
-            let _ = provider.free(&handle);
-            let _ = provider.free(&out);
+            handle.release().unwrap();
+            out.release().unwrap();
         });
     }
 
@@ -1327,51 +1365,53 @@ pub(crate) mod tests {
 
     #[test]
     fn cumtrapz_resident_extension_roles_reject_before_provider_access() {
-        fn resident(shape: Vec<usize>, buffer_id: u64, integer: bool, logical: bool) -> Value {
-            let handle = runmat_accelerate_api::GpuTensorHandle {
-                shape,
-                device_id: u32::MAX,
-                buffer_id,
-                descriptor: Default::default(),
+        fn resident(shape: Vec<usize>, integer: bool, logical: bool) -> Value {
+            use runmat_accelerate_api::{
+                test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+                ProviderPrecision,
             };
-            let handle = if integer {
-                handle.with_numeric_descriptor(
-                    runmat_accelerate_api::NumericElementType::U64,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
-                )
+            let owner = TestAllocationOwner::new();
+            let allocation = if logical {
+                owner.allocate_logical_zeroed(shape, ProviderPrecision::F64)
             } else {
-                handle
-            };
-            if logical {
-                runmat_accelerate_api::set_handle_logical(&handle, true);
+                owner.allocate_zeroed(
+                    shape,
+                    if integer {
+                        NumericElementType::U64
+                    } else {
+                        NumericElementType::F64
+                    },
+                    GpuTensorStorage::Real,
+                )
             }
-            Value::GpuTensor(handle)
+            .unwrap();
+            Value::GpuTensor(allocation.handle)
         }
         let y = || Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
         let cases = [
             (
-                resident(vec![1, 2], u64::MAX - 520, true, false),
+                resident(vec![1, 2], true, false),
                 Vec::new(),
                 CUMTRAPZ_INTEGER_Y_EXTENSION.error_identifier,
             ),
             (
-                resident(vec![1, 2], u64::MAX - 521, false, true),
+                resident(vec![1, 2], false, true),
                 Vec::new(),
                 CUMTRAPZ_LOGICAL_Y_EXTENSION.error_identifier,
             ),
             (
-                resident(vec![1, 2], u64::MAX - 522, true, false),
+                resident(vec![1, 2], true, false),
                 vec![y()],
                 CUMTRAPZ_INTEGER_X_EXTENSION.error_identifier,
             ),
             (
-                resident(vec![1, 2], u64::MAX - 523, false, true),
+                resident(vec![1, 2], false, true),
                 vec![y()],
                 CUMTRAPZ_LOGICAL_X_EXTENSION.error_identifier,
             ),
             (
                 Value::Num(1.0),
-                vec![y(), resident(vec![1, 1], u64::MAX - 524, true, false)],
+                vec![y(), resident(vec![1, 1], true, false)],
                 CUMTRAPZ_INTEGER_DIM_EXTENSION.error_identifier,
             ),
         ];
@@ -1398,13 +1438,31 @@ pub(crate) mod tests {
                     })
                     .expect("resident Y");
                 let x = Value::Tensor(Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap());
-                let result = run_cumtrapz(x, vec![Value::GpuTensor(y_handle.clone())])
-                    .expect("native or fallback cumtrapz");
-                assert_eq!(provider.frees.load(Ordering::SeqCst), expected_frees);
-                if let Value::GpuTensor(result_handle) = result {
-                    let _ = provider.free(&result_handle);
+                let result = run_cumtrapz(x, vec![Value::GpuTensor(y_handle.clone())]);
+                assert_eq!(provider.retired(), expected_frees);
+                match behavior {
+                    NativeBehavior::Success => {
+                        let Value::GpuTensor(result_handle) = result.expect("native cumtrapz")
+                        else {
+                            panic!("expected resident native result");
+                        };
+                        assert_eq!(provider.values(&result_handle), vec![0.0, 0.5, 3.5]);
+                        result_handle.release().unwrap();
+                    }
+                    NativeBehavior::Error | NativeBehavior::Reject => {
+                        let error =
+                            result.expect_err("operational and malformed outputs are terminal");
+                        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                    }
                 }
-                let _ = provider.free(&y_handle);
+                y_handle.allocation_lease().validate_live().unwrap();
+                y_handle.release().unwrap();
+                assert!(provider
+                    .allocations
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .all(|probe| probe.retirements() == 1));
             });
         }
     }
