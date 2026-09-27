@@ -6,7 +6,7 @@ use runmat_execution::Digest;
 use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     contracts::{ComputeBackend, FeaRunError, FeaRunResult, LinearStaticSolveOptions},
-    planning::resource::FeaResourcePlan,
+    planning::resource::{FeaResourcePlan, PreparedInputResourceFacts},
     results::observation::ObservationExecutionPolicy,
 };
 
@@ -15,6 +15,8 @@ use super::run_linear_static_with_constraint_plan;
 #[derive(Clone, Copy)]
 pub struct StaticResourceAdmission<'a> {
     pub plan: &'a FeaResourcePlan,
+    /// Worker-derived facts, never extracted from the submitted resource plan.
+    pub prepared_inputs: Option<&'a PreparedInputResourceFacts>,
     pub observation_execution: ObservationExecutionPolicy,
 }
 

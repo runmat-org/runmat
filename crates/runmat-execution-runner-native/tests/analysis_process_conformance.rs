@@ -1308,7 +1308,7 @@ fn fixture_for_study(
     model.sequence.steps[0].observations = vec![structural_displacement_observation()];
     let step_id = model.sequence.steps[0].step_id.clone();
     let solve = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         model,
         step_id,
         backend: ComputeBackend::Cpu,
@@ -1320,7 +1320,7 @@ fn fixture_for_study(
                 std::num::NonZeroU32::new(2).unwrap(),
             ),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let mesh = solver_mesh(&solve.model);
     let access = ArtifactAccess {
@@ -1334,7 +1334,7 @@ fn fixture_for_study(
         artifact_access: access,
         workload: solve,
         mesh: Some(mesh),
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -1362,7 +1362,7 @@ fn explicit_fixture(
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     model.sequence.steps[0].observations = vec![structural_displacement_observation()];
     let solve = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -1374,7 +1374,7 @@ fn explicit_fixture(
                 std::num::NonZeroU32::new(2).unwrap(),
             ),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest("explicit-authored-study"),
@@ -1386,7 +1386,7 @@ fn explicit_fixture(
         },
         workload: solve,
         mesh: None,
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -1555,7 +1555,7 @@ fn mixed_fixture(
     assert_eq!(material.material_id, "mat_shell_alloy");
     model.geometry_revision = mesh.geometry.geometry_revision as u32;
     let solve = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -1567,7 +1567,7 @@ fn mixed_fixture(
                 std::num::NonZeroU32::new(2).unwrap(),
             ),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest("mixed-authored-study"),
@@ -1579,7 +1579,7 @@ fn mixed_fixture(
         },
         workload: solve,
         mesh: Some(mesh),
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -1703,7 +1703,7 @@ fn sequence_preparation(
         }],
     };
     let workload = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         model,
         step_id: root.step_id,
         backend: ComputeBackend::Cpu,
@@ -1715,7 +1715,7 @@ fn sequence_preparation(
                 std::num::NonZeroU32::new(2).unwrap(),
             ),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let mesh = solver_mesh(&workload.model);
     let workloads = workload

@@ -204,7 +204,7 @@ pub use signal::{
 };
 pub use solve::{
     StructuralLinearNumericalReceipt, StructuralLinearNumericalReceiptArtifact,
-    StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    StructuralLinearStateInput, StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 pub use state::{
     BoundThermalStateTransfer, CanonicalSemanticState, CanonicalSemanticStateInput,

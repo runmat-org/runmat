@@ -23,7 +23,7 @@ fn native_kernel_executes_connector_observation_admitted_by_portable_preparation
     spec.output_location = runmat_analysis_core::FieldLocation::Connector;
     model.sequence.steps[0].observations = vec![observation];
     let solve = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -33,7 +33,7 @@ fn native_kernel_executes_connector_observation_admitted_by_portable_preparation
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::serial(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest("connector-observation-study"),
@@ -45,7 +45,7 @@ fn native_kernel_executes_connector_observation_admitted_by_portable_preparation
         },
         workload: solve,
         mesh: None,
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -86,7 +86,7 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     model.sequence.steps[0].observations = vec![structural_displacement_observation()];
     let solve = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -96,7 +96,7 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest("explicit-study"),
@@ -108,7 +108,7 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
         },
         workload: solve.clone(),
         mesh: None,
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),

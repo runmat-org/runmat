@@ -38,7 +38,7 @@ fn workload() -> StructuralLinearWorkload {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let step_id = model.sequence.steps[0].step_id.clone();
     StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         model,
         step_id,
         backend: ComputeBackend::Cpu,
@@ -48,7 +48,7 @@ fn workload() -> StructuralLinearWorkload {
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: false,
-        initial_guess_transition: None,
+        state_input: None,
     }
 }
 

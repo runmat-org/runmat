@@ -685,7 +685,7 @@ fn linear_workload_matches_prepared_execution(
         && backend_matches
         && workload.observation_execution == ObservationExecutionPolicy::scalable()
         && workload.require_solver_mesh_for_solid
-        && workload.initial_guess_transition.is_none()
+        && workload.state_input.is_none()
         && options.solver_mesh_artifact_path.is_none()
 }
 

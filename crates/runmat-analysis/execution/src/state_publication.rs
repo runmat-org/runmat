@@ -97,6 +97,16 @@ pub fn prepare_semantic_state_publication(
             ));
         }
         manifest.identity()
+    } else if matches!(
+        preparation.source,
+        SemanticStatePublicationSource::StructuralPrimaryFields
+            | SemanticStatePublicationSource::StructuralLinearization
+    ) {
+        crate::structural::result_source::decode_structural_result_source(
+            &preparation.source_host,
+            &preparation.source_result,
+        )?
+        .0
     } else {
         SolverResultIdentity::new(
             preparation.source_host.workload.identity,

@@ -2364,7 +2364,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
     model.sequence.steps[0].observations = vec![ObservationRequest::Field(request)];
     // The direct evaluator uses serial partition ownership; retain that exact policy.
     let workload = crate::execution::StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: crate::ComputeBackend::Cpu,
@@ -2373,7 +2373,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::serial(),
         require_solver_mesh_for_solid: false,
-        initial_guess_transition: None,
+        state_input: None,
     };
     workload.validate().unwrap();
     let constraint_plan =

@@ -10,7 +10,7 @@ use runmat_execution::Digest;
 fn portable_thermal_result_separates_physical_source_from_transport_commitment() {
     use crate::execution::{
         AnalysisWorkloadIdentity, StructuralLinearNumericalReceiptArtifact,
-        StructuralLinearWorkloadResult,
+        StructuralLinearStateInput, StructuralLinearWorkload, StructuralLinearWorkloadResult,
     };
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let (model, mesh) = model_and_mesh(order, true);
@@ -45,6 +45,36 @@ fn portable_thermal_result_separates_physical_source_from_transport_commitment()
             .thermal_source()
             .unwrap();
         retained.validate_model(&model).unwrap();
+        let workload = StructuralLinearWorkload {
+            schema_version: 2,
+            model: model.clone(),
+            step_id: retained.transition().consumer_step_id.clone(),
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+            preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+            algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+            observation_execution: crate::results::observation::ObservationExecutionPolicy::serial(
+            ),
+            require_solver_mesh_for_solid: true,
+            state_input: Some(StructuralLinearStateInput::ThermalPrestress(
+                retained.transition().clone(),
+            )),
+        };
+        result.validate_thermal_workload(&workload).unwrap();
+        result
+            .validate_thermal_source(retained.transition().consumer, physical_identity)
+            .unwrap();
+        assert!(result
+            .validate_thermal_source(retained.transition().producer, physical_identity)
+            .is_err());
+        let foreign_result = crate::execution::SolverResultIdentity::from_step_result(
+            retained.transition().consumer,
+            Digest::sha256("foreign physical result"),
+        )
+        .unwrap();
+        assert!(result
+            .validate_thermal_source(retained.transition().consumer, foreign_result)
+            .is_err());
         let mut foreign_model = model.clone();
         foreign_model.materials[0]
             .thermal
@@ -52,6 +82,15 @@ fn portable_thermal_result_separates_physical_source_from_transport_commitment()
             .unwrap()
             .expansion_coefficient_per_k *= 2.0;
         assert!(retained.validate_model(&foreign_model).is_err());
+        let mut foreign_workload = workload.clone();
+        foreign_workload.model = foreign_model;
+        foreign_workload.validate().unwrap();
+        assert!(result.validate_thermal_workload(&foreign_workload).is_err());
+        let mut stripped_workload = workload.clone();
+        stripped_workload.state_input = None;
+        assert!(result
+            .validate_thermal_workload(&stripped_workload)
+            .is_err());
         let first = AnalysisWorkloadIdentity::for_test("thermal first placement").unwrap();
         let second = AnalysisWorkloadIdentity::for_test("thermal second placement").unwrap();
         let receipt = StructuralLinearNumericalReceiptArtifact::new(first, &result).unwrap();

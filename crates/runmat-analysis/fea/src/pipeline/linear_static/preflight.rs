@@ -116,6 +116,7 @@ pub(super) fn prepare_static_preassembly(
         observations: &observations,
         accelerator_requests: &[],
         local_execution: options.local_execution,
+        prepared_inputs: admitted.and_then(|admission| admission.prepared_inputs),
     })?;
     if admitted.is_some_and(|admission| admission.plan != &resource_plan) {
         return Err(ResourcePlanningError::Invalid(
@@ -305,7 +306,13 @@ mod tests {
             ObservationLimits::default(),
         )
         .unwrap();
+        let facts = crate::planning::resource::PreparedInputResourceFacts {
+            encoded_payload_bytes: crate::planning::resource::ByteCount(1024),
+            transport_closure_bytes: crate::planning::resource::ByteCount(2048),
+            decoded_resident_bytes_admission_budget: crate::planning::resource::ByteCount(8192),
+        };
         let plan = build_static_resource_plan(StaticResourcePreflight {
+            prepared_inputs: Some(&facts),
             model: &model,
             step,
             backend: ComputeBackend::Cpu,
@@ -319,6 +326,7 @@ mod tests {
         })
         .unwrap();
         let admitted = StaticResourceAdmission {
+            prepared_inputs: Some(&facts),
             plan: &plan,
             observation_execution: ObservationExecutionPolicy::serial(),
         };
@@ -332,6 +340,27 @@ mod tests {
         )
         .expect("exact worker plan must converge at numerical preassembly");
 
+        // Recomputed facts must match exactly, including larger valid transport envelopes.
+        // Copying facts from the submitted plan would incorrectly accept these substitutions.
+        let mut changed_facts = facts.clone();
+        changed_facts.transport_closure_bytes.0 += 1;
+        for prepared_inputs in [None, Some(&changed_facts)] {
+            assert!(matches!(
+                prepare_static_preassembly(
+                    &model,
+                    step,
+                    ComputeBackend::Cpu,
+                    &options,
+                    Some(&constraints),
+                    Some(StaticResourceAdmission {
+                        prepared_inputs,
+                        ..admitted
+                    }),
+                ),
+                Err(FeaRunError::Resource(ResourcePlanningError::Invalid(_)))
+            ));
+        }
+
         let mut substituted_input = plan.input.clone();
         substituted_input.worker.fixed_memory_bytes.0 += 1;
         let substituted =
@@ -344,6 +373,7 @@ mod tests {
             &options,
             Some(&constraints),
             Some(StaticResourceAdmission {
+                prepared_inputs: Some(&facts),
                 plan: &substituted,
                 observation_execution: ObservationExecutionPolicy::serial(),
             }),

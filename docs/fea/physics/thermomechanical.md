@@ -103,6 +103,22 @@ The Rust numerical library provides the narrower executable path:
    `Reuse` transition requiring identical topology and preserved reference temperature.
 3. Call `run_linear_static_from_thermal_state` with the retained state and canonical solver mesh.
 
+The native structural worker also accepts this retained source through schema-2
+`StructuralLinearWorkload::state_input`, using the closed `ThermalPrestress` variant rather than
+treating temperature as a displacement initial guess. `prepare_structural_sequence_step` binds
+the source to the exact authored consumer; the prepared numerical entry retains the complete
+sequence instead of erasing its thermal input. The worker independently reconstructs its resource
+plan before decoding the semantic source. Estimation revision 37 adds prepared transport and
+decoded-residency facts to the existing numerical thermal alignment reservations. Host preparation
+and canonical profiling still materialize source bytes; this is not metadata-only admission or a
+measured whole-task memory bound.
+
+Thermal structural results retain a physical identity that commits the full solver model, source
+transition and solved fields. Numerical receipts separately commit the complete transported result
+and execution workload. Completion import, field recovery and prestress-state publication preserve
+that physical identity. These worker-level facilities do not yet provide a whole-study thermal →
+structural → modal/harmonic/buckling scheduler or qualify the coupled path for production.
+
 The result includes the thermal transition and a source-linked `SolverResultIdentity`. Completed
 thermal results retain the producer step identity
 and persistent node IDs in field order, and publication checks both against its context. Source

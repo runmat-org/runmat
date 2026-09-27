@@ -64,6 +64,8 @@ pub(super) fn execute(
         SemanticStatePublicationSource::StructuralPrimaryFields => {
             let solver_result =
                 StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
+            solver_result
+                .validate_thermal_source(publication.producer, publication.source_result)?;
             if solver_result
                 .constraint_result
                 .topology
@@ -84,6 +86,8 @@ pub(super) fn execute(
         SemanticStatePublicationSource::StructuralLinearization => {
             let solver_result =
                 StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
+            solver_result
+                .validate_thermal_source(publication.producer, publication.source_result)?;
             let linearization = solver_result.linearization.ok_or_else(|| {
                 AnalysisBridgeError::Invalid(
                     "solver result did not publish its declared structural linearization".into(),

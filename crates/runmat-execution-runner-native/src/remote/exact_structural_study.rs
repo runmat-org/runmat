@@ -1039,7 +1039,7 @@ mod tests {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let step_id = model.sequence.steps[0].step_id.clone();
         let mut workload = StructuralLinearWorkload {
-            schema_version: 1,
+            schema_version: 2,
             model,
             step_id,
             backend: ComputeBackend::Cpu,
@@ -1049,7 +1049,7 @@ mod tests {
             observation_execution:
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
             require_solver_mesh_for_solid: true,
-            initial_guess_transition: None,
+            state_input: None,
         };
         workload.model.constraints[0].visit_targets_mut(|target| {
             *target = runmat_analysis_core::RegionTarget::boundary("face_000002")

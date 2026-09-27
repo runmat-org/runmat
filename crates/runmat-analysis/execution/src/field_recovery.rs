@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, FieldRecoverySource,
-    SolverResultIdentity, StructuralLinearWorkload, StructuralLinearWorkloadResult,
+    StructuralLinearWorkload,
 };
 use runmat_analysis_fea::results::field::{
     reconstruct_recovered_field, RecoveredFieldArtifact, RecoveredFieldArtifactManifest,
@@ -101,19 +101,14 @@ pub fn prepare_structural_field_recovery(
             ))
         }
     }
-    let source_result = SolverResultIdentity::new(
-        preparation.source_host.workload.identity,
-        preparation.source_result.manifest.payload_digest,
-    )?;
-    if preparation.source_result.manifest.logical_identity != source_result.digest() {
-        return Err(AnalysisBridgeError::Identity(
-            "field recovery solver result differs from its source workload",
-        ));
-    }
+    let (source_result, result) =
+        crate::structural::result_source::decode_structural_result_source(
+            &preparation.source_host,
+            &preparation.source_result,
+        )?;
     let workload =
         StructuralLinearWorkload::from_canonical_bytes(&preparation.source_invocation.payload())?;
-    let result =
-        StructuralLinearWorkloadResult::from_canonical_bytes(&preparation.source_result.payload())?;
+    result.validate_thermal_workload(&workload)?;
     let mesh_artifact = preparation
         .mesh
         .as_ref()

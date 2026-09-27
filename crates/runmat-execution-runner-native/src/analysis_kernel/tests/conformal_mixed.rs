@@ -106,7 +106,7 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
             }),
         }));
     let solve = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -116,7 +116,7 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest("mixed-study"),
@@ -128,7 +128,7 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
         },
         workload: solve,
         mesh: Some(mesh),
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),

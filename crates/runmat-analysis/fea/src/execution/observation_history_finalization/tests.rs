@@ -13,7 +13,7 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOr
 fn structural_source_fixture() -> crate::execution::StructuralLinearWorkload {
     let model = crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     let workload = crate::execution::StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -22,7 +22,7 @@ fn structural_source_fixture() -> crate::execution::StructuralLinearWorkload {
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::serial(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     workload.validate().unwrap();
     workload

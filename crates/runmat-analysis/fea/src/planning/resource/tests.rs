@@ -21,6 +21,7 @@ use super::*;
 
 mod curved_connector;
 mod exact_work;
+mod prepared_inputs;
 mod thermal_state;
 
 #[test]
@@ -51,6 +52,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
         phase: FeaResourcePhase::StructuralLinearPipeline,
         demand: FeaResourceDemand::StructuralLinearPipeline(
             StructuralLinearPipelineResourceDemand {
+                inputs: None,
                 state_profiles_output: PreparedOutputResourceFacts {
                     encoded_payload_bytes_upper_bound: ByteCount(1),
                     transport_closure_bytes_upper_bound: ByteCount(1),
@@ -476,7 +478,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     )
     .unwrap();
     let workload = crate::execution::StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::contracts::ComputeBackend::Cpu,
@@ -485,7 +487,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
 
     let plan = build_structural_resource_plan(
@@ -495,6 +497,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &workload,
         &[],
         LocalExecutionPlan::serial(),
+        None,
     )
     .unwrap();
     let mut serial_workload = workload.clone();
@@ -507,9 +510,11 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &serial_workload,
         &[],
         LocalExecutionPlan::serial(),
+        None,
     )
     .unwrap();
     let direct_plan = build_static_resource_plan(StaticResourcePreflight {
+        prepared_inputs: None,
         model: &serial_workload.model,
         step: serial_workload.procedure_step().unwrap(),
         backend: serial_workload.backend,
@@ -525,6 +530,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     assert_eq!(direct_plan, serial_plan);
     let solver_model = serial_workload.solver_model().unwrap();
     let solver_projection_plan = build_static_resource_plan(StaticResourcePreflight {
+        prepared_inputs: None,
         model: &solver_model,
         step: &solver_model.sequence.steps[0],
         backend: serial_workload.backend,
@@ -550,6 +556,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &workload,
         &[],
         four_threads,
+        None,
     )
     .unwrap();
 
@@ -626,6 +633,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &foundation_workload,
         &[],
         LocalExecutionPlan::serial(),
+        None,
     )
     .unwrap();
     let foundation_bytes = connector_buffers::estimate_connector_buffers(
@@ -719,6 +727,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &gpu_workload,
         &[],
         LocalExecutionPlan::serial(),
+        None,
     )
     .is_err());
     let accelerator = AcceleratorRequest {
@@ -733,6 +742,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         &gpu_workload,
         std::slice::from_ref(&accelerator),
         LocalExecutionPlan::serial(),
+        None,
     )
     .unwrap();
     assert_eq!(accelerated.request.accelerators, vec![accelerator]);
@@ -755,7 +765,7 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
     )
     .unwrap();
     let workload = crate::execution::StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: crate::contracts::ComputeBackend::Cpu,
@@ -764,7 +774,7 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let plan = build_structural_resource_plan(
         Some(&mesh),
@@ -773,6 +783,7 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
         &workload,
         &[],
         LocalExecutionPlan::serial(),
+        None,
     )
     .unwrap();
 
@@ -801,6 +812,7 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
             &workload,
             &[],
             LocalExecutionPlan::serial(),
+            None,
         )
         .unwrap()
         .identity
@@ -887,7 +899,7 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
     )
     .unwrap();
     let workload = crate::execution::StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: crate::contracts::ComputeBackend::Cpu,
@@ -896,7 +908,7 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let plan = build_structural_resource_plan(
         None,
@@ -905,6 +917,7 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
         &workload,
         &[],
         LocalExecutionPlan::serial(),
+        None,
     )
     .unwrap();
     let structural = model.structural.as_ref().unwrap();
@@ -942,6 +955,7 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
             &workload,
             &[],
             LocalExecutionPlan::serial(),
+            None,
         )
         .unwrap()
         .identity

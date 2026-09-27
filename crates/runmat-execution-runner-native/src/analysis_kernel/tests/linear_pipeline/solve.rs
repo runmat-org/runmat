@@ -48,7 +48,7 @@ pub(super) fn execute() -> SolvedPipeline {
     };
     let step_id = model.sequence.steps[0].step_id.clone();
     let solve = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         model,
         step_id,
         backend: ComputeBackend::Cpu,
@@ -60,7 +60,7 @@ pub(super) fn execute() -> SolvedPipeline {
                 std::num::NonZeroU32::new(2).unwrap(),
             ),
         require_solver_mesh_for_solid: false,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -96,7 +96,7 @@ pub(super) fn execute() -> SolvedPipeline {
         },
         workload: solve.clone(),
         mesh: Some(mesh),
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),

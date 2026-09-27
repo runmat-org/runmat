@@ -25,9 +25,10 @@ use super::{
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     FieldRecoveryResourceFacts, LocalExecutionPlan, NumericalScalar, ObservationResourceFacts,
-    PartitioningPolicy, PhaseResourcePolicy, PreconditionerStorage, ResourcePlanningError,
-    SolveResourcePolicy, SolverAdmissionResourcePolicy, StructuralLinearPipelineResourceDemand,
-    StructuralOperatorResourceDemand, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    PartitioningPolicy, PhaseResourcePolicy, PreconditionerStorage, PreparedInputResourceFacts,
+    ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy,
+    StructuralLinearPipelineResourceDemand, StructuralOperatorResourceDemand, WorkerResourcePolicy,
+    RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const STRUCTURAL_FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
@@ -63,6 +64,9 @@ pub fn require_executable_static_backend(
 ///
 /// This function does no assembly and accepts no caller-supplied topology, sparse, constraint, or
 /// observation counts. It is therefore safe to run before allocations and expensive kernels.
+/// Portable callers must independently derive `prepared_inputs` from the authenticated input
+/// closure, excluding the resource-plan object itself. `None` is for direct numerical execution;
+/// these transport reservations supplement, rather than replace, thermal alignment/work storage.
 pub fn build_structural_resource_plan(
     mesh: Option<&SolverMeshArtifact>,
     constraints: &CanonicalStructuralConstraintPlan,
@@ -70,6 +74,7 @@ pub fn build_structural_resource_plan(
     workload: &StructuralLinearWorkload,
     accelerator_requests: &[AcceleratorRequest],
     local_execution: LocalExecutionPlan,
+    prepared_inputs: Option<&PreparedInputResourceFacts>,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     workload
         .validate()
@@ -88,6 +93,7 @@ pub fn build_structural_resource_plan(
         observations,
         accelerator_requests,
         local_execution,
+        prepared_inputs,
     })
 }
 
@@ -104,6 +110,7 @@ pub(crate) struct StaticResourcePreflight<'a> {
     pub observations: &'a ResolvedObservationPlan,
     pub accelerator_requests: &'a [AcceleratorRequest],
     pub local_execution: LocalExecutionPlan,
+    pub prepared_inputs: Option<&'a PreparedInputResourceFacts>,
 }
 
 pub(crate) fn build_static_resource_plan(
@@ -120,6 +127,7 @@ pub(crate) fn build_static_resource_plan(
         observations,
         accelerator_requests,
         local_execution,
+        prepared_inputs,
     } = input;
     let facts = derive_structural_resource_facts(model, mesh, constraints)?;
     let state_profiles_output =
@@ -265,6 +273,7 @@ pub(crate) fn build_static_resource_plan(
         phase: FeaResourcePhase::StructuralLinearPipeline,
         demand: FeaResourceDemand::StructuralLinearPipeline(
             StructuralLinearPipelineResourceDemand {
+                inputs: prepared_inputs.cloned(),
                 state_profiles_output,
                 operator: StructuralOperatorResourceDemand {
                     topology_digest: facts.topology_digest,

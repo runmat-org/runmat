@@ -50,6 +50,16 @@ pub(super) fn execute_field_recovery(
     }
     let mut solver_result =
         StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
+    solver_result.validate_thermal_workload(&workload)?;
+    solver_result.validate_thermal_source(
+        request.producer,
+        request
+            .source
+            .solver_result()
+            .ok_or(AnalysisBridgeError::Identity(
+                "structural recovery requires a solver result source",
+            ))?,
+    )?;
     if solver_result.constraint_result.topology != topology.identity {
         return Err(AnalysisBridgeError::Identity(
             "field recovery topology differs from the completed solve",

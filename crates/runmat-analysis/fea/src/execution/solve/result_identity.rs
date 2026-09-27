@@ -44,6 +44,58 @@ impl ResultIdentitySource {
 }
 
 impl StructuralLinearWorkloadResult {
+    /// Validate retained thermal physics against the complete authored worker input.
+    pub fn validate_thermal_workload(
+        &self,
+        workload: &StructuralLinearWorkload,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate()?;
+        workload.validate()?;
+        let source = self
+            .linearization
+            .as_ref()
+            .and_then(|value| value.thermal_source());
+        match (workload.state_input.as_ref(), source) {
+            (Some(StructuralLinearStateInput::ThermalPrestress(transition)), Some(source)) => {
+                source
+                    .validate_model(&workload.model)
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                if source.transition() != transition {
+                    return Err(AnalysisExecutionError::Identity(
+                        "thermal structural result retained a different source transition",
+                    ));
+                }
+            }
+            (Some(StructuralLinearStateInput::ThermalPrestress(_)), None) | (_, Some(_)) => {
+                return Err(AnalysisExecutionError::Identity(
+                    "thermal structural result source differs from the prepared workload",
+                ));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Validate physical source identity at downstream publication/recovery boundaries which
+    /// possess the result and producer identity but not the full authored model.
+    pub fn validate_thermal_source(
+        &self,
+        producer: super::super::StepIdentity,
+        result: SolverResultIdentity,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate()?;
+        if let Some(source) = self
+            .linearization
+            .as_ref()
+            .and_then(|value| value.thermal_source())
+        {
+            if source.transition().consumer != producer || source.structural_result() != result {
+                return Err(AnalysisExecutionError::Identity("thermal structural result differs from its publication producer or physical source"));
+            }
+        }
+        Ok(())
+    }
+
     pub fn result_identity(
         &self,
         workload: AnalysisWorkloadIdentity,

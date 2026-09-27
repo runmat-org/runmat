@@ -103,7 +103,7 @@ impl StructuralPrestressProducerCoordinator {
             artifact_access: self.preparation.artifact_access.clone(),
             workload: self.preparation.preload_workload.clone(),
             mesh: Some(self.preparation.mesh.clone()),
-            initial_guess: None,
+            state_input: None,
             chunk_bytes: self.preparation.chunk_bytes,
             inventory_limits: self.preparation.inventory_limits,
             required_capabilities: self.preparation.required_capabilities.clone(),

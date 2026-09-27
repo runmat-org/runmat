@@ -6,7 +6,7 @@ use runmat_analysis_fea::execution::{
     DiscretizationIdentity, ExecutionPlanIdentity, NumericalPlanIdentity, OperatorIdentity,
     ProblemIdentity, SequenceIdentity, SignalMaterializationIdentity, SignalRealizationIdentity,
     SolverExcitationIdentity, SolverResultIdentity, StepIdentity,
-    StructuralLinearNumericalReceiptArtifact, StructuralLinearWorkload,
+    StructuralLinearNumericalReceiptArtifact, StructuralLinearStateInput, StructuralLinearWorkload,
     StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_analysis_fea::planning::resource::{
@@ -44,7 +44,7 @@ pub struct StructuralLinearProgramPreparation {
     pub artifact_access: ArtifactAccess,
     pub workload: StructuralLinearWorkload,
     pub mesh: Option<SolverMeshArtifact>,
-    pub initial_guess: Option<PreparedAnalysisObjects>,
+    pub state_input: Option<PreparedAnalysisObjects>,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
@@ -76,7 +76,7 @@ pub struct ImportedStructuralLinearResult {
 pub fn prepare_structural_sequence_step(
     mut preparation: StructuralLinearProgramPreparation,
 ) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
-    if preparation.workload.initial_guess_transition.is_some() {
+    if preparation.workload.state_input.is_some() {
         return Err(AnalysisBridgeError::Invalid(
             "sequence-step preparation derives its transition and does not accept a prebound one"
                 .into(),
@@ -85,14 +85,20 @@ pub fn prepare_structural_sequence_step(
     let step = preparation.workload.procedure_step()?.clone();
     match step.state_inputs.as_slice() {
         [] => {
-            if preparation.initial_guess.is_some() {
+            if preparation.state_input.is_some() {
                 return Err(AnalysisBridgeError::Invalid(
                     "root sequence step cannot receive an upstream semantic state".into(),
                 ));
             }
         }
-        [input] if input.use_as == runmat_analysis_core::StateUse::InitialGuess => {
-            let state_objects = preparation.initial_guess.as_ref().ok_or_else(|| {
+        [input]
+            if matches!(
+                input.use_as,
+                runmat_analysis_core::StateUse::InitialGuess
+                    | runmat_analysis_core::StateUse::Prestress
+            ) =>
+        {
+            let state_objects = preparation.state_input.as_ref().ok_or_else(|| {
                 AnalysisBridgeError::Invalid(
                     "stateful sequence step is missing its upstream semantic state".into(),
                 )
@@ -103,17 +109,26 @@ pub fn prepare_structural_sequence_step(
                 ));
             }
             let state = CanonicalSemanticState::from_canonical_bytes(&state_objects.payload())?;
-            preparation.workload.initial_guess_transition = Some(bind_upstream_state_transition(
+            let transition = bind_upstream_state_transition(
                 &preparation.workload.model,
                 &step.step_id,
                 &state,
                 input.use_as,
                 structural_topology_digest(&preparation.workload, preparation.mesh.as_ref())?,
-            )?);
+            )?;
+            preparation.workload.state_input = Some(match input.use_as {
+                runmat_analysis_core::StateUse::InitialGuess => {
+                    StructuralLinearStateInput::InitialGuess(transition)
+                }
+                runmat_analysis_core::StateUse::Prestress => {
+                    StructuralLinearStateInput::ThermalPrestress(transition)
+                }
+                _ => unreachable!("matched executable structural state input"),
+            });
         }
         _ => {
             return Err(AnalysisBridgeError::Invalid(
-                "structural sequence execution currently supports at most one initial-guess state input"
+                "structural sequence execution supports one initial-guess or thermal-prestress state input"
                     .into(),
             ));
         }
@@ -173,22 +188,15 @@ pub fn prepare_structural_linear_program(
         ObservationLimits::default(),
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let resource_plan = build_structural_resource_plan(
-        preparation.mesh.as_ref(),
-        &constraint_plan,
-        &observation_plan,
-        &preparation.workload,
-        &preparation.accelerator_requests,
-        preparation.local_execution,
-    )?;
-    let resource_plan_bytes = resource_plan
-        .canonical_bytes()
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let solve_bytes = preparation.workload.canonical_bytes()?;
     let topology_digest = constraint_plan.topology.discretization_digest();
     match (
-        preparation.workload.initial_guess_transition.as_ref(),
-        preparation.initial_guess.as_ref(),
+        preparation
+            .workload
+            .state_input
+            .as_ref()
+            .map(StructuralLinearStateInput::transition),
+        preparation.state_input.as_ref(),
     ) {
         (Some(transition), Some(state))
             if state.manifest.kind == AnalysisNumericalObjectKind::SemanticState
@@ -203,14 +211,39 @@ pub fn prepare_structural_linear_program(
                 || transition.target_topology_digest != topology_digest
             {
                 return Err(AnalysisBridgeError::Identity(
-                    "initial-guess state differs from its transition or solver mesh",
+                    "structural source state differs from its transition or solver mesh",
+                ));
+            }
+            let use_as = match preparation.workload.state_input.as_ref() {
+                Some(StructuralLinearStateInput::InitialGuess(_)) => {
+                    runmat_analysis_core::StateUse::InitialGuess
+                }
+                Some(StructuralLinearStateInput::ThermalPrestress(_)) => {
+                    runmat_analysis_core::StateUse::Prestress
+                }
+                None => {
+                    return Err(AnalysisBridgeError::Identity(
+                        "structural source has no bound input",
+                    ))
+                }
+            };
+            let rebound = bind_upstream_state_transition(
+                &preparation.workload.model,
+                &preparation.workload.step_id,
+                &decoded,
+                use_as,
+                topology_digest,
+            )?;
+            if &rebound != transition {
+                return Err(AnalysisBridgeError::Identity(
+                    "structural source does not reproduce its bound transition",
                 ));
             }
         }
         (None, None) => {}
         _ => {
             return Err(AnalysisBridgeError::Invalid(
-                "structural initial-guess transition and state must be supplied together".into(),
+                "structural transition and source state must be supplied together".into(),
             ));
         }
     }
@@ -221,9 +254,13 @@ pub fn prepare_structural_linear_program(
         topology_digest,
         constraint_plan_digest,
         property_map.identity.semantic_digest,
-        resource_plan.identity.digest(),
     )?;
-    if let Some(transition) = preparation.workload.initial_guess_transition.as_ref() {
+    if let Some(transition) = preparation
+        .workload
+        .state_input
+        .as_ref()
+        .map(StructuralLinearStateInput::transition)
+    {
         let producer = preparation
             .workload
             .model
@@ -233,7 +270,7 @@ pub fn prepare_structural_linear_program(
             .find(|step| step.step_id == transition.producer_step_id)
             .ok_or_else(|| {
                 AnalysisBridgeError::Invalid(
-                    "initial-guess transition producer is absent from the authored sequence".into(),
+                    "structural state producer is absent from the authored sequence".into(),
                 )
             })?;
         let expected_producer = StepIdentity::from_solver_contract(identities.sequence, producer)?;
@@ -242,7 +279,7 @@ pub fn prepare_structural_linear_program(
             || transition.consumer != identities.step
         {
             return Err(AnalysisBridgeError::Identity(
-                "initial-guess transition identities differ from the authored sequence",
+                "structural transition identities differ from the authored sequence",
             ));
         }
     }
@@ -254,7 +291,7 @@ pub fn prepare_structural_linear_program(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let constraint_plan = prepare_analysis_objects(
+    let constraint_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ConstraintPlan,
         identities.constraint_plan.digest(),
         &constraint_plan_bytes,
@@ -262,16 +299,8 @@ pub fn prepare_structural_linear_program(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let resource_plan_objects = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ResourcePlan,
-        resource_plan.identity.digest(),
-        &resource_plan_bytes,
-        preparation.chunk_bytes,
-        ObjectNamespace::InputValue,
-        preparation.inventory_limits,
-    )?;
     let mut inputs = vec![(invocation, ValueRefKind::DriverObject)];
-    if let Some(mesh) = preparation.mesh {
+    if let Some(mesh) = preparation.mesh.as_ref() {
         let mesh_bytes = mesh
             .canonical_encode()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -287,11 +316,50 @@ pub fn prepare_structural_linear_program(
             ValueRefKind::DriverObject,
         ));
     }
-    inputs.push((constraint_plan, ValueRefKind::DriverObject));
-    inputs.push((resource_plan_objects, ValueRefKind::DriverObject));
-    if let Some(initial_guess) = preparation.initial_guess {
-        inputs.push((initial_guess, ValueRefKind::ResultObject));
+    inputs.push((constraint_objects, ValueRefKind::DriverObject));
+    if let Some(state_input) = preparation.state_input {
+        inputs.push((state_input, ValueRefKind::ResultObject));
     }
+    let input_facts = crate::object::prepared_input_resource_facts_from_refs(
+        inputs.iter().map(|(objects, _)| objects),
+    )?;
+    let resource_plan = build_structural_resource_plan(
+        preparation.mesh.as_ref(),
+        &constraint_plan,
+        &observation_plan,
+        &preparation.workload,
+        &preparation.accelerator_requests,
+        preparation.local_execution,
+        Some(&input_facts),
+    )?;
+    let resource_plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan.canonical_bytes()?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    let plan_index = inputs
+        .iter()
+        .position(|(input, _)| input.manifest.kind == AnalysisNumericalObjectKind::SemanticState)
+        .unwrap_or(inputs.len());
+    inputs.insert(
+        plan_index,
+        (resource_plan_objects, ValueRefKind::DriverObject),
+    );
+    let execution_plan = ExecutionPlanIdentity::new(
+        identities.numerical,
+        contract_digest(
+            "execution",
+            &(
+                ANALYSIS_HOST_ABI,
+                preparation.workload.require_solver_mesh_for_solid,
+                AnalysisNumericalObjectKind::SolverResult,
+                resource_plan.identity.digest(),
+            ),
+        )?,
+    )?;
     let workload_inputs = inputs
         .iter()
         .map(|(input, reference_kind)| AnalysisWorkloadInput {
@@ -319,7 +387,7 @@ pub fn prepare_structural_linear_program(
     let workload = AnalysisWorkloadRequest::new(
         identities.study,
         identities.step,
-        identities.execution_plan,
+        execution_plan,
         AnalysisWorkKind::Solve,
         workload_inputs,
         vec![
@@ -340,6 +408,7 @@ pub fn prepare_structural_linear_program(
 }
 
 mod import;
+pub(crate) mod result_source;
 pub use import::{import_structural_linear_completion, import_structural_linear_result};
 
 struct StructuralIdentities {
@@ -348,7 +417,7 @@ struct StructuralIdentities {
     step: StepIdentity,
     problem: ProblemIdentity,
     constraint_plan: ConstraintPlanIdentity,
-    execution_plan: ExecutionPlanIdentity,
+    numerical: NumericalPlanIdentity,
 }
 
 fn structural_topology_digest(
@@ -367,7 +436,6 @@ fn derive_identities(
     topology_digest: Digest,
     constraint_plan_digest: Digest,
     property_semantic_digest: Digest,
-    resource_plan_digest: Digest,
 ) -> AnalysisBridgeResult<StructuralIdentities> {
     let step_contract = workload.procedure_step()?;
     let study = StudyIdentity::from_authored_digest(authored_study_digest, frozen_project_digest)?;
@@ -402,9 +470,9 @@ fn derive_identities(
         step,
         contract_digest("solver-model", &workload.model.solver_identity_contract())?,
         workload
-            .initial_guess_transition
+            .state_input
             .as_ref()
-            .map(|transition| transition.identity),
+            .map(|input| input.transition().identity),
         constraints,
         excitations,
     )?;
@@ -434,25 +502,13 @@ fn derive_identities(
             ),
         )?,
     )?;
-    let execution_plan = ExecutionPlanIdentity::new(
-        numerical,
-        contract_digest(
-            "execution",
-            &(
-                ANALYSIS_HOST_ABI,
-                workload.require_solver_mesh_for_solid,
-                AnalysisNumericalObjectKind::SolverResult,
-                resource_plan_digest,
-            ),
-        )?,
-    )?;
     Ok(StructuralIdentities {
         study,
         sequence,
         step,
         problem,
         constraint_plan: constraints,
-        execution_plan,
+        numerical,
     })
 }
 
@@ -500,6 +556,7 @@ fn validate_result_semantics(
             )
         })?;
     let step = workload.procedure_step()?;
+    result.validate_thermal_workload(&workload)?;
     if result.run.requested_backend != workload.backend
         || result.run.identity.family() != step.family
         || result.run.identity.procedure() != step.procedure

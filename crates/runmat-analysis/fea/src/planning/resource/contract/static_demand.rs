@@ -1,5 +1,7 @@
 //! Mandatory producer metadata reservation on the whole-step structural plan.
-use super::{PreparedOutputResourceFacts, StructuralOperatorResourceDemand};
+use super::{
+    PreparedInputResourceFacts, PreparedOutputResourceFacts, StructuralOperatorResourceDemand,
+};
 use serde::{Deserialize, Serialize};
 
 /// Whole-step static numerical envelope plus the mandatory portable producer catalog.
@@ -8,5 +10,7 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct StructuralLinearPipelineResourceDemand {
     pub operator: StructuralOperatorResourceDemand,
+    /// Independently derived transport facts; absent only for direct numerical execution.
+    pub inputs: Option<PreparedInputResourceFacts>,
     pub state_profiles_output: PreparedOutputResourceFacts,
 }

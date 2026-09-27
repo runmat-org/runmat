@@ -48,7 +48,7 @@ fn connected_preflight_tracks_expanded_proof_and_upper_pattern_fallback() {
             .resources
             .maximum_resident_bytes;
         let workload = StructuralLinearWorkload {
-            schema_version: 1,
+            schema_version: 2,
             step_id: model.sequence.steps[0].step_id.clone(),
             model,
             backend: ComputeBackend::Cpu,
@@ -57,7 +57,7 @@ fn connected_preflight_tracks_expanded_proof_and_upper_pattern_fallback() {
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
             observation_execution: ObservationExecutionPolicy::scalable(),
             require_solver_mesh_for_solid: true,
-            initial_guess_transition: None,
+            state_input: None,
         };
         let plan = build_structural_resource_plan(
             Some(&mesh),
@@ -66,6 +66,7 @@ fn connected_preflight_tracks_expanded_proof_and_upper_pattern_fallback() {
             &workload,
             &[],
             LocalExecutionPlan::serial(),
+            None,
         )
         .unwrap();
         assert!(plan.request.memory_bytes <= ceiling);
@@ -88,6 +89,7 @@ fn connected_preflight_tracks_expanded_proof_and_upper_pattern_fallback() {
                 &capped,
                 &[],
                 LocalExecutionPlan::serial(),
+                None,
             )
             .expect_err("a ceiling below the resource reservation must reject early");
             assert!(matches!(
@@ -117,7 +119,7 @@ fn refined_connected_tet10_preflight_reserves_and_rejects_a_lower_ceiling() {
     )
     .unwrap();
     let mut workload = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -126,7 +128,7 @@ fn refined_connected_tet10_preflight_reserves_and_rejects_a_lower_ceiling() {
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let plan = build_structural_resource_plan(
         Some(&mesh),
@@ -135,6 +137,7 @@ fn refined_connected_tet10_preflight_reserves_and_rejects_a_lower_ceiling() {
         &workload,
         &[],
         LocalExecutionPlan::serial(),
+        None,
     )
     .unwrap();
     assert!(plan.request.memory_bytes > 1);
@@ -150,6 +153,7 @@ fn refined_connected_tet10_preflight_reserves_and_rejects_a_lower_ceiling() {
             &workload,
             &[],
             LocalExecutionPlan::serial(),
+            None,
         ),
         Err(ResourcePlanningError::AccuracyCeiling { .. })
     ));

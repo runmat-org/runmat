@@ -7,6 +7,19 @@ pub(super) fn build_operator_resource_plan(
     inputs: Option<&PreparedInputResourceFacts>,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_operator_demand(&input, demand)?;
+    if matches!(input.demand, FeaResourceDemand::StructuralLinearPipeline(_))
+        && inputs.is_some_and(|facts| {
+            facts.encoded_payload_bytes.0 == 0
+                // Transport counts unique chunks; repeated logical payloads need not
+                // increase that closure, unlike their independent materializations.
+                || facts.transport_closure_bytes.0 == 0
+                || facts.decoded_resident_bytes_admission_budget < facts.encoded_payload_bytes
+        })
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "operator prepared input transport or materialization is underreserved".into(),
+        ));
+    }
     let (catalog_construction, catalog_transport) =
         if let FeaResourceDemand::StructuralLinearPipeline(pipeline) = &input.demand {
             let output = &pipeline.state_profiles_output;

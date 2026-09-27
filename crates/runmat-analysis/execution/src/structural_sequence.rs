@@ -289,16 +289,16 @@ impl StructuralSequenceCoordinator {
                 .ok_or(AnalysisBridgeError::Identity(
                     "validated sequence level references an absent step",
                 ))?;
-            let initial_guess = match step.state_inputs.as_slice() {
+            let state_input = match step.state_inputs.as_slice() {
                 [] => None,
-                [input] if input.use_as == StateUse::InitialGuess => {
+                [input] if matches!(input.use_as, StateUse::InitialGuess | StateUse::Prestress) => {
                     let StateSource::Upstream {
                         producer_step,
                         state_id,
                     } = &input.source
                     else {
                         return Err(AnalysisBridgeError::Invalid(
-                            "structural initial guess must name an upstream state".into(),
+                            "structural state input must name an upstream state".into(),
                         ));
                     };
                     Some(
@@ -333,7 +333,7 @@ impl StructuralSequenceCoordinator {
                 artifact_access: self.preparation.artifact_access.clone(),
                 workload,
                 mesh: self.preparation.mesh.clone(),
-                initial_guess,
+                state_input,
                 chunk_bytes: self.preparation.chunk_bytes,
                 inventory_limits: self.preparation.inventory_limits,
                 required_capabilities: self.preparation.required_capabilities.clone(),

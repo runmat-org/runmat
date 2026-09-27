@@ -169,7 +169,7 @@ pub fn prepared_input_resource_facts_without_resource_plan(
     )
 }
 
-fn prepared_input_resource_facts_from_refs<'a>(
+pub(crate) fn prepared_input_resource_facts_from_refs<'a>(
     inputs: impl Iterator<Item = &'a PreparedAnalysisObjects>,
 ) -> AnalysisBridgeResult<PreparedInputResourceFacts> {
     let inputs = inputs.collect::<Vec<_>>();

@@ -180,7 +180,7 @@ fn portable_static_preparation_admits_connector_target_observation() {
     model.sequence.steps[0].observations =
         vec![runmat_analysis_core::ObservationRequest::Probe(spec)];
     let workload = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -190,7 +190,7 @@ fn portable_static_preparation_admits_connector_target_observation() {
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::serial(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest("connector-observation-study"),
@@ -199,7 +199,7 @@ fn portable_static_preparation_admits_connector_target_observation() {
         artifact_access: access(),
         workload,
         mesh: None,
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -1208,11 +1208,8 @@ impl AnalysisKernel for StructuralResultKernel {
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         assert_eq!(invocation.kind, AnalysisWorkKind::Solve);
-        let result_identity = runmat_analysis_fea::execution::SolverResultIdentity::new(
-            invocation.host.workload.identity,
-            Digest::sha256(&self.0),
-        )?;
         let result = StructuralLinearWorkloadResult::from_canonical_bytes(&self.0)?;
+        let result_identity = result.result_identity(invocation.host.workload.identity)?;
         let receipt =
             runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact::new(
                 invocation.host.workload.identity,
@@ -1504,7 +1501,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     };
     let step_id = producer_step.step_id.clone();
     let mut solve = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         model,
         step_id,
         backend: ComputeBackend::Cpu,
@@ -1516,7 +1513,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 std::num::NonZeroU32::new(2).unwrap(),
             ),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let mut audit_alias_material = solve.model.materials[0].clone();
     audit_alias_material.material_id = "legacy_material_name".into();
@@ -1552,7 +1549,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         artifact_access: access(),
         workload: solve.clone(),
         mesh: Some(mesh.clone()),
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -2810,7 +2807,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         artifact_access: access(),
         workload: branch_workload,
         mesh: Some(mesh.clone()),
-        initial_guess: Some(state_completed.outputs[0].clone()),
+        state_input: Some(state_completed.outputs[0].clone()),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -2843,7 +2840,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             &branch.inputs[0].payload(),
         )
         .unwrap();
-    let branch_transition = branch_invocation.initial_guess_transition.unwrap();
+    let branch_input = branch_invocation.state_input.unwrap();
+    let branch_transition = branch_input.transition();
     assert_eq!(branch_transition.source_state, state.identity);
     assert_eq!(branch_transition.producer, prepared.host.workload.step);
     assert_eq!(branch_transition.consumer, branch.host.workload.step);
@@ -2860,7 +2858,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             artifact_access: access(),
             workload: substituted_workload,
             mesh: Some(mesh.clone()),
-            initial_guess: Some(substituted_state),
+            state_input: Some(substituted_state),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
@@ -2899,7 +2897,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         },
         workload: solve.clone(),
         mesh: Some(mesh.clone()),
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -2933,7 +2931,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         artifact_access: access(),
         workload: audit_variant_workload,
         mesh: Some(mesh.clone()),
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -2949,7 +2947,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         prepared.host.workload.step,
         audit_variant.host.workload.step
     );
-    assert_eq!(
+    // Audit metadata remains outside the physical problem, but its encoded bytes
+    // genuinely change the admitted transport and decoded-residency requirements.
+    assert_ne!(
         prepared.host.workload.execution_plan,
         audit_variant.host.workload.execution_plan
     );
@@ -2961,7 +2961,18 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         prepared.inputs[0].manifest.payload_digest,
         audit_variant.inputs[0].manifest.payload_digest
     );
-    assert_eq!(prepared.resource_plan, audit_variant.resource_plan);
+    assert_ne!(prepared.resource_plan, audit_variant.resource_plan);
+    assert_eq!(
+        prepared.resource_plan.input.structural_operator(),
+        audit_variant.resource_plan.input.structural_operator()
+    );
+    assert_ne!(
+        prepared.resource_plan.breakdown.input_encoded_payload_bytes,
+        audit_variant
+            .resource_plan
+            .breakdown
+            .input_encoded_payload_bytes
+    );
     assert_eq!(
         prepared.program.request.recipe,
         audit_variant.program.request.recipe
@@ -2986,7 +2997,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         artifact_access: access(),
         workload: backend_variant,
         mesh: Some(mesh.clone()),
-        initial_guess: None,
+        state_input: None,
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
@@ -3114,7 +3125,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         }],
     };
     let workload = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: root.step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -3124,7 +3135,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -3419,8 +3430,9 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         .map(|task| {
             StructuralLinearWorkload::from_canonical_bytes(&task.prepared.inputs[0].payload())
                 .unwrap()
-                .initial_guess_transition
+                .state_input
                 .unwrap()
+                .transition()
                 .source_state
         })
         .collect::<BTreeSet<_>>();

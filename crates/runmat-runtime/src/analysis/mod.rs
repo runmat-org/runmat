@@ -5849,7 +5849,7 @@ fn prepare_linear_static_workload_template(
         }
     };
     Ok(StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         model: model.clone(),
         step_id: step_id.clone(),
         backend,
@@ -5859,7 +5859,7 @@ fn prepare_linear_static_workload_template(
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     })
 }
 

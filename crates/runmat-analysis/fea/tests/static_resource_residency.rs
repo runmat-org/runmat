@@ -117,7 +117,7 @@ fn measure_static_case(
         ..LinearStaticSolveOptions::default()
     };
     let workload = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: ComputeBackend::Cpu,
@@ -126,7 +126,7 @@ fn measure_static_case(
         algebra_backend: options.algebra_backend_kind,
         observation_execution: ObservationExecutionPolicy::serial(),
         require_solver_mesh_for_solid: options.require_solver_mesh_for_solid,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let plan = build_structural_resource_plan(
         None,
@@ -135,6 +135,7 @@ fn measure_static_case(
         &workload,
         &[],
         local_execution,
+        None,
     )
     .unwrap();
     match enforcement {
@@ -156,6 +157,7 @@ fn measure_static_case(
         options,
         &constraints,
         Some(StaticResourceAdmission {
+            prepared_inputs: None,
             plan: &plan,
             observation_execution: ObservationExecutionPolicy::serial(),
         }),

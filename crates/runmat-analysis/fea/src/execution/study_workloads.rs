@@ -391,7 +391,7 @@ fn validate_linear_sequence(
 ) -> AnalysisExecutionResult<()> {
     for (step_id, workload) in workloads {
         workload.validate_sequence_template()?;
-        if workload.initial_guess_transition.is_some() {
+        if workload.state_input.is_some() {
             return Err(invalid(
                 "sequence preparation does not accept a prebound state transition",
             ));

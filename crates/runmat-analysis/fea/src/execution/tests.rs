@@ -554,7 +554,7 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
     .unwrap();
     let step_id = model.sequence.steps[0].step_id.clone();
     let workload = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         model,
         step_id,
         backend: crate::ComputeBackend::Cpu,
@@ -563,7 +563,7 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     let bytes = workload.canonical_bytes().unwrap();
     let decoded = StructuralLinearWorkload::from_canonical_bytes(&bytes).unwrap();

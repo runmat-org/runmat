@@ -23,6 +23,7 @@ fn solved_thermal_inventory_changes_preflight_identity_memory_and_publication() 
         let mut authored_model = model.clone();
         authored_model.sequence.steps[0] = step.clone();
         build_static_resource_plan(StaticResourcePreflight {
+            prepared_inputs: None,
             model: &authored_model,
             step,
             backend: crate::ComputeBackend::Cpu,

@@ -74,7 +74,7 @@ pub fn build_resource_plan(
         (
             FeaResourcePhase::StructuralLinearPipeline,
             FeaResourceDemand::StructuralLinearPipeline(demand),
-        ) => build_operator_resource_plan(input.clone(), &demand.operator, None),
+        ) => build_operator_resource_plan(input.clone(), &demand.operator, demand.inputs.as_ref()),
         (
             FeaResourcePhase::StructuralModalExtraction(workload),
             FeaResourceDemand::StructuralModalExtraction(demand),

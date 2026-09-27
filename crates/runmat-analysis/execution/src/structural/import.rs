@@ -24,15 +24,11 @@ pub fn import_structural_linear_completion(
                 .into(),
         ));
     };
-    let expected_result = SolverResultIdentity::new(
-        prepared.host.workload.identity,
-        result_output.payload_digest,
-    )?;
     let imported = import_analysis_objects(
         source,
         &result_output.root,
         AnalysisNumericalObjectKind::SolverResult,
-        expected_result.digest(),
+        result_output.logical_identity,
         result_output.payload_digest,
         &prepared.host.artifact_access,
         limits,
@@ -82,6 +78,12 @@ pub fn import_structural_linear_completion(
             AnalysisBridgeError::Invalid("analysis result byte accounting overflowed".into())
         })?;
     let result = StructuralLinearWorkloadResult::from_canonical_bytes(&imported.payload())?;
+    let expected_result = result.result_identity(prepared.host.workload.identity)?;
+    if expected_result.digest() != result_output.logical_identity {
+        return Err(AnalysisBridgeError::Identity(
+            "structural result identity differs from its canonical source",
+        ));
+    }
     let numerical_receipt =
         StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(&receipt_objects.payload())?;
     if numerical_receipt.identity().digest() != receipt_output.logical_identity

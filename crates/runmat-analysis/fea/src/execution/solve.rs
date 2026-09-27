@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     validate_model_sequence, AnalysisFieldValues, AnalysisModel, AnalysisProcedure,
     AnalysisSequence, CoupledPhysicsFamily, FormulationRequirement, PhysicsFamily, ProcedureStep,
-    ProcedureStepId, RestartPolicy, SolutionSpace, StateSource, StateUse,
+    ProcedureStepId, RestartPolicy, SolutionSpace,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -13,11 +13,13 @@ use crate::solve::preconditioner::SpdPreconditionerKind;
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult};
 mod result_identity;
+mod state_input;
 use super::{
     AnalysisWorkloadIdentity, CanonicalStateTransition, NumericalReceiptIdentity,
     SolverResultIdentity,
 };
 use result_identity::ResultIdentitySource;
+pub use state_input::StructuralLinearStateInput;
 
 const SOLVE_PREFIX: &[u8] = b"runmat-analysis-solve/v1\0";
 const SOLVE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
@@ -36,7 +38,7 @@ pub struct StructuralLinearWorkload {
     pub algebra_backend: LinearAlgebraBackendKind,
     pub observation_execution: ObservationExecutionPolicy,
     pub require_solver_mesh_for_solid: bool,
-    pub initial_guess_transition: Option<CanonicalStateTransition>,
+    pub state_input: Option<StructuralLinearStateInput>,
 }
 
 impl StructuralLinearWorkload {
@@ -48,47 +50,22 @@ impl StructuralLinearWorkload {
     /// Validates one authored sequence workload before its upstream state is bound.
     ///
     /// The coordinator accepts only the currently executable transition envelope: a fresh root
-    /// step or one upstream structural-primary state used as an initial guess. Executable workload
+    /// step, one structural initial guess, or one solved thermal prestress source. Executable workload
     /// validation remains stricter and requires the exact canonical transition receipt.
     pub fn validate_sequence_template(&self) -> AnalysisExecutionResult<()> {
         let step = self.validate_common()?;
         crate::planning::resource::require_executable_static_backend(self.backend)
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if self.initial_guess_transition.is_some() {
+        if self.state_input.is_some() {
             return Err(AnalysisExecutionError::Invalid(
                 "structural sequence template cannot contain a prebound transition".into(),
             ));
         }
-        if !step.activations.is_empty() {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural sequence execution does not yet implement step object activation"
-                    .into(),
-            ));
-        }
-        if step.restart != RestartPolicy::Fresh {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural sequence execution does not yet implement restart policies".into(),
-            ));
-        }
-        match step.state_inputs.as_slice() {
-            [] => Ok(()),
-            [input]
-                if input.use_as == StateUse::InitialGuess
-                    && input.required_kind
-                        == runmat_analysis_core::StateKind::StructuralPrimary
-                    && matches!(input.source, StateSource::Upstream { .. }) =>
-            {
-                Ok(())
-            }
-            _ => Err(AnalysisExecutionError::Invalid(
-                "structural sequence execution currently supports at most one upstream structural-primary initial guess"
-                    .into(),
-            )),
-        }
+        self.validate_authored_state_input(step).map(|_| ())
     }
 
     fn validate_common(&self) -> AnalysisExecutionResult<&ProcedureStep> {
-        if self.schema_version != 1 {
+        if self.schema_version != 2 {
             return Err(AnalysisExecutionError::Invalid(
                 "unsupported structural linear workload schema".into(),
             ));
@@ -137,6 +114,14 @@ impl StructuralLinearWorkload {
     /// The complete authored sequence remains in the portable workload and therefore in identity.
     pub fn solver_model(&self) -> AnalysisExecutionResult<AnalysisModel> {
         self.validate()?;
+        if matches!(
+            self.state_input,
+            Some(StructuralLinearStateInput::ThermalPrestress(_))
+        ) {
+            return Err(AnalysisExecutionError::Invalid(
+                "thermal prestress requires the full authored model and selected prepared thermal solve".into(),
+            ));
+        }
         let mut step = self.procedure_step()?.clone();
         step.state_inputs.clear();
         // Observations are part of the exact portable workload and are evaluated from this solve's
@@ -149,67 +134,6 @@ impl StructuralLinearWorkload {
             vec![step],
         );
         Ok(model)
-    }
-
-    fn validate_state_input(&self, step: &ProcedureStep) -> AnalysisExecutionResult<()> {
-        if !step.activations.is_empty() {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural sequence execution does not yet implement step object activation"
-                    .into(),
-            ));
-        }
-        match &self.initial_guess_transition {
-            Some(transition) => {
-                transition.validate()?;
-                if transition.method
-                    != runmat_analysis_core::StateTransitionMethod::InitialGuessOnly
-                    || transition.consumer_step_id != step.step_id
-                {
-                    return Err(AnalysisExecutionError::Invalid(
-                        "structural linear initial guess targets a different procedure step".into(),
-                    ));
-                }
-                let matching_inputs = step
-                    .state_inputs
-                    .iter()
-                    .filter(|input| {
-                        input.use_as == StateUse::InitialGuess
-                            && input.required_kind
-                                == runmat_analysis_core::StateKind::StructuralPrimary
-                            && matches!(
-                                &input.source,
-                                StateSource::Upstream {
-                                    producer_step,
-                                    state_id,
-                                } if producer_step == &transition.producer_step_id
-                                    && state_id == &transition.state_id
-                            )
-                    })
-                    .count();
-                let authored_transition = self.model.sequence.transitions.iter().any(|authored| {
-                    authored.transition_id == transition.transition_id
-                        && authored.producer_step == transition.producer_step_id
-                        && authored.consumer_step == transition.consumer_step_id
-                        && authored.state_id == transition.state_id
-                        && authored.method == transition.method
-                        && authored.topology == transition.topology
-                        && authored.reference == transition.reference
-                });
-                if matching_inputs != 1 || step.state_inputs.len() != 1 || !authored_transition {
-                    return Err(AnalysisExecutionError::Invalid(
-                        "initial-guess transition does not exactly bind the selected step input"
-                            .into(),
-                    ));
-                }
-            }
-            None if !step.state_inputs.is_empty() => {
-                return Err(AnalysisExecutionError::Invalid(
-                    "structural linear step has state inputs but no executable transition".into(),
-                ));
-            }
-            None => {}
-        }
-        Ok(())
     }
 
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {

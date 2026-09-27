@@ -61,6 +61,7 @@ fn prepared_thermal_solve_selects_each_static_consumer_and_preserves_admission()
             )
             .unwrap();
             let plan = build_static_resource_plan(StaticResourcePreflight {
+                prepared_inputs: None,
                 model: &model,
                 step: consumer,
                 backend: ComputeBackend::Cpu,
@@ -89,6 +90,7 @@ fn prepared_thermal_solve_selects_each_static_consumer_and_preserves_admission()
             let result = execute(
                 &constraints,
                 Some(StaticResourceAdmission {
+                    prepared_inputs: None,
                     plan: &plan,
                     observation_execution: ObservationExecutionPolicy::serial(),
                 }),
@@ -107,6 +109,7 @@ fn prepared_thermal_solve_selects_each_static_consumer_and_preserves_admission()
             assert!(execute(
                 &constraints,
                 Some(StaticResourceAdmission {
+                    prepared_inputs: None,
                     plan: &wrong_plan,
                     observation_execution: ObservationExecutionPolicy::serial()
                 })
@@ -125,6 +128,7 @@ fn prepared_thermal_solve_selects_each_static_consumer_and_preserves_admission()
                     source: &invalid_source,
                     constraint_plan: &constraints,
                     admitted: Some(StaticResourceAdmission {
+                        prepared_inputs: None,
                         plan: &wrong_plan,
                         observation_execution: ObservationExecutionPolicy::serial(),
                     }),

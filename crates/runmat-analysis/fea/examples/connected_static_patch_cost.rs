@@ -239,7 +239,7 @@ fn plan_patch(
         ObservationLimits::default(),
     )?;
     let workload = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: ComputeBackend::Cpu,
@@ -249,7 +249,7 @@ fn plan_patch(
             runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::serial(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     Ok(build_structural_resource_plan(
         Some(mesh),
@@ -258,6 +258,7 @@ fn plan_patch(
         &workload,
         &[],
         local_execution,
+        None,
     )?)
 }
 

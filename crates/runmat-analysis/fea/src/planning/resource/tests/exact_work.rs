@@ -100,7 +100,7 @@ fn connected_tet4_and_tet10_exact_coercivity_proofs_fit_preassembly_envelopes() 
             ..LinearStaticSolveOptions::default()
         };
         let workload = StructuralLinearWorkload {
-            schema_version: 1,
+            schema_version: 2,
             step_id: model.sequence.steps[0].step_id.clone(),
             model: model.clone(),
             backend: ComputeBackend::Cpu,
@@ -109,7 +109,7 @@ fn connected_tet4_and_tet10_exact_coercivity_proofs_fit_preassembly_envelopes() 
             algebra_backend: options.algebra_backend_kind,
             observation_execution: ObservationExecutionPolicy::serial(),
             require_solver_mesh_for_solid: true,
-            initial_guess_transition: None,
+            state_input: None,
         };
         let plan = build_structural_resource_plan(
             Some(&mesh),
@@ -118,6 +118,7 @@ fn connected_tet4_and_tet10_exact_coercivity_proofs_fit_preassembly_envelopes() 
             &workload,
             &[],
             LocalExecutionPlan::serial(),
+            None,
         )
         .unwrap();
         let SolveResourcePolicy::Iterative { admission, .. } =
@@ -161,6 +162,7 @@ fn connected_tet4_and_tet10_exact_coercivity_proofs_fit_preassembly_envelopes() 
             options,
             &constraints,
             Some(StaticResourceAdmission {
+                prepared_inputs: None,
                 plan: &plan,
                 observation_execution: ObservationExecutionPolicy::serial(),
             }),

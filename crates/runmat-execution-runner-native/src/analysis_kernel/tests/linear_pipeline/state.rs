@@ -169,7 +169,7 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         mesh: Some(
             SolverMeshArtifact::canonical_decode(&solved.prepared.inputs[1].payload()).unwrap(),
         ),
-        initial_guess: Some(warm_state),
+        state_input: Some(warm_state),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),

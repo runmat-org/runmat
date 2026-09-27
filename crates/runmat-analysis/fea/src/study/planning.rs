@@ -132,7 +132,7 @@ fn linear_workload(
         ComputeBackend::Gpu => LinearAlgebraBackendKind::Accelerator,
     };
     let workload = StructuralLinearWorkload {
-        schema_version: 1,
+        schema_version: 2,
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
@@ -141,7 +141,7 @@ fn linear_workload(
         algebra_backend,
         observation_execution: ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,
-        initial_guess_transition: None,
+        state_input: None,
     };
     workload.validate_sequence_template()?;
     Ok(workload)
