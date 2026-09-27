@@ -41,6 +41,7 @@ use runmat_value::{Tensor, Value};
 use serde::{Deserialize, Serialize};
 
 mod builtin_call;
+mod calibration_cleanup;
 pub use builtin_call::{install_preparation_service, AdmittedAcceleration};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -709,7 +710,7 @@ fn provider_prior(evaluation: &DecisionEvaluation) -> ExecutionCostEstimate {
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
         Value::Tensor(t) => Some(&t.shape),
-        Value::GpuTensor(handle) => Some(&handle.shape),
+        Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
     }
 }
@@ -796,7 +797,7 @@ fn update_cpu_cost(slot: &mut f64, candidate: f64) {
 fn value_len(value: &Value) -> Option<usize> {
     match value {
         Value::Tensor(t) => Some(tensor_element_len(t)),
-        Value::GpuTensor(handle) => Some(handle.shape.iter().product()),
+        Value::GpuTensor(handle) => Some(handle.shape().iter().product()),
         Value::Num(_) | Value::Bool(_) | Value::Int(_) => Some(1),
         Value::Complex(_, _) => Some(1),
         _ => None,
@@ -1574,8 +1575,8 @@ fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
     match value {
         Value::Tensor(t) => Some((t.rows(), t.cols())),
         Value::GpuTensor(handle) => {
-            if handle.shape.len() == 2 {
-                Some((handle.shape[0], handle.shape[1]))
+            if handle.shape().len() == 2 {
+                Some((handle.shape()[0], handle.shape()[1]))
             } else {
                 None
             }
@@ -1615,9 +1616,9 @@ async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
             trace!(
                 "auto-offload: gather_args arg[{}]=GpuTensor device_id={} buffer_id={} shape={:?}",
                 idx,
-                handle.device_id,
-                handle.buffer_id,
-                handle.shape
+                handle.device_id(),
+                handle.buffer_id(),
+                handle.shape()
             );
         } else {
             trace!(
@@ -2277,7 +2278,7 @@ fn slugify(input: &str) -> String {
 async fn auto_calibrate(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
-) -> Result<()> {
+) -> ProviderExecutionResult<()> {
     if let Some(elem_threshold) = calibrate_elemwise(provider, cfg).await.transpose()? {
         if elem_threshold != usize::MAX {
             cfg.binary_min_elems = elem_threshold;
@@ -2300,7 +2301,7 @@ async fn auto_calibrate(
 async fn calibrate_elemwise(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
-) -> Option<Result<usize>> {
+) -> Option<ProviderExecutionResult<usize>> {
     let sizes = [256usize, 1_024, 4_096, 16_384, 65_536];
     for size in sizes {
         match compare_elemwise(provider, size, &mut cfg.cpu_elem_per_elem).await {
@@ -2317,7 +2318,7 @@ async fn compare_elemwise(
     provider: &'static dyn AccelProvider,
     elements: usize,
     cpu_cost_slot: &mut f64,
-) -> Result<Option<bool>> {
+) -> ProviderExecutionResult<Option<bool>> {
     if elements == 0 {
         return Ok(Some(false));
     }
@@ -2360,28 +2361,22 @@ async fn compare_elemwise(
         data: template_data.as_slice(),
         shape: template.shape.as_slice(),
     };
-    let ha = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
-    let hb = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
+    let ha = provider.upload(&view)?;
+    let hb = provider.upload(&view)?;
     let start = Instant::now();
     let hc = match provider.elem_add(&ha, &hb).await {
         Ok(h) => h,
-        Err(_) => {
-            let _ = provider.free(&ha);
-            let _ = provider.free(&hb);
-            return Ok(None);
-        }
+        Err(error) => return calibration_cleanup::operation_failed(error, [ha, hb]),
     };
     let gpu_time = start.elapsed();
-    let _ = provider.free(&ha);
-    let _ = provider.free(&hb);
-    let _ = provider.free(&hc);
+    calibration_cleanup::release([ha, hb, hc])?;
     Ok(Some(gpu_time < cpu_time))
 }
 
 async fn calibrate_reduction(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
-) -> Option<Result<usize>> {
+) -> Option<ProviderExecutionResult<usize>> {
     let sizes = [256usize, 1_024, 4_096, 16_384, 65_536];
     for size in sizes {
         match compare_reduction(provider, size, &mut cfg.cpu_reduction_per_elem).await {
@@ -2398,7 +2393,7 @@ async fn compare_reduction(
     provider: &'static dyn AccelProvider,
     elements: usize,
     cpu_cost_slot: &mut f64,
-) -> Result<Option<bool>> {
+) -> ProviderExecutionResult<Option<bool>> {
     let shape = vec![elements, 1];
     let template = match provider.precision() {
         ProviderPrecision::F64 => {
@@ -2430,25 +2425,21 @@ async fn compare_reduction(
         data: template_data.as_slice(),
         shape: template.shape.as_slice(),
     };
-    let h = provider.upload(&view).map_err(|e| anyhow!(e.to_string()))?;
+    let h = provider.upload(&view)?;
     let start = Instant::now();
     let out = match provider.reduce_sum(&h).await {
         Ok(hc) => hc,
-        Err(_) => {
-            provider.free(&h).ok();
-            return Ok(None);
-        }
+        Err(error) => return calibration_cleanup::operation_failed(error, [h]),
     };
     let gpu_time = start.elapsed();
-    let _ = provider.free(&h);
-    let _ = provider.free(&out);
+    calibration_cleanup::release([h, out])?;
     Ok(Some(gpu_time < cpu_time))
 }
 
 async fn calibrate_matmul(
     provider: &'static dyn AccelProvider,
     cfg: &mut ThresholdConfig,
-) -> Option<Result<usize>> {
+) -> Option<ProviderExecutionResult<usize>> {
     let dims = [32usize, 64, 96, 128, 192];
     for n in dims {
         match compare_matmul(provider, n, &mut cfg.cpu_matmul_per_flop).await {
@@ -2468,7 +2459,7 @@ async fn compare_matmul(
     provider: &'static dyn AccelProvider,
     n: usize,
     cpu_cost_slot: &mut f64,
-) -> Result<Option<bool>> {
+) -> ProviderExecutionResult<Option<bool>> {
     if n == 0 {
         return Ok(Some(false));
     }
@@ -2528,25 +2519,15 @@ async fn compare_matmul(
         data: data_b.as_slice(),
         shape: tb.shape.as_slice(),
     };
-    let ha = provider
-        .upload(&view_a)
-        .map_err(|e| anyhow!(e.to_string()))?;
-    let hb = provider
-        .upload(&view_b)
-        .map_err(|e| anyhow!(e.to_string()))?;
+    let ha = provider.upload(&view_a)?;
+    let hb = provider.upload(&view_b)?;
     let start = Instant::now();
     let hc = match provider.matmul(&ha, &hb).await {
         Ok(h) => h,
-        Err(_) => {
-            let _ = provider.free(&ha);
-            let _ = provider.free(&hb);
-            return Ok(None);
-        }
+        Err(error) => return calibration_cleanup::operation_failed(error, [ha, hb]),
     };
     let gpu_time = start.elapsed();
-    let _ = provider.free(&ha);
-    let _ = provider.free(&hb);
-    let _ = provider.free(&hc);
+    calibration_cleanup::release([ha, hb, hc])?;
     Ok(Some(gpu_time < cpu_time))
 }
 
