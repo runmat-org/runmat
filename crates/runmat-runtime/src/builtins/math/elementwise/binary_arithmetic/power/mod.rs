@@ -23,17 +23,17 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Elementwise,
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[ProviderHook::Binary {
-        name: "elem_pow",
-        commutative: false,
-    }],
+    provider_hooks: &[
+        ProviderHook::Custom("classify_real_power"),
+        ProviderHook::Custom("real_power_in_domain"),
+    ],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers execute floating element-wise pow when both operands reside on the device; integer operands gather for exact exponent-domain validation and arithmetic.",
+    notes: "Real floating pairs are classified at their actual broadcast positions before domain-preserving provider power; integer operands retain the exact host exponent-domain and arithmetic path.",
 };
 
 #[runmat_macros::register_fusion_spec(
