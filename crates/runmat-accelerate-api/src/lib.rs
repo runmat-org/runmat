@@ -3139,7 +3139,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _handle: &GpuTensorHandle,
         _order: &[usize],
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("permute not supported by provider"))
+        Err(unsupported_provider_operation(
+            "permute not supported by provider",
+        ))
     }
     fn flip(&self, _handle: &GpuTensorHandle, _axes: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(unsupported_provider_operation(
@@ -3167,7 +3169,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _dim: usize,
         _spacing: f64,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("gradient_dim not supported by provider"))
+        Err(unsupported_provider_operation(
+            "gradient_dim not supported by provider",
+        ))
     }
     fn gradient_dim_with_coordinates(
         &self,
@@ -3175,8 +3179,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _dim: usize,
         _coordinates: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "gradient_dim_with_coordinates not supported by provider"
+        Err(unsupported_provider_operation(
+            "gradient_dim_with_coordinates not supported by provider",
         ))
     }
     /// Perform an in-place FFT along a zero-based dimension, optionally padding/truncating to `len`.
@@ -3559,7 +3563,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _dim: usize,
         _spacing: ProviderTrapezoidSpacing<'_>,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("cumtrapz_dim not supported by provider"))
+        Err(unsupported_provider_operation(
+            "cumtrapz_dim not supported by provider",
+        ))
     }
     fn cumprod_scan(
         &self,
@@ -3667,12 +3673,16 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Build a numeric tensor where NaNs in `a` are replaced with 0.0 (device side).
     fn map_nan_to_zero(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("map_nan_to_zero not supported by provider"))
+        Err(unsupported_provider_operation(
+            "map_nan_to_zero not supported by provider",
+        ))
     }
 
     /// Build a numeric mask tensor with 1.0 where value is not NaN and 0.0 where value is NaN.
     fn not_nan_mask(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("not_nan_mask not supported by provider"))
+        Err(unsupported_provider_operation(
+            "not_nan_mask not supported by provider",
+        ))
     }
 
     /// Generic fused reduction entrypoint.
@@ -4740,6 +4750,9 @@ pub struct ImageNormalizeDescriptor {
 fn default_image_normalize_clamp_zero() -> bool {
     true
 }
+
+#[cfg(test)]
+mod optional_provider_defaults_tests;
 
 #[cfg(test)]
 mod tests {
