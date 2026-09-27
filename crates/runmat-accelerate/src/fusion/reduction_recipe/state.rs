@@ -28,11 +28,16 @@ pub(super) fn source(
             "(bitcast<u32>(value) & 0x80000000u) != 0u",
         ),
         ProviderPrecision::F64 => (
-            "bitcast<f64>(vec2<u32>(0u, 0x7ff80000u))",
-            "(bitcast<vec2<u32>>(value).y & 0x80000000u) != 0u",
+            // Naga's WGSL frontend cannot bitcast between a scalar f64 and
+            // two u32 lanes. Extrema canonicalize NaNs; no payload is owed.
+            "f64(bitcast<f32>(0x7fc00000u))",
+            // The helper guards zero before this conversion. Both signed
+            // zeros are exactly representable in f32; no nonzero value or
+            // accumulator is narrowed to decide a comparison.
+            "(bitcast<u32>(f32(value)) & 0x80000000u) != 0u",
         ),
     };
-    let mut source = format!("struct RRPartial {{ value: {acc}, count: u32, flags: u32, }};\nfn rr_nan() -> {acc} {{ return {nan}; }}\nfn rr_negative(value: {acc}) -> bool {{ return {negative}; }}\nfn rr_empty() -> RRPartial {{ return RRPartial({acc}(0.0), 0u, 0u); }}\n");
+    let mut source = format!("struct RRPartial {{ value: {acc}, count: u32, flags: u32, }};\nfn rr_nan() -> {acc} {{ return {nan}; }}\nfn rr_negative_zero(value: {acc}) -> bool {{ if value != {acc}(0.0) {{ return false; }} return {negative}; }}\nfn rr_empty() -> RRPartial {{ return RRPartial({acc}(0.0), 0u, 0u); }}\n");
     if contract.identity {
         source.push_str(&format!("fn rr_sample(value: {acc}) -> RRPartial {{ return RRPartial(value, 1u, 1u); }}\nfn rr_combine(a: RRPartial, b: RRPartial) -> RRPartial {{ if (a.flags & 1u) != 0u {{ return a; }} return b; }}\nfn rr_finish(a: RRPartial) -> {out} {{ return {out}(a.value); }}\n"));
         return Ok(source);
@@ -47,11 +52,11 @@ pub(super) fn source(
         let (comparison, tie) = match (contract.operation, contract.ties) {
             (FusionReductionOperation::Minimum, FusionReductionTies::FirstWithNegativeZero) => (
                 "b.value < a.value",
-                "rr_negative(b.value) && !rr_negative(a.value)",
+                "rr_negative_zero(b.value) && !rr_negative_zero(a.value)",
             ),
             (FusionReductionOperation::Maximum, FusionReductionTies::FirstWithPositiveZero) => (
                 "b.value > a.value",
-                "!rr_negative(b.value) && rr_negative(a.value)",
+                "!rr_negative_zero(b.value) && rr_negative_zero(a.value)",
             ),
             _ => return Err(anyhow!("unsupported extrema tie policy")),
         };

@@ -294,8 +294,14 @@ fn every_pass_carries_nan_counts_validity_and_signed_zero_ties() {
         assert!(source.contains("if denominator == 0u"));
     }
     for (name, expected) in [
-        ("min", "rr_negative(b.value) && !rr_negative(a.value)"),
-        ("max", "!rr_negative(b.value) && rr_negative(a.value)"),
+        (
+            "min",
+            "rr_negative_zero(b.value) && !rr_negative_zero(a.value)",
+        ),
+        (
+            "max",
+            "!rr_negative_zero(b.value) && rr_negative_zero(a.value)",
+        ),
     ] {
         let extrema = recipe(
             name,
@@ -312,6 +318,45 @@ fn every_pass_carries_nan_counts_validity_and_signed_zero_ties() {
             assert!(source.contains(expected));
             assert!(source.contains("if (a.flags & 1u) == 0u"));
             assert!(source.contains("if (a.flags & 2u) != 0u"));
+        }
+    }
+}
+
+#[test]
+fn f64_zero_sign_encoding_is_exact_without_narrowing_nonzero_comparisons() {
+    // Independent IEEE bit-pattern oracle for the conversion used only after
+    // the shader's zero guard. This is not a GPU execution claim; the Naga
+    // matrix below validates the actual F64 shaders with the same helper.
+    for (bits, expected) in [(0u64, 0u32), (1u64 << 63, 1u32 << 31)] {
+        assert_eq!((f64::from_bits(bits) as f32).to_bits(), expected);
+    }
+    assert!((f32::from_bits(0x7fc00000) as f64).is_nan());
+    for name in ["min", "max"] {
+        let extrema = recipe(
+            name,
+            vec![array(false, &[25, 2])],
+            axes(name, Value::Num(1.0), false),
+            None,
+            config(),
+        );
+        for source in [
+            extrema.single_source(),
+            extrema.pass1_source(),
+            extrema.pass2_source(),
+        ] {
+            assert!(source.contains(
+                "if value != f64(0.0) { return false; } return (bitcast<u32>(f32(value))"
+            ));
+            assert!(source.contains("return f64(bitcast<f32>(0x7fc00000u))"));
+            assert!(!source.contains("bitcast<vec2<u32>>"));
+            assert!(!source.contains("bitcast<f64>"));
+            // Infinity and every nonzero comparison still use native F64
+            // operands, never the sign helper's temporary f32 zero.
+            assert!(source.contains(if name == "min" {
+                "b.value < a.value"
+            } else {
+                "b.value > a.value"
+            }));
         }
     }
 }
