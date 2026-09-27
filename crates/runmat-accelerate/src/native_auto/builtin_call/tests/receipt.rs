@@ -216,7 +216,7 @@ fn failing_cleanup_call(
         9271,
         1,
     ));
-    let mut uploads = super::super::ownership::OwnedUploads::new(provider, &[]).unwrap();
+    let mut uploads = super::super::ownership::OwnedUploads::new(&[]).unwrap();
     uploads.track(&discarded);
     uploads.track(&retained);
     let mut prepared = observed(probe, true, vec![]);

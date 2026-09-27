@@ -48,8 +48,8 @@ where
     runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
         prepared.begin_execution();
         let result = execute(prepared.take_operands()).await;
-        prepared.finish(&result)?;
-        result
+        let cleanup = prepared.finish(&result);
+        crate::runtime_error::complete_with_cleanup(result, cleanup)
     })
 }
 

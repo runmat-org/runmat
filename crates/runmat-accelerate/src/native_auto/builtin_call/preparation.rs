@@ -141,7 +141,7 @@ impl NativeAutoOffload {
         name: &str,
         args: &[Value],
         runtime: Option<&RuntimeContext>,
-    ) -> Result<PreparedBuiltinCall> {
+    ) -> ProviderExecutionResult<PreparedBuiltinCall> {
         if !self.enabled
             || (name.eq_ignore_ascii_case("double")
                 && self.provider.precision() != ProviderPrecision::F64)
@@ -160,7 +160,7 @@ impl NativeAutoOffload {
         args: &[Value],
         runtime: Option<&RuntimeContext>,
         operation: ArgumentOperation,
-    ) -> Result<PreparedBuiltinCall> {
+    ) -> ProviderExecutionResult<PreparedBuiltinCall> {
         let Some((evaluation, family, workload)) = operation.evaluate(self, args) else {
             return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
         };
@@ -204,7 +204,10 @@ impl NativeAutoOffload {
                         continue;
                     }
                     if uploads.is_none() {
-                        uploads = Some(super::ownership::OwnedUploads::new(self.provider, args)?);
+                        uploads = Some(
+                            super::ownership::OwnedUploads::new(args)
+                                .map_err(|error| ProviderExecutionError::from_source(*error))?,
+                        );
                     }
                     let uploads = uploads.as_mut().expect("initialized before upload");
                     *value = self.promote_tensor_protecting(

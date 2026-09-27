@@ -25,7 +25,7 @@ pub async fn accel_promote_binary(
     };
     Ok(promote_binary(mapped, a, b)
         .await
-        .map_err(|e| e.to_string())?)
+        .map_err(promotion_error)?)
 }
 
 #[cfg(not(feature = "native-accel"))]
@@ -45,10 +45,17 @@ pub async fn accel_promote_unary(op: AutoUnaryOp, value: &Value) -> Result<Value
     };
     Ok(promote_unary(mapped, value)
         .await
-        .map_err(|e| e.to_string())?)
+        .map_err(promotion_error)?)
 }
 
 #[cfg(not(feature = "native-accel"))]
 pub async fn accel_promote_unary(_op: AutoUnaryOp, value: &Value) -> Result<Value, RuntimeError> {
     Ok(value.clone())
+}
+
+#[cfg(feature = "native-accel")]
+fn promotion_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+    runmat_runtime::build_runtime_error(error.to_string())
+        .with_source(error)
+        .build()
 }

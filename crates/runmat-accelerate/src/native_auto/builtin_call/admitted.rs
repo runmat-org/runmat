@@ -154,9 +154,10 @@ pub(super) fn prepare_with(
     Ok(prepared)
 }
 
-fn preparation_error(error: impl std::fmt::Display) -> RuntimeError {
+fn preparation_error(error: ProviderExecutionError) -> RuntimeError {
     runmat_runtime::build_runtime_error(format!("prepare builtin args: {error}"))
         .with_identifier("RunMat:AccelerationOperationFailed")
+        .with_source(error)
         .build()
 }
 

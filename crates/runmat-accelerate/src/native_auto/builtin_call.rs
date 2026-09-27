@@ -35,9 +35,6 @@ impl BuiltinCallGuard {
     }
 
     fn finish(mut self, result: &Result<Value, RuntimeError>) -> PreparationResult<()> {
-        if let (Some(uploads), Ok(value)) = (self.uploads.as_mut(), result) {
-            uploads.adopt(value)?;
-        }
         // Release unused staging before sealing the candidate's publication.
         if let Some(uploads) = self.uploads.as_mut() {
             if let Err(error) = uploads.release() {
@@ -45,9 +42,12 @@ impl BuiltinCallGuard {
                 if let Some(observation) = self.observation.as_mut() {
                     observation.cleanup_failed();
                 }
-                // Preserve the body's result/error. Replacing a valid result
-                // could orphan its already-adopted resident outputs. Cleanup
-                // failure invalidates measurement, never trains success.
+                return Err(Box::new(
+                    runmat_runtime::build_runtime_error(error.to_string())
+                        .with_identifier("RunMat:AccelerationCleanupFailed")
+                        .with_source(error)
+                        .build(),
+                ));
             }
         }
         drop(self.uploads.take());
@@ -101,8 +101,8 @@ impl PreparedBuiltinCall {
         runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
             guard.begin_execution();
             let result = call(args).await;
-            guard.finish(&result).map_err(|error| *error)?;
-            result
+            let cleanup = guard.finish(&result).map_err(|error| *error);
+            runmat_runtime::runtime_error::complete_with_cleanup(result, cleanup)
         })
     }
 
@@ -122,7 +122,7 @@ async fn prepare_builtin_call(
     name: &str,
     args: &[Value],
     runtime: &RuntimeContext,
-) -> Result<PreparedBuiltinCall> {
+) -> ProviderExecutionResult<PreparedBuiltinCall> {
     prepare(name, args, Some(runtime)).await
 }
 
@@ -130,7 +130,7 @@ pub(super) async fn prepare(
     name: &str,
     args: &[Value],
     runtime: Option<&RuntimeContext>,
-) -> Result<PreparedBuiltinCall> {
+) -> ProviderExecutionResult<PreparedBuiltinCall> {
     // Canonical domains invoke their declared form after admission. RuntimeOwned
     // entries deliberately retain their own execution path, not legacy guessing.
     if runmat_builtins::builtin_catalog_primary_entry_by_name(name).is_some() {

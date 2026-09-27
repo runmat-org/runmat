@@ -25,6 +25,7 @@ use runmat_accelerate_api::{
     AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorView, ProviderOperationFamily,
     ProviderPrecision, ProviderRejectionCode, ProviderWorkload,
 };
+use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult};
 use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
@@ -979,7 +980,7 @@ impl NativeAutoOffload {
         value: &Value,
         threshold: usize,
         trace: Option<&PlacementTraceContext>,
-    ) -> Result<Value> {
+    ) -> ProviderExecutionResult<Value> {
         self.promote_tensor_protecting(value, threshold, trace, &[])
     }
 
@@ -989,7 +990,7 @@ impl NativeAutoOffload {
         threshold: usize,
         trace: Option<&PlacementTraceContext>,
         protected: &[&GpuTensorHandle],
-    ) -> Result<Value> {
+    ) -> ProviderExecutionResult<Value> {
         match value {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
@@ -1027,12 +1028,7 @@ impl NativeAutoOffload {
                             }
                             Ok(value)
                         }
-                        Err(error)
-                            if t.integer_storage().is_some()
-                                && runmat_accelerate_api::is_unsupported_provider_operation(
-                                    &error,
-                                ) =>
-                        {
+                        Err(error) if t.integer_storage().is_some() && error.is_unsupported() => {
                             if let Some(trace) = trace {
                                 trace.event(
                                     PlacementEventKind::Fallback,
@@ -1070,14 +1066,20 @@ impl NativeAutoOffload {
         }
     }
 
-    fn tensor_to_gpu(&self, tensor: &Tensor, protected: &[&GpuTensorHandle]) -> Result<Value> {
-        let mut handle =
-            runmat_runtime::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
-                self.provider,
-                tensor,
-                protected,
-            )?;
-        runmat_accelerate_api::mark_handle_automatic(&mut handle);
+    fn tensor_to_gpu(
+        &self,
+        tensor: &Tensor,
+        protected: &[&GpuTensorHandle],
+    ) -> ProviderExecutionResult<Value> {
+        let handle = runmat_runtime::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+            self.provider,
+            tensor,
+            protected,
+        )
+        .map_err(ProviderExecutionError::from_source)?;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .map_err(ProviderExecutionError::from_source)?;
         Ok(Value::GpuTensor(handle))
     }
 
@@ -1098,7 +1100,12 @@ impl NativeAutoOffload {
             && elements >= thresholds.small_batch_min_elems
     }
 
-    fn promote_binary(&self, op: BinaryOp, a: &Value, b: &Value) -> Result<(Value, Value)> {
+    fn promote_binary(
+        &self,
+        op: BinaryOp,
+        a: &Value,
+        b: &Value,
+    ) -> ProviderExecutionResult<(Value, Value)> {
         if !self.enabled {
             return Ok((a.clone(), b.clone()));
         }
@@ -1174,7 +1181,7 @@ impl NativeAutoOffload {
         }
     }
 
-    fn promote_unary(&self, op: UnaryOp, v: &Value) -> Result<Value> {
+    fn promote_unary(&self, op: UnaryOp, v: &Value) -> ProviderExecutionResult<Value> {
         if !self.enabled {
             return Ok(v.clone());
         }
@@ -1207,7 +1214,11 @@ impl NativeAutoOffload {
         }
     }
 
-    fn promote_reduction(&self, _op: ReductionOp, args: &[Value]) -> Result<Vec<Value>> {
+    fn promote_reduction(
+        &self,
+        _op: ReductionOp,
+        args: &[Value],
+    ) -> ProviderExecutionResult<Vec<Value>> {
         if !self.enabled || args.is_empty() {
             return Ok(args.to_vec());
         }
@@ -2780,7 +2791,11 @@ fn load_profile_cost_model() -> Option<ProfileCostModel> {
     None
 }
 
-pub async fn promote_binary(op: BinaryOp, a: &Value, b: &Value) -> Result<(Value, Value)> {
+pub async fn promote_binary(
+    op: BinaryOp,
+    a: &Value,
+    b: &Value,
+) -> ProviderExecutionResult<(Value, Value)> {
     if !auto_enabled() {
         return Ok((a.clone(), b.clone()));
     }
@@ -2791,7 +2806,7 @@ pub async fn promote_binary(op: BinaryOp, a: &Value, b: &Value) -> Result<(Value
     }
 }
 
-pub async fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
+pub async fn promote_unary(op: UnaryOp, value: &Value) -> ProviderExecutionResult<Value> {
     if !auto_enabled() {
         return Ok(value.clone());
     }
@@ -2802,7 +2817,10 @@ pub async fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
     }
 }
 
-pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>> {
+pub async fn prepare_builtin_args(
+    name: &str,
+    args: &[Value],
+) -> ProviderExecutionResult<Vec<Value>> {
     Ok(builtin_call::prepare(name, args, None).await?.into_args())
 }
 
@@ -2810,7 +2828,10 @@ pub fn is_sink(name: &str) -> bool {
     builtin_policy(name).map(|p| p.is_sink).unwrap_or(false)
 }
 
-pub async fn promote_reduction_args(op: ReductionOp, args: &[Value]) -> Result<Vec<Value>> {
+pub async fn promote_reduction_args(
+    op: ReductionOp,
+    args: &[Value],
+) -> ProviderExecutionResult<Vec<Value>> {
     if !auto_enabled() {
         return Ok(args.to_vec());
     }

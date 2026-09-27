@@ -5,6 +5,8 @@ pub use runmat_async::{
 
 #[cfg(test)]
 mod provider_sources;
+mod cleanup;
+pub use cleanup::complete_with_cleanup;
 
 /// Attach an owning provider failure without erasing a nested language error.
 /// Provider failures are not implicit gather-and-retry requests.

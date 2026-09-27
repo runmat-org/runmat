@@ -1,45 +1,54 @@
-//! Fresh argument uploads belong to one preparation/call until adopted by its result.
+//! Call-owned upload references; returned aliases retain their own leases.
 use super::*;
+use runmat_accelerate_api::allocation::GpuHandleReleaseError;
 use runmat_accelerate_api::GpuTensorHandle;
-use std::collections::BTreeSet;
 
+#[derive(Debug)]
 pub(super) struct UploadCleanupFailure {
-    failed: usize,
-    first: (u32, u64),
+    failures: Vec<GpuHandleReleaseError>,
 }
 impl UploadCleanupFailure {
     pub(super) fn report(&self, phase: &'static str) {
         // Fixed schema and bounded scalar fields, not arbitrary backend text.
         log::warn!(target: "runmat::placement::cleanup",
-            "event=prepared_operand_retirement_failed phase={} device_id={} buffer_id={} failed_allocations={}",
-            phase, self.first.0, self.first.1, self.failed);
+            "event=prepared_operand_retirement_failed phase={} failed_allocations={}",
+            phase, self.failures.len());
+    }
+}
+impl std::fmt::Display for UploadCleanupFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} prepared operand retirement failure(s)",
+            self.failures.len()
+        )
+    }
+}
+impl std::error::Error for UploadCleanupFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.failures.first().map(|error| error as _)
     }
 }
 
 pub(super) struct OwnedUploads {
-    provider: &'static dyn AccelProvider,
-    borrowed: BTreeSet<(u32, u64)>,
     borrowed_handles: Vec<GpuTensorHandle>,
     owned: Vec<GpuTensorHandle>,
 }
 
 impl OwnedUploads {
-    pub(super) fn new(
-        provider: &'static dyn AccelProvider,
-        args: &[Value],
-    ) -> PreparationResult<Self> {
-        let mut borrowed = BTreeSet::new();
-        let mut borrowed_handles = Vec::new();
+    pub(super) fn new(args: &[Value]) -> PreparationResult<Self> {
+        let mut borrowed_handles: Vec<GpuTensorHandle> = Vec::new();
         for value in args {
             runmat_runtime::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
-                if borrowed.insert((handle.device_id, handle.buffer_id)) {
+                if !borrowed_handles
+                    .iter()
+                    .any(|existing| existing.shares_allocation_with(handle))
+                {
                     borrowed_handles.push(handle.clone());
                 }
             })?;
         }
         Ok(Self {
-            provider,
-            borrowed,
             borrowed_handles,
             owned: Vec::new(),
         })
@@ -51,50 +60,38 @@ impl OwnedUploads {
 
     pub(super) fn track(&mut self, value: &Value) {
         runmat_runtime::dispatcher::visit_gpu_handles(value, &mut |handle| {
-            let identity = (handle.device_id, handle.buffer_id);
-            if !self.borrowed.contains(&identity)
+            if !self
+                .borrowed_handles
+                .iter()
+                .any(|borrowed| borrowed.shares_allocation_with(handle))
                 && !self
                     .owned
                     .iter()
-                    .any(|owned| (owned.device_id, owned.buffer_id) == identity)
+                    .any(|owned| owned.shares_allocation_with(handle))
             {
                 self.owned.push(handle.clone());
             }
         });
     }
 
-    pub(super) fn adopt(&mut self, value: &Value) -> PreparationResult<()> {
-        if self.owned.is_empty() {
-            return Ok(());
-        }
-        let mut retained = BTreeSet::new();
-        runmat_runtime::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
-            retained.insert((handle.device_id, handle.buffer_id));
-        })?;
-        self.owned
-            .retain(|handle| !retained.contains(&(handle.device_id, handle.buffer_id)));
-        Ok(())
-    }
-
     pub(super) fn transfer_all(mut self) {
         self.owned.clear();
     }
 
-    /// Attempt each remaining retirement once. A failed free may already have
-    /// released backend storage, so drain it even on error: Drop must not retry.
-    /// Failure persistence/teardown remains the captured provider's authority.
+    /// Release this call's references. Returned aliases retain their own lease;
+    /// only the last reference attempts physical retirement, exactly once.
     pub(super) fn release(&mut self) -> std::result::Result<(), UploadCleanupFailure> {
-        let mut failure: Option<UploadCleanupFailure> = None;
+        let mut failures = Vec::new();
         for handle in self.owned.drain(..) {
-            if self.provider.free(&handle).is_err() {
-                let failure = failure.get_or_insert(UploadCleanupFailure {
-                    failed: 0,
-                    first: (handle.device_id, handle.buffer_id),
-                });
-                failure.failed += 1; // bounded by the original owned Vec length
+            if let Err(error) = handle.release() {
+                failures.push(error);
             }
         }
-        failure.map_or(Ok(()), Err)
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(UploadCleanupFailure { failures })
+        }
     }
 }
 
@@ -105,5 +102,55 @@ impl Drop for OwnedUploads {
         if let Err(error) = self.release() {
             error.report("abandonment");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
+
+    #[test]
+    fn explicit_release_preserves_output_alias_and_retires_unused_upload() {
+        let owner = TestAllocationOwner::new();
+        for retain_output in [false, true] {
+            let allocation = owner
+                .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let value = Value::GpuTensor(allocation.handle);
+            let output = retain_output.then(|| value.clone());
+            let mut uploads = OwnedUploads::new(&[]).unwrap();
+            uploads.track(&value);
+            uploads.track(&value);
+            drop(value);
+            uploads.release().unwrap();
+            assert_eq!(allocation.probe.retirements(), usize::from(!retain_output));
+            drop(uploads);
+            drop(output);
+            assert_eq!(allocation.probe.retirements(), 1);
+        }
+    }
+
+    #[test]
+    fn borrowed_view_is_not_tracked_as_a_fresh_upload() {
+        let owner = TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(vec![2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let other_view = allocation
+            .handle
+            .with_view(runmat_accelerate_api::GpuTensorView::contiguous(vec![1, 2]))
+            .unwrap();
+        let mut uploads =
+            OwnedUploads::new(&[Value::GpuTensor(allocation.handle.clone())]).unwrap();
+        uploads.track(&Value::GpuTensor(other_view));
+        assert!(uploads.owned.is_empty());
+        uploads.release().unwrap();
+        drop(uploads);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }
