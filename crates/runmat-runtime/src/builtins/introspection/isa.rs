@@ -481,6 +481,10 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
+            let caller_alias = handle.clone();
+            let lease = handle.allocation_lease().downgrade();
+            let original = handle.wire_descriptor();
+            provider.reset_telemetry();
             let gpu_value = Value::GpuTensor(handle);
 
             let numeric = isa_builtin(gpu_value.clone(), Value::from("numeric")).expect("isa");
@@ -496,8 +500,11 @@ pub(crate) mod tests {
                 unreachable!()
             };
             let gpu_value = Value::GpuTensor(
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+                handle
+                    .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                    .expect("explicit immutable view"),
             );
+            drop(handle);
             assert_eq!(
                 isa_builtin(gpu_value.clone(), Value::from("gpuArray")).expect("explicit isa"),
                 Value::Bool(true)
@@ -506,6 +513,11 @@ pub(crate) mod tests {
                 isa_builtin(gpu_value, Value::from("numeric")).expect("wrapper category"),
                 Value::Bool(false)
             );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(caller_alias.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            drop(caller_alias);
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -513,13 +525,17 @@ pub(crate) mod tests {
     #[test]
     fn isa_gpu_logical_handles_preserve_automatic_transparency() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let logical_value = gpu_helpers::logical_gpu_value(handle.clone());
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1, 0],
+                    shape: &[2, 2],
+                })
+                .expect("logical producer upload");
+            let lease = handle.allocation_lease().downgrade();
+            let original = handle.wire_descriptor();
+            let logical_value =
+                gpu_helpers::logical_gpu_value(handle.clone()).expect("adopt logical output");
+            provider.reset_telemetry();
 
             let logical = isa_builtin(logical_value.clone(), Value::from("logical")).expect("isa");
             assert_eq!(logical, Value::Bool(true));
@@ -527,6 +543,11 @@ pub(crate) mod tests {
             let numeric =
                 isa_builtin(logical_value, Value::from("numeric")).expect("isa numeric false");
             assert_eq!(numeric, Value::Bool(false));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(handle.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            drop(handle);
+            assert!(lease.acquire().is_none());
         });
     }
 

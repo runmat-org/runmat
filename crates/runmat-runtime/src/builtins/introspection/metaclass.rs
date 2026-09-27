@@ -245,10 +245,22 @@ mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
+            let caller_alias = handle.clone();
+            let original = handle.wire_descriptor();
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
             assert_eq!(call(Value::GpuTensor(handle.clone())), "double");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit immutable view");
+            drop(handle);
+            let handle = explicit;
             assert_eq!(call(Value::GpuTensor(handle)), "gpuArray");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert_eq!(caller_alias.wire_descriptor(), original);
+            assert!(lease.acquire().is_some());
+            drop(caller_alias);
+            assert!(lease.acquire().is_none());
         });
     }
 }
