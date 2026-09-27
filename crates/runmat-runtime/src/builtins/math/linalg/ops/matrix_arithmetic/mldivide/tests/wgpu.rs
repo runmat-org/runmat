@@ -37,8 +37,8 @@ fn wgpu_tall_path_avoids_host_reupload_fallback() {
     let gpu_value = mldivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
         .expect("gpu mldivide");
     let gathered = test_support::gather(gpu_value).expect("gather");
-    let _ = provider.free(&ha);
-    let _ = provider.free(&hb);
+    ha.release().expect("release caller A");
+    hb.release().expect("release caller B");
 
     assert_eq!(gathered.shape, cpu_tensor.shape);
     for (gpu, cpu) in gathered
@@ -91,8 +91,8 @@ fn wgpu_square_path_avoids_host_reupload_fallback() {
     let gpu_value = mldivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
         .expect("gpu mldivide");
     let gathered = test_support::gather(gpu_value).expect("gather");
-    let _ = provider.free(&ha);
-    let _ = provider.free(&hb);
+    ha.release().expect("release caller A");
+    hb.release().expect("release caller B");
 
     assert_eq!(gathered.shape, cpu_tensor.shape);
     for (gpu, cpu) in gathered
@@ -144,8 +144,8 @@ fn wgpu_round_trip_matches_cpu() {
     let gpu_value = mldivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
         .expect("gpu mldivide");
     let gathered = test_support::gather(gpu_value).expect("gather");
-    let _ = provider.free(&ha);
-    let _ = provider.free(&hb);
+    ha.release().expect("release caller A");
+    hb.release().expect("release caller B");
 
     assert_eq!(gathered.shape, cpu_tensor.shape);
     for (gpu, cpu) in gathered

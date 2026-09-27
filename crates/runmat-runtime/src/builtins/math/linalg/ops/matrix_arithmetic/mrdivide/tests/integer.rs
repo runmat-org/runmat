@@ -49,8 +49,21 @@ fn resident_integer_result_restores_to_the_input_owner_not_the_ambient_provider(
         runmat_accelerate_api::HostIntegerDataOwned::U64(vec![4, 6])
     );
 
-    owner.free(&input_handle).expect("free input");
-    owner.free(&result_handle).expect("free result");
+    let input_weak = input_handle.downgrade();
+    let result_weak = result_handle.downgrade();
+    input_handle
+        .clone()
+        .release()
+        .expect("release temporary input alias");
+    let original = block_on(owner.download_integer(&input_handle)).expect("caller input survives");
+    assert_eq!(
+        original.data,
+        runmat_accelerate_api::HostIntegerDataOwned::U64(vec![8, 12])
+    );
+    input_handle.release().expect("release caller input");
+    result_handle.release().expect("release caller result");
+    assert!(input_weak.acquire().is_err());
+    assert!(result_weak.acquire().is_err());
 }
 
 #[test]

@@ -22,7 +22,8 @@ fn gpu_round_trip_matches_cpu() {
         let ha = provider
             .upload(&view_a)
             .expect("upload A")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit input view");
         let hb = provider.upload(&view_b).expect("upload B");
         let result = mldivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
             .expect("gpu mldivide");
@@ -31,10 +32,11 @@ fn gpu_round_trip_matches_cpu() {
         };
         assert!(runmat_accelerate_api::handle_is_explicit(output));
         let gathered = test_support::gather(result).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.numel(), cpu_tensor.numel());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -73,8 +75,8 @@ fn provider_telemetry_records_gpu_host_reupload_path() {
         assert!(telemetry.download_bytes > 0);
         assert_eq!(fallback_count(&telemetry, "mldivide:host_reupload"), 1);
 
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
     });
 }
 
@@ -107,7 +109,7 @@ fn scalar_gpu_input_falls_back_without_provider_solve_dispatch() {
         assert_eq!(fallback_count(&telemetry, "mldivide:host_reupload"), 0);
         assert!(telemetry.download_bytes > 0);
 
-        let _ = provider.free(&hs);
-        let _ = provider.free(&hm);
+        hs.release().expect("release caller input");
+        hm.release().expect("release caller input");
     });
 }

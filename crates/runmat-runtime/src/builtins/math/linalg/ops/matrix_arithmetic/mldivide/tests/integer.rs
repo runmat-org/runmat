@@ -34,8 +34,21 @@ fn resident_integer_result_restores_to_the_input_owner_not_the_ambient_provider(
         gathered.data,
         runmat_accelerate_api::HostIntegerDataOwned::U64(vec![4, 6])
     );
-    owner.free(&rhs_handle).expect("free rhs");
-    owner.free(&result_handle).expect("free result");
+    let input_weak = rhs_handle.downgrade();
+    let result_weak = result_handle.downgrade();
+    rhs_handle
+        .clone()
+        .release()
+        .expect("release temporary input alias");
+    let original = block_on(owner.download_integer(&rhs_handle)).expect("caller input survives");
+    assert_eq!(
+        original.data,
+        runmat_accelerate_api::HostIntegerDataOwned::U64(vec![8, 12])
+    );
+    rhs_handle.release().expect("release caller input");
+    result_handle.release().expect("release caller result");
+    assert!(input_weak.acquire().is_err());
+    assert!(result_weak.acquire().is_err());
 }
 
 #[test]
@@ -58,11 +71,9 @@ fn wgpu_integer_scalar_mldivide_preserves_all_classes_and_residency() {
             match mldivide_builtin(Value::Int(scalar), Value::GpuTensor(rhs_handle.clone())) {
                 Ok(Value::GpuTensor(handle)) => handle,
                 Ok(other) => {
-                    provider.free(&rhs_handle).expect("free RHS");
                     panic!("expected resident integer result, got {other:?}");
                 }
                 Err(error) => {
-                    provider.free(&rhs_handle).expect("free RHS");
                     panic!("WGPU integer scalar-left division failed: {error}");
                 }
             };
@@ -73,8 +84,8 @@ fn wgpu_integer_scalar_mldivide_preserves_all_classes_and_residency() {
         let result_type = runmat_accelerate_api::handle_integer_type(&result_handle);
         let gathered = test_support::gather(Value::GpuTensor(result_handle.clone()));
 
-        provider.free(&rhs_handle).expect("free RHS");
-        provider.free(&result_handle).expect("free result");
+        rhs_handle.release().expect("release RHS");
+        result_handle.release().expect("release result");
 
         assert!(owner_matches, "result must restore to the WGPU RHS owner");
         assert_eq!(result_type, Some(integer_element_type(&expected)));
@@ -130,8 +141,16 @@ fn solve_provider_uses_resident_owner_and_rejects_mixed_owners() {
     .expect_err("mixed provider solve must reject");
     assert_eq!(error.identifier(), Some("RunMat:gpu:MixedProviders"));
 
-    first.free(&first_handle).expect("free first");
-    second.free(&second_handle).expect("free second");
+    first_handle
+        .allocation_lease()
+        .validate_live()
+        .expect("first caller remains live");
+    second_handle
+        .allocation_lease()
+        .validate_live()
+        .expect("second caller remains live");
+    first_handle.release().expect("release first");
+    second_handle.release().expect("release second");
 }
 
 #[test]
