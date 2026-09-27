@@ -18,6 +18,17 @@ struct Provider {
 
 struct Defaults;
 
+fn ready_default<F: std::future::Future>(future: F) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    match future.as_mut().poll(&mut context) {
+        std::task::Poll::Ready(output) => output,
+        std::task::Poll::Pending => {
+            panic!("an unsupported default must resolve without device work")
+        }
+    }
+}
+
 #[test]
 fn polynomial_defaults_are_typed_unsupported() {
     let input = Provider::new(FillMode::Unsupported).allocation(&[1, 2]);
@@ -26,16 +37,16 @@ fn polynomial_defaults_are_typed_unsupported() {
         &Defaults.polyval(&input, &input, &options).unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
-        &futures::executor::block_on(Defaults.polyfit(&input, &input, 1, None)).unwrap_err()
+        &ready_default(Defaults.polyfit(&input, &input, 1, None)).unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
-        &futures::executor::block_on(Defaults.polyder_single(&input)).unwrap_err()
+        &ready_default(Defaults.polyder_single(&input)).unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
-        &futures::executor::block_on(Defaults.polyder_product(&input, &input)).unwrap_err()
+        &ready_default(Defaults.polyder_product(&input, &input)).unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
-        &futures::executor::block_on(Defaults.polyder_quotient(&input, &input)).unwrap_err()
+        &ready_default(Defaults.polyder_quotient(&input, &input)).unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
         &Defaults.polyint(&input, 0.0).unwrap_err()
@@ -51,18 +62,14 @@ fn structure_defaults_are_typed_unsupported() {
             .unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
-        &futures::executor::block_on(Defaults.ishermitian(
-            &input,
-            ProviderHermitianKind::Hermitian,
-            0.0
-        ))
-        .unwrap_err()
+        &ready_default(Defaults.ishermitian(&input, ProviderHermitianKind::Hermitian, 0.0))
+            .unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
         &Defaults.bandwidth(&input).unwrap_err()
     ));
     assert!(is_unsupported_provider_operation(
-        &futures::executor::block_on(Defaults.sym_rcm(&input)).unwrap_err()
+        &ready_default(Defaults.sym_rcm(&input)).unwrap_err()
     ));
 }
 impl AccelProvider for Defaults {
