@@ -12,13 +12,17 @@ pub(crate) enum HookProfile {
 }
 
 pub(crate) struct UnaryWork {
+    #[cfg(feature = "wgpu")]
     pub(crate) probe_elements: u64,
     /// Conservative sum of numeric intermediate, uniform and readback storage.
     /// This is an allocation bound, not a claim that every buffer overlaps.
     pub(crate) temporary_bytes: u64,
+    #[cfg(feature = "wgpu")]
     pub(crate) readback_bytes: u64,
+    #[cfg(feature = "wgpu")]
     pub(crate) readbacks: u32,
     pub(crate) dispatches: u32,
+    #[cfg(feature = "wgpu")]
     pub(crate) queue_submissions: u32,
     pub(crate) output: ProviderRepresentation,
 }
@@ -85,13 +89,17 @@ pub(crate) fn work(
         ProviderPrecision::F64 => 8,
     };
     let work = UnaryWork {
+        #[cfg(feature = "wgpu")]
         probe_elements: elements
             .checked_mul(u64::from(reductions))
             .ok_or((Code::ResourceLimit, "real_unary.work.overflow"))?,
         temporary_bytes: scalar_bytes * u64::from(reductions) * 2,
+        #[cfg(feature = "wgpu")]
         readback_bytes: scalar_bytes * u64::from(reductions),
+        #[cfg(feature = "wgpu")]
         readbacks: reductions,
         dispatches: reductions + 1,
+        #[cfg(feature = "wgpu")]
         queue_submissions: reductions + 1,
         output,
     };

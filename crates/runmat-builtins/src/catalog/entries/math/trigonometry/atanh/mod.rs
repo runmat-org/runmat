@@ -91,7 +91,8 @@ pub const ATANH_GPU_REAL_COMPLEX_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "atanh-gpu-real-complex-promotion",
         mode: BuiltinExtensionMode::RunMatOnly,
-        description: "atanh explicit gpuArray real input that requires complex output is a RunMat extension",
+        description:
+            "atanh explicit gpuArray real input that requires complex output is a RunMat extension",
         error_identifier: Some("RunMat:compatibility:AtanhGpuRealComplexPromotionExtension"),
     };
 pub const ATANH_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [

@@ -22,6 +22,7 @@ pub mod integer;
 pub mod interp1;
 pub mod kron;
 pub mod logical;
+pub(crate) mod logarithms;
 pub mod matmul;
 pub mod matmul_smallk;
 pub mod matmul_tall_skinny;

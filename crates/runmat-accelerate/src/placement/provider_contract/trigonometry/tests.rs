@@ -243,9 +243,18 @@ fn direct_complex_trigonometric_queries_match_interleaved_provider_values() {
 #[test]
 fn trigonometric_query_does_not_claim_range_dependent_or_compound_kernels() {
     let provider = InProcessProvider::new();
+    for name in ["asin", "acos", "acosh", "atanh"] {
+        let mut request = query(DirectUnary::Sin);
+        request.operation = ProviderOperationIdentity::new(name);
+        let result = validate(&provider, false, &request)
+            .expect("registered inverse operation must validate domain evidence");
+        assert!(
+            !result.is_supported(),
+            "{name} requires admitted domain evidence"
+        );
+    }
     for name in [
-        "asin", "acos", "acosh", "atanh", "sind", "cosd", "tand", "sinpi", "cospi", "deg2rad",
-        "rad2deg", "pol2cart",
+        "sind", "cosd", "tand", "sinpi", "cospi", "deg2rad", "rad2deg", "pol2cart",
     ] {
         let mut request = query(DirectUnary::Sin);
         request.operation = ProviderOperationIdentity::new(name);
