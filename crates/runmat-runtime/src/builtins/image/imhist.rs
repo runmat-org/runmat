@@ -16,7 +16,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::image::color::common;
 use crate::builtins::image::type_resolvers::imhist_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
