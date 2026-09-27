@@ -6,6 +6,13 @@ use runmat_accelerate_api::observation::{
 };
 
 #[derive(Default)]
+pub(in crate::native_auto) struct BuiltinPlanningContext<'a> {
+    pub(in crate::native_auto) runtime: Option<&'a RuntimeContext>,
+    pub(in crate::native_auto) preparation_program:
+        Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
+}
+
+#[derive(Default)]
 pub(in crate::native_auto) struct BuiltinObservationPlan {
     pub(in crate::native_auto) feedback: Option<Box<LocalPlacementFeedback>>,
     pub(in crate::native_auto) provider_query:
@@ -53,7 +60,7 @@ impl BuiltinCallObservation {
             if let ProviderObservationSupport::Observed(mut receipt) =
                 provider.begin_operation_observation(query)
             {
-                receipt.require_selected_execution();
+                receipt.require_provider_execution(provider.device_id(), query.operation.clone());
                 self.receipt = Some(receipt);
             }
         }

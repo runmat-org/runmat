@@ -16,8 +16,31 @@ impl WgpuProvider {
         query: &ProviderFeasibilityQuery,
         program: ProviderPreparationProgram<'_>,
     ) -> Option<ProviderPreparationSnapshot> {
+        let shader = match program {
+            ProviderPreparationProgram::Elementwise { shader } => shader,
+            ProviderPreparationProgram::FloatingCast { target } => {
+                let work = crate::placement::floating_cast_physical_work(self, query)?;
+                if work.target != target {
+                    return None;
+                }
+                let keys = if work.estimate.dispatches == Some(0) {
+                    vec![]
+                } else {
+                    let precision = |precision| match precision {
+                        runmat_accelerate_api::ProviderPrecision::F32 => NumericPrecision::F32,
+                        runmat_accelerate_api::ProviderPrecision::F64 => NumericPrecision::F64,
+                    };
+                    vec![PipelineRecipe::floating_cast(
+                        precision(work.source),
+                        precision(work.target),
+                        work.workgroup,
+                    )
+                    .key()]
+                };
+                return self.preparation_keys_snapshot("wgpu-floating-cast-preparation-v1", keys);
+            }
+        };
         let work = crate::placement::fusion_physical_work(self, query)?;
-        let ProviderPreparationProgram::Elementwise { shader } = program;
         let mut keys = Vec::new();
         if work.estimate.dispatches != Some(0) {
             let outputs = if query.outputs.len() == 1 {
@@ -67,14 +90,26 @@ impl WgpuProvider {
         // cache key is missing here. Repeated casts compile a shared key once.
         keys.sort_unstable();
         keys.dedup();
-        let identity = Digest::sha256(
-            serde_json::to_vec(&(
-                "wgpu-fusion-preparation-v1",
-                self.workgroup_config.scalar,
-                &keys,
-            ))
-            .ok()?,
-        );
+        self.preparation_keys_snapshot("wgpu-fusion-preparation-v1", keys)
+    }
+
+    fn preparation_keys_snapshot(
+        &self,
+        kind: &str,
+        keys: Vec<u64>,
+    ) -> Option<ProviderPreparationSnapshot> {
+        let identity =
+            Digest::sha256(serde_json::to_vec(&(kind, self.workgroup_config.scalar, &keys)).ok()?);
+        // No shader is used by a same-type alias or empty cast. Cache contention
+        // cannot make that route's known zero preparation work unknown.
+        if keys.is_empty() {
+            return Some(ProviderPreparationSnapshot {
+                identity,
+                state: Some(CandidatePreparationState::Ready),
+                cold_pipelines: 0,
+                warm_pipelines: 0,
+            });
+        }
         let cache = self.fused_pipeline_cache.try_lock().ok();
         let (state, cold_pipelines, warm_pipelines) = match cache {
             Some(cache) => {

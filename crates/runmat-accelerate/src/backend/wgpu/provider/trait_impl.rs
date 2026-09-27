@@ -37,7 +37,15 @@ impl AccelProvider for WgpuProvider {
         {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
         }
-        crate::placement::provider_observation_capability(self, query)
+        let capability = crate::placement::provider_observation_capability(self, query);
+        if matches!(
+            capability,
+            runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported
+        ) {
+            crate::placement::floating_cast_observation_capability(self, query)
+        } else {
+            capability
+        }
     }
 
     fn begin_operation_observation(

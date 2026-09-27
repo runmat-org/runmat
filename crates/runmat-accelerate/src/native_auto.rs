@@ -1251,8 +1251,14 @@ impl NativeAutoOffload {
         values: &[&Value],
         workload: ProviderWorkload,
     ) -> (DecisionEvaluation, Option<ProviderRejectionCode>) {
-        let (evaluation, rejection, _) =
-            self.plan_operation(evaluation, operation, family, values, workload, None);
+        let (evaluation, rejection, _) = self.plan_operation(
+            evaluation,
+            operation,
+            family,
+            values,
+            workload,
+            Default::default(),
+        );
         (evaluation, rejection)
     }
 
@@ -1263,7 +1269,7 @@ impl NativeAutoOffload {
         family: ProviderOperationFamily,
         values: &[&Value],
         workload: ProviderWorkload,
-        runtime: Option<&runmat_runtime::context::RuntimeContext>,
+        planning: builtin_call::observation::BuiltinPlanningContext<'_>,
     ) -> (
         DecisionEvaluation,
         Option<ProviderRejectionCode>,
@@ -1308,14 +1314,14 @@ impl NativeAutoOffload {
                 outputs: Vec::new(),
                 workload,
                 preparation: CandidatePreparationState::Warm,
-                preparation_program: None,
+                preparation_program: planning.preparation_program,
                 cpu,
                 provider_fallback,
                 required_upload_bytes: None,
                 required_download_bytes: 0,
                 downstream_materialization: false,
                 compare_profitability: true,
-                runtime,
+                runtime: planning.runtime,
             },
             PlacementPolicy::default(),
         ) {

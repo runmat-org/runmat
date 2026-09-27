@@ -16,6 +16,11 @@ mod session;
 pub(crate) use provider_contract::matmul::scalar_work_units as matmul_scalar_work_units;
 
 #[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::floating_conversion::{
+    observation_capability as floating_cast_observation_capability,
+    physical_work as floating_cast_physical_work,
+};
+#[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::observation_capability as provider_observation_capability;
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::physical_work as fusion_physical_work;

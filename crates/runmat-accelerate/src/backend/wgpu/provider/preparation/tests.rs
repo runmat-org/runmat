@@ -4,6 +4,79 @@ use runmat_accelerate_api::{
     ProviderStorage,
 };
 
+fn single_query(source: ProviderElementType, shape: &[u64]) -> ProviderFeasibilityQuery {
+    ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new(
+            runmat_builtins::SINGLE_CATALOG_ENTRY.identity.name,
+        ),
+        family: ProviderOperationFamily::Elementwise,
+        inputs: vec![ProviderRepresentation {
+            element_type: source,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            residency: ProviderResidency::Device,
+            shape: shape.to_vec(),
+        }],
+        outputs: vec![],
+        workload: Default::default(),
+    }
+}
+
+#[test]
+#[ignore = "requires actual WGPU device; execute explicitly for qualification"]
+fn actual_single_alias_and_empty_inventory_are_ready_even_when_cache_is_locked() {
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    let lock = provider.fused_pipeline_cache.lock().unwrap();
+    for shape in [&[1, 8][..], &[0, 2, 3][..]] {
+        let query = single_query(ProviderElementType::F32, shape);
+        let snapshot = provider
+            .preparation_snapshot(
+                &query,
+                ProviderPreparationProgram::FloatingCast {
+                    target: runmat_accelerate_api::ProviderPrecision::F32,
+                },
+            )
+            .unwrap();
+        assert_eq!(snapshot.state, Some(CandidatePreparationState::Ready));
+        assert_eq!((snapshot.cold_pipelines, snapshot.warm_pipelines), (0, 0));
+    }
+    drop(lock);
+}
+
+#[test]
+#[ignore = "requires an actual shader-f64 adapter; execute explicitly for qualification"]
+fn actual_single_cast_execution_populates_exact_preparation_key() {
+    use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    assert_eq!(
+        provider.precision(),
+        runmat_accelerate_api::ProviderPrecision::F64
+    );
+    let query = single_query(ProviderElementType::F64, &[1, 2]);
+    let program = ProviderPreparationProgram::FloatingCast {
+        target: runmat_accelerate_api::ProviderPrecision::F32,
+    };
+    let cold = provider.preparation_snapshot(&query, program).unwrap();
+    assert_eq!(cold.state, Some(CandidatePreparationState::Cold));
+    assert_eq!(cold.cold_pipelines, 1);
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.25, 16_777_217.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let output = provider
+        .floating_cast_exec(&input, NumericPrecision::F32)
+        .unwrap();
+    let warm = provider.preparation_snapshot(&query, program).unwrap();
+    assert_eq!(warm.identity, cold.identity);
+    assert_eq!(warm.state, Some(CandidatePreparationState::Warm));
+    assert_eq!((warm.cold_pipelines, warm.warm_pipelines), (0, 1));
+    provider.free(&input).unwrap();
+    provider.free(&output).unwrap();
+}
+
 #[test]
 #[ignore = "requires actual WGPU device; execute explicitly for qualification"]
 fn actual_cache_queries_are_read_only_and_lazy_hits_reuse_exact_pipeline() {

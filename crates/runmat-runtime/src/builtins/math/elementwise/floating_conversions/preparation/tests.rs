@@ -41,6 +41,11 @@ impl RuntimeAccelerationService for Service {
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
         let admission = request.admission();
         assert!(["double", "single"].contains(&admission.binding.builtin.name));
+        assert_eq!(
+            request.form().id.0,
+            u16::from(admission.binding.builtin.name == "single" && admission.signature == 0),
+            "the admitted owner selects the stable plain form explicitly; overlapping legacy signatures must not select the first form"
+        );
         assert_eq!(request.form().data_arguments, &[0]);
         assert_eq!(
             admission.input_count,

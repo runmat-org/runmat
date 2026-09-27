@@ -65,6 +65,11 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         value,
         signature,
         input_count,
+        runmat_builtins::BuiltinPreparationFormId(if matches!(template, OutputTemplate::Default) {
+            1
+        } else {
+            0
+        }),
         |value| execution::convert(value, template, borrowed),
     )
     .await

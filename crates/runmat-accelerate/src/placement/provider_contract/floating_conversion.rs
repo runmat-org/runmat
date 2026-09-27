@@ -4,6 +4,9 @@ use runmat_builtins::{DOUBLE_CATALOG_ENTRY, SINGLE_CATALOG_ENTRY};
 
 #[cfg(test)]
 mod tests;
+mod work;
+#[cfg(feature = "wgpu")]
+pub(crate) use work::{observation_capability, physical_work};
 
 pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
     snapshot.operations.extend(
@@ -21,13 +24,26 @@ pub(super) fn validate(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
-    let target = if query.operation.0 == DOUBLE_CATALOG_ENTRY.identity.name {
-        ProviderElementType::F64
+    let target = target(query)?;
+    validate_target(provider, wgpu, query, target)
+}
+
+fn target(query: &ProviderFeasibilityQuery) -> Option<ProviderElementType> {
+    if query.operation.0 == DOUBLE_CATALOG_ENTRY.identity.name {
+        Some(ProviderElementType::F64)
     } else if query.operation.0 == SINGLE_CATALOG_ENTRY.identity.name {
-        ProviderElementType::F32
+        Some(ProviderElementType::F32)
     } else {
-        return None;
-    };
+        None
+    }
+}
+
+fn validate_target(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+    target: ProviderElementType,
+) -> Option<ProviderFeasibility> {
     let reject = |code, reason| Some(ProviderFeasibility::rejected(code, reason));
     if query.family != ProviderOperationFamily::Elementwise {
         return reject(
@@ -89,7 +105,13 @@ pub(super) fn validate(
         );
     }
     let mut complete = query.clone();
-    complete.outputs = vec![output];
+    // Same-type WGPU casts publish an alias registration, not a second physical
+    // payload. Output descriptor consistency was checked above.
+    complete.outputs = if wgpu && input.element_type == target {
+        vec![]
+    } else {
+        vec![output]
+    };
     let mut snapshot = dense_capability_snapshot(provider, 1, &[]);
     append(&mut snapshot);
     // This operation has genuinely typed F32 output on an F64 owner. Do not
@@ -109,22 +131,25 @@ pub(super) fn validate(
     {
         // InProcess executes synchronously on CPU; WGPU same-type casts only
         // register a fresh handle sharing the original allocation.
-        resources.dispatches = Some(if !wgpu || elements == 0 || input.element_type == target {
-            0
+        if wgpu {
+            let Some(work) = work::build(provider, query, target) else {
+                return reject(
+                    ProviderRejectionCode::UnknownResourceEstimate,
+                    "floating_cast.physical_work.unknown",
+                );
+            };
+            *resources = work.estimate;
+            if snapshot
+                .max_allocation_bytes
+                .is_some_and(|limit| resources.transient_bytes.is_some_and(|bytes| bytes > limit))
+            {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "floating_cast.physical_work.limit",
+                );
+            }
         } else {
-            #[cfg(feature = "wgpu")]
-            {
-                let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
-                    * u64::from(crate::backend::wgpu::config::effective_workgroup_size());
-                elements.div_ceil(capacity) as u32
-            }
-            #[cfg(not(feature = "wgpu"))]
-            {
-                1
-            }
-        });
-        if wgpu && input.element_type == target {
-            resources.transient_bytes = resources.output_bytes;
+            resources.dispatches = Some(0);
         }
     }
     Some(feasibility)

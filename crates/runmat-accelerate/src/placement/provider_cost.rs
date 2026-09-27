@@ -9,6 +9,10 @@ use runmat_execution::{
 
 use super::local::transfer_prior_ns;
 
+#[cfg(test)]
+#[path = "provider_cost/floating_cast_tests.rs"]
+mod floating_cast_tests;
+
 #[cfg(all(test, feature = "wgpu"))]
 mod digit_tests;
 
@@ -20,6 +24,8 @@ pub(crate) fn wgpu_cost_estimate(
     query: &ProviderCostQuery,
 ) -> ProviderCostEstimate {
     let matrix_work = super::provider_contract::matmul::physical_work(provider, &query.operation);
+    let cast_work =
+        super::provider_contract::floating_conversion::physical_work(provider, &query.operation);
     let fusion_work =
         super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
     let fusion_empty = fusion_work
@@ -157,6 +163,7 @@ pub(crate) fn wgpu_cost_estimate(
         || digit_work.is_some()
         || remainder_work.is_some()
         || matrix_work.is_some()
+        || cast_work.is_some()
         || query.operation.workload.scalar_work_units.is_some()
     {
         None
@@ -292,6 +299,28 @@ pub(crate) fn wgpu_cost_estimate(
     let compile_or_prepare_ns = if remainder_work
         .as_ref()
         .is_some_and(|work| work.dispatches == 0)
+    {
+        0
+    } else {
+        compile_or_prepare_ns
+    };
+    let execution_ns = cast_work
+        .as_ref()
+        .map_or(execution_ns, |work| work.scalar_visits.saturating_mul(2));
+    let allocations = cast_work
+        .as_ref()
+        .map_or(allocations, |work| work.allocations);
+    let queue_submissions = cast_work.as_ref().map_or(queue_submissions, |work| {
+        work.estimate.dispatches.unwrap_or(0)
+    });
+    let scratch_bytes = cast_work
+        .as_ref()
+        .map_or(scratch_bytes, |work| work.scratch_bytes);
+    let upload_bytes =
+        upload_bytes.saturating_add(cast_work.as_ref().map_or(0, |work| work.uniform_bytes));
+    let compile_or_prepare_ns = if cast_work
+        .as_ref()
+        .is_some_and(|work| work.estimate.dispatches == Some(0))
     {
         0
     } else {

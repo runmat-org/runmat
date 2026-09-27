@@ -19,6 +19,7 @@ macro_rules! define_floating_conversion_contract {
         $upper:literal,
         $class:expr,
         $preparation_requirement:expr,
+        $preparation_forms:expr,
         $documentation:expr,
         $output_description:literal,
         $gpu_storage_description:literal,
@@ -156,6 +157,17 @@ macro_rules! define_floating_conversion_contract {
         const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
         const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 
+        // Form 0 retains its original meaning and signature coverage. New
+        // audited routes use fresh IDs rather than reinterpret serialized facts.
+        const DEFAULT_PREPARATION_FORM: crate::BuiltinPreparationForm = crate::BuiltinPreparationForm {
+            id: crate::BuiltinPreparationFormId(0),
+            binding_variant: "default",
+            signatures: &[0, 1],
+            data_arguments: &[0],
+            operation: crate::BuiltinPreparationOperation::Unary,
+            provider_requirement: $preparation_requirement,
+        };
+
         pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },
@@ -177,14 +189,7 @@ macro_rules! define_floating_conversion_contract {
                 capabilities: &[],
             },
             placement: BuiltinPlacementContract {
-                preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
-                    id: crate::BuiltinPreparationFormId(0),
-                    binding_variant: "default",
-                    signatures: &[0, 1],
-                    data_arguments: &[0],
-                    operation: crate::BuiltinPreparationOperation::Unary,
-                    provider_requirement: $preparation_requirement,
-                }]),
+                preparation: crate::BuiltinOperandPreparation::Forms($preparation_forms),
                 portability: BuiltinPortability::NativeAndWasm,
                 accelerator: BuiltinAcceleratorPolicy::Optional,
                 residency: BuiltinResidencyPolicy::Dynamic,

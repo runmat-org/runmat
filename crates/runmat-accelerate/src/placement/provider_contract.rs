@@ -9,7 +9,7 @@ use runmat_value::{NumericDType, Value};
 
 mod arithmetic;
 mod complex_components;
-mod floating_conversion;
+pub(crate) mod floating_conversion;
 pub(crate) mod fusion_elementwise;
 mod integer_conversion;
 mod logical;

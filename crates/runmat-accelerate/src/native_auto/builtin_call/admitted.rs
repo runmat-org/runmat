@@ -109,6 +109,15 @@ pub(super) fn prepare_with(
     }
     let operation = match request.form().operation {
         Operation::Unary => ArgumentOperation::Unary(UnaryOp::Generic),
+        Operation::FloatingCast(class) => ArgumentOperation::FloatingCast(match class {
+            runmat_types::NumericClass::Single => ProviderPrecision::F32,
+            runmat_types::NumericClass::Double => ProviderPrecision::F64,
+            _ => {
+                return Err(Box::new(preparation_error(
+                    "invalid admitted floating cast target",
+                )))
+            }
+        }),
         Operation::RealUnary(_) => ArgumentOperation::RealUnary(request.numerical_domain()),
         Operation::RoundDigits => ArgumentOperation::RoundDigits(request.numerical_domain()),
         Operation::FloatingRemainder(_) => {

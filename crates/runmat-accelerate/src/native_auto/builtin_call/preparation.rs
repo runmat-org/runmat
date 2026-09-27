@@ -8,6 +8,7 @@ pub(super) enum ArgumentOperation {
         requested_outputs: Option<u32>,
     },
     Unary(UnaryOp),
+    FloatingCast(ProviderPrecision),
     RealUnary(runmat_accelerate_api::NumericalDomainEvidence),
     RoundDigits(runmat_accelerate_api::NumericalDomainEvidence),
     FloatingRemainder(runmat_accelerate_api::NumericalDomainEvidence),
@@ -15,6 +16,16 @@ pub(super) enum ArgumentOperation {
 }
 
 impl ArgumentOperation {
+    fn preparation_program(
+        &self,
+    ) -> Option<runmat_accelerate_api::ProviderPreparationProgram<'static>> {
+        match self {
+            Self::FloatingCast(target) => Some(
+                runmat_accelerate_api::ProviderPreparationProgram::FloatingCast { target: *target },
+            ),
+            _ => None,
+        }
+    }
     fn for_call(name: &str, args: &[Value]) -> Option<Self> {
         let policy = builtin_policy(name)?;
         let has = |tag| policy.accel_tags.contains(&tag);
@@ -79,6 +90,10 @@ impl ArgumentOperation {
             ),
             Self::Unary(op) => (
                 auto.evaluate_unary(elements, *op, &args[0]),
+                ProviderOperationFamily::Elementwise,
+            ),
+            Self::FloatingCast(_) => (
+                auto.evaluate_unary(elements, UnaryOp::Generic, &args[0]),
                 ProviderOperationFamily::Elementwise,
             ),
             Self::RealUnary(evidence) | Self::RoundDigits(evidence) => {
@@ -159,7 +174,10 @@ impl NativeAutoOffload {
             family,
             &inputs,
             workload.clone(),
-            runtime,
+            super::observation::BuiltinPlanningContext {
+                runtime,
+                preparation_program: operation.preparation_program(),
+            },
         );
         let trace = record_decision(decision_entry(
             &identity,

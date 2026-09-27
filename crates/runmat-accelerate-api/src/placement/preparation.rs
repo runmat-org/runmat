@@ -11,7 +11,13 @@ pub struct ProviderElementwiseGeometry {
 
 #[derive(Clone, Copy, Debug)]
 pub enum ProviderPreparationProgram<'a> {
-    Elementwise { shader: &'a str },
+    Elementwise {
+        shader: &'a str,
+    },
+    /// Provider-owned cast recipe; controls/adaptation are not part of this route.
+    FloatingCast {
+        target: crate::ProviderPrecision,
+    },
 }
 
 /// A point-in-time cache observation. None means unavailable/contended, not

@@ -35,6 +35,8 @@ pub struct BuiltinPreparationForm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinPreparationOperation {
     Unary,
+    /// Plain, shape-preserving floating cast; no output prototype adaptation.
+    FloatingCast(runmat_types::NumericClass),
     /// A real unary route whose numerical domain is admitted by its owner.
     RealUnary(runmat_types::RealUnaryPredicate),
     /// Digit count and decimal/significant mode remain typed request controls.
@@ -83,6 +85,7 @@ impl BuiltinPreparationOperation {
     pub const fn data_arity(self) -> Option<usize> {
         match self {
             Self::Unary
+            | Self::FloatingCast(_)
             | Self::RealUnary(_)
             | Self::RoundDigits
             | Self::Transpose

@@ -101,6 +101,12 @@ impl AdmittedBuiltinPreparation {
         let form = matching_forms
             .next()
             .ok_or_else(|| invalid("unknown canonical preparation form"))?;
+        if matches!(form.operation, runmat_builtins::BuiltinPreparationOperation::FloatingCast(class) if !matches!(class, runmat_types::NumericClass::Single | runmat_types::NumericClass::Double))
+        {
+            return Err(invalid(
+                "floating cast preparation requires Single or Double target",
+            ));
+        }
         if matching_forms.next().is_some() {
             return Err(invalid("ambiguous canonical preparation form"));
         }

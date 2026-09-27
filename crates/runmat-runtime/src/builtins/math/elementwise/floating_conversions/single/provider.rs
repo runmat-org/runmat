@@ -51,6 +51,16 @@ pub(super) async fn single_from_gpu(
                         .any(|input| gpu_helpers::same_gpu_handle(&output, input)) =>
             {
                 runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+                if let Some(recorder) =
+                    runmat_accelerate_api::observation::current_provider_observation()
+                {
+                    recorder.confirm_provider_execution(
+                        provider.device_id(),
+                        &runmat_accelerate_api::ProviderOperationIdentity::new(
+                            runmat_builtins::SINGLE_CATALOG_ENTRY.identity.name,
+                        ),
+                    );
+                }
                 return Ok(gpu_helpers::resident_gpu_value(output));
             }
             Ok(output) => {
@@ -70,6 +80,11 @@ pub(super) async fn single_from_gpu(
         }
     }
 
+    if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation() {
+        recorder.execution_disposition(
+            runmat_accelerate_api::observation::ProviderExecutionDisposition::SharedRuntimeFallback,
+        );
+    }
     let gathered_result =
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
     gpu_helpers::restore_handle_metadata(&handle, &input_metadata);

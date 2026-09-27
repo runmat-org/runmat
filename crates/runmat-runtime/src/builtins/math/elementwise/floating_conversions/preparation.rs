@@ -14,6 +14,7 @@ pub(super) async fn execute<F, Fut>(
     value: Value,
     signature: usize,
     input_count: usize,
+    form: BuiltinPreparationFormId,
     body: F,
 ) -> BuiltinResult<Value>
 where
@@ -45,7 +46,7 @@ where
                 builtin: identity,
                 variant: "default",
             },
-            form: BuiltinPreparationFormId(0),
+            form,
             signature,
             input_count,
             requested_outputs: crate::output_count::current_output_count(),

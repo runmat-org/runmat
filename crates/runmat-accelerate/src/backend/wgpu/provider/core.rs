@@ -274,8 +274,7 @@ impl WgpuProvider {
         words: usize,
         label: &str,
     ) -> Result<Arc<wgpu::Buffer>> {
-        let bytes = (words as u64)
-            .checked_mul(std::mem::size_of::<u32>() as u64)
+        let bytes = crate::backend::wgpu_storage::raw_word_requested_bytes(words as u64)
             .ok_or_else(|| anyhow!("{label}: integer buffer size overflow"))?;
         if bytes > self.adapter_limits.max_buffer_size {
             return Err(anyhow!("{label}: integer buffer exceeds GPU limits"));
@@ -283,7 +282,7 @@ impl WgpuProvider {
         Ok(Arc::new(self.device.create_buffer(
             &wgpu::BufferDescriptor {
                 label: Some(label),
-                size: bytes.max(4),
+                size: bytes,
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,

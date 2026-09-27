@@ -14,6 +14,10 @@ pub fn validate_builtin_preparation(entry: &BuiltinCatalogEntry) -> Vec<&'static
     }
     let mut ids = BTreeSet::new();
     for form in forms {
+        if matches!(form.operation, BuiltinPreparationOperation::FloatingCast(class) if !matches!(class, runmat_types::NumericClass::Single | runmat_types::NumericClass::Double))
+        {
+            errors.push("floating cast preparation requires Single or Double target");
+        }
         if matches!(form.operation, BuiltinPreparationOperation::ElementwiseNary { data_arity } if data_arity < 2)
         {
             errors.push("N-ary preparation requires at least two data operands");

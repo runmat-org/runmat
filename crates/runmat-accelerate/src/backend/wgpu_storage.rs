@@ -1,6 +1,12 @@
 //! Physical integer buffer geometry shared by WGPU allocation and admission.
 use runmat_accelerate_api::{IntegerElementType, ProviderElementType, ProviderRepresentation};
 
+/// Requested raw-word storage, including WGPU's nonzero empty binding buffer.
+/// Payload length remains separate; this is not driver allocation granularity.
+pub(crate) fn raw_word_requested_bytes(words: u64) -> Option<u64> {
+    words.checked_mul(4).map(|bytes| bytes.max(4))
+}
+
 pub(crate) const fn integer_words_per_element(element_type: IntegerElementType) -> usize {
     match element_type {
         IntegerElementType::I64 | IntegerElementType::U64 => 2,

@@ -95,7 +95,7 @@ fn direct_receipt_preserves_query_and_includes_staging_before_body() {
     futures::executor::block_on(prepared.execute(|_| async {
         let recorder = current_provider_observation().unwrap();
         recorder.submission().unwrap().complete();
-        recorder.execution_disposition(ProviderExecutionDisposition::SelectedProvider);
+        recorder.confirm_provider_execution(provider.device_id(), &query.operation);
         provider.clock.0.store(180, Ordering::SeqCst);
         Ok(Value::Num(1.0)) // residency is deliberately not evidence
     }))
@@ -123,7 +123,7 @@ fn direct_unproven_or_fallback_execution_never_becomes_positive() {
             recorder.submission().unwrap().complete();
             if fallback {
                 recorder.execution_disposition(ProviderExecutionDisposition::SharedRuntimeFallback);
-                recorder.execution_disposition(ProviderExecutionDisposition::SelectedProvider);
+                recorder.confirm_provider_execution(provider.device_id(), &query().operation);
             }
             // Host fallback may restore a resident result. That cannot repair
             // the failed route evidence. No provider allocation is fabricated.
@@ -236,7 +236,7 @@ fn failed_cleanup_invalidates_success_without_orphaning_adopted_result_or_retryi
     let result = futures::executor::block_on(prepared.execute(|_| async {
         current_provider_observation()
             .unwrap()
-            .execution_disposition(ProviderExecutionDisposition::SelectedProvider);
+            .confirm_provider_execution(provider.device_id(), &query().operation);
         Ok(retained)
     }))
     .unwrap();

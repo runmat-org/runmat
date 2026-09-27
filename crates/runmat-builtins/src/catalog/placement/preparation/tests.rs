@@ -120,3 +120,36 @@ fn runtime_owned_does_not_change_accelerator_capability_and_forms_serialize() {
     entry.placement.accelerator = BuiltinAcceleratorPolicy::Forbidden;
     assert!(!validate_builtin_preparation(&entry).is_empty());
 }
+
+#[test]
+fn floating_cast_targets_are_typed_and_legacy_form_identity_is_preserved() {
+    assert!(errors(&[BuiltinPreparationForm {
+        operation: BuiltinPreparationOperation::FloatingCast(runmat_types::NumericClass::Single),
+        ..FORM
+    }])
+    .is_empty());
+    assert!(errors(&[BuiltinPreparationForm {
+        operation: BuiltinPreparationOperation::FloatingCast(runmat_types::NumericClass::Double),
+        ..FORM
+    }])
+    .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        operation: BuiltinPreparationOperation::FloatingCast(runmat_types::NumericClass::Int8),
+        ..FORM
+    }])
+    .is_empty());
+    let BuiltinOperandPreparation::Forms(forms) = SINGLE_CATALOG_ENTRY.placement.preparation else {
+        panic!("declared forms");
+    };
+    assert_eq!(forms.len(), 2);
+    assert_eq!(forms[0].id, BuiltinPreparationFormId(0));
+    assert_eq!(forms[0].signatures, &[0, 1]);
+    assert_eq!(forms[0].operation, BuiltinPreparationOperation::Unary);
+    assert_eq!(forms[1].id, BuiltinPreparationFormId(1));
+    assert_eq!(forms[1].signatures, &[0]);
+    assert_eq!(
+        forms[1].operation,
+        BuiltinPreparationOperation::FloatingCast(runmat_types::NumericClass::Single)
+    );
+    assert!(validate_builtin_preparation(&SINGLE_CATALOG_ENTRY).is_empty());
+}
