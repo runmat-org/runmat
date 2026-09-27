@@ -619,10 +619,11 @@ async fn range_gpu(
         return range_gpu_fallback(&handle, selection, nan_mode).await;
     }
 
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
         return range_gpu_fallback(&handle, selection, nan_mode).await;
     };
 
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let resolved = resolve_dims(handle.shape(), &selection)?;
 
     if should_use_global_reduce(handle.shape(), &selection, &resolved) {
@@ -679,24 +680,8 @@ async fn range_gpu_all(
     handle: &GpuTensorHandle,
 ) -> Option<GpuTensorHandle> {
     let min_handle = provider.reduce_min(handle).await.ok()?;
-    let max_handle = match provider.reduce_max(handle).await {
-        Ok(h) => h,
-        Err(_) => {
-            let _ = provider.free(&min_handle);
-            return None;
-        }
-    };
-    let diff = match provider.elem_sub(&max_handle, &min_handle).await {
-        Ok(h) => h,
-        Err(_) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return None;
-        }
-    };
-    let _ = provider.free(&min_handle);
-    let _ = provider.free(&max_handle);
-    Some(diff)
+    let max_handle = provider.reduce_max(handle).await.ok()?;
+    provider.elem_sub(&max_handle, &min_handle).await.ok()
 }
 
 async fn range_gpu_single_dim(
@@ -722,23 +707,15 @@ async fn range_gpu_single_dim(
             Err(_) => continue,
         };
         if min_result.values.shape() != expected_shape {
-            let _ = provider.free(&min_result.values);
-            let _ = provider.free(&min_result.indices);
             continue;
         }
         let max_result = match provider.reduce_max_dim(handle, candidate).await {
             Ok(res) => res,
             Err(_) => {
-                let _ = provider.free(&min_result.values);
-                let _ = provider.free(&min_result.indices);
                 continue;
             }
         };
         if max_result.values.shape() != expected_shape {
-            let _ = provider.free(&min_result.values);
-            let _ = provider.free(&min_result.indices);
-            let _ = provider.free(&max_result.values);
-            let _ = provider.free(&max_result.indices);
             continue;
         }
         let diff = match provider
@@ -747,17 +724,9 @@ async fn range_gpu_single_dim(
         {
             Ok(handle) => handle,
             Err(_) => {
-                let _ = provider.free(&min_result.values);
-                let _ = provider.free(&min_result.indices);
-                let _ = provider.free(&max_result.values);
-                let _ = provider.free(&max_result.indices);
                 continue;
             }
         };
-        let _ = provider.free(&min_result.values);
-        let _ = provider.free(&min_result.indices);
-        let _ = provider.free(&max_result.values);
-        let _ = provider.free(&max_result.indices);
         return Some(diff);
     }
     None
@@ -1059,6 +1028,10 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .map(|idx| idx + 1)
         .unwrap_or(1)
 }
+
+#[cfg(test)]
+#[path = "range/owning_tests.rs"]
+mod owning_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
