@@ -512,8 +512,9 @@ fn try_gpu_normrnd(
             let valid = !source.shares_allocation_with(&handle)
                 && handle.shape() == shape
                 && handle.device_id() == provider.device_id()
-                && gpu_helpers::exact_provider_for_handle(&handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && gpu_helpers::exact_provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
                 && runmat_accelerate_api::handle_storage(&handle)
                     == runmat_accelerate_api::GpuTensorStorage::Real
                 && runmat_accelerate_api::handle_precision(&handle) == Some(expected_precision)

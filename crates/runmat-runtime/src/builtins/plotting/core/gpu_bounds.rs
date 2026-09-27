@@ -44,8 +44,9 @@ impl Temporaries<'_> {
                 .try_fold(1usize, |n, d| n.checked_mul(*d))
                 == Some(1)
             && output.device_id() == self.provider.device_id()
-            && gpu::exact_provider_for_handle(&output)
-                .is_some_and(|owner| std::ptr::eq(owner, self.provider))
+            && gpu::exact_provider_for_handle(&output).is_some_and(|owner| {
+                runmat_accelerate_api::same_provider_instance(owner, self.provider)
+            })
             && gpu::numeric_descriptor_matches(&output, expected.element, GpuTensorStorage::Real)
             && gpu::gpu_class_metadata_matches(
                 &output,

@@ -72,9 +72,9 @@ pub(super) async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<B
     for value in values {
         let (shape, host) = match value {
             Value::GpuTensor(handle) => {
-                if !gpu_helpers::exact_provider_for_handle(handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
-                {
+                if !gpu_helpers::exact_provider_for_handle(handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                }) {
                     return Ok(None);
                 }
                 if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real {
@@ -171,7 +171,7 @@ pub(super) async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<B
     let valid = |handle: &GpuTensorHandle| {
         handle.shape() == output_shape
             && gpu_helpers::exact_provider_for_handle(handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider))
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
             && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
             && !runmat_accelerate_api::handle_is_transposed(handle)
             && gpu_helpers::gpu_class_metadata_matches(

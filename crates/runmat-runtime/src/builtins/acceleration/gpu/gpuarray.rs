@@ -911,7 +911,7 @@ fn validate_prepared_handle(
         DataClass::UInt64 => runmat_accelerate_api::NumericElementType::U64,
     };
     let owner_matches = gpu_helpers::exact_provider_for_handle(handle)
-        .is_some_and(|owner| std::ptr::eq(owner, provider));
+        .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider));
     if !owner_matches
         || handle.device_id() != provider.device_id()
         || handle.shape() != expected_shape
@@ -1097,7 +1097,7 @@ fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> BuiltinResult<()>
         || runmat_accelerate_api::handle_is_logical(&reshaped)
             != runmat_accelerate_api::handle_is_logical(handle)
         || !gpu_helpers::exact_provider_for_handle(&reshaped)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
     {
         return Err(gpu_helpers::reject_gpu_output(
             reshaped,

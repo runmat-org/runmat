@@ -506,7 +506,10 @@ impl HistWeightsInput {
                     runmat_accelerate_api::provider_for_handle(samples),
                 ) {
                     (Some(weights_provider), Some(samples_provider)) => {
-                        std::ptr::eq(weights_provider, samples_provider)
+                        runmat_accelerate_api::same_provider_instance(
+                            weights_provider,
+                            samples_provider,
+                        )
                     }
                     _ => false,
                 };

@@ -435,7 +435,7 @@ async fn filter2_gpu(
     let kernel_handle = match kernel_value {
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider))
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
             {
                 handle
             } else {

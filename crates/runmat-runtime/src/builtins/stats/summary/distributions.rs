@@ -2661,7 +2661,9 @@ pub mod icdf {
                 let current = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
                     super::normal_error("icdf", "icdf: resident input owner is unavailable")
                 })?;
-                if owner.is_some_and(|owner| !std::ptr::eq(owner, current)) {
+                if owner.is_some_and(|owner| {
+                    !runmat_accelerate_api::same_provider_instance(owner, current)
+                }) {
                     return Err(super::normal_error(
                         "icdf",
                         "icdf: resident inputs must share one exact provider",
@@ -3719,8 +3721,11 @@ mod tests {
                 panic!("expected resident output")
             };
             assert_eq!(output_handle.device_id(), source.device_id());
-            assert!(gpu_helpers::exact_provider_for_handle(output_handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                gpu_helpers::exact_provider_for_handle(output_handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             assert!(runmat_accelerate::fusion_residency::is_resident(&source));
             let gathered = test_support::gather(output).expect("gather tinv output");
             assert_eq!(gathered.materialize_f64(), vec![0.0]);
@@ -4385,8 +4390,11 @@ mod tests {
                 panic!("expected resident output");
             };
             assert_eq!(output_handle.device_id(), source.device_id());
-            assert!(gpu_helpers::exact_provider_for_handle(output_handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                gpu_helpers::exact_provider_for_handle(output_handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             assert!(runmat_accelerate::fusion_residency::is_resident(&source));
             let gathered =
                 crate::builtins::common::test_support::gather(output).expect("gather output");
@@ -4460,8 +4468,11 @@ mod tests {
             let Value::GpuTensor(output) = automatic else {
                 panic!("expected resident automatic output")
             };
-            assert!(gpu_helpers::exact_provider_for_handle(&output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                gpu_helpers::exact_provider_for_handle(&output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
 
             let source = source
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)

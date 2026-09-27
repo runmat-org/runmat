@@ -1411,8 +1411,9 @@ fn tensor_to_gpu(
     let valid = !uploaded.shares_allocation_with(prototype)
         && uploaded.device_id() == prototype.device_id()
         && uploaded.shape() == expected_shape
-        && gpu_helpers::exact_provider_for_handle(&uploaded)
-            .is_some_and(|uploaded_owner| std::ptr::eq(uploaded_owner, owner))
+        && gpu_helpers::exact_provider_for_handle(&uploaded).is_some_and(|uploaded_owner| {
+            runmat_accelerate_api::same_provider_instance(uploaded_owner, owner)
+        })
         && runmat_accelerate_api::handle_storage(&uploaded) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_integer_type(&uploaded) == expected_integer
         && runmat_accelerate_api::handle_precision(&uploaded) == expected_precision
@@ -2738,8 +2739,11 @@ pub(crate) mod tests {
             let Value::GpuTensor(output) = &result else {
                 panic!("expected GPU tensor result, got {result:?}");
             };
-            assert!(gpu_helpers::exact_provider_for_handle(output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                gpu_helpers::exact_provider_for_handle(output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             assert_eq!(
                 runmat_accelerate_api::handle_precision(output),
                 Some(runmat_accelerate_api::ProviderPrecision::F64)
@@ -2773,8 +2777,11 @@ pub(crate) mod tests {
             let Value::GpuTensor(output) = &result else {
                 panic!("expected resident integer output");
             };
-            assert!(gpu_helpers::exact_provider_for_handle(output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                gpu_helpers::exact_provider_for_handle(output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(output),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
