@@ -20,15 +20,8 @@ async fn provider() -> WgpuProvider {
     provider
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
-#[cfg_attr(
-    not(target_arch = "wasm32"),
-    ignore = "requires an actual WGPU adapter; run explicitly with --ignored"
-)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
-async fn fft_debug_scope_retains_validation_source_and_balances_scopes() {
-    let provider = provider().await;
-    let (layout, pipeline) = provider
+fn scope_test_pipeline(provider: &WgpuProvider) -> (wgpu::BindGroupLayout, wgpu::ComputePipeline) {
+    provider
         .with_emission(|emission, _| {
             let layout =
                 emission
@@ -56,7 +49,18 @@ async fn fft_debug_scope_retains_validation_source_and_balances_scopes() {
             );
             (layout, pipeline)
         })
-        .unwrap();
+        .unwrap()
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    ignore = "requires an actual WGPU adapter; run explicitly with --ignored"
+)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
+async fn fft_debug_scope_retains_validation_source_and_balances_scopes() {
+    let provider = provider().await;
+    let (layout, pipeline) = scope_test_pipeline(&provider);
     let prepare = |workgroups| {
         let layout = &layout;
         let pipeline = &pipeline;
@@ -101,6 +105,66 @@ async fn fft_debug_scope_retains_validation_source_and_balances_scopes() {
         .fft_dispatch_with_debug(false, "normal-after-error", prepare(1))
         .await
         .unwrap();
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen_test::wasm_bindgen_test(async)]
+async fn suspended_browser_fft_scope_can_be_cancelled_before_promise_delivery() {
+    use std::{
+        cell::Cell,
+        future::Future,
+        task::{Context, Poll},
+    };
+
+    let provider = provider().await;
+    let (layout, pipeline) = scope_test_pipeline(&provider);
+    let preparations = Cell::new(0usize);
+    let prepare = |emission: &WgpuEmission<'_>| {
+        preparations.set(preparations.get() + 1);
+        let bind = emission
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("fft-cancelled-scope-bind"),
+                layout: &layout,
+                entries: &[],
+            });
+        Ok((&pipeline, bind, 1))
+    };
+    let mut pending = Box::pin(provider.fft_dispatch_with_debug(
+        true,
+        "cancelled-before-scope-delivery",
+        prepare,
+    ));
+    let waker = futures::task::noop_waker();
+    // No JS event-loop yield occurs between production submission, polling the
+    // detached popErrorScope promises, and cancellation. Native may resolve
+    // immediately; this is deliberately a browser-only suspension witness.
+    assert!(matches!(
+        pending.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    assert_eq!(
+        preparations.get(),
+        1,
+        "production dispatch was actually entered"
+    );
+    drop(pending);
+    // Cancellation cannot retain the exclusive emission permit. The dispatch
+    // helper publishes no tensor handles; its temporary bind group and popped
+    // receipt are dropped here, while WGPU owns any submitted command resources.
+    provider
+        .access
+        .with_shared(|_| ())
+        .expect("cancelled receipt released access");
+    provider
+        .fft_dispatch_with_debug(true, "valid-after-pending-cancellation", prepare)
+        .await
+        .expect("later debug scope must resolve without stale scope errors");
+    provider
+        .fft_dispatch_with_debug(false, "shared-after-pending-cancellation", prepare)
+        .await
+        .expect("normal emission remains usable after scope cancellation");
+    assert_eq!(preparations.get(), 3);
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]

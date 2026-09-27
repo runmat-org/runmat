@@ -25,14 +25,18 @@ struct Provider {
     owner: TestAllocationOwner,
     calls: AtomicUsize,
     fail_after: usize,
+    suspend_second: bool,
     partials: Mutex<Vec<RetirementProbe>>,
     unsupported: bool,
     source: Mutex<Option<RetirementProbe>>,
     downloads: AtomicUsize,
 }
 impl Provider {
-    fn fft(&self, input: &GpuTensorHandle) -> ProviderExecutionResult<GpuTensorHandle> {
+    async fn fft(&self, input: &GpuTensorHandle) -> ProviderExecutionResult<GpuTensorHandle> {
         let pass = self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.suspend_second && pass == 1 {
+            return std::future::pending().await;
+        }
         if self.unsupported {
             return Err(unsupported_provider_operation("fixture FFT unsupported").into());
         }
@@ -105,7 +109,7 @@ impl AccelProvider for Provider {
         _: Option<usize>,
         _: usize,
     ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.fft(input) })
+        Box::pin(async move { self.fft(input).await })
     }
     fn ifft_dim<'a>(
         &'a self,
@@ -113,7 +117,7 @@ impl AccelProvider for Provider {
         _: Option<usize>,
         _: usize,
     ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.fft(input) })
+        Box::pin(async move { self.fft(input).await })
     }
     fn uniform_spectral_estimate<'a>(
         &'a self,
@@ -140,6 +144,7 @@ fn check_failure(name: &str, fail_after: usize) {
         owner: TestAllocationOwner::new(),
         calls: AtomicUsize::new(0),
         fail_after,
+        suspend_second: false,
         partials: Mutex::new(Vec::new()),
         unsupported: false,
         source: Mutex::new(None),
@@ -219,6 +224,7 @@ fn typed_unsupported_runs_existing_host_fft_without_replaying_provider() {
         owner: TestAllocationOwner::new(),
         calls: AtomicUsize::new(0),
         fail_after: 0,
+        suspend_second: false,
         partials: Mutex::new(Vec::new()),
         unsupported: true,
         source: Mutex::new(None),
@@ -274,4 +280,67 @@ fn typed_unsupported_runs_existing_host_fft_without_replaying_provider() {
             .retirements(),
         1
     );
+}
+
+#[test]
+fn cancellation_during_second_fft_pass_retires_only_execution_owned_partial() {
+    use std::{
+        future::Future,
+        task::{Context, Poll},
+    };
+    for name in ["fft2", "fftn", "ifft2", "ifftn"] {
+        let provider = Box::leak(Box::new(Provider {
+            owner: TestAllocationOwner::new(),
+            calls: AtomicUsize::new(0),
+            fail_after: usize::MAX,
+            suspend_second: true,
+            partials: Mutex::new(Vec::new()),
+            unsupported: false,
+            source: Mutex::new(None),
+            downloads: AtomicUsize::new(0),
+        }));
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider
+            .owner
+            .allocate_zeroed(vec![4, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let args = vec![Value::GpuTensor(input.handle.clone())];
+        let mut future = Box::pin(runmat_runtime::call_builtin_async(name, &args));
+        let waker = futures::task::noop_waker();
+        assert!(matches!(
+            future.as_mut().poll(&mut Context::from_waker(&waker)),
+            Poll::Pending
+        ));
+        assert_eq!(
+            provider.calls.load(Ordering::SeqCst),
+            2,
+            "{name}: second pass entered"
+        );
+        {
+            let partials = provider.partials.lock().unwrap();
+            assert_eq!(partials.len(), 1);
+            assert_eq!(
+                partials[0].retirements(),
+                0,
+                "{name}: first output remains owned across suspension"
+            );
+        }
+        drop(future);
+        assert_eq!(
+            provider.partials.lock().unwrap()[0].retirements(),
+            1,
+            "{name}: cancellation retires first output exactly once"
+        );
+        assert_eq!(
+            provider.calls.load(Ordering::SeqCst),
+            2,
+            "{name}: no replay on cancellation"
+        );
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        input.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(input.probe.retirements(), 0);
+        drop(args);
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
+    }
 }
