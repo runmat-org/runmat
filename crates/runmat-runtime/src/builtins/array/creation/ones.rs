@@ -1,8 +1,8 @@
 //! MATLAB-compatible `ones` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{
-    GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView, IntegerElementType,
-};
+use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
+#[cfg(test)]
+use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -580,30 +580,14 @@ async fn ones_gpu(shape: &[usize], template: OutputTemplate) -> crate::BuiltinRe
         )
         .map_err(|error| builtin_error(format!("ones: {error}")))?,
         OutputTemplate::Logical => {
-            let tensor =
-                tensor::ones(shape).map_err(|error| builtin_error(format!("ones: {error}")))?;
-            let gpu = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| builtin_error(format!("ones: {error}")))?;
-            let mut gpu = validate_constructor_gpu_output(
-                "ones",
-                provider,
-                gpu,
-                shape,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-                Some(provider.precision()),
-                None,
-                true,
-            )
-            .map_err(builtin_error)?;
-            runmat_accelerate_api::mark_handle_explicit(&mut gpu);
-            return Ok(Value::GpuTensor(gpu));
+            return super::resident_constant::logical(provider, shape, true, &[], "ones")
+                .map(Value::GpuTensor);
         }
         OutputTemplate::GpuArray(_) | OutputTemplate::Like(_) => {
             return Err(builtin_error("ones: invalid gpuArray class specification"));
         }
     };
-    let output = gpu_helpers::upload_tensor(provider, &host)
-        .map_err(|error| builtin_error(format!("ones: {error}")))?;
+    let output = gpu_helpers::upload_tensor(provider, &host)?;
     let (precision, integer) = if let Some(storage) = host.integer_storage() {
         (None, Some(integer_element_type(storage)))
     } else {
@@ -613,7 +597,7 @@ async fn ones_gpu(shape: &[usize], template: OutputTemplate) -> crate::BuiltinRe
         };
         (Some(precision), None)
     };
-    let mut output = validate_constructor_gpu_output(
+    let output = validate_constructor_gpu_output(
         "ones",
         provider,
         output,
@@ -622,9 +606,7 @@ async fn ones_gpu(shape: &[usize], template: OutputTemplate) -> crate::BuiltinRe
         precision,
         integer,
         false,
-    )
-    .map_err(builtin_error)?;
-    runmat_accelerate_api::mark_handle_explicit(&mut output);
+    )?;
     Ok(Value::GpuTensor(output))
 }
 
@@ -769,171 +751,8 @@ fn ones_complex_integer_like(
         .map_err(|e| builtin_error(format!("ones: {e}")))
 }
 
-#[async_recursion::async_recursion(?Send)]
 async fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
-        let prototype = integer_storage_prototype_from_element_type(integer_type);
-        let storage = prototype.ones_like(tensor::element_count(shape));
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-            let view = integer_tensor_view(&storage, shape);
-            if let Ok(gpu) = provider.upload_integer(&view) {
-                if let Ok(gpu) = validate_constructor_gpu_output(
-                    "ones",
-                    provider,
-                    gpu,
-                    shape,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
-                    None,
-                    Some(integer_type),
-                    false,
-                ) {
-                    return Ok(Value::GpuTensor(gpu));
-                }
-            }
-        }
-        return Err(builtin_error(
-            "ones: provider cannot preserve explicit integer gpuArray output",
-        ));
-    }
-
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-        if runmat_accelerate_api::handle_storage(handle)
-            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-        {
-            let dtype = match runmat_accelerate_api::handle_precision(handle)
-                .unwrap_or_else(|| provider.precision())
-            {
-                runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-                runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-            };
-            let tensor = ComplexTensor::from_f64_values_with_dtype(
-                vec![(1.0, 0.0); tensor::element_count(shape)],
-                shape.to_vec(),
-                dtype,
-            )
-            .map_err(|error| builtin_error(format!("ones: {error}")))?;
-            if let Ok(gpu) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
-                let precision = runmat_accelerate_api::handle_precision(handle)
-                    .unwrap_or_else(|| provider.precision());
-                if let Ok(gpu) = validate_constructor_gpu_output(
-                    "ones",
-                    provider,
-                    gpu,
-                    shape,
-                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-                    Some(precision),
-                    None,
-                    false,
-                ) {
-                    return Ok(Value::GpuTensor(gpu));
-                }
-            }
-            return Err(builtin_error(
-                "ones: provider cannot preserve explicit complex gpuArray output",
-            ));
-        }
-        let attempt = if handle.shape() == shape {
-            provider.ones_like(handle)
-        } else {
-            provider.ones(shape)
-        };
-        if let Ok(gpu) = attempt {
-            let precision = runmat_accelerate_api::handle_precision(handle)
-                .unwrap_or_else(|| provider.precision());
-            if let Ok(gpu) = validate_constructor_gpu_output(
-                "ones",
-                provider,
-                gpu,
-                shape,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-                Some(precision),
-                None,
-                false,
-            ) {
-                return Ok(Value::GpuTensor(gpu));
-            }
-        }
-
-        if let Ok(zero_handle) = provider.zeros(shape) {
-            let add_result = provider.scalar_add(&zero_handle, 1.0);
-            let _ = provider.free(&zero_handle);
-            if let Ok(filled) = add_result {
-                let precision = runmat_accelerate_api::handle_precision(handle)
-                    .unwrap_or_else(|| provider.precision());
-                if let Ok(filled) = validate_constructor_gpu_output(
-                    "ones",
-                    provider,
-                    filled,
-                    shape,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
-                    Some(precision),
-                    None,
-                    false,
-                ) {
-                    return Ok(Value::GpuTensor(filled));
-                }
-            }
-        }
-
-        if let Ok(host) = tensor::ones_with_dtype(
-            shape,
-            match provider.precision() {
-                runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-                runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-            },
-        ) {
-            if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
-                let precision = runmat_accelerate_api::handle_precision(handle)
-                    .unwrap_or_else(|| provider.precision());
-                if let Ok(gpu) = validate_constructor_gpu_output(
-                    "ones",
-                    provider,
-                    gpu,
-                    shape,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
-                    Some(precision),
-                    None,
-                    false,
-                ) {
-                    return Ok(Value::GpuTensor(gpu));
-                }
-            }
-        }
-    }
-
-    Err(builtin_error(
-        "ones: provider cannot preserve explicit gpuArray output",
-    ))
-}
-
-fn integer_storage_prototype_from_element_type(element_type: IntegerElementType) -> IntegerStorage {
-    match element_type {
-        IntegerElementType::I8 => IntegerStorage::I8(Vec::new()),
-        IntegerElementType::I16 => IntegerStorage::I16(Vec::new()),
-        IntegerElementType::I32 => IntegerStorage::I32(Vec::new()),
-        IntegerElementType::I64 => IntegerStorage::I64(Vec::new()),
-        IntegerElementType::U8 => IntegerStorage::U8(Vec::new()),
-        IntegerElementType::U16 => IntegerStorage::U16(Vec::new()),
-        IntegerElementType::U32 => IntegerStorage::U32(Vec::new()),
-        IntegerElementType::U64 => IntegerStorage::U64(Vec::new()),
-    }
-}
-
-fn integer_tensor_view<'a>(
-    storage: &'a IntegerStorage,
-    shape: &'a [usize],
-) -> HostIntegerTensorView<'a> {
-    let data = match storage {
-        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-    };
-    HostIntegerTensorView { data, shape }
+    super::resident_constant::like(handle, shape, super::resident_constant::Constant::One)
 }
 
 fn keyword_of(value: &Value) -> Option<String> {
