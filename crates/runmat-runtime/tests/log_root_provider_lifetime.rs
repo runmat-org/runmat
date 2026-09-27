@@ -1,52 +1,99 @@
 use futures::{executor::block_on, task::noop_waker};
-use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle, HostTensorView,
-    ProviderPrecision, ThreadProviderGuard,
+    test_support::{RetirementProbe, TestAllocationOwner},
+    AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle, GpuTensorStorage,
+    HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned, HostTensorOwned,
+    HostTensorView, ThreadProviderGuard,
 };
 use runmat_value::Value;
 use std::{
     future::Future,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     task::{Context, Poll},
 };
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug)]
 enum Fault {
-    #[default]
     PendingReduction,
     PendingDownload,
     FailedDownload,
     Alias,
-    MissingStorage,
+    WrongStorage,
     PendingUnary,
     MalformedUnary,
 }
 
-#[derive(Default)]
+struct Record {
+    id: u64,
+    probe: RetirementProbe,
+}
+
 struct State {
-    fault: Fault,
-    temporary: Option<GpuTensorHandle>,
-    freed: Vec<u64>,
+    // Probes retain the actual fixture owner, not an owning tensor lease.
+    // Recording a returned handle here would keep the temporary alive.
+    records: Vec<Record>,
     calls: usize,
 }
 
 struct Provider {
-    inner: InProcessProvider,
+    owner: TestAllocationOwner,
+    fault: Fault,
     state: Mutex<State>,
 }
 
 impl Provider {
+    fn allocate(
+        &self,
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(data),
+            shape,
+            storage,
+        })?;
+        self.state.lock().unwrap().records.push(Record {
+            id: allocation.handle.buffer_id(),
+            probe: allocation.probe,
+        });
+        Ok(allocation.handle)
+    }
+
+    fn read(&self, handle: &GpuTensorHandle) -> anyhow::Result<HostTensorOwned> {
+        let probe = self
+            .state
+            .lock()
+            .unwrap()
+            .records
+            .iter()
+            .find(|record| record.id == handle.buffer_id())
+            .ok_or_else(|| anyhow::anyhow!("fixture received unknown allocation"))?
+            .probe
+            .clone();
+        let data = probe.with_data(handle, |data| match data {
+            HostNumericDataView::F64(data) => data.to_vec(),
+            _ => panic!("this fixture allocates actual F64 storage only"),
+        })?;
+        Ok(HostTensorOwned {
+            data,
+            shape: handle.shape().to_vec(),
+            storage: runmat_accelerate_api::handle_storage(handle),
+        })
+    }
+
     fn unary<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if matches!(self.state.lock().unwrap().fault, Fault::PendingUnary) {
-                runmat_accelerate_api::set_handle_logical(input, true);
+            if matches!(self.fault, Fault::PendingUnary) {
                 return std::future::pending().await;
             }
-            let mut output = self.inner.unary_sqrt(input).await?;
-            self.state.lock().unwrap().temporary = Some(output.clone());
-            output.descriptor.storage = None;
-            Ok(output)
+            // A lawful allocation with the wrong operation result shape:
+            // immutable descriptors cannot be forged to omit storage.
+            self.allocate(vec![0.0], vec![1, 1], GpuTensorStorage::Real)
+                .map(|output| {
+                    assert_ne!(output.shape(), input.shape());
+                    output
+                })
         })
     }
 }
@@ -83,70 +130,61 @@ impl AccelProvider for Provider {
         self.unary(input)
     }
     fn device_id(&self) -> u32 {
-        self.inner.device_id()
+        self.owner.device_id()
     }
     fn device_info(&self) -> String {
-        self.inner.device_info()
-    }
-    fn precision(&self) -> ProviderPrecision {
-        self.inner.precision()
+        "owning log/root lifetime fixture".into()
     }
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.inner.upload(view)
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.state.lock().unwrap().freed.push(handle.buffer_id);
-        self.inner.free(handle)
+        self.allocate(
+            view.data.to_vec(),
+            view.shape.to_vec(),
+            GpuTensorStorage::Real,
+        )
     }
     fn reduce_min<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let fault = {
-                let mut state = self.state.lock().unwrap();
-                state.calls += 1;
-                state.fault
-            };
-            if matches!(fault, Fault::PendingReduction) {
-                runmat_accelerate_api::set_handle_logical(input, true);
-                return std::future::pending().await;
+            self.state.lock().unwrap().calls += 1;
+            match self.fault {
+                Fault::PendingReduction => return std::future::pending().await,
+                Fault::Alias => return input.with_view(input.view().clone()).map_err(Into::into),
+                Fault::WrongStorage => {
+                    return self.allocate(
+                        vec![1.0, 0.0],
+                        vec![1, 1],
+                        GpuTensorStorage::ComplexInterleaved,
+                    )
+                }
+                _ => {}
             }
-            if matches!(fault, Fault::Alias) {
-                return Ok(input.clone());
-            }
-            let mut output = self.inner.reduce_min(input).await?;
-            self.state.lock().unwrap().temporary = Some(output.clone());
-            if matches!(fault, Fault::MissingStorage) {
-                output.descriptor.storage = None;
-            }
-            Ok(output)
+            let minimum = self.read(input)?.data.into_iter().reduce(f64::min).unwrap();
+            self.allocate(vec![minimum], vec![1, 1], GpuTensorStorage::Real)
         })
     }
     fn download<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
-            let fault = self.state.lock().unwrap().fault;
-            match fault {
+            match self.fault {
                 Fault::PendingDownload => std::future::pending().await,
                 Fault::FailedDownload => anyhow::bail!("injected probe download failure"),
-                _ => self.inner.download(input).await,
+                _ => self.read(input),
             }
         })
     }
 }
 
 fn fixture(fault: Fault) -> (&'static Provider, GpuTensorHandle) {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
-        inner: InProcessProvider::new(),
-        state: Mutex::default(),
-    });
-    *provider.state.lock().unwrap() = State {
+    let provider = Box::leak(Box::new(Provider {
+        owner: TestAllocationOwner::new(),
         fault,
-        ..State::default()
-    };
+        state: Mutex::new(State {
+            records: Vec::new(),
+            calls: 0,
+        }),
+    }));
     let input = provider
-        .inner
         .upload(&HostTensorView {
             data: &[1.0, 4.0],
             shape: &[1, 2],
@@ -166,12 +204,12 @@ fn logarithm_root_and_gammaln_probe_lifetimes_through_dispatch() {
             Fault::PendingDownload,
             Fault::FailedDownload,
             Fault::Alias,
-            Fault::MissingStorage,
+            Fault::WrongStorage,
             Fault::PendingUnary,
             Fault::MalformedUnary,
         ] {
             if name == "gammaln" && matches!(fault, Fault::PendingUnary | Fault::MalformedUnary) {
-                continue; // This identity is a shared probe consumer, not a migrated unary body.
+                continue; // Probe coverage only for this identity.
             }
             let (provider, input) = fixture(fault);
             let _provider = ThreadProviderGuard::set(Some(provider));
@@ -196,41 +234,55 @@ fn logarithm_root_and_gammaln_probe_lifetimes_through_dispatch() {
                 fault,
                 Fault::PendingReduction | Fault::PendingDownload | Fault::PendingUnary
             ) {
-                assert!(matches!(result, Poll::Pending), "{name}");
+                assert!(
+                    matches!(result, Poll::Pending),
+                    "{name}/{fault:?}: {result:?}"
+                );
             } else {
-                assert!(matches!(result, Poll::Ready(Err(_))), "{name}");
+                assert!(
+                    matches!(result, Poll::Ready(Err(_))),
+                    "{name}/{fault:?}: {result:?}"
+                );
             }
             drop(call);
+            drop(result);
             assert!(!runmat_accelerate_api::handle_is_logical(&input), "{name}");
             let state = provider.state.lock().unwrap();
             assert_eq!(state.calls, 1, "{name}: no retry after provider failure");
-            assert!(!state.freed.contains(&input.buffer_id), "{name}");
-            if matches!(fault, Fault::MalformedUnary) {
+            assert_eq!(
+                state.records[0].probe.retirements(),
+                0,
+                "{name}: borrowed input"
+            );
+            let expected_temporaries = match fault {
+                Fault::PendingReduction | Fault::Alias => 0,
+                Fault::MalformedUnary => 2,
+                _ => 1,
+            };
+            assert_eq!(
+                state.records.len() - 1,
+                expected_temporaries,
+                "{name}/{fault:?}"
+            );
+            for record in &state.records[1..] {
                 assert_eq!(
-                    state.freed.len(),
-                    2,
-                    "{name}: reduction and rejected output"
-                );
-            }
-            if let Some(temporary) = &state.temporary {
-                assert_eq!(
-                    state
-                        .freed
-                        .iter()
-                        .filter(|id| **id == temporary.buffer_id)
-                        .count(),
+                    record.probe.retirements(),
                     1,
-                    "{name}"
+                    "{name}/{fault:?}: temporary {}",
+                    record.id
                 );
-            } else {
-                assert!(state.freed.is_empty(), "{name}");
             }
             drop(state);
+            assert_eq!(provider.read(&input).unwrap().data, [1.0, 4.0]);
+            drop(args);
+            drop(input);
             assert_eq!(
-                block_on(provider.inner.download(&input)).unwrap().data,
-                [1.0, 4.0]
+                provider.state.lock().unwrap().records[0]
+                    .probe
+                    .retirements(),
+                1,
+                "{name}: final input owner"
             );
-            provider.inner.free(&input).unwrap();
         }
     }
 }
