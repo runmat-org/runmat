@@ -44,16 +44,15 @@ fn bitshift_malformed_arity_precedes_compatibility_gates() {
 fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
 
-    let signed_value = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 74,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::I32,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let signed_value_allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::I32,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(gpu_helpers::exact_provider_for_handle(&signed_value_allocation.handle).is_none());
+    let signed_value = signed_value_allocation.handle.clone();
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(signed_value),
         Value::Num(1.0),
@@ -64,16 +63,15 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         Some("RunMat:compatibility:BitshiftGpuUndocumentedInputExtension")
     );
 
-    let unsigned_value = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 75,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::U8,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let unsigned_value_allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::U8,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(gpu_helpers::exact_provider_for_handle(&unsigned_value_allocation.handle).is_none());
+    let unsigned_value = unsigned_value_allocation.handle.clone();
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(unsigned_value.clone()),
         Value::Int(IntValue::U64(1)),
@@ -84,12 +82,15 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         Some("RunMat:compatibility:BitshiftGpuUndocumentedInputExtension")
     );
 
-    let double_value = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 76,
-        descriptor: Default::default(),
-    };
+    let double_value_allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(gpu_helpers::exact_provider_for_handle(&double_value_allocation.handle).is_none());
+    let double_value = double_value_allocation.handle.clone();
     let error = block_on(bitshift_builtin(vec![
         Value::GpuTensor(double_value),
         Value::Num(1.0),
@@ -110,6 +111,15 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         error.identifier(),
         Some("RunMat:compatibility:BitshiftGpuAssumedTypeExtension")
     );
+    assert_eq!(signed_value_allocation.probe.retirements(), 0);
+    drop(signed_value_allocation.handle);
+    assert_eq!(signed_value_allocation.probe.retirements(), 1);
+    assert_eq!(unsigned_value_allocation.probe.retirements(), 0);
+    drop(unsigned_value_allocation.handle);
+    assert_eq!(unsigned_value_allocation.probe.retirements(), 1);
+    assert_eq!(double_value_allocation.probe.retirements(), 0);
+    drop(double_value_allocation.handle);
+    assert_eq!(double_value_allocation.probe.retirements(), 1);
 }
 
 #[test]

@@ -1,16 +1,43 @@
 use futures::executor::block_on;
+use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
     NumericElementType, ProviderPrecision, ThreadProviderGuard,
 };
 use runmat_value::Value;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
-struct NoDownload(AtomicUsize);
-static PROVIDER: NoDownload = NoDownload(AtomicUsize::new(0));
+struct NoDownload {
+    downloads: AtomicUsize,
+    owner: TestAllocationOwner,
+    probes: Mutex<Vec<RetirementProbe>>,
+}
+impl NoDownload {
+    fn new() -> &'static Self {
+        Box::leak(Box::new(Self {
+            downloads: AtomicUsize::new(0),
+            owner: TestAllocationOwner::new(),
+            probes: Mutex::new(Vec::new()),
+        }))
+    }
+    fn source(&self) -> Value {
+        let allocation = self
+            .owner
+            .allocate_zeroed(vec![1, 2], NumericElementType::U8, GpuTensorStorage::Real)
+            .unwrap();
+        self.probes.lock().unwrap().push(allocation.probe);
+        Value::GpuTensor(allocation.handle)
+    }
+    fn assert_retired(&self) {
+        let probes = self.probes.lock().unwrap();
+        assert!(!probes.is_empty());
+        assert!(probes.iter().all(|probe| probe.retirements() == 1));
+    }
+}
 impl AccelProvider for NoDownload {
     fn device_id(&self) -> u32 {
-        u32::MAX - 220
+        self.owner.device_id()
     }
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
@@ -19,30 +46,36 @@ impl AccelProvider for NoDownload {
         "bitwise-admission".into()
     }
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        anyhow::bail!("unexpected upload")
+        panic!("invalid admission must not upload")
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.0.fetch_add(1, Ordering::Relaxed);
+        self.downloads.fetch_add(1, Ordering::Relaxed);
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        anyhow::bail!("borrowed handle must not be freed")
+    fn download_numeric<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async { anyhow::bail!("unexpected native download") })
     }
-}
-
-fn source() -> Value {
-    Value::GpuTensor(
-        GpuTensorHandle::new(vec![1, 2], PROVIDER.device_id(), 1)
-            .with_numeric_descriptor(NumericElementType::U8, GpuTensorStorage::Real),
-    )
+    fn download_integer<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelIntegerDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async { anyhow::bail!("unexpected integer download") })
+    }
 }
 
 #[test]
 fn invalid_host_controls_and_shapes_fail_before_resident_download() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
-    let _provider = ThreadProviderGuard::set(Some(&PROVIDER));
+    let provider = NoDownload::new();
+    let _provider = ThreadProviderGuard::set(Some(provider));
+    let source = || provider.source();
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    PROVIDER.0.store(0, Ordering::Relaxed);
+    provider.downloads.store(0, Ordering::Relaxed);
     for (name, args) in [
         ("bitand", vec![source(), Value::Num(1.5)]),
         (
@@ -71,15 +104,18 @@ fn invalid_host_controls_and_shapes_fail_before_resident_download() {
             block_on(crate::dispatcher::call_builtin_async(name, &args)).is_err(),
             "{name}"
         );
-        assert_eq!(PROVIDER.0.load(Ordering::Relaxed), 0, "{name}");
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0, "{name}");
     }
+    provider.assert_retired();
 }
 
 #[test]
 fn every_identity_rejects_excess_outputs_before_provider_access() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
-    let _provider = ThreadProviderGuard::set(Some(&PROVIDER));
-    PROVIDER.0.store(0, Ordering::Relaxed);
+    let provider = NoDownload::new();
+    let _provider = ThreadProviderGuard::set(Some(provider));
+    let source = || provider.source();
+    provider.downloads.store(0, Ordering::Relaxed);
     for name in [
         "bitcmp",
         "bitget",
@@ -99,7 +135,7 @@ fn every_identity_rejects_excess_outputs_before_provider_access() {
             name, &args, 2
         ))
         .is_err());
-        assert_eq!(PROVIDER.0.load(Ordering::Relaxed), 0, "{name}");
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0, "{name}");
         let args = if matches!(name, "bitcmp" | "swapbytes") {
             vec![Value::Num(3.0)]
         } else {
@@ -112,10 +148,13 @@ fn every_identity_rejects_excess_outputs_before_provider_access() {
             .unwrap();
         }
     }
+    provider.assert_retired();
 }
 
 #[test]
 fn assumed_type_gate_uses_parsed_text_for_all_direct_forms() {
+    let provider = NoDownload::new();
+    let source = || provider.source();
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let chars = || Value::CharArray(runmat_value::CharArray::new_row("uint8"));
     for (name, args) in [
@@ -133,6 +172,7 @@ fn assumed_type_gate_uses_parsed_text_for_all_direct_forms() {
             Some("RunMat:compatibility:DirectBitGpuAssumedTypeExtension")
         );
     }
+    provider.assert_retired();
 }
 
 #[test]

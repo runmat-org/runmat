@@ -60,16 +60,15 @@ fn bitor_malformed_arity_precedes_compatibility_gates() {
 
 #[test]
 fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
-    let signed = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 72,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::I32,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let signed_allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::I32,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(gpu_helpers::exact_provider_for_handle(&signed_allocation.handle).is_none());
+    let signed = signed_allocation.handle.clone();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(bitor_builtin(vec![
         Value::GpuTensor(signed),
@@ -81,16 +80,15 @@ fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
         Some("RunMat:compatibility:BitorGpuUndocumentedInputExtension")
     );
 
-    let unsigned = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 73,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::U8,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let unsigned_allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::U8,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(gpu_helpers::exact_provider_for_handle(&unsigned_allocation.handle).is_none());
+    let unsigned = unsigned_allocation.handle.clone();
     let error = block_on(bitor_builtin(vec![
         Value::GpuTensor(unsigned),
         Value::Int(IntValue::U8(1)),
@@ -101,6 +99,12 @@ fn bitor_rejects_unsupported_resident_forms_before_provider_access() {
         error.identifier(),
         Some("RunMat:compatibility:BitorGpuAssumedTypeExtension")
     );
+    assert_eq!(signed_allocation.probe.retirements(), 0);
+    drop(signed_allocation.handle);
+    assert_eq!(signed_allocation.probe.retirements(), 1);
+    assert_eq!(unsigned_allocation.probe.retirements(), 0);
+    drop(unsigned_allocation.handle);
+    assert_eq!(unsigned_allocation.probe.retirements(), 1);
 }
 
 #[test]
