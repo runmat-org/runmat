@@ -770,6 +770,8 @@ fn fusion_plan_cache_key(
     hasher.finish()
 }
 
+mod matmul_boundary;
+
 fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<FusionGroup> {
     groups
         .iter()
@@ -803,7 +805,9 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
                     .unwrap_or((usize::MAX, usize::MAX, *node_id))
             });
             sanitized.nodes.dedup();
-            if sanitized.nodes.is_empty() {
+            if sanitized.nodes.is_empty()
+                || (sanitized.kind == FusionKind::MatmulEpilogue
+                    && !matmul_boundary::preserves_observable_values(graph, &sanitized)) {
                 None
             } else {
                 Some(sanitized)
