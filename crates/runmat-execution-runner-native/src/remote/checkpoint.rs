@@ -50,6 +50,7 @@ pub(super) struct RemoteDriverCheckpoint {
     request_digest: Digest,
     pub(super) phase: RemoteDriverCheckpointPhase,
     pub(super) closure_catalog: Option<ProgramExecutionObjectLocation>,
+    pub(super) pool_catalog: Option<ProgramExecutionObjectLocation>,
 }
 
 impl RemoteDriverCheckpoint {
@@ -62,7 +63,7 @@ impl RemoteDriverCheckpoint {
         closure_catalog: Option<ProgramExecutionObjectLocation>,
     ) -> NativeExecutionResult<Self> {
         let checkpoint = Self {
-            schema_version: 1,
+            schema_version: 2,
             sequence,
             source_driver_fence: authority.fencing_token,
             run_id: authority.run_id.clone(),
@@ -70,9 +71,19 @@ impl RemoteDriverCheckpoint {
             request_digest: request_digest(request)?,
             phase,
             closure_catalog,
+            pool_catalog: None,
         };
         checkpoint.validate_content()?;
         Ok(checkpoint)
+    }
+
+    pub(super) fn with_pool_catalog(
+        mut self,
+        catalog: Option<ProgramExecutionObjectLocation>,
+    ) -> NativeExecutionResult<Self> {
+        self.pool_catalog = catalog;
+        self.validate_content()?;
+        Ok(self)
     }
 
     pub(super) fn validate_for_replacement(
@@ -119,7 +130,7 @@ impl RemoteDriverCheckpoint {
     }
 
     fn validate_content(&self) -> NativeExecutionResult<()> {
-        if self.schema_version != 1
+        if self.schema_version != 2
             || self.sequence == 0
             || self.source_driver_fence == 0
             || self.run_id.is_empty()
@@ -127,7 +138,7 @@ impl RemoteDriverCheckpoint {
         {
             return Err(protocol("remote driver checkpoint is malformed"));
         }
-        if let Some(catalog) = &self.closure_catalog {
+        for catalog in self.closure_catalog.iter().chain(self.pool_catalog.iter()) {
             catalog.validate().map_err(protocol)?;
             if catalog.reference.kind != ValueRefKind::ResultObject
                 || catalog.reference.authorization_scope != self.run_id
@@ -237,7 +248,8 @@ mod tests {
                 logical_digest: digest("closure-catalog"),
                 encoded_length: 128,
                 media_type: "application/vnd.runmat.execution-object-closure+json".into(),
-                value_schema: "runmat.execution-object-closure.v1".into(),
+                value_schema:
+                    runmat_execution_artifact::PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA.into(),
                 encryption_context: digest("closure-encryption"),
                 kind: ValueRefKind::ResultObject,
                 authorization_scope: run_id.into(),

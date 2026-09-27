@@ -14,11 +14,11 @@ use crate::{ArtifactError, ArtifactResult};
 pub const MAX_PROGRAM_EXECUTION_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES: u64 =
     MAX_PROGRAM_EXECUTION_OBJECT_BYTES * MAX_PROGRAM_EXECUTION_RESULT_OBJECTS as u64;
-pub const PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION: u16 = 1;
+pub const PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION: u16 = 2;
 pub const PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE: &str =
     "application/vnd.runmat.execution-object-closure+json";
 pub const PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA: &str =
-    "runmat.execution-object-closure.v1";
+    "runmat.execution-object-closure.v2";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgramExecutionObject {
     pub reference: ValueRef,
@@ -200,7 +200,7 @@ impl ProgramExecutionObjectClosure {
                 "program execution object closure uses an unsupported schema or root kind".into(),
             ));
         }
-        validate_locations(&self.objects, ValueRefKind::ResultObject, "closure")?;
+        validate_location_inventory(&self.objects, LocationKinds::PortableClosure, "closure")?;
         if self.objects.is_empty()
             || self
                 .objects
@@ -367,6 +367,33 @@ fn validate_locations(
     expected_kind: ValueRefKind,
     inventory_name: &str,
 ) -> ArtifactResult<()> {
+    validate_location_inventory(objects, LocationKinds::Exact(expected_kind), inventory_name)
+}
+
+enum LocationKinds {
+    Exact(ValueRefKind),
+    PortableClosure,
+}
+
+impl LocationKinds {
+    fn permits(&self, kind: ValueRefKind) -> bool {
+        match self {
+            Self::Exact(expected) => kind == *expected,
+            Self::PortableClosure => {
+                matches!(
+                    kind,
+                    ValueRefKind::DriverObject | ValueRefKind::ResultObject
+                )
+            }
+        }
+    }
+}
+
+fn validate_location_inventory(
+    objects: &[ProgramExecutionObjectLocation],
+    kinds: LocationKinds,
+    inventory_name: &str,
+) -> ArtifactResult<()> {
     if objects.len() > MAX_PROGRAM_EXECUTION_RESULT_OBJECTS {
         return Err(ArtifactError::Invalid(format!(
             "program {inventory_name} object inventory exceeds its count bound"
@@ -379,7 +406,7 @@ fn validate_locations(
     let mut total_bytes = 0_u64;
     for object in objects {
         object.validate()?;
-        if object.reference.kind != expected_kind
+        if !kinds.permits(object.reference.kind)
             || !ids.insert(object.reference.id)
             || !digests.insert(object.reference.logical_digest)
             || !artifact_ids.insert(object.artifact_id.as_str())
@@ -662,5 +689,146 @@ mod tests {
         let mut reordered = closure;
         reordered.objects.reverse();
         assert!(reordered.validate().is_err());
+    }
+
+    fn mixed_closure() -> ProgramExecutionObjectClosure {
+        let root = result_reference(b"checkpoint root");
+        ProgramExecutionObjectClosure::new(
+            root.clone(),
+            vec![
+                ProgramExecutionObjectLocation {
+                    reference: root,
+                    artifact_id: "root-artifact".into(),
+                },
+                ProgramExecutionObjectLocation {
+                    reference: input_reference(b"retained driver input"),
+                    artifact_id: "input-artifact".into(),
+                },
+            ],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn mixed_portable_closure_has_canonical_versioned_identity() {
+        let closure = mixed_closure();
+        assert_eq!(closure.schema_version, 2);
+        assert_eq!(
+            PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA,
+            "runmat.execution-object-closure.v2"
+        );
+        let bytes = closure.canonical_bytes().unwrap();
+        assert_eq!(
+            ProgramExecutionObjectClosure::from_canonical_bytes(&bytes).unwrap(),
+            closure
+        );
+        let mut reverse = closure.objects.clone();
+        reverse.reverse();
+        assert_eq!(
+            ProgramExecutionObjectClosure::new(closure.root.clone(), reverse)
+                .unwrap()
+                .canonical_bytes()
+                .unwrap(),
+            bytes
+        );
+        let mut noncanonical = bytes.clone();
+        noncanonical.push(b' ');
+        assert!(ProgramExecutionObjectClosure::from_canonical_bytes(&noncanonical).is_err());
+        for schema in [0, 1, 3] {
+            let mut invalid = closure.clone();
+            invalid.schema_version = schema;
+            assert!(invalid.validate().is_err());
+            assert!(ProgramExecutionObjectClosure::from_canonical_bytes(
+                &serde_json::to_vec(&invalid).unwrap()
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn mixed_closure_rejects_foreign_nonportable_duplicate_and_unbounded_members() {
+        use runmat_execution::identity::{NodeLeaseId, WorkerId};
+        use runmat_execution::value::ResidentFence;
+        let closure = mixed_closure();
+        let input = closure
+            .objects
+            .iter()
+            .position(|object| object.reference.kind == ValueRefKind::DriverObject)
+            .unwrap();
+        for case in 0..9 {
+            let mut invalid = closure.clone();
+            match case {
+                0 => invalid.objects[input].reference.kind = ValueRefKind::WorkerObject,
+                1 => {
+                    invalid.objects[input].reference.resident_fence = Some(ResidentFence {
+                        worker_id: WorkerId::derive(&[b"worker"]),
+                        node_lease_id: NodeLeaseId::derive(&[b"lease"]),
+                        process_generation: 1,
+                        device_identity: None,
+                    })
+                }
+                2 => invalid.objects[input].reference.authorization_scope = "foreign".into(),
+                3 => {
+                    let mut alias = invalid.objects[input].clone();
+                    alias.reference.kind = ValueRefKind::ResultObject;
+                    alias.artifact_id = "alias-artifact".into();
+                    invalid.objects.push(alias);
+                    invalid.objects.sort_by_key(|object| object.reference.id);
+                }
+                4 => {
+                    invalid.objects[input].reference.encoded_length =
+                        MAX_PROGRAM_EXECUTION_OBJECT_BYTES + 1
+                }
+                5 => invalid
+                    .objects
+                    .retain(|object| object.reference != closure.root),
+                6 => invalid.root.kind = ValueRefKind::DriverObject,
+                7 => {
+                    invalid.objects[input].artifact_id =
+                        invalid.objects[1 - input].artifact_id.clone()
+                }
+                _ => invalid.objects[input].reference.logical_digest = invalid.root.logical_digest,
+            }
+            assert!(invalid.validate().is_err(), "corruption {case}");
+        }
+        let mut too_many = closure;
+        too_many.objects =
+            vec![too_many.objects[0].clone(); MAX_PROGRAM_EXECUTION_RESULT_OBJECTS + 1];
+        assert!(too_many.validate().is_err());
+    }
+
+    #[test]
+    fn mixed_closure_does_not_relax_input_or_output_kind_contracts() {
+        let closure = mixed_closure();
+        let input = closure
+            .objects
+            .iter()
+            .find(|object| object.reference.kind == ValueRefKind::DriverObject)
+            .unwrap()
+            .clone();
+        let result = closure
+            .objects
+            .iter()
+            .find(|object| object.reference.kind == ValueRefKind::ResultObject)
+            .unwrap()
+            .clone();
+        let inputs = |object: ProgramExecutionObjectLocation| ProgramExecutionInputs {
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            arguments: vec![ValuePayload::Object(Box::new(object.reference.clone()))],
+            objects: vec![object],
+        };
+        assert!(inputs(input.clone()).validate().is_ok());
+        assert!(inputs(result.clone()).validate().is_err());
+        let outputs = |object: ProgramExecutionObjectLocation| {
+            ProgramExecutionOutputs::new(
+                ProgramExecutionResponse::ExternalizedSuccess {
+                    outputs: vec![ValuePayload::Object(Box::new(object.reference.clone()))],
+                    result_objects: vec![object.reference.clone()],
+                },
+                vec![object],
+            )
+        };
+        assert!(outputs(result).is_ok());
+        assert!(outputs(input).is_err());
     }
 }

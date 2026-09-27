@@ -194,9 +194,9 @@ pub use remote::{
     run_remote_driver_from_env, run_remote_meshing_worker_quic, run_remote_worker_from_env,
     run_remote_worker_quic, run_remote_worker_relay, QuicRemoteWorkerChannel,
     RelayRemoteWorkerChannel, RemoteAttempt, RemoteBundleReceipt, RemoteMeshingWorkerQuicRequest,
-    RemoteObjectReceipt, RemotePoolDriver, RemoteTaskCompletion, RemoteValueReceipt,
-    RemoteWorkerChannel, RemoteWorkerChannelConfig, RemoteWorkerQuicRequest,
-    RemoteWorkerRelayRequest,
+    RemoteObjectReceipt, RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority,
+    RemoteTaskCompletion, RemoteValueReceipt, RemoteWorkerChannel, RemoteWorkerChannelConfig,
+    RemoteWorkerQuicRequest, RemoteWorkerRelayRequest,
 };
 pub use remote_exact_meshing_executor::RemoteExactMeshingExecutor;
 pub use runmat_execution_artifact::cache::FilesystemObjectStore;

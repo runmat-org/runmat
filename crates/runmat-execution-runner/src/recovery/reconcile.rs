@@ -4,13 +4,28 @@ use crate::driver::{Driver, DriverEvent, DriverEventKind, DriverSnapshot};
 use crate::pool::WorkerLifecycle;
 use crate::scheduler::{QueueEntry, ResourceAllocation};
 use crate::task::{retry_decision, RetryCause, RetryDecision};
-use crate::RunnerResult;
+use crate::{RunnerError, RunnerResult};
 
 use super::next_driver_fence;
 
-pub fn reconcile_snapshot(mut snapshot: DriverSnapshot) -> RunnerResult<Driver> {
+pub fn reconcile_snapshot(snapshot: DriverSnapshot) -> RunnerResult<Driver> {
+    let replacement_fence = next_driver_fence(snapshot.driver_fence)?;
+    reconcile_snapshot_at_fence(snapshot, replacement_fence)
+}
+
+/// Restore under a replacement authority whose fence may skip prior generations.
+/// Historical attempts and commits retain their original fencing identities.
+pub fn reconcile_snapshot_at_fence(
+    mut snapshot: DriverSnapshot,
+    replacement_fence: u64,
+) -> RunnerResult<Driver> {
     snapshot.validate()?;
-    snapshot.driver_fence = next_driver_fence(snapshot.driver_fence)?;
+    if replacement_fence == 0 || replacement_fence <= snapshot.driver_fence {
+        return Err(RunnerError::Invalid(
+            "replacement driver fence must be strictly newer than the saved fence".into(),
+        ));
+    }
+    snapshot.driver_fence = replacement_fence;
     let lost = snapshot
         .attempts
         .values_mut()

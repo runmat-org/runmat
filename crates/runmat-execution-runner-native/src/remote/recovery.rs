@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use runmat_analysis_execution::StructuralTransientRecoveryClosure;
-use runmat_execution::value::ValueRef;
+use runmat_execution::identity::ValueId;
+use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution_artifact::encryption::{EncryptionPurpose, RunKeyMaterial};
 use runmat_execution_artifact::{
     ArtifactAccess, LogicalObject, ObjectNamespace, ProgramExecutionObject,
@@ -12,9 +14,11 @@ use runmat_execution_artifact::{
 use runmat_execution_transport_native::control::{
     DriverArtifactKind, DriverAuthority, DriverControlPlane,
 };
+use tokio::sync::Mutex;
 
 use super::checkpoint::{RemoteDriverCheckpoint, RemoteDriverCheckpointPhase};
 use super::crypto::open_object;
+use super::RemotePoolDriver;
 use crate::{NativeExecutionError, NativeExecutionResult, StructuralTransientRecoveryPublisher};
 
 #[derive(Clone)]
@@ -22,17 +26,27 @@ pub(super) struct RestoredObjectClosure {
     pub(super) root: ValueRef,
     pub(super) objects: Vec<ProgramExecutionObject>,
     pub(super) locations: Vec<ProgramExecutionObjectLocation>,
+    pub(super) catalog: ProgramExecutionObjectLocation,
 }
 
+struct PublicationState {
+    sequence: u64,
+    physical_catalog: Option<ProgramExecutionObjectLocation>,
+    pool_catalog: Option<ProgramExecutionObjectLocation>,
+    physical_locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
+    pool_locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
+}
+
+/// One transaction owner for periodic scheduler and physical solver publication.
+#[derive(Clone)]
 pub(super) struct RemoteRecoveryPublisher<'a> {
     control: &'a dyn DriverControlPlane,
     run_key: &'a RunKeyMaterial,
     authority: &'a DriverAuthority,
     project_revision: String,
     request: ProgramExecutionRequest,
-    checkpoint_sequence: u64,
-    retained_locations:
-        BTreeMap<runmat_execution::identity::ValueId, ProgramExecutionObjectLocation>,
+    pool: Option<Arc<RemotePoolDriver>>,
+    state: Arc<Mutex<PublicationState>>,
 }
 
 impl<'a> RemoteRecoveryPublisher<'a> {
@@ -45,12 +59,12 @@ impl<'a> RemoteRecoveryPublisher<'a> {
         checkpoint_sequence: u64,
         restored: Option<&RestoredObjectClosure>,
     ) -> NativeExecutionResult<Self> {
-        let retained_locations = restored
+        let physical_locations: BTreeMap<_, _> = restored
             .into_iter()
             .flat_map(|closure| closure.locations.iter().cloned())
             .map(|location| (location.reference.id, location))
-            .collect::<BTreeMap<_, _>>();
-        if retained_locations
+            .collect();
+        if physical_locations
             .values()
             .any(|location| location.reference.authorization_scope != authority.run_id)
         {
@@ -64,9 +78,42 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             authority,
             project_revision: project_revision.into(),
             request: request.clone(),
-            checkpoint_sequence,
-            retained_locations,
+            pool: None,
+            state: Arc::new(Mutex::new(PublicationState {
+                sequence: checkpoint_sequence,
+                physical_catalog: restored.map(|closure| closure.catalog.clone()),
+                pool_catalog: None,
+                physical_locations,
+                pool_locations: BTreeMap::new(),
+            })),
         })
+    }
+
+    /// Bind once before cloning this publisher into execution and periodic-save owners.
+    pub(super) fn bind_pool(
+        &mut self,
+        pool: Arc<RemotePoolDriver>,
+        catalog: Option<ProgramExecutionObjectLocation>,
+        locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
+    ) -> NativeExecutionResult<()> {
+        if self.pool.is_some() || Arc::strong_count(&self.state) != 1 {
+            return Err(protocol(
+                "recovery pool must be bound before publisher sharing",
+            ));
+        }
+        let mut state = self.state.try_lock().map_err(protocol)?;
+        if locations
+            .values()
+            .any(|location| location.reference.authorization_scope != self.authority.run_id)
+        {
+            return Err(protocol(
+                "restored pool locations are outside the driver run authority",
+            ));
+        }
+        state.pool_catalog = catalog;
+        state.pool_locations = locations;
+        self.pool = Some(pool);
+        Ok(())
     }
 
     pub(super) async fn publish_objects(
@@ -80,88 +127,94 @@ impl<'a> RemoteRecoveryPublisher<'a> {
         };
         access.validate().map_err(protocol)?;
         if root.authorization_scope != self.authority.run_id
-            || root.kind != runmat_execution::value::ValueRefKind::ResultObject
+            || root.kind != ValueRefKind::ResultObject
         {
             return Err(protocol(
-                "transient recovery root is outside the driver result authority",
+                "physical recovery root is outside the driver result authority",
             ));
         }
+        let mut state = self.state.lock().await;
         let mut locations = Vec::with_capacity(objects.len());
-        let mut next_retained = BTreeMap::new();
         for object in objects {
-            object.validate().map_err(protocol)?;
-            if object.reference.authorization_scope != self.authority.run_id
-                || object.reference.encryption_context != access.encryption_context
-                || object.reference.kind != runmat_execution::value::ValueRefKind::ResultObject
-            {
+            if object.reference.encryption_context != access.encryption_context {
                 return Err(protocol(
-                    "transient recovery object is outside the driver result authority",
+                    "physical recovery object has a different encryption context",
                 ));
             }
-            let location = match self.retained_locations.get(&object.reference.id) {
-                Some(location) if location.reference == object.reference => location.clone(),
-                Some(_) => {
-                    return Err(protocol(
-                        "transient recovery object id changed immutable content",
-                    ))
-                }
-                None => ProgramExecutionObjectLocation {
-                    reference: object.reference.clone(),
-                    artifact_id: super::driver::store_encrypted(
-                        self.control,
-                        self.authority,
-                        self.run_key,
-                        DriverArtifactKind::Result,
-                        EncryptionPurpose::Result,
-                        &object.bytes,
-                        None,
-                    )
-                    .await?,
-                },
-            };
-            next_retained.insert(location.reference.id, location.clone());
+            let location = store_object(
+                self.control,
+                self.run_key,
+                self.authority,
+                &object.reference,
+                &object.bytes,
+                state.physical_locations.get(&object.reference.id),
+            )
+            .await?;
             locations.push(location);
         }
-        let catalog = ProgramExecutionObjectClosure::new(root, locations).map_err(protocol)?;
-        let catalog_object = LogicalObject::new(
-            ObjectNamespace::ResultValue,
-            "execution/recovery-closure-catalog",
-            PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE,
-            catalog.canonical_bytes().map_err(protocol)?,
+        let catalog = store_catalog(
+            self.control,
+            self.run_key,
+            self.authority,
+            access,
+            root,
+            locations.clone(),
         )
-        .map_err(protocol)?;
-        let catalog_reference = access
-            .reference(
-                &catalog_object,
-                runmat_execution::value::ValueRefKind::ResultObject,
-                PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA,
-            )
-            .map_err(protocol)?;
-        let catalog_location = ProgramExecutionObjectLocation {
-            reference: catalog_reference,
-            artifact_id: super::driver::store_encrypted(
-                self.control,
-                self.authority,
-                self.run_key,
-                DriverArtifactKind::Result,
-                EncryptionPurpose::Result,
-                &catalog_object.bytes,
-                None,
-            )
-            .await?,
-        };
-        let next_sequence = self
-            .checkpoint_sequence
+        .await?;
+        self.commit(&mut state, Some((catalog, locations))).await
+    }
+
+    pub(super) async fn publish_pool(&self) -> NativeExecutionResult<()> {
+        if self.pool.is_none() {
+            return Err(protocol("periodic recovery has no bound pool"));
+        }
+        let mut state = self.state.lock().await;
+        self.commit(&mut state, None).await
+    }
+
+    async fn commit(
+        &self,
+        state: &mut PublicationState,
+        physical: Option<(
+            ProgramExecutionObjectLocation,
+            Vec<ProgramExecutionObjectLocation>,
+        )>,
+    ) -> NativeExecutionResult<()> {
+        let sequence = state
+            .sequence
             .checked_add(1)
             .ok_or_else(|| protocol("remote driver checkpoint sequence overflow"))?;
+        let pool = match &self.pool {
+            Some(pool) => Some(
+                super::pool_checkpoint::publish(
+                    self.control,
+                    self.run_key,
+                    self.authority,
+                    pool,
+                    sequence,
+                    &state.pool_locations,
+                )
+                .await?,
+            ),
+            None => None,
+        };
+        let physical_catalog = physical
+            .as_ref()
+            .map(|(catalog, _)| catalog.clone())
+            .or_else(|| state.physical_catalog.clone());
+        let pool_catalog = pool
+            .as_ref()
+            .map(|published| published.catalog.clone())
+            .or_else(|| state.pool_catalog.clone());
         let checkpoint = RemoteDriverCheckpoint::new(
-            next_sequence,
+            sequence,
             self.authority,
             &self.project_revision,
             &self.request,
             RemoteDriverCheckpointPhase::ReplayableExecutionStarted,
-            Some(catalog_location),
-        )?;
+            physical_catalog.clone(),
+        )?
+        .with_pool_catalog(pool_catalog.clone())?;
         super::driver::store_driver_checkpoint(
             self.control,
             self.authority,
@@ -169,14 +222,28 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             &checkpoint,
         )
         .await?;
-        self.checkpoint_sequence = next_sequence;
-        self.retained_locations = next_retained;
+        // Neither root nor its reuse cache advances on upload failure or lost acknowledgment.
+        state.sequence = sequence;
+        state.physical_catalog = physical_catalog;
+        state.pool_catalog = pool_catalog;
+        if let Some((_, locations)) = physical {
+            state.physical_locations = locations
+                .into_iter()
+                .map(|location| (location.reference.id, location))
+                .collect();
+        }
+        if let Some(pool) = pool {
+            state.pool_locations = pool.locations;
+        }
         Ok(())
     }
 
     #[cfg(test)]
-    pub(super) const fn checkpoint_sequence(&self) -> u64 {
-        self.checkpoint_sequence
+    pub(super) fn checkpoint_sequence(&self) -> u64 {
+        self.state
+            .try_lock()
+            .expect("publication transaction is idle")
+            .sequence
     }
 }
 
@@ -190,73 +257,154 @@ impl StructuralTransientRecoveryPublisher for RemoteRecoveryPublisher<'_> {
     }
 }
 
+/// Preserve typed encryption purpose even when a valid alias shares identical bytes.
+pub(super) async fn store_object(
+    control: &dyn DriverControlPlane,
+    key: &RunKeyMaterial,
+    authority: &DriverAuthority,
+    reference: &ValueRef,
+    bytes: &[u8],
+    retained: Option<&ProgramExecutionObjectLocation>,
+) -> NativeExecutionResult<ProgramExecutionObjectLocation> {
+    let object = ProgramExecutionObject {
+        reference: reference.clone(),
+        bytes: bytes.to_vec(),
+    };
+    object.validate().map_err(protocol)?;
+    if reference.authorization_scope != authority.run_id {
+        return Err(protocol(
+            "recovery object is outside the driver run authority",
+        ));
+    }
+    let purpose = object_purpose(reference)?;
+    if let Some(location) = retained {
+        if location.reference == *reference {
+            return Ok(location.clone());
+        }
+        if !super::object_transfer::references_share_content_identity(
+            &location.reference,
+            reference,
+        ) {
+            return Err(protocol("recovery object id changed immutable content"));
+        }
+    }
+    Ok(ProgramExecutionObjectLocation {
+        reference: reference.clone(),
+        artifact_id: super::driver::store_encrypted(
+            control,
+            authority,
+            key,
+            DriverArtifactKind::Result,
+            purpose,
+            bytes,
+            None,
+        )
+        .await?,
+    })
+}
+
+pub(super) async fn store_catalog(
+    control: &dyn DriverControlPlane,
+    key: &RunKeyMaterial,
+    authority: &DriverAuthority,
+    access: ArtifactAccess,
+    root: ValueRef,
+    locations: Vec<ProgramExecutionObjectLocation>,
+) -> NativeExecutionResult<ProgramExecutionObjectLocation> {
+    let catalog = ProgramExecutionObjectClosure::new(root, locations).map_err(protocol)?;
+    let object = LogicalObject::new(
+        ObjectNamespace::ResultValue,
+        "execution/recovery-closure-catalog",
+        PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE,
+        catalog.canonical_bytes().map_err(protocol)?,
+    )
+    .map_err(protocol)?;
+    let reference = access
+        .reference(
+            &object,
+            ValueRefKind::ResultObject,
+            PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA,
+        )
+        .map_err(protocol)?;
+    store_object(control, key, authority, &reference, &object.bytes, None).await
+}
+
+pub(super) async fn read_object(
+    control: &dyn DriverControlPlane,
+    key: &RunKeyMaterial,
+    authority: &DriverAuthority,
+    location: &ProgramExecutionObjectLocation,
+) -> NativeExecutionResult<ProgramExecutionObject> {
+    location.validate().map_err(protocol)?;
+    if location.reference.authorization_scope != authority.run_id {
+        return Err(protocol("recovery object is outside the run authority"));
+    }
+    let purpose = object_purpose(&location.reference)?;
+    let artifact = control
+        .execution_artifact(authority, &location.artifact_id)
+        .await
+        .map_err(protocol)?;
+    if artifact.artifact_id != location.artifact_id || artifact.kind != "result" {
+        return Err(protocol(
+            "Server resolved the wrong recovery object artifact",
+        ));
+    }
+    let object = ProgramExecutionObject {
+        reference: location.reference.clone(),
+        bytes: open_object(
+            key,
+            &control.download(&artifact).await.map_err(protocol)?,
+            &authority.run_id,
+            purpose,
+        )?,
+    };
+    object.validate().map_err(protocol)?;
+    Ok(object)
+}
+
+pub(super) async fn read_catalog(
+    control: &dyn DriverControlPlane,
+    key: &RunKeyMaterial,
+    authority: &DriverAuthority,
+    location: &ProgramExecutionObjectLocation,
+) -> NativeExecutionResult<ProgramExecutionObjectClosure> {
+    if location.reference.kind != ValueRefKind::ResultObject
+        || location.reference.media_type != PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE
+        || location.reference.value_schema != PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA
+    {
+        return Err(protocol("recovery catalog has the wrong type"));
+    }
+    let object = read_object(control, key, authority, location).await?;
+    ProgramExecutionObjectClosure::from_canonical_bytes(&object.bytes).map_err(protocol)
+}
+
 pub(super) async fn restore(
     control: &dyn DriverControlPlane,
     run_key: &RunKeyMaterial,
     authority: &DriverAuthority,
     catalog_location: &ProgramExecutionObjectLocation,
 ) -> NativeExecutionResult<RestoredObjectClosure> {
-    let catalog_download = control
-        .execution_artifact(authority, &catalog_location.artifact_id)
-        .await
-        .map_err(protocol)?;
-    if catalog_download.artifact_id != catalog_location.artifact_id
-        || catalog_download.kind != "result"
-    {
-        return Err(protocol(
-            "Server resolved the wrong recovery catalog artifact",
-        ));
-    }
-    let catalog_object = ProgramExecutionObject {
-        reference: catalog_location.reference.clone(),
-        bytes: open_object(
-            run_key,
-            &control
-                .download(&catalog_download)
-                .await
-                .map_err(protocol)?,
-            &authority.run_id,
-            EncryptionPurpose::Result,
-        )?,
-    };
-    catalog_object.validate().map_err(protocol)?;
-    let closure = ProgramExecutionObjectClosure::from_canonical_bytes(&catalog_object.bytes)
-        .map_err(protocol)?;
-    if closure.root.authorization_scope != authority.run_id {
-        return Err(protocol("recovery closure is outside the run authority"));
-    }
-
+    let closure = read_catalog(control, run_key, authority, catalog_location).await?;
     let mut objects = Vec::with_capacity(closure.objects.len());
     for location in &closure.objects {
-        let artifact = control
-            .execution_artifact(authority, &location.artifact_id)
-            .await
-            .map_err(protocol)?;
-        if artifact.artifact_id != location.artifact_id || artifact.kind != "result" {
-            return Err(protocol(
-                "Server resolved the wrong recovery object artifact",
-            ));
-        }
-        let object = ProgramExecutionObject {
-            reference: location.reference.clone(),
-            bytes: open_object(
-                run_key,
-                &control.download(&artifact).await.map_err(protocol)?,
-                &authority.run_id,
-                EncryptionPurpose::Result,
-            )?,
-        };
-        object.validate().map_err(protocol)?;
-        if object.reference.authorization_scope != authority.run_id {
-            return Err(protocol("recovery object is outside the run authority"));
-        }
-        objects.push(object);
+        objects.push(read_object(control, run_key, authority, location).await?);
     }
     Ok(RestoredObjectClosure {
         root: closure.root,
         objects,
         locations: closure.objects,
+        catalog: catalog_location.clone(),
     })
+}
+
+fn object_purpose(reference: &ValueRef) -> NativeExecutionResult<EncryptionPurpose> {
+    match reference.kind {
+        ValueRefKind::DriverObject => Ok(EncryptionPurpose::Input),
+        ValueRefKind::ResultObject => Ok(EncryptionPurpose::Result),
+        _ => Err(protocol(
+            "recovery object kind is not portable input or result",
+        )),
+    }
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

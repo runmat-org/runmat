@@ -149,31 +149,36 @@ pub(super) async fn run_remote_driver(
     }
     let input_locations = inputs.objects.clone();
     let request = ProgramExecutionRequest::from_parts(descriptor, inputs).map_err(protocol)?;
-    let (mut checkpoint_sequence, closure_catalog) = match bootstrap.checkpoint.as_ref() {
-        Some(download) => {
-            if download.kind != "checkpoint" {
-                return Err(protocol(
-                    "driver bootstrap checkpoint has the wrong artifact kind",
-                ));
+    let (mut checkpoint_sequence, closure_catalog, pool_catalog) =
+        match bootstrap.checkpoint.as_ref() {
+            Some(download) => {
+                if download.kind != "checkpoint" {
+                    return Err(protocol(
+                        "driver bootstrap checkpoint has the wrong artifact kind",
+                    ));
+                }
+                let plaintext = open_download(
+                    control.as_ref(),
+                    &run_key,
+                    download,
+                    &config.authority.run_id,
+                    EncryptionPurpose::Checkpoint,
+                )
+                .await?;
+                let checkpoint = RemoteDriverCheckpoint::from_canonical_bytes(&plaintext)?;
+                checkpoint.validate_for_replacement(
+                    &config.authority,
+                    &bootstrap.project_revision,
+                    &request,
+                )?;
+                (
+                    checkpoint.sequence,
+                    checkpoint.closure_catalog,
+                    checkpoint.pool_catalog,
+                )
             }
-            let plaintext = open_download(
-                control.as_ref(),
-                &run_key,
-                download,
-                &config.authority.run_id,
-                EncryptionPurpose::Checkpoint,
-            )
-            .await?;
-            let checkpoint = RemoteDriverCheckpoint::from_canonical_bytes(&plaintext)?;
-            checkpoint.validate_for_replacement(
-                &config.authority,
-                &bootstrap.project_revision,
-                &request,
-            )?;
-            (checkpoint.sequence, checkpoint.closure_catalog)
-        }
-        None => (0, None),
-    };
+            None => (0, None, None),
+        };
     let mut input_objects = Vec::with_capacity(input_locations.len());
     for location in input_locations {
         let artifact = control
@@ -206,6 +211,25 @@ pub(super) async fn run_remote_driver(
         ),
         None => None,
     };
+    let recovered_pool = match pool_catalog.as_ref() {
+        Some(location) => {
+            if bootstrap.desired_worker_count == 0 {
+                return Err(protocol(
+                    "a pool checkpoint requires a remote worker allocation",
+                ));
+            }
+            Some(
+                super::pool_checkpoint::restore(
+                    control.as_ref(),
+                    &run_key,
+                    &config.authority,
+                    location,
+                )
+                .await?,
+            )
+        }
+        None => None,
+    };
     if let Some(recovered) = &recovered {
         input_objects.extend(recovered.objects.iter().cloned());
         if !input_objects
@@ -234,7 +258,8 @@ pub(super) async fn run_remote_driver(
             &request,
             RemoteDriverCheckpointPhase::ReadyToExecute,
             closure_catalog.clone(),
-        )?,
+        )?
+        .with_pool_catalog(pool_catalog.clone())?,
     )
     .await?;
     transition(
@@ -260,7 +285,8 @@ pub(super) async fn run_remote_driver(
             &request,
             execution_start_phase(&request),
             closure_catalog,
-        )?,
+        )?
+        .with_pool_catalog(pool_catalog)?,
     )
     .await?;
 
@@ -323,6 +349,7 @@ pub(super) async fn run_remote_driver(
                 request,
                 input_objects,
                 recovered,
+                recovered_pool,
                 project_revision: bootstrap.project_revision.clone(),
                 checkpoint_sequence,
                 desired_workers: bootstrap.desired_worker_count,

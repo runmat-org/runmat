@@ -35,6 +35,8 @@ use super::config::RemoteDriverConfig;
 use super::crypto::{ciphertext_digest, open_object, project_revision_identity, seal_object};
 use super::driver::run_remote_driver;
 
+mod mixed_recovery;
+
 #[derive(Default)]
 struct FakeState {
     downloads: BTreeMap<String, Vec<u8>>,
@@ -357,7 +359,11 @@ async fn replacement_restores_a_verified_run_scoped_object_closure() {
         vec![second_location.clone(), first_location.clone()],
     )
     .unwrap();
-    let catalog = result_object(run_id, &closure.canonical_bytes().unwrap());
+    let mut catalog = result_object(run_id, &closure.canonical_bytes().unwrap());
+    catalog.reference.media_type =
+        runmat_execution_artifact::PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE.into();
+    catalog.reference.value_schema =
+        runmat_execution_artifact::PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA.into();
     let catalog_location = ProgramExecutionObjectLocation {
         reference: catalog.reference.clone(),
         artifact_id: "recovery-catalog".into(),

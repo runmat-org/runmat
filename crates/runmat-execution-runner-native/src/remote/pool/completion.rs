@@ -85,10 +85,8 @@ impl RemotePoolDriver {
         {
             let _ = sender.send(outcome);
         }
-        self.programs
-            .lock()
-            .expect("remote program catalog poisoned")
-            .remove(&task_id);
+        // Exact admitted programs have the same lifetime as scheduler task records:
+        // completed-task replay and durable recovery still need their authority.
         self.progress
             .lock()
             .expect("remote progress registry poisoned")

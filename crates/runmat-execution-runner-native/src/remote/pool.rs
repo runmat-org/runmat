@@ -26,6 +26,9 @@ type CompletionResult = Result<AttemptSuccess, String>;
 mod completion;
 mod input_inventory;
 mod object_registration;
+mod recovery;
+
+pub use recovery::{RemotePoolCheckpoint, RemotePoolRestoreAuthority};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) struct WorkerRouteIdentity {
@@ -52,6 +55,11 @@ struct PendingTaskRegistration {
     progress: Arc<super::pool_progress::RemoteProgressBuffer>,
 }
 
+struct ExistingTask {
+    task_id: TaskId,
+    committed: Option<AttemptSuccess>,
+}
+
 /// Portable scheduler composition over allocation-scoped remote worker routes.
 pub struct RemotePoolDriver {
     scope_id: ExecutionScopeId,
@@ -72,6 +80,8 @@ pub struct RemotePoolDriver {
     input_inventories: Mutex<input_inventory::InputInventories>,
     completions: Mutex<HashMap<TaskId, oneshot::Sender<CompletionResult>>>,
     progress: Mutex<HashMap<TaskId, Arc<super::pool_progress::RemoteProgressBuffer>>>,
+    admission: Mutex<()>,
+    restored_completions: Mutex<HashMap<TaskId, RemoteTaskCompletion>>,
 }
 
 impl CacheImport for RemotePoolDriver {
@@ -138,6 +148,8 @@ impl RemotePoolDriver {
             input_inventories: Mutex::new(input_inventory::InputInventories::default()),
             completions: Mutex::new(HashMap::new()),
             progress: Mutex::new(HashMap::new()),
+            admission: Mutex::new(()),
+            restored_completions: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -290,21 +302,18 @@ impl RemotePoolDriver {
         submission: TaskSubmission,
         program: ProgramExecutionRequest,
     ) -> NativeExecutionResult<RemoteTaskCompletion> {
-        if let Some(completion) = self.reuse_committed_task(&submission, &program)? {
-            return Ok(completion);
-        }
-        self.submit_new_graph(vec![(program, submission)])?
+        self.submit_graph(vec![(program, submission)])?
             .pop()
             .ok_or_else(|| {
                 NativeExecutionError::Protocol("remote task admission returned no handle".into())
             })
     }
 
-    fn reuse_committed_task(
+    fn existing_task(
         &self,
         submission: &TaskSubmission,
         program: &ProgramExecutionRequest,
-    ) -> NativeExecutionResult<Option<RemoteTaskCompletion>> {
+    ) -> NativeExecutionResult<Option<ExistingTask>> {
         self.input_inventories
             .lock()
             .expect("input inventory registry poisoned")
@@ -355,6 +364,17 @@ impl RemotePoolDriver {
             )));
         }
         if existing.state != runmat_execution::state::TaskState::Succeeded {
+            if self
+                .restored_completions
+                .lock()
+                .expect("restored completion registry poisoned")
+                .contains_key(&submission.request.id)
+            {
+                return Ok(Some(ExistingTask {
+                    task_id: submission.request.id,
+                    committed: None,
+                }));
+            }
             return Err(NativeExecutionError::Protocol(format!(
                 "remote task {} already exists in non-reusable state {:?}",
                 submission.request.id, existing.state
@@ -374,11 +394,14 @@ impl RemotePoolDriver {
                 )));
             }
         }
-        Ok(Some(RemoteTaskCompletion::resolved(Ok(AttemptSuccess {
-            outputs: committed.outputs,
-            result_objects: committed.result_objects,
-            resources: committed.resources,
-        }))))
+        Ok(Some(ExistingTask {
+            task_id: submission.request.id,
+            committed: Some(AttemptSuccess {
+                outputs: committed.outputs,
+                result_objects: committed.result_objects,
+                resources: committed.resources,
+            }),
+        }))
     }
 
     /// Atomically admits a topologically ordered graph before dispatching any task.
@@ -391,36 +414,52 @@ impl RemotePoolDriver {
                 "remote task graph must not be empty".into(),
             ));
         }
+        // Existing restored handles are consumed only after the whole graph validates
+        // and any new tasks are admitted. Failed graph submission cannot steal a waiter.
+        let _admission = self.admission.lock().expect("remote admission poisoned");
         let mut ordered = Vec::with_capacity(tasks.len());
         let mut pending = Vec::new();
+        let mut unique = BTreeSet::new();
         for (program, submission) in tasks {
-            if let Some(completion) = self.reuse_committed_task(&submission, &program)? {
-                ordered.push(Some(completion));
+            if !unique.insert(submission.request.id) {
+                return Err(NativeExecutionError::Protocol(
+                    "remote graph repeats a task".into(),
+                ));
+            }
+            if let Some(existing) = self.existing_task(&submission, &program)? {
+                ordered.push(Some(existing));
             } else {
                 ordered.push(None);
                 pending.push((program, submission));
             }
         }
-        if !pending.is_empty() {
-            let mut admitted = self.submit_new_graph(pending)?.into_iter();
-            for completion in &mut ordered {
-                if completion.is_none() {
-                    *completion = Some(admitted.next().ok_or_else(|| {
-                        NativeExecutionError::Protocol(
-                            "remote task graph admission returned too few handles".into(),
-                        )
-                    })?);
-                }
-            }
-            if admitted.next().is_some() {
-                return Err(NativeExecutionError::Protocol(
-                    "remote task graph admission returned too many handles".into(),
-                ));
-            }
+        let mut admitted = if pending.is_empty() {
+            Vec::new()
+        } else {
+            self.submit_new_graph(pending)?
         }
+        .into_iter();
+        let mut restored = self
+            .restored_completions
+            .lock()
+            .expect("restored completion registry poisoned");
         ordered
             .into_iter()
-            .map(|completion| {
+            .map(|existing| {
+                let completion = match existing {
+                    Some(ExistingTask {
+                        task_id,
+                        committed: Some(result),
+                    }) => {
+                        restored.remove(&task_id);
+                        Some(RemoteTaskCompletion::resolved(Ok(result)))
+                    }
+                    Some(ExistingTask {
+                        task_id,
+                        committed: None,
+                    }) => restored.remove(&task_id),
+                    None => admitted.next(),
+                };
                 completion.ok_or_else(|| {
                     NativeExecutionError::Protocol(
                         "remote task graph omitted an admitted completion".into(),

@@ -1,12 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
 use runmat_execution::identity::PoolId;
+use runmat_execution::identity::ValueId;
 use runmat_execution::{CancellationReason, ExecutionScopeId};
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_artifact::{
-    ProgramExecutionObject, ProgramExecutionRequest, ProgramExecutionResponse,
+    ProgramExecutionObject, ProgramExecutionObjectLocation, ProgramExecutionRequest,
+    ProgramExecutionResponse,
 };
 use runmat_execution_runner::PoolSpec;
 use runmat_execution_transport_native::control::{
@@ -26,6 +28,7 @@ use crate::{
 
 const WORKER_READY_TIMEOUT: Duration = Duration::from_secs(90);
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
+const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(2);
 const DRIVER_TICK_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(crate) enum RemotePoolExecutionOutcome {
@@ -58,6 +61,7 @@ pub(super) struct RemotePoolExecution<'a> {
     pub(super) request: ProgramExecutionRequest,
     pub(super) input_objects: Vec<ProgramExecutionObject>,
     pub(super) recovered: Option<super::recovery::RestoredObjectClosure>,
+    pub(super) recovered_pool: Option<super::pool_checkpoint::RestoredPoolCheckpoint>,
     pub(super) project_revision: String,
     pub(super) checkpoint_sequence: u64,
     pub(super) desired_workers: u32,
@@ -76,6 +80,7 @@ pub(super) async fn execute(
         request,
         input_objects,
         recovered,
+        recovered_pool,
         project_revision,
         checkpoint_sequence,
         desired_workers,
@@ -85,19 +90,38 @@ pub(super) async fn execute(
     let scope_id = ExecutionScopeId::derive(&[authority.run_id.as_bytes(), b"remote-root"]);
     let pool_id = PoolId::derive(&[authority.run_id.as_bytes(), b"remote-pool"]);
     let pool_inventory = pool_inventory(&resources, desired_workers)?;
-    let pool = RemotePoolDriver::new_with_value_scope(
-        scope_id,
-        PoolSpec {
-            id: pool_id,
-            min_workers: 1,
-            max_workers: desired_workers,
-            max_in_flight: desired_workers,
-            resource_limit: pool_inventory,
-        },
-        authority.fencing_token,
-        bundle_archive,
-        authority.run_id.clone(),
-    )?;
+    let pool_spec = PoolSpec {
+        id: pool_id,
+        min_workers: 1,
+        max_workers: desired_workers,
+        max_in_flight: desired_workers,
+        resource_limit: pool_inventory,
+    };
+    let pool_catalog = recovered_pool
+        .as_ref()
+        .map(|restored| restored.catalog.clone());
+    let pool_locations = recovered_pool
+        .as_ref()
+        .map(|restored| restored.locations.clone())
+        .unwrap_or_default();
+    let pool = match recovered_pool {
+        Some(restored) => restored.into_pool(
+            super::RemotePoolRestoreAuthority {
+                scope_id,
+                pool: pool_spec,
+                value_scope: authority.run_id.clone(),
+                driver_fence: authority.fencing_token,
+            },
+            Arc::from(bundle_archive),
+        )?,
+        None => RemotePoolDriver::new_with_value_scope(
+            scope_id,
+            pool_spec,
+            authority.fencing_token,
+            bundle_archive,
+            authority.run_id.clone(),
+        )?,
+    };
     for object in input_objects {
         if object.is_externalized_value() {
             pool.register_value_object(object.reference, object.bytes)?;
@@ -163,6 +187,8 @@ pub(super) async fn execute(
                 pool_id,
                 request,
                 recovered,
+                pool_catalog,
+                pool_locations,
                 project_revision,
                 checkpoint_sequence,
                 desired_workers,
@@ -195,6 +221,8 @@ struct AllocatedExecution<'a> {
     pool_id: PoolId,
     request: ProgramExecutionRequest,
     recovered: Option<super::recovery::RestoredObjectClosure>,
+    pool_catalog: Option<ProgramExecutionObjectLocation>,
+    pool_locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
     project_revision: String,
     checkpoint_sequence: u64,
     desired_workers: u32,
@@ -217,6 +245,8 @@ async fn execute_with_allocated_workers(
         pool_id,
         request,
         recovered,
+        pool_catalog,
+        pool_locations,
         project_revision,
         checkpoint_sequence,
         desired_workers,
@@ -348,6 +378,12 @@ async fn execute_with_allocated_workers(
             )
         })
         .transpose()?;
+    if let Some(publisher) = recovery_publisher.as_mut() {
+        publisher.bind_pool(Arc::clone(&pool), pool_catalog, pool_locations)?;
+    }
+    // The study owns physical publications; this clone owns periodic scheduler
+    // publications. Both serialize through the same acknowledged sequence.
+    let periodic_publisher = recovery_publisher.clone();
     let mut execution = if geometry_meshing {
         Box::pin(super::exact_meshing::execute_geometry_root(
             pool_for_execution,
@@ -401,8 +437,11 @@ async fn execute_with_allocated_workers(
     };
     let mut reconcile_ticks = tokio::time::interval(RECONCILE_INTERVAL);
     reconcile_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut checkpoint_ticks = tokio::time::interval(CHECKPOINT_INTERVAL);
+    checkpoint_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     driver_ticks.tick().await;
     reconcile_ticks.tick().await;
+    checkpoint_ticks.tick().await;
     let mut cancellation_requested = false;
     let mut cancellation_open = true;
     loop {
@@ -428,6 +467,34 @@ async fn execute_with_allocated_workers(
             }
             _ = driver_ticks.tick() => {
                 pool.tick()?;
+            }
+            _ = checkpoint_ticks.tick(), if periodic_publisher.is_some() && !cancellation_requested => {
+                let publisher = periodic_publisher.as_ref().expect("checkpoint branch is enabled");
+                match await_running_operation(
+                    publisher.publish_pool(),
+                    &mut execution,
+                    &mut driver_ticks,
+                    &pool,
+                    &mut cancellation,
+                    &mut cancellation_requested,
+                    tokio::time::Instant::now() + WORKER_READY_TIMEOUT,
+                ).await? {
+                    RunningWait::Operation(result, completed) => {
+                        result?;
+                        if let Some(result) = completed {
+                            return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                        }
+                    }
+                    RunningWait::Deadline(completed) => {
+                        if let Some(result) = completed {
+                            return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                        }
+                        if cancellation_requested {
+                            return Ok(RemotePoolExecutionOutcome::Cancelled);
+                        }
+                        return Err(protocol("remote recovery publication exceeded its deadline"));
+                    }
+                }
             }
             _ = reconcile_ticks.tick(), if !cancellation_requested => {
                 let resize = async {

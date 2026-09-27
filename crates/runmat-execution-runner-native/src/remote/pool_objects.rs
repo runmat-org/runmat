@@ -80,6 +80,16 @@ impl RemoteObjectCatalog {
         encoded: Arc<[u8]>,
         authorization_scope: &str,
     ) -> NativeExecutionResult<()> {
+        self.restore_object(reference, encoded, authorization_scope, true)
+    }
+
+    pub(super) fn restore_object(
+        &self,
+        reference: ValueRef,
+        encoded: Arc<[u8]>,
+        authorization_scope: &str,
+        registered_input: bool,
+    ) -> NativeExecutionResult<()> {
         validate_object(&reference, &encoded, authorization_scope)?;
         let mut state = self.state.lock().expect("remote object catalog poisoned");
         let mut admitted = admitted_objects(&state)?;
@@ -88,8 +98,19 @@ impl RemoteObjectCatalog {
         let value_id = reference.id;
         store(&self.store, &reference, encoded.as_ref())?;
         insert(&mut state.objects, reference)?;
-        state.registered_inputs.insert(value_id);
+        if registered_input {
+            state.registered_inputs.insert(value_id);
+        }
         Ok(())
+    }
+
+    pub(super) fn checkpoint_inputs(&self) -> Vec<ValueRef> {
+        let state = self.state.lock().expect("remote object catalog poisoned");
+        state
+            .registered_inputs
+            .iter()
+            .filter_map(|id| state.objects.get(id).cloned())
+            .collect()
     }
 
     pub(super) fn get(&self, reference: &ValueRef) -> NativeExecutionResult<Option<Arc<[u8]>>> {

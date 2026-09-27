@@ -18,6 +18,25 @@ pub(super) struct RemoteValueCatalog {
 }
 
 impl RemoteValueCatalog {
+    pub(super) fn checkpoint_references(&self) -> Vec<ValueRef> {
+        self.objects
+            .lock()
+            .expect("remote value catalog poisoned")
+            .values()
+            .map(|(reference, _)| reference.clone())
+            .collect()
+    }
+
+    pub(super) fn encoded(&self, reference: &ValueRef) -> NativeExecutionResult<Option<Arc<[u8]>>> {
+        let objects = self.objects.lock().expect("remote value catalog poisoned");
+        match objects.get(&reference.id) {
+            Some((stored, bytes)) if stored == reference => Ok(Some(Arc::clone(bytes))),
+            Some(_) => Err(protocol(
+                "remote value reference differs from stored content",
+            )),
+            None => Ok(None),
+        }
+    }
     pub(super) fn register(
         &self,
         reference: ValueRef,

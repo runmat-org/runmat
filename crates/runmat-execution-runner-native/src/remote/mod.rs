@@ -11,6 +11,7 @@ pub(crate) mod input_materialization;
 mod object_transfer;
 mod pool;
 mod pool_allocation;
+mod pool_checkpoint;
 pub(crate) mod pool_execution;
 mod pool_objects;
 mod pool_progress;
@@ -39,7 +40,7 @@ pub use channel::{
     RemoteWorkerChannel,
 };
 pub use driver::run_remote_driver_from_env;
-pub use pool::RemotePoolDriver;
+pub use pool::{RemotePoolCheckpoint, RemotePoolDriver, RemotePoolRestoreAuthority};
 pub use pool_progress::RemoteTaskCompletion;
 pub use quic_channel::{QuicRemoteWorkerChannel, RemoteWorkerChannelConfig};
 pub use relay_channel::RelayRemoteWorkerChannel;
