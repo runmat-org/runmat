@@ -140,20 +140,21 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .ok_or_else(|| internal_error("GPU provider unavailable for input"))?;
     match provider.unary_erfcinv(&handle).await {
         Ok(mut out) if real_unary::output_matches(&out, &handle, provider) => {
-            real_unary::preserve_residency_intent(&mut out, &handle);
+            real_unary::preserve_residency_intent(&mut out, &handle)?;
             return gpu_helpers::resident_gpu_value(out);
         }
         Ok(out) => {
-            real_unary::reject_output(&out, &handle, provider);
-            return Err(internal_error(
-                "provider unary_erfcinv returned malformed output",
+            return Err(real_unary::reject_output(
+                out,
+                internal_error("provider unary_erfcinv returned malformed output"),
             ));
         }
         Err(err) if real_unary::hook_is_unsupported(&err) => {}
         Err(err) => {
-            return Err(internal_error(format!(
-                "provider unary_erfcinv failed: {err}"
-            )))
+            let mut error = internal_error(format!("provider unary_erfcinv failed: {err}"));
+            error.source = Some(err.into_boxed_dyn_error());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
         }
     }
 

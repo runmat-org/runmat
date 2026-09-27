@@ -67,23 +67,20 @@ pub(super) fn validate_provider_output_with_storage(
                 precision: runmat_accelerate_api::handle_precision(input),
                 integer: None,
                 logical: false,
-                alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+                alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
             },
         );
     if !valid {
-        gpu_helpers::free_rejected_provider_output(&output, &[input], provider);
-        return Err(error_with_detail(
+        let mut error = error_with_detail(
             builtin,
             internal_error,
             "provider returned malformed unary output",
-        ));
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(output, error));
     }
     let mut output = output;
-    runmat_accelerate_api::set_handle_provenance(
-        &mut output,
-        runmat_accelerate_api::handle_provenance(input)
-            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-    );
+    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

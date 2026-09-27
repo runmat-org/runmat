@@ -139,22 +139,27 @@ async fn erf_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     })?;
     match provider.unary_erf(&handle).await {
         Ok(mut out) if real_unary::output_matches(&out, &handle, provider) => {
-            real_unary::preserve_residency_intent(&mut out, &handle);
+            real_unary::preserve_residency_intent(&mut out, &handle)?;
             return gpu_helpers::resident_gpu_value(out);
         }
         Ok(out) => {
-            real_unary::reject_output(&out, &handle, provider);
-            return Err(erf_error_with_detail(
-                &ERF_ERROR_INTERNAL,
-                "provider unary_erf returned malformed output",
+            return Err(real_unary::reject_output(
+                out,
+                erf_error_with_detail(
+                    &ERF_ERROR_INTERNAL,
+                    "provider unary_erf returned malformed output",
+                ),
             ));
         }
         Err(err) if real_unary::hook_is_unsupported(&err) => {}
         Err(err) => {
-            return Err(erf_error_with_detail(
+            let mut error = erf_error_with_detail(
                 &ERF_ERROR_INTERNAL,
                 format!("provider unary_erf failed: {err}"),
-            ))
+            );
+            error.source = Some(err.into_boxed_dyn_error());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle)
