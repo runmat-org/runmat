@@ -10,7 +10,8 @@ use crate::builtins::common::path_search::{
 };
 use crate::BuiltinResult;
 use runmat_builtins::{
-    builtin_name_is_known, EXIST_ERROR_INVALID_TYPE, EXIST_ERROR_TYPE_ARG, EXIST_SEARCH_TYPE_EXTENSION,
+    builtin_name_is_known, EXIST_ERROR_INVALID_TYPE, EXIST_ERROR_TYPE_ARG,
+    EXIST_SEARCH_TYPE_EXTENSION,
 };
 use runmat_value::Value;
 

@@ -8,6 +8,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "matlabroot",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::installation_path::matlabroot"
 )]
 async fn matlabroot_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

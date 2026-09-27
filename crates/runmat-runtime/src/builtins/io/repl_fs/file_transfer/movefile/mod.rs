@@ -12,6 +12,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "movefile",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::file_transfer::movefile"
 )]
 async fn movefile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -4,6 +4,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "isfolder",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_predicate::isfolder"
 )]
 async fn isfolder_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -8,6 +8,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "ls",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::directory_listing::ls"
 )]
 async fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

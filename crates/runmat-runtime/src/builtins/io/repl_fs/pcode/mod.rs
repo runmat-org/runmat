@@ -33,7 +33,11 @@ struct PcodeOptions {
     items: Vec<String>,
 }
 
-#[runtime_builtin(name = "pcode", builtin_path = "crate::builtins::io::repl_fs::pcode")]
+#[runtime_builtin(
+    name = "pcode",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::io::repl_fs::pcode"
+)]
 async fn pcode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     evaluate(&args).await?;
     Ok(empty_array())

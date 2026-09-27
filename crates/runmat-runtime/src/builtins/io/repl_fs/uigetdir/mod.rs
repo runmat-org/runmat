@@ -47,6 +47,7 @@ fn host_error(detail: impl AsRef<str>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "uigetdir",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::uigetdir"
 )]
 async fn uigetdir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

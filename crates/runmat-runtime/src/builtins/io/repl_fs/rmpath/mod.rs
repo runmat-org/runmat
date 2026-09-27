@@ -9,7 +9,11 @@ mod tests;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-#[runtime_builtin(name = "rmpath", builtin_path = "crate::builtins::io::repl_fs::rmpath")]
+#[runtime_builtin(
+    name = "rmpath",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::io::repl_fs::rmpath"
+)]
 async fn rmpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     execute::run(args).await
 }

@@ -20,6 +20,7 @@ use std::path::PathBuf;
 const BUILTIN_NAME: &str = "opentoline";
 #[runtime_builtin(
     name = "opentoline",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::opentoline"
 )]
 async fn opentoline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

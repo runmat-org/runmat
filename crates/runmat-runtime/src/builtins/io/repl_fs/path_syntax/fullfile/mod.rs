@@ -8,6 +8,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "fullfile",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_syntax::fullfile"
 )]
 async fn fullfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

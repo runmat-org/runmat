@@ -14,6 +14,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "genpath",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::genpath"
 )]
 async fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

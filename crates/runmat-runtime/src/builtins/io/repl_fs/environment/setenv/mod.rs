@@ -9,6 +9,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "setenv",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::environment::setenv"
 )]
 async fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

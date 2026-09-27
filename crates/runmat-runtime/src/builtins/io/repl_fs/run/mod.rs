@@ -152,7 +152,11 @@ pub async fn resolve_run_source(value: &Value) -> BuiltinResult<RunScriptSource>
     })
 }
 
-#[runtime_builtin(name = "run", builtin_path = "crate::builtins::io::repl_fs::run")]
+#[runtime_builtin(
+    name = "run",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::io::repl_fs::run"
+)]
 pub fn run_builtin_registered(_args: Vec<Value>) -> crate::BuiltinResult<Value> {
     requires_vm_workspace_context()
 }

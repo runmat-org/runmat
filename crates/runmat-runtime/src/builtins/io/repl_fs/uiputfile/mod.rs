@@ -50,6 +50,7 @@ fn host_error(detail: impl AsRef<str>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "uiputfile",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::uiputfile"
 )]
 async fn uiputfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

@@ -8,6 +8,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "what",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::source_inventory::what"
 )]
 async fn what_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

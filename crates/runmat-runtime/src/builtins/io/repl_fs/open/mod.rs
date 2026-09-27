@@ -16,7 +16,11 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 use std::path::{Path, PathBuf};
 const BUILTIN_NAME: &str = "open";
-#[runtime_builtin(name = "open", builtin_path = "crate::builtins::io::repl_fs::open")]
+#[runtime_builtin(
+    name = "open",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::io::repl_fs::open"
+)]
 async fn open_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() != 1 {
         return Err(open_error(

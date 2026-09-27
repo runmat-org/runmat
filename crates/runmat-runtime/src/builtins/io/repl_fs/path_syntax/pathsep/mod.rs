@@ -5,6 +5,7 @@ use runmat_value::{CharArray, Value};
 
 #[runtime_builtin(
     name = "pathsep",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_syntax::pathsep"
 )]
 async fn pathsep_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

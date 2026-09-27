@@ -4,6 +4,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "isfile",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_predicate::isfile"
 )]
 async fn isfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
