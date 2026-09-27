@@ -13,6 +13,9 @@ use super::contract::{
 use super::row;
 use super::vector::{add, cross, dot, magnitude, scale, subtract};
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn pair_targets(
     mesh: &SolverMeshArtifact,
     primary: &ResolvedConstraintTarget,
@@ -159,15 +162,23 @@ fn pair_matching(
                     secondary_point,
                     transform_position(transform, point),
                 ));
-                Ok((*identity, distance))
+                Ok::<_, ConstraintPlanError>((*identity, distance))
             })
-            .collect::<Result<Vec<_>, ConstraintPlanError>>()?
-            .into_iter()
-            .min_by(|left, right| {
-                left.1
-                    .total_cmp(&right.1)
-                    .then_with(|| left.0.cmp(&right.0))
-            })
+            .try_fold(None, |nearest: Option<(StableDigest, f64)>, candidate| {
+                let candidate = candidate?;
+                Ok::<_, ConstraintPlanError>(Some(match nearest {
+                    Some(previous)
+                        if previous
+                            .1
+                            .total_cmp(&candidate.1)
+                            .then_with(|| previous.0.cmp(&candidate.0))
+                            .is_le() =>
+                    {
+                        previous
+                    }
+                    _ => candidate,
+                }))
+            })?
             .filter(|(_, distance)| *distance <= tolerance)
             .ok_or(ConstraintPlanError::PairingUnavailable {
                 constraint_id: constraint_id.into(),

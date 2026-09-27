@@ -6,31 +6,29 @@ use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use super::contract::{ConstraintPlanError, ResolvedConstraintTarget};
 use super::plan::canonical_digest;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn resolve_solid_target(
     mesh: &SolverMeshArtifact,
     target: &RegionTarget,
     constraint_id: &str,
 ) -> Result<ResolvedConstraintTarget, ConstraintPlanError> {
-    let (mut entities, mut nodes) = match (target.entity_dimension, target.expected_topology) {
+    let (entities, mut nodes) = match (target.entity_dimension, target.expected_topology) {
         (EntityDimension::Face, ExpectedTopology::BoundaryFace) => {
-            let faces = mesh
-                .topology
-                .boundary_faces
-                .iter()
-                .filter(|face| {
-                    face.provenance
-                        .iter()
-                        .any(|entity| target.matches_persistent_entity(entity))
-                })
-                .collect::<Vec<_>>();
+            let faces = mesh.topology.boundary_faces.iter().filter(|face| {
+                face.provenance
+                    .iter()
+                    .any(|entity| target.matches_persistent_entity(entity))
+            });
+            // Borrow and deduplicate CAD provenance before cloning it. A single source face
+            // may occur on many boundary triangles; ownership scales with unique entities.
             let entities = faces
-                .iter()
+                .clone()
                 .flat_map(|face| face.provenance.iter())
                 .filter(|entity| target.matches_persistent_entity(entity))
-                .cloned()
-                .collect::<Vec<_>>();
+                .collect::<BTreeSet<_>>();
             let node_ids = faces
-                .iter()
                 .flat_map(|face| face.node_ids.iter().copied())
                 .collect::<BTreeSet<_>>();
             let nodes = mesh
@@ -59,7 +57,7 @@ pub(super) fn resolve_solid_target(
                     .filter(|node| node.node_id == node_id)
                     .map(|node| node.stable_identity)
                     .collect::<Vec<_>>();
-                (Vec::new(), nodes)
+                (BTreeSet::new(), nodes)
             } else {
                 let nodes = mesh
                     .topology
@@ -72,7 +70,10 @@ pub(super) fn resolve_solid_target(
                     })
                     .map(|node| node.stable_identity)
                     .collect::<Vec<_>>();
-                (target.resolved_entities().to_vec(), nodes)
+                (
+                    target.resolved_entities().iter().collect::<BTreeSet<_>>(),
+                    nodes,
+                )
             }
         }
         _ => {
@@ -82,8 +83,6 @@ pub(super) fn resolve_solid_target(
             });
         }
     };
-    entities.sort();
-    entities.dedup();
     nodes.sort_unstable();
     nodes.dedup();
     if nodes.is_empty() {
@@ -107,7 +106,7 @@ pub(super) fn resolve_solid_target(
         canonical_digest("resolved-constraint-target", &(target, &entities, &nodes))?;
     Ok(ResolvedConstraintTarget {
         authored: target.clone(),
-        matched_entities: entities,
+        matched_entities: entities.into_iter().cloned().collect(),
         matched_node_identities: nodes,
         selection_digest,
     })

@@ -13,6 +13,9 @@ use super::{plan::canonical_digest, rank};
 
 const ROW_DOMAIN: &str = "structural-constraint-row";
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn new_singleton(
     constraint_id: &str,
     node_identity: StableDigest,
@@ -56,33 +59,40 @@ pub(super) fn new_sparse(
     right_hand_side: f64,
 ) -> Result<CanonicalStructuralConstraintRow, ConstraintPlanError> {
     terms.sort_by_key(term_key);
-    let mut combined: Vec<CanonicalStructuralConstraintTerm> = Vec::with_capacity(terms.len());
-    for term in terms {
-        if let Some(previous) = combined
-            .last_mut()
-            .filter(|previous| term_key(previous) == term_key(&term))
-        {
-            previous.coefficient += term.coefficient;
+    // Do not retain geometric growth slack from lowering across the whole plan. Boxing
+    // removes excess capacity; exact-capacity inputs keep their allocation. A shrinking
+    // allocator may move this buffer, so this is not a zero-allocation claim for spare capacity.
+    let mut terms = terms.into_boxed_slice().into_vec();
+    let mut written = 0;
+    for read in 0..terms.len() {
+        if written != 0 && term_key(&terms[written - 1]) == term_key(&terms[read]) {
+            let coefficient = terms[read].coefficient;
+            terms[written - 1].coefficient += coefficient;
         } else {
-            combined.push(term);
+            terms.swap(written, read);
+            written += 1;
         }
     }
-    combined.retain(|term| term.coefficient != 0.0);
-    if combined.is_empty() || !right_hand_side.is_finite() {
+    terms.truncate(written);
+    terms.retain(|term| term.coefficient != 0.0);
+    if terms.is_empty()
+        || !right_hand_side.is_finite()
+        || terms.iter().any(|term| !term.coefficient.is_finite())
+    {
         return Err(ConstraintPlanError::Invalid(format!(
             "constraint `{constraint_id}` compiles to an empty or non-finite equation"
         )));
     }
-    let reaction_recovery = if combined.len() == 1 {
+    let reaction_recovery = if terms.len() == 1 {
         ReactionRecovery::UnconstrainedEquilibriumResidual
     } else {
         ReactionRecovery::ConstraintMultiplier
     };
-    let residual_quantity = residual_quantity(&combined);
+    let residual_quantity = residual_quantity(&terms);
     let mut row = CanonicalStructuralConstraintRow {
         identity: Digest::from_bytes([0; 32]),
         constraint_id: constraint_id.into(),
-        terms: combined,
+        terms,
         right_hand_side,
         residual_quantity,
         reaction_recovery,
