@@ -49,10 +49,37 @@ async fn pending_owned_readback_cancellation_unmaps_same_device_buffer() {
         Poll::Pending
     ));
     drop(pending);
-    let actual = read_with(access, buffer, "remap after cancellation", |bytes| {
+    let actual = read_with(
+        access.clone(),
+        buffer.clone(),
+        "remap after cancellation",
+        |bytes| Ok(bytemuck::cast_slice::<u8, f32>(bytes).to_vec()),
+    )
+    .await
+    .expect("cancelled production mapping must permit remapping");
+    assert_eq!(actual, expected);
+    let error = read_with(
+        access.clone(),
+        buffer.clone(),
+        "decode failure",
+        |bytes| -> Result<()> {
+            assert_eq!(bytemuck::cast_slice::<u8, f32>(bytes), expected);
+            Err(
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "browser decode sentinel")
+                    .into(),
+            )
+        },
+    )
+    .await
+    .expect_err("production decoder failure must remain an error");
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    let actual = read_with(access, buffer, "remap after decoder failure", |bytes| {
         Ok(bytemuck::cast_slice::<u8, f32>(bytes).to_vec())
     })
     .await
-    .expect("cancelled production mapping must permit remapping");
+    .expect("failed production decoder must unmap the same staging buffer");
     assert_eq!(actual, expected);
 }

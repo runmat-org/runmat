@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use futures::channel::oneshot;
 use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
 use runmat_accelerate_api::{WgpuAccessError, WgpuDeviceAccess};
-use std::{error::Error, fmt};
+use std::{borrow::Borrow, error::Error, fmt};
 
 #[cfg(test)]
 #[path = "readback/tests.rs"]
@@ -64,13 +64,13 @@ fn complete<T>(result: Result<T>, cleanup: std::result::Result<(), CleanupError>
     }
 }
 
-struct Readback {
+struct Readback<B: Borrow<wgpu::Buffer>> {
     access: WgpuDeviceAccess,
-    buffer: Option<wgpu::Buffer>,
+    buffer: Option<B>,
     map_registered: bool,
 }
 
-impl Readback {
+impl<B: Borrow<wgpu::Buffer>> Readback<B> {
     fn cleanup(&mut self) -> std::result::Result<(), CleanupError> {
         let Some(buffer) = self.buffer.take() else {
             return Ok(());
@@ -86,7 +86,7 @@ impl Readback {
         // reported as successful unmap when the explicit teardown failed.
         let result = catch_allocation_cleanup_unwind(|| {
             self.access
-                .with_cleanup(|cleanup| cleanup.unmap_buffer(&buffer))
+                .with_cleanup(|cleanup| cleanup.unmap_buffer(buffer.borrow()))
         })
         .map_err(|_| CleanupError::UnmapPanicked)
         .and_then(|result| result.map_err(CleanupError::Access));
@@ -104,7 +104,7 @@ impl Readback {
     }
 }
 
-impl Drop for Readback {
+impl<B: Borrow<wgpu::Buffer>> Drop for Readback<B> {
     fn drop(&mut self) {
         if let Err(error) = self.cleanup() {
             log::error!("WGPU staging cancellation/unwind cleanup failed: {error}");
@@ -130,7 +130,7 @@ pub(super) fn read(
 
 pub(super) fn read_with<'a, T: 'a>(
     access: WgpuDeviceAccess,
-    buffer: wgpu::Buffer,
+    buffer: impl Borrow<wgpu::Buffer> + 'a,
     context: &'a str,
     decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
 ) -> impl std::future::Future<Output = Result<T>> + 'a {
@@ -150,6 +150,7 @@ pub(super) fn read_with<'a, T: 'a>(
                     .buffer
                     .as_ref()
                     .expect("readback owns staging")
+                    .borrow()
                     .slice(..)
                     .map_async(wgpu::MapMode::Read, move |result| {
                         let _ = send.send(result);
@@ -165,6 +166,7 @@ pub(super) fn read_with<'a, T: 'a>(
                     .buffer
                     .as_ref()
                     .expect("readback owns staging")
+                    .borrow()
                     .slice(..)
                     .get_mapped_range();
                 let output = decode(&data);

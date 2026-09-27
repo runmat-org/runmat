@@ -1,5 +1,78 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "requires provisioned WGPU adapter; run with --ignored"]
+fn production_decoder_failure_and_unwind_unmap_same_staging_buffer() {
+    use crate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptions};
+    use wgpu::util::DeviceExt;
+    let provider =
+        WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU adapter");
+    let access = provider.access.clone();
+    let expected = [1.25f32, -3.5, 9.0, 0.125];
+    let buffer = std::sync::Arc::new(
+        access
+            .with_shared(|emission| {
+                emission
+                    .device()
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("same-staging-readback-lifecycle"),
+                        contents: bytemuck::cast_slice(&expected),
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    })
+            })
+            .expect("same-device staging"),
+    );
+    let remap = || {
+        let actual = futures::executor::block_on(read_with(
+            access.clone(),
+            buffer.clone(),
+            "same staging remap",
+            |bytes| Ok(bytemuck::cast_slice::<u8, f32>(bytes).to_vec()),
+        ))
+        .expect("production cleanup must permit remapping the same staging buffer");
+        assert_eq!(actual, expected);
+    };
+    drop(read_with(
+        access.clone(),
+        buffer.clone(),
+        "unpolled",
+        |_| -> Result<()> { panic!("unpolled decoder must not execute") },
+    ));
+    remap();
+    let error = futures::executor::block_on(read_with(
+        access.clone(),
+        buffer.clone(),
+        "decode error",
+        |bytes| -> Result<()> {
+            assert_eq!(bytemuck::cast_slice::<u8, f32>(bytes), expected);
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "decode sentinel").into())
+        },
+    ))
+    .expect_err("decoder error must survive cleanup");
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    remap();
+    #[cfg(panic = "unwind")]
+    {
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            futures::executor::block_on(read_with(
+                access.clone(),
+                buffer.clone(),
+                "decode unwind",
+                |bytes| -> Result<()> {
+                    assert_eq!(bytemuck::cast_slice::<u8, f32>(bytes), expected);
+                    panic!("decoder unwind sentinel")
+                },
+            ))
+        }));
+        assert!(unwind.is_err());
+        remap();
+    }
+}
+
 #[test]
 fn completion_retains_primary_and_typed_cleanup_failures() {
     let error = complete::<()>(
