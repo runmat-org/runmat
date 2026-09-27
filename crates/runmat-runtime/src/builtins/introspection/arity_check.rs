@@ -688,12 +688,16 @@ mod tests {
     #[test]
     fn arity_checks_reject_resident_bounds_before_provider_access() {
         let _guard = replace_call_counts(vec![(1, 1)]);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_419_007,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("valid unregistered resident fixture")
+                .handle,
+        );
         let nargin = dispatch_narginchk(vec![resident.clone(), Value::Num(2.0)])
             .expect_err("resident nargin bound must reject");
         assert_eq!(nargin.identifier(), Some("RunMat:NarginchkArgumentInvalid"));

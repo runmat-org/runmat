@@ -436,12 +436,16 @@ mod tests {
 
     #[test]
     fn inputname_rejects_resident_index_without_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("valid unregistered resident fixture")
+                .handle,
+        );
         let error = dispatch_inputname(vec![resident]).unwrap_err();
         assert_eq!(
             error.identifier(),

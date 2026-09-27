@@ -205,13 +205,17 @@ mod tests {
     use super::*;
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
-    fn unowned_resident_value() -> Value {
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        })
+    fn unregistered_resident_value() -> Value {
+        Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("valid unregistered resident fixture")
+                .handle,
+        )
     }
 
     #[test]
@@ -231,7 +235,7 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                     .expect("integer tensor"),
             ),
-            unowned_resident_value(),
+            unregistered_resident_value(),
         ] {
             let error = dispatch_str2func(value).expect_err("non-text must reject");
             assert_eq!(error.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
@@ -264,7 +268,7 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
                     .expect("integer tensor"),
             ),
-            unowned_resident_value(),
+            unregistered_resident_value(),
         ]) {
             let error = dispatch_func2str(value).expect_err("non-handle rejection");
             assert_eq!(

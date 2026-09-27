@@ -9,16 +9,22 @@ fn backing_fields_preserve_wide_integer_and_nested_resident_payloads() {
         block_on(get_p_builtin(source.clone())).unwrap(),
         Value::Num(0.0)
     );
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![0, 3],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
     let payload = Value::Cell(
         CellArray::new(
             vec![
                 Value::Int(IntValue::U64(u64::MAX)),
-                Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                    shape: vec![0, 3],
-                    device_id: u32::MAX - 732,
-                    buffer_id: u64::MAX - 732,
-                    descriptor: Default::default(),
-                }),
+                Value::GpuTensor(allocation.handle),
             ],
             1,
             2,
@@ -28,6 +34,9 @@ fn backing_fields_preserve_wide_integer_and_nested_resident_payloads() {
     let updated = block_on(set_p_builtin(source.clone(), payload.clone())).unwrap();
     assert_eq!(block_on(get_p_builtin(updated)).unwrap(), payload);
     assert_eq!(block_on(get_p_builtin(source)).unwrap(), Value::Num(0.0));
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(payload);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

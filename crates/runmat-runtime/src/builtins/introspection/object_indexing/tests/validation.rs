@@ -66,21 +66,29 @@ fn default_brace_rejects_unvalidated_subscript_containers() {
 
 #[test]
 fn default_brace_shape_overflow_returns_substruct_error() {
-    let target = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![usize::MAX, 2],
-        device_id: 0,
-        buffer_id: 99,
-        descriptor: Default::default(),
-    });
-    let descriptor = substruct(
-        crate::OBJECT_INDEX_BRACE,
-        cell(vec![Value::String(":".to_string())]),
-    );
-    let err = call_err(target, descriptor, Value::String("Statement".to_string()));
+    // Operational handles cannot carry an overflowing shape. Exercise the
+    // indexing count boundary directly, retaining its stable error contract.
+    let err =
+        crate::builtins::introspection::object_indexing::selectors::checked_shape_element_count(&[
+            usize::MAX,
+            2,
+        ])
+        .unwrap_err();
     assert_eq!(
         err.identifier(),
         Some("RunMat:numArgumentsFromSubscript:InvalidSubstruct")
     );
+}
+
+#[test]
+fn resident_owner_rejects_overflowing_shape_before_publication() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![usize::MAX, 2],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+    assert!(allocation.is_err());
 }
 
 #[test]

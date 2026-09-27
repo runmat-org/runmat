@@ -75,12 +75,16 @@ fn default_cell_brace_empty_logical_selection_can_return_zero() {
 
 #[test]
 fn default_gpu_brace_colon_counts_shape_without_gather() {
-    let target = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 3],
-        device_id: 0,
-        buffer_id: 99,
-        descriptor: Default::default(),
-    });
+    let target = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("valid unregistered resident fixture")
+            .handle,
+    );
     let descriptor = substruct(
         crate::OBJECT_INDEX_BRACE,
         cell(vec![

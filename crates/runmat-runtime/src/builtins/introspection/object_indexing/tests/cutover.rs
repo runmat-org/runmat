@@ -23,12 +23,16 @@ fn canonical_indexing_bindings_join_without_legacy_authority() {
 
 #[test]
 fn requested_cell_outputs_preserve_nested_resident_values_without_provider_access() {
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 3],
-        device_id: u32::MAX - 731,
-        buffer_id: u64::MAX - 731,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("valid unregistered resident fixture")
+            .handle,
+    );
     let payload = cell(vec![resident]);
     let source = cell(vec![Value::Int(IntValue::U64(u64::MAX)), payload.clone()]);
     let path = substruct("{}", cell(vec![Value::String(":".into())]));
