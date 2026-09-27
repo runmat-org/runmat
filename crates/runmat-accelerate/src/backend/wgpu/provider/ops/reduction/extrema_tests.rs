@@ -34,6 +34,23 @@ async fn dimensional_extrema_include_nan_layout_empty_and_workgroup_boundary() {
         transposed.view().layout(),
         GpuTensorLayout::Transpose(_)
     ));
+    // The same logical slices are columns of the lazy transpose and rows of
+    // the original allocation. Both dispatch axes must retain NaNs and origins.
+    for minimum in [true, false] {
+        let result = if minimum {
+            provider.reduce_min_dim(&input, 1).await
+        } else {
+            provider.reduce_max_dim(&input, 1).await
+        }
+        .unwrap();
+        assert_eq!(result.values.shape(), &[2, 1]);
+        let values = provider.download(&result.values).await.unwrap().data;
+        let indices = provider.download(&result.indices).await.unwrap().data;
+        assert!(values[0].is_nan());
+        assert_eq!(indices[0], 2.0);
+        assert_eq!(values[1], if minimum { 0.0 } else { f64::INFINITY });
+        assert_eq!(indices[1], if minimum { 3.0 } else { 2.0 });
+    }
     for minimum in [true, false] {
         let result = if minimum {
             provider.reduce_min_dim(&transposed, 0).await
@@ -83,9 +100,28 @@ async fn dimensional_extrema_include_nan_layout_empty_and_workgroup_boundary() {
     for shape in [[0, 3], [3, 0]] {
         let empty = upload(&[], &shape);
         for dim in [0, 1] {
-            let result = provider.reduce_min_dim(&empty, dim).await.unwrap();
-            assert_eq!(result.values.shape(), shape);
-            assert_eq!(result.indices.shape(), shape);
+            for minimum in [true, false] {
+                let result = if minimum {
+                    provider.reduce_min_dim(&empty, dim).await
+                } else {
+                    provider.reduce_max_dim(&empty, dim).await
+                }
+                .unwrap();
+                assert_eq!(result.values.shape(), shape);
+                assert_eq!(result.indices.shape(), shape);
+                assert!(provider
+                    .download(&result.values)
+                    .await
+                    .unwrap()
+                    .data
+                    .is_empty());
+                assert!(provider
+                    .download(&result.indices)
+                    .await
+                    .unwrap()
+                    .data
+                    .is_empty());
+            }
         }
     }
 }
