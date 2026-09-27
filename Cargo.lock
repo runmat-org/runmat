@@ -7004,6 +7004,7 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "thiserror 1.0.69",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
