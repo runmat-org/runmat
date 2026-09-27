@@ -109,9 +109,10 @@ async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {
-        return crate::builtins::common::provider_restore::gather_compute_restore(
+        return super::inverse_helpers::real_fallback::compute(
             handle,
             BUILTIN_NAME,
+            &ACOS_GPU_REAL_COMPLEX_EXTENSION,
             acos_tensor_real,
         )
         .await;
@@ -136,13 +137,10 @@ async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 }
             },
             Some(true) => {
-                crate::compatibility::ensure_builtin_extension_enabled(
-                    &ACOS_GPU_REAL_COMPLEX_EXTENSION,
-                    BUILTIN_NAME,
-                )?;
-                return crate::builtins::common::provider_restore::gather_compute_restore(
+                return super::inverse_helpers::real_fallback::compute(
                     handle,
                     BUILTIN_NAME,
+                    &ACOS_GPU_REAL_COMPLEX_EXTENSION,
                     acos_tensor_real,
                 )
                 .await;
@@ -152,9 +150,10 @@ async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    crate::builtins::common::provider_restore::gather_compute_restore(
+    super::inverse_helpers::real_fallback::compute(
         handle,
         BUILTIN_NAME,
+        &ACOS_GPU_REAL_COMPLEX_EXTENSION,
         acos_tensor_real,
     )
     .await

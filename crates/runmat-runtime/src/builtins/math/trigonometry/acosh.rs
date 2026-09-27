@@ -155,25 +155,13 @@ async fn detect_gpu_requires_complex(
 }
 
 async fn acosh_gather_compute_restore(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
-        acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, "GPU input has no owning provider")
-    })?;
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|error| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, error))?;
-    let output = acosh_tensor_real(tensor)?;
-    if matches!(output, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &ACOSH_GPU_REAL_COMPLEX_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    crate::builtins::common::provider_restore::upload_value_like(
-        provider,
-        output,
+    super::inverse_helpers::real_fallback::compute(
+        handle,
         BUILTIN_NAME,
-        &handle,
+        &ACOSH_GPU_REAL_COMPLEX_EXTENSION,
+        acosh_tensor_real,
     )
+    .await
 }
 
 fn acosh_real(value: Value) -> BuiltinResult<Value> {

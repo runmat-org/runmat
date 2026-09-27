@@ -119,6 +119,7 @@ pub(crate) async fn requires_complex(
         }
     }
     let mut outside = false;
+    let mut minimum = None;
     for output in &outputs.owned {
         let host = gpu_helpers::download_native_values_async(provider, output)
             .await
@@ -134,6 +135,21 @@ pub(crate) async fn requires_complex(
         let value = &host.data[0];
         if value.is_nan() {
             return Ok(None);
+        }
+        if matches!(domain, RealDomain::ClosedUnitInterval) {
+            // NaN-omitting reductions can return their identity pair for an
+            // all-NaN input. An inverted range is not evidence of complex data.
+            let current = match value {
+                runmat_value::NumericScalar::F64(value) => Some(*value),
+                runmat_value::NumericScalar::F32(value) => Some(f64::from(*value)),
+                _ => None,
+            };
+            if let (Some(low), Some(high)) = (minimum, current) {
+                if low > high {
+                    return Ok(None);
+                }
+            }
+            minimum = current;
         }
         outside |= match domain {
             RealDomain::ClosedUnitInterval => value.is_outside_closed_unit_interval(0.0),

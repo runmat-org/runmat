@@ -8,6 +8,7 @@ pub(super) mod resident_range;
 pub(super) mod preparation;
 pub(super) mod like;
 pub(super) mod resident_complex;
+pub(super) mod real_fallback;
 
 pub(crate) fn ensure_input_extensions(
     value: &Value,

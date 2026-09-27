@@ -155,25 +155,13 @@ async fn detect_gpu_requires_complex(
 }
 
 async fn atanh_gather_compute_restore(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
-        atanh_error_with_detail(&ATANH_ERROR_INTERNAL, "GPU input has no owning provider")
-    })?;
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|error| atanh_error_with_detail(&ATANH_ERROR_INTERNAL, error))?;
-    let output = atanh_tensor_real(tensor)?;
-    if matches!(output, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &ATANH_GPU_REAL_COMPLEX_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    crate::builtins::common::provider_restore::upload_value_like(
-        provider,
-        output,
+    super::inverse_helpers::real_fallback::compute(
+        handle,
         BUILTIN_NAME,
-        &handle,
+        &ATANH_GPU_REAL_COMPLEX_EXTENSION,
+        atanh_tensor_real,
     )
+    .await
 }
 
 fn atanh_real(value: Value) -> BuiltinResult<Value> {

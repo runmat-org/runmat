@@ -144,6 +144,10 @@ impl AccelProvider for Provider {
 }
 
 fn fixture(at: usize, fault: Fault) -> (&'static Provider, GpuTensorHandle) {
+    fixture_values(at, fault, &[0.0, 0.5])
+}
+
+fn fixture_values(at: usize, fault: Fault, values: &[f64]) -> (&'static Provider, GpuTensorHandle) {
     static PROVIDER: OnceLock<Provider> = OnceLock::new();
     let provider = PROVIDER.get_or_init(|| Provider {
         inner: InProcessProvider::new(),
@@ -157,11 +161,86 @@ fn fixture(at: usize, fault: Fault) -> (&'static Provider, GpuTensorHandle) {
     let input = provider
         .inner
         .upload(&HostTensorView {
-            data: &[0.0, 0.5],
-            shape: &[1, 2],
+            data: values,
+            shape: &[1, values.len()],
         })
         .unwrap();
     (provider, input)
+}
+
+#[test]
+fn inverse_range_all_nan_is_inconclusive_not_complex_evidence() {
+    let _serial = test_support::accel_test_lock();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    for name in ["asin", "acos", "atanh", "acosh"] {
+        let (provider, mut input) = fixture_values(0, Fault::None, &[f64::NAN, f64::NAN]);
+        runmat_accelerate_api::mark_handle_explicit(&mut input);
+        let _provider = ThreadProviderGuard::set(Some(provider));
+        let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
+            name,
+            &[Value::GpuTensor(input.clone())],
+            1,
+        ))
+        .unwrap();
+        let Value::GpuTensor(output) = &result else {
+            panic!("{name}: explicit input must retain residency");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(output));
+        assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+        let host = block_on(provider.inner.download(output)).unwrap();
+        assert!(host.data.iter().all(|value| value.is_nan()));
+        provider.inner.free(output).unwrap();
+        runmat_accelerate_api::clear_handle_metadata(output);
+        provider.assert_reclaimed(&input);
+    }
+}
+
+#[test]
+fn inverse_range_complex_policy_is_independent_of_probe_support_and_respects_provenance() {
+    let _serial = test_support::accel_test_lock();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    for name in ["asin", "acos", "atanh", "acosh"] {
+        let outside = if name == "acosh" { 0.5 } else { 2.0 };
+        for fault in [Fault::None, Fault::Unsupported] {
+            for automatic in [false, true] {
+                let (provider, mut input) = fixture_values(1, fault, &[outside]);
+                if automatic {
+                    runmat_accelerate_api::mark_handle_automatic(&mut input);
+                } else {
+                    runmat_accelerate_api::mark_handle_explicit(&mut input);
+                }
+                let _provider = ThreadProviderGuard::set(Some(provider));
+                let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
+                    name,
+                    &[Value::GpuTensor(input.clone())],
+                    1,
+                ));
+                if automatic {
+                    let output = result.unwrap();
+                    assert!(matches!(
+                        output,
+                        Value::Complex(_, _) | Value::ComplexTensor(_)
+                    ));
+                    let expected = block_on(crate::dispatcher::call_builtin_async_with_outputs(
+                        name,
+                        &[Value::Num(outside)],
+                        1,
+                    ))
+                    .unwrap();
+                    assert_eq!(
+                        output, expected,
+                        "{name}: automatic residency changed semantics"
+                    );
+                } else {
+                    assert!(
+                        result.is_err(),
+                        "{name}: explicit complex extension must be gated"
+                    );
+                }
+                provider.assert_reclaimed(&input);
+            }
+        }
+    }
 }
 
 #[test]
