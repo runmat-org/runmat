@@ -126,12 +126,6 @@ pub fn prepare_accuracy(
             )?,
         );
     }
-    crate::validate_accuracy_source_context(
-        &request,
-        &numerical_receipt,
-        preparation.source_observations.as_ref(),
-        &preparation.source_context_inputs.iter().collect::<Vec<_>>(),
-    )?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::AccuracyEvaluationRequest,
@@ -148,13 +142,15 @@ pub fn prepare_accuracy(
             ValueRefKind::ResultObject,
         ),
     ];
+    let source_context_start = inputs.len();
     inputs.extend(
         preparation
             .source_context_inputs
             .into_iter()
             .map(|input| (input, ValueRefKind::DriverObject)),
     );
-    if let Some(observations) = preparation.source_observations {
+    let source_context_end = inputs.len();
+    if let Some(observations) = &preparation.source_observations {
         let bytes = observations
             .canonical_bytes()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -187,6 +183,16 @@ pub fn prepare_accuracy(
         .collect::<Vec<_>>();
     let resource_plan =
         crate::build_prepared_accuracy_resource_plan(&request, &numerical_receipt, &inputs)?;
+    // Reject an inadmissible task before source verification reconstructs constraints and
+    // observation topology. Input serialization above is not covered by this boundary.
+    crate::validate_accuracy_source_context(
+        &request,
+        &numerical_receipt,
+        preparation.source_observations.as_ref(),
+        &inputs[source_context_start..source_context_end]
+            .iter()
+            .collect::<Vec<_>>(),
+    )?;
     let plan_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         resource_plan.identity.digest(),

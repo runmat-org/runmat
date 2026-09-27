@@ -9,6 +9,9 @@ use crate::{
     results::accuracy::{accuracy_evaluation_resource_profile, AccuracyEvidence},
 };
 
+#[cfg(test)]
+mod tests;
+
 pub fn build_accuracy_resource_plan(
     request: &AccuracyEvaluationRequest,
     evidence: &[AccuracyEvidence],
@@ -35,6 +38,10 @@ pub fn build_accuracy_resource_plan(
         .ok_or(ResourcePlanningError::Overflow(
             "accuracy source verification workspace",
         ))?;
+    let mut worker = super::post_process::post_process_worker();
+    worker.maximum_wall_milliseconds = worker
+        .maximum_wall_milliseconds
+        .min(request.plan.resources.maximum_wall_time_milliseconds);
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::AccuracyEvaluation(request.identity()),
@@ -54,7 +61,7 @@ pub fn build_accuracy_resource_plan(
             output: facts.output,
         }),
         output_set: Some(facts.output_set),
-        worker: super::post_process::post_process_worker(),
-        accuracy_ceiling: super::post_process::post_process_ceiling(),
+        worker,
+        accuracy_ceiling: request.plan.resources,
     })
 }

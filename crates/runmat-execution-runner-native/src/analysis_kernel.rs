@@ -653,12 +653,6 @@ fn execute_accuracy_evaluation(
             "accuracy numerical receipt differs from its admitted source result",
         ));
     }
-    runmat_analysis_execution::validate_accuracy_source_context(
-        &request,
-        &numerical_receipt,
-        observations.as_ref(),
-        &source_context,
-    )?;
     let admitted_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())?;
     let expected_plan = runmat_analysis_execution::build_prepared_accuracy_resource_plan(
         &request,
@@ -672,6 +666,14 @@ fn execute_accuracy_evaluation(
             "accuracy resource plan differs from admitted inputs",
         ));
     }
+    // Authenticate the exact admitted resource plan before reconstructing source topology
+    // and constraints. The authored source checks remain mandatory after admission.
+    runmat_analysis_execution::validate_accuracy_source_context(
+        &request,
+        &numerical_receipt,
+        observations.as_ref(),
+        &source_context,
+    )?;
     let evidence = numerical_receipt.evidence(&request)?;
     let artifact =
         runmat_analysis_fea::results::accuracy::evaluate_accuracy_artifact(&request, evidence)

@@ -36,6 +36,10 @@ pub(super) fn execute(
     .unwrap();
     let accuracy_inputs = prepared.inputs;
     let plan = prepared.resource_plan;
+    assert_eq!(
+        plan.input.accuracy_ceiling,
+        solved.solve.model.sequence.steps[0].accuracy.resources
+    );
     let accuracy_host = prepared.host;
     let plan_index = accuracy_inputs
         .iter()
@@ -104,6 +108,8 @@ pub(super) fn execute(
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    // Even a self-consistent replacement admission plan cannot weaken authored acceptance.
+    replan_accuracy(&mut weakened_inputs);
     let weakened_host = test_host_for_inputs(
         host,
         AnalysisWorkKind::EvaluateAccuracy,
@@ -120,11 +126,30 @@ pub(super) fn execute(
         })
         .unwrap_err();
     assert!(error.to_string().contains("authored requirements"));
-    let missing_context: Vec<_> = accuracy_inputs
+    let mut missing_context: Vec<_> = accuracy_inputs
         .iter()
         .filter(|input| input.manifest.kind != AnalysisNumericalObjectKind::AccuracySourceContext)
         .cloned()
         .collect();
+    let missing_host = test_host_for_inputs(
+        host,
+        AnalysisWorkKind::EvaluateAccuracy,
+        &missing_context,
+        vec![AnalysisNumericalObjectKind::AccuracyReport],
+        Some(1),
+    );
+    let error = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
+            kind: AnalysisWorkKind::EvaluateAccuracy,
+            host: &missing_host,
+            inputs: &missing_context,
+        })
+        .unwrap_err();
+    // Plan authentication must win over expensive source reconstruction. The stale plan
+    // still accounts for the removed input, so it must fail before source decoding.
+    assert!(error.to_string().contains("accuracy resource plan differs"));
+    replan_accuracy(&mut missing_context);
     let missing_host = test_host_for_inputs(
         host,
         AnalysisWorkKind::EvaluateAccuracy,
@@ -307,4 +332,37 @@ pub(super) fn execute(
             inputs: &substituted_accuracy_inputs,
         })
         .is_err());
+}
+
+fn replan_accuracy(inputs: &mut [runmat_analysis_execution::PreparedAnalysisObjects]) {
+    use runmat_analysis_fea::execution::AccuracySourceReceipt;
+    let request = inputs
+        .iter()
+        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::AccuracyEvaluationRequest)
+        .unwrap();
+    let request = AccuracyEvaluationRequest::from_canonical_bytes(&request.payload()).unwrap();
+    let receipt = inputs
+        .iter()
+        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::NumericalReceipt)
+        .unwrap();
+    let receipt =
+        AccuracySourceReceipt::from_canonical_bytes(request.source_kind, &receipt.payload())
+            .unwrap();
+    let plan = runmat_analysis_execution::build_prepared_accuracy_resource_plan(
+        &request, &receipt, inputs,
+    )
+    .unwrap();
+    let index = inputs
+        .iter()
+        .position(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .unwrap();
+    inputs[index] = runmat_analysis_execution::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        plan.identity.digest(),
+        &plan.canonical_bytes().unwrap(),
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
 }

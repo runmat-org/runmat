@@ -605,6 +605,37 @@ fn assert_worker_rejects_omitted_authored_observations(
         )
         .unwrap(),
     );
+    // Recompute admission as well: this must still fail on independent authored authority,
+    // not merely because the changed input inventory invalidates the original resource plan.
+    let replan = |inputs: &mut Vec<runmat_analysis_execution::PreparedAnalysisObjects>| {
+        let receipt = inputs
+            .iter()
+            .find(|input| input.manifest.kind == Kind::NumericalReceipt)
+            .unwrap();
+        let receipt = runmat_analysis_fea::execution::AccuracySourceReceipt::from_canonical_bytes(
+            omitted.source_kind,
+            &receipt.payload(),
+        )
+        .unwrap();
+        let plan = runmat_analysis_execution::build_prepared_accuracy_resource_plan(
+            &omitted, &receipt, inputs,
+        )
+        .unwrap();
+        let index = inputs
+            .iter()
+            .position(|input| input.manifest.kind == Kind::ResourcePlan)
+            .unwrap();
+        inputs[index] = prepare_analysis_objects(
+            Kind::ResourcePlan,
+            plan.identity.digest(),
+            &plan.canonical_bytes().unwrap(),
+            output_policy.chunk_bytes(),
+            runmat_execution_artifact::ObjectNamespace::InputValue,
+            output_policy.inventory_limits(),
+        )
+        .unwrap();
+    };
+    replan(&mut inputs);
     let error = crate::NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
             output_policy,
@@ -619,6 +650,7 @@ fn assert_worker_rejects_omitted_authored_observations(
     );
     // Removing the independent source context is not a way to bypass that check.
     inputs.retain(|input| !matches!(input.manifest.kind, Kind::ThermalWorkload | Kind::Mesh));
+    replan(&mut inputs);
     let error = crate::NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
             output_policy,
