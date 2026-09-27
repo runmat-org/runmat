@@ -17,6 +17,30 @@ struct Provider {
 }
 
 struct Defaults;
+
+#[test]
+fn structure_defaults_are_typed_unsupported() {
+    let input = Provider::new(FillMode::Unsupported).allocation(&[2, 2]);
+    assert!(is_unsupported_provider_operation(
+        &Defaults
+            .issymmetric(&input, ProviderSymmetryKind::Symmetric, 0.0)
+            .unwrap_err()
+    ));
+    assert!(is_unsupported_provider_operation(
+        &futures::executor::block_on(Defaults.ishermitian(
+            &input,
+            ProviderHermitianKind::Hermitian,
+            0.0
+        ))
+        .unwrap_err()
+    ));
+    assert!(is_unsupported_provider_operation(
+        &Defaults.bandwidth(&input).unwrap_err()
+    ));
+    assert!(is_unsupported_provider_operation(
+        &futures::executor::block_on(Defaults.sym_rcm(&input)).unwrap_err()
+    ));
+}
 impl AccelProvider for Defaults {
     fn device_info(&self) -> String {
         "defaults only".into()

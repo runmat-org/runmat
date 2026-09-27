@@ -3,6 +3,45 @@ use futures::executor::block_on;
 use runmat_accelerate_api::HostLogicalTensorView;
 
 #[test]
+fn structure_hooks_preserve_native_storage_or_request_typed_fallback() {
+    let provider = InProcessProvider::new();
+    for (data, storage) in [
+        (
+            HostNumericDataView::F32(&[1.0, 0.0, 0.0, 1.0]),
+            GpuTensorStorage::Real,
+        ),
+        (
+            HostNumericDataView::F64(&[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+            GpuTensorStorage::ComplexInterleaved,
+        ),
+    ] {
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data,
+                shape: &[2, 2],
+                storage,
+            })
+            .unwrap();
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &provider
+                .issymmetric(&input, ProviderSymmetryKind::Symmetric, 0.0)
+                .unwrap_err()
+        ));
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &block_on(provider.ishermitian(&input, ProviderHermitianKind::Hermitian, 0.0))
+                .unwrap_err()
+        ));
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &provider.bandwidth(&input).unwrap_err()
+        ));
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &block_on(provider.sym_rcm(&input)).unwrap_err()
+        ));
+        assert!(input.allocation_lease().validate_live().is_ok());
+    }
+}
+
+#[test]
 fn linear_indexing_distinguishes_unsupported_storage_from_invalid_owner() {
     let provider = InProcessProvider::new();
     let foreign = InProcessProvider::new();

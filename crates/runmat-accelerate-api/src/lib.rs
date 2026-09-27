@@ -3827,8 +3827,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _kind: ProviderSymmetryKind,
         _tolerance: f64,
     ) -> anyhow::Result<bool> {
-        Err(anyhow::anyhow!(
-            "issymmetric predicate not supported by provider"
+        Err(unsupported_provider_operation(
+            "issymmetric predicate not supported by provider",
         ))
     }
 
@@ -3840,15 +3840,17 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _tolerance: f64,
     ) -> AccelProviderFuture<'a, bool> {
         Box::pin(async move {
-            Err(anyhow::anyhow!(
-                "ishermitian predicate not supported by provider"
+            Err(unsupported_provider_operation(
+                "ishermitian predicate not supported by provider",
             ))
         })
     }
 
     /// Inspect the bandwidth of a matrix without gathering it back to the host.
     fn bandwidth(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<ProviderBandwidth> {
-        Err(anyhow::anyhow!("bandwidth not supported by provider"))
+        Err(unsupported_provider_operation(
+            "bandwidth not supported by provider",
+        ))
     }
 
     /// Compute the symmetric reverse Cuthill-McKee permutation for the matrix.
@@ -3856,7 +3858,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// Implementations may execute on the device or gather to the host. The permutation should be
     /// returned as zero-based indices.
     fn sym_rcm<'a>(&'a self, _matrix: &'a GpuTensorHandle) -> AccelProviderFuture<'a, Vec<usize>> {
-        Box::pin(async move { Err(anyhow::anyhow!("sym_rcm not supported by provider")) })
+        Box::pin(async move {
+            Err(unsupported_provider_operation(
+                "sym_rcm not supported by provider",
+            ))
+        })
     }
 }
 

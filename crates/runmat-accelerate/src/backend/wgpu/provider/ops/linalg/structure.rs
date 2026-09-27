@@ -77,6 +77,13 @@ impl WgpuProvider {
         kind: ProviderSymmetryKind,
         tolerance: f64,
     ) -> Result<bool> {
+        let physical = self.get_entry_raw(matrix)?;
+        if physical.storage != runmat_accelerate_api::GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "issymmetric_exec: real kernel cannot consume complex storage",
+            ));
+        }
+
         let entry = self.get_entry(matrix)?;
         let (rows, cols) =
             ensure_symmetry_shape(&entry.shape).map_err(|e| anyhow!("issymmetric: {e}"))?;
@@ -227,6 +234,13 @@ impl WgpuProvider {
         kind: ProviderHermitianKind,
         tolerance: f64,
     ) -> Result<bool> {
+        let physical = self.get_entry_raw(matrix)?;
+        if physical.storage != runmat_accelerate_api::GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "ishermitian_exec: real kernel cannot consume complex storage",
+            ));
+        }
+
         if !tolerance.is_finite() || tolerance < 0.0 {
             return Err(anyhow!(
                 "ishermitian: tolerance must be finite and non-negative"
@@ -238,11 +252,25 @@ impl WgpuProvider {
     }
 
     pub(crate) async fn sym_rcm_exec(&self, matrix: &GpuTensorHandle) -> Result<Vec<usize>> {
+        let physical = self.get_entry_raw(matrix)?;
+        if physical.storage != runmat_accelerate_api::GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "sym_rcm_exec: real kernel cannot consume complex storage",
+            ));
+        }
+
         let host = self.download_exec(matrix).await?;
         symrcm_host_real_data(&host.shape, &host.data).map_err(|e| anyhow!(e))
     }
 
     pub(crate) fn bandwidth_exec(&self, matrix: &GpuTensorHandle) -> Result<ProviderBandwidth> {
+        let physical = self.get_entry_raw(matrix)?;
+        if physical.storage != runmat_accelerate_api::GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "bandwidth_exec: real kernel cannot consume complex storage",
+            ));
+        }
+
         let entry = self.get_entry(matrix)?;
         let (rows, cols) =
             ensure_bandwidth_shape(&entry.shape).map_err(|e| anyhow!("bandwidth: {e}"))?;

@@ -5032,6 +5032,20 @@ impl AccelProvider for InProcessProvider {
         kind: ProviderSymmetryKind,
         tolerance: f64,
     ) -> Result<bool> {
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("issymmetric: allocation owner is poisoned"))?;
+            ensure!(guard.get(matrix).is_some(), "issymmetric: unknown buffer");
+            if matrix.physical().element_type() != NumericElementType::F64
+                || matrix.physical().storage() != GpuTensorStorage::Real
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "issymmetric: real F64 kernel cannot consume this physical storage",
+                ));
+            }
+        }
+
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard.get(&matrix).cloned().ok_or_else(|| {
@@ -5049,6 +5063,20 @@ impl AccelProvider for InProcessProvider {
         tolerance: f64,
     ) -> AccelProviderFuture<'a, bool> {
         Box::pin(async move {
+            {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("ishermitian: allocation owner is poisoned"))?;
+                ensure!(guard.get(matrix).is_some(), "ishermitian: unknown buffer");
+                if matrix.physical().element_type() != NumericElementType::F64
+                    || matrix.physical().storage() != GpuTensorStorage::Real
+                {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "ishermitian: real F64 kernel cannot consume this physical storage",
+                    ));
+                }
+            }
+
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard.get(&matrix).cloned().ok_or_else(|| {
@@ -5062,6 +5090,20 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn bandwidth(&self, matrix: &GpuTensorHandle) -> Result<ProviderBandwidth> {
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("bandwidth: allocation owner is poisoned"))?;
+            ensure!(guard.get(matrix).is_some(), "bandwidth: unknown buffer");
+            if matrix.physical().element_type() != NumericElementType::F64
+                || matrix.physical().storage() != GpuTensorStorage::Real
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "bandwidth: real F64 kernel cannot consume this physical storage",
+                ));
+            }
+        }
+
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
@@ -5079,6 +5121,20 @@ impl AccelProvider for InProcessProvider {
 
     fn sym_rcm<'a>(&'a self, matrix: &'a GpuTensorHandle) -> AccelProviderFuture<'a, Vec<usize>> {
         Box::pin(async move {
+            {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("sym_rcm: allocation owner is poisoned"))?;
+                ensure!(guard.get(matrix).is_some(), "sym_rcm: unknown buffer");
+                if matrix.physical().element_type() != NumericElementType::F64
+                    || matrix.physical().storage() != GpuTensorStorage::Real
+                {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "sym_rcm: real F64 kernel cannot consume this physical storage",
+                    ));
+                }
+            }
+
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard.get(&matrix).cloned().ok_or_else(|| {
