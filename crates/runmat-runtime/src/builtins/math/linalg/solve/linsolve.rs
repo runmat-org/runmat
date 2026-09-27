@@ -3,7 +3,7 @@
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, HostTensorView, ProviderLinsolveOptions, ProviderLinsolveResult,
+    AccelProvider, GpuTensorHandle, ProviderLinsolveOptions, ProviderLinsolveResult,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -550,21 +550,20 @@ async fn try_gpu_linsolve(
         return Ok(None);
     }
 
-    let mut lhs_operand = match prepare_gpu_operand(lhs, provider)? {
+    let lhs_operand = match prepare_gpu_operand(lhs, provider, &gpu_handles)? {
         Some(op) => op,
         None => return Ok(None),
     };
-    let mut rhs_operand = match prepare_gpu_operand(rhs, provider)? {
+    let mut protected = gpu_handles.clone();
+    protected.push(lhs_operand.handle());
+    let rhs_operand = match prepare_gpu_operand(rhs, provider, &protected)? {
         Some(op) => op,
         None => {
-            release_operand(provider, &mut lhs_operand);
             return Ok(None);
         }
     };
 
     if is_scalar_handle(lhs_operand.handle()) || is_scalar_handle(rhs_operand.handle()) {
-        release_operand(provider, &mut lhs_operand);
-        release_operand(provider, &mut rhs_operand);
         return Ok(None);
     }
 
@@ -584,8 +583,6 @@ async fn try_gpu_linsolve(
     let rectangular = effective_rows != effective_cols;
     let wants_second_output = matches!(crate::output_count::current_output_count(), Some(2));
     if rectangular && wants_second_output {
-        release_operand(provider, &mut lhs_operand);
-        release_operand(provider, &mut rhs_operand);
         return Ok(None);
     }
     provider_opts.need_rcond = wants_second_output || options.rcond.is_some();
@@ -610,8 +607,8 @@ async fn try_gpu_linsolve(
         reciprocal_condition,
     }) = result
     {
-        let aliases_lhs = gpu_helpers::same_gpu_handle(&solution, lhs_operand.handle());
-        let aliases_rhs = gpu_helpers::same_gpu_handle(&solution, rhs_operand.handle());
+        let aliases_lhs = solution.shares_allocation_with(lhs_operand.handle());
+        let aliases_rhs = solution.shares_allocation_with(rhs_operand.handle());
         let expected_rows = effective_cols;
         let expected_cols = rhs_operand.handle().shape().get(1).copied().unwrap_or(1);
         let valid = !aliases_lhs
@@ -626,33 +623,18 @@ async fn try_gpu_linsolve(
             && runmat_accelerate_api::handle_integer_type(&solution).is_none()
             && !runmat_accelerate_api::handle_is_logical(&solution);
         if !valid {
-            if !aliases_lhs && !aliases_rhs {
-                gpu_helpers::free_unprotected_exact_owner(
-                    &solution,
-                    &[lhs_operand.handle(), rhs_operand.handle()],
-                );
-            }
-            release_operand(provider, &mut lhs_operand);
-            release_operand(provider, &mut rhs_operand);
-            return Err(builtin_error(
-                "linsolve: provider returned malformed or aliased output",
+            return Err(gpu_helpers::reject_gpu_output(
+                solution,
+                builtin_error("linsolve: provider returned malformed or aliased output"),
             ));
         }
-        let provenance = gpu_handles
-            .iter()
-            .filter_map(|handle| runmat_accelerate_api::handle_provenance(handle))
-            .find(|provenance| *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit)
-            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-        runmat_accelerate_api::set_handle_provenance(&mut solution, provenance);
-        runmat_accelerate_api::mark_residency(&solution);
-        release_operand(provider, &mut lhs_operand);
-        release_operand(provider, &mut rhs_operand);
-        let eval = LinsolveEval::new(Value::GpuTensor(solution), Some(reciprocal_condition));
+        gpu_helpers::propagate_output_provenance(&mut solution, gpu_handles.iter().copied())?;
+        let eval = LinsolveEval::new(
+            gpu_helpers::resident_gpu_value(solution)?,
+            Some(reciprocal_condition),
+        );
         return Ok(Some(eval));
     }
-
-    release_operand(provider, &mut lhs_operand);
-    release_operand(provider, &mut rhs_operand);
 
     Ok(None)
 }
@@ -881,27 +863,26 @@ fn contains_complex(value: &Value) -> bool {
 }
 
 fn is_scalar_handle(handle: &GpuTensorHandle) -> bool {
-    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
+    crate::builtins::common::shape::is_scalar_shape(handle.shape())
 }
 
 struct PreparedOperand {
     handle: GpuTensorHandle,
-    owned: bool,
 }
+
+#[cfg(test)]
+#[path = "linsolve/owning_tests.rs"]
+mod owning_tests;
 
 impl PreparedOperand {
     fn borrowed(handle: &GpuTensorHandle) -> Self {
         Self {
             handle: handle.clone(),
-            owned: false,
         }
     }
 
     fn owned(handle: GpuTensorHandle) -> Self {
-        Self {
-            handle,
-            owned: true,
-        }
+        Self { handle }
     }
 
     fn handle(&self) -> &GpuTensorHandle {
@@ -912,6 +893,7 @@ impl PreparedOperand {
 fn prepare_gpu_operand(
     value: &Value,
     provider: &'static dyn AccelProvider,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Option<PreparedOperand>> {
     match value {
         Value::GpuTensor(handle) => {
@@ -929,7 +911,7 @@ fn prepare_gpu_operand(
             if tensor::is_scalar_tensor(tensor) {
                 Ok(None)
             } else {
-                let uploaded = upload_tensor(provider, tensor)?;
+                let uploaded = upload_tensor(provider, tensor, protected)?;
                 Ok(Some(PreparedOperand::owned(uploaded)))
             }
         }
@@ -938,7 +920,7 @@ fn prepare_gpu_operand(
                 Ok(None)
             } else {
                 let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
-                let uploaded = upload_tensor(provider, &tensor)?;
+                let uploaded = upload_tensor(provider, &tensor, protected)?;
                 Ok(Some(PreparedOperand::owned(uploaded)))
             }
         }
@@ -949,24 +931,22 @@ fn prepare_gpu_operand(
 fn upload_tensor(
     provider: &'static dyn AccelProvider,
     tensor: &Tensor,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<GpuTensorHandle> {
     // The current provider view is floating; materialize that transfer
     // boundary from authoritative host storage without consulting a mirror.
     let values = tensor::tensor_values_f64_cow(tensor);
-    let view = HostTensorView {
-        data: values.as_ref(),
-        shape: &tensor.shape,
-    };
-    provider
-        .upload(&view)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
-}
-
-fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedOperand) {
-    if operand.owned {
-        let _ = provider.free(&operand.handle);
-        operand.owned = false;
+    let transfer = match provider.precision() {
+        runmat_accelerate_api::ProviderPrecision::F64 => {
+            Tensor::new(values.into_owned(), tensor.shape.clone())
+        }
+        runmat_accelerate_api::ProviderPrecision::F32 => Tensor::from_f32(
+            values.iter().map(|value| *value as f32).collect(),
+            tensor.shape.clone(),
+        ),
     }
+    .map_err(builtin_error)?;
+    gpu_helpers::upload_tensor_protecting(provider, &transfer, protected)
 }
 
 fn solve_real(lhs: Tensor, rhs: Tensor, options: &SolveOptions) -> BuiltinResult<(Tensor, f64)> {
