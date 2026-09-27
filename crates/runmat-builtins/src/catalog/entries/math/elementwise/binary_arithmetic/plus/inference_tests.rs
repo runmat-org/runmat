@@ -7,6 +7,61 @@ use runmat_types::{
 };
 
 #[test]
+fn storage_facts_distinguish_unknown_representation_single_and_placement() {
+    use runmat_types::StorageFact;
+    let mut unknown = numeric(
+        NumericClass::Double,
+        NumericDomain::Real,
+        &[Some(2), Some(3)],
+    );
+    unknown.storage = StorageFact::Unknown;
+    let zero = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let inferred = infer_catalog_call(&PLUS_CATALOG_ENTRY, &request(vec![unknown, zero.clone()]));
+    assert_eq!(inferred.outputs[0].storage, StorageFact::Unknown);
+    let single = numeric(
+        NumericClass::Single,
+        NumericDomain::Real,
+        &[Some(1), Some(1)],
+    );
+    let inferred = infer_catalog_call(
+        &PLUS_CATALOG_ENTRY,
+        &request(vec![single.clone(), zero.clone()]),
+    );
+    assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
+    let mut call = request(vec![
+        single.clone(),
+        single.clone(),
+        ValueFact::scalar(ValueKindFact::String),
+        zero,
+    ]);
+    call.literals.literal_args = vec![
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::Keyword("like".into()),
+        LiteralValue::Unknown,
+    ];
+    assert_eq!(
+        infer_catalog_call(&PLUS_CATALOG_ENTRY, &call).outputs[0].storage,
+        StorageFact::Dense
+    );
+    call.arguments[3].residency = ResidencyFact::Device {
+        provider: Some("p".into()),
+    };
+    assert_eq!(
+        infer_catalog_call(&PLUS_CATALOG_ENTRY, &call).outputs[0].storage,
+        StorageFact::Opaque
+    );
+    assert_eq!(
+        infer_catalog_call(&PLUS_CATALOG_ENTRY, &request(vec![single.clone(), single])).outputs[0]
+            .storage,
+        StorageFact::Unknown
+    );
+}
+
+#[test]
 fn integer_inference_rejects_non_numeric_and_complex_pairs() {
     let integer = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::UInt64,

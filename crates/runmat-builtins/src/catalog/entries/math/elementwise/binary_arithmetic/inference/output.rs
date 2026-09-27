@@ -31,8 +31,10 @@ pub(super) fn infer(
     // represented in ValueFact. Input residency alone cannot promise residency
     // after provider fallback or automatic preparation.
     let floating_pair = [left, right].iter().all(|fact| {
-        fact.numeric()
-            .is_some_and(|n| n.class.integer_class().is_none() && n.domain == NumericDomain::Real)
+        matches!(fact.storage, StorageFact::Dense | StorageFact::Unknown)
+            && fact.numeric().is_some_and(|n| {
+                n.class.integer_class().is_none() && n.domain == NumericDomain::Real
+            })
     });
     output.residency = if !floating_pair
         && left.residency == ResidencyFact::Host
@@ -78,6 +80,25 @@ pub(super) fn infer(
         output.contiguity = ContiguityFact::Unknown;
     }
     apply_prototype(admitted.prototype, &mut output, &mut diagnostics);
+    if left.storage == StorageFact::Unknown || right.storage == StorageFact::Unknown {
+        output.storage = StorageFact::Unknown;
+    }
+    if output.storage == StorageFact::Scalar
+        && output
+            .numeric()
+            .is_some_and(|n| n.class == runmat_types::NumericClass::Single)
+    {
+        output.storage = StorageFact::Dense;
+    }
+    match output.residency {
+        ResidencyFact::Host => {}
+        ResidencyFact::Device { .. } => output.storage = StorageFact::Opaque,
+        _ => output.storage = StorageFact::Unknown,
+    }
+    if matches!(output.storage, StorageFact::Unknown | StorageFact::Opaque) {
+        output.layout = LayoutFact::Unknown;
+        output.contiguity = ContiguityFact::Unknown;
+    }
     finish_fixed(entry, request, output, diagnostics)
 }
 
