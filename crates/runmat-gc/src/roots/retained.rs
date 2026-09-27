@@ -3,6 +3,8 @@ use super::*;
 
 /// A GC root whose retained Values are visible for non-GC resource ownership.
 /// The same lifetime and exclusive-access invariants as `GcRoot::scan` apply.
+/// Like scanning, projection must not register/unregister roots or reenter the
+/// root scanner: the registration read lock protects all projected lifetimes.
 pub trait ValueRoot: GcRoot {
     fn retained_values(&self) -> Option<Vec<Value>>;
 }
@@ -88,6 +90,15 @@ mod tests {
             }))
             .unwrap();
         assert_eq!(scanner.retained_values().unwrap().len(), 2);
+        assert_eq!(
+            scanner.retained_values_excluding(&[inner_id]),
+            Some(outer.clone())
+        );
+        assert_eq!(
+            scanner.retained_values().unwrap().len(),
+            2,
+            "projection exclusion never unregisters roots"
+        );
         scanner.unregister_root(inner_id).unwrap();
         assert_eq!(scanner.retained_values(), Some(outer.clone()));
         scanner.unregister_root(outer_id).unwrap();

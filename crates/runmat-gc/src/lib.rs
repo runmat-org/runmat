@@ -946,12 +946,21 @@ pub fn gc_register_value_root(root: Box<dyn ValueRoot>) -> Result<RootId> {
     }
 }
 
-/// Complete current-thread retained Values, or unavailable for opaque roots.
+/// Registered current-thread value roots and explicit-root targets, or
+/// unavailable for opaque roots. External domain root providers are not Value
+/// registrations; callers must also compose those domains' retained-value views.
 pub fn gc_retained_values() -> Option<Vec<Value>> {
+    gc_retained_values_excluding(&[])
+}
+
+/// Project retained Values except registrations owned by a retiring frame.
+/// Exclusion affects neither GC tracing nor explicit roots and never unregisters
+/// anything; callers must own the excluded registration lifetimes.
+pub fn gc_retained_values_excluding(excluded: &[RootId]) -> Option<Vec<Value>> {
     if registered_roots_exist_on_other_threads() || external_roots_exist_on_other_threads() {
         return None;
     }
-    let mut values = ROOT_SCANNER.with(RootScanner::retained_values)?;
+    let mut values = ROOT_SCANNER.with(|scanner| scanner.retained_values_excluding(excluded))?;
     // Snapshot identities before guarded reads; never hold the root table lock
     // across value traversal or invoke callbacks while holding it.
     let explicit = GC.root_ptrs.try_lock()?.keys().copied().collect::<Vec<_>>();
