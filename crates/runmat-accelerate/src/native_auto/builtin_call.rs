@@ -5,6 +5,7 @@ pub use admitted::{install_preparation_service, AdmittedAcceleration};
 mod ownership;
 mod preparation;
 mod nary;
+mod owner_admission;
 #[cfg(test)]
 mod tests;
 

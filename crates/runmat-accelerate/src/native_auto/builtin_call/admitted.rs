@@ -101,6 +101,12 @@ pub(super) fn prepare_with(
     {
         return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
     }
+    if !super::owner_admission::matches_selected_owner(auto.provider, request.operands())? {
+        // The domain already owns the correct direct/cross-provider behavior.
+        // Do not upload other operands or observe a candidate whose retained
+        // provider cannot execute the actual borrowed operands.
+        return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+    }
     let operation = match request.form().operation {
         Operation::Unary => ArgumentOperation::Unary(UnaryOp::Generic),
         Operation::RealUnary(_) => ArgumentOperation::RealUnary(request.numerical_domain()),
