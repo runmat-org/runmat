@@ -13,6 +13,19 @@ pub enum IntegerComparisonOp {
     Ge,
 }
 
+impl IntegerComparisonOp {
+    fn builtin_name(self) -> &'static str {
+        match self {
+            Self::Eq => "eq",
+            Self::Ne => "ne",
+            Self::Lt => "lt",
+            Self::Le => "le",
+            Self::Gt => "gt",
+            Self::Ge => "ge",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum IntegerComparisonError {
     SizeMismatch,
