@@ -1,6 +1,10 @@
 //! Mean provider strategies retain typed failures and own every intermediate.
 use super::*;
 
+#[cfg(test)]
+#[path = "result_tests.rs"]
+mod result_tests;
+
 #[derive(Debug)]
 pub(super) enum MeanProviderFailure {
     Unsupported,
@@ -23,16 +27,72 @@ pub(super) async fn execute(
     axes: &MeanAxes,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let dims = resolve_native_dims(input.shape(), axes)?;
+    if dims.is_empty() {
+        return Ok(Some(input.clone()));
+    }
     let result = if nan_mode == ReductionNaN::Include {
         mean_gpu_try(provider, input, axes).await
     } else {
         mean_gpu_omitnan(provider, input, axes).await
     };
     match result {
-        Ok(output) => Ok(Some(output)),
+        Ok(output) => admit_result(provider, input, output, axes, &dims).map(Some),
         Err(MeanProviderFailure::Unsupported) => Ok(None),
         Err(MeanProviderFailure::Execution(error)) => Err(error),
     }
+}
+
+fn admit_result(
+    provider: &dyn AccelProvider,
+    input: &GpuTensorHandle,
+    mut output: GpuTensorHandle,
+    axes: &MeanAxes,
+    dims: &[usize],
+) -> BuiltinResult<GpuTensorHandle> {
+    let mut shape = input.shape().to_vec();
+    for &dim in dims {
+        shape[dim] = 1;
+    }
+    if matches!(axes, MeanAxes::All) {
+        shape = vec![1, 1];
+    }
+    // Normalize only equivalent scalar views, not non-scalar shape mismatches.
+    if output.shape() != shape
+        && output.shape().iter().all(|&dim| dim == 1)
+        && shape.iter().all(|&dim| dim == 1)
+    {
+        output = output
+            .with_view(output.view().clone().with_shape(shape.clone()))
+            .map_err(|source| {
+                let mut error = mean_internal_error(format!(
+                    "mean: cannot publish scalar reduction view: {source}"
+                ));
+                error.source = Some(Box::new(source));
+                error
+            })?;
+    }
+    let precision = runmat_accelerate_api::handle_precision(input);
+    let storage = runmat_accelerate_api::handle_storage(input);
+    let valid = precision.is_some()
+        && output.shape() == shape
+        && gpu_helpers::exact_provider_for_handle(&output)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && runmat_accelerate_api::handle_precision(&output) == precision
+        && runmat_accelerate_api::handle_storage(&output) == storage
+        && runmat_accelerate_api::handle_integer_type(&output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&output)
+        && (!output.shares_allocation_with(input)
+            || dims.iter().all(|&dim| input.shape()[dim] == 1))
+        && gpu_helpers::expected_handle_numeric_element_type(&output).is_ok();
+    if !valid {
+        let mut error = mean_internal_error(
+            "mean: provider returned malformed reduction class, shape, owner, or alias",
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(output, error));
+    }
+    Ok(output)
 }
 
 async fn mean_gpu_try(
@@ -53,7 +113,13 @@ async fn mean_gpu_try(
             // Prefer provider N-D reduce if available
             let mut dims0: Vec<usize> = dims
                 .iter()
-                .filter_map(|&d| if d > 0 { Some(d - 1) } else { None })
+                .filter_map(|&d| {
+                    if d > 0 && d <= handle.shape().len() {
+                        Some(d - 1)
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             dims0.sort_unstable();
             dims0.dedup();
@@ -174,9 +240,6 @@ pub(super) async fn reduce_mean_vecdim_nd_gpu(
     let mut order: Vec<usize> = Vec::with_capacity(rank);
     order.extend_from_slice(&reduce_dims);
     order.extend_from_slice(&kept_dims);
-    let permuted = provider
-        .permute(handle, &order)
-        .map_err(mean_provider_error)?;
     // Compute rows/cols
     let mut reduce_len: usize = 1;
     for &d in &reduce_dims {
@@ -184,10 +247,17 @@ pub(super) async fn reduce_mean_vecdim_nd_gpu(
     }
     let total_elems: usize = handle.shape().iter().copied().product();
     if reduce_len == 0 || total_elems == 0 {
+        let mut output_shape = handle.shape().to_vec();
+        for &dim in &reduce_dims {
+            output_shape[dim] = 1;
+        }
         return provider
-            .fill(&[1, 1], f64::NAN)
+            .fill(&output_shape, f64::NAN)
             .map_err(mean_provider_error);
     }
+    let permuted = provider
+        .permute(handle, &order)
+        .map_err(mean_provider_error)?;
     let num_slices = total_elems / reduce_len;
     // Reshape permuted view to [rows, cols]
     let reshaped2d = provider
