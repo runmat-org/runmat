@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
+use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -2046,12 +2046,10 @@ async fn elementwise_max_gpu_pair(
             super::extrema_provider::supported!(kind, "elem_max", provider.elem_max(a, b).await);
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
         if let Some(mask) = kind.optional("elem_ge", provider.elem_ge(a, b).await)? {
-            let Some(indices) = gpu_mask_indices(provider, &mask)? else {
-                return Ok(None);
-            };
+            let indices = kind.mask_indices(provider, mask).await?;
             return Ok(Some(MaxEvaluation {
                 values: Value::GpuTensor(values),
-                indices: Value::GpuTensor(indices),
+                indices,
             }));
         } else {
             // Host path for indices only
@@ -2176,12 +2174,10 @@ async fn elementwise_max_gpu_scalar_left(
         kind.optional("fill_like", provider.fill_like(a, scalar))?
     {
         if let Some(mask) = kind.optional("elem_ge", provider.elem_ge(a, &fill).await)? {
-            let Some(indices) = gpu_mask_indices(provider, &mask)? else {
-                return Ok(None);
-            };
+            let indices = kind.mask_indices(provider, mask).await?;
             return Ok(Some(MaxEvaluation {
                 values: Value::GpuTensor(values),
-                indices: Value::GpuTensor(indices),
+                indices,
             }));
         } else {
             let ta = kind.gather_tensor(a).await?;
@@ -2237,12 +2233,10 @@ async fn elementwise_max_gpu_scalar_right(
         kind.optional("fill_like", provider.fill_like(b, scalar))?
     {
         if let Some(mask) = kind.optional("elem_ge", provider.elem_ge(&fill, b).await)? {
-            let Some(indices) = gpu_mask_indices(provider, &mask)? else {
-                return Ok(None);
-            };
+            let indices = kind.mask_indices(provider, mask).await?;
             return Ok(Some(MaxEvaluation {
                 values: Value::GpuTensor(values),
-                indices: Value::GpuTensor(indices),
+                indices,
             }));
         } else {
             let tb = kind.gather_tensor(b).await?;
@@ -2296,18 +2290,6 @@ async fn gpu_tensor_scalar_value(handle: &GpuTensorHandle) -> BuiltinResult<Opti
         .gather_tensor(handle)
         .await?;
     Ok(tensor::tensor_values_f64(&tensor).first().copied())
-}
-
-fn gpu_mask_indices(
-    provider: &dyn AccelProvider,
-    mask: &GpuTensorHandle,
-) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let kind = super::extrema_provider::ExtremaKind::Max;
-    let scaled =
-        super::extrema_provider::supported!(kind, "scalar_mul", provider.scalar_mul(mask, -1.0));
-    let shifted =
-        super::extrema_provider::supported!(kind, "scalar_add", provider.scalar_add(&scaled, 2.0));
-    Ok(Some(shifted))
 }
 
 fn elementwise_real_or_complex(

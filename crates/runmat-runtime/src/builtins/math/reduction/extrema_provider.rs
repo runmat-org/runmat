@@ -6,6 +6,8 @@ use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
 use runmat_value::{Tensor, Value};
 
+mod indices;
+
 /// Single has no immediate scalar `Value` representation. Its scalar extrema
 /// must use the same typed storage selection as its nonscalar extrema, not the
 /// double-only scalar shortcut. Mixed precision remains resolved there too.
