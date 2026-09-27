@@ -59,9 +59,6 @@ impl AccelProvider for SubmittedCast {
         self.downloads.fetch_add(1, Ordering::Relaxed);
         self.inner.download_numeric(handle)
     }
-    fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
-        self.inner.free(handle)
-    }
     fn capability_snapshot(&self) -> ProviderCapabilitySnapshot {
         self.inner.capability_snapshot()
     }

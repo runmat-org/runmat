@@ -71,8 +71,8 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
     let Value::GpuTensor(output) = output else {
         panic!("selected cross-precision device route")
     };
-    assert_eq!(output.device_id, provider.device_id());
-    assert_eq!(output.shape, vec![1, 2, 2]);
+    assert_eq!(output.device_id(), provider.device_id());
+    assert_eq!(output.shape(), &[1, 2, 2]);
     assert_eq!(
         output.descriptor.element_type,
         Some(NumericElementType::F32)
@@ -145,5 +145,5 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
         actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
         values.map(|v| (v as f32).to_bits())
     );
-    provider.free(&output).unwrap();
+    drop(output);
 }

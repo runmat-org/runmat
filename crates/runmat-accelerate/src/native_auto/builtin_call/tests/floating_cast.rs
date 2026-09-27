@@ -68,7 +68,7 @@ fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt
         output.descriptor.element_type,
         Some(NumericElementType::F32)
     );
-    assert_eq!(output.shape, vec![1, 2, 2]);
+    assert_eq!(output.shape(), &[1, 2, 2]);
     assert_eq!(probe.requests.borrow().len(), 1);
     let feedback = probe.feedback.borrow();
     assert_eq!(
@@ -92,7 +92,7 @@ fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt
             .collect::<Vec<_>>(),
         [1.25_f32, -0.0, 16_777_216.0, 3.5].map(f32::to_bits)
     );
-    provider.free(&output).unwrap();
+    drop(output);
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
         .unwrap();
         let actual = match result {
             Value::Tensor(value) if !device_like => {
-                assert_eq!(value.shape, vec![1, 2, 2]);
+                assert_eq!(value.shape(), &[1, 2, 2]);
                 value.as_f32_slice().unwrap().to_vec()
             }
             Value::GpuTensor(value) if device_like => {
@@ -162,7 +162,7 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
                 let HostNumericDataOwned::F32(data) = downloaded.data else {
                     panic!("Single result")
                 };
-                provider.free(&value).unwrap();
+                drop(value);
                 data
             }
             other => panic!("wrong template residency: {other:?}"),
@@ -180,6 +180,6 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
             "adaptation is not a completed plain-cast sample"
         );
     }
-    provider.free(&input).unwrap();
-    provider.free(&prototype).unwrap();
+    drop(input);
+    drop(prototype);
 }

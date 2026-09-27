@@ -41,10 +41,6 @@ impl AccelProvider for UnsupportedCast {
         self.inner.download_numeric(handle)
     }
 
-    fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
-        self.inner.free(handle)
-    }
-
     fn device_id(&self) -> u32 {
         self.inner.device_id()
     }
@@ -144,7 +140,7 @@ fn actual_single_unsupported_hook_restores_values_without_successful_device_feed
     let Value::GpuTensor(output) = output else {
         panic!("fallback must restore resident output");
     };
-    assert_eq!(output.shape, [1, 2, 2]);
+    assert_eq!(output.shape(), &[1, 2, 2]);
     assert_eq!(provider.casts.load(Ordering::Relaxed), 1);
     assert_eq!(provider.receipts.load(Ordering::Relaxed), 1);
     assert_eq!(
@@ -179,5 +175,5 @@ fn actual_single_unsupported_hook_restores_values_without_successful_device_feed
             .collect::<Vec<_>>(),
         values.map(f32::to_bits)
     );
-    provider.free(&output).unwrap();
+    drop(output);
 }
