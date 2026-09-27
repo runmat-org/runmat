@@ -8020,7 +8020,7 @@ impl AccelProvider for InProcessProvider {
             let tensor = ComplexTensor::new(complex_data, handle.shape().to_vec())
                 .map_err(|e| anyhow!("gradient_dim: {e}"))?;
             let gradiented = gradient_complex_tensor_host(tensor, dim + 1, spacing)
-                .map_err(|e| anyhow!("gradient_dim: {e}"))?;
+                .map_err(|e| anyhow!(e))?;
             let shape = gradiented.shape.clone();
             let data = gradiented.materialize_f64();
             let mut interleaved = Vec::with_capacity(data.len() * 2);
@@ -8038,7 +8038,7 @@ impl AccelProvider for InProcessProvider {
         let tensor =
             Tensor::new(data, handle.shape().to_vec()).map_err(|e| anyhow!("gradient_dim: {e}"))?;
         let gradiented = gradient_real_tensor_host(tensor, dim + 1, spacing)
-            .map_err(|e| anyhow!("gradient_dim: {e}"))?;
+            .map_err(|e| anyhow!(e))?;
         let shape = gradiented.shape.clone();
         self.allocate_tensor(gradiented.materialize_f64(), shape)
     }
@@ -8088,7 +8088,7 @@ impl AccelProvider for InProcessProvider {
                 .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
             let gradiented =
                 gradient_complex_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
-                    .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
+                    .map_err(|e| anyhow!(e))?;
             let shape = gradiented.shape.clone();
             let data = gradiented.materialize_f64();
             let mut interleaved = Vec::with_capacity(data.len() * 2);
@@ -8107,7 +8107,7 @@ impl AccelProvider for InProcessProvider {
             .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
         let gradiented =
             gradient_real_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
-                .map_err(|e| anyhow!("gradient_dim_with_coordinates: {e}"))?;
+                .map_err(|e| anyhow!(e))?;
         let shape = gradiented.shape.clone();
         self.allocate_tensor(gradiented.materialize_f64(), shape)
     }

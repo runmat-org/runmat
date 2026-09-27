@@ -251,6 +251,10 @@ fn gradient_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     gradient_descriptor_error_with_detail(&GRADIENT_ERROR_INTERNAL, detail)
 }
 
+#[path = "gradient/kernel_error.rs"]
+pub mod kernel_error;
+use kernel_error::{GradientKernelError, GradientKernelResult};
+
 #[derive(Clone, Debug, PartialEq)]
 enum GradientSpacing {
     Scalar(f64),
@@ -562,8 +566,7 @@ async fn gradient_gpu_outputs(
                 Err(source) => {
                     let mut error =
                         gradient_internal_error(format!("provider gradient failed: {source}"));
-                    error =
-                        crate::runtime_error::with_provider_execution_source(error, source.into());
+                    error = kernel_error::with_provider_source(error, source.into());
                     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                     return Err(error);
                 }
@@ -879,7 +882,7 @@ pub fn gradient_real_tensor_host(
     tensor: Tensor,
     dim: usize,
     spacing: f64,
-) -> BuiltinResult<Tensor> {
+) -> GradientKernelResult<Tensor> {
     let spacing = GradientSpacing::Scalar(spacing);
     gradient_real_tensor_host_with_spacing(tensor, dim, &spacing)
 }
@@ -889,7 +892,7 @@ pub fn gradient_real_tensor_host_with_coordinates(
     tensor: Tensor,
     dim: usize,
     coordinates: Vec<f64>,
-) -> BuiltinResult<Tensor> {
+) -> GradientKernelResult<Tensor> {
     let spacing = GradientSpacing::Coordinates(coordinates);
     gradient_real_tensor_host_with_spacing(tensor, dim, &spacing)
 }
@@ -898,11 +901,11 @@ fn gradient_real_tensor_host_with_spacing(
     tensor: Tensor,
     dim: usize,
     spacing: &GradientSpacing,
-) -> BuiltinResult<Tensor> {
+) -> GradientKernelResult<Tensor> {
     let shape = tensor.shape.clone();
     let storage = tensor
         .into_numeric_storage()
-        .map_err(|error| gradient_internal_error(format!("gradient: {error}")))?;
+        .map_err(|error| GradientKernelError::new(format!("gradient: {error}")))?;
     let output_dtype = match storage.numeric_dtype() {
         NumericDType::F32 => NumericDType::F32,
         NumericDType::F64
@@ -926,7 +929,7 @@ fn gradient_real_tensor_host_with_spacing(
         // matlab_gradient_shape returned an empty vec (untyped empty tensor).
         let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
         return Tensor::new_with_dtype(Vec::new(), empty_shape, output_dtype)
-            .map_err(|e| gradient_internal_error(format!("gradient: {e}")));
+            .map_err(|e| GradientKernelError::new(format!("gradient: {e}")));
     }
 
     while shape.len() <= dim_index {
@@ -953,11 +956,11 @@ fn gradient_real_tensor_host_with_spacing(
     if len_dim > 1 {
         let block = stride_before
             .checked_mul(len_dim)
-            .ok_or_else(|| gradient_internal_error("gradient: block size overflow"))?;
+            .ok_or_else(|| GradientKernelError::new("gradient: block size overflow"))?;
         for after in 0..stride_after {
             let base = after
                 .checked_mul(block)
-                .ok_or_else(|| gradient_internal_error("gradient: indexing overflow"))?;
+                .ok_or_else(|| GradientKernelError::new("gradient: indexing overflow"))?;
             for before in 0..stride_before {
                 for k in 0..len_dim {
                     let idx = base + before + k * stride_before;
@@ -977,14 +980,14 @@ fn gradient_real_tensor_host_with_spacing(
     }
 
     Tensor::new_with_dtype(out, shape, output_dtype)
-        .map_err(|e| gradient_internal_error(format!("gradient: {e}")))
+        .map_err(|e| GradientKernelError::new(format!("gradient: {e}")))
 }
 
 pub fn gradient_complex_tensor_host(
     tensor: ComplexTensor,
     dim: usize,
     spacing: f64,
-) -> BuiltinResult<ComplexTensor> {
+) -> GradientKernelResult<ComplexTensor> {
     let spacing = GradientSpacing::Scalar(spacing);
     gradient_complex_tensor_host_with_spacing(tensor, dim, &spacing)
 }
@@ -994,7 +997,7 @@ pub fn gradient_complex_tensor_host_with_coordinates(
     tensor: ComplexTensor,
     dim: usize,
     coordinates: Vec<f64>,
-) -> BuiltinResult<ComplexTensor> {
+) -> GradientKernelResult<ComplexTensor> {
     let spacing = GradientSpacing::Coordinates(coordinates);
     gradient_complex_tensor_host_with_spacing(tensor, dim, &spacing)
 }
@@ -1003,7 +1006,7 @@ fn gradient_complex_tensor_host_with_spacing(
     tensor: ComplexTensor,
     dim: usize,
     spacing: &GradientSpacing,
-) -> BuiltinResult<ComplexTensor> {
+) -> GradientKernelResult<ComplexTensor> {
     let output_dtype = if tensor.numeric_dtype() == NumericDType::F32 {
         NumericDType::F32
     } else {
@@ -1019,7 +1022,7 @@ fn gradient_complex_tensor_host_with_spacing(
         // before the early return, which would produce product ≠ 0 for empty data.
         let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
         return ComplexTensor::from_f64_values_with_dtype(Vec::new(), empty_shape, output_dtype)
-            .map_err(|e| gradient_internal_error(format!("gradient: {e}")));
+            .map_err(|e| GradientKernelError::new(format!("gradient: {e}")));
     }
 
     while shape.len() <= dim_index {
@@ -1046,11 +1049,11 @@ fn gradient_complex_tensor_host_with_spacing(
     if len_dim > 1 {
         let block = stride_before
             .checked_mul(len_dim)
-            .ok_or_else(|| gradient_internal_error("gradient: block size overflow"))?;
+            .ok_or_else(|| GradientKernelError::new("gradient: block size overflow"))?;
         for after in 0..stride_after {
             let base = after
                 .checked_mul(block)
-                .ok_or_else(|| gradient_internal_error("gradient: indexing overflow"))?;
+                .ok_or_else(|| GradientKernelError::new("gradient: indexing overflow"))?;
             for before in 0..stride_before {
                 for k in 0..len_dim {
                     let idx = base + before + k * stride_before;
@@ -1076,7 +1079,7 @@ fn gradient_complex_tensor_host_with_spacing(
     }
 
     ComplexTensor::from_f64_values_with_dtype(out, shape, output_dtype)
-        .map_err(|e| gradient_internal_error(format!("gradient: {e}")))
+        .map_err(|e| GradientKernelError::new(format!("gradient: {e}")))
 }
 
 fn spacing_denominator(spacing: &GradientSpacing, k: usize, len_dim: usize) -> f64 {
