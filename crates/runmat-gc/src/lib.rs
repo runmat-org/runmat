@@ -17,6 +17,7 @@ pub mod config;
 pub use runmat_gc_api::{GcHandle, GcRoot, RootId, RootInfo, RootScannerStats, Trace, Tracer};
 pub mod generations;
 pub mod roots;
+mod retirement;
 pub mod stats;
 
 // Finalizer support
@@ -99,22 +100,16 @@ static FINALIZERS: once_cell::sync::Lazy<
 
 /// Register a finalizer for the provided GC handle.
 pub fn gc_register_finalizer(ptr: GcHandle, f: std::sync::Arc<dyn GcFinalizer>) -> Result<()> {
-    FINALIZERS.lock().insert(ptr.into(), f);
+    let previous = FINALIZERS.lock().insert(ptr.into(), f);
+    drop(previous);
     Ok(())
 }
 
 /// Remove any registered finalizer for the provided GC handle.
 pub fn gc_unregister_finalizer(ptr: GcHandle) -> Result<()> {
-    FINALIZERS.lock().remove(&ptr.into());
+    let removed = FINALIZERS.lock().remove(&ptr.into());
+    drop(removed);
     Ok(())
-}
-
-/// Internal: run and remove finalizer for a live handle if present.
-pub(crate) fn gc_run_finalizer_for_handle(handle: GcHandle) {
-    if let Some(f) = FINALIZERS.lock().remove(&handle.into()) {
-        // Run finalizer; avoid panicking across GC boundaries
-        f.finalize();
-    }
 }
 
 #[cfg(feature = "pointer-compression")]
@@ -314,37 +309,12 @@ impl GarbageCollector {
     }
 
     fn allocate_inner(&self, value: Value) -> Result<(GcHandle, bool)> {
-        // Capture GPU handle if present to attach a finalizer after allocation
-        let gpu_handle: Option<runmat_accelerate_api::GpuTensorHandle> =
-            if let Value::GpuTensor(h) = &value {
-                Some(h.clone())
-            } else {
-                None
-            };
-
         let mut allocator = self.allocator.lock();
         let ptr = allocator.allocate(value, &self.stats)?;
         let usage = allocator.young_generation_usage();
         let alloc_count = allocator.young_allocations_count();
         let cfg = self.config.read().clone();
         drop(allocator);
-
-        // Register finalizer for GPU tensors so buffers are freed on collection
-        if let Some(handle) = gpu_handle {
-            struct GpuTensorFinalizer {
-                handle: runmat_accelerate_api::GpuTensorHandle,
-            }
-            impl GcFinalizer for GpuTensorFinalizer {
-                fn finalize(&self) {
-                    if let Some(p) = runmat_accelerate_api::provider() {
-                        let _ = p.free(&self.handle);
-                        runmat_accelerate_api::clear_handle_logical(&self.handle);
-                    }
-                }
-            }
-            let fin = std::sync::Arc::new(GpuTensorFinalizer { handle });
-            let _ = gc_register_finalizer(ptr, fin);
-        }
 
         // Heuristic triggers:
         // - Utilization threshold
@@ -565,11 +535,15 @@ impl GarbageCollector {
         // Collect young generation via unified collector/allocator
         let mut allocator = self.allocator.lock();
         let mut collector = self.collector.lock();
-        let collected_count =
+        let retired =
             collector.collect_young_generation(&mut allocator, &combined_roots, &self.stats)?;
+        let collected_count = retired.len();
+        drop(collector);
+        drop(allocator);
 
         // Clear dirty cards; keep remembered set for next minor cycle
         WRITE_BARRIERS.clear_after_minor_gc();
+        drop(retired);
 
         let duration = start_time.elapsed();
         self.stats
@@ -627,12 +601,16 @@ impl GarbageCollector {
 
         let mut allocator = self.allocator.lock();
         let mut collector = self.collector.lock();
-        let collected_count =
+        let retired =
             collector.collect_all_generations(&mut allocator, &combined_roots, &self.stats)?;
+        let collected_count = retired.len();
 
         // Clear all barriers after major GC
         WRITE_BARRIERS.clear_after_major_gc();
         allocator.clear_promotion_state();
+        drop(collector);
+        drop(allocator);
+        drop(retired);
 
         let duration = start_time.elapsed();
         self.stats
@@ -1068,26 +1046,25 @@ pub fn gc_reset_for_test() -> Result<()> {
     GC.stats.reset();
 
     // Reset allocator/collector and roots
-    {
+    let retired = {
         let config = GcConfig::default();
         *GC.config.write() = config.clone();
         let mut alloc = GC.allocator.lock();
         let live_ptrs = alloc.take_tracked_value_ptrs_for_reset();
+        let mut retired = Vec::with_capacity(live_ptrs.len());
         for (ptr, handle) in live_ptrs {
-            if let Some(handle) = handle {
-                gc_run_finalizer_for_handle(handle);
-            }
             // SAFETY: these pointers are drained from allocator bookkeeping for
             // initialized Value slots that remain live at whole-GC test reset.
             // Each pointer is deduplicated before it is returned.
             unsafe {
-                std::ptr::drop_in_place(ptr as *mut Value);
+                retired.push(retirement::RetiredValue::take(ptr, handle));
             }
         }
         *alloc = GenerationalAllocator::new(&config);
         let mut coll = GC.collector.lock();
         *coll = MarkSweepCollector::new(&config);
-    }
+        retired
+    };
 
     {
         let mut roots = GC.root_ptrs.lock();
@@ -1103,6 +1080,7 @@ pub fn gc_reset_for_test() -> Result<()> {
 
     // Configure with default settings
     gc_configure(GcConfig::default())?;
+    drop(retired);
 
     Ok(())
 }
@@ -1140,6 +1118,66 @@ where
 mod tests {
     use super::*;
     use std::ptr::NonNull;
+
+    #[test]
+    fn collection_and_reset_release_values_and_finalizers_outside_locks() {
+        struct AssertUnlocked;
+        impl GcFinalizer for AssertUnlocked {
+            fn finalize(&self) {
+                assert!(GC.allocator.try_lock().is_some());
+                assert!(GC.collector.try_lock().is_some());
+                assert!(FINALIZERS.try_lock().is_some());
+            }
+        }
+        for collect in [gc_collect_minor, gc_collect_major] {
+            gc_test_context(|| {
+                let handle = gc_allocate(Value::Num(1.0)).unwrap();
+                gc_register_finalizer(handle, Arc::new(AssertUnlocked)).unwrap();
+                assert_eq!(collect().unwrap(), 1);
+            });
+        }
+        gc_test_context(|| {
+            let handle = gc_allocate(Value::Num(1.0)).unwrap();
+            gc_register_finalizer(handle, Arc::new(AssertUnlocked)).unwrap();
+            gc_reset_for_test().unwrap();
+        });
+    }
+
+    #[test]
+    fn collection_releases_only_its_gpu_alias_including_nested_values() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        for collect in [gc_collect_minor, gc_collect_major] {
+            for nested in [false, true] {
+                gc_test_context(|| {
+                    let owner = TestAllocationOwner::new();
+                    let allocation = owner
+                        .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+                        .unwrap();
+                    let alias = allocation.handle.clone();
+                    let value = Value::GpuTensor(allocation.handle);
+                    let value = if nested {
+                        Value::Cell(runmat_value::CellArray::new(vec![value], 1, 1).unwrap())
+                    } else {
+                        value
+                    };
+                    let target = gc_allocate_rooted(value).unwrap();
+                    assert_eq!(collect().unwrap(), 0);
+                    assert_eq!(allocation.probe.retirements(), 0);
+                    target.unroot().unwrap();
+                    assert_eq!(collect().unwrap(), 1);
+                    assert_eq!(allocation.probe.retirements(), 0);
+                    allocation
+                        .probe
+                        .with_data(&alias, |data| assert_eq!(data.len(), 1))
+                        .unwrap();
+                    drop(alias);
+                    assert_eq!(allocation.probe.retirements(), 1);
+                });
+            }
+        }
+    }
 
     thread_local! {
         static TEST_EXTERNAL_ROOT: std::cell::Cell<Option<GcHandle>> = const { std::cell::Cell::new(None) };

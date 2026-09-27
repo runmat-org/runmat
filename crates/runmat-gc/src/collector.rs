@@ -3,6 +3,7 @@
 //! Implements mark-and-sweep collection for generational garbage collection,
 //! with optimizations for RunMat's value types and usage patterns.
 
+use crate::retirement::RetiredValue;
 use crate::{
     roots::collect_value_roots, GcConfig, GcHandle, GcStats, GenerationalAllocator, Result,
 };
@@ -34,13 +35,14 @@ impl MarkSweepCollector {
         }
     }
 
-    /// Collect the young generation only (minor GC)
+    /// Detach unreachable young-generation values. Drop the returned payloads
+    /// only after releasing allocator and collector locks.
     pub fn collect_young_generation(
         &mut self,
         allocator: &mut GenerationalAllocator,
         roots: &[GcHandle],
         stats: &GcStats,
-    ) -> Result<usize> {
+    ) -> Result<Vec<RetiredValue>> {
         let _ = stats; // currently unused in this path
         log::debug!("Starting young generation collection");
         let start_time = Instant::now();
@@ -50,6 +52,7 @@ impl MarkSweepCollector {
 
         // Phase 2: Sweep unmarked objects in young generation (in-place sweep)
         let mut collected = 0usize;
+        let mut retired = Vec::new();
         let mut any_survivor = false;
         // Walk allocations recorded by the young generation and free the unmarked ones
         let allocated_ptrs = allocator.young_take_collection_candidates();
@@ -58,14 +61,12 @@ impl MarkSweepCollector {
             let addr = ptr as usize;
             if !self.marked_objects.lock().contains(&addr) {
                 collected += 1;
-                // Run finalizer if registered for this object address
-                if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
-                    crate::gc_run_finalizer_for_handle(handle);
-                }
+                let handle = allocator.handle_for_live_ptr(ptr);
                 if allocator.note_value_dropped(ptr) {
-                    // Drop the value in place to run destructors if any
+                    // SAFETY: the initialized slot was just removed from the
+                    // live set; transfer it before its storage can be reused.
                     unsafe {
-                        std::ptr::drop_in_place(ptr as *mut Value);
+                        retired.push(RetiredValue::take(ptr as *const Value, handle));
                     }
                 }
                 // Space remains reserved; a free-list compactor can reclaim later
@@ -96,16 +97,17 @@ impl MarkSweepCollector {
         }
         log::debug!("Young generation collection completed: {collected} collected, {promoted_this_cycle} promoted in {duration:?}");
 
-        Ok(collected)
+        Ok(retired)
     }
 
-    /// Collect all generations (major GC)
+    /// Detach unreachable values in all generations. Drop the returned payloads
+    /// only after releasing allocator and collector locks.
     pub fn collect_all_generations(
         &mut self,
         allocator: &mut GenerationalAllocator,
         roots: &[GcHandle],
         stats: &GcStats,
-    ) -> Result<usize> {
+    ) -> Result<Vec<RetiredValue>> {
         log::debug!("Starting full heap collection");
         let start_time = Instant::now();
 
@@ -119,16 +121,16 @@ impl MarkSweepCollector {
         let _ = stats;
         let allocated_ptrs = allocator.all_live_collection_candidates();
         let mut collected = 0usize;
+        let mut retired = Vec::new();
         for ptr in allocated_ptrs {
             let addr = ptr as usize;
             if !self.marked_objects.lock().contains(&addr) {
-                if let Some(handle) = allocator.handle_for_live_ptr(ptr) {
-                    crate::gc_run_finalizer_for_handle(handle);
-                }
+                let handle = allocator.handle_for_live_ptr(ptr);
                 if allocator.note_value_dropped(ptr) {
                     collected += 1;
+                    // SAFETY: removing the live slot grants its unique payload.
                     unsafe {
-                        std::ptr::drop_in_place(ptr as *mut Value);
+                        retired.push(RetiredValue::take(ptr as *const Value, handle));
                     }
                 }
             }
@@ -141,7 +143,7 @@ impl MarkSweepCollector {
         let duration = start_time.elapsed();
         log::debug!("Full heap collection completed: {collected} collected in {duration:?}");
 
-        Ok(collected)
+        Ok(retired)
     }
 
     /// Mark phase: traverse from roots and mark all reachable objects

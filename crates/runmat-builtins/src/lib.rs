@@ -402,7 +402,7 @@ impl Type {
                 }
             }
             Value::GpuTensor(h) => Type::Tensor {
-                shape: Some(h.shape.iter().map(|&d| Some(d)).collect()),
+                shape: Some(h.shape().iter().map(|&d| Some(d)).collect()),
             },
             Value::Object(object) => Type::Object {
                 class_name: Some(object.class_name.clone()),
