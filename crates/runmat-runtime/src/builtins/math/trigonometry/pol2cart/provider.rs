@@ -108,9 +108,10 @@ impl From<anyhow::Error> for AttemptError {
         if gpu_helpers::provider_hook_is_unsupported(&error) {
             Self::Unsupported
         } else {
-            let mut contextual = pol2cart_error(&ERROR_INTERNAL, &error);
-            contextual.source = Some(error.into_boxed_dyn_error());
-            Self::Failure(Box::new(contextual))
+            let contextual = pol2cart_error(&ERROR_INTERNAL, &error);
+            Self::Failure(Box::new(
+                crate::runtime_error::with_provider_execution_source(contextual, error.into()),
+            ))
         }
     }
 }

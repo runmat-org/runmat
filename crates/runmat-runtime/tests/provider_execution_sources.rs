@@ -65,6 +65,9 @@ impl AccelProvider for Provider {
     dimension_hook!(reduce_sum_dim);
     dimension_hook!(reduce_mean_dim);
     dimension_hook!(reduce_integer_mean_native_dim);
+    fn unary_cos<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail() })
+    }
     fn moving_window<'a>(
         &'a self,
         _: &'a ProviderMovingWindowRequest<'a>,
@@ -93,7 +96,7 @@ impl AccelProvider for Provider {
 }
 
 #[test]
-fn actual_reduction_domains_retain_typed_causes_without_retry() {
+fn actual_provider_domains_retain_typed_causes_without_retry() {
     runmat_gc::gc_test_context(|| {
         for nested in [false, true] {
             let provider = Box::leak(Box::new(Provider {
@@ -110,6 +113,7 @@ fn actual_reduction_domains_retain_typed_causes_without_retry() {
                 ("sum", false),
                 ("mean", false),
                 ("mean", true),
+                ("pol2cart", false),
             ] {
                 let input = provider
                     .owner
@@ -129,6 +133,7 @@ fn actual_reduction_domains_retain_typed_causes_without_retry() {
                     .unwrap();
                 let mut args = vec![Value::GpuTensor(handle)];
                 match name {
+                    "pol2cart" => args.push(args[0].clone()),
                     "movsum" => args.push(Value::Num(2.0)),
                     "mean" | "sum" if integer => {
                         args.push(Value::Num(1.0));
