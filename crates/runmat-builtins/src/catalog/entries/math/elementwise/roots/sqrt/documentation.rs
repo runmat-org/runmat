@@ -26,6 +26,19 @@ const SQRT_SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const SQRT_EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision and array pages",
+        program: "input = reshape(single([4 9]), [1 1 2]);\nresult = sqrt(input);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(result), 'single'));\nassert(isequal(size(result), [1 1 2]));\nassert(max(abs(double(result(:)) - [2; 3])) < 1e-6);",
+        },
+    },
+    BuiltinExample {
         id: "positive-scalar",
         title: "Take the square root of a positive scalar",
         program: "y = sqrt(9)",
@@ -128,7 +141,7 @@ const SQRT_FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "How are complex values near an axis handled?",
-        answer: "RunMat uses the principal complex branch and normalizes negligible components to avoid displaying negative-zero artifacts.",
+        answer: "RunMat uses the principal complex branch and retains small nonzero components. Exact zero components are normalized to positive zero.",
     },
     BuiltinDocumentationFaq {
         question: "Can providers add direct complex support?",

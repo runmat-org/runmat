@@ -50,6 +50,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision and array pages",
+        program: "input = reshape(single([0 exp(1)-1]), [1 1 2]);\nresult = log1p(input);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(result), 'single'));\nassert(isequal(size(result), [1 1 2]));\nassert(max(abs(double(result(:)) - [0; 1])) < 1e-6);",
+        },
+    },
+    BuiltinExample {
         id: "near-zero-accuracy",
         title: "Retain accuracy for a tiny increment",
         program: "delta = 1e-12;\nvalue = log1p(delta)",

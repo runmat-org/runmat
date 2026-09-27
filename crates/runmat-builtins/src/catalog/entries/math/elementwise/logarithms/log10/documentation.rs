@@ -56,6 +56,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision and array pages",
+        program: "input = reshape(single([1 100]), [1 1 2]);\nresult = log10(input);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(result), 'single'));\nassert(isequal(size(result), [1 1 2]));\nassert(max(abs(double(result(:)) - [0; 2])) < 1e-6);",
+        },
+    },
+    BuiltinExample {
         id: "order-of-magnitude",
         title: "Find the order of magnitude of a number",
         program: "value = log10(1000)",
@@ -146,7 +159,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "How is precision selected?",
-        answer: "Double input returns double and single input returns single. Integer extensions enter the double domain only when every value is exactly representable in binary64. Tiny finite roundoff components may be normalized to zero.",
+        answer: "Double input returns double and single input returns single. Integer extensions enter the double domain only when every value is exactly representable in binary64. Small nonzero real and imaginary components are retained.",
     },
 ];
 

@@ -25,6 +25,19 @@ const REALSQRT_SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const REALSQRT_EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision and array pages",
+        program: "input = reshape(single([4 9]), [1 1 2]);\nresult = realsqrt(input);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(result), 'single'));\nassert(isequal(size(result), [1 1 2]));\nassert(max(abs(double(result(:)) - [2; 3])) < 1e-6);",
+        },
+    },
+    BuiltinExample {
         id: "positive-scalar",
         title: "Take the real square root of a scalar",
         program: "y = realsqrt(9)",

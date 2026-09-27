@@ -61,6 +61,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision and array pages",
+        program: "input = reshape(single([1 8]), [1 1 2]);\nresult = log2(input);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(result), 'single'));\nassert(isequal(size(result), [1 1 2]));\nassert(max(abs(double(result(:)) - [0; 3])) < 1e-6);",
+        },
+    },
+    BuiltinExample {
         id: "powers-of-two",
         title: "Compute logarithms of powers of two",
         program: "values = [1 2 4 8];\npowers = log2(values)",
@@ -176,7 +189,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "How is precision selected?",
-        answer: "Single input returns single and double input returns double. Integer, logical, and character extensions enter the double domain. Tiny finite imaginary roundoff may be normalized to zero.",
+        answer: "Single input returns single and double input returns double. Integer, logical, and character extensions enter the double domain. Small nonzero real and imaginary components are retained.",
     },
 ];
 
