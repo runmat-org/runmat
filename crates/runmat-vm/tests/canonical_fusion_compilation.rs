@@ -87,10 +87,13 @@ fn named_and_operator_products_keep_real_matmul_epilogue_graphs() {
         let graph = bytecode
             .runtime_accel_graph_for_fusion(&windows)
             .expect("compiler-authorized product graph");
-        assert!(graph
-            .nodes
-            .iter()
-            .any(|node| node.category == AccelOpCategory::MatMul));
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.category == AccelOpCategory::MatMul),
+            "{expression}: {graph:?}"
+        );
         assert!(
             graph
                 .detect_fusion_groups()
@@ -98,6 +101,53 @@ fn named_and_operator_products_keep_real_matmul_epilogue_graphs() {
                 .any(|group| matches!(group.kind, FusionKind::MatmulEpilogue)),
             "{expression}: real matmul epilogue detector"
         );
+        let groups = bytecode.runtime_fusion_groups_for_graph(&graph);
+        let plan = runmat_accelerate::fusion::prepare_fusion_plan(
+            Some(&graph),
+            &groups,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count,
+        )
+        .expect("actual runtime matmul plan");
+        assert!(
+            plan.groups
+                .iter()
+                .any(|group| group.group.kind == FusionKind::MatmulEpilogue),
+            "{expression}"
+        );
+    }
+}
+
+#[test]
+fn scalar_operator_windows_refine_to_actual_elementwise_plans() {
+    use runmat_accelerate::{fusion::prepare_fusion_plan, graph::AccelOpCategory, FusionKind};
+    for expression in ["2 * A", "A * 2"] {
+        let bytecode =
+            test_helpers::compile_source(&format!("A = rand(4, 3); y = {expression} + 1;"))
+                .unwrap();
+        let windows = bytecode.runtime_fusion_groups();
+        let graph = bytecode
+            .runtime_accel_graph_for_fusion(&windows)
+            .expect("scalar product graph");
+        assert!(graph
+            .nodes
+            .iter()
+            .all(|node| node.category != AccelOpCategory::MatMul));
+        let groups = bytecode.runtime_fusion_groups_for_graph(&graph);
+        let candidates = bytecode.fusion_metadata.mir_fusion_candidate_group_count;
+        let plan = prepare_fusion_plan(Some(&graph), &groups, candidates)
+            .expect("scalar elementwise plan");
+        assert!(plan
+            .groups
+            .iter()
+            .any(|group| group.group.kind == FusionKind::ElementwiseChain));
+        assert!(plan
+            .groups
+            .iter()
+            .all(|group| group.group.kind != FusionKind::MatmulEpilogue));
+        assert!(prepare_fusion_plan(None, &groups, candidates).is_none());
+        let mut empty = graph.clone();
+        empty.nodes.clear();
+        assert!(bytecode.runtime_fusion_groups_for_graph(&empty).is_empty());
     }
 }
 

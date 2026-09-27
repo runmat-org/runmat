@@ -495,6 +495,18 @@ impl<'a> GraphBuilder<'a> {
                 return;
             }
         };
+        if op == PrimitiveOp::Mul && !self.value_is_scalar(lhs) && !self.value_is_scalar(rhs) {
+            // `*` and the named matrix-product call share one canonical graph
+            // operation. Scalar scaling retains the elementwise primitive;
+            // unknown operands remain subject to the matmul executor's checks.
+            let inputs = vec![lhs, rhs];
+            let out_type = self.infer_matmul_type(&inputs);
+            let name = runmat_types::OperatorOverloadMethod::MatrixMultiply
+                .name()
+                .display_name();
+            self.push_builtin_node(pc, name, inputs, out_type);
+            return;
+        }
         let inputs = vec![lhs, rhs];
         let node_id = self.nodes.len() as NodeId;
         let span = InstrSpan { start: pc, end: pc };
@@ -1232,7 +1244,7 @@ mod tests {
         let graph = build_accel_graph(&instructions, &var_types);
         let mut out_type = None;
         for node in &graph.nodes {
-            if let AccelNodeLabel::Primitive(PrimitiveOp::Mul) = node.label {
+            if node.category == AccelOpCategory::MatMul {
                 let out_id = node.outputs.first().copied().expect("output");
                 let value = graph.value(out_id).expect("value");
                 out_type = Some(value.ty.clone());
@@ -1244,6 +1256,42 @@ mod tests {
                 shape: Some(vec![Some(2), Some(4)])
             })
         );
+    }
+
+    #[test]
+    fn operator_product_refines_only_proven_scalar_operands_to_elementwise() {
+        let matrix = Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        };
+        let scalar_tensor = Type::Tensor {
+            shape: Some(vec![Some(1), Some(1)]),
+        };
+        for (left, right, category) in [
+            (Type::Num, matrix.clone(), AccelOpCategory::Elementwise),
+            (matrix.clone(), Type::Num, AccelOpCategory::Elementwise),
+            (
+                scalar_tensor.clone(),
+                matrix.clone(),
+                AccelOpCategory::Elementwise,
+            ),
+            (matrix, scalar_tensor, AccelOpCategory::Elementwise),
+            (Type::Unknown, Type::Unknown, AccelOpCategory::MatMul),
+        ] {
+            let graph = build_accel_graph(
+                &[Instr::LoadVar(0), Instr::LoadVar(1), Instr::Mul],
+                &[left, right],
+            );
+            let node = graph.nodes.last().unwrap();
+            assert_eq!(node.category, category);
+            if category == AccelOpCategory::Elementwise {
+                assert!(matches!(
+                    node.label,
+                    AccelNodeLabel::Primitive(PrimitiveOp::Mul)
+                ));
+            } else {
+                assert!(node.tags.contains(&AccelGraphTag::MatMul));
+            }
+        }
     }
 
     #[test]

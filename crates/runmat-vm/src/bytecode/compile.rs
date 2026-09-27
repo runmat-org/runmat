@@ -663,9 +663,11 @@ fn derive_semantic_fusion_instruction_windows(
 #[cfg(feature = "native-accel")]
 fn instr_fusion_signal_kind(instr: &Instr) -> Option<crate::bytecode::FusionInstructionKind> {
     match instr {
+        // Operand shapes are not available in the instruction stream. The
+        // runtime graph refines scalar multiplication back to elementwise.
+        Instr::Mul => Some(crate::bytecode::FusionInstructionKind::Matmul),
         Instr::Add
         | Instr::Sub
-        | Instr::Mul
         | Instr::RightDiv
         | Instr::LeftDiv
         | Instr::Pow
