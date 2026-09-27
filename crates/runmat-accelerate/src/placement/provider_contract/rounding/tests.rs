@@ -57,6 +57,49 @@ fn declared_rounding_hooks_execute_the_admitted_representations() {
     provider.free(&input).unwrap();
 }
 
+#[cfg(feature = "wgpu")]
+#[test]
+fn digit_work_counts_real_chunking_uniform_transfers_and_scaling_bound() {
+    use runmat_accelerate_api::{NumericalDomainEvidence, RoundDigitsMode};
+    let capacity = usize::try_from(crate::backend::wgpu::config::WORKGROUP_SIZE).unwrap()
+        * usize::try_from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS).unwrap();
+    let mut query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new(ROUND_CATALOG_ENTRY.identity.name),
+        family: ProviderOperationFamily::Elementwise,
+        inputs: vec![ProviderRepresentation {
+            element_type: ProviderElementType::F64,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![1, capacity + 1],
+            residency: ProviderResidency::Device,
+        }],
+        outputs: vec![],
+        workload: ProviderWorkload {
+            numerical_domain: NumericalDomainEvidence::RoundDigits {
+                digits: 2,
+                mode: RoundDigitsMode::Significant,
+            },
+            ..Default::default()
+        },
+    };
+    let work = wgpu_work(ProviderPrecision::F64, &query).unwrap();
+    assert_eq!(work.dispatches, 2);
+    assert_eq!(work.queue_submissions, 2);
+    assert_eq!(work.allocations, 2);
+    assert_eq!(work.scratch_bytes, 16);
+    assert_eq!(work.extra_upload_bytes, 32);
+    assert!(work.execution_units > (capacity as u64 + 1) * 96);
+    query.inputs[0].shape = vec![0, usize::MAX];
+    let work = wgpu_work(ProviderPrecision::F64, &query).unwrap();
+    assert_eq!(work.dispatches, 0);
+    assert_eq!(work.queue_submissions, 0);
+    assert_eq!(work.allocations, 1);
+    assert_eq!(work.scratch_bytes, 0);
+    assert_eq!(work.execution_units, 0);
+    query.inputs[0].shape = vec![usize::MAX, usize::MAX];
+    assert!(wgpu_work(ProviderPrecision::F64, &query).is_none());
+}
+
 #[test]
 fn digit_capability_preserves_parsed_strategy_and_validates_evidence() {
     use runmat_accelerate_api::{NumericalDomainEvidence, RoundDigitsMode};

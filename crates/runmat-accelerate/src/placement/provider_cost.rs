@@ -15,6 +15,16 @@ pub(crate) fn wgpu_cost_estimate(
 ) -> ProviderCostEstimate {
     let fusion_work =
         super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
+    let digit_work = {
+        #[cfg(feature = "wgpu")]
+        {
+            super::provider_contract::rounding::wgpu_work(provider.precision(), &query.operation)
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            None::<super::provider_contract::rounding::RoundDigitsWork>
+        }
+    };
     let power_work = {
         #[cfg(feature = "wgpu")]
         {
@@ -115,6 +125,7 @@ pub(crate) fn wgpu_cost_estimate(
         || unary_work.is_some()
         || fusion_work.is_some()
         || coordinate_work.is_some()
+        || digit_work.is_some()
     {
         None
     } else {
@@ -134,6 +145,30 @@ pub(crate) fn wgpu_cost_estimate(
                 })
                 .saturating_add(probe_elements.saturating_mul(3))
         });
+    let execution_ns = digit_work.as_ref().map_or(execution_ns, |work| {
+        if work.dispatches == 0 {
+            0
+        } else {
+            work.execution_units.saturating_mul(2).max(5_000)
+        }
+    });
+    let allocations = digit_work
+        .as_ref()
+        .map_or(allocations, |work| work.allocations);
+    let queue_submissions = digit_work
+        .as_ref()
+        .map_or(queue_submissions, |work| work.queue_submissions);
+    let scratch_bytes = fusion_work
+        .as_ref()
+        .map_or(probe_bytes, |work| work.scratch_bytes);
+    let scratch_bytes = digit_work
+        .as_ref()
+        .map_or(scratch_bytes, |work| work.scratch_bytes);
+    let upload_bytes = upload_bytes.saturating_add(
+        digit_work
+            .as_ref()
+            .map_or(0, |work| work.extra_upload_bytes),
+    );
     let compile_or_prepare_ns = match query.preparation {
         CandidatePreparationState::Ready | CandidatePreparationState::Warm => 0,
         CandidatePreparationState::Cold => 100_000,
@@ -155,9 +190,7 @@ pub(crate) fn wgpu_cost_estimate(
                     0
                 },
             },
-            scratch_bytes: fusion_work
-                .as_ref()
-                .map_or(probe_bytes, |work| work.scratch_bytes),
+            scratch_bytes,
             confidence: if observed_execution_ns.is_some() {
                 EstimateConfidence::Medium
             } else {

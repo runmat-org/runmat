@@ -7,6 +7,11 @@ use runmat_builtins::{
 #[cfg(test)]
 mod tests;
 
+mod work;
+#[cfg(feature = "wgpu")]
+pub(crate) use work::wgpu_work;
+pub(crate) use work::RoundDigitsWork;
+
 const ENTRIES: &[&runmat_builtins::BuiltinCatalogEntry] = &[
     &CEIL_CATALOG_ENTRY,
     &FIX_CATALOG_ENTRY,
