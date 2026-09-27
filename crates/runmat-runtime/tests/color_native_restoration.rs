@@ -150,3 +150,60 @@ fn explicit_color_extension_rejection_precedes_all_provider_effects() {
     drop(input);
     assert!(borrowed.acquire().is_none());
 }
+
+#[test]
+fn scalar_color_fallback_preserves_the_original_host_carrier() {
+    for explicit in [false, true] {
+        let inner = Box::leak(Box::new(
+            runmat_accelerate::simple_provider::InProcessProvider::new(),
+        ));
+        let provider = Provider::new(inner, Mode::Unsupported);
+        let _active = ThreadProviderGuard::set(Some(provider));
+        let input = inner
+            .upload(&HostTensorView {
+                data: &[0.25],
+                shape: &[1, 1],
+            })
+            .unwrap()
+            .with_provenance(if explicit {
+                GpuHandleProvenance::Explicit
+            } else {
+                GpuHandleProvenance::Automatic
+            })
+            .unwrap();
+        let borrowed = input.allocation_lease().downgrade();
+        let expected = block_on(call_builtin_async_with_outputs(
+            "im2double",
+            &[Value::Num(0.25)],
+            1,
+        ))
+        .unwrap();
+        assert_eq!(expected, Value::Num(0.25));
+        let result = block_on(call_builtin_async_with_outputs(
+            "im2double",
+            &[Value::GpuTensor(input.clone())],
+            1,
+        ));
+        assert_eq!(
+            *provider.trace.lock().unwrap(),
+            ["download", "numeric-upload"],
+            "explicit={explicit}, result={:?}",
+            result.as_ref().map(|_| "success")
+        );
+        if explicit {
+            let error = result.unwrap_err();
+            assert_eq!(
+                error.gpu_gather_retry,
+                runmat_runtime::GpuGatherRetry::Never
+            );
+            assert!(
+                matches!(error.source.as_ref().unwrap().downcast_ref::<NumericUploadError>().unwrap(), NumericUploadError::Provider(cause) if is_unsupported_provider_operation(cause))
+            );
+        } else {
+            assert_eq!(result.unwrap(), expected);
+        }
+        assert!(borrowed.acquire().is_some());
+        drop(input);
+        assert!(borrowed.acquire().is_none());
+    }
+}

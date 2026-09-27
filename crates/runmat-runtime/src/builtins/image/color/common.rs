@@ -150,25 +150,52 @@ pub(crate) fn restore_resident_numeric_result_for_sources(
         exact_owner(input, name)?;
     }
     let _residency = protect_resident_inputs(sources);
-    let tensor = match tensor::value_into_tensor_for(name, value.clone()) {
-        Ok(tensor) => tensor,
-        Err(_) => {
+    let restore = |value| {
+        crate::builtins::common::gpu_helpers::restore_class_preserving_value_protecting(
+            source,
+            value,
+            name,
+            &sources.iter().collect::<Vec<_>>(),
+        )
+        .map_err(|error| map_flow(name, error))
+    };
+    match value {
+        // Transfer the existing native payload, and let the shared scalar
+        // adapter preserve Num when automatic restoration is unsupported.
+        value @ (Value::Tensor(_) | Value::Num(_)) => restore(value),
+        Value::Int(integer) => {
+            let tensor = tensor::value_into_tensor_for(name, Value::Int(integer))
+                .map_err(|error| builtin_error(name, error))?;
+            match restore(Value::Tensor(tensor))? {
+                Value::Tensor(_) => Ok(Value::Int(integer)),
+                restored => Ok(restored),
+            }
+        }
+        Value::Bool(bit) => match restore(Value::Num(if bit { 1.0 } else { 0.0 }))? {
+            Value::Num(_) => Ok(Value::Bool(bit)),
+            restored => Ok(restored),
+        },
+        Value::LogicalArray(logical) => {
+            // This helper produces numeric color data, not a logical relabel.
+            // Keep the original only for a legal automatic host fallback; the
+            // converted floating allocation is necessary, not a payload clone.
+            let tensor =
+                tensor::logical_to_tensor(&logical).map_err(|error| builtin_error(name, error))?;
+            match restore(Value::Tensor(tensor))? {
+                Value::Tensor(_) => Ok(Value::LogicalArray(logical)),
+                restored => Ok(restored),
+            }
+        }
+        value => {
             if runmat_accelerate_api::handle_is_explicit(source) {
                 return Err(builtin_error(
                     name,
                     format!("{name}: explicit gpuArray result cannot remain resident"),
                 ));
             }
-            return Ok(value);
+            Ok(value)
         }
-    };
-    crate::builtins::common::gpu_helpers::restore_class_preserving_value_protecting(
-        source,
-        Value::Tensor(tensor),
-        name,
-        &sources.iter().collect::<Vec<_>>(),
-    )
-    .map_err(|error| map_flow(name, error))
+    }
 }
 
 pub(crate) fn restore_resident_numeric_result(
