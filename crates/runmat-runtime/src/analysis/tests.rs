@@ -6,10 +6,7 @@ use std::{
 };
 
 use chrono::Utc;
-use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
-    HostTensorView,
-};
+use runmat_accelerate_api::{AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_analysis_core::{
     AnalysisExcitation, AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisModelId,
     AnalysisProcedure, AnalysisSequence, BeamElementModel, BeamSectionModel,
@@ -93,6 +90,7 @@ use runmat_meshing_core::{
 
 use super::*;
 
+mod static_admission;
 mod structural_study_intent;
 mod structural_study_storage;
 mod topology_identity;
@@ -3077,86 +3075,6 @@ fn host_progress_handler_observes_direct_solver_progress() {
 }
 
 #[test]
-fn gpu_run_without_provider_records_fallback_event() {
-    let _guard = analysis_test_guard();
-    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
-    let model = sample_model();
-    let envelope = analysis_run_linear_static_with_options(
-        &model,
-        ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("run should pass");
-
-    if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
-        assert!(envelope
-            .data
-            .provenance
-            .fallback_events
-            .iter()
-            .any(FallbackEvent::is_solver_backend_fallback));
-        assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
-        assert!(matches!(
-            envelope
-                .data
-                .run
-                .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
-                .expect("structural displacement field should be present")
-                .values,
-            AnalysisFieldValues::HostF64(_)
-        ));
-    } else {
-        assert_eq!(
-            envelope.data.provenance.solver_backend,
-            LinearAlgebraBackendKind::Accelerator
-        );
-    }
-}
-
-#[test]
-fn gpu_run_uses_native_sparse_provider_and_releases_prepared_resources() {
-    let _guard = analysis_test_guard();
-    let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
-        Box::new(runmat_accelerate::simple_provider::InProcessProvider::new()),
-    );
-    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    assert_eq!(provider.placement_resources().live_bytes, 0);
-
-    let envelope = analysis_run_linear_static_with_options(
-        &sample_model(),
-        ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(Some("trace-native-sparse".to_string()), None),
-    )
-    .expect("native sparse FEA run should converge");
-
-    assert_eq!(
-        envelope.data.provenance.solver_backend,
-        LinearAlgebraBackendKind::Accelerator
-    );
-    assert_eq!(
-        envelope.data.provenance.solver_method,
-        SolverMethod::AssembledPcg
-    );
-    assert!(envelope.data.provenance.fallback_events.is_empty());
-    assert_eq!(envelope.data.run.accelerator_evidence.len(), 1);
-    let evidence = &envelope.data.run.accelerator_evidence[0];
-    evidence.validate().expect("evidence should validate");
-    assert!(evidence.satisfies_tolerance());
-    assert_eq!(evidence.provider().host_synchronizations, 0);
-    assert_eq!(evidence.provider().device_readbacks, 0);
-    assert_eq!(evidence.terminal_solution_readbacks(), 1);
-    assert!(evidence.provider().resident_matrix_bytes > 0);
-    assert!(evidence.provider().resident_preconditioner_bytes > 0);
-    assert!(evidence.provider().scratch_bytes > 0);
-    assert!(!evidence.provider().used_host_fallback);
-    assert_eq!(provider.placement_resources().live_bytes, 0);
-}
-
-#[test]
 fn native_sparse_fea_cancellation_is_terminal_and_releases_resources() {
     let _guard = analysis_test_guard();
     let provider: &'static runmat_accelerate::simple_provider::InProcessProvider = Box::leak(
@@ -3280,110 +3198,6 @@ fn native_sparse_provider_serves_modal_and_transient_routes() {
         .iter()
         .all(|evidence| evidence.validate().is_ok() && evidence.satisfies_tolerance()));
     assert_eq!(provider.placement_resources().live_bytes, 0);
-}
-
-#[test]
-fn gpu_run_with_provider_keeps_authoritative_host_fields() {
-    let _guard = analysis_test_guard();
-    static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1000);
-
-    struct AnalysisTestProvider;
-
-    impl AccelProvider for AnalysisTestProvider {
-        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: 7,
-                buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
-                descriptor: Default::default(),
-            })
-        }
-
-        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn device_info(&self) -> String {
-            "analysis-test-provider".to_string()
-        }
-
-        fn device_id(&self) -> u32 {
-            7
-        }
-
-        fn device_info_struct(&self) -> ApiDeviceInfo {
-            ApiDeviceInfo {
-                device_id: 7,
-                name: "analysis-test-provider".to_string(),
-                vendor: "runmat-tests".to_string(),
-                memory_bytes: None,
-                backend: Some("test_gpu".to_string()),
-            }
-        }
-    }
-
-    static PROVIDER: AnalysisTestProvider = AnalysisTestProvider;
-    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
-
-    let model = sample_model();
-    let envelope = analysis_run_linear_static_with_options(
-        &model,
-        ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("run should pass");
-
-    assert!(matches!(
-        envelope.data.provenance.solver_backend.as_str(),
-        "accelerator" | "cpu_reference"
-    ));
-    if envelope.data.provenance.solver_backend == LinearAlgebraBackendKind::CpuReference {
-        assert!(envelope
-            .data
-            .provenance
-            .fallback_events
-            .iter()
-            .any(FallbackEvent::is_solver_backend_fallback));
-    }
-    assert!(
-        (0.0..=1.0).contains(&envelope.data.provenance.solver_device_apply_k_ratio),
-        "ratio must be in [0,1]"
-    );
-    assert!(matches!(
-        envelope
-            .data
-            .run
-            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
-            .expect("structural displacement field should be present")
-            .values,
-        AnalysisFieldValues::HostF64(_)
-    ));
-    assert!(matches!(
-        envelope
-            .data
-            .run
-            .field(FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS)
-            .expect("beam bending stress field should be present")
-            .values,
-        AnalysisFieldValues::HostF64(_)
-    ));
-    assert!(envelope
-        .data
-        .run
-        .field(FEA_FIELD_STRUCTURAL_VON_MISES)
-        .is_none());
 }
 
 #[test]
@@ -5447,118 +5261,6 @@ fn quality_policy_exploratory_allows_numerically_acceptable_warn_path() {
         .iter()
         .any(|reason| reason.code == QualityReasonCode::MaterialAssignmentConflict));
     assert_eq!(envelope.data.provenance.quality_policy, "exploratory");
-}
-
-#[test]
-fn quality_policy_balanced_allows_numerical_acceptance_with_quality_reasons() {
-    let _guard = analysis_test_guard();
-
-    struct UploadFailProvider;
-
-    impl AccelProvider for UploadFailProvider {
-        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Err(anyhow::anyhow!("forced-upload-failure"))
-        }
-
-        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn device_info(&self) -> String {
-            "upload-fail-provider".to_string()
-        }
-    }
-
-    static PROVIDER: UploadFailProvider = UploadFailProvider;
-    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
-
-    let model = sample_model();
-    let envelope = analysis_run_linear_static_with_options(
-        &model,
-        ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
-        AnalysisRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            preconditioner_mode: PreconditionerMode::Auto,
-            quality_policy: QualityPolicy::Balanced,
-            solver_mesh_artifact_path: None,
-        },
-        OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
-    )
-    .expect("run should succeed");
-
-    assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
-    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
-    assert!(envelope.data.numerically_acceptable);
-    assert_eq!(envelope.data.run_status, RunStatus::Completed);
-    assert_eq!(envelope.data.provenance.quality_policy, "balanced");
-}
-
-#[test]
-fn quality_policy_strict_rejects_numerical_acceptance_with_quality_reasons() {
-    let _guard = analysis_test_guard();
-
-    struct UploadFailProvider;
-
-    impl AccelProvider for UploadFailProvider {
-        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Err(anyhow::anyhow!("forced-upload-failure"))
-        }
-
-        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(HostTensorOwned {
-                    data: vec![0.0; h.shape.iter().product()],
-                    shape: h.shape.clone(),
-                    storage: runmat_accelerate_api::handle_storage(h),
-                })
-            })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn device_info(&self) -> String {
-            "upload-fail-provider".to_string()
-        }
-    }
-
-    static PROVIDER: UploadFailProvider = UploadFailProvider;
-    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
-
-    let model = sample_model();
-    let envelope = analysis_run_linear_static_with_options(
-        &model,
-        ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
-        AnalysisRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            preconditioner_mode: PreconditionerMode::Auto,
-            quality_policy: QualityPolicy::Strict,
-            solver_mesh_artifact_path: None,
-        },
-        OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
-    )
-    .expect("run should succeed");
-
-    assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
-    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
-    assert!(!envelope.data.numerically_acceptable);
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert_eq!(envelope.data.provenance.quality_policy, "strict");
 }
 
 #[test]
