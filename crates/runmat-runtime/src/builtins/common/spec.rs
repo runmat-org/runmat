@@ -11,7 +11,9 @@ pub use canonical::{
     canonical_fusion_declaration, canonical_fusion_spec, CanonicalFusionDeclaration,
 };
 pub use epilogue::{fusion_epilogue_operation, FusionEpilogueOperation};
-pub use selected::{selected_fusion_binding, SelectedFusionBinding, SelectedFusionIdentity};
+pub use selected::{
+    selected_builtin_binding, selected_fusion_binding, SelectedFusionBinding, SelectedFusionIdentity,
+};
 pub use structural::FusionStructuralOperation;
 
 #[cfg(not(target_arch = "wasm32"))]

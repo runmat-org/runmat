@@ -4,7 +4,9 @@
 //! inventories distinct. Ambiguous provenance must continue to fail closed.
 use runmat_runtime::{
     builtin::{RuntimeBuiltinBinding, RuntimeBuiltinFuture},
-    builtins::common::spec::{canonical_fusion_declaration, selected_fusion_binding},
+    builtins::common::spec::{
+        canonical_fusion_declaration, selected_builtin_binding, selected_fusion_binding,
+    },
     context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts},
 };
 use runmat_value::Value;
@@ -104,6 +106,43 @@ fn indexed_declarations_never_cache_scoped_selection_permission() {
         .with_service_ports(RuntimeServicePorts::default().with_builtin(absent.clone()));
         assert!(selected_fusion_binding("sin", expected, Some(&other)).is_none());
         assert_eq!(absent.calls.get(), 1);
+        assert_eq!(service.calls.get(), 5);
+    });
+}
+
+#[test]
+fn canonical_selection_is_independent_of_fusion_and_rechecks_scoped_implementation() {
+    runmat_gc::gc_test_context(|| {
+        let original = runmat_runtime::builtin::runtime_builtin_bindings_by_name("log");
+        assert_eq!(original.len(), 1, "compiled log bindings: {original:?}");
+        let entry = runmat_builtins::builtin_catalog_entry_by_name("log").unwrap();
+        assert_eq!(entry.bindings.len(), 1);
+        assert_eq!(
+            original[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
+        let service = Rc::new(ChangingService {
+            bindings: RefCell::new(original.clone()),
+            calls: Cell::new(0),
+        });
+        let context = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(RuntimeServicePorts::default().with_builtin(service.clone()));
+        let expected = Some(original[0].identity);
+        let selected = selected_builtin_binding("log", expected, Some(&context)).unwrap();
+        assert!(std::ptr::fn_addr_eq(
+            selected.implementation,
+            original[0].implementation
+        ));
+        service.bindings.borrow_mut()[0].implementation = replacement;
+        assert!(selected_builtin_binding("log", expected, Some(&context)).is_none());
+        *service.bindings.borrow_mut() = vec![original[0], original[0]];
+        assert!(selected_builtin_binding("log", expected, Some(&context)).is_none());
+        service.bindings.borrow_mut().clear();
+        assert!(selected_builtin_binding("log", expected, Some(&context)).is_none());
+        *service.bindings.borrow_mut() = original;
+        assert!(selected_builtin_binding("LOG", expected, Some(&context)).is_some());
         assert_eq!(service.calls.get(), 5);
     });
 }

@@ -23,6 +23,50 @@ pub enum SelectedFusionIdentity {
     Legacy { physical_owner: &'static str },
 }
 
+/// Resolve a canonical implementation against the current invocation's dispatch
+/// authority. This is not operand, overload, or numerical-domain admission.
+pub fn selected_builtin_binding(
+    name: &str,
+    expected: Option<BuiltinBindingIdentity>,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Option<crate::builtin::RuntimeBuiltinBinding> {
+    let active = crate::context::legacy::active();
+    let service = context
+        .or(active.as_ref())
+        .and_then(|context| context.service_ports().builtin());
+    let entry = builtin_catalog_entry_by_name(name)?;
+    let [binding] = entry.bindings else {
+        return None;
+    };
+    let identity = entry.binding_identity(binding);
+    if expected.is_some_and(|expected| expected != identity) {
+        return None;
+    }
+    let compiled =
+        crate::builtin::with_runtime_builtin_bindings_by_name(name, |bindings| match bindings {
+            [binding] => Some(*binding),
+            _ => None,
+        })?;
+    if compiled.identity != identity
+        || (service.is_none()
+            && with_builtin_functions_by_exact_name(name, |entries| !entries.is_empty()))
+    {
+        return None;
+    }
+    if let Some(service) = service {
+        let selected = service.bindings_by_name(name);
+        let [selected] = selected.as_slice() else {
+            return None;
+        };
+        if selected.identity != identity
+            || !std::ptr::fn_addr_eq(selected.implementation, compiled.implementation)
+        {
+            return None;
+        }
+    }
+    Some(compiled)
+}
+
 pub fn selected_fusion_binding(
     name: &str,
     expected: Option<BuiltinBindingIdentity>,
@@ -32,39 +76,8 @@ pub fn selected_fusion_binding(
     let service = context
         .or(active.as_ref())
         .and_then(|context| context.service_ports().builtin());
-    if let Some(entry) = builtin_catalog_entry_by_name(name) {
-        let [binding] = entry.bindings else {
-            return None;
-        };
-        let identity = entry.binding_identity(binding);
-        if expected.is_some_and(|expected| expected != identity) {
-            return None;
-        }
-        let compiled =
-            crate::builtin::with_runtime_builtin_bindings_by_name(
-                name,
-                |bindings| match bindings {
-                    [binding] => Some(*binding),
-                    _ => None,
-                },
-            )?;
-        if compiled.identity != identity
-            || (service.is_none()
-                && with_builtin_functions_by_exact_name(name, |entries| !entries.is_empty()))
-        {
-            return None;
-        }
-        if let Some(service) = service {
-            let selected = service.bindings_by_name(name);
-            let [selected] = selected.as_slice() else {
-                return None;
-            };
-            if selected.identity != identity
-                || !std::ptr::fn_addr_eq(selected.implementation, compiled.implementation)
-            {
-                return None;
-            }
-        }
+    if builtin_catalog_entry_by_name(name).is_some() {
+        let identity = selected_builtin_binding(name, expected, context)?.identity;
         let declaration = canonical_fusion_declaration(identity)?;
         return Some(SelectedFusionBinding {
             identity: SelectedFusionIdentity::Canonical(identity),
