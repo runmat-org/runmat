@@ -398,6 +398,31 @@ mod tests {
         );
     }
 
+    fn register_fixture_handle_class(runtime: &RuntimeContext) {
+        pollster::block_on(runtime.scope(async {
+            crate::compatibility::set_runmat_extensions_enabled(false);
+            let mut class = crate::class_registry::RuntimeClass {
+                name: "FixtureHandle".into(),
+                parent: None,
+                properties: Default::default(),
+                methods: Default::default(),
+            };
+            class.properties.insert(
+                "Value".into(),
+                crate::class_registry::RuntimeProperty {
+                    name: "Value".into(),
+                    is_static: false,
+                    is_constant: false,
+                    is_dependent: false,
+                    get_access: runmat_types::MemberAccess::Public,
+                    set_access: runmat_types::MemberAccess::Public,
+                    default_value: None,
+                },
+            );
+            crate::class_registry::register_class(class);
+        }));
+    }
+
     #[test]
     fn object_callbacks_preserve_handle_identity_and_mutate_its_target() {
         let mut target = ObjectInstance::new("FixtureHandle");
@@ -409,6 +434,7 @@ mod tests {
             valid: true,
         };
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        register_fixture_handle_class(&runtime);
         let services = RuntimeMexHostServices::new(runtime);
 
         assert_eq!(
@@ -458,6 +484,7 @@ mod tests {
         )
         .expect("valid handle array");
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        register_fixture_handle_class(&runtime);
         let services = RuntimeMexHostServices::new(runtime);
 
         assert_eq!(
@@ -531,6 +558,7 @@ public:
             valid: true,
         };
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        register_fixture_handle_class(&runtime);
         let services = Rc::new(RuntimeMexHostServices::new(runtime));
         let artifact = runmat_mex::MexBuild::new(&source, directory.path())
             .compile()
