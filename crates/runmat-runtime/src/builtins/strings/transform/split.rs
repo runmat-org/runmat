@@ -1677,8 +1677,9 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("resident dimension");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let result = split_builtin(
                 Value::String("Mary Butler".into()),
                 vec![Value::String(" ".into()), Value::GpuTensor(handle.clone())],
@@ -1690,8 +1691,9 @@ pub(crate) mod tests {
             assert_eq!(result.shape, vec![2, 1]);
 
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let error = split_builtin(
                 Value::String("Mary Butler".into()),
                 vec![Value::String(" ".into()), Value::GpuTensor(handle.clone())],
@@ -1701,7 +1703,7 @@ pub(crate) mod tests {
                 error.identifier(),
                 SPLIT_RESIDENT_DIMENSION_EXTENSION.error_identifier
             );
-            provider.free(&handle).expect("free dimension");
+            handle.release().expect("release fixture handle");
         });
     }
 

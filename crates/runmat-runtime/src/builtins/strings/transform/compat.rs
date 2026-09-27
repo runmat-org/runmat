@@ -3090,12 +3090,16 @@ mod tests {
             before.identifier(),
             EXTRACT_BEFORE_CHAR_MATRIX_EXTENSION.error_identifier
         );
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let after = block(extract_after_builtin(
             Value::String("abc".into()),
             vec![resident],
@@ -3224,12 +3228,16 @@ mod tests {
                 .unwrap()
         )))
         .is_err());
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
         let err = block(deblank_builtin(nested)).unwrap_err();
         assert!(!err.to_string().contains("provider"));

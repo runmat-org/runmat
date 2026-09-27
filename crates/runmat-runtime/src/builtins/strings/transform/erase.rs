@@ -687,7 +687,7 @@ pub(crate) mod tests {
             .expect_err("resident numeric pattern is invalid");
             assert_eq!(error.identifier(), ERASE_ERROR_PATTERN_TYPE.identifier);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            provider.free(&handle).expect("free input");
+            handle.release().expect("release fixture handle");
         });
     }
 

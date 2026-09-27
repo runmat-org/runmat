@@ -1333,7 +1333,7 @@ pub(crate) mod tests {
                 RESIDENT_POSITION_EXTENSION.error_identifier
             );
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            provider.free(&handle).expect("free input");
+            handle.release().expect("release fixture handle");
         });
     }
 
