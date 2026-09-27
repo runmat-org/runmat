@@ -334,11 +334,16 @@ fn isequal_typed_complex_integer_compares_exact_components() {
 fn errors_are_identity_specific_and_validate_before_materialization() {
     for nan in [false, true] {
         let name = if nan { "isequaln" } else { "isequal" };
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-            vec![1, 1],
-            u32::MAX,
-            u64::MAX,
-        ));
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let error = block_on(equality_builtin(vec![resident.clone()], nan, name)).unwrap_err();
         assert_eq!(
             error.identifier(),
@@ -418,7 +423,7 @@ fn nested_resident_values_gather_exactly_without_consuming_inputs() {
         ))
         .unwrap();
         assert!(values_equal(&after, &Value::Tensor(tensor), false));
-        provider.free(&handle).unwrap();
+        handle.release().unwrap();
     });
 }
 
@@ -427,7 +432,14 @@ fn nested_unowned_resident_input_is_an_error_not_false() {
     let nested = Value::Cell(
         CellArray::new(
             vec![Value::GpuTensor(
-                runmat_accelerate_api::GpuTensorHandle::new(vec![1, 1], u32::MAX, u64::MAX),
+                runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                    .allocate_zeroed(
+                        vec![1, 1],
+                        runmat_accelerate_api::NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .unwrap()
+                    .handle,
             )],
             1,
             1,

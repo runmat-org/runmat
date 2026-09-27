@@ -1,7 +1,7 @@
 //! MATLAB-compatible `logical` builtin with GPU-aware semantics for RunMat.
 
 use log::trace;
-use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle};
 use runmat_builtins::{
     BuiltinErrorDescriptor, LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE, LOGICAL_ERROR_GPU_GATHER_FAILED,
     LOGICAL_ERROR_INTERNAL, LOGICAL_ERROR_TOO_MANY_INPUTS, LOGICAL_STRING_ARRAY_EXTENSION,
@@ -243,9 +243,9 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = gpu_helpers::exact_provider_for_handle(&handle);
 
     if let Some(p) = provider {
-        let contains_nan = match provider_input_contains_nan(p, &handle).await {
-            Ok(contains_nan) => contains_nan,
-            Err(_) => {
+        let contains_nan = match provider_input_contains_nan(p, &handle).await? {
+            Some(contains_nan) => contains_nan,
+            None => {
                 let host =
                     gpu_helpers::download_value_preserving_residency_async(p, &handle).await?;
                 value_contains_nan(&host)
@@ -254,35 +254,18 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         if contains_nan {
             return Err(conversion_error("NaN"));
         }
-        match p.logical_islogical(&handle) {
-            Ok(true) => {
-                runmat_accelerate_api::set_handle_logical(&handle, true);
-                return Ok(Value::GpuTensor(handle));
-            }
-            Ok(false) => {}
-            Err(err) => {
-                trace!("logical: provider logical_islogical hook unavailable, falling back ({err})")
-            }
-        }
-        if let Some(mut result) = try_gpu_cast(p, &handle).await {
-            copy_logical_provenance(&mut result, &handle);
+        if let Some(mut result) = try_gpu_cast(p, &handle).await? {
+            copy_logical_provenance(&mut result, &handle)?;
             return gpu_helpers::logical_gpu_value(result);
         } else {
             trace!(
                 "logical: provider elem_ne/zeros_like unavailable for buffer {} – gathering",
-                handle.buffer_id
+                handle.buffer_id()
             );
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|err| {
-            logical_error_with_message(
-                format!("{BUILTIN_NAME}: {err}"),
-                &LOGICAL_ERROR_GPU_GATHER_FAILED,
-            )
-        })?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     if value_contains_nan(&Value::Tensor(tensor.clone())) {
         return Err(conversion_error("NaN"));
     }
@@ -293,42 +276,55 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 async fn provider_input_contains_nan(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     source: &GpuTensorHandle,
-) -> BuiltinResult<bool> {
-    let mask = provider
-        .logical_isnan(source)
-        .map_err(|error| logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL))?;
-    let mask_valid = !gpu_helpers::same_gpu_handle(&mask, source)
-        && mask.shape == source.shape
-        && mask.device_id == source.device_id
-        && gpu_helpers::exact_provider_for_handle(&mask)
-            .is_some_and(|owner| std::ptr::eq(owner, provider));
-    if !mask_valid {
-        return Err(logical_error_with_message(
-            "logical: provider returned a malformed NaN mask",
-            &LOGICAL_ERROR_INTERNAL,
+) -> BuiltinResult<Option<bool>> {
+    if source.shape().contains(&0) || runmat_accelerate_api::handle_integer_type(source).is_some() {
+        return Ok(Some(false));
+    }
+    let mask = match provider.logical_isnan(source) {
+        Ok(mask) => mask,
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) => return Err(logical_provider_error(error.into())),
+    };
+    if !valid_logical_gpu_output(&mask, source, provider) {
+        return Err(gpu_helpers::reject_gpu_output(
+            mask,
+            logical_error_with_message(
+                "logical: provider returned a malformed NaN mask",
+                &LOGICAL_ERROR_INTERNAL,
+            ),
         ));
     }
-    let maximum = provider
-        .reduce_max(&mask)
-        .await
-        .map_err(|error| logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL))?;
-    let maximum_valid = !gpu_helpers::same_gpu_handle(&maximum, source)
-        && !gpu_helpers::same_gpu_handle(&maximum, &mask)
-        && maximum.shape.iter().product::<usize>() == 1
-        && maximum.device_id == source.device_id
-        && gpu_helpers::exact_provider_for_handle(&maximum)
-            .is_some_and(|owner| std::ptr::eq(owner, provider));
-    if !maximum_valid {
-        return Err(logical_error_with_message(
-            "logical: provider returned a malformed NaN reduction",
-            &LOGICAL_ERROR_INTERNAL,
+    let maximum = match provider.reduce_max(&mask).await {
+        Ok(maximum) => maximum,
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) => return Err(logical_provider_error(error.into())),
+    };
+    if maximum.shares_allocation_with(source)
+        || maximum.shares_allocation_with(&mask)
+        || !maximum.shape().iter().all(|dim| *dim == 1)
+        || maximum.device_id() != source.device_id()
+        || !gpu_helpers::exact_provider_for_handle(&maximum)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            maximum,
+            logical_error_with_message(
+                "logical: provider returned a malformed NaN reduction",
+                &LOGICAL_ERROR_INTERNAL,
+            ),
         ));
     }
     let downloaded = provider
         .download(&maximum)
         .await
-        .map_err(|error| logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL))?;
-    Ok(downloaded.data.first().is_some_and(|value| *value != 0.0))
+        .map_err(|error| logical_provider_error(error.into()))?;
+    if downloaded.data.len() != 1 || !downloaded.shape.iter().all(|dim| *dim == 1) {
+        return Err(logical_error_with_message(
+            "logical: invalid NaN reduction payload",
+            &LOGICAL_ERROR_INTERNAL,
+        ));
+    }
+    Ok(Some(downloaded.data[0] != 0.0))
 }
 
 fn value_contains_nan(value: &Value) -> bool {
@@ -361,100 +357,113 @@ fn logical_buffer_to_gpu(
     source: &GpuTensorHandle,
 ) -> BuiltinResult<Value> {
     let explicit = runmat_accelerate_api::handle_is_explicit(source);
-    if let Some(p) = provider {
-        let floats: Vec<f64> = buffer
-            .bits
-            .iter()
-            .map(|&b| if b != 0 { 1.0 } else { 0.0 })
-            .collect();
-        let view = HostTensorView {
-            data: &floats,
-            shape: &buffer.shape,
+    let Some(provider) = provider else {
+        return if explicit {
+            Err(logical_error_with_message(
+                "logical: no exact owner for explicit gpuArray input",
+                &LOGICAL_ERROR_GPU_GATHER_FAILED,
+            ))
+        } else {
+            logical_buffer_to_host(buffer)
         };
-        match p.upload(&view) {
-            Ok(mut handle) => {
-                if !valid_logical_gpu_output(&handle, source, p) {
-                    if explicit {
-                        return Err(logical_error_with_message(
-                            "logical: provider returned an invalid restored logical output",
-                            &LOGICAL_ERROR_INTERNAL,
-                        ));
-                    }
-                    return logical_buffer_to_host(buffer);
-                }
-                if explicit {
-                    runmat_accelerate_api::mark_handle_explicit(&mut handle);
-                } else {
-                    runmat_accelerate_api::mark_handle_automatic(&mut handle);
-                }
-                gpu_helpers::logical_gpu_value(handle)
-            }
-            Err(err) => {
-                trace!("logical: upload failed during fallback path ({err})");
-                if explicit {
-                    Err(logical_error_with_message(
-                        format!("logical: failed to preserve explicit gpuArray residency: {err}"),
+    };
+    let output = runmat_accelerate_api::upload_logical_protecting(
+        provider,
+        &runmat_accelerate_api::HostLogicalTensorView {
+            data: &buffer.bits,
+            shape: &buffer.shape,
+        },
+        &[source],
+    );
+    match output {
+        Ok(mut output) => {
+            if !valid_logical_gpu_output(&output, source, provider) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    logical_error_with_message(
+                        "logical: provider returned an invalid restored logical output",
                         &LOGICAL_ERROR_INTERNAL,
-                    ))
-                } else {
-                    logical_buffer_to_host(buffer)
-                }
+                    ),
+                ));
+            }
+            copy_logical_provenance(&mut output, source)?;
+            gpu_helpers::logical_gpu_value(output)
+        }
+        Err(error) => {
+            let error = runmat_accelerate_api::ProviderExecutionError::from_source(error);
+            if !explicit && error.is_unsupported() {
+                logical_buffer_to_host(buffer)
+            } else {
+                Err(logical_provider_error(error))
             }
         }
-    } else if explicit {
-        Err(logical_error_with_message(
-            "logical: no exact owner for explicit gpuArray input",
-            &LOGICAL_ERROR_GPU_GATHER_FAILED,
-        ))
-    } else {
-        logical_buffer_to_host(buffer)
     }
 }
 
 async fn try_gpu_cast(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
-) -> Option<GpuTensorHandle> {
-    let zeros = provider.zeros_like(input).ok()?;
-    let zeros_valid = zeros.shape == input.shape
-        && zeros.device_id == input.device_id
-        && !gpu_helpers::same_gpu_handle(&zeros, input)
-        && runmat_accelerate_api::handle_storage(&zeros)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(&zeros)
-            == runmat_accelerate_api::handle_precision(input)
-        && runmat_accelerate_api::handle_integer_type(&zeros)
-            == runmat_accelerate_api::handle_integer_type(input)
-        && runmat_accelerate_api::handle_is_logical(&zeros)
-            == runmat_accelerate_api::handle_is_logical(input)
-        && gpu_helpers::exact_provider_for_handle(&zeros)
-            .is_some_and(|owner| std::ptr::eq(owner, provider));
-    if !zeros_valid {
-        return None;
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    if runmat_accelerate_api::handle_integer_type(input).is_some()
+        || runmat_accelerate_api::handle_precision(input) != Some(provider.precision())
+    {
+        return Ok(None);
     }
-    let result = provider
-        .elem_ne(input, &zeros)
-        .await
-        .ok()
-        .and_then(|output| {
-            if valid_logical_gpu_output(&output, input, provider)
-                && !gpu_helpers::same_gpu_handle(&output, &zeros)
-            {
-                Some(output)
-            } else {
-                None
-            }
-        });
-    drop(zeros);
-    result
+    let zeros = match provider.zeros_like(input, input.shape()) {
+        Ok(zeros) => zeros,
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) => return Err(logical_provider_error(error.into())),
+    };
+    if zeros.shape() != input.shape()
+        || zeros.device_id() != input.device_id()
+        || zeros.shares_allocation_with(input)
+        || zeros.physical().storage() != input.physical().storage()
+        || zeros.physical().element_type() != input.physical().element_type()
+        || zeros.view().is_logical() != input.view().is_logical()
+        || !gpu_helpers::exact_provider_for_handle(&zeros)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            zeros,
+            logical_error_with_message(
+                "logical: provider returned an invalid zero operand",
+                &LOGICAL_ERROR_INTERNAL,
+            ),
+        ));
+    }
+    let output = match provider.elem_ne(input, &zeros).await {
+        Ok(output) => output,
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) => return Err(logical_provider_error(error.into())),
+    };
+    if !valid_logical_gpu_output(&output, input, provider) || output.shares_allocation_with(&zeros)
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            logical_error_with_message(
+                "logical: provider returned an invalid logical conversion",
+                &LOGICAL_ERROR_INTERNAL,
+            ),
+        ));
+    }
+    Ok(Some(output))
 }
 
-fn copy_logical_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {
-    runmat_accelerate_api::set_handle_provenance(
-        output,
-        runmat_accelerate_api::handle_provenance(input)
-            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-    );
+fn copy_logical_provenance(
+    output: &mut GpuTensorHandle,
+    input: &GpuTensorHandle,
+) -> BuiltinResult<()> {
+    gpu_helpers::propagate_output_provenance(output, [input])
+}
+
+fn logical_provider_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        logical_error_with_message(
+            format!("logical: provider execution failed: {error}"),
+            &LOGICAL_ERROR_INTERNAL,
+        ),
+        error,
+    )
 }
 
 fn valid_logical_gpu_output(
@@ -462,12 +471,12 @@ fn valid_logical_gpu_output(
     input: &GpuTensorHandle,
     provider: &'static dyn AccelProvider,
 ) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
+    output.view().is_logical()
+        && output.shape() == input.shape()
+        && output.device_id() == input.device_id()
         && !gpu_helpers::same_gpu_handle(output, input)
         && runmat_accelerate_api::handle_storage(output)
             == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
@@ -534,3 +543,6 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod owning_tests;

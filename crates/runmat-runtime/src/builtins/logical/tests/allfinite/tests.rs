@@ -9,7 +9,6 @@ use runmat_accelerate_api::{
 use runmat_value::{
     CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
 };
-use std::sync::OnceLock;
 
 fn call(value: Value) -> BuiltinResult<Value> {
     block_on(allfinite_builtin(value))
@@ -176,12 +175,15 @@ impl AccelProvider for AllFiniteProvider {
         self.inner.upload(host)
     }
 
-    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.inner.download(handle)
+    fn upload_logical_raw(
+        &self,
+        host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload_logical_raw(host)
     }
 
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.inner.free(handle)
+    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.inner.download(handle)
     }
 
     fn logical_isfinite(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
@@ -212,17 +214,7 @@ impl AccelProvider for AllFiniteProvider {
 }
 
 fn provider(mode: HookMode) -> &'static AllFiniteProvider {
-    static CLASSIFICATION_UNSUPPORTED: OnceLock<AllFiniteProvider> = OnceLock::new();
-    static REDUCTION_UNSUPPORTED: OnceLock<AllFiniteProvider> = OnceLock::new();
-    static CLASSIFICATION_FAILURE: OnceLock<AllFiniteProvider> = OnceLock::new();
-    match mode {
-        HookMode::ClassificationUnsupported => CLASSIFICATION_UNSUPPORTED
-            .get_or_init(|| AllFiniteProvider::new(HookMode::ClassificationUnsupported)),
-        HookMode::ReductionUnsupported => REDUCTION_UNSUPPORTED
-            .get_or_init(|| AllFiniteProvider::new(HookMode::ReductionUnsupported)),
-        HookMode::ClassificationFailure => CLASSIFICATION_FAILURE
-            .get_or_init(|| AllFiniteProvider::new(HookMode::ClassificationFailure)),
-    }
+    Box::leak(Box::new(AllFiniteProvider::new(mode)))
 }
 
 fn resident_input(provider: &dyn AccelProvider) -> GpuTensorHandle {
@@ -244,7 +236,7 @@ fn only_typed_unsupported_hooks_use_host_fallback() {
         let _provider = ThreadProviderGuard::set(Some(provider));
         let input = resident_input(provider);
         assert!(!truth(Value::GpuTensor(input.clone())));
-        provider.free(&input).unwrap();
+        input.release().unwrap();
     }
 
     let provider = provider(HookMode::ClassificationFailure);
@@ -255,7 +247,7 @@ fn only_typed_unsupported_hooks_use_host_fallback() {
     assert!(error
         .message()
         .contains("injected finite-classification failure"));
-    provider.free(&input).unwrap();
+    input.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -267,5 +259,5 @@ fn wgpu_matches_host_and_returns_scalar() {
     let _provider = ThreadProviderGuard::set(Some(provider));
     let input = resident_input(provider);
     assert!(!truth(Value::GpuTensor(input.clone())));
-    provider.free(&input).ok();
+    input.release().ok();
 }

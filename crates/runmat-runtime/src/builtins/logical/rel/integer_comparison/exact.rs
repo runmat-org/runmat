@@ -18,7 +18,7 @@ pub(crate) fn admit_numeric_pair(lhs: &Value, rhs: &Value) -> Result<bool, Integ
             .map(|operand| operand.shape)
             .or_else(|| complex_operand(value).map(|operand| operand.shape))
             .or_else(|| match value {
-                Value::GpuTensor(handle) => Some(handle.shape.clone()),
+                Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
                 _ => None,
             })
     }

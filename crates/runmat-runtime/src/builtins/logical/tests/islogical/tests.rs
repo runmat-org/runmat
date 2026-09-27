@@ -29,8 +29,14 @@ fn resident_metadata_distinguishes_numeric_and_logical_classes() {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
         assert!(!run(Value::GpuTensor(handle.clone())));
-        assert!(run(gpu_helpers::logical_gpu_value(handle.clone())));
-        provider.free(&handle).ok();
+        let logical = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        assert!(run(gpu_helpers::logical_gpu_value(logical).unwrap()));
+        handle.release().ok();
     });
 }
 
@@ -51,6 +57,12 @@ fn wgpu_metadata_matches_gathered_class() {
     let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
     let handle = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
     assert!(!run(Value::GpuTensor(handle.clone())));
-    assert!(run(gpu_helpers::logical_gpu_value(handle.clone())));
-    provider.free(&handle).ok();
+    let logical = provider
+        .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+            data: &[1],
+            shape: &[1, 1],
+        })
+        .unwrap();
+    assert!(run(gpu_helpers::logical_gpu_value(logical).unwrap()));
+    handle.release().ok();
 }

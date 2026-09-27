@@ -96,27 +96,26 @@ impl AllFiniteBoundary {
         }
         let provider = gpu_helpers::exact_provider_for_handle(&handle)
             .ok_or_else(|| self.internal("no acceleration provider owns the input handle"))?;
-        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(&handle);
         let mask_result = provider.logical_isfinite(&handle);
-        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
         let mask = match mask_result {
             Ok(mask)
                 if !gpu_helpers::same_gpu_handle(&handle, &mask)
-                    && valid_provider_truth_handle(&mask, provider, &handle.shape) =>
+                    && valid_provider_truth_handle(&mask, provider, &handle.shape()) =>
             {
                 mask
             }
             Ok(mask) => {
-                gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);
-                return Err(self.internal("provider returned an invalid finite-value mask"));
+                return Err(gpu_helpers::reject_gpu_output(
+                    mask,
+                    self.internal("provider returned an invalid finite-value mask"),
+                ));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
                 return self.gather_and_reduce(provider, &handle).await;
             }
             Err(error) => {
-                return Err(
-                    self.internal(format!("provider finite classification failed: {error}"))
-                );
+                return Err(self.owning_error(error.into()));
             }
         };
 
@@ -130,24 +129,26 @@ impl AllFiniteBoundary {
                 reduced
             }
             Ok(reduced) => {
-                gpu_helpers::free_unprotected_exact_owner(&reduced, &[&handle, &mask]);
-                gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);
-                return Err(self.internal("provider returned an invalid logical reduction"));
+                return Err(gpu_helpers::reject_gpu_output(
+                    reduced,
+                    self.internal("provider returned an invalid logical reduction"),
+                ));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);
                 return self.gather_and_reduce(provider, &handle).await;
             }
             Err(error) => {
-                gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);
-                return Err(self.internal(format!("provider logical reduction failed: {error}")));
+                return Err(self.owning_error(error.into()));
             }
         };
 
         let downloaded = gpu_helpers::download_truth_values_async(provider, &reduced).await;
-        gpu_helpers::free_unprotected_exact_owner(&reduced, &[&handle, &mask]);
-        gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);
-        let downloaded = downloaded.map_err(|error| self.internal(error.message()))?;
+
+        let downloaded = downloaded.map_err(|error| {
+            self.owning_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+                error,
+            ))
+        })?;
         if downloaded.shape != [1, 1] || downloaded.data.len() != 1 {
             return Err(self.internal("provider reduction payload is not one logical scalar"));
         }
@@ -161,7 +162,11 @@ impl AllFiniteBoundary {
     ) -> BuiltinResult<Value> {
         let host = gpu_helpers::download_value_preserving_residency_async(provider, handle)
             .await
-            .map_err(|error| self.internal(error.message()))?;
+            .map_err(|error| {
+                self.owning_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    error,
+                ))
+            })?;
         self.execute_host(host)
     }
 
@@ -190,6 +195,12 @@ impl AllFiniteBoundary {
 
     fn name(&self) -> &'static str {
         self.entry.identity.name
+    }
+
+    fn owning_error(&self, error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+        let mut wrapped = self.internal(error.to_string());
+        wrapped.source = Some(Box::new(error));
+        wrapped
     }
 
     fn internal(&self, detail: impl std::fmt::Display) -> RuntimeError {

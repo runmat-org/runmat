@@ -51,7 +51,7 @@ pub(super) fn admitted_shape<'a>(
         Value::Tensor(array) => Ok(&array.shape),
         Value::ComplexTensor(array) => Ok(&array.shape),
         Value::CharArray(array) => Ok(&array.shape),
-        Value::GpuTensor(handle) => Ok(&handle.shape),
+        Value::GpuTensor(handle) => Ok(handle.shape()),
         other => Err(error_with_detail(
             builtin,
             invalid,

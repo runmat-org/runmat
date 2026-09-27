@@ -65,31 +65,40 @@ impl ClassificationBoundary {
     }
 
     async fn execute_resident(&self, handle: GpuTensorHandle) -> BuiltinResult<Value> {
-        if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
+        if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+            && !handle.view().is_logical()
+        {
             return self.resident_integer_mask(&handle);
         }
         let provider = gpu_helpers::exact_provider_for_handle(&handle)
             .ok_or_else(|| self.internal("no acceleration provider owns the input handle"))?;
-        let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(&handle);
         let provider_result = self.invoke_provider(provider, &handle);
-        gpu_helpers::restore_handle_metadata(&handle, &metadata);
         match provider_result {
             Ok(mask) if self.valid_provider_mask(&handle, &mask, provider) => {
                 gpu_helpers::logical_gpu_value(mask)
             }
-            Ok(mask) => {
-                gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);
-                Err(self.internal("provider returned an invalid logical mask"))
-            }
+            Ok(mask) => Err(gpu_helpers::reject_gpu_output(
+                mask,
+                self.internal("provider returned an invalid logical mask"),
+            )),
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
                 let host =
                     gpu_helpers::download_value_preserving_residency_async(provider, &handle)
                         .await
-                        .map_err(|error| self.internal(error))?;
+                        .map_err(|error| {
+                            self.owning_error(
+                                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                            )
+                        })?;
                 let result = self.execute_host(host)?;
                 let restored =
                     gpu_helpers::restore_class_preserving_value(&handle, result, self.name())
-                        .map_err(|error| self.internal(error.message()))?;
+                        .map_err(|error| {
+                            self.owning_error(
+                                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                            )
+                        })?;
                 if runmat_accelerate_api::handle_is_explicit(&handle)
                     && !matches!(restored, Value::GpuTensor(_))
                 {
@@ -98,7 +107,7 @@ impl ClassificationBoundary {
                 }
                 Ok(restored)
             }
-            Err(error) => Err(self.internal(format!("provider execution failed: {error}"))),
+            Err(error) => Err(self.owning_error(error.into())),
         }
     }
 
@@ -121,7 +130,7 @@ impl ClassificationBoundary {
         provider: &dyn AccelProvider,
     ) -> bool {
         !gpu_helpers::same_gpu_handle(input, output)
-            && valid_provider_truth_handle(output, provider, &input.shape)
+            && valid_provider_truth_handle(output, provider, &input.shape())
     }
 
     fn resident_integer_mask(&self, handle: &GpuTensorHandle) -> BuiltinResult<Value> {
@@ -139,11 +148,15 @@ impl ClassificationBoundary {
             return Err(self.internal("resident integer metadata is contradictory"));
         }
         let mask = self.logical_fill(
-            handle.shape.clone(),
+            handle.shape().to_vec(),
             matches!(self.predicate, NumericClassificationPredicate::Finite),
         )?;
         let restored = gpu_helpers::restore_class_preserving_value(handle, mask, self.name())
-            .map_err(|error| self.internal(error.message()))?;
+            .map_err(|error| {
+                self.owning_error(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    error,
+                ))
+            })?;
         if runmat_accelerate_api::handle_is_explicit(handle)
             && !matches!(restored, Value::GpuTensor(_))
         {
@@ -249,6 +262,12 @@ impl ClassificationBoundary {
             .map_err(|error| self.internal(error))
     }
 
+    fn owning_error(&self, error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+        let mut wrapped = self.internal(error.to_string());
+        wrapped.source = Some(Box::new(error));
+        wrapped
+    }
+
     fn internal(&self, detail: impl std::fmt::Display) -> RuntimeError {
         self.error(self.internal, detail)
     }
@@ -274,14 +293,24 @@ pub(super) fn valid_provider_truth_handle(
 ) -> bool {
     let precision = runmat_accelerate_api::handle_precision(output);
     let logical = runmat_accelerate_api::handle_is_logical(output);
-    output.shape == expected_shape
-        && output.device_id == provider.device_id()
+    logical
+        && output.shape() == expected_shape
+        && output.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && precision.is_some()
-        && gpu_helpers::gpu_class_metadata_matches(output, precision, None, logical)
+        && matches!(
+            output.physical().element_type(),
+            runmat_accelerate_api::NumericElementType::U8
+                | runmat_accelerate_api::NumericElementType::F32
+                | runmat_accelerate_api::NumericElementType::F64
+        )
+        && gpu_helpers::gpu_class_metadata_matches(
+            output,
+            precision,
+            runmat_accelerate_api::handle_integer_type(output),
+            logical,
+        )
 }
 
 #[cfg(test)]
@@ -297,7 +326,6 @@ mod tests {
         ISNAN_CATALOG_ENTRY, ISNAN_ERROR_INTERNAL, ISNAN_ERROR_INVALID_INPUT,
         ISNAN_ERROR_TOO_MANY_OUTPUTS,
     };
-    use std::sync::OnceLock;
 
     #[derive(Clone, Copy)]
     enum HookResult {
@@ -336,12 +364,15 @@ mod tests {
             self.inner.upload(host)
         }
 
-        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            self.inner.download(handle)
+        fn upload_logical_raw(
+            &self,
+            host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload_logical_raw(host)
         }
 
-        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            self.inner.free(handle)
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.inner.download(handle)
         }
 
         fn logical_isnan(&self, _input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
@@ -372,16 +403,7 @@ mod tests {
     }
 
     fn test_provider(result: HookResult) -> &'static ClassificationProvider {
-        static UNSUPPORTED: OnceLock<ClassificationProvider> = OnceLock::new();
-        static FAILURE: OnceLock<ClassificationProvider> = OnceLock::new();
-        match result {
-            HookResult::Unsupported => {
-                UNSUPPORTED.get_or_init(|| ClassificationProvider::new(HookResult::Unsupported))
-            }
-            HookResult::Failure => {
-                FAILURE.get_or_init(|| ClassificationProvider::new(HookResult::Failure))
-            }
-        }
+        Box::leak(Box::new(ClassificationProvider::new(result)))
     }
 
     #[test]
@@ -417,6 +439,6 @@ mod tests {
         assert!(error
             .message()
             .contains("injected classification kernel failure"));
-        provider.free(&input).expect("free input");
+        input.release().expect("free input");
     }
 }

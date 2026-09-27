@@ -415,7 +415,7 @@ fn eq_resident_integer_with_host_scalar_falls_back_exactly() {
         let gathered = test_support::gather(result).expect("gather logical result");
         assert_eq!(gathered.shape, vec![2, 1]);
         assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0]);
-        provider.free(&handle).expect("free input");
+        handle.release().expect("free input");
     });
 }
 

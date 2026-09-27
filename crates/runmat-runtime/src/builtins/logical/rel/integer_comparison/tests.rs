@@ -368,9 +368,9 @@ fn assert_resident_complex_ordering(provider: &dyn runmat_accelerate_api::AccelP
         let gathered = test_support::gather(result).expect("gather reverse logical result");
         assert_eq!(gathered.materialize_f64(), reverse_expected);
     }
-    let _ = provider.free(&complex_handle);
-    let _ = provider.free(&complex_rhs_handle);
-    let _ = provider.free(&real_handle);
+    let _ = complex_handle.release();
+    let _ = complex_rhs_handle.release();
+    let _ = real_handle.release();
 }
 
 #[test]

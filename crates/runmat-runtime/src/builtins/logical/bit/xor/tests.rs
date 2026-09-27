@@ -155,7 +155,9 @@ fn xor_explicit_resident_integer_fallback_is_exact_and_stays_resident() {
         )
         .expect("integer input");
         let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let result = run_xor(Value::GpuTensor(handle), Value::Bool(true)).expect("xor");
         let Value::GpuTensor(output) = &result else {
             panic!("explicit gpuArray result must remain resident");
@@ -288,7 +290,9 @@ fn xor_wgpu_integer_handle_uses_exact_fallback_and_preserves_explicit_residency(
     )
     .expect("integer input");
     let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-    let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+    let handle = handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
     let result = run_xor(Value::GpuTensor(handle), Value::Bool(true)).expect("xor");
     let Value::GpuTensor(output) = &result else {
         panic!("explicit gpuArray result must remain resident");

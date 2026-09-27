@@ -1,5 +1,12 @@
 use crate::{build_runtime_error, GpuGatherRetry, RuntimeError};
 
+pub(super) fn provider(builtin: &str, source: anyhow::Error) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        execution(builtin, format!("provider execution failed: {source}")),
+        source.into(),
+    )
+}
+
 pub(super) fn execution(builtin: &str, detail: impl std::fmt::Display) -> RuntimeError {
     build_runtime_error(format!("{builtin}: {detail}"))
         .with_builtin(builtin)

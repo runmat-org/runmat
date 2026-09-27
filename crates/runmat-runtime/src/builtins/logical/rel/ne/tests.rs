@@ -314,7 +314,9 @@ fn ne_explicit_resident_wide_integer_fallback_stays_logical_and_resident() {
         )
         .expect("integer input");
         let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let result = run_ne(Value::GpuTensor(handle), Value::Num(0.0)).expect("ne");
         let Value::GpuTensor(output) = &result else {
             panic!("explicit gpuArray result must remain resident");
@@ -348,7 +350,9 @@ fn ne_wgpu_compares_wide_integer_handles_exactly_and_preserves_explicit_residenc
         .expect("rhs");
     let lhs = gpu_helpers::upload_tensor(provider, &lhs).expect("upload lhs");
     let rhs = gpu_helpers::upload_tensor(provider, &rhs).expect("upload rhs");
-    let lhs = lhs.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+    let lhs = lhs
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
     let result = run_ne(Value::GpuTensor(lhs), Value::GpuTensor(rhs)).expect("ne");
     let Value::GpuTensor(output) = &result else {
         panic!("resident comparison must remain resident");

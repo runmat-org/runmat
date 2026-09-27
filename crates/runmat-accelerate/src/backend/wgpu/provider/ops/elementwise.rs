@@ -847,8 +847,21 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
+        if entry_a.storage != GpuTensorStorage::Real || entry_b.storage != GpuTensorStorage::Real {
+            return Err(unsupported_provider_operation(
+                "logical kernel requires real storage",
+            ));
+        }
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("logical_and: shape mismatch between inputs"));
+            super::backend_shared::matlab_broadcast_shapes(
+                "logical",
+                &entry_a.shape,
+                &entry_b.shape,
+                entry_a.shape.len().max(entry_b.shape.len()),
+            )?;
+            return Err(unsupported_provider_operation(
+                "logical_and: broadcast kernel unavailable",
+            ));
         }
         let len = entry_a.len;
         let handle = if len == 0 {
@@ -876,8 +889,21 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
+        if entry_a.storage != GpuTensorStorage::Real || entry_b.storage != GpuTensorStorage::Real {
+            return Err(unsupported_provider_operation(
+                "logical kernel requires real storage",
+            ));
+        }
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("logical_or: shape mismatch between inputs"));
+            super::backend_shared::matlab_broadcast_shapes(
+                "logical",
+                &entry_a.shape,
+                &entry_b.shape,
+                entry_a.shape.len().max(entry_b.shape.len()),
+            )?;
+            return Err(unsupported_provider_operation(
+                "logical_or: broadcast kernel unavailable",
+            ));
         }
         let len = entry_a.len;
         let handle = if len == 0 {
@@ -904,8 +930,21 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
+        if entry_a.storage != GpuTensorStorage::Real || entry_b.storage != GpuTensorStorage::Real {
+            return Err(unsupported_provider_operation(
+                "logical kernel requires real storage",
+            ));
+        }
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("logical_xor: shape mismatch between inputs"));
+            super::backend_shared::matlab_broadcast_shapes(
+                "logical",
+                &entry_a.shape,
+                &entry_b.shape,
+                entry_a.shape.len().max(entry_b.shape.len()),
+            )?;
+            return Err(unsupported_provider_operation(
+                "logical_xor: broadcast kernel unavailable",
+            ));
         }
         let len = entry_a.len;
         let handle = if len == 0 {
@@ -928,6 +967,11 @@ impl WgpuProvider {
 
     pub(crate) fn logical_not_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(a)?;
+        if entry.storage != GpuTensorStorage::Real {
+            return Err(unsupported_provider_operation(
+                "logical kernel requires real storage",
+            ));
+        }
         let len = entry.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-logical-not-empty");

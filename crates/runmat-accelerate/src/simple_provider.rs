@@ -1906,6 +1906,27 @@ impl InProcessProvider {
         self.allocate_tensor_with_storage(data, shape, GpuTensorStorage::Real)
     }
 
+    fn validate_logical_float_inputs(&self, inputs: &[&GpuTensorHandle]) -> Result<()> {
+        let guard = numeric_registry()
+            .lock_for(self.device_id)
+            .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
+        for input in inputs {
+            ensure!(
+                guard.get(input).is_some(),
+                "logical kernel input is not a live owned allocation"
+            );
+        }
+        if inputs.iter().any(|input| {
+            input.physical().element_type() != NumericElementType::F64
+                || input.physical().storage() != GpuTensorStorage::Real
+        }) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "logical kernel requires real native F64 storage",
+            ));
+        }
+        Ok(())
+    }
+
     fn allocate_logical_tensor(
         &self,
         data: Vec<f64>,
@@ -6244,6 +6265,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.validate_logical_float_inputs(&[a, b])?;
         let (adata, bdata) = {
             let guard = registry(self.device_id).lock().unwrap();
             let a_vec = guard
@@ -6290,6 +6312,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn logical_or(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.validate_logical_float_inputs(&[a, b])?;
         let (adata, bdata) = {
             let guard = registry(self.device_id).lock().unwrap();
             let a_vec = guard
@@ -6336,6 +6359,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn logical_xor(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.validate_logical_float_inputs(&[a, b])?;
         let (adata, bdata) = {
             let guard = registry(self.device_id).lock().unwrap();
             let a_vec = guard
@@ -6384,6 +6408,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn logical_not(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.validate_logical_float_inputs(&[a])?;
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
@@ -6416,6 +6441,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn logical_isfinite(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.validate_logical_float_inputs(&[a])?;
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
@@ -6438,6 +6464,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn logical_isnan(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.validate_logical_float_inputs(&[a])?;
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
@@ -6460,6 +6487,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn logical_isinf(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.validate_logical_float_inputs(&[a])?;
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
@@ -10351,6 +10379,31 @@ mod tests {
         IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
     };
     use runmat_value::{IntValue, IntegerStorage};
+
+    #[test]
+    fn logical_unsupported_class_does_not_hide_foreign_owner() {
+        let provider = InProcessProvider::new();
+        let other = InProcessProvider::new();
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F32(&[1.0]),
+                shape: &[1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &provider.logical_not(&input).unwrap_err()
+        ));
+        let foreign = other
+            .upload(&HostTensorView {
+                data: &[1.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+            &provider.logical_and(&input, &foreign).unwrap_err()
+        ));
+    }
 
     #[test]
     fn shared_numeric_registry_round_trips_every_native_class_and_layout() {

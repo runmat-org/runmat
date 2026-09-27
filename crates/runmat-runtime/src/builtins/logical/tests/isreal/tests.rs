@@ -35,7 +35,7 @@ fn resident_metadata_distinguishes_real_and_complex_storage() {
             gpu_helpers::upload_tensor(provider, &Tensor::new(vec![1.0], vec![1, 1]).unwrap())
                 .unwrap();
         assert!(run(Value::GpuTensor(real.clone())));
-        provider.free(&real).ok();
+        real.release().ok();
     });
 }
 
@@ -56,5 +56,5 @@ fn wgpu_metadata_matches_storage_complexity() {
     let handle =
         gpu_helpers::upload_tensor(provider, &Tensor::new(vec![1.0], vec![1, 1]).unwrap()).unwrap();
     assert!(run(Value::GpuTensor(handle.clone())));
-    provider.free(&handle).ok();
+    handle.release().ok();
 }

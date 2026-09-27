@@ -23,8 +23,9 @@ fn only_explicit_handles_report_true() {
             handle
                 .clone()
                 .with_provenance(GpuHandleProvenance::Explicit)
+                .unwrap()
         )));
-        provider.free(&handle).ok();
+        handle.release().ok();
     });
 }
 
@@ -49,6 +50,7 @@ fn wgpu_explicit_identity_is_distinct_from_automatic_residency() {
         handle
             .clone()
             .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap()
     )));
-    provider.free(&handle).ok();
+    handle.release().ok();
 }

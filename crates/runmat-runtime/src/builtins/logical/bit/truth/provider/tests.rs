@@ -8,7 +8,7 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::LogicalBinaryOperator;
 use runmat_value::{Tensor, Value};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 #[derive(Clone, Copy)]
 enum HookBehavior {
@@ -20,7 +20,7 @@ enum HookBehavior {
 struct LogicalHookProvider {
     inner: InProcessProvider,
     behavior: HookBehavior,
-    malformed_output: Mutex<Option<GpuTensorHandle>>,
+    malformed_output: Mutex<Option<runmat_accelerate_api::allocation::GpuTensorWireDescriptor>>,
 }
 
 impl LogicalHookProvider {
@@ -46,7 +46,7 @@ impl LogicalHookProvider {
                     shape: &[2, 1],
                 })?;
                 *self.malformed_output.lock().expect("malformed output lock") =
-                    Some(output.clone());
+                    Some(output.wire_descriptor());
                 Ok(output)
             }
         }
@@ -70,12 +70,15 @@ impl AccelProvider for LogicalHookProvider {
         self.inner.upload(host)
     }
 
-    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.inner.download(handle)
+    fn upload_logical_raw(
+        &self,
+        host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload_logical_raw(host)
     }
 
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.inner.free(handle)
+    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.inner.download(handle)
     }
 
     fn logical_and(
@@ -88,20 +91,7 @@ impl AccelProvider for LogicalHookProvider {
 }
 
 fn provider(behavior: HookBehavior) -> &'static LogicalHookProvider {
-    static UNSUPPORTED: OnceLock<LogicalHookProvider> = OnceLock::new();
-    static FAILURE: OnceLock<LogicalHookProvider> = OnceLock::new();
-    static MALFORMED: OnceLock<LogicalHookProvider> = OnceLock::new();
-    match behavior {
-        HookBehavior::Unsupported => {
-            UNSUPPORTED.get_or_init(|| LogicalHookProvider::new(HookBehavior::Unsupported))
-        }
-        HookBehavior::Failure => {
-            FAILURE.get_or_init(|| LogicalHookProvider::new(HookBehavior::Failure))
-        }
-        HookBehavior::Malformed => {
-            MALFORMED.get_or_init(|| LogicalHookProvider::new(HookBehavior::Malformed))
-        }
-    }
+    Box::leak(Box::new(LogicalHookProvider::new(behavior)))
 }
 
 fn resident_pair(provider: &dyn AccelProvider) -> (GpuTensorHandle, GpuTensorHandle) {
@@ -132,8 +122,8 @@ fn typed_unsupported_hook_uses_exact_host_fallback() {
     .expect("typed unsupported hook should fall back");
     let gathered = test_support::gather(result).expect("logical result");
     assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0]);
-    provider.free(&lhs).expect("free lhs");
-    provider.free(&rhs).expect("free rhs");
+    lhs.release().expect("free lhs");
+    rhs.release().expect("free rhs");
 }
 
 #[test]
@@ -154,8 +144,8 @@ fn provider_failure_remains_visible() {
         Some("RunMat:gpu:ProviderExecutionFailed")
     );
     assert!(error.message().contains("injected logical kernel failure"));
-    provider.free(&lhs).expect("free lhs");
-    provider.free(&rhs).expect("free rhs");
+    lhs.release().expect("free lhs");
+    rhs.release().expect("free rhs");
 }
 
 #[test]
@@ -181,7 +171,10 @@ fn malformed_provider_output_is_freed_and_rejected() {
         .expect("malformed output lock")
         .take()
         .expect("provider recorded malformed output");
-    assert!(block_on(provider.download(&malformed)).is_err());
-    provider.free(&lhs).expect("free lhs");
-    provider.free(&rhs).expect("free rhs");
+    assert!(
+        provider.inner.acquire_live(&malformed).is_err(),
+        "rejected output has no surviving owned reference"
+    );
+    lhs.release().expect("free lhs");
+    rhs.release().expect("free rhs");
 }

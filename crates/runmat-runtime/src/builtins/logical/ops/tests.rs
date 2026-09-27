@@ -26,10 +26,8 @@ fn logical_empty_character_pages_preserve_geometry() {
 fn logical_provider_output_validation_rejects_alias_shape_and_storage() {
     use runmat_accelerate::simple_provider::InProcessProvider;
     use runmat_accelerate_api::{GpuTensorStorage, ThreadProviderGuard};
-    use std::sync::OnceLock;
     let _state = test_support::accel_test_lock();
-    static PROVIDER: OnceLock<InProcessProvider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(InProcessProvider::new);
+    let provider = Box::leak(Box::new(InProcessProvider::new()));
     let _provider = ThreadProviderGuard::set(Some(provider));
     let input = provider
         .upload(&HostTensorView {
@@ -38,23 +36,36 @@ fn logical_provider_output_validation_rejects_alias_shape_and_storage() {
         })
         .unwrap();
     let output = provider
-        .upload(&HostTensorView {
-            data: &[0.0, 1.0],
+        .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+            data: &[0, 1],
             shape: &[1, 2],
         })
         .unwrap();
     assert!(valid_logical_gpu_output(&output, &input, provider));
     assert!(!valid_logical_gpu_output(&input, &input, provider));
-    let mut wrong_shape = output.clone();
-    wrong_shape.shape = vec![2, 1];
-    assert!(!valid_logical_gpu_output(&wrong_shape, &input, provider));
-    let complex = output.clone().with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::F64,
-        GpuTensorStorage::ComplexInterleaved,
+    assert!(!valid_logical_gpu_output(&output, &output, provider));
+    let numeric_mask = provider
+        .upload(&HostTensorView {
+            data: &[0.0, 1.0],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    assert!(
+        !valid_logical_gpu_output(&numeric_mask, &input, provider),
+        "boolean-looking numeric storage is not producer-admitted logical"
     );
+    let wrong_shape = output
+        .with_view(output.view().clone().with_shape(vec![2, 1]))
+        .unwrap();
+    assert!(!valid_logical_gpu_output(&wrong_shape, &input, provider));
+    let complex = provider
+        .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+            data: runmat_accelerate_api::HostNumericDataView::F64(&[0.0, 0.0, 1.0, 0.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        })
+        .unwrap();
     assert!(!valid_logical_gpu_output(&complex, &input, provider));
-    provider.free(&output).unwrap();
-    provider.free(&input).unwrap();
 }
 
 #[test]
@@ -363,13 +374,12 @@ fn logical_gpu_roundtrip() {
 #[test]
 fn logical_gpu_passthrough_for_logical_handle() {
     test_support::with_test_provider(|provider| {
-        let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
-        let view = HostTensorView {
-            data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
-        };
-        let handle = provider.upload(&view).expect("upload");
-        runmat_accelerate_api::set_handle_logical(&handle, true);
+        let handle = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[0, 1],
+                shape: &[2, 1],
+            })
+            .expect("logical producer upload");
         let result =
             logical_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("logical");
         match result {

@@ -2541,24 +2541,32 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _a: &GpuTensorHandle,
         _b: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("logical_and not supported by provider"))
+        Err(unsupported_provider_operation(
+            "logical_and not supported by provider",
+        ))
     }
     fn logical_or(
         &self,
         _a: &GpuTensorHandle,
         _b: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("logical_or not supported by provider"))
+        Err(unsupported_provider_operation(
+            "logical_or not supported by provider",
+        ))
     }
     fn logical_xor(
         &self,
         _a: &GpuTensorHandle,
         _b: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("logical_xor not supported by provider"))
+        Err(unsupported_provider_operation(
+            "logical_xor not supported by provider",
+        ))
     }
     fn logical_not(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("logical_not not supported by provider"))
+        Err(unsupported_provider_operation(
+            "logical_not not supported by provider",
+        ))
     }
     fn logical_islogical(&self, a: &GpuTensorHandle) -> anyhow::Result<bool> {
         Ok(handle_is_logical(a))
@@ -4736,6 +4744,25 @@ mod tests {
     }
 
     struct DefaultNumericAdapterProvider;
+
+    #[test]
+    fn default_logical_operations_are_typed_unsupported() {
+        let provider = DefaultNumericAdapterProvider;
+        let input = crate::test_support::handle(
+            404,
+            vec![1, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+        );
+        for result in [
+            provider.logical_and(&input, &input),
+            provider.logical_or(&input, &input),
+            provider.logical_xor(&input, &input),
+            provider.logical_not(&input),
+        ] {
+            assert!(is_unsupported_provider_operation(&result.unwrap_err()));
+        }
+    }
 
     #[test]
     fn generic_fill_preserves_operational_failure_without_upload_retry() {

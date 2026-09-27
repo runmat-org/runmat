@@ -196,16 +196,14 @@ fn and_complex_inputs() {
 fn and_complex_and_character_extensions_are_mode_gated_before_dispatch() {
     assert_eq!(AND_EXTENSIONS[0].id, "and-complex-input");
     assert_eq!(AND_EXTENSIONS[1].id, "and-character-input");
-    let complex_handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_347_001,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::F64,
-        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-    );
+    let complex_handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        )
+        .unwrap()
+        .handle;
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     for complex in [
         Value::Complex(1.0, 1.0),
@@ -301,10 +299,12 @@ fn and_resident_integer_fallback_is_exact_and_restores_residency() {
         let rhs = Tensor::new_integer(IntegerStorage::I8(vec![1, 0, -1]), vec![3, 1]).unwrap();
         let gpu_lhs = gpu_helpers::upload_tensor(provider, &lhs)
             .expect("upload lhs")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let gpu_rhs = gpu_helpers::upload_tensor(provider, &rhs)
             .expect("upload rhs")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
 
         let result = run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs))
             .expect("resident integer and");
@@ -326,10 +326,12 @@ fn and_resident_complex_extension_gathers_and_restores_residency() {
         let rhs = ComplexTensor::new(vec![(1.0, 0.0), (3.0, 0.0)], vec![2, 1]).unwrap();
         let gpu_lhs = gpu_helpers::upload_complex_tensor(provider, &lhs)
             .expect("upload lhs")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let gpu_rhs = gpu_helpers::upload_complex_tensor(provider, &rhs)
             .expect("upload rhs")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         let result = run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs))
@@ -412,10 +414,12 @@ fn and_wgpu_integer_broadcast_fallback_restores_logical_gpuarray() {
     let rhs = Tensor::new_integer(IntegerStorage::I8(vec![1, 0]), vec![1, 2]).unwrap();
     let gpu_lhs = gpu_helpers::upload_tensor(provider, &lhs)
         .expect("upload lhs")
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
     let gpu_rhs = gpu_helpers::upload_tensor(provider, &rhs)
         .expect("upload rhs")
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
 
     let result = run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs))
         .expect("wgpu integer broadcast and");

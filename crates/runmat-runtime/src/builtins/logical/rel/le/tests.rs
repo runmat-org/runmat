@@ -148,7 +148,9 @@ fn le_mixed_explicit_gpu_host_restores_logical_residency() {
         )
         .expect("lhs");
         let handle = gpu_helpers::upload_tensor(provider, &lhs).expect("upload");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let result =
             run_le(Value::GpuTensor(handle), Value::Num((1_u64 << 53) as f64)).expect("mixed le");
         let Value::GpuTensor(output) = result else {

@@ -22,7 +22,7 @@ fn resident_dense_values_are_not_sparse() {
     test_support::with_test_provider(|provider| {
         let handle = gpu_helpers::upload_tensor(provider, &Tensor::zeros(vec![2, 2])).unwrap();
         assert!(!run(Value::GpuTensor(handle.clone())));
-        provider.free(&handle).ok();
+        handle.release().ok();
     });
 }
 

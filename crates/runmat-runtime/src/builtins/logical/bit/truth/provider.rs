@@ -40,7 +40,7 @@ pub(super) fn binary_hook(
     builtin: &str,
     operation: LogicalBinaryOperator,
 ) -> BuiltinResult<Option<Value>> {
-    if !floating_real(lhs) || !floating_real(rhs) || lhs.device_id != rhs.device_id {
+    if !floating_real(lhs) || !floating_real(rhs) || lhs.device_id() != rhs.device_id() {
         return Ok(None);
     }
     let owner = gpu_helpers::exact_provider_for_handle(lhs)
@@ -62,21 +62,17 @@ pub(super) fn binary_hook(
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
         Err(error) => {
-            return Err(errors::execution(
-                builtin,
-                format!("provider execution failed: {error}"),
-            ));
+            return Err(errors::provider(builtin, error));
         }
     };
     if !output::valid_binary(&output, lhs, rhs, owner, builtin) {
-        output::free_rejected(&output, &[lhs, rhs]);
-        return Err(errors::payload(
-            builtin,
-            "provider returned an invalid logical output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            errors::payload(builtin, "provider returned an invalid logical output"),
         ));
     }
-    output::annotate(&mut output, [lhs, rhs]);
-    Ok(Some(gpu_helpers::logical_gpu_value(output)))
+    output::annotate(&mut output, [lhs, rhs])?;
+    Ok(Some(gpu_helpers::logical_gpu_value(output)?))
 }
 
 pub(super) fn unary_hook(input: &GpuTensorHandle, builtin: &str) -> BuiltinResult<Option<Value>> {
@@ -89,21 +85,17 @@ pub(super) fn unary_hook(input: &GpuTensorHandle, builtin: &str) -> BuiltinResul
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
         Err(error) => {
-            return Err(errors::execution(
-                builtin,
-                format!("provider execution failed: {error}"),
-            ));
+            return Err(errors::provider(builtin, error));
         }
     };
-    if output.shape != input.shape || !output::valid(&output, input, owner) {
-        output::free_rejected(&output, &[input]);
-        return Err(errors::payload(
-            builtin,
-            "provider returned an invalid logical output",
+    if output.shape() != input.shape() || !output::valid(&output, input, owner) {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            errors::payload(builtin, "provider returned an invalid logical output"),
         ));
     }
-    output::annotate(&mut output, [input]);
-    Ok(Some(gpu_helpers::logical_gpu_value(output)))
+    output::annotate(&mut output, [input])?;
+    Ok(Some(gpu_helpers::logical_gpu_value(output)?))
 }
 
 pub(super) fn restore_explicit(
