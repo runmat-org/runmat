@@ -754,18 +754,8 @@ async fn run_interpreter_inner(
         &sequence_register,
         thread_roots,
     )?;
-    #[cfg(feature = "native-accel")]
-    // SAFETY: these frame owners stay pinned until the cleanup guard and then
-    // their GC registrations are dropped. The inner async block drops first.
-    let mut resident_frame = unsafe {
-        super::resident_ownership::FrameValues::new(
-            &stack,
-            &vars,
-            &context.locals,
-            &sequence_register,
-            _gc_context.root_ids(),
-        )
-    };
+    // GC registrations retain managed frame objects during suspension. GPU
+    // values own their allocation leases directly, including returned aliases.
     let debug_stack = interp_engine::debug_stack_enabled();
     let mut interpreter_timing = InterpreterTiming::new();
     #[cfg(feature = "native-accel")]
@@ -1290,10 +1280,6 @@ async fn run_interpreter_inner(
     #[cfg(feature = "native-accel")]
     fusion_observations.abort();
     interpreter_timing.flush_host_span("loop_complete", None);
-    #[cfg(feature = "native-accel")]
-    {
-        resident_frame.complete(&vars);
-    }
     sync_initial_vars(initial_vars, &vars);
     Ok(InterpreterOutcome::Completed(
         crate::interpreter::state::InterpreterCompletion {

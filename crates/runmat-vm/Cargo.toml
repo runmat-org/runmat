@@ -42,4 +42,5 @@ wgpu = ["native-accel", "runmat-accelerate/wgpu"]
 plot-core = ["runmat-runtime/plot-core"]
 
 [dev-dependencies]
+runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 anyhow = "1"

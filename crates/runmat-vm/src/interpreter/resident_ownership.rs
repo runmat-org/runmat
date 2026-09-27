@@ -5,11 +5,9 @@ use runmat_value::Value;
 use std::collections::HashSet;
 
 mod arguments;
-mod frame;
 mod visibility;
 #[cfg(test)]
 mod tests;
-pub(super) use frame::FrameValues;
 use visibility::{allocations, release, retain_value, Allocation};
 
 /// Declared before a suspended dispatch future; therefore that future is

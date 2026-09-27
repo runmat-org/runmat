@@ -25,16 +25,6 @@ pub struct InterpretContext<'roots> {
 }
 
 impl<'roots> InterpretContext<'roots> {
-    #[cfg(feature = "native-accel")]
-    pub(crate) fn root_ids(&self) -> Vec<RootId> {
-        self.stack_root_id
-            .iter()
-            .chain(self.vars_root_id.iter())
-            .chain(&self.extra_root_ids)
-            .copied()
-            .collect()
-    }
-
     /// Register the complete frame before returning its root owner. Like the
     /// existing stack/vars constructor, this does not hold a shared Rust borrow
     /// while the interpreter mutates the registered owners between scans.

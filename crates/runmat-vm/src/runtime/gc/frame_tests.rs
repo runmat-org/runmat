@@ -4,6 +4,35 @@ use crate::interpreter::dispatch::{SequenceRegister, SequenceState};
 use runmat_value::Value;
 
 #[test]
+fn frame_registration_does_not_own_physical_gpu_retirement() {
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
+    runmat_gc::gc_test_context(|| {
+        let owner = TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let returned_alias = allocation.handle.clone();
+        let stack = vec![Value::GpuTensor(allocation.handle)];
+        let vars = Vec::new();
+        let locals = Vec::new();
+        let sequence = SequenceState::default();
+        let registrations = InterpretContext::new_frame(&stack, &vars, &locals, &sequence).unwrap();
+        drop(registrations);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(stack);
+        assert_eq!(
+            allocation.probe.retirements(),
+            0,
+            "returned alias owns the allocation"
+        );
+        drop(returned_alias);
+        assert_eq!(allocation.probe.retirements(), 1);
+    });
+}
+
+#[test]
 fn complete_frame_registration_allows_mutation_and_remains_live_across_await() {
     runmat_gc::gc_test_context(|| {
         let mut stack = Vec::new();
