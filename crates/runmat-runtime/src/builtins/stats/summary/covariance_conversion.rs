@@ -646,6 +646,12 @@ async fn covariance_conversion_builtin(
         ));
     }
     ensure_conversion_extensions(kind, &value)?;
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        return Err(conversion_error(
+            name,
+            format!("{name}: too many output arguments; maximum is 2"),
+        ));
+    }
     if matches!(crate::output_count::current_output_count(), Some(0)) {
         return Ok(Value::OutputList(Vec::new()));
     }
@@ -822,37 +828,47 @@ mod tests {
     #[test]
     fn resident_output_arity_keeps_only_returned_allocation_leases() {
         test_support::with_test_provider(|provider| {
-            for count in [Some(0), Some(1), Some(2), Some(3), None] {
-                let correlation = provider
-                    .upload(&runmat_accelerate_api::HostTensorView {
-                        data: &[1.0, 0.0, 0.0, 1.0],
-                        shape: &[2, 2],
-                    })
-                    .unwrap();
-                let sigma = provider
-                    .upload(&runmat_accelerate_api::HostTensorView {
-                        data: &[1.0, 1.0],
-                        shape: &[2, 1],
-                    })
-                    .unwrap();
-                let correlation_weak = correlation.downgrade();
-                let sigma_weak = sigma.downgrade();
-                let _outputs = crate::output_count::push_output_count(count);
-                let result = CovarianceGpuEval {
-                    provider,
-                    correlation,
-                    sigma,
+            for (kind, name) in [
+                (ConversionKind::Corrcov, "corrcov"),
+                (ConversionKind::Cov2corr, "cov2corr"),
+            ] {
+                for count in [Some(0), Some(1), Some(2), Some(3), None] {
+                    let correlation = provider
+                        .upload(&runmat_accelerate_api::HostTensorView {
+                            data: &[1.0, 0.0, 0.0, 1.0],
+                            shape: &[2, 2],
+                        })
+                        .unwrap();
+                    let sigma = provider
+                        .upload(&runmat_accelerate_api::HostTensorView {
+                            data: &[1.0, 1.0],
+                            shape: &[2, 1],
+                        })
+                        .unwrap();
+                    // Publication may mint a provenance/shape view. The owned
+                    // resource is the physical allocation, not that old view.
+                    let correlation_weak = correlation.allocation_lease().downgrade();
+                    let sigma_weak = sigma.allocation_lease().downgrade();
+                    let _outputs = crate::output_count::push_output_count(count);
+                    let result = CovarianceGpuEval {
+                        provider,
+                        correlation,
+                        sigma,
+                    }
+                    .output(kind, name);
+                    assert_eq!(result.is_err(), count == Some(3));
+                    let returns_first = matches!(count, None | Some(1 | 2));
+                    let returns_second = count == Some(2);
+                    let (keeps_correlation, keeps_sigma) = match kind {
+                        ConversionKind::Corrcov => (returns_first, returns_second),
+                        ConversionKind::Cov2corr => (returns_second, returns_first),
+                    };
+                    assert_eq!(correlation_weak.acquire().is_some(), keeps_correlation);
+                    assert_eq!(sigma_weak.acquire().is_some(), keeps_sigma);
+                    drop(result);
+                    assert!(correlation_weak.acquire().is_none());
+                    assert!(sigma_weak.acquire().is_none());
                 }
-                .output(ConversionKind::Corrcov, "corrcov");
-                assert_eq!(result.is_err(), count == Some(3));
-                assert_eq!(
-                    correlation_weak.acquire().is_ok(),
-                    matches!(count, None | Some(1 | 2))
-                );
-                assert_eq!(sigma_weak.acquire().is_ok(), count == Some(2));
-                drop(result);
-                assert!(correlation_weak.acquire().is_err());
-                assert!(sigma_weak.acquire().is_err());
             }
         });
     }
