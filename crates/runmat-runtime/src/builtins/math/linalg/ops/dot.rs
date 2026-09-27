@@ -351,7 +351,14 @@ async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<
     };
 
     if lhs_gpu || rhs_gpu {
-        promote_result_to_gpu(value, resident_anchor.as_ref())
+        let protected = [&lhs, &rhs]
+            .into_iter()
+            .filter_map(|value| match value {
+                Value::GpuTensor(handle) => Some(handle),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        promote_result_to_gpu(value, resident_anchor.as_ref(), &protected)
     } else {
         Ok(value)
     }
@@ -829,70 +836,14 @@ fn dim_product(dims: &[usize]) -> usize {
 fn promote_result_to_gpu(
     value: Value,
     anchor: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let provider = match anchor.and_then(resolved_actual_dot_owner) {
-        Some(p) => p,
-        None => return Ok(value),
-    };
-    match value {
-        Value::Tensor(tensor) => {
-            let Some(anchor) = anchor else {
-                return Ok(Value::Tensor(tensor));
-            };
-            let expected_precision = match tensor.numeric_dtype() {
-                NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-                _ => runmat_accelerate_api::ProviderPrecision::F64,
-            };
-            if provider.precision() != expected_precision {
-                return Ok(Value::Tensor(tensor));
-            }
-            match gpu_helpers::upload_tensor_protecting(provider, &tensor, &[anchor]) {
-                Ok(handle)
-                    if valid_dot_uploaded_output(
-                        &handle,
-                        anchor,
-                        provider,
-                        &tensor.shape,
-                        expected_precision,
-                    ) =>
-                {
-                    Ok(Value::GpuTensor(handle))
-                }
-                Ok(handle) => Err(reject_dot_output(handle)),
-                Err(error) => Err(error),
-            }
-        }
-        Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| dot_internal_error(format!("{DOT_NAME}: {e}")))?;
-            promote_result_to_gpu(Value::Tensor(tensor), anchor)
-        }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(dot_internal_error)?;
-            promote_result_to_gpu(Value::Tensor(tensor), anchor)
-        }
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
-        other => Ok(other),
+    match anchor {
+        Some(anchor) => gpu_helpers::restore_class_preserving_value_protecting(
+            anchor, value, DOT_NAME, protected,
+        ),
+        None => Ok(value),
     }
-}
-
-fn valid_dot_uploaded_output(
-    output: &runmat_accelerate_api::GpuTensorHandle,
-    anchor: &runmat_accelerate_api::GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    expected_shape: &[usize],
-    expected_precision: runmat_accelerate_api::ProviderPrecision,
-) -> bool {
-    output.shape() == expected_shape
-        && output.device_id() == anchor.device_id()
-        && !gpu_handles_alias(output, anchor)
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
-        && resolved_actual_dot_owner(output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn resolved_actual_dot_owner(
@@ -1144,13 +1095,7 @@ pub(crate) mod tests {
                 provider,
                 Some(1)
             ));
-            assert!(!valid_dot_uploaded_output(
-                &alias,
-                &lhs,
-                provider,
-                &[1, 3],
-                runmat_accelerate_api::ProviderPrecision::F64
-            ));
+            assert!(alias.shares_allocation_with(&lhs));
             let _error = reject_dot_output(alias);
             lhs.allocation_lease().validate_live().unwrap();
             rhs.allocation_lease().validate_live().unwrap();

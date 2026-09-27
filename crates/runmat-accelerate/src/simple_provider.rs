@@ -8,6 +8,7 @@ mod unary;
 mod arithmetic;
 mod dimensional_extrema;
 mod median;
+mod dot;
 #[cfg(test)]
 mod owning_routes;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
@@ -8226,27 +8227,7 @@ impl AccelProvider for InProcessProvider {
         rhs: &'a GpuTensorHandle,
         dim: Option<usize>,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let (lhs_buf, rhs_buf) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let lhs_buf = guard
-                    .get(&lhs)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("dot: unknown tensor handle {}", lhs.buffer_id()))?;
-                let rhs_buf = guard
-                    .get(&rhs)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("dot: unknown tensor handle {}", rhs.buffer_id()))?;
-                (lhs_buf, rhs_buf)
-            };
-            let lhs_tensor =
-                Tensor::new(lhs_buf, lhs.shape().to_vec()).map_err(|e| anyhow!("dot: {e}"))?;
-            let rhs_tensor =
-                Tensor::new(rhs_buf, rhs.shape().to_vec()).map_err(|e| anyhow!("dot: {e}"))?;
-            let result = dot_host_real_for_provider(&lhs_tensor, &rhs_tensor, dim)
-                .map_err(|e| anyhow!(e))?;
-            self.allocate_tensor(result.materialize_f64(), result.shape.clone())
-        })
+        Box::pin(async move { self.native_dot(lhs, rhs, dim) })
     }
 
     fn reduce_sum<'a>(
