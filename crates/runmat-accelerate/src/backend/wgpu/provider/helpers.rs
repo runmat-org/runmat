@@ -56,8 +56,29 @@ impl WgpuProvider {
         label: &str,
         usage: BufferUsageClass,
     ) -> Result<Arc<wgpu::Buffer>> {
+        self.create_storage_buffer_checked_with_element_size(
+            emission,
+            len,
+            label,
+            usage,
+            self.element_size,
+        )
+    }
+
+    /// Same checked pool owner, with the operation's admitted native element
+    /// size rather than the provider's preferred floating representation.
+    pub(super) fn create_storage_buffer_checked_with_element_size(
+        &self,
+        emission: &WgpuEmission<'_>,
+        len: usize,
+        label: &str,
+        usage: BufferUsageClass,
+        element_size: usize,
+    ) -> Result<Arc<wgpu::Buffer>> {
         // Centralised guard + warning for oversized allocations
-        let size_bytes = (len as u64) * self.element_size as u64;
+        let size_bytes = u64::try_from(len)?
+            .checked_mul(u64::try_from(element_size)?)
+            .ok_or_else(|| anyhow::anyhow!("{label}: allocation byte extent overflow"))?;
         if size_bytes > self.adapter_limits.max_buffer_size {
             return Err(gpu_per_buffer_limit_error(
                 label,
@@ -65,7 +86,10 @@ impl WgpuProvider {
                 self.adapter_limits.max_buffer_size,
             ));
         }
-        let (buffer, reused) = self.create_storage_buffer_for_usage(emission, usage, len, label)?;
+        emission.ensure_device(&self.access)?;
+        let (buffer, reused) = self
+            .allocations
+            .acquire(emission, usage, len, element_size, label);
         if reused && std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
             log::debug!(
                 "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",

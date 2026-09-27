@@ -164,8 +164,6 @@ const TRIL_SHADER_F64: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F
 const TRIL_SHADER_F32: &str = crate::backend::wgpu::shaders::tril::TRIL_SHADER_F32;
 const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F64;
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
-const IMFILTER_SHADER_F64: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F64;
-const IMFILTER_SHADER_F32: &str = crate::backend::wgpu::shaders::imfilter::IMFILTER_SHADER_F32;
 const INTERP1_SHADER_F64: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F64;
 const INTERP1_SHADER_F32: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F32;
 #[cfg(not(target_os = "windows"))]
@@ -233,6 +231,11 @@ pub struct PipelineBundle {
 }
 
 impl PipelineBundle {
+    #[cfg(test)]
+    pub(crate) fn is_initialized(&self) -> bool {
+        self.compiled.get().is_some()
+    }
+
     pub fn get(
         &self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
@@ -330,7 +333,9 @@ pub struct WgpuPipelines {
     pub fspecial: PipelineBundle,
     pub peaks: PipelineBundle,
     pub peaks_xy: PipelineBundle,
-    pub imfilter: PipelineBundle,
+    pub imfilter_single: PipelineBundle,
+    pub imfilter_single_double: PipelineBundle,
+    pub imfilter_double: PipelineBundle,
     pub image_normalize: PipelineBundle,
     pub polyval: PipelineBundle,
     pub polyder: PipelineBundle,
@@ -1389,23 +1394,29 @@ impl WgpuPipelines {
             },
         );
 
-        let imfilter = create_pipeline(
-            access,
-            "runmat-imfilter-layout",
-            "runmat-imfilter-shader",
-            "runmat-imfilter-pipeline",
-            vec![
-                storage_read_entry(0), // Image
-                storage_read_entry(1), // KernelOffsets
-                storage_read_entry(2), // KernelWeights
-                storage_read_write_entry(3),
-                uniform_entry(4),
-            ],
-            match precision {
-                NumericPrecision::F64 => IMFILTER_SHADER_F64,
-                NumericPrecision::F32 => IMFILTER_SHADER_F32,
-            },
+        let imfilter = |source: Cow<'static, str>, label: &'static str| {
+            create_pipeline(
+                access,
+                "runmat-imfilter-layout",
+                label,
+                label,
+                vec![
+                    storage_read_entry(0), // Image
+                    storage_read_entry(1), // KernelOffsets
+                    storage_read_entry(2), // KernelWeights
+                    storage_read_write_entry(3),
+                    uniform_entry(4),
+                ],
+                source,
+            )
+        };
+        use crate::backend::wgpu::shaders::imfilter::ImfilterShader;
+        let imfilter_single = imfilter(ImfilterShader::Single.source(), "runmat-imfilter-f32");
+        let imfilter_single_double = imfilter(
+            ImfilterShader::SingleDouble.source(),
+            "runmat-imfilter-f32-f64",
         );
+        let imfilter_double = imfilter(ImfilterShader::Double.source(), "runmat-imfilter-f64");
 
         #[cfg(target_os = "windows")]
         let image_norm_source: Cow<'static, str> = Cow::Borrowed(match precision {
@@ -1739,7 +1750,9 @@ impl WgpuPipelines {
             fspecial,
             peaks,
             peaks_xy,
-            imfilter,
+            imfilter_single,
+            imfilter_single_double,
+            imfilter_double,
             image_normalize,
             polyval,
             polyder,
