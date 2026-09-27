@@ -4,9 +4,7 @@ use runmat_value::Value;
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin};
 use crate::BuiltinResult;
 
-use super::super::super::provider_support::{
-    host_real_scalar, valid_real_binary_output, Temporary,
-};
+use super::super::super::provider_support::{host_real_scalar, valid_real_binary_output};
 use super::super::{builtin_error, power_host, BUILTIN_NAME};
 use super::conversion::{
     gather_value, is_complex, is_integer, tensor_matches_handle, value_to_real_tensor,
@@ -59,8 +57,8 @@ async fn power_gpu_host(
                     let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&resident);
                     gpu_helpers::upload_tensor_protecting(provider, &host_tensor, &[&resident])?
                 };
-                let temporary = Temporary::new(uploaded, provider, &[&resident]);
-                let uploaded = &temporary.handle;
+                let uploaded_owner = uploaded;
+                let uploaded = &uploaded_owner;
                 let result = resident_operand
                     .typed_power(provider, &resident, uploaded)
                     .await;
@@ -98,9 +96,9 @@ async fn try_resident_scalar(
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
         Err(error) => return Err(builtin_error(format!("power: {error}"))),
     };
-    let temporary = Temporary::new(filled, provider, &[resident]);
-    let filled = &temporary.handle;
-    if !valid_real_binary_output(filled, resident, None, provider, &resident.shape) {
+    let filled_owner = filled;
+    let filled = &filled_owner;
+    if !valid_real_binary_output(filled, resident, None, provider, resident.shape()) {
         return Err(builtin_error(
             "power: provider returned invalid scalar-fill metadata",
         ));
@@ -120,7 +118,7 @@ async fn try_resident_scalar(
         resident,
         Some(filled),
     )
-    .map(|output| output.map(gpu_helpers::resident_gpu_value))
+    .and_then(|output| output.map(gpu_helpers::resident_gpu_value).transpose())
 }
 
 fn accept_result(
@@ -136,19 +134,15 @@ fn accept_result(
                 class_source,
                 other_source,
                 provider,
-                &class_source.shape,
+                class_source.shape(),
             ) =>
         {
             Ok(Some(output))
         }
-        Ok(output) => {
-            let protected =
-                other_source.map_or_else(|| vec![class_source], |other| vec![class_source, other]);
-            gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
-            Err(builtin_error(
-                "power: provider returned an invalid element-wise power result",
-            ))
-        }
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            builtin_error("power: provider returned an invalid element-wise power result"),
+        )),
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
         Err(error) => Err(builtin_error(format!("power: {error}"))),
     }

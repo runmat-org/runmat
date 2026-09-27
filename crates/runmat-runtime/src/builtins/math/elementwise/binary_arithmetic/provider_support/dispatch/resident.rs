@@ -4,7 +4,7 @@ use runmat_value::Value;
 use crate::builtins::common::gpu_helpers;
 use crate::BuiltinResult;
 
-use super::super::{host_real_scalar, ArithmeticProviderOperation, Temporary};
+use super::super::{host_real_scalar, ArithmeticProviderOperation};
 use super::common::{accept_output, float_handle_supported, provider_error};
 
 pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_host_right(
@@ -35,12 +35,17 @@ async fn try_host_scalar(
     let Some(scalar) = host_real_scalar(host) else {
         return Ok(None);
     };
-    if let Some(uploaded) =
-        gpu_helpers::upload_exact_integer_scalar_like(provider, resident, scalar)
-            .map_err(|error| provider_error(operation, error))?
-    {
-        let temporary = Temporary::new(uploaded, provider, &[resident]);
-        let uploaded = &temporary.handle;
+    if let Some(uploaded) = gpu_helpers::upload_exact_integer_scalar_like(
+        provider, resident, scalar,
+    )
+    .map_err(|source| {
+        crate::build_runtime_error(format!("{}: {source}", operation.name()))
+            .with_builtin(operation.name())
+            .with_source(source)
+            .build()
+    })? {
+        let uploaded_owner = uploaded;
+        let uploaded = &uploaded_owner;
         let result = if host_is_left {
             operation.apply(provider, uploaded, resident).await
         } else {
@@ -53,7 +58,7 @@ async fn try_host_scalar(
                 resident,
                 Some(uploaded),
                 provider,
-                &resident.shape,
+                resident.shape(),
             ),
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
             Err(error) => Err(provider_error(operation, error)),
@@ -72,7 +77,14 @@ async fn try_host_scalar(
         operation.scalar_right(provider, resident, scalar)
     };
     match result {
-        Ok(output) => accept_output(operation, output, resident, None, provider, &resident.shape),
+        Ok(output) => accept_output(
+            operation,
+            output,
+            resident,
+            None,
+            provider,
+            resident.shape(),
+        ),
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
         Err(error) => Err(provider_error(operation, error)),
     }

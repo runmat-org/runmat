@@ -37,17 +37,6 @@ pub(super) fn accept_output(
     }
 }
 
-pub(super) fn accepted_output(result: &BuiltinResult<Option<Value>>) -> Option<&GpuTensorHandle> {
-    result
-        .as_ref()
-        .ok()
-        .and_then(Option::as_ref)
-        .and_then(|value| match value {
-            Value::GpuTensor(handle) => Some(handle),
-            _ => None,
-        })
-}
-
 pub(super) fn common_owner(
     left: &GpuTensorHandle,
     right: &GpuTensorHandle,
@@ -89,11 +78,13 @@ pub(super) fn float_handle_supported(handle: &GpuTensorHandle) -> bool {
 
 pub(super) fn provider_error(
     operation: ArithmeticProviderOperation,
-    error: impl std::fmt::Display,
+    error: anyhow::Error,
 ) -> crate::RuntimeError {
-    build_runtime_error(format!("{}: {error}", operation.name()))
+    let mut result = build_runtime_error(format!("{}: {error}", operation.name()))
         .with_builtin(operation.name())
-        .build()
+        .build();
+    result.source = Some(error.into_boxed_dyn_error());
+    result
 }
 
 pub(super) fn provider_contract_error(

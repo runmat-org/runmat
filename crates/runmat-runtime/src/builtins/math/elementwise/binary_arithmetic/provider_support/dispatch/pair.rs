@@ -5,11 +5,14 @@ use runmat_value::Value;
 use crate::builtins::common::gpu_helpers;
 use crate::BuiltinResult;
 
+#[cfg(test)]
+mod owned_tests;
+
 use super::super::{
     broadcast_repetitions, device_real_scalar, ArithmeticProviderOperation, ExpandedPair,
 };
 use super::common::{
-    accept_output, accepted_output, common_owner, compatible_inputs, float_handle_supported,
+    accept_output, common_owner, compatible_inputs, float_handle_supported,
     provider_contract_error, provider_error,
 };
 
@@ -28,7 +31,7 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
     if left.shape() == right.shape() {
         match operation.apply(provider, left, right).await {
             Ok(output) => {
-                return accept_output(operation, output, left, Some(right), provider, &left.shape)
+                return accept_output(operation, output, left, Some(right), provider, left.shape())
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => return Err(provider_error(operation, error)),
@@ -49,7 +52,7 @@ async fn try_broadcast(
     right: &GpuTensorHandle,
 ) -> BuiltinResult<Option<Value>> {
     let Some((output_shape, left_repetitions, right_repetitions)) =
-        broadcast_repetitions(&left.shape, &right.shape)
+        broadcast_repetitions(left.shape(), right.shape())
     else {
         return Ok(None);
     };
@@ -65,7 +68,6 @@ async fn try_broadcast(
         return Ok(None);
     };
     if !expanded_inputs_are_valid(&expanded, &output_shape) {
-        expanded.release(&[]);
         return Err(provider_contract_error(
             operation,
             "provider returned invalid singleton-expanded input metadata",
@@ -76,8 +78,7 @@ async fn try_broadcast(
         .await
     {
         Ok(output)
-            if gpu_helpers::same_gpu_handle(&output, left)
-                || gpu_helpers::same_gpu_handle(&output, right) =>
+            if output.shares_allocation_with(left) || output.shares_allocation_with(right) =>
         {
             Err(provider_contract_error(
                 operation,
@@ -95,8 +96,6 @@ async fn try_broadcast(
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
         Err(error) => Err(provider_error(operation, error)),
     };
-    let protected = accepted_output(&result);
-    expanded.release(&protected.into_iter().collect::<Vec<_>>());
     result
 }
 
@@ -132,7 +131,7 @@ async fn try_device_scalar(
             class_source,
             Some(other_source),
             provider,
-            &class_source.shape,
+            class_source.shape(),
         ),
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
         Err(error) => Err(provider_error(operation, error)),
@@ -155,8 +154,8 @@ fn expand_pair<'a>(
         original_right: right,
         left: left.clone(),
         right: right.clone(),
-        owns_left: false,
-        owns_right: false,
+        expanded_left: false,
+        expanded_right: false,
     };
     if left_repetitions.iter().any(|&count| count != 1) {
         expanded.left = match provider.repmat(left, left_repetitions) {
@@ -164,7 +163,7 @@ fn expand_pair<'a>(
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
             Err(error) => return Err(provider_error(operation, error)),
         };
-        expanded.owns_left = true;
+        expanded.expanded_left = true;
     }
     if right_repetitions.iter().any(|&count| count != 1) {
         expanded.right = match provider.repmat(right, right_repetitions) {
@@ -172,7 +171,7 @@ fn expand_pair<'a>(
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
             Err(error) => return Err(provider_error(operation, error)),
         };
-        expanded.owns_right = true;
+        expanded.expanded_right = true;
     }
     Ok(Some(expanded))
 }
@@ -180,10 +179,10 @@ fn expand_pair<'a>(
 fn expanded_inputs_are_valid(expanded: &ExpandedPair<'_>, expected_shape: &[usize]) -> bool {
     use super::super::valid_real_binary_output;
 
-    !(expanded.owns_left
-        && expanded.owns_right
-        && gpu_helpers::same_gpu_handle(&expanded.left, &expanded.right))
-        && (!expanded.owns_left
+    !(expanded.expanded_left
+        && expanded.expanded_right
+        && expanded.left.shares_allocation_with(&expanded.right))
+        && (!expanded.expanded_left
             || valid_real_binary_output(
                 &expanded.left,
                 expanded.original_left,
@@ -191,7 +190,7 @@ fn expanded_inputs_are_valid(expanded: &ExpandedPair<'_>, expected_shape: &[usiz
                 expanded.provider,
                 expected_shape,
             ))
-        && (!expanded.owns_right
+        && (!expanded.expanded_right
             || valid_real_binary_output(
                 &expanded.right,
                 expanded.original_right,
