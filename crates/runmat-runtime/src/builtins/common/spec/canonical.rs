@@ -22,6 +22,7 @@ pub struct CanonicalFusionDeclaration {
     pub semantics: Option<&'static FusionSemanticDeclaration>,
     pub structural: Option<FusionStructuralOperation>,
     pub epilogue: Option<FusionEpilogueOperation>,
+    pub reduction: Option<&'static super::FusionReductionDeclaration>,
 }
 
 impl std::fmt::Debug for CanonicalFusionDeclaration {
@@ -82,7 +83,8 @@ pub fn canonical_fusion_declaration(
     if registration.structural.is_some()
         && (registration.semantics.is_none()
             || registration.spec.elementwise.is_some()
-            || registration.spec.reduction.is_some())
+            || registration.spec.reduction.is_some()
+            || registration.reduction.is_some())
     {
         return None;
     }
@@ -92,5 +94,6 @@ pub fn canonical_fusion_declaration(
         semantics: registration.semantics,
         structural: registration.structural,
         epilogue: registration.epilogue,
+        reduction: registration.reduction,
     })
 }

@@ -335,7 +335,10 @@ fn sum_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     sum_descriptor_error_with_detail(&SUM_ERROR_INTERNAL, detail)
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::sum")]
+#[path = "sum/fusion_contract.rs"]
+mod fusion_contract;
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::sum", reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "sum",
     shape: ShapeRequirements::BroadcastCompatible,

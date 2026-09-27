@@ -15,6 +15,7 @@ pub struct SelectedFusionBinding {
     pub identity: SelectedFusionIdentity,
     pub epilogue: Option<FusionEpilogueOperation>,
     pub structural: Option<FusionStructuralOperation>,
+    pub reduction: Option<&'static super::FusionReductionDeclaration>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
@@ -83,6 +84,7 @@ pub fn selected_fusion_binding(
             identity: SelectedFusionIdentity::Canonical(identity),
             epilogue: declaration.epilogue,
             structural: declaration.structural,
+            reduction: declaration.reduction,
         });
     }
     // The dispatcher never falls back to global legacy inventory when a scoped
@@ -114,5 +116,6 @@ pub fn selected_fusion_binding(
         },
         epilogue: declaration.epilogue,
         structural: declaration.structural,
+        reduction: declaration.reduction,
     })
 }

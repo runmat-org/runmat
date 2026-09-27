@@ -550,7 +550,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers should implement reduce_max_dim / reduce_max. Requests that require omitnan, comparisonmethod overrides, or complex inputs fall back to the host implementation.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::max", epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Maximum)]
+#[path = "max/fusion_contract.rs"]
+mod fusion_contract;
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::max", epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Maximum, reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "max",
     shape: ShapeRequirements::BroadcastCompatible,

@@ -4,6 +4,8 @@ mod canonical;
 mod admission;
 mod structural;
 mod epilogue;
+mod reduction;
+pub use reduction::*;
 mod selected;
 mod registration_index;
 pub use admission::*;
@@ -174,7 +176,7 @@ pub enum ResidencyPolicy {
 }
 
 /// How reductions should treat NaN values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ReductionNaN {
     Include,
     Omit,
@@ -272,6 +274,7 @@ pub struct FusionSpecInventory {
     pub semantics: Option<&'static FusionSemanticDeclaration>,
     pub structural: Option<FusionStructuralOperation>,
     pub epilogue: Option<FusionEpilogueOperation>,
+    pub reduction: Option<&'static FusionReductionDeclaration>,
     pub builtin_path: &'static str,
     pub declaration: &'static str,
     pub source_file: &'static str,
@@ -293,6 +296,7 @@ pub(crate) struct FusionSpecRegistration {
     pub semantics: Option<&'static FusionSemanticDeclaration>,
     pub structural: Option<FusionStructuralOperation>,
     pub epilogue: Option<FusionEpilogueOperation>,
+    pub reduction: Option<&'static FusionReductionDeclaration>,
     pub builtin_path: &'static str,
     pub declaration: &'static str,
     pub source_file: &'static str,
@@ -351,6 +355,7 @@ pub(crate) fn builtin_fusion_spec_registrations() -> impl Iterator<Item = Fusion
         semantics: entry.semantics,
         structural: entry.structural,
         epilogue: entry.epilogue,
+        reduction: entry.reduction,
         builtin_path: entry.builtin_path,
         declaration: entry.declaration,
         source_file: entry.source_file,

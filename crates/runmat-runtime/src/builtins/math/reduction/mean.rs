@@ -415,7 +415,10 @@ fn mean_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     mean_descriptor_error_with_detail(&MEAN_ERROR_INTERNAL, detail)
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::mean")]
+#[path = "mean/fusion_contract.rs"]
+mod fusion_contract;
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::mean", reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mean",
     shape: ShapeRequirements::BroadcastCompatible,

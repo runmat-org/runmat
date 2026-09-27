@@ -6,6 +6,15 @@ fn old_spec_declarations_have_no_structural_operation() {
     assert!(args.structural.is_none());
     assert!(args.semantics.is_none());
     assert!(args.epilogue.is_none());
+    assert!(args.reduction.is_none());
+}
+
+#[test]
+fn typed_reduction_declaration_is_optional_and_unique() {
+    let args: RegisterSpecAttrArgs =
+        syn::parse_quote!(builtin_path = "crate::operation", reduction = REDUCTION);
+    assert!(matches!(args.reduction, Some(syn::Expr::Path(_))));
+    assert!(syn::parse_str::<RegisterSpecAttrArgs>("reduction = A, reduction = B").is_err());
 }
 
 #[test]

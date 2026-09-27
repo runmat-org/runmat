@@ -430,7 +430,10 @@ fn min_internal_error(detail: impl AsRef<str>) -> RuntimeError {
     min_descriptor_error_with_detail(&MIN_ERROR_INTERNAL, detail)
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::min", epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Minimum)]
+#[path = "min/fusion_contract.rs"]
+mod fusion_contract;
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::min", epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Minimum, reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "min",
     shape: ShapeRequirements::BroadcastCompatible,

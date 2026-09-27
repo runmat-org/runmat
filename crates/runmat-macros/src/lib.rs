@@ -845,6 +845,7 @@ struct RegisterSpecAttrArgs {
     semantics: Option<Expr>,
     structural: Option<Expr>,
     epilogue: Option<Expr>,
+    reduction: Option<Expr>,
 }
 
 #[cfg(test)]
@@ -858,6 +859,7 @@ impl Parse for RegisterSpecAttrArgs {
         let mut semantics = None;
         let mut structural = None;
         let mut epilogue = None;
+        let mut reduction = None;
         while !input.is_empty() {
             let ident: syn::Ident = input.parse()?;
             input.parse::<syn::Token![=]>()?;
@@ -881,6 +883,14 @@ impl Parse for RegisterSpecAttrArgs {
                     ));
                 }
                 epilogue = Some(input.parse()?);
+            } else if ident == "reduction" {
+                if reduction.is_some() {
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "duplicate reduction declaration",
+                    ));
+                }
+                reduction = Some(input.parse()?);
             } else if ident == "builtin_path" {
                 let lit: LitStr = input.parse()?;
                 builtin_path = Some(lit);
@@ -897,6 +907,7 @@ impl Parse for RegisterSpecAttrArgs {
             semantics,
             structural,
             epilogue,
+            reduction,
         })
     }
 }
@@ -910,8 +921,9 @@ pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
         semantics,
         structural,
         epilogue,
+        reduction,
     } = args;
-    if semantics.is_some() || structural.is_some() || epilogue.is_some() {
+    if semantics.is_some() || structural.is_some() || epilogue.is_some() || reduction.is_some() {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
             "semantics and structural operations belong to a fusion registration",
@@ -992,7 +1004,11 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
         semantics,
         structural,
         epilogue,
+        reduction,
     } = args;
+    let reduction = reduction
+        .map(|value| quote! { Some(&#value) })
+        .unwrap_or_else(|| quote! { None });
     let epilogue = epilogue
         .map(|value| quote! { Some(#value) })
         .unwrap_or_else(|| quote! { None });
@@ -1028,6 +1044,7 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
                     semantics: #semantics,
                     structural: #structural,
                     epilogue: #epilogue,
+                    reduction: #reduction,
                     source_file: file!(), module_path: module_path!(),
                 }
             );
@@ -1056,6 +1073,7 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
                 semantics: #semantics,
                 structural: #structural,
                 epilogue: #epilogue,
+                reduction: #reduction,
                 builtin_path: #builtin_path_lit,
                 declaration: #declaration,
                 source_file: file!(),
