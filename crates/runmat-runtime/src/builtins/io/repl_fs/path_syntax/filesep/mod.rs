@@ -1,4 +1,3 @@
-pub(crate) mod specification;
 #[cfg(test)]
 mod tests;
 use runmat_macros::runtime_builtin;
@@ -6,6 +5,7 @@ use runmat_value::{CharArray, Value};
 
 #[runtime_builtin(
     name = "filesep",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_syntax::filesep"
 )]
 async fn filesep_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
