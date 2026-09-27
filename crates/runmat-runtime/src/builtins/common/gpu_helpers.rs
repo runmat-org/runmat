@@ -275,7 +275,20 @@ pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GpuOutputAliasPolicy {
     AllowInput,
+    /// A separate immutable view, possibly sharing the physical allocation.
     RequireDistinct,
+    /// Fresh computational storage; another view of the input is not sufficient.
+    RequireDistinctAllocation,
+}
+
+impl GpuOutputAliasPolicy {
+    fn accepts(self, output: &GpuTensorHandle, input: &GpuTensorHandle) -> bool {
+        match self {
+            Self::AllowInput => true,
+            Self::RequireDistinct => !same_gpu_handle(output, input),
+            Self::RequireDistinctAllocation => !output.shares_allocation_with(input),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,8 +308,7 @@ pub fn unary_gpu_output_matches(
 ) -> bool {
     output.shape() == input.shape()
         && output.device_id() == input.device_id()
-        && (matches!(contract.alias, GpuOutputAliasPolicy::AllowInput)
-            || !same_gpu_handle(output, input))
+        && contract.alias.accepts(output, input)
         && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == contract.storage
         && runmat_accelerate_api::handle_precision(output) == contract.precision
@@ -329,8 +341,8 @@ pub fn binary_gpu_output_matches(
 ) -> bool {
     output.shape() == contract.shape
         && output.device_id() == provider.device_id()
-        && (matches!(contract.alias, GpuOutputAliasPolicy::AllowInput)
-            || (!same_gpu_handle(output, left) && !same_gpu_handle(output, right)))
+        && contract.alias.accepts(output, left)
+        && contract.alias.accepts(output, right)
         && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == contract.storage
         && runmat_accelerate_api::handle_precision(output) == contract.precision

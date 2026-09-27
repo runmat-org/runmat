@@ -36,16 +36,26 @@ impl ReductionOutputs {
             shape,
             storage: GpuTensorStorage::Real,
             precision: runmat_accelerate_api::handle_precision(&output),
-            integer: None,
+            integer: runmat_accelerate_api::handle_integer_type(&output),
             logical: runmat_accelerate_api::handle_is_logical(&output),
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         };
         let valid =
             gpu_helpers::expected_handle_numeric_element_type(&output).is_ok_and(|element| {
-                gpu_helpers::numeric_descriptor_matches(&output, element, GpuTensorStorage::Real)
+                (matches!(
+                    element,
+                    runmat_accelerate_api::NumericElementType::F32
+                        | runmat_accelerate_api::NumericElementType::F64
+                ) || (contract.logical
+                    && element == runmat_accelerate_api::NumericElementType::U8))
+                    && gpu_helpers::numeric_descriptor_matches(
+                        &output,
+                        element,
+                        GpuTensorStorage::Real,
+                    )
             }) && !protected
                 .iter()
-                .any(|input| gpu_helpers::same_gpu_handle(&output, input))
+                .any(|input| output.shares_allocation_with(input))
                 && gpu_helpers::binary_gpu_output_matches(
                     &output,
                     &self.source,
@@ -54,10 +64,12 @@ impl ReductionOutputs {
                     &contract,
                 );
         if !valid {
-            gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
-            return Err(config.error(
-                config.internal,
-                "provider returned an invalid or aliased logical reduction result",
+            return Err(gpu_helpers::reject_gpu_output(
+                output,
+                config.error(
+                    config.internal,
+                    "provider returned an invalid or aliased logical reduction result",
+                ),
             ));
         }
         self.owned.push(output);
@@ -65,12 +77,5 @@ impl ReductionOutputs {
     }
 }
 
-impl Drop for ReductionOutputs {
-    fn drop(&mut self) {
-        // Accepted outputs are distinct from all inputs/earlier temporaries.
-        // This also runs when a reduction or download future is cancelled.
-        for output in &self.owned {
-            gpu_helpers::free_unprotected_exact_owner(output, &[&self.source]);
-        }
-    }
-}
+// Each vector entry is an owning lease. Ordinary drop releases intermediates
+// on success, error and cancellation without manually freeing borrowed handles.

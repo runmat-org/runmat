@@ -26,7 +26,7 @@ pub(super) fn admit(inputs: &[Value], outputs: Option<usize>) -> BuiltinResult<V
                         "GPU input has no owning provider",
                     ));
                 }
-                if handle.descriptor.storage == Some(GpuTensorStorage::ComplexInterleaved) {
+                if handle.descriptor().storage == Some(GpuTensorStorage::ComplexInterleaved) {
                     return Err(pol2cart_error(&ERROR_COMPLEX_UNSUPPORTED, "complex input"));
                 }
                 let element = gpu_helpers::expected_handle_numeric_element_type(handle)
@@ -39,7 +39,7 @@ pub(super) fn admit(inputs: &[Value], outputs: Option<usize>) -> BuiltinResult<V
                         "expected explicit real numeric GPU storage",
                     ));
                 }
-                handle.shape.clone()
+                handle.shape().to_vec()
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => {
                 return Err(pol2cart_error(&ERROR_COMPLEX_UNSUPPORTED, "complex input"));

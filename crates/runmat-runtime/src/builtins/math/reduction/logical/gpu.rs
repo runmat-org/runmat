@@ -59,8 +59,8 @@ async fn try_provider(
         if let Ok(reduced) = reduced {
             let mut outputs = output::ReductionOutputs::new(handle);
             // Full reductions may choose a scalar rank, but never a non-scalar.
-            let expected = if is_scalar_shape(&reduced.shape) {
-                reduced.shape.clone()
+            let expected = if is_scalar_shape(&reduced.shape()) {
+                reduced.shape().to_vec()
             } else {
                 vec![1, 1]
             };
@@ -69,7 +69,7 @@ async fn try_provider(
                 gpu_helpers::download_truth_values_async(provider, outputs.current()).await;
             return downloaded
                 .map(Some)
-                .map_err(|error| config.error(config.internal, error));
+                .map_err(|error| download_error(config, error));
         }
     }
     reduce_dimensions(config, provider, handle, spec, omit_nan).await
@@ -82,7 +82,7 @@ async fn reduce_dimensions(
     spec: &ReductionSpec,
     omit_nan: bool,
 ) -> BuiltinResult<Option<HostTruthTensorOwned>> {
-    let dimensions = shape::dimensions(spec, &handle.shape);
+    let dimensions = shape::dimensions(spec, &handle.shape());
     if dimensions.is_empty() {
         return Ok(None);
     }
@@ -92,10 +92,10 @@ async fn reduce_dimensions(
         let Some(axis) = dimension.checked_sub(1) else {
             return Ok(None);
         };
-        if axis >= outputs.current().shape.len() {
+        if axis >= outputs.current().shape().len() {
             return Ok(None);
         }
-        let mut expected = outputs.current().shape.clone();
+        let mut expected = outputs.current().shape().to_vec();
         expected[axis] = 1;
         let next = match config.kind {
             LogicalReductionKind::All => {
@@ -118,7 +118,16 @@ async fn reduce_dimensions(
     let downloaded = gpu_helpers::download_truth_values_async(provider, outputs.current()).await;
     downloaded
         .map(Some)
-        .map_err(|error| config.error(config.internal, error))
+        .map_err(|error| download_error(config, error))
+}
+
+fn download_error(
+    config: &LogicalReductionConfig,
+    error: crate::RuntimeError,
+) -> crate::RuntimeError {
+    let mut contextual = config.error(config.internal, error.message());
+    contextual.source = Some(Box::new(error));
+    contextual
 }
 
 fn logical_from_host(

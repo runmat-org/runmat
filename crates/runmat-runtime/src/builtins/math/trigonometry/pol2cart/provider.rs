@@ -40,7 +40,7 @@ pub(super) async fn try_pol2cart_gpu(
                 }
                 let uploaded =
                     gpu_helpers::upload_tensor_protecting(provider, &tensor, &outputs.protected())
-                        .map_err(|error| pol2cart_error(&ERROR_INTERNAL, error))?;
+                        .map_err(upload_error)?;
                 outputs.adopt(provider, uploaded, anchor, &tensor.shape, precision)?
             }
         };
@@ -60,7 +60,7 @@ pub(super) async fn try_pol2cart_gpu(
             let values = handles
                 .into_iter()
                 .map(|handle| outputs.publish(handle))
-                .collect::<Vec<_>>();
+                .collect::<BuiltinResult<Vec<_>>>()?;
             Ok(Some(if requested_outputs.is_none() {
                 values
                     .into_iter()
@@ -108,7 +108,9 @@ impl From<anyhow::Error> for AttemptError {
         if gpu_helpers::provider_hook_is_unsupported(&error) {
             Self::Unsupported
         } else {
-            Self::Failure(Box::new(pol2cart_error(&ERROR_INTERNAL, error)))
+            let mut contextual = pol2cart_error(&ERROR_INTERNAL, &error);
+            contextual.source = Some(error.into_boxed_dyn_error());
+            Self::Failure(Box::new(contextual))
         }
     }
 }
@@ -128,18 +130,18 @@ async fn evaluate(
 ) -> Result<Vec<GpuTensorHandle>, AttemptError> {
     let theta = &operands[0];
     let rho = &operands[1];
-    let pair_shape = matlab_broadcast_shape(&theta.shape, &rho.shape)?;
+    let pair_shape = matlab_broadcast_shape(&theta.shape(), &rho.shape())?;
     let cos = outputs.run_protected(provider.unary_cos(theta)).await?;
-    let cos = outputs.adopt(provider, cos, theta, &theta.shape, precision)?;
+    let cos = outputs.adopt(provider, cos, theta, &theta.shape(), precision)?;
     let sin = outputs.run_protected(provider.unary_sin(theta)).await?;
-    let sin = outputs.adopt(provider, sin, theta, &theta.shape, precision)?;
+    let sin = outputs.adopt(provider, sin, theta, &theta.shape(), precision)?;
     let x = outputs.run_protected(provider.elem_mul(rho, &cos)).await?;
     let mut x = outputs.adopt(provider, x, theta, &pair_shape, precision)?;
     let y = outputs.run_protected(provider.elem_mul(rho, &sin)).await?;
     let mut y = outputs.adopt(provider, y, theta, &pair_shape, precision)?;
     let count = requested.unwrap_or(1);
     let needs_xy_expansion = pair_shape != shape;
-    let needs_z_expansion = count >= 3 && operands[2].shape != shape;
+    let needs_z_expansion = count >= 3 && operands[2].shape() != shape;
     let ones = if needs_xy_expansion || needs_z_expansion {
         // Typed upload preserves physical precision even when the provider's
         // default fill precision differs from the inputs.
@@ -154,7 +156,7 @@ async fn evaluate(
         }
         .map_err(|error| pol2cart_error(&ERROR_INTERNAL, error))?;
         let handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &outputs.protected())
-            .map_err(|error| pol2cart_error(&ERROR_INTERNAL, error))?;
+            .map_err(upload_error)?;
         Some(outputs.adopt(provider, handle, theta, shape, precision)?)
     } else {
         None
@@ -187,7 +189,7 @@ async fn evaluate(
                 .map_err(|error| pol2cart_error(&ERROR_INTERNAL, error))?;
                 let handle =
                     gpu_helpers::upload_tensor_protecting(provider, &tensor, &outputs.protected())
-                        .map_err(|error| pol2cart_error(&ERROR_INTERNAL, error))?;
+                        .map_err(upload_error)?;
                 outputs.adopt(provider, handle, theta, &[1, 1], precision)?
             }
         };
@@ -197,4 +199,10 @@ async fn evaluate(
         result.push(outputs.adopt(provider, output, theta, shape, precision)?);
     }
     Ok(result)
+}
+
+fn upload_error(error: RuntimeError) -> RuntimeError {
+    let mut contextual = pol2cart_error(&ERROR_INTERNAL, error.message());
+    contextual.source = Some(Box::new(error));
+    contextual
 }

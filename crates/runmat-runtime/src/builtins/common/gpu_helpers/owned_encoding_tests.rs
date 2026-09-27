@@ -2,6 +2,28 @@ use super::*;
 use runmat_accelerate_api::test_support::TestAllocationOwner;
 
 #[test]
+fn view_distinctness_does_not_claim_independent_storage() {
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let view = allocation
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    assert!(GpuOutputAliasPolicy::AllowInput.accepts(&allocation.handle, &allocation.handle));
+    assert!(!GpuOutputAliasPolicy::RequireDistinct.accepts(&allocation.handle, &allocation.handle));
+    assert!(GpuOutputAliasPolicy::RequireDistinct.accepts(&view, &allocation.handle));
+    assert!(!GpuOutputAliasPolicy::RequireDistinctAllocation.accepts(&view, &allocation.handle));
+    let fresh = owner
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    assert!(
+        GpuOutputAliasPolicy::RequireDistinctAllocation.accepts(&fresh.handle, &allocation.handle)
+    );
+}
+
+#[test]
 fn logical_u8_owner_preserves_physical_type_and_logical_host_class() {
     let owner = TestAllocationOwner::new();
     let allocation = owner.allocate_logical(vec![0, 1], vec![1, 2]).unwrap();

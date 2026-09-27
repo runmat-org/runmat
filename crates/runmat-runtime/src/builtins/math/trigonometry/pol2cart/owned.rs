@@ -1,11 +1,15 @@
 use super::*;
 use runmat_accelerate_api::ProviderPrecision;
 
+#[cfg(test)]
+#[path = "owned_tests.rs"]
+mod tests;
+
 /// Fresh transform temporaries only. Borrowed inputs are never adopted, even
 /// when a malformed provider returns one as an output. Drop handles cancellation.
 pub(super) struct Outputs {
     borrowed: Vec<GpuTensorHandle>,
-    owned: Vec<(GpuTensorHandle, &'static dyn AccelProvider)>,
+    owned: Vec<GpuTensorHandle>,
     provenance: Option<runmat_accelerate_api::GpuHandleProvenance>,
 }
 
@@ -52,10 +56,7 @@ impl Outputs {
     }
 
     pub(super) fn protected(&self) -> Vec<&GpuTensorHandle> {
-        self.borrowed
-            .iter()
-            .chain(self.owned.iter().map(|(handle, _)| handle))
-            .collect()
+        self.borrowed.iter().chain(self.owned.iter()).collect()
     }
 
     pub(super) fn adopt(
@@ -73,44 +74,40 @@ impl Outputs {
             precision: Some(precision),
             integer: None,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         };
-        let valid = !protected
-            .iter()
-            .any(|h| gpu_helpers::same_gpu_handle(h, &output))
+        let valid = !protected.iter().any(|h| h.shares_allocation_with(&output))
             && gpu_helpers::binary_gpu_output_matches(&output, anchor, anchor, provider, &contract)
             && gpu_helpers::expected_handle_numeric_element_type(&output).is_ok_and(|element| {
                 gpu_helpers::numeric_descriptor_matches(&output, element, GpuTensorStorage::Real)
             });
         if !valid {
-            gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
-            return Err(pol2cart_error(
-                &ERROR_INTERNAL,
-                "provider returned an invalid or aliased coordinate result",
+            return Err(gpu_helpers::reject_gpu_output(
+                output,
+                pol2cart_error(
+                    &ERROR_INTERNAL,
+                    "provider returned an invalid or aliased coordinate result",
+                ),
             ));
         }
         if let Some(provenance) = self.provenance {
-            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+            output = output.with_provenance(provenance).map_err(|error| {
+                build_runtime_error(format!("pol2cart: cannot preserve input intent: {error}"))
+                    .with_builtin("pol2cart")
+                    .with_source(error)
+                    .build()
+            })?;
         }
-        self.owned.push((output.clone(), provider));
+        self.owned.push(output.clone());
         Ok(output)
     }
 
-    pub(super) fn publish(&mut self, handle: GpuTensorHandle) -> Value {
+    pub(super) fn publish(&mut self, handle: GpuTensorHandle) -> BuiltinResult<Value> {
         self.owned
-            .retain(|(owned, _)| !gpu_helpers::same_gpu_handle(owned, &handle));
+            .retain(|owned| !gpu_helpers::same_gpu_handle(owned, &handle));
         gpu_helpers::resident_gpu_value(handle)
     }
 }
 
-impl Drop for Outputs {
-    fn drop(&mut self) {
-        for (handle, provider) in &self.owned {
-            // Adoption proved these are fresh and non-borrowed. Retain the
-            // actual provider authority across suspension and selection drop.
-            if provider.free(handle).is_ok() {
-                runmat_accelerate_api::clear_handle_metadata(handle);
-            }
-        }
-    }
-}
+// Owning handles retain their exact allocation authority across suspension and
+// thread-provider changes. Vector drop retires only its own references.

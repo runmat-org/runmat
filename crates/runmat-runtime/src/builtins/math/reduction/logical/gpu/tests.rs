@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::common::{spec::ReductionNaN, test_support};
 use futures::{executor::block_on, task::noop_waker};
-use runmat_accelerate::simple_provider::InProcessProvider;
+use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocation, TestAllocationOwner};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProviderFuture, HostTensorView, ProviderPrecision,
     ThreadProviderGuard,
@@ -10,7 +10,7 @@ use std::{
     future::Future,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Mutex, OnceLock,
+        Mutex,
     },
     task::{Context, Poll},
 };
@@ -21,21 +21,23 @@ enum Behavior {
     WrongShape,
     AliasIntermediate,
     PendingDownload,
-    UnknownDevice,
-    MissingStorage,
+    ForeignOwner,
+    ComplexStorage,
 }
 
 struct ReductionProvider {
-    inner: InProcessProvider,
+    owner: TestAllocationOwner,
+    foreign: TestAllocationOwner,
     behavior: Behavior,
-    created: Mutex<Vec<GpuTensorHandle>>,
+    created: Mutex<Vec<RetirementProbe>>,
     calls: AtomicUsize,
 }
 
 impl ReductionProvider {
     fn new(behavior: Behavior) -> Self {
         Self {
-            inner: InProcessProvider::new(),
+            owner: TestAllocationOwner::new(),
+            foreign: TestAllocationOwner::new(),
             behavior,
             created: Mutex::new(Vec::new()),
             calls: AtomicUsize::new(0),
@@ -55,61 +57,62 @@ impl ReductionProvider {
         let shape = if matches!(self.behavior, Behavior::WrongShape) {
             vec![1, 3]
         } else if let Some(axis) = axis {
-            let mut shape = input.shape.clone();
+            let mut shape = input.shape().to_vec();
             shape[axis] = 1;
             shape
         } else {
             vec![1, 1]
         };
-        let data = vec![1.0; shape.iter().product()];
-        let mut output = self.inner.upload(&HostTensorView {
-            data: &data,
-            shape: &shape,
-        })?;
-        self.created.lock().unwrap().push(output.clone());
-        match self.behavior {
-            Behavior::UnknownDevice => output.device_id = u32::MAX - 7,
-            Behavior::MissingStorage => output.descriptor.storage = None,
-            _ => {}
-        }
-        Ok(output)
+        let owner = if matches!(self.behavior, Behavior::ForeignOwner) {
+            &self.foreign
+        } else {
+            &self.owner
+        };
+        let storage = if matches!(self.behavior, Behavior::ComplexStorage) {
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        } else {
+            runmat_accelerate_api::GpuTensorStorage::Real
+        };
+        let allocation = owner.allocate_zeroed(
+            shape,
+            runmat_accelerate_api::NumericElementType::F64,
+            storage,
+        )?;
+        self.created.lock().unwrap().push(allocation.probe);
+        Ok(allocation.handle)
+    }
+    fn source(&self) -> TestAllocation {
+        self.owner
+            .allocate_zeroed(
+                vec![2, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
     }
 }
 
 impl AccelProvider for ReductionProvider {
     fn device_id(&self) -> u32 {
-        self.inner.device_id()
+        self.owner.device_id()
     }
     fn device_info(&self) -> String {
-        self.inner.device_info()
+        "owned reduction fixture".into()
     }
     fn precision(&self) -> ProviderPrecision {
-        self.inner.precision()
+        ProviderPrecision::F64
     }
-    fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.inner.upload(host)
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        panic!("reduction does not upload")
     }
-    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         if matches!(self.behavior, Behavior::PendingDownload) {
             Box::pin(std::future::pending())
         } else {
-            self.inner.download(handle)
+            Box::pin(async { panic!("invalid result must not reach download") })
         }
     }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        // This provider created the deliberately malformed handle, so it can
-        // release its own allocation despite the bad returned device metadata.
-        if matches!(self.behavior, Behavior::UnknownDevice) && handle.device_id != self.device_id()
-        {
-            let created = self.created.lock().unwrap();
-            let original = created
-                .iter()
-                .find(|value| value.buffer_id == handle.buffer_id)
-                .ok_or_else(|| anyhow::anyhow!("unknown malformed allocation"))?;
-            return self.inner.free(original);
-        }
-        self.inner.free(handle)
-    }
+
     fn reduce_all<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
@@ -143,22 +146,7 @@ impl AccelProvider for ReductionProvider {
 }
 
 fn provider(behavior: Behavior) -> &'static ReductionProvider {
-    static ALIAS: OnceLock<ReductionProvider> = OnceLock::new();
-    static SHAPE: OnceLock<ReductionProvider> = OnceLock::new();
-    static INTERMEDIATE: OnceLock<ReductionProvider> = OnceLock::new();
-    static PENDING: OnceLock<ReductionProvider> = OnceLock::new();
-    static UNKNOWN: OnceLock<ReductionProvider> = OnceLock::new();
-    static MISSING: OnceLock<ReductionProvider> = OnceLock::new();
-    match behavior {
-        Behavior::AliasInput => ALIAS.get_or_init(|| ReductionProvider::new(behavior)),
-        Behavior::WrongShape => SHAPE.get_or_init(|| ReductionProvider::new(behavior)),
-        Behavior::AliasIntermediate => {
-            INTERMEDIATE.get_or_init(|| ReductionProvider::new(behavior))
-        }
-        Behavior::PendingDownload => PENDING.get_or_init(|| ReductionProvider::new(behavior)),
-        Behavior::UnknownDevice => UNKNOWN.get_or_init(|| ReductionProvider::new(behavior)),
-        Behavior::MissingStorage => MISSING.get_or_init(|| ReductionProvider::new(behavior)),
-    }
+    Box::leak(Box::new(ReductionProvider::new(behavior)))
 }
 
 fn configs() -> [&'static LogicalReductionConfig; 2] {
@@ -169,23 +157,18 @@ fn configs() -> [&'static LogicalReductionConfig; 2] {
 }
 
 #[test]
-fn malformed_owner_or_missing_storage_is_freed_before_next_dimension_hook() {
+fn foreign_owner_or_complex_storage_is_retired_before_next_dimension_hook() {
     let _state = test_support::accel_test_lock();
-    for behavior in [Behavior::UnknownDevice, Behavior::MissingStorage] {
+    for behavior in [Behavior::ForeignOwner, Behavior::ComplexStorage] {
         let provider = provider(behavior);
         let _provider = ThreadProviderGuard::set(Some(provider));
         for config in configs() {
             provider.created.lock().unwrap().clear();
             provider.calls.store(0, Ordering::SeqCst);
-            let input = provider
-                .upload(&HostTensorView {
-                    data: &[1.0; 4],
-                    shape: &[2, 2],
-                })
-                .unwrap();
+            let input = provider.source();
             let error = block_on(reduce(
                 config,
-                input.clone(),
+                input.handle.clone(),
                 ReductionSpec::Dimensions(vec![1, 2]),
                 ReductionNaN::Include,
             ))
@@ -196,14 +179,17 @@ fn malformed_owner_or_missing_storage_is_freed_before_next_dimension_hook() {
                 1,
                 "malformed first result must not reach the next hook"
             );
-            assert!(block_on(provider.inner.download(&input)).is_ok());
+            assert!(input.handle.allocation_lease().validate_live().is_ok());
+            assert_eq!(input.probe.retirements(), 0);
             let created = provider.created.lock().unwrap();
             assert_eq!(created.len(), 1);
-            assert!(
-                block_on(provider.inner.download(&created[0])).is_err(),
-                "invoked provider must release output even with unknown device metadata"
+            assert_eq!(
+                created[0].retirements(),
+                1,
+                "rejected result releases its actual owner"
             );
-            provider.free(&input).unwrap();
+            drop(input.handle);
+            assert_eq!(input.probe.retirements(), 1);
         }
     }
 }
@@ -220,25 +206,27 @@ fn invalid_reduction_outputs_never_free_borrowed_inputs_and_free_fresh_results()
         let _provider = ThreadProviderGuard::set(Some(provider));
         for config in configs() {
             provider.created.lock().unwrap().clear();
-            let input = provider
-                .upload(&HostTensorView {
-                    data: &[1.0; 4],
-                    shape: &[2, 2],
-                })
-                .unwrap();
+            let input = provider.source();
             let spec = if matches!(behavior, Behavior::AliasIntermediate) {
                 ReductionSpec::Dimensions(vec![1, 2])
             } else {
                 ReductionSpec::All
             };
-            let error =
-                block_on(reduce(config, input.clone(), spec, ReductionNaN::Include)).unwrap_err();
+            let error = block_on(reduce(
+                config,
+                input.handle.clone(),
+                spec,
+                ReductionNaN::Include,
+            ))
+            .unwrap_err();
             assert_eq!(error.identifier(), config.internal.identifier);
-            assert!(block_on(provider.inner.download(&input)).is_ok());
+            assert!(input.handle.allocation_lease().validate_live().is_ok());
+            assert_eq!(input.probe.retirements(), 0);
             for output in provider.created.lock().unwrap().iter() {
-                assert!(block_on(provider.inner.download(output)).is_err());
+                assert_eq!(output.retirements(), 1);
             }
-            provider.free(&input).unwrap();
+            drop(input.handle);
+            assert_eq!(input.probe.retirements(), 1);
         }
     }
 }
@@ -250,15 +238,10 @@ fn cancelling_reduction_download_releases_fresh_outputs_but_not_input() {
     let _provider = ThreadProviderGuard::set(Some(provider));
     for config in configs() {
         provider.created.lock().unwrap().clear();
-        let input = provider
-            .upload(&HostTensorView {
-                data: &[1.0; 4],
-                shape: &[2, 2],
-            })
-            .unwrap();
+        let input = provider.source();
         let mut future = Box::pin(reduce(
             config,
-            input.clone(),
+            input.handle.clone(),
             ReductionSpec::All,
             ReductionNaN::Include,
         ));
@@ -269,10 +252,12 @@ fn cancelling_reduction_download_releases_fresh_outputs_but_not_input() {
             Poll::Pending
         ));
         drop(future);
-        assert!(block_on(provider.inner.download(&input)).is_ok());
+        assert!(input.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(input.probe.retirements(), 0);
         let created = provider.created.lock().unwrap();
         assert_eq!(created.len(), 1);
-        assert!(block_on(provider.inner.download(&created[0])).is_err());
-        provider.free(&input).unwrap();
+        assert_eq!(created[0].retirements(), 1);
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
     }
 }
