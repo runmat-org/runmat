@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::{
     fs,
@@ -4391,8 +4391,9 @@ fn analysis_run_linear_static_persists_artifacts_through_runtime_filesystem_prov
 fn analysis_run_linear_static_cancellation_maps_normalized_error() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
-    let cancelled = Arc::new(AtomicBool::new(true));
-    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(cancelled));
+    let cancelled = runmat_execution::cancellation::CancellationSource::new();
+    cancelled.cancel(runmat_execution::CancellationReason::User);
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(cancelled.token()));
     let model = sample_model();
 
     let err = analysis_run_linear_static_op(

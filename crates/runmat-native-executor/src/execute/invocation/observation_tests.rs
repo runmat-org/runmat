@@ -1,6 +1,7 @@
 use super::*;
 use crate::execute::region::observation::test_support::observed_state;
 use crate::region::placement_test_support::Probe;
+use runmat_runtime::native::{NativeCall, NativeExit, NativeHostStatus};
 use std::rc::Rc;
 
 unsafe extern "C" fn failed_entry(_: *mut NativeCall, _: *mut NativeExit) -> NativeHostStatus {
@@ -19,7 +20,7 @@ fn failed_entry_reports_before_retained_invocation_is_dropped() {
         None,
     );
     assert!(invocation.advance().is_err());
-    assert!(invocation.state.region_observation.is_none());
+    assert!(invocation.active.is_none());
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
     drop(invocation);

@@ -61,11 +61,7 @@ fn execute_inner(
     if state.skip_before_resume(request)? {
         return Ok(NativeSiteOutcome::continue_execution());
     }
-    if state
-        .runtime
-        .cancellation()
-        .load(std::sync::atomic::Ordering::Relaxed)
-    {
+    if state.runtime.is_cancelled() {
         *exit = NativeExit::cancelled(runmat_runtime::native::NativeCancellation {
             reason: runmat_runtime::native::NativeCancellationReason::REQUESTED,
             reserved: 0,

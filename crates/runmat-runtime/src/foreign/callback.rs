@@ -59,10 +59,7 @@ pub fn invoke_foreign_callback(
     request: ForeignCallbackRequest,
 ) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>> {
     Box::pin(async move {
-        if context
-            .cancellation()
-            .load(std::sync::atomic::Ordering::SeqCst)
-        {
+        if context.is_cancelled() {
             return Err(foreign_error(
                 ForeignErrorKind::CallbackFailed,
                 "foreign callback was cancelled before invocation",
@@ -140,11 +137,11 @@ mod tests {
     #[test]
     fn callback_observes_originating_session_cancellation() {
         let service = Rc::new(RecordingCallService::default());
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_cancellation_token(cancellation.token())
             .with_service_ports(RuntimeServicePorts::default().with_call(service.clone()));
-        context
-            .cancellation()
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        cancellation.cancel(runmat_execution::CancellationReason::User);
         let error = futures::executor::block_on(invoke_foreign_callback(
             context,
             ForeignCallbackRequest {

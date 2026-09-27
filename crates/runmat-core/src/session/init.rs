@@ -21,7 +21,7 @@ impl RunMatSession {
         #[cfg(target_arch = "wasm32")]
         let _ = enable_jit;
 
-        let interrupt_flag = Arc::new(AtomicBool::new(false));
+        let cancellation = cancellation::SessionCancellation::default();
         let search_path = Arc::new(
             runmat_runtime::builtins::common::path_state::SearchPath::new(
                 runmat_runtime::builtins::common::path_state::current_path_string(),
@@ -96,10 +96,10 @@ impl RunMatSession {
             native_tiering_enabled,
             project_handoff: None,
             source_pool: SourcePool::default(),
-            interrupt_flag: Arc::clone(&interrupt_flag),
+            cancellation: cancellation.clone(),
             runtime_context: runmat_runtime::context::RuntimeContext::with_cancellation(
                 std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
-                Arc::clone(&interrupt_flag),
+                cancellation.handle().token(),
             )
             .with_search_path(search_path)
             .with_service_ports(runtime_services),

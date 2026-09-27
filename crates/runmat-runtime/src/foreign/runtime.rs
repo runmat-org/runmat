@@ -157,10 +157,7 @@ impl RuntimeForeignService for ForeignRuntime {
                     format!("foreign adapter {} is not registered", call.adapter),
                 )
             })?;
-            if context
-                .cancellation()
-                .load(std::sync::atomic::Ordering::SeqCst)
-            {
+            if context.is_cancelled() {
                 return Err(foreign_error(
                     ForeignErrorKind::CallbackFailed,
                     format!("foreign call {} was cancelled", call.symbol),

@@ -14,10 +14,7 @@ use runmat_time::Instant;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use crate::execution::{
@@ -51,6 +48,7 @@ fn runtime_language_mode(mode: CompatMode) -> runmat_runtime::context::RuntimeLa
 
 mod compile;
 pub(crate) mod semantic_definition;
+mod cancellation;
 mod config;
 mod dynamic;
 mod executable;
@@ -100,8 +98,8 @@ pub struct RunMatSession {
     project_handoff: Option<runmat_package::FrozenProjectHandoff>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
-    /// Cooperative cancellation flag shared with the runtime.
-    interrupt_flag: Arc<AtomicBool>,
+    /// Publishes one immutable cancellation generation per admitted execution.
+    cancellation: cancellation::SessionCancellation,
     /// Root-scoped execution authority inherited by every invocation.
     runtime_context: runmat_runtime::context::RuntimeContext,
     /// Typed handle retained alongside the executor-neutral runtime port so a

@@ -1,6 +1,7 @@
 //! Portable execution contracts shared by native, browser, test, and remote hosts.
 
 pub mod collective;
+pub mod cancellation;
 pub mod distributed;
 mod error;
 pub mod executable;

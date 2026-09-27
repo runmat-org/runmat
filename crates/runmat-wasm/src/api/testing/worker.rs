@@ -1,6 +1,3 @@
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-
 use wasm_bindgen::prelude::*;
 
 use crate::api::session::{install_wasm_interrupt, RunMatWasm};
@@ -19,7 +16,7 @@ impl RunMatWasm {
         self.ensure_not_disposed()?;
         let input: TestAttemptInput = serde_wasm_bindgen::from_value(input)
             .map_err(|error| js_error(&format!("Test attempt input is invalid: {error}")))?;
-        let cancellation = Arc::new(AtomicBool::new(false));
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let _interrupt = install_wasm_interrupt(&self.active_interrupt, cancellation.clone());
         let mut session = self.session.borrow_mut();
         let attempt = session
@@ -28,7 +25,7 @@ impl RunMatWasm {
                 &input.plan,
                 &input.test_id,
                 input.attempt,
-                cancellation,
+                cancellation.token(),
             )
             .await
             .map_err(|error| js_error(&format!("Test attempt failed: {error}")))?;

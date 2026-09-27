@@ -1,8 +1,3 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
 use runmat_core::{
     ExecutableSource, InvocationControl, ProcedureInvocation, RunError, RunMatSession,
 };
@@ -211,12 +206,13 @@ async fn executable_invocation_observes_cancellation_and_deadlines() {
         )
         .await
         .unwrap();
-    let cancelled = Arc::new(AtomicBool::new(true));
+    let cancelled = runmat_execution::cancellation::CancellationSource::new();
+    cancelled.cancel(runmat_execution::CancellationReason::User);
     let cancellation_error = session
         .invoke_executable(
             &unit,
             ProcedureInvocation::function("controlledTest", Vec::new()),
-            &InvocationControl::default().with_cancellation(cancelled.clone()),
+            &InvocationControl::default().with_cancellation(cancelled.token()),
         )
         .await
         .unwrap_err();
@@ -225,7 +221,6 @@ async fn executable_invocation_observes_cancellation_and_deadlines() {
         Some("RunMat:ExecutionCancelled")
     );
 
-    cancelled.store(false, Ordering::Relaxed);
     let deadline_error = session
         .invoke_executable(
             &unit,

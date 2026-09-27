@@ -2,6 +2,8 @@
 
 #[path = "generic_execution/short_circuit.rs"]
 mod short_circuit;
+#[path = "generic_execution/cancellation_resume.rs"]
+mod cancellation_resume;
 
 use std::{
     collections::BTreeMap,
@@ -715,10 +717,9 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
 #[test]
 fn cancellation_exits_without_committing_speculative_outputs() {
     let executor = compile_executor(fixture()).unwrap();
-    let runtime = runtime_context();
-    runtime
-        .cancellation()
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let source = runmat_execution::cancellation::CancellationSource::new();
+    let runtime = runtime_context().with_cancellation_token(source.token());
+    source.cancel(runmat_execution::CancellationReason::User);
     assert!(matches!(
         executor.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime),
         Err(NativeExecutorError::Cancelled)

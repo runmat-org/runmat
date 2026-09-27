@@ -20,7 +20,7 @@ fn fusion_var_index(bytecode: &runmat_vm::Bytecode, name: &str) -> usize {
         .expect("named fixture variable")
 }
 
-fn resume_after_input_store(
+pub(super) fn resume_after_input_store(
     bytecode: &runmat_vm::Bytecode,
     input: Value,
 ) -> runmat_vm::InterpreterResumeState {
@@ -373,7 +373,7 @@ fn fusion_compiler_nested_expressions_and_branches_have_disjoint_regions() {
 /// no instruction, span, candidate, decision, or execution result is replaced.
 struct CancelOnCpuFusionSelection {
     placement: Rc<runmat_accelerate::placement::PlacementSession>,
-    cancellation: std::sync::Arc<AtomicBool>,
+    cancellation: runmat_execution::cancellation::CancellationSource,
     selected: std::cell::Cell<bool>,
 }
 
@@ -393,7 +393,8 @@ impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelec
             })
         {
             self.selected.set(true);
-            self.cancellation.store(true, Ordering::SeqCst);
+            self.cancellation
+                .cancel(runmat_execution::CancellationReason::User);
         }
         Ok(decision)
     }
@@ -423,7 +424,7 @@ fn fusion_cpu_region_cancellation_records_failure_not_completion() {
         // coverage; ticket RAII drop remains separately unit-tested.
         let bytecode = compile_semantic("x = [0.25, 0.5]; y = sin(x) .* x + 2;");
         let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
-        let cancellation = std::sync::Arc::new(AtomicBool::new(false));
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let service = Rc::new(CancelOnCpuFusionSelection {
             placement: placement.clone(),
             cancellation: cancellation.clone(),
@@ -431,7 +432,7 @@ fn fusion_cpu_region_cancellation_records_failure_not_completion() {
         });
         let runtime = runmat_runtime::context::RuntimeContext::with_cancellation(
             Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
-            cancellation,
+            cancellation.token(),
         )
         .with_service_ports(
             runmat_runtime::context::RuntimeServicePorts::default().with_placement(service.clone()),

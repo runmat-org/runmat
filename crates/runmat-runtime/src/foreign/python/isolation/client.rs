@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
@@ -193,7 +192,7 @@ impl IsolatedPythonClient {
         nested: &NestedPythonQueue,
     ) -> Result<Vec<Value>, RuntimeError> {
         loop {
-            if runtime.cancellation().load(Ordering::Relaxed) {
+            if runtime.is_cancelled() {
                 let _ = self.child.terminate_tree().await;
                 return Err(runtime_error(wire_error(
                     "RunMat:Python:Cancelled",

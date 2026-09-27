@@ -2,10 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc, Arc, Condvar, Mutex,
-};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use futures::channel::{mpsc as async_mpsc, oneshot};
@@ -162,7 +159,7 @@ enum NativeAsyncState {
 pub(super) struct NativeAsyncResult {
     state: Mutex<NativeAsyncState>,
     ready: Condvar,
-    cancellation: Arc<AtomicBool>,
+    cancellation: runmat_execution::cancellation::CancellationSource,
     _origin: Arc<OriginServiceLease>,
 }
 
@@ -186,7 +183,7 @@ impl NativeAsyncResult {
         Self {
             state: Mutex::new(NativeAsyncState::Pending),
             ready: Condvar::new(),
-            cancellation: Arc::new(AtomicBool::new(false)),
+            cancellation: runmat_execution::cancellation::CancellationSource::new(),
             _origin: origin,
         }
     }
@@ -209,8 +206,8 @@ impl NativeAsyncResult {
         self.ready.notify_all();
     }
 
-    fn cancellation(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.cancellation)
+    fn cancellation(&self) -> runmat_execution::cancellation::CancellationToken {
+        self.cancellation.token()
     }
 }
 
@@ -227,22 +224,25 @@ impl Drop for NativeAsyncResult {
 
 impl MexAsyncResult for NativeAsyncResult {
     fn cancel(&self, allow_interrupt: bool) -> bool {
-        let mut state = self.state.lock().expect("MEX async result is not poisoned");
-        match *state {
-            NativeAsyncState::Pending => {
-                self.cancellation.store(true, Ordering::Release);
-                *state = NativeAsyncState::Cancelled;
-                self.ready.notify_all();
-                true
+        let requested = {
+            let mut state = self.state.lock().expect("MEX async result is not poisoned");
+            match *state {
+                NativeAsyncState::Pending => {
+                    *state = NativeAsyncState::Cancelled;
+                    true
+                }
+                NativeAsyncState::Running if allow_interrupt => true,
+                NativeAsyncState::Running
+                | NativeAsyncState::Cancelled
+                | NativeAsyncState::Complete(_) => false,
             }
-            NativeAsyncState::Running if allow_interrupt => {
-                self.cancellation.store(true, Ordering::Release);
-                true
-            }
-            NativeAsyncState::Running
-            | NativeAsyncState::Cancelled
-            | NativeAsyncState::Complete(_) => false,
+        };
+        if requested {
+            self.cancellation
+                .cancel(runmat_execution::CancellationReason::User);
+            self.ready.notify_all();
         }
+        requested
     }
 
     fn is_ready(&self) -> bool {
@@ -954,7 +954,7 @@ mod tests {
 
         assert!(result.cancel(false));
         assert!(result.is_ready());
-        assert!(result.cancellation().load(Ordering::Acquire));
+        assert!(result.cancellation().is_cancelled());
         let error = result
             .result()
             .result
@@ -969,11 +969,11 @@ mod tests {
         assert!(result.begin());
 
         assert!(!result.cancel(false));
-        assert!(!result.cancellation().load(Ordering::Acquire));
+        assert!(!result.cancellation().is_cancelled());
         assert!(!result.is_ready());
 
         assert!(result.cancel(true));
-        assert!(result.cancellation().load(Ordering::Acquire));
+        assert!(result.cancellation().is_cancelled());
         assert!(!result.is_ready());
         result.complete(MexEngineCompletion::from_result(Err(lane_diagnostic(
             "operation observed cancellation",
@@ -1107,7 +1107,7 @@ mod tests {
         fn execute_async(
             &self,
             operation: MexAsyncOperation,
-            cancellation: Arc<AtomicBool>,
+            cancellation: runmat_execution::cancellation::CancellationToken,
         ) -> MexEngineCompletion<Vec<MxArray>> {
             let MexAsyncOperation::Call { function, .. } = operation else {
                 return MexEngineCompletion::from_result(Err(lane_diagnostic(
@@ -1116,10 +1116,10 @@ mod tests {
             };
             assert_eq!(function, "wait_for_cancel");
             let deadline = Instant::now() + Duration::from_secs(2);
-            while !cancellation.load(Ordering::Acquire) && Instant::now() < deadline {
+            while !cancellation.is_cancelled() && Instant::now() < deadline {
                 std::thread::yield_now();
             }
-            let diagnostic = if cancellation.load(Ordering::Acquire) {
+            let diagnostic = if cancellation.is_cancelled() {
                 MexDiagnostic {
                     identifier: Some("RunMat:MEX:Cancelled".into()),
                     message: "asynchronous callback observed cancellation".into(),

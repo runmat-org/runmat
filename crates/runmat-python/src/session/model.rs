@@ -194,7 +194,7 @@ impl PythonSession {
     pub fn invoke_with_callback_and_cancellation(
         &self,
         call: PythonCall,
-        cancellation: Option<&std::sync::atomic::AtomicBool>,
+        cancellation: Option<&dyn Fn() -> bool>,
         mut callback: impl FnMut(PythonCallbackInvocation) -> Result<PythonValue, PythonError>,
     ) -> Result<Vec<PythonValue>, PythonError> {
         if let Some(active) = ACTIVE_REENTRY.with(|active| active.borrow().clone()) {
@@ -217,8 +217,7 @@ impl PythonSession {
             let event = match response.recv_timeout(std::time::Duration::from_millis(10)) {
                 Ok(event) => event,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if !interrupted && cancellation.is_some_and(|flag| flag.load(Ordering::SeqCst))
-                    {
+                    if !interrupted && cancellation.is_some_and(|is_cancelled| is_cancelled()) {
                         if !self.inner.interrupt.request() {
                             return Err(PythonError::host(
                                 "PythonCancellationError",
@@ -606,7 +605,7 @@ mod tests {
                     inputs: Vec::new(),
                     outputs: Vec::new(),
                 },
-                Some(&cancellation),
+                Some(&|| cancellation.load(Ordering::SeqCst)),
                 |_| {
                     Err(PythonError::host(
                         "PythonCallbackError",

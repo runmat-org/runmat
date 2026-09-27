@@ -309,7 +309,12 @@ mod tests {
 
     #[test]
     fn interleaved_futures_isolate_source_output_and_cancellation_state() {
-        async fn session_future(source_id: SourceId, source: &'static str, outputs: usize) {
+        async fn session_future(
+            source_id: SourceId,
+            source: &'static str,
+            outputs: usize,
+            cancelled: bool,
+        ) {
             let _catalog = crate::source_context::replace_source_catalog(vec![(
                 source_id,
                 format!("session-{}.m", source_id.0),
@@ -332,24 +337,24 @@ mod tests {
                 Some(source)
             );
             assert_eq!(crate::output_count::current_output_count(), Some(outputs));
-            assert!(!crate::interrupt::is_cancelled());
+            assert_eq!(crate::interrupt::is_cancelled(), cancelled);
         }
 
-        let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let first = RuntimeContext::with_cancellation(
+            Rc::new(RuntimeExecutionService::new()),
+            cancellation.token(),
+        );
         let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        first
-            .cancellation()
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        let mut first_future = Box::pin(first.scope(session_future(SourceId(1), "first", 1)));
-        let mut second_future = Box::pin(second.scope(session_future(SourceId(2), "second", 2)));
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        let mut first_future = Box::pin(first.scope(session_future(SourceId(1), "first", 1, true)));
+        let mut second_future =
+            Box::pin(second.scope(session_future(SourceId(2), "second", 2, false)));
         let waker = std::task::Waker::from(Arc::new(NoopWake));
         let mut cx = Context::from_waker(&waker);
 
         assert!(first_future.as_mut().poll(&mut cx).is_pending());
         assert!(second_future.as_mut().poll(&mut cx).is_pending());
-        first
-            .cancellation()
-            .store(false, std::sync::atomic::Ordering::Relaxed);
         assert!(first_future.as_mut().poll(&mut cx).is_ready());
         assert!(second_future.as_mut().poll(&mut cx).is_ready());
         assert!(crate::source_context::current_source().is_none());

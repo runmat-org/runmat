@@ -9,6 +9,8 @@ mod runtime;
 mod scope;
 mod services;
 mod state;
+#[cfg(test)]
+mod cancellation_tests;
 
 pub mod legacy;
 pub mod preparation;

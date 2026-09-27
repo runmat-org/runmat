@@ -1,6 +1,3 @@
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-
 use runmat_execution_artifact::{
     ExecutableForm, ProgramExecutionRequest, ProgramExecutionResponse,
 };
@@ -254,7 +251,7 @@ async fn execute_test_attempt(
             &workload.submission.plan,
             &workload.test_id,
             workload.attempt,
-            Arc::new(AtomicBool::new(false)),
+            runmat_execution::cancellation::CancellationSource::new().token(),
         )
         .await
         .map_err(|error| error.to_string());

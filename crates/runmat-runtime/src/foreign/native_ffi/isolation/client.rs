@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use runmat_process_host::environment::{EnvironmentAllowlist, EnvironmentPolicy};
@@ -217,7 +216,7 @@ impl IsolatedNativeFfiClient {
         host_identity: &str,
     ) -> Result<Vec<Value>, RuntimeError> {
         loop {
-            if runtime.cancellation().load(Ordering::Relaxed) {
+            if runtime.is_cancelled() {
                 return Err(runtime_error(wire_error(
                     "RunMat:NativeFFI:Cancelled",
                     "isolated native-library invocation was cancelled",

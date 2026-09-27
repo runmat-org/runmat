@@ -1,5 +1,5 @@
+use runmat_execution::cancellation::CancellationToken;
 use std::rc::Rc;
-use std::sync::{atomic::AtomicBool, Arc};
 
 use crate::{
     value_from_mx_in_context, value_to_mx_for_interface_in_context, MexDiagnostic,
@@ -15,7 +15,7 @@ pub trait MexBoundaryHostServices {
     fn execute_async(
         &self,
         operation: crate::MexAsyncOperation,
-        _cancellation: Arc<AtomicBool>,
+        _cancellation: CancellationToken,
     ) -> MexEngineCompletion<Vec<MxArray>> {
         execute_async_operation(self, operation)
     }
@@ -96,7 +96,7 @@ impl MexBoundaryHostServices for DirectMexBoundaryHostServices {
     fn execute_async(
         &self,
         operation: crate::MexAsyncOperation,
-        cancellation: Arc<AtomicBool>,
+        cancellation: CancellationToken,
     ) -> MexEngineCompletion<Vec<MxArray>> {
         let _cancellation = self.services.cancellation_scope(cancellation);
         execute_async_operation(self, operation)

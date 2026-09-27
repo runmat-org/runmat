@@ -456,6 +456,7 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
+        let _admission = self.admit_execution(None);
         let requested_outputs = request.requested_outputs;
         let source_input = request.source.clone();
         let source_resolution = match source_input_text(request.source).await {
@@ -541,9 +542,8 @@ impl RunMatSession {
         runmat_runtime::warning_store::reset();
         runmat_value::set_display_format(self.format_mode);
         reset_provider_telemetry();
-        self.interrupt_flag.store(false, Ordering::Relaxed);
         let _interrupt_guard =
-            runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
+            runmat_runtime::interrupt::replace_interrupt(Some(self.runtime_context.cancellation()));
         let start_time = Instant::now();
         self.stats.total_executions += 1;
         let debug_trace = std::env::var("RUNMAT_DEBUG_REPL").is_ok();

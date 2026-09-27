@@ -42,11 +42,7 @@ unsafe extern "C" fn poll_safepoint(
         // SAFETY: the pointers were checked and are borrowed for this callback.
         unsafe { (*safepoint).validate() }
             .map_err(|error| NativeExecutorError::Host(error.to_string()))?;
-        if state
-            .runtime
-            .cancellation()
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if state.runtime.is_cancelled() {
             // SAFETY: exit is a checked writable callback output.
             unsafe {
                 *exit = NativeExit::cancelled(NativeCancellation {

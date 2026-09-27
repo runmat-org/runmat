@@ -1,8 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 
 use log::warn;
 use runmat_core::RunMatSession;
@@ -77,14 +74,15 @@ pub struct RunMatWasm {
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
-    pub(crate) active_interrupt: RefCell<Option<Arc<AtomicBool>>>,
+    pub(crate) active_interrupt:
+        RefCell<Option<runmat_execution::cancellation::CancellationSource>>,
     telemetry_sink: Option<Arc<dyn TelemetrySink>>,
     package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
     execution_service: std::rc::Rc<BrowserExecutionService>,
 }
 
 pub(crate) struct WasmInterruptGuard<'a> {
-    slot: &'a RefCell<Option<Arc<AtomicBool>>>,
+    slot: &'a RefCell<Option<runmat_execution::cancellation::CancellationSource>>,
     _runtime_guard: runmat_runtime::interrupt::InterruptGuard,
 }
 
@@ -95,12 +93,11 @@ impl Drop for WasmInterruptGuard<'_> {
 }
 
 pub(crate) fn install_wasm_interrupt(
-    slot: &RefCell<Option<Arc<AtomicBool>>>,
-    handle: Arc<AtomicBool>,
+    slot: &RefCell<Option<runmat_execution::cancellation::CancellationSource>>,
+    handle: runmat_execution::cancellation::CancellationSource,
 ) -> WasmInterruptGuard<'_> {
-    handle.store(false, Ordering::Relaxed);
-    slot.borrow_mut().replace(Arc::clone(&handle));
-    let runtime_guard = runmat_runtime::interrupt::replace_interrupt(Some(handle));
+    slot.borrow_mut().replace(handle.clone());
+    let runtime_guard = runmat_runtime::interrupt::replace_interrupt(Some(handle.token()));
     WasmInterruptGuard {
         slot,
         _runtime_guard: runtime_guard,
@@ -880,9 +877,9 @@ impl RunMatWasm {
         let interrupt_handle = self.session.borrow().interrupt_handle();
         self.active_interrupt
             .borrow_mut()
-            .replace(Arc::clone(&interrupt_handle));
+            .replace(interrupt_handle.clone());
         struct ActiveInterruptGuard<'a> {
-            slot: &'a RefCell<Option<Arc<std::sync::atomic::AtomicBool>>>,
+            slot: &'a RefCell<Option<runmat_execution::cancellation::CancellationSource>>,
         }
         impl Drop for ActiveInterruptGuard<'_> {
             fn drop(&mut self) {
@@ -1341,8 +1338,9 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = cancelExecution)]
     pub fn cancel_execution(&self) {
-        if let Some(flag) = self.active_interrupt.borrow().as_ref() {
-            flag.store(true, Ordering::Relaxed);
+        let active = self.active_interrupt.borrow().clone();
+        if let Some(flag) = active {
+            flag.cancel(runmat_execution::CancellationReason::User);
             return;
         }
         self.session.borrow().cancel_execution();

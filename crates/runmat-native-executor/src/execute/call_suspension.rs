@@ -141,16 +141,11 @@ pub(super) async fn complete(
     continuation: u64,
     generation: u64,
 ) -> NativeExecutorResult<NativeSiteRequest> {
+    validate_pending(state, continuation, generation)?;
     let pending = state
         .pending_call
         .take()
         .ok_or_else(|| NativeExecutorError::Host("native invocation has no pending call".into()))?;
-    if pending.continuation != continuation || pending.generation != generation {
-        state.pending_call = Some(pending);
-        return Err(NativeExecutorError::Host(
-            "native call continuation identity is stale or mismatched".into(),
-        ));
-    }
     let completion = pending.future.await;
     let completion = super::sync::CompletedOperation::new(completion).finish(state)?;
     let request = pending.request;
@@ -172,4 +167,21 @@ pub(super) async fn complete(
         payload,
     });
     Ok(request)
+}
+
+pub(super) fn validate_pending(
+    state: &HostState,
+    continuation: u64,
+    generation: u64,
+) -> NativeExecutorResult<()> {
+    let pending = state
+        .pending_call
+        .as_ref()
+        .ok_or_else(|| NativeExecutorError::Host("native invocation has no pending call".into()))?;
+    if pending.continuation != continuation || pending.generation != generation {
+        return Err(NativeExecutorError::Host(
+            "native call continuation identity is stale or mismatched".into(),
+        ));
+    }
+    Ok(())
 }

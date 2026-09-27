@@ -1,5 +1,5 @@
+use runmat_execution::cancellation::CancellationToken;
 use runmat_value::Value;
-use std::sync::{atomic::AtomicBool, Arc};
 
 use super::MexDiagnostic;
 
@@ -38,7 +38,10 @@ impl MexCancellationScope for () {}
 /// its workspace, cancellation, and reentrancy policy. The MEX layer never
 /// reaches into VM or Core state directly.
 pub trait MexHostServices {
-    fn cancellation_scope(&self, _cancellation: Arc<AtomicBool>) -> Box<dyn MexCancellationScope> {
+    fn cancellation_scope(
+        &self,
+        _cancellation: CancellationToken,
+    ) -> Box<dyn MexCancellationScope> {
         Box::new(())
     }
     fn eval(&self, command: &str) -> Result<(), MexDiagnostic>;

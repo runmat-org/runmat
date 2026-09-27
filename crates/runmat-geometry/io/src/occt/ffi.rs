@@ -1,8 +1,9 @@
+use crate::import::CancellationProbe;
 use sha2::Digest as _;
 use std::collections::BTreeMap;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc, Mutex, OnceLock,
+    atomic::{AtomicU64, Ordering},
+    Mutex, OnceLock,
 };
 
 #[cxx::bridge(namespace = "runmat_geometry_io::occt_backend")]
@@ -508,14 +509,14 @@ pub(crate) mod bridge {
 }
 
 static NEXT_CANCEL_TOKEN_ID: AtomicU64 = AtomicU64::new(1);
-static CANCEL_TOKENS: OnceLock<Mutex<BTreeMap<u64, Arc<AtomicBool>>>> = OnceLock::new();
+static CANCEL_TOKENS: OnceLock<Mutex<BTreeMap<u64, CancellationProbe>>> = OnceLock::new();
 
 pub(crate) struct OcctCancelTokenRegistration {
     id: u64,
 }
 
 impl OcctCancelTokenRegistration {
-    pub(crate) fn new(flag: Option<Arc<AtomicBool>>) -> Self {
+    pub(crate) fn new(flag: Option<CancellationProbe>) -> Self {
         let Some(flag) = flag else {
             return Self { id: 0 };
         };
@@ -538,9 +539,11 @@ impl Drop for OcctCancelTokenRegistration {
         if self.id == 0 {
             return;
         }
-        if let Ok(mut tokens) = cancel_tokens().lock() {
-            tokens.remove(&self.id);
-        }
+        let retired = cancel_tokens()
+            .lock()
+            .ok()
+            .and_then(|mut tokens| tokens.remove(&self.id));
+        drop(retired);
     }
 }
 
@@ -548,12 +551,11 @@ fn occt_import_cancelled(cancel_token_id: u64) -> bool {
     if cancel_token_id == 0 {
         return false;
     }
-    cancel_tokens()
+    let probe = cancel_tokens()
         .lock()
         .ok()
-        .and_then(|tokens| tokens.get(&cancel_token_id).cloned())
-        .map(|flag| flag.load(Ordering::Relaxed))
-        .unwrap_or(false)
+        .and_then(|tokens| tokens.get(&cancel_token_id).cloned());
+    probe.is_some_and(|is_cancelled| is_cancelled())
 }
 
 fn occt_exact_identity_digest(bytes: &[u8]) -> Vec<u8> {
@@ -567,6 +569,28 @@ fn occt_geometry_digest(bytes: &[u8]) -> Vec<u8> {
     sha2::Sha256::digest(bytes).to_vec()
 }
 
-fn cancel_tokens() -> &'static Mutex<BTreeMap<u64, Arc<AtomicBool>>> {
+fn cancel_tokens() -> &'static Mutex<BTreeMap<u64, CancellationProbe>> {
     CANCEL_TOKENS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn probe_runs_outside_registry_lock_and_registration_drop_removes_it() {
+        let probe: CancellationProbe = Arc::new(|| {
+            drop(cancel_tokens().lock().unwrap());
+            true
+        });
+        let registration = OcctCancelTokenRegistration::new(Some(probe.clone()));
+        let id = registration.id();
+        assert_ne!(id, 0);
+        assert!(occt_import_cancelled(id));
+        assert_eq!(Arc::strong_count(&probe), 2);
+        drop(registration);
+        assert_eq!(Arc::strong_count(&probe), 1);
+        assert!(!occt_import_cancelled(id));
+    }
 }

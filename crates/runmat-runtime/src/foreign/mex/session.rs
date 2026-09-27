@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 
 use futures::FutureExt;
 use runmat_mex::{
@@ -203,7 +203,7 @@ impl MexRuntimeSession {
                 "MEX modules cannot be invoked while the session is shutting down",
             )));
         }
-        if runtime.cancellation().load(Ordering::Relaxed) {
+        if runtime.is_cancelled() {
             return Some(Err(runtime_error(
                 "Cancelled",
                 format!("MEX invocation '{name}' was cancelled before entering native code"),
@@ -741,8 +741,12 @@ mod tests {
 
     #[test]
     fn cancelled_invocation_never_reaches_discovery_or_native_code() {
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        runtime.cancellation().store(true, Ordering::Relaxed);
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(RuntimeExecutionService::new()),
+            cancellation.token(),
+        );
+        cancellation.cancel(runmat_execution::CancellationReason::User);
         let result = futures::executor::block_on(MexRuntimeSession::new().load_and_call(
             "module_that_must_not_be_resolved",
             Vec::new(),

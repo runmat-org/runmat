@@ -1,6 +1,5 @@
+use runmat_execution::cancellation::CancellationToken;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 use runmat_test::context::TestExecutionContext;
 use runmat_test::discovery::FrozenTestRunSnapshot;
@@ -25,11 +24,11 @@ pub struct CoreTestAttempt {
     pub coverage: Vec<runmat_test::coverage::CoverageFragment>,
 }
 
-struct AtomicCancellation(Arc<AtomicBool>);
+struct AttemptCancellation(CancellationToken);
 
-impl CancellationProbe for AtomicCancellation {
+impl CancellationProbe for AttemptCancellation {
     fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+        self.0.is_cancelled()
     }
 }
 
@@ -42,8 +41,9 @@ impl RunMatSession {
         plan: &TestPlan,
         test_id: &TestId,
         attempt: u32,
-        cancellation: Arc<AtomicBool>,
+        cancellation: CancellationToken,
     ) -> Result<CoreTestAttempt, TestDomainError> {
+        let _admission = self.admit_execution(Some(&cancellation));
         snapshot.validate()?;
         if snapshot.program_revision != plan.program_revision {
             return Err(TestDomainError::InvalidField {
@@ -125,7 +125,7 @@ impl RunMatSession {
             .execute(
                 &case,
                 &mut executor,
-                &AtomicCancellation(cancellation),
+                &AttemptCancellation(cancellation),
                 &mut sink,
             )
             .await;

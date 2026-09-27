@@ -84,13 +84,7 @@ pub(in crate::execute) fn before_site(state: &mut HostState, request: NativeSite
     let Some(pending) = state.region_observation.take() else {
         return;
     };
-    state.region_observation = pending.before(
-        identity(request),
-        state
-            .runtime
-            .cancellation()
-            .load(std::sync::atomic::Ordering::Relaxed),
-    );
+    state.region_observation = pending.before(identity(request), state.runtime.is_cancelled());
 }
 pub(in crate::execute) fn after_site(
     state: &mut HostState,
