@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
@@ -13,30 +11,21 @@ use runmat_accelerate_api::{
     NativeDeviceContext, NativeDeviceContextGuard, NativeDeviceInitialization, NumericElementType,
 };
 
-use super::driver::{CudaDriver, DevicePointer};
+use super::allocation_state::{Allocation, AllocationState};
+use super::driver::CudaDriver;
 use super::transfer::{
     numeric_owned_bytes_mut, numeric_to_integer, numeric_view_bytes, zeroed_numeric,
 };
 
 static PROVIDER: OnceCell<Option<&'static CudaProvider>> = OnceCell::new();
 
-#[derive(Debug, Clone, Copy)]
-struct Allocation {
-    pointer: DevicePointer,
-    byte_length: usize,
-    descriptor: GpuTensorDescriptor,
-}
-
 pub struct CudaProvider {
     driver: Arc<CudaDriver>,
-    cuda_device: i32,
     ordinal: u32,
-    context: usize,
     name: String,
     memory_bytes: u64,
     device_id: u32,
-    next_buffer: AtomicU64,
-    allocations: Mutex<HashMap<u64, Allocation>>,
+    allocations: Arc<AllocationState>,
 }
 
 impl std::fmt::Debug for CudaProvider {
@@ -50,24 +39,6 @@ impl std::fmt::Debug for CudaProvider {
     }
 }
 
-impl Drop for CudaProvider {
-    fn drop(&mut self) {
-        if let Ok(allocations) = self.allocations.get_mut() {
-            let pointers = allocations
-                .values()
-                .map(|allocation| allocation.pointer)
-                .collect::<Vec<_>>();
-            let _ = self.with_context(|| {
-                for pointer in pointers {
-                    let _ = self.driver.free(pointer);
-                }
-                Ok(())
-            });
-        }
-        self.driver.release_primary_context(self.cuda_device);
-    }
-}
-
 impl CudaProvider {
     fn initialize(ordinal: u32) -> Result<Option<Self>> {
         let Some(driver) = CudaDriver::load()? else {
@@ -75,82 +46,30 @@ impl CudaProvider {
         };
         let driver = Arc::new(driver);
         let (cuda_device, context, name, memory_bytes) = driver.initialize(ordinal as i32)?;
+        let device_id = runmat_accelerate_api::next_device_id();
+        let allocations = Arc::new(AllocationState::new(
+            driver.clone(),
+            cuda_device,
+            context,
+            device_id,
+        ));
         Ok(Some(Self {
             driver,
-            cuda_device,
             ordinal,
-            context,
             name,
             memory_bytes: u64::try_from(memory_bytes)
                 .map_err(|_| anyhow!("CUDA device memory exceeds the supported range"))?,
-            device_id: runmat_accelerate_api::next_device_id(),
-            next_buffer: AtomicU64::new(1),
-            allocations: Mutex::new(HashMap::new()),
+            device_id,
+            allocations,
         }))
     }
 
     fn with_context<T>(&self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
-        self.driver.push_context(self.context)?;
-        let result = operation();
-        let leave = self.driver.pop_context();
-        match (result, leave) {
-            (Ok(value), Ok(())) => Ok(value),
-            (Err(error), _) => Err(error),
-            (Ok(_), Err(error)) => Err(error.context("could not leave CUDA context")),
-        }
+        self.allocations.with_context(operation)
     }
 
     fn allocation(&self, handle: &GpuTensorHandle) -> Result<Allocation> {
-        if handle.device_id != self.device_id {
-            return Err(anyhow!("CUDA handle belongs to a different provider"));
-        }
-        let allocation = self
-            .allocations
-            .lock()
-            .map_err(|_| anyhow!("CUDA allocation registry is poisoned"))?
-            .get(&handle.buffer_id)
-            .copied()
-            .ok_or_else(|| anyhow!("CUDA handle is stale or unknown"))?;
-        if allocation.descriptor.element_type != handle.descriptor.element_type
-            || allocation.descriptor.storage != handle.descriptor.storage
-        {
-            return Err(anyhow!(
-                "CUDA handle descriptor does not match its allocation"
-            ));
-        }
-        Ok(allocation)
-    }
-
-    fn insert(
-        &self,
-        shape: Vec<usize>,
-        descriptor: GpuTensorDescriptor,
-        pointer: DevicePointer,
-        byte_length: usize,
-    ) -> Result<GpuTensorHandle> {
-        let buffer_id = self
-            .next_buffer
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                current.checked_add(1)
-            })
-            .map_err(|_| anyhow!("CUDA buffer identity space is exhausted"))?;
-        self.allocations
-            .lock()
-            .map_err(|_| anyhow!("CUDA allocation registry is poisoned"))?
-            .insert(
-                buffer_id,
-                Allocation {
-                    pointer,
-                    byte_length,
-                    descriptor,
-                },
-            );
-        Ok(GpuTensorHandle {
-            shape,
-            device_id: self.device_id,
-            buffer_id,
-            descriptor,
-        })
+        self.allocations.allocation(handle)
     }
 
     fn allocate(
@@ -161,21 +80,20 @@ impl CudaProvider {
         initialization: NativeDeviceInitialization,
     ) -> Result<GpuTensorHandle> {
         let byte_length = native_buffer_byte_length(shape, element_type, storage)?;
-        let pointer = self.with_context(|| {
-            let pointer = self.driver.allocate(byte_length)?;
-            if initialization == NativeDeviceInitialization::Zeroed {
-                if let Err(error) = self.driver.zero(pointer, byte_length) {
-                    let _ = self.driver.free(pointer);
-                    return Err(error);
-                }
-            }
-            Ok(pointer)
-        })?;
         let descriptor = GpuTensorDescriptor::numeric(element_type, storage);
-        self.insert(shape.to_vec(), descriptor, pointer, byte_length)
-            .inspect_err(|_| {
-                let _ = self.with_context(|| self.driver.free(pointer));
-            })
+        self.allocations.allocate(
+            shape.to_vec(),
+            descriptor,
+            byte_length,
+            || self.driver.allocate(byte_length),
+            |pointer| {
+                if initialization == NativeDeviceInitialization::Zeroed {
+                    self.driver.zero(pointer, byte_length)
+                } else {
+                    Ok(())
+                }
+            },
+        )
     }
 
     fn upload_numeric_impl(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
@@ -385,16 +303,7 @@ impl AccelProvider for CudaProvider {
     }
 
     fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
-        if handle.device_id != self.device_id {
-            return Err(anyhow!("CUDA handle belongs to a different provider"));
-        }
-        let allocation = self
-            .allocations
-            .lock()
-            .map_err(|_| anyhow!("CUDA allocation registry is poisoned"))?
-            .remove(&handle.buffer_id)
-            .ok_or_else(|| anyhow!("CUDA handle is stale or already freed"))?;
-        self.with_context(|| self.driver.free(allocation.pointer))
+        self.allocations.free(handle)
     }
 
     fn device_info(&self) -> String {
@@ -440,15 +349,13 @@ impl AccelProvider for CudaProvider {
             api: NativeDeviceApi::Cuda,
             provider_device_id: self.device_id,
             device_ordinal: self.ordinal,
-            context_identity: self.context as u64,
+            context_identity: self.allocations.context_identity()? as u64,
             stream_identity: 0,
         })
     }
 
     fn enter_native_device_context(&self) -> Result<NativeDeviceContextGuard> {
-        self.driver.push_context(self.context)?;
-        let driver = Arc::clone(&self.driver);
-        Ok(NativeDeviceContextGuard::new(move || driver.pop_context()))
+        self.allocations.enter_native()
     }
 
     fn export_native_device_buffer(

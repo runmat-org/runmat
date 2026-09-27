@@ -150,10 +150,6 @@ impl CudaDriver {
         self.call("cuDeviceGet", unsafe {
             (self.device_get)(&mut device, ordinal)
         })?;
-        let mut context = std::ptr::null_mut();
-        self.call("cuDevicePrimaryCtxRetain", unsafe {
-            (self.primary_context_retain)(&mut context, device)
-        })?;
         let mut name = [0_i8; 256];
         self.call("cuDeviceGetName", unsafe {
             (self.device_get_name)(name.as_mut_ptr(), name.len() as i32, device)
@@ -166,13 +162,18 @@ impl CudaDriver {
         self.call("cuDeviceTotalMem", unsafe {
             (self.device_total_memory)(&mut total_memory, device)
         })?;
+        // Retain only after fallible device metadata queries have completed.
+        let mut context = std::ptr::null_mut();
+        self.call("cuDevicePrimaryCtxRetain", unsafe {
+            (self.primary_context_retain)(&mut context, device)
+        })?;
         Ok((device, context as usize, name, total_memory))
     }
 
-    pub(super) fn release_primary_context(&self, device: i32) {
-        let _ = self.call("cuDevicePrimaryCtxRelease", unsafe {
+    pub(super) fn release_primary_context(&self, device: i32) -> Result<()> {
+        self.call("cuDevicePrimaryCtxRelease", unsafe {
             (self.primary_context_release)(device)
-        });
+        })
     }
 
     pub(super) fn push_context(&self, context: usize) -> Result<()> {

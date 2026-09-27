@@ -1,3 +1,4 @@
+mod allocation_state;
 mod driver;
 mod provider;
 mod transfer;
