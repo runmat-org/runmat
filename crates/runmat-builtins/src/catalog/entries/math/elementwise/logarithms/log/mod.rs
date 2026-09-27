@@ -46,7 +46,17 @@ pub const LOG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Internal tensor construction, table mapping, or provider interaction fails.",
     message: "log: internal error",
 };
-const LOG_ERRORS: [BuiltinErrorDescriptor; 2] = [LOG_ERROR_INVALID_INPUT, LOG_ERROR_INTERNAL];
+pub const LOG_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOG.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:log:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "log: too many output arguments",
+};
+const LOG_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    LOG_ERROR_INVALID_INPUT,
+    LOG_ERROR_INTERNAL,
+    LOG_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const LOG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &LOG_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

@@ -17,5 +17,10 @@ pub(super) const OPERATION: LogarithmOperation = LogarithmOperation::Common;
     builtin_path = "crate::builtins::math::elementwise::logarithms::log10"
 )]
 async fn log10_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::LOG10_DESCRIPTOR,
+        &runmat_builtins::LOG10_ERROR_TOO_MANY_OUTPUTS,
+        "log10",
+    )?;
     super::engine::execute(OPERATION, value).await
 }

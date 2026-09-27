@@ -11,6 +11,36 @@ fn call(name: &str, value: Value) -> Value {
 }
 
 #[test]
+fn discarded_outputs_still_validate_argument_and_domain() {
+    for name in ["log", "log10", "log1p", "log2", "sqrt", "realsqrt"] {
+        assert!(
+            block_on(runmat_runtime::call_builtin_async_with_outputs(
+                name,
+                &[Value::String("not numeric".into())],
+                0,
+            ))
+            .is_err(),
+            "{name}"
+        );
+        assert!(
+            block_on(runmat_runtime::call_builtin_async_with_outputs(
+                name,
+                &[Value::Num(4.0)],
+                0,
+            ))
+            .is_ok(),
+            "{name}"
+        );
+    }
+    assert!(block_on(runmat_runtime::call_builtin_async_with_outputs(
+        "realsqrt",
+        &[Value::Num(-1.0)],
+        0,
+    ))
+    .is_err());
+}
+
+#[test]
 fn square_root_preserves_small_results_and_nan_real_domain() {
     let Value::Num(value) = call("sqrt", Value::Num(1e-300)) else {
         panic!("real double");

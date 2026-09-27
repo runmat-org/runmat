@@ -24,6 +24,11 @@ pub(super) const BUILTIN_NAME: &str = "realsqrt";
     builtin_path = "crate::builtins::math::elementwise::roots::realsqrt"
 )]
 async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REALSQRT_DESCRIPTOR,
+        &runmat_builtins::REALSQRT_ERROR_TOO_MANY_OUTPUTS,
+        "realsqrt",
+    )?;
     match value {
         Value::GpuTensor(handle) => provider::evaluate(handle).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(errors::with_detail(

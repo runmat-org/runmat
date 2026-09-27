@@ -50,10 +50,17 @@ pub const REALSQRT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "Internal tensor construction or provider interaction fails.",
     message: "realsqrt: internal error",
 };
-const REALSQRT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+pub const REALSQRT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REALSQRT.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:realsqrt:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "realsqrt: too many output arguments",
+};
+const REALSQRT_ERRORS: [BuiltinErrorDescriptor; 4] = [
     REALSQRT_ERROR_INVALID_INPUT,
     REALSQRT_ERROR_DOMAIN,
     REALSQRT_ERROR_INTERNAL,
+    REALSQRT_ERROR_TOO_MANY_OUTPUTS,
 ];
 pub const REALSQRT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &REALSQRT_SIGNATURES,

@@ -26,6 +26,11 @@ pub(super) const BUILTIN_NAME: &str = "sqrt";
     builtin_path = "crate::builtins::math::elementwise::roots::sqrt"
 )]
 async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SQRT_DESCRIPTOR,
+        &runmat_builtins::SQRT_ERROR_TOO_MANY_OUTPUTS,
+        "sqrt",
+    )?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &value,
         &SQRT_INTEGER_INPUT_EXTENSION,

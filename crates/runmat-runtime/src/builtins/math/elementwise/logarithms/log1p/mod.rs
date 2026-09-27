@@ -19,5 +19,10 @@ pub(super) const OPERATION: LogarithmOperation = LogarithmOperation::OnePlus;
     builtin_path = "crate::builtins::math::elementwise::logarithms::log1p"
 )]
 async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::LOG1P_DESCRIPTOR,
+        &runmat_builtins::LOG1P_ERROR_TOO_MANY_OUTPUTS,
+        "log1p",
+    )?;
     super::engine::execute(OPERATION, value).await
 }

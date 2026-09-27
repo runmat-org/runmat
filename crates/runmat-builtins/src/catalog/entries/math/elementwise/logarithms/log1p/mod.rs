@@ -49,7 +49,17 @@ pub const LOG1P_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     when: "Internal tensor construction or provider interaction fails.",
     message: "log1p: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [LOG1P_ERROR_INVALID_INPUT, LOG1P_ERROR_INTERNAL];
+pub const LOG1P_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOG1P.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:log1p:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "log1p: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] = [
+    LOG1P_ERROR_INVALID_INPUT,
+    LOG1P_ERROR_INTERNAL,
+    LOG1P_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const LOG1P_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

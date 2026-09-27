@@ -124,6 +124,14 @@ fn logarithm_root_and_gammaln_probe_lifetimes_through_dispatch() {
             let (provider, input) = fixture(fault);
             let _provider = ThreadProviderGuard::set(Some(provider));
             let args = [Value::GpuTensor(input.clone())];
+            if name != "gammaln" {
+                let error = block_on(runmat_runtime::call_builtin_async_with_outputs(
+                    name, &args, 3,
+                ))
+                .unwrap_err();
+                assert!(error.message().contains("output"), "{name}: {error}");
+                assert_eq!(provider.state.lock().unwrap().calls, 0);
+            }
             drop(runmat_runtime::dispatcher::call_builtin_async_with_outputs(
                 name, &args, 1,
             ));

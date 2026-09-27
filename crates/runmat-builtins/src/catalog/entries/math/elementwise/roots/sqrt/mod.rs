@@ -44,7 +44,17 @@ pub const SQRT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Internal tensor construction or provider interaction fails.",
     message: "sqrt: internal error",
 };
-const SQRT_ERRORS: [BuiltinErrorDescriptor; 2] = [SQRT_ERROR_INVALID_INPUT, SQRT_ERROR_INTERNAL];
+pub const SQRT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQRT.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:sqrt:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "sqrt: too many output arguments",
+};
+const SQRT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    SQRT_ERROR_INVALID_INPUT,
+    SQRT_ERROR_INTERNAL,
+    SQRT_ERROR_TOO_MANY_OUTPUTS,
+];
 pub const SQRT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SQRT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
