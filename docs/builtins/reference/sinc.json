@@ -34,11 +34,12 @@
   "behaviors": [
     "Accepts real or complex scalars, vectors, matrices, and N-D tensors.",
     "Preserves the input shape for vector, matrix, and N-D tensor inputs.",
+    "Preserves single or double precision for real and complex floating-point arrays, including supported GPU fallback and restoration.",
     "Returns `1` for exactly zero real inputs.",
     "Returns exact `0` for finite nonzero integer-valued real inputs, matching MATLAB's `sinpi`-style integer accuracy where practical.",
     "MATLAB-compatible calls use single or double real or complex inputs. In `runmat` compatibility mode, supported integer and logical inputs are accepted as a RunMat extension and promoted to double precision before evaluation.",
     "Complex inputs use the analytic extension `sin(pi*z)/(pi*z)` and return `1 + 0i` for `z == 0`.",
-    "GPU inputs stay resident when the active provider supports `unary_sinc`; otherwise RunMat gathers automatically and evaluates with the host implementation."
+    "GPU inputs stay resident when their owning provider supports `unary_sinc`. An unsupported hook uses host evaluation and restores the result to that provider when supported; operational errors are returned without retrying on the host."
   ],
   "examples": [
     {
@@ -122,7 +123,7 @@
   "gpu_residency": "`sinc` keeps real and complex-interleaved GPU tensors resident when the active provider exposes `unary_sinc`. The runtime preserves a host fallback for providers that do not support the hook.",
   "gpu_behavior": [
     "Provider-backed execution uses the same normalized sinc semantics, including `sinc(0) == 1` and exact zeros for finite nonzero integer-valued real inputs.",
-    "If the provider declines the operation, RunMat gathers through the active provider and evaluates with the host implementation.",
+    "If the provider reports an unsupported operation, RunMat gathers through the input's owning provider and evaluates with the host implementation. Supported restoration preserves the input's precision, shape, and device intent.",
     "Fusion emits a guarded normalized sinc expression with explicit zero and integer branches for real elementwise graphs."
   ]
 }
