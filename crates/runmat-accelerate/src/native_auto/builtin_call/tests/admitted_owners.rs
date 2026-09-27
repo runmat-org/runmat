@@ -1,8 +1,8 @@
 //! Ownership conformance uses separate genuine provider allocation owners.
 use super::*;
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, HostNumericTensorView, NumericElementType,
-    ThreadProviderGuard, WeakGpuTensorHandle,
+    allocation::WeakGpuTensorHandle, GpuTensorHandle, GpuTensorStorage, HostNumericTensorView,
+    NumericElementType, ThreadProviderGuard,
 };
 use runmat_runtime::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationAdmission,

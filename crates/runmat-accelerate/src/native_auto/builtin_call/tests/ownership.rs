@@ -1,9 +1,10 @@
 use super::super::preparation::ArgumentOperation;
 use super::*;
 use runmat_accelerate_api::{
+    allocation::WeakGpuTensorHandle,
     test_support::{RetirementProbe, TestAllocationOwner},
     GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorOwned, WeakGpuTensorHandle,
+    HostNumericTensorOwned,
 };
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -207,7 +208,10 @@ fn inaccessible_result_graph_fails_without_publishing_and_releases_uploads() {
 fn host() -> Value {
     Value::Tensor(Tensor::new(vec![1.; 2], vec![1, 2]).unwrap())
 }
-fn prepare(provider: &'static CounterProvider, args: &[Value]) -> Result<PreparedBuiltinCall> {
+fn prepare(
+    provider: &'static CounterProvider,
+    args: &[Value],
+) -> runmat_accelerate_api::ProviderExecutionResult<PreparedBuiltinCall> {
     let probe = Rc::new(Probe::default());
     probe.provider.set(true);
     NativeAutoOffload::new(provider, ThresholdConfig::default()).prepare_operation(
