@@ -1586,13 +1586,6 @@ fn ensure_storage_len(
     Ok(logical_len)
 }
 
-fn storage_pair(data: &[f64], storage: &GpuTensorStorage, idx: usize) -> (f64, f64) {
-    match storage {
-        GpuTensorStorage::Real => (data[idx], 0.0),
-        GpuTensorStorage::ComplexInterleaved => (data[idx * 2], data[idx * 2 + 1]),
-    }
-}
-
 fn require_non_integer_elementwise_inputs(
     operation: &'static str,
     left: &GpuTensorHandle,
