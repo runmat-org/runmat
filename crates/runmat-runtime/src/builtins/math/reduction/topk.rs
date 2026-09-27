@@ -154,9 +154,7 @@ async fn evaluate_topk(
     // Restoration's borrowed-input metadata guards re-mark inputs as resident.
     // Apply the completed sink barrier after those guards, leaving the distinct
     // requested output allocations resident and every source buffer reusable.
-    for handle in &protected {
-        runmat_accelerate_api::clear_residency(handle);
-    }
+    gpu_helpers::clear_input_residency(&protected, kind.name())?;
     Ok(evaluation)
 }
 

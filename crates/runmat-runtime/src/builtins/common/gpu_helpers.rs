@@ -11,6 +11,9 @@ use runmat_value::{IntegerComplexStorage, NumericScalar, NumericStorage};
 
 use crate::build_runtime_error;
 
+mod residency_cleanup;
+pub(crate) use residency_cleanup::clear_input_residency;
+
 pub fn integer_storage_from_owned(data: HostIntegerDataOwned) -> IntegerStorage {
     match data {
         HostIntegerDataOwned::I8(values) => IntegerStorage::I8(values),

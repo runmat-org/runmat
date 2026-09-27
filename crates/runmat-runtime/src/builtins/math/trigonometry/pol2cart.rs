@@ -71,9 +71,7 @@ async fn pol2cart_builtin(theta: Value, rho: Value, rest: Vec<Value>) -> Builtin
     let result = preparation::execute(inputs, &shape, requested_outputs).await?;
     // A terminal coordinate transform ends fusion use only after successful
     // semantic work; this never frees inputs or changes explicit GPU intent.
-    for source in sources {
-        runmat_accelerate_api::clear_residency(&source);
-    }
+    gpu_helpers::clear_input_residency(&sources, NAME)?;
     Ok(result)
 }
 

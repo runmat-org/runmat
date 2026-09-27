@@ -44,10 +44,9 @@ pub async fn animatedline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         })
         .collect();
     let result = construct_animatedline(args).await;
-    for handle in resident_inputs {
-        runmat_accelerate_api::clear_residency(&handle);
-    }
-    result
+    let cleanup =
+        crate::builtins::common::gpu_helpers::clear_input_residency(&resident_inputs, BUILTIN_NAME);
+    crate::runtime_error::complete_with_cleanup(result, cleanup)
 }
 
 async fn construct_animatedline(args: Vec<Value>) -> BuiltinResult<Value> {

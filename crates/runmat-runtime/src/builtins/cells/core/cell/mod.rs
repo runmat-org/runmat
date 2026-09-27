@@ -38,8 +38,6 @@ async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         })
         .collect();
     let output = allocation::build(arguments::parse(args).await?)?;
-    for handle in &resident_controls {
-        runmat_accelerate_api::clear_residency(handle);
-    }
+    crate::builtins::common::gpu_helpers::clear_input_residency(&resident_controls, "cell")?;
     Ok(output)
 }

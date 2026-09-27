@@ -59,9 +59,7 @@ async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinR
     ensure_histc_input_extensions(&x)?;
     ensure_histc_input_extensions(&binranges)?;
     let eval = evaluate(x, binranges, dim).await?;
-    for handle in &resident_inputs {
-        runmat_accelerate_api::clear_residency(handle);
-    }
+    gpu_helpers::clear_input_residency(&resident_inputs, NAME)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
