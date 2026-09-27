@@ -7,8 +7,8 @@ use runmat_accelerate::backend::wgpu::provider::{
 use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
 use runmat_accelerate::graph::ShapeInfo;
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorStorage, HostNumericDataOwned, HostTensorView, NumericElementType,
-    ProviderPrecision,
+    allocation::AllocationReleaseOutcome, AccelProvider, GpuTensorStorage, HostNumericDataOwned,
+    HostTensorView, NumericElementType, ProviderPrecision,
 };
 use runmat_value::Value;
 
@@ -73,7 +73,8 @@ async fn check_direct_and_fused_round(provider: &'static WgpuProvider) {
             shape: &[2, 2, 3],
         })
         .unwrap();
-    let metadata = runmat_accelerate_api::snapshot_handle_metadata(&input);
+    let metadata = input.wire_descriptor();
+    let input_view = input.view_identity();
     let output = provider.unary_round(&input).await.unwrap();
     let mut plan = fixture::plan(vec![fixture::cast("round", 0, 2)], 2);
     plan.group.shape = ShapeInfo::Tensor(vec![Some(2), Some(2), Some(3)]);
@@ -89,31 +90,25 @@ async fn check_direct_and_fused_round(provider: &'static WgpuProvider) {
     let Value::GpuTensor(fused) = result.final_value else {
         panic!("fused Round must publish a resident result");
     };
-    assert_eq!(
-        runmat_accelerate_api::snapshot_handle_metadata(&input),
-        metadata
-    );
-    assert_ne!(output.buffer_id, fused.buffer_id);
+    assert_eq!(input.wire_descriptor(), metadata);
+    assert_eq!(input.view_identity(), input_view);
+    assert_ne!(output.allocation_identity(), fused.allocation_identity());
+    assert!(!output.shares_allocation_with(&fused));
     for handle in [&output, &fused] {
-        assert_eq!(handle.shape, input.shape);
-        assert_eq!(handle.device_id, provider.device_id());
-        assert_ne!(handle.buffer_id, input.buffer_id);
-        assert_eq!(handle.descriptor.storage, Some(GpuTensorStorage::Real));
+        assert_eq!(handle.shape(), input.shape());
+        assert_eq!(handle.device_id(), provider.device_id());
+        assert_ne!(handle.allocation_identity(), input.allocation_identity());
+        assert!(!handle.shares_allocation_with(&input));
+        assert_eq!(handle.physical().storage(), GpuTensorStorage::Real);
         let downloaded = provider.download_numeric(handle).await.unwrap();
-        assert_eq!(downloaded.shape, input.shape);
+        assert_eq!(downloaded.shape, input.shape());
         let actual = match (provider.precision(), downloaded.data) {
             (ProviderPrecision::F32, HostNumericDataOwned::F32(values)) => {
-                assert_eq!(
-                    handle.descriptor.element_type,
-                    Some(NumericElementType::F32)
-                );
+                assert_eq!(handle.physical().element_type(), NumericElementType::F32);
                 values.into_iter().map(f64::from).collect::<Vec<_>>()
             }
             (ProviderPrecision::F64, HostNumericDataOwned::F64(values)) => {
-                assert_eq!(
-                    handle.descriptor.element_type,
-                    Some(NumericElementType::F64)
-                );
+                assert_eq!(handle.physical().element_type(), NumericElementType::F64);
                 values
             }
             _ => panic!("round output must retain the actual provider-native floating storage"),
@@ -131,8 +126,28 @@ async fn check_direct_and_fused_round(provider: &'static WgpuProvider) {
             }
         }
     }
-    provider.download(&input).await.unwrap();
-    provider.free(&output).unwrap();
-    provider.free(&fused).unwrap();
-    provider.free(&input).unwrap();
+    for handle in [output, fused] {
+        let weak = handle.allocation_lease().downgrade();
+        let alias = handle.clone();
+        assert_eq!(
+            handle.release().unwrap(),
+            AllocationReleaseOutcome::ReferenceReleased
+        );
+        assert!(weak.acquire().is_some());
+        provider.download(&alias).await.unwrap();
+        assert_eq!(alias.release().unwrap(), AllocationReleaseOutcome::Retired);
+        assert!(weak.acquire().is_none());
+    }
+    let downloaded = provider.download(&input).await.unwrap();
+    assert_eq!(downloaded.data.len(), source.len());
+    for (actual, expected) in downloaded.data.iter().zip(source) {
+        if expected.is_nan() {
+            assert!(actual.is_nan());
+        } else {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+    }
+    let weak = input.allocation_lease().downgrade();
+    assert_eq!(input.release().unwrap(), AllocationReleaseOutcome::Retired);
+    assert!(weak.acquire().is_none());
 }

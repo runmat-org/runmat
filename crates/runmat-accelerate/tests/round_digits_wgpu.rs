@@ -1,5 +1,14 @@
 #![cfg(feature = "wgpu")]
-use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderPrecision};
+use runmat_accelerate_api::{
+    allocation::AllocationReleaseOutcome, AccelProvider, GpuTensorHandle, HostTensorView,
+    ProviderPrecision,
+};
+
+fn release_final(handle: GpuTensorHandle) {
+    let weak = handle.allocation_lease().downgrade();
+    assert_eq!(handle.release().unwrap(), AllocationReleaseOutcome::Retired);
+    assert!(weak.acquire().is_none());
+}
 
 #[tokio::test]
 #[ignore = "requires an actual compatible WGPU adapter"]
@@ -53,8 +62,9 @@ async fn round_digits_hardware_preserves_integral_extreme_and_tiny_values() {
             .round_digits(&input, digits, significant)
             .await
             .unwrap();
-        assert_eq!(output.shape, input.shape);
-        assert_ne!(output.buffer_id, input.buffer_id);
+        assert_eq!(output.shape(), input.shape());
+        assert_ne!(output.allocation_identity(), input.allocation_identity());
+        assert!(!output.shares_allocation_with(&input));
         let actual = provider.download(&output).await.unwrap().data;
         assert_eq!(actual.len(), 1);
         if expected.is_nan() {
@@ -66,9 +76,15 @@ async fn round_digits_hardware_preserves_integral_extreme_and_tiny_values() {
                 "{source}, N={digits}, significant={significant}"
             );
         }
-        provider.download(&input).await.unwrap();
-        provider.free(&output).unwrap();
-        provider.free(&input).unwrap();
+        release_final(output);
+        let original = provider.download(&input).await.unwrap().data;
+        assert_eq!(original.len(), 1);
+        if source.is_nan() {
+            assert!(original[0].is_nan());
+        } else {
+            assert_eq!(original[0].to_bits(), represented(source).to_bits());
+        }
+        release_final(input);
     }
 
     let (tiny, digits, quantum, ulp) = if single {
@@ -92,8 +108,8 @@ async fn round_digits_hardware_preserves_integral_extreme_and_tiny_values() {
     assert_eq!(actual.len(), 2);
     assert!((actual[0] - quantum).abs() <= 4.0 * ulp);
     assert!((actual[1] + quantum).abs() <= 4.0 * ulp);
-    provider.free(&output).unwrap();
-    provider.free(&input).unwrap();
+    release_final(output);
+    release_final(input);
 }
 
 #[tokio::test]
@@ -165,8 +181,30 @@ async fn round_digits_preserves_lazy_transpose_for_real_and_complex_components()
             })
             .collect();
         assert_eq!(actual, expected);
-        provider.free(&output).unwrap();
-        provider.free(&transposed).unwrap();
-        provider.free(&input).unwrap();
+        assert!(!output.shares_allocation_with(&transposed));
+        release_final(output);
+        let input_weak = input.allocation_lease().downgrade();
+        if complex {
+            assert!(!transposed.shares_allocation_with(&input));
+            release_final(transposed);
+        } else {
+            assert!(transposed.shares_allocation_with(&input));
+            assert_ne!(transposed.view_identity(), input.view_identity());
+            assert_eq!(
+                transposed.release().unwrap(),
+                AllocationReleaseOutcome::ReferenceReleased
+            );
+        }
+        assert!(input_weak.acquire().is_some());
+        let original = provider.download_numeric(&input).await.unwrap();
+        assert_eq!(original.shape, [2, 3]);
+        assert_eq!(original.storage, storage);
+        match original.data {
+            HostNumericDataOwned::F32(actual) => assert_eq!(actual, singles),
+            HostNumericDataOwned::F64(actual) => assert_eq!(actual, values),
+            _ => panic!("original floating storage must survive output retirement"),
+        }
+        release_final(input);
+        assert!(input_weak.acquire().is_none());
     }
 }
