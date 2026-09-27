@@ -1770,24 +1770,30 @@ impl WgpuProvider {
             }
             Vec::new()
         };
-        let (output_buffer, _) = self.create_storage_buffer_for_usage(
-            BufferUsageClass::FusionOut,
-            len,
-            "runmat-fusion-output",
-        );
-        let bind_group_layout = self.cached_fusion_bind_group_layout(inputs.len());
-        let pipeline = self.recipe_pipeline(
-            &recipe,
-            bind_group_layout.as_ref(),
-            "runmat-fusion-pipeline",
-        );
-        // Warmup once
-        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-        );
-        self.device_ref().poll(wgpu::Maintain::Poll);
+        let (output_buffer, bind_group_layout, pipeline) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let (output_buffer, _) = self.create_storage_buffer_for_usage(
+                    emission,
+                    BufferUsageClass::FusionOut,
+                    len,
+                    "runmat-fusion-output",
+                )?;
+                let bind_group_layout =
+                    self.cached_fusion_bind_group_layout(emission, inputs.len())?;
+                let pipeline = self.recipe_pipeline(
+                    emission,
+                    &recipe,
+                    bind_group_layout.as_ref(),
+                    "runmat-fusion-pipeline",
+                )?;
+                // Warmup once
+                crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+                    emission, pending, &pipeline,
+                )?;
+                Ok((output_buffer, bind_group_layout, pipeline))
+            })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        let emitted = self.with_emission(|emission, pending| -> Result<_> {
 
         struct BroadcastUniformState {
             buffer: Arc<wgpu::Buffer>,
@@ -1795,10 +1801,10 @@ impl WgpuProvider {
         }
 
         impl BroadcastUniformState {
-            fn update(&mut self, queue: &wgpu::Queue, len: u32, offset: u32) {
+            fn update(&mut self, emission: &runmat_accelerate_api::WgpuEmission<'_>, len: u32, offset: u32) {
                 self.template[..4].copy_from_slice(&len.to_ne_bytes());
                 self.template[4..8].copy_from_slice(&offset.to_ne_bytes());
-                queue.write_buffer(self.buffer.as_ref(), 0, &self.template);
+                emission.queue().write_buffer(self.buffer.as_ref(), 0, &self.template);
             }
         }
 
@@ -1836,13 +1842,13 @@ impl WgpuProvider {
                 write_packed_array(&mut bytes, shape_u32);
                 write_packed_array(&mut bytes, strides);
             }
-            let buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-fusion-params"),
                 size: bytes.len() as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
-            self.queue.write_buffer(buffer.as_ref(), 0, &bytes);
+            emission.queue().write_buffer(buffer.as_ref(), 0, &bytes);
             let uniform_buffer = buffer.clone();
             let state = BroadcastUniformState {
                 buffer,
@@ -1850,7 +1856,7 @@ impl WgpuProvider {
             };
             (FusionUniformState::Broadcast(state), uniform_buffer)
         } else {
-            let buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-fusion-params"),
                 size: std::mem::size_of::<crate::backend::wgpu::params::FusionParams>() as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -1884,16 +1890,16 @@ impl WgpuProvider {
 
         let bind_group =
             self.bind_group_cache
-                .get_or_create(bind_group_layout.as_ref(), &bind_entries, || {
+                .get_or_create(emission, bind_group_layout.as_ref(), &bind_entries, |emission| {
                     Arc::new(
-                        self.device_ref()
+                        emission.device()
                             .create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: Some("runmat-fusion-bind-group"),
                                 layout: bind_group_layout.as_ref(),
                                 entries: &bind_entries,
                             }),
                     )
-                });
+                })?;
 
         let output_ptr = output_buffer.as_ref() as *const wgpu::Buffer as usize;
         let input_ids: Vec<u64> = inputs.iter().map(|h| h.buffer_id()).collect();
@@ -1920,7 +1926,7 @@ impl WgpuProvider {
             );
             match &mut uniform_state {
                 FusionUniformState::Broadcast(state) => {
-                    state.update(self.queue_ref(), chunk_len as u32, offset_elems as u32)
+                    state.update(emission, chunk_len as u32, offset_elems as u32)
                 }
                 FusionUniformState::Simple { buffer } => {
                     let params = crate::backend::wgpu::params::FusionParams {
@@ -1929,8 +1935,7 @@ impl WgpuProvider {
                         _pad1: 0,
                         _pad2: 0,
                     };
-                    self.queue
-                        .write_buffer(buffer.as_ref(), 0, bytes_of(&params));
+                    emission.queue().write_buffer(buffer.as_ref(), 0, bytes_of(&params));
                 }
             }
 
@@ -1939,7 +1944,7 @@ impl WgpuProvider {
                 workgroup_size,
             );
             let mut enc =
-                self.device_ref()
+                emission.device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-fusion-elementwise-encoder"),
                     });
@@ -1954,7 +1959,7 @@ impl WgpuProvider {
                     pass.dispatch_workgroups(workgroups, 1, 1);
                 }
             }
-            let submission_id = self.submit(enc);
+            let submission_id = self.submit(emission, pending, enc)?;
             last_submission_id = Some(submission_id);
             log::trace!(
                 "fusion elementwise chunk complete out_ptr=0x{:x} chunk_len={} offset={} submission_id={}",
@@ -1966,6 +1971,9 @@ impl WgpuProvider {
             offset_elems += chunk_len;
             chunk_index += 1;
         }
+        Ok((last_submission_id, output_ptr, chunk_index))
+        })??;
+        let (last_submission_id, output_ptr, chunk_index) = emitted;
         let handle = if representation.logical_output {
             ensure!(
                 output_storage == GpuTensorStorage::Real,
@@ -2053,157 +2061,178 @@ impl WgpuProvider {
                 super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
             })
             .collect::<Result<Vec<_>>>()?;
-        let output_buffers: Vec<_> = (0..num_outputs)
-            .map(|_| {
-                self.create_storage_buffer_for_usage(
-                    BufferUsageClass::FusionOut,
-                    len,
-                    "runmat-fusion-multi-output",
-                )
-            })
-            .collect();
+        let (output_buffers, bind_group_layout, pipeline) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let output_buffers: Vec<_> = (0..num_outputs)
+                    .map(|_| {
+                        self.create_storage_buffer_for_usage(
+                            emission,
+                            BufferUsageClass::FusionOut,
+                            len,
+                            "runmat-fusion-multi-output",
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()?;
 
-        let bind_group_layout = {
-            let key = format!(
-                "runmat-fusion-multi-layout-{}-{}",
-                inputs.len(),
-                num_outputs
-            );
-            self.cached_bind_group_layout(&key, |device| {
-                crate::backend::wgpu::bindings::build_fusion_multi_bgl(
-                    device,
-                    inputs.len(),
-                    num_outputs,
-                )
-            })
-        };
-        let pipeline = self.recipe_pipeline(
-            &recipe,
-            bind_group_layout.as_ref(),
-            "runmat-fusion-multi-pipeline",
-        );
-        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-        );
-        self.device_ref().poll(wgpu::Maintain::Poll);
-
-        struct BroadcastUniformState {
-            buffer: Arc<wgpu::Buffer>,
-            template: Vec<u8>,
-        }
-        impl BroadcastUniformState {
-            fn update(&mut self, queue: &wgpu::Queue, len: u32, offset: u32) {
-                self.template[..4].copy_from_slice(&len.to_ne_bytes());
-                self.template[4..8].copy_from_slice(&offset.to_ne_bytes());
-                queue.write_buffer(self.buffer.as_ref(), 0, &self.template);
+                let bind_group_layout = {
+                    let key = format!(
+                        "runmat-fusion-multi-layout-{}-{}",
+                        inputs.len(),
+                        num_outputs
+                    );
+                    self.cached_bind_group_layout(emission, &key, |emission| {
+                        crate::backend::wgpu::bindings::build_fusion_multi_bgl(
+                            emission,
+                            inputs.len(),
+                            num_outputs,
+                        )
+                    })?
+                };
+                let pipeline = self.recipe_pipeline(
+                    emission,
+                    &recipe,
+                    bind_group_layout.as_ref(),
+                    "runmat-fusion-multi-pipeline",
+                )?;
+                crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+                    emission, pending, &pipeline,
+                )?;
+                Ok((output_buffers, bind_group_layout, pipeline))
+            })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        let last_submission_id = self.with_emission(|emission, pending| -> Result<_> {
+            struct BroadcastUniformState {
+                buffer: Arc<wgpu::Buffer>,
+                template: Vec<u8>,
             }
-        }
-
-        let rank = output_shape.len();
-        let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
-        let mut bytes: Vec<u8> = Vec::with_capacity(4 * 4 + (max_rank * 4 * 4));
-        let write_u32 = |buf: &mut Vec<u8>, v: u32| buf.extend_from_slice(&v.to_ne_bytes());
-        write_u32(&mut bytes, 0); // len placeholder
-        write_u32(&mut bytes, 0); // offset placeholder
-        write_u32(&mut bytes, rank as u32);
-        write_u32(&mut bytes, 0);
-        let write_packed_array = |buf: &mut Vec<u8>, vals: &[u32]| {
-            for &val in vals.iter() {
-                write_u32(buf, val);
-                write_u32(buf, 0);
-                write_u32(buf, 0);
-                write_u32(buf, 0);
+            impl BroadcastUniformState {
+                fn update(
+                    &mut self,
+                    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+                    len: u32,
+                    offset: u32,
+                ) {
+                    self.template[..4].copy_from_slice(&len.to_ne_bytes());
+                    self.template[4..8].copy_from_slice(&offset.to_ne_bytes());
+                    emission
+                        .queue()
+                        .write_buffer(self.buffer.as_ref(), 0, &self.template);
+                }
             }
-            for _ in vals.len()..max_rank {
-                write_u32(buf, 0);
-                write_u32(buf, 0);
-                write_u32(buf, 0);
-                write_u32(buf, 0);
+
+            let rank = output_shape.len();
+            let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
+            let mut bytes: Vec<u8> = Vec::with_capacity(4 * 4 + (max_rank * 4 * 4));
+            let write_u32 = |buf: &mut Vec<u8>, v: u32| buf.extend_from_slice(&v.to_ne_bytes());
+            write_u32(&mut bytes, 0); // len placeholder
+            write_u32(&mut bytes, 0); // offset placeholder
+            write_u32(&mut bytes, rank as u32);
+            write_u32(&mut bytes, 0);
+            let write_packed_array = |buf: &mut Vec<u8>, vals: &[u32]| {
+                for &val in vals.iter() {
+                    write_u32(buf, val);
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                }
+                for _ in vals.len()..max_rank {
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                }
+            };
+            let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
+            write_packed_array(&mut bytes, &out_shape_u32);
+            for (shape_u32, strides) in &layouts {
+                write_packed_array(&mut bytes, shape_u32);
+                write_packed_array(&mut bytes, strides);
             }
-        };
-        let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
-        write_packed_array(&mut bytes, &out_shape_u32);
-        for (shape_u32, strides) in &layouts {
-            write_packed_array(&mut bytes, shape_u32);
-            write_packed_array(&mut bytes, strides);
-        }
-        let uniform_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-fusion-multi-params"),
-            size: bytes.len() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
-        self.queue.write_buffer(uniform_buffer.as_ref(), 0, &bytes);
+            let uniform_buffer =
+                Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-fusion-multi-params"),
+                    size: bytes.len() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+            emission
+                .queue()
+                .write_buffer(uniform_buffer.as_ref(), 0, &bytes);
 
-        let mut uniform_state = BroadcastUniformState {
-            buffer: uniform_buffer.clone(),
-            template: bytes,
-        };
+            let mut uniform_state = BroadcastUniformState {
+                buffer: uniform_buffer.clone(),
+                template: bytes,
+            };
 
-        let mut bind_entries = Vec::with_capacity(total_bindings);
-        for (idx, entry) in entries.iter().enumerate() {
+            let mut bind_entries = Vec::with_capacity(total_bindings);
+            for (idx, entry) in entries.iter().enumerate() {
+                bind_entries.push(wgpu::BindGroupEntry {
+                    binding: idx as u32,
+                    resource: entry.buffer.as_ref().as_entire_binding(),
+                });
+            }
+            for (k, (out_buf, _)) in output_buffers.iter().enumerate() {
+                bind_entries.push(wgpu::BindGroupEntry {
+                    binding: (inputs.len() + k) as u32,
+                    resource: out_buf.as_ref().as_entire_binding(),
+                });
+            }
             bind_entries.push(wgpu::BindGroupEntry {
-                binding: idx as u32,
-                resource: entry.buffer.as_ref().as_entire_binding(),
+                binding: storage_bindings as u32,
+                resource: uniform_buffer.as_ref().as_entire_binding(),
             });
-        }
-        for (k, (out_buf, _)) in output_buffers.iter().enumerate() {
-            bind_entries.push(wgpu::BindGroupEntry {
-                binding: (inputs.len() + k) as u32,
-                resource: out_buf.as_ref().as_entire_binding(),
-            });
-        }
-        bind_entries.push(wgpu::BindGroupEntry {
-            binding: storage_bindings as u32,
-            resource: uniform_buffer.as_ref().as_entire_binding(),
-        });
 
-        let bind_group =
-            self.bind_group_cache
-                .get_or_create(bind_group_layout.as_ref(), &bind_entries, || {
+            let bind_group = self.bind_group_cache.get_or_create(
+                emission,
+                bind_group_layout.as_ref(),
+                &bind_entries,
+                |emission| {
                     Arc::new(
-                        self.device_ref()
+                        emission
+                            .device()
                             .create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: Some("runmat-fusion-multi-bind-group"),
                                 layout: bind_group_layout.as_ref(),
                                 entries: &bind_entries,
                             }),
                     )
-                });
+                },
+            )?;
 
-        let mut offset_elems = 0usize;
-        let mut last_submission_id = None;
-        while offset_elems < len {
-            let remaining = len - offset_elems;
-            let chunk_len = remaining.min(chunk_capacity);
-            uniform_state.update(self.queue_ref(), chunk_len as u32, offset_elems as u32);
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                workgroup_size,
-            );
-            let mut enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-fusion-multi-elementwise-encoder"),
+            let mut offset_elems = 0usize;
+            let mut last_submission_id = None;
+            while offset_elems < len {
+                let remaining = len - offset_elems;
+                let chunk_len = remaining.min(chunk_capacity);
+                uniform_state.update(emission, chunk_len as u32, offset_elems as u32);
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    workgroup_size,
+                );
+                let mut enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-fusion-multi-elementwise-encoder"),
+                        });
+                {
+                    let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("runmat-fusion-multi-elementwise-pass"),
+                        timestamp_writes: None,
                     });
-            {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("runmat-fusion-multi-elementwise-pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&pipeline);
-                pass.set_bind_group(0, bind_group.as_ref(), &[]);
-                if workgroups > 0 {
-                    pass.dispatch_workgroups(workgroups, 1, 1);
+                    pass.set_pipeline(&pipeline);
+                    pass.set_bind_group(0, bind_group.as_ref(), &[]);
+                    if workgroups > 0 {
+                        pass.dispatch_workgroups(workgroups, 1, 1);
+                    }
                 }
+                let submission_id = self.submit(emission, pending, enc)?;
+                last_submission_id = Some(submission_id);
+                offset_elems += chunk_len;
             }
-            let submission_id = self.submit(enc);
-            last_submission_id = Some(submission_id);
-            offset_elems += chunk_len;
-        }
 
+            Ok(last_submission_id)
+        })??;
         let mut handles = Vec::with_capacity(num_outputs);
         for ((out_buf, _), class) in output_buffers.into_iter().zip(output_classes) {
             let handle = if *class == runmat_accelerate_api::ProviderElementType::Logical {
