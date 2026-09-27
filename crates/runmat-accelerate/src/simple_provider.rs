@@ -5091,6 +5091,33 @@ impl AccelProvider for InProcessProvider {
         )
     }
 
+    fn fill_like(&self, prototype: &GpuTensorHandle, value: f64) -> Result<GpuTensorHandle> {
+        if value == 0.0 {
+            return self.zeros_like(prototype, prototype.shape());
+        }
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
+            ensure!(
+                guard.get(prototype).is_some(),
+                "fill_like: prototype is not a live owned allocation"
+            );
+        }
+        if prototype.physical().element_type() != NumericElementType::F64
+            || prototype.physical().storage() != GpuTensorStorage::Real
+            || prototype.view().is_logical()
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "fill_like: non-native class requires typed host construction",
+            ));
+        }
+        self.allocate_tensor(
+            vec![value; logical_len_for_shape("fill_like", prototype.shape())?],
+            prototype.shape().to_vec(),
+        )
+    }
+
     fn zeros_integer_like(
         &self,
         prototype: &GpuTensorHandle,
@@ -7971,6 +7998,22 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn flip(&self, handle: &GpuTensorHandle, axes: &[usize]) -> Result<GpuTensorHandle> {
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
+            ensure!(
+                guard.get(handle).is_some(),
+                "flip: input is not a live owned allocation"
+            );
+        }
+        if handle.physical().storage() == GpuTensorStorage::ComplexInterleaved
+            || handle.physical().element_type() == NumericElementType::F32
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "flip: representation requires typed host fallback",
+            ));
+        }
         if runmat_accelerate_api::handle_integer_type(handle).is_some() {
             let data = integer_registry(self.device_id)
                 .lock()
@@ -7994,7 +8037,12 @@ impl AccelProvider for InProcessProvider {
                 .clone()
         };
         let flipped = flip_data(&data, handle.shape(), axes)?;
-        self.allocate_tensor_with_storage(flipped, handle.shape().to_vec(), storage)
+        self.allocate_produced(
+            InProcessNumericData::F64(flipped),
+            handle.shape().to_vec(),
+            storage,
+            handle.view().is_logical(),
+        )
     }
 
     fn circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> Result<GpuTensorHandle> {

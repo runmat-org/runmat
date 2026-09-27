@@ -1408,7 +1408,14 @@ impl WgpuProvider {
             return Ok(handle.clone());
         }
 
-        let entry = self.get_entry_for_storage_move(handle, "flip")?;
+        let entry = self.get_entry_raw(handle)?;
+        if entry.storage == GpuTensorStorage::ComplexInterleaved
+            || (entry.integer_type().is_none() && entry.precision != self.precision)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "flip: representation requires typed host fallback",
+            ));
+        }
         let integer_type = entry.integer_type();
         let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
             runmat_accelerate_api::IntegerElementType::I64
@@ -1438,10 +1445,12 @@ impl WgpuProvider {
         }
         let rank = logical_rank + usize::from(word_factor > 1);
         if rank > crate::backend::wgpu::params::FLIP_MAX_RANK {
-            return Err(anyhow!(
-                "flip: rank {} exceeds GPU support (max {})",
-                logical_rank,
-                crate::backend::wgpu::params::FLIP_MAX_RANK
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                format!(
+                    "flip: rank {} exceeds GPU support (max {})",
+                    logical_rank,
+                    crate::backend::wgpu::params::FLIP_MAX_RANK
+                ),
             ));
         }
 

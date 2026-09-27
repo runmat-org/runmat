@@ -1927,7 +1927,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Allocate a zero-initialised tensor with the provided shape on the device.
     fn zeros(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("zeros not supported by provider"))
+        Err(unsupported_provider_operation(
+            "zeros not supported by provider",
+        ))
     }
 
     /// Allocate a zero-initialised tensor with the provided shape and storage layout.
@@ -1987,21 +1989,27 @@ pub trait AccelProvider: AcceleratorThreadBound {
         if value == 0.0 {
             return self.zeros(shape);
         }
-        if let Ok(base) = self.zeros(shape) {
-            match self.scalar_add(&base, value) {
-                Ok(out) => {
-                    drop(base);
-                    return Ok(out);
-                }
-                Err(_) => {
-                    drop(base);
-                }
-            }
+        match self.zeros(shape) {
+            Ok(base) => match self.scalar_add(&base, value) {
+                Ok(output) => return Ok(output),
+                Err(error) if is_unsupported_provider_operation(&error) => {}
+                Err(error) => return Err(error),
+            },
+            Err(error) if is_unsupported_provider_operation(&error) => {}
+            Err(error) => return Err(error),
         }
-        let len: usize = shape.iter().copied().product();
-        let data = vec![value; len];
-        let view = HostTensorView { data: &data, shape };
-        self.upload(&view)
+        let len = if shape.contains(&0) {
+            0
+        } else {
+            shape
+                .iter()
+                .try_fold(1usize, |n, dim| n.checked_mul(*dim))
+                .ok_or_else(|| anyhow::anyhow!("fill: shape overflow"))?
+        };
+        self.upload(&HostTensorView {
+            data: &vec![value; len],
+            shape,
+        })
     }
 
     /// Allocate a tensor filled with a constant value, matching a prototype's residency.
@@ -2013,18 +2021,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
         if value == 0.0 {
             return self.zeros_like(prototype, prototype.shape());
         }
-        if let Ok(base) = self.zeros_like(prototype, prototype.shape()) {
-            match self.scalar_add(&base, value) {
-                Ok(out) => {
-                    drop(base);
-                    return Ok(out);
-                }
-                Err(_) => {
-                    drop(base);
-                }
-            }
-        }
-        self.fill(prototype.shape(), value)
+        // Generic scalar arithmetic does not prove preservation of every
+        // prototype class (notably logical, integer and non-native floats).
+        Err(unsupported_provider_operation(
+            "nonzero class-preserving fill_like requires provider support",
+        ))
     }
 
     /// Allocate a one-initialised tensor matching the prototype tensor.
@@ -2865,7 +2866,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
     }
     // Scalar operations: apply op with scalar right-hand side (broadcast over a)
     fn scalar_add(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("scalar_add not supported by provider"))
+        Err(unsupported_provider_operation(
+            "scalar_add not supported by provider",
+        ))
     }
     fn scalar_sub(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_sub not supported by provider"))
@@ -3125,7 +3128,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Err(anyhow::anyhow!("permute not supported by provider"))
     }
     fn flip(&self, _handle: &GpuTensorHandle, _axes: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("flip not supported by provider"))
+        Err(unsupported_provider_operation(
+            "flip not supported by provider",
+        ))
     }
     fn circshift(
         &self,
@@ -4731,6 +4736,45 @@ mod tests {
     struct DefaultNumericAdapterProvider;
 
     #[test]
+    fn generic_fill_preserves_operational_failure_without_upload_retry() {
+        struct FailedFill {
+            fail_allocation: bool,
+        }
+        impl AccelProvider for FailedFill {
+            fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                panic!("operational failure must not retry upload")
+            }
+            fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                Box::pin(async { unreachable!() })
+            }
+            fn device_info(&self) -> String {
+                "failed-fill".into()
+            }
+            fn zeros(&self, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+                if self.fail_allocation {
+                    return Err(std::io::Error::other("allocation failed").into());
+                }
+                Ok(crate::test_support::handle(
+                    404,
+                    shape.to_vec(),
+                    NumericElementType::F64,
+                    GpuTensorStorage::Real,
+                ))
+            }
+            fn scalar_add(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+                Err(std::io::Error::other("execution failed").into())
+            }
+        }
+        for fail_allocation in [true, false] {
+            let error = FailedFill { fail_allocation }
+                .fill(&[1, 2], 3.0)
+                .unwrap_err();
+            assert!(error.downcast_ref::<std::io::Error>().is_some());
+            assert!(!is_unsupported_provider_operation(&error));
+        }
+    }
+
+    #[test]
     fn typed_constant_constructors_default_to_explicit_unsupported() {
         let provider = DefaultNumericAdapterProvider;
         let prototype = crate::test_support::handle(
@@ -4744,6 +4788,12 @@ mod tests {
         ));
         assert!(is_unsupported_provider_operation(
             &provider.logical_fill(&[2, 3], true).unwrap_err()
+        ));
+        assert!(is_unsupported_provider_operation(
+            &provider.fill_like(&prototype, 2.0).unwrap_err()
+        ));
+        assert!(is_unsupported_provider_operation(
+            &provider.flip(&prototype, &[0]).unwrap_err()
         ));
         assert!(is_unsupported_provider_operation(
             &provider.eye(&[2, 3]).unwrap_err()

@@ -3,6 +3,47 @@ use futures::executor::block_on;
 use runmat_accelerate_api::HostLogicalTensorView;
 
 #[test]
+fn fill_like_and_flip_keep_class_or_explicitly_request_typed_fallback() {
+    let provider = InProcessProvider::new();
+    let single = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider.fill_like(&single, 2.0).unwrap_err()
+    ));
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider.flip(&single, &[1]).unwrap_err()
+    ));
+    let real = provider
+        .upload(&HostTensorView {
+            data: &[1.0, 2.0],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    let filled = provider.fill_like(&real, 3.0).unwrap();
+    assert_eq!(
+        block_on(provider.download(&filled)).unwrap().data,
+        vec![3.0; 2]
+    );
+    let logical = provider
+        .upload_logical(&HostLogicalTensorView {
+            data: &[0, 1],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    let flipped = provider.flip(&logical, &[1]).unwrap();
+    assert!(flipped.view().is_logical());
+    assert_eq!(
+        block_on(provider.download(&flipped)).unwrap().data,
+        vec![1.0, 0.0]
+    );
+}
+
+#[test]
 fn ndgrid_unsupported_representation_does_not_hide_invalid_owner_or_request() {
     let provider = InProcessProvider::new();
     let foreign = InProcessProvider::new();
