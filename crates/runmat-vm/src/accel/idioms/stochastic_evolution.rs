@@ -18,28 +18,9 @@ pub async fn execute_stochastic_evolution(
     #[cfg(feature = "native-accel")]
     {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let protected = [&state, &drift, &scale, &steps]
-                .into_iter()
-                .filter_map(|value| match value {
-                    Value::GpuTensor(handle) => Some(handle),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            let (state_handle, state_owned) =
-                ensure_gpu_tensor_for_stochastic(provider, &state).await?;
-            // Capture the exact allocation owner before any control download
-            // can suspend. The shared guard protects every borrowed operand and
-            // transfers ownership only when the published result aliases it.
-            let state_owner = state_owned
-                .as_ref()
-                .map(|handle| {
-                    runmat_runtime::builtins::common::resident_output::ResidentResultGuard::new(
-                        &Value::GpuTensor(handle.clone()),
-                        &protected,
-                    )
-                })
-                .transpose()
-                .map_err(|error| crate::interpreter::errors::mex("ProviderOwnership", &error))?;
+            // The admitted handle owns its allocation across control downloads.
+            // Cancellation drops only this reference; borrowed aliases survive.
+            let state_handle = ensure_gpu_tensor_for_stochastic(provider, &state).await?;
             let drift_scalar =
                 scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
             let scale_scalar =
@@ -50,18 +31,17 @@ pub async fn execute_stochastic_evolution(
                 scale_scalar,
                 steps_u32,
             ) {
-                Ok(mut output) => {
-                    if runmat_accelerate_api::handle_is_explicit(&state_handle) {
-                        runmat_accelerate_api::mark_handle_explicit(&mut output);
+                Ok(output) => {
+                    let provenance = if runmat_accelerate_api::handle_is_explicit(&state_handle) {
+                        runmat_accelerate_api::GpuHandleProvenance::Explicit
                     } else {
-                        runmat_accelerate_api::mark_handle_automatic(&mut output);
-                    }
+                        runmat_accelerate_api::GpuHandleProvenance::Automatic
+                    };
+                    let output = output.with_provenance(provenance).map_err(|error| {
+                        crate::interpreter::errors::mex("ProviderOwnership", &error.to_string())
+                    })?;
                     fusion_residency::mark(&output);
-                    let output = Value::GpuTensor(output);
-                    if let Some(owner) = state_owner {
-                        owner.publish(&output);
-                    }
-                    return Ok(output);
+                    return Ok(Value::GpuTensor(output));
                 }
                 Err(err) => {
                     log::debug!("stochastic_evolution provider fallback to host: {}", err);
@@ -173,13 +153,7 @@ fn parse_integer_steps(value: &Value) -> Option<Result<u32, RuntimeError>> {
 async fn ensure_gpu_tensor_for_stochastic(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     value: &Value,
-) -> Result<
-    (
-        runmat_accelerate_api::GpuTensorHandle,
-        Option<runmat_accelerate_api::GpuTensorHandle>,
-    ),
-    RuntimeError,
-> {
+) -> Result<runmat_accelerate_api::GpuTensorHandle, RuntimeError> {
     match value {
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_integer_type(handle).is_some()
@@ -190,12 +164,11 @@ async fn ensure_gpu_tensor_for_stochastic(
                     "stochastic_evolution: optimized evolution requires single or double state",
                 ));
             }
-            Ok((handle.clone(), None))
+            Ok(handle.clone())
         }
         Value::Tensor(tensor) => {
             ensure_floating_state_tensor(tensor)?;
-            let handle = upload_tensor_view(provider, tensor)?;
-            Ok((handle.clone(), Some(handle)))
+            upload_tensor_view(provider, tensor)
         }
         _ => {
             let gathered = runmat_runtime::dispatcher::gather_if_needed_async(value)
@@ -204,8 +177,7 @@ async fn ensure_gpu_tensor_for_stochastic(
             match gathered {
                 Value::Tensor(t) => {
                     ensure_floating_state_tensor(&t)?;
-                    let handle = upload_tensor_view(provider, &t)?;
-                    Ok((handle.clone(), Some(handle)))
+                    upload_tensor_view(provider, &t)
                 }
                 other => {
                     let tensor = runmat_runtime::builtins::common::tensor::value_into_tensor_for(
@@ -213,8 +185,7 @@ async fn ensure_gpu_tensor_for_stochastic(
                         other,
                     )?;
                     ensure_floating_state_tensor(&tensor)?;
-                    let handle = upload_tensor_view(provider, &tensor)?;
-                    Ok((handle.clone(), Some(handle)))
+                    upload_tensor_view(provider, &tensor)
                 }
             }
         }
