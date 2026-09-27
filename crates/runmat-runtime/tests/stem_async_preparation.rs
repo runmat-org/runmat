@@ -6,9 +6,7 @@ use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision,
     ThreadProviderGuard,
 };
-use runmat_runtime::builtins::plotting::{
-    clone_figure, lock_plot_test_context, new_figure_handle,
-};
+use runmat_runtime::builtins::plotting::{clone_figure, lock_plot_test_context, new_figure_handle};
 use runmat_value::{Tensor, Value};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -54,7 +52,7 @@ impl AccelProvider for Provider {
 }
 
 #[test]
-fn dispatched_stem_has_no_registry_mutation_until_preparation_completes() {
+fn dispatched_stem_and_stairs_publish_only_after_preparation_completes() {
     static PROVIDER: OnceLock<Provider> = OnceLock::new();
     let provider = PROVIDER.get_or_init(|| Provider {
         inner: InProcessProvider::new(),
@@ -63,6 +61,14 @@ fn dispatched_stem_has_no_registry_mutation_until_preparation_completes() {
     });
     let _plot = lock_plot_test_context();
     let _current = ThreadProviderGuard::set(Some(provider));
+    for name in ["stem", "stairs"] {
+        provider.mode.store(0, Ordering::SeqCst);
+        provider.freed.store(0, Ordering::SeqCst);
+        assert_preparation_lifecycle(name, provider);
+    }
+}
+
+fn assert_preparation_lifecycle(name: &str, provider: &Provider) {
     let figure = new_figure_handle();
     let count = || clone_figure(figure).unwrap().plots().count();
     let before = count();
@@ -75,8 +81,19 @@ fn dispatched_stem_has_no_registry_mutation_until_preparation_completes() {
     let args = [
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         Value::GpuTensor(input.clone()),
+        Value::from("Visible"),
+        Value::from("off"),
     ];
-    let mut future = Box::pin(runmat_runtime::call_builtin_async("stem", &args));
+    let mut invalid = args.to_vec();
+    *invalid.last_mut().unwrap() = Value::from("invalid");
+    let mut rejected = Box::pin(runmat_runtime::call_builtin_async(name, &invalid));
+    assert!(matches!(
+        rejected.poll_unpin(&mut Context::from_waker(&noop_waker())),
+        Poll::Ready(Err(_))
+    ));
+    assert_eq!(count(), before);
+    drop(rejected);
+    let mut future = Box::pin(runmat_runtime::call_builtin_async(name, &args));
     assert!(matches!(
         future.poll_unpin(&mut Context::from_waker(&noop_waker())),
         Poll::Pending
@@ -86,10 +103,10 @@ fn dispatched_stem_has_no_registry_mutation_until_preparation_completes() {
     assert_eq!(count(), before);
     assert_eq!(provider.freed.load(Ordering::SeqCst), 0);
     provider.mode.store(1, Ordering::SeqCst);
-    assert!(block_on(runmat_runtime::call_builtin_async("stem", &args)).is_err());
+    assert!(block_on(runmat_runtime::call_builtin_async(name, &args)).is_err());
     assert_eq!(count(), before);
     provider.mode.store(0, Ordering::SeqCst);
-    let mut future = Box::pin(runmat_runtime::call_builtin_async("stem", &args));
+    let mut future = Box::pin(runmat_runtime::call_builtin_async(name, &args));
     assert!(matches!(
         future.poll_unpin(&mut Context::from_waker(&noop_waker())),
         Poll::Pending
@@ -98,6 +115,10 @@ fn dispatched_stem_has_no_registry_mutation_until_preparation_completes() {
     provider.mode.store(2, Ordering::SeqCst);
     block_on(future).unwrap();
     assert_eq!(count(), before + 1);
+    assert!(clone_figure(figure)
+        .unwrap()
+        .plots()
+        .all(|plot| !plot.is_visible()));
     assert_eq!(provider.freed.load(Ordering::SeqCst), 0);
     assert!(block_on(provider.inner.download(&input)).is_ok());
     provider.free(&input).unwrap();
