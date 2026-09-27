@@ -397,6 +397,18 @@ fn remainder_character_pages_are_not_scalarized_or_reordered() {
 #[test]
 fn finite_remainders_survive_overflowing_quotients() {
     for name in ["mod", "rem"] {
+        let Value::Num(cancelled) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            name,
+            &[Value::Num(2.0), Value::Num(0.1)],
+            1,
+        ))
+        .unwrap() else {
+            panic!("scalar remainder")
+        };
+        assert_eq!(
+            cancelled, 0.0,
+            "{name}: preserve rounded-quotient compensation"
+        );
         for left in [f64::MAX, -f64::MAX] {
             for right in [0.5, -0.5, f64::MIN_POSITIVE] {
                 let Value::Num(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(

@@ -279,7 +279,8 @@ fn rem_real_scalar_f32(a: f32, b: f32) -> f32 {
     if b.is_infinite() && a.is_finite() {
         return if a == -0.0 { 0.0 } else { a };
     }
-    let remainder = a % b;
+    let direct = a - b * (a / b).trunc();
+    let remainder = if direct.is_finite() { direct } else { a % b };
     if remainder == -0.0 {
         0.0
     } else {
@@ -300,7 +301,8 @@ fn rem_real_scalar(a: f64, b: f64) -> f64 {
     if b.is_infinite() && a.is_finite() {
         return normalize_zero(a);
     }
-    let remainder = a % b;
+    let direct = a - b * (a / b).trunc();
+    let remainder = if direct.is_finite() { direct } else { a % b };
     normalize_zero(remainder)
 }
 
