@@ -241,6 +241,11 @@ async fn tan_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
         Value::Num(n) => Ok(Value::Num(n.tan())),
         other => tan_real(other),
     }?;
+    let host = crate::builtins::math::resident_real_unary::preserve_elementwise_scalar_shape(
+        host,
+        source.shape(),
+        BUILTIN_NAME,
+    )?;
     let protected: Vec<_> = protected.iter().collect();
     gpu_helpers::restore_class_preserving_value_protecting(&source, host, BUILTIN_NAME, &protected)
 }

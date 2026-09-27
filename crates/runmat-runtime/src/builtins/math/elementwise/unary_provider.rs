@@ -62,33 +62,18 @@ fn restore_output(
     output: Value,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
+    let output = crate::builtins::math::resident_real_unary::preserve_elementwise_scalar_shape(
+        output,
+        input.shape(),
+        builtin,
+    )?;
     let (mut handle, storage, precision) = match &output {
-        Value::Num(value) => {
-            let tensor = runmat_value::Tensor::new(vec![*value], vec![1, 1])
-                .map_err(|error| internal(builtin, error))?;
-            (
-                gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])
-                    .map_err(|error| retained_internal(builtin, error))?,
-                GpuTensorStorage::Real,
-                Some(ProviderPrecision::F64),
-            )
-        }
         Value::Tensor(tensor) => (
             gpu_helpers::upload_tensor_protecting(provider, tensor, &[input])
                 .map_err(|error| retained_internal(builtin, error))?,
             GpuTensorStorage::Real,
             precision_for(tensor.numeric_dtype()),
         ),
-        Value::Complex(real, imag) => {
-            let tensor = runmat_value::ComplexTensor::new(vec![(*real, *imag)], vec![1, 1])
-                .map_err(|error| internal(builtin, error))?;
-            (
-                gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])
-                    .map_err(|error| retained_internal(builtin, error))?,
-                GpuTensorStorage::ComplexInterleaved,
-                Some(ProviderPrecision::F64),
-            )
-        }
         Value::ComplexTensor(tensor) => (
             gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[input])
                 .map_err(|error| retained_internal(builtin, error))?,

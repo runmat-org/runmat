@@ -48,6 +48,11 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
     let gathered = gathered_result?;
     let host = host::abs_host_value(gathered)?;
+    let host = crate::builtins::math::resident_real_unary::preserve_elementwise_scalar_shape(
+        host,
+        handle.shape(),
+        BUILTIN_NAME,
+    )?;
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, host)
         .map_err(|error| OPERATION.error(&ABS_ERROR_INTERNAL, error))?;
     let mut output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[&handle])?;

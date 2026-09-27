@@ -9,6 +9,9 @@ use runmat_value::Tensor;
 
 use crate::builtins::common::gpu_helpers;
 
+mod scalar_shape;
+pub(super) use scalar_shape::preserve_elementwise_scalar_shape;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum InvalidResidentInput {
     Integer,
@@ -123,7 +126,11 @@ mod tests {
         );
         drop(error);
         assert_eq!(allocation.probe.retirements(), 0);
-        allocation.handle.allocation_lease().validate_live().unwrap();
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
         drop(allocation.handle);
         assert_eq!(allocation.probe.retirements(), 1);
     }
