@@ -469,7 +469,7 @@ fn valid_gpu_envelope_result(
             && runmat_accelerate_api::handle_integer_type(output).is_none()
             && !runmat_accelerate_api::handle_is_logical(output)
             && resolved_actual_envelope_owner(output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider))
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
     };
     valid(&result.upper) && valid(&result.lower) && !gpu_handles_alias(&result.upper, &result.lower)
 }

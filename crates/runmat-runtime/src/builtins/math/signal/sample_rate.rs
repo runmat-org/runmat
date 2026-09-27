@@ -1708,7 +1708,7 @@ fn valid_class_preserving_gpu_output(
         && output.device_id() == provider.device_id()
         && output.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && gpu_helpers::numeric_descriptor_matches_source(source, output)
         && (!runmat_accelerate_api::handle_is_logical(output)
             || runmat_accelerate_api::handle_is_logical(source))
@@ -2617,8 +2617,11 @@ mod tests {
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(IntegerElementType::U64)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let gathered = block_on(provider.download_integer(&output)).expect("integer download");
             assert_eq!(
                 gathered.data,
@@ -2688,7 +2691,7 @@ mod tests {
             Some(IntegerElementType::U64)
         );
         assert!(runmat_accelerate_api::provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider)));
         let downloaded =
             block_on(provider.download_integer(&output)).expect("download WGPU uint64 output");
         assert_eq!(downloaded.shape, vec![1, 3]);

@@ -361,7 +361,7 @@ fn valid_provider_window(
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(handle)
         && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 #[cfg(test)]

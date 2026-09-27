@@ -297,8 +297,9 @@ async fn blackman_builtin(
                 };
                 let valid = handle.device_id() == provider.device_id()
                     && handle.shape() == [options.len, 1]
-                    && runmat_accelerate_api::provider_for_handle(&handle)
-                        .is_some_and(|owner| std::ptr::eq(owner, provider))
+                    && runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                        runmat_accelerate_api::same_provider_instance(owner, provider)
+                    })
                     && gpu_helpers::numeric_descriptor_matches(
                         &handle,
                         element_type,

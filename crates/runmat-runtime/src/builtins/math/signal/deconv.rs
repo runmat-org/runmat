@@ -336,7 +336,9 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
                             "resident input has no owning provider",
                         )
                     })?;
-                if !std::ptr::eq(owner, provider) || handle.device_id() != prototype.device_id() {
+                if !runmat_accelerate_api::same_provider_instance(owner, provider)
+                    || handle.device_id() != prototype.device_id()
+                {
                     return Err(deconv_error_with_detail(
                         &DECONV_ERROR_INVALID_INPUT,
                         "resident inputs must share one owning provider and device",

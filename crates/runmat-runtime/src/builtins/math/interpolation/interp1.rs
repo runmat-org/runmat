@@ -789,7 +789,7 @@ fn valid_interp1_gpu_output(
             .iter()
             .any(|input| input.shares_allocation_with(output))
         && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(output) == expected_precision
         && runmat_accelerate_api::handle_integer_type(output).is_none()
@@ -810,7 +810,7 @@ fn valid_interp1_gpu_input(
             .iter()
             .any(|input| input.shares_allocation_with(handle))
         && gpu_helpers::exact_provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(handle) == expected_precision
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
@@ -931,7 +931,7 @@ async fn gpu_query_points(
                     )
                 })?;
             if !gpu_helpers::exact_provider_for_handle(handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider))
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
             {
                 return Err(interp1_error_with_message(
                     "interp1: resident Xq is not owned by the Y provider",
