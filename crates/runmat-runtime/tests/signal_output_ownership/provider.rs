@@ -292,12 +292,17 @@ impl AccelProvider for Provider {
             if self.pending_download.load(Ordering::SeqCst) {
                 std::future::pending::<()>().await;
             }
-            self.source
+            input.allocation_lease().validate_live()?;
+            let probes = self
+                .source
                 .lock()
                 .unwrap()
-                .as_ref()
-                .unwrap()
-                .with_data(input, |data| {
+                .iter()
+                .cloned()
+                .chain(self.produced.lock().unwrap().iter().cloned())
+                .collect::<Vec<_>>();
+            for probe in probes {
+                if let Ok(host) = probe.with_data(input, |data| {
                     let data = match data {
                         HostNumericDataView::F32(data) => HostNumericDataOwned::F32(data.to_vec()),
                         HostNumericDataView::F64(data) => HostNumericDataOwned::F64(data.to_vec()),
@@ -308,7 +313,11 @@ impl AccelProvider for Provider {
                         shape: input.shape().to_vec(),
                         storage: input.physical().storage(),
                     }
-                })
+                }) {
+                    return Ok(host);
+                }
+            }
+            Err(anyhow::anyhow!("unknown fixture allocation"))
         })
     }
     fn uniform_spectral_estimate<'a>(

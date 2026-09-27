@@ -8,6 +8,11 @@ use runmat_value::Value;
 use crate::builtins::common::gpu_helpers::{self, BinaryGpuOutputContract};
 use crate::{BuiltinResult, GpuGatherRetry, RuntimeError};
 
+fn terminal(mut error: RuntimeError) -> RuntimeError {
+    error.gpu_gather_retry = GpuGatherRetry::Never;
+    error
+}
+
 pub(super) fn owner(
     input: &GpuTensorHandle,
     error: impl FnOnce() -> RuntimeError,
@@ -47,7 +52,7 @@ impl OutputContext<'_> {
     ) -> BuiltinResult<Value> {
         let tensor = super::common::output_precision::SignalPrecision::of_handle(self.input)
             .real(values, shape)
-            .map_err(|_| error())?;
+            .map_err(|_| terminal(error()))?;
         let protected = self
             .caller_inputs
             .iter()
@@ -60,6 +65,7 @@ impl OutputContext<'_> {
             builtin,
             &protected,
         )
+        .map_err(terminal)
     }
 
     pub(super) fn admit(
@@ -118,7 +124,8 @@ pub(super) fn restore(
     let Value::OutputList(values) = value else {
         return gpu_helpers::restore_class_preserving_value_protecting(
             input, value, builtin, protected,
-        );
+        )
+        .map_err(terminal);
     };
     let mut outputs = Vec::with_capacity(values.len());
     for value in values {
@@ -135,7 +142,8 @@ pub(super) fn restore(
             .collect::<Vec<_>>();
         let output = gpu_helpers::restore_class_preserving_value_protecting(
             input, value, builtin, &borrowed,
-        )?;
+        )
+        .map_err(terminal)?;
         outputs.push(output);
     }
     Ok(Value::OutputList(outputs))

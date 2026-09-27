@@ -120,17 +120,43 @@ fn typed_complex_zero_and_tiny_imaginary_signals_keep_default_twosided_range() {
                 2,
             ))
             .unwrap();
-            assert_eq!(actual, expected);
             let Value::OutputList(values) = actual else {
                 panic!("two spectral outputs")
             };
-            let Value::Tensor(frequency) = &values[1] else {
-                panic!("host fallback frequency")
+            let Value::OutputList(expected) = expected else {
+                panic!("host reference outputs")
             };
-            assert_eq!(frequency.shape, vec![4, 1]);
-            assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+            assert_eq!(values.len(), expected.len());
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
-            assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+            for (actual, expected) in values.iter().zip(&expected) {
+                let Value::GpuTensor(handle) = actual else {
+                    panic!("restored spectral output")
+                };
+                assert_eq!(handle.physical().element_type(), NumericElementType::F64);
+                assert_eq!(
+                    handle.physical().storage(),
+                    if matches!(expected, Value::ComplexTensor(_)) {
+                        GpuTensorStorage::ComplexInterleaved
+                    } else {
+                        GpuTensorStorage::Real
+                    }
+                );
+                let gathered =
+                    block_on(runmat_runtime::dispatcher::gather_if_needed_async(actual)).unwrap();
+                assert_eq!(
+                    &gathered, expected,
+                    "native class, shape, complex storage and numerical values must agree"
+                );
+            }
+            let Value::GpuTensor(frequency) = &values[1] else {
+                panic!("restored frequency")
+            };
+            assert_eq!(frequency.shape(), &[4, 1]);
+            assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 3);
+            assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
+            drop(values);
+            provider.assert_retired();
             assert_eq!(source.probe.retirements(), 0);
         }
     }
