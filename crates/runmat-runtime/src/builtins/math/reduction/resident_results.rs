@@ -27,10 +27,8 @@ pub(super) fn restore_pair(
     match restore(source, second, builtin, &second_protected) {
         Ok(second) => Ok((first, second)),
         Err(error) => {
-            if let Value::GpuTensor(handle) = &first {
-                let mut inputs = protected.to_vec();
-                inputs.push(source);
-                gpu_helpers::free_unprotected_exact_owner(handle, &inputs);
+            if let Value::GpuTensor(handle) = first {
+                return Err(gpu_helpers::reject_gpu_output(handle, error));
             }
             Err(error)
         }
@@ -66,3 +64,7 @@ fn restore(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "resident_results/owning_tests.rs"]
+mod owning_tests;
