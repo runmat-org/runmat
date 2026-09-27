@@ -1,4 +1,6 @@
 use crate::host_lu::{lu_factor_host, LuHostFactors};
+mod allocation_state;
+use allocation_state::{integer_registry, numeric_registry, registry};
 mod power;
 mod logarithms;
 mod remainder;
@@ -60,9 +62,8 @@ use runmat_runtime::builtins::math::reduction::{
     gradient_real_tensor_host_with_coordinates,
 };
 use std::cmp::Ordering as CmpOrdering;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{LockResult, Mutex, MutexGuard, PoisonError};
+use std::sync::Mutex;
 use std::time::Instant;
 
 const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
@@ -252,101 +253,7 @@ fn extract_numeric_diagonal(
     })
 }
 
-static NUMERIC_REGISTRY: OnceCell<Mutex<HashMap<u64, InProcessNumericData>>> = OnceCell::new();
 static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
-
-fn numeric_registry() -> &'static Mutex<HashMap<u64, InProcessNumericData>> {
-    NUMERIC_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-struct F64Registry;
-
-struct F64RegistryGuard<'a>(MutexGuard<'a, HashMap<u64, InProcessNumericData>>);
-
-impl F64Registry {
-    fn lock(&self) -> LockResult<F64RegistryGuard<'_>> {
-        numeric_registry()
-            .lock()
-            .map(F64RegistryGuard)
-            .map_err(|error| PoisonError::new(F64RegistryGuard(error.into_inner())))
-    }
-}
-
-impl F64RegistryGuard<'_> {
-    fn get(&self, id: &u64) -> Option<&Vec<f64>> {
-        match self.0.get(id) {
-            Some(InProcessNumericData::F64(values)) => Some(values),
-            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
-        }
-    }
-
-    fn get_mut(&mut self, id: &u64) -> Option<&mut Vec<f64>> {
-        match self.0.get_mut(id) {
-            Some(InProcessNumericData::F64(values)) => Some(values),
-            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
-        }
-    }
-
-    fn insert(&mut self, id: u64, values: Vec<f64>) -> Option<Vec<f64>> {
-        match self.0.insert(id, InProcessNumericData::F64(values)) {
-            Some(InProcessNumericData::F64(previous)) => Some(previous),
-            Some(InProcessNumericData::F32(_) | InProcessNumericData::Integer(_)) | None => None,
-        }
-    }
-
-    #[cfg(test)]
-    fn contains_key(&self, id: &u64) -> bool {
-        matches!(self.0.get(id), Some(InProcessNumericData::F64(_)))
-    }
-}
-
-static F64_REGISTRY_VIEW: F64Registry = F64Registry;
-
-fn registry() -> &'static F64Registry {
-    &F64_REGISTRY_VIEW
-}
-
-struct IntegerRegistry;
-
-struct IntegerRegistryGuard<'a>(MutexGuard<'a, HashMap<u64, InProcessNumericData>>);
-
-impl IntegerRegistry {
-    fn lock(&self) -> LockResult<IntegerRegistryGuard<'_>> {
-        numeric_registry()
-            .lock()
-            .map(IntegerRegistryGuard)
-            .map_err(|error| PoisonError::new(IntegerRegistryGuard(error.into_inner())))
-    }
-}
-
-impl IntegerRegistryGuard<'_> {
-    fn get(&self, id: &u64) -> Option<&HostIntegerDataOwned> {
-        match self.0.get(id) {
-            Some(InProcessNumericData::Integer(values)) => Some(values),
-            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
-        }
-    }
-
-    fn get_mut(&mut self, id: &u64) -> Option<&mut HostIntegerDataOwned> {
-        match self.0.get_mut(id) {
-            Some(InProcessNumericData::Integer(values)) => Some(values),
-            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
-        }
-    }
-
-    fn insert(&mut self, id: u64, values: HostIntegerDataOwned) -> Option<HostIntegerDataOwned> {
-        match self.0.insert(id, InProcessNumericData::Integer(values)) {
-            Some(InProcessNumericData::Integer(previous)) => Some(previous),
-            Some(InProcessNumericData::F64(_) | InProcessNumericData::F32(_)) | None => None,
-        }
-    }
-}
-
-static INTEGER_REGISTRY_VIEW: IntegerRegistry = IntegerRegistry;
-
-fn integer_registry() -> &'static IntegerRegistry {
-    &INTEGER_REGISTRY_VIEW
-}
 
 fn owned_integer_data(data: HostIntegerDataView<'_>) -> HostIntegerDataOwned {
     match data {
@@ -4438,10 +4345,8 @@ impl AccelProvider for InProcessProvider {
                 self.device_id
             ));
         }
-        numeric_registry()
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .remove(&h.buffer_id);
+        let allocation = numeric_registry().take(h.buffer_id);
+        drop(allocation);
         runmat_accelerate_api::clear_handle_metadata(h);
         Ok(())
     }
