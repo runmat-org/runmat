@@ -16,6 +16,10 @@ use runmat_accelerate_api::{
     ProviderTrapezoidSpacing,
 };
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "signal/spectral_preflight_tests.rs"]
+mod spectral_preflight_tests;
+
 #[derive(Clone, Copy)]
 enum GradientSpacingInput<'a> {
     Scalar(f64),
@@ -275,13 +279,21 @@ impl WgpuProvider {
         &self,
         request: &ProviderSpectralRequest<'_>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderSpectralResult> {
-        if !(!request.window.is_empty()
-            && request.nfft > 0
-            && request.frame_count > 0
-            && request.denominator.is_finite()
-            && request.denominator > 0.0)
-        {
-            return Err(anyhow!("uniform_spectral_estimate: invalid request").into());
+        runmat_accelerate_api::validate_uniform_spectral_request(request)?;
+        // Authenticate the original allocation before the first window upload.
+        let input = self.get_entry(request.input)?;
+        let component_count = request
+            .input_len
+            .checked_mul(if request.input_complex { 2 } else { 1 })
+            .ok_or_else(|| anyhow!("uniform_spectral_estimate: input too large"))?;
+        if input.len < component_count {
+            return Err(anyhow!("uniform_spectral_estimate: input length mismatch").into());
+        }
+        if runmat_accelerate_api::handle_is_transposed(request.input) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "uniform_spectral_estimate: linear framing requires contiguous input",
+            )
+            .into());
         }
 
         let framed_len = request
@@ -289,6 +301,25 @@ impl WgpuProvider {
             .checked_mul(request.frame_count)
             .and_then(|len| len.checked_mul(2))
             .ok_or_else(|| anyhow!("uniform_spectral_estimate: frame too large"))?;
+        let mode_dimensions = match request.frame_mode {
+            ProviderSpectralFrameMode::Sliding { hop } => [hop, 0, 0],
+            ProviderSpectralFrameMode::ColumnSliding {
+                hop,
+                input_rows,
+                frames_per_column,
+            } => [hop, input_rows, frames_per_column],
+            ProviderSpectralFrameMode::FoldedColumns { input_rows } => [input_rows, 0, 0],
+        };
+        if [framed_len, component_count, request.window.len()]
+            .into_iter()
+            .chain(mode_dimensions)
+            .any(|n| n > u32::MAX as usize)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "uniform_spectral_estimate: dimensions exceed GPU kernel limits",
+            )
+            .into());
+        }
 
         let window_shape = [request.window.len(), 1usize];
         let window = self.upload_exec(&HostTensorView {
@@ -429,22 +460,40 @@ impl WgpuProvider {
             return Err(anyhow!("signal_envelope: input shape mismatch").into());
         }
 
+        // Invalid controls must not trigger a lazy-view materialization.
+        if matches!(
+            request.method,
+            ProviderEnvelopeMethod::AnalyticFir { filter_len: 0 }
+                | ProviderEnvelopeMethod::Rms { window_len: 0 }
+        ) {
+            return Err(anyhow!("signal_envelope: invalid request").into());
+        }
+        // Direct-indexing RMS/FIR kernels consume logical column-major order.
+        // Existing reshape materializes transpose through the bit-preserving
+        // permutation owner, without mutating the borrowed source view.
+        let materialized = if runmat_accelerate_api::handle_is_transposed(request.input)
+            && !matches!(request.method, ProviderEnvelopeMethod::Analytic)
+        {
+            Some(self.reshape_exec(request.input, request.input.shape())?)
+        } else {
+            None
+        };
+        let prepared = ProviderEnvelopeRequest {
+            input: materialized.as_ref().unwrap_or(request.input),
+            channel_len: request.channel_len,
+            channel_count: request.channel_count,
+            output_shape: request.output_shape,
+            method: request.method,
+        };
+        let request = &prepared;
         match request.method {
             ProviderEnvelopeMethod::Analytic => self.signal_envelope_analytic_exec(request).await,
-            ProviderEnvelopeMethod::AnalyticFir { filter_len } => {
-                if filter_len == 0 {
-                    return Err(anyhow!("signal_envelope: invalid request").into());
-                }
-                self.signal_envelope_analytic_fir_exec(request, filter_len)
-                    .map_err(Into::into)
-            }
-            ProviderEnvelopeMethod::Rms { window_len } => {
-                if window_len == 0 {
-                    return Err(anyhow!("signal_envelope: invalid request").into());
-                }
-                self.signal_envelope_rms_exec(request, window_len)
-                    .map_err(Into::into)
-            }
+            ProviderEnvelopeMethod::AnalyticFir { filter_len } => self
+                .signal_envelope_analytic_fir_exec(request, filter_len)
+                .map_err(Into::into),
+            ProviderEnvelopeMethod::Rms { window_len } => self
+                .signal_envelope_rms_exec(request, window_len)
+                .map_err(Into::into),
         }
     }
 
