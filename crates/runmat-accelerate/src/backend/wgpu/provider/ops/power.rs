@@ -155,12 +155,10 @@ impl WgpuProvider {
             "power output exceeds GPU index limits"
         );
         if words == 0 {
-            return self.register_existing_buffer_with_storage(
-                self.create_storage_buffer(0, "power-empty"),
-                shape,
-                0,
-                storage,
-            );
+            let buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "power-empty")
+            })??;
+            return self.register_existing_buffer_with_storage(buffer, shape, 0, storage);
         }
         self.fused_elementwise_with_telemetry_and_storage_exec(
             &shader(self.precision, PowerShader::Evaluate(domain)),
