@@ -1678,6 +1678,15 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(anyhow!("fused_elementwise: tensor too large"));
         }
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let chunk_capacity =
+            crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
+                .ok_or_else(|| anyhow!("fused_elementwise: workgroup size is zero"))?
+                as usize;
+        // Freeze the selector for the shader, cache identity, and dispatch. The
+        // generic shader helper must not re-read a different @WG@ selection.
+        let selected_shader = shader.replace("@WG@", &workgroup_size.to_string());
+        let shader = selected_shader.as_str();
         let storage_bindings = checked_binding_count("fused_elementwise", inputs.len(), 1)?;
         let total_bindings = checked_binding_count("fused_elementwise", inputs.len(), 2)?;
         validate_compute_binding_counts(
@@ -1746,11 +1755,8 @@ impl WgpuProvider {
             tag.push_str(&inputs.len().to_string());
             tag
         };
-        let shader_hash = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            &layout_tag,
-            Some(crate::backend::wgpu::config::effective_workgroup_size()),
-        );
+        let shader_hash =
+            self.compute_pipeline_hash_bytes(shader.as_bytes(), &layout_tag, Some(workgroup_size));
         let module = crate::backend::wgpu::pipelines::create_shader_module(
             self.device_ref(),
             "runmat-fusion-shader",
@@ -1763,7 +1769,7 @@ impl WgpuProvider {
             "runmat-fusion-pipeline",
             Some(shader.as_bytes()),
             Some(&layout_tag),
-            Some(crate::backend::wgpu::config::effective_workgroup_size()),
+            Some(workgroup_size),
         );
         // Warmup once
         crate::backend::wgpu::dispatch::elementwise::warmup_noop(
@@ -1887,9 +1893,7 @@ impl WgpuProvider {
             output_ptr,
             input_ids
         );
-        // Dispatch in chunks to satisfy 65535 limit
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        // Dispatch in chunks bounded by the selected shader workgroup size.
         let mut offset_elems = 0usize;
         let mut chunk_index = 0usize;
         let mut last_submission_id = None;
@@ -1922,7 +1926,7 @@ impl WgpuProvider {
 
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
-                crate::backend::wgpu::config::effective_workgroup_size(),
+                workgroup_size,
             );
             let mut enc =
                 self.device_ref()
@@ -1989,6 +1993,13 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(anyhow!("fused_elementwise_multi: tensor too large"));
         }
+        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let chunk_capacity =
+            crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
+                .ok_or_else(|| anyhow!("fused_elementwise_multi: workgroup size is zero"))?
+                as usize;
+        let selected_shader = shader.replace("@WG@", &workgroup_size.to_string());
+        let shader = selected_shader.as_str();
         let storage_bindings =
             checked_binding_count("fused_elementwise_multi", inputs.len(), num_outputs)?;
         let total_bindings = checked_binding_count("fused_elementwise_multi", storage_bindings, 1)?;
@@ -2044,11 +2055,8 @@ impl WgpuProvider {
             inputs.len(),
             num_outputs
         );
-        let shader_hash = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            &layout_tag,
-            Some(crate::backend::wgpu::config::effective_workgroup_size()),
-        );
+        let shader_hash =
+            self.compute_pipeline_hash_bytes(shader.as_bytes(), &layout_tag, Some(workgroup_size));
         let module = crate::backend::wgpu::pipelines::create_shader_module(
             self.device_ref(),
             "runmat-fusion-multi-shader",
@@ -2061,7 +2069,7 @@ impl WgpuProvider {
             "runmat-fusion-multi-pipeline",
             Some(shader.as_bytes()),
             Some(&layout_tag),
-            Some(crate::backend::wgpu::config::effective_workgroup_size()),
+            Some(workgroup_size),
         );
         crate::backend::wgpu::dispatch::elementwise::warmup_noop(
             self.device_ref(),
@@ -2154,8 +2162,6 @@ impl WgpuProvider {
                     )
                 });
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset_elems = 0usize;
         let mut last_submission_id = None;
         while offset_elems < len {
@@ -2164,7 +2170,7 @@ impl WgpuProvider {
             uniform_state.update(self.queue_ref(), chunk_len as u32, offset_elems as u32);
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
-                crate::backend::wgpu::config::effective_workgroup_size(),
+                workgroup_size,
             );
             let mut enc =
                 self.device_ref()
