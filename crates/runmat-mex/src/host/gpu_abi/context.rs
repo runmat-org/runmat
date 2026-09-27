@@ -1,10 +1,14 @@
 //! One native invocation's exact provider and thread-affine context lifetime.
 use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
 use runmat_accelerate_api::{AccelProvider, NativeDeviceContextGuard};
+use std::rc::Rc;
+
+use super::exports::ExportScope;
 
 pub(super) struct NativeInvocationContext {
     provider: &'static dyn AccelProvider,
     guard: Option<NativeDeviceContextGuard>,
+    exports: Rc<ExportScope>,
 }
 
 impl NativeInvocationContext {
@@ -18,6 +22,7 @@ impl NativeInvocationContext {
         Ok(Self {
             provider,
             guard: Some(guard),
+            exports: ExportScope::enter(provider),
         })
     }
 
@@ -29,6 +34,7 @@ impl NativeInvocationContext {
         let Some(guard) = self.guard.take() else {
             return Ok(());
         };
+        self.exports.stop_exports();
         // Keep the context current through synchronization, including failure.
         // Neither step consults the mutable ambient provider selection.
         let synchronize = catch_allocation_cleanup_unwind(|| {
@@ -42,6 +48,7 @@ impl NativeInvocationContext {
             catch_allocation_cleanup_unwind(|| guard.leave().map_err(|error| error.to_string()))
                 .map_err(|_| "context exit panicked".to_string())
                 .and_then(|result| result);
+        self.exports.finish();
         match (synchronize, leave) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(synchronize), Err(leave)) => Err(format!(

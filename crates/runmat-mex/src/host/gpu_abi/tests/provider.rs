@@ -1,6 +1,8 @@
+use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocation, TestAllocationOwner};
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView, NativeDeviceApi,
-    NativeDeviceContextGuard,
+    AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
+    NativeDeviceAccess, NativeDeviceApi, NativeDeviceBuffer, NativeDeviceContext,
+    NativeDeviceContextGuard, NumericElementType,
 };
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -28,10 +30,11 @@ impl Fault {
 struct Events {
     log: Mutex<Vec<&'static str>>,
     active: AtomicBool,
+    retained: Mutex<Vec<RetirementProbe>>,
 }
 
 pub(super) struct Provider {
-    id: u32,
+    allocations: TestAllocationOwner,
     events: Arc<Events>,
     enter: Fault,
     synchronize: Fault,
@@ -41,7 +44,7 @@ pub(super) struct Provider {
 impl Provider {
     pub(super) fn new(enter: Fault, synchronize: Fault, leave: Fault) -> &'static Self {
         Box::leak(Box::new(Self {
-            id: runmat_accelerate_api::next_device_id(),
+            allocations: TestAllocationOwner::new(),
             events: Arc::default(),
             enter,
             synchronize,
@@ -52,6 +55,16 @@ impl Provider {
     pub(super) fn events(&self) -> Vec<&'static str> {
         self.events.log.lock().unwrap().clone()
     }
+
+    pub(super) fn empty_allocation(&self) -> TestAllocation {
+        self.allocations
+            .allocate_zeroed(vec![0, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap()
+    }
+
+    pub(super) fn expect_retained(&self, probe: &RetirementProbe) {
+        self.events.retained.lock().unwrap().push(probe.clone());
+    }
 }
 
 impl AccelProvider for Provider {
@@ -61,14 +74,11 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("context fixture has no numerical allocations") })
     }
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        anyhow::bail!("context fixture has no numerical allocations")
-    }
     fn device_info(&self) -> String {
         "native context lifecycle fixture".into()
     }
     fn device_id(&self) -> u32 {
-        self.id
+        self.allocations.device_id()
     }
     fn native_device_api(&self) -> Option<NativeDeviceApi> {
         Some(NativeDeviceApi::Cuda)
@@ -81,6 +91,12 @@ impl AccelProvider for Provider {
         let events = self.events.clone();
         let fault = self.leave;
         Ok(NativeDeviceContextGuard::new(move || {
+            assert!(events
+                .retained
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|probe| probe.retirements() == 0));
             assert!(
                 events.active.swap(false, Ordering::SeqCst),
                 "exit must occur exactly once"
@@ -91,11 +107,41 @@ impl AccelProvider for Provider {
     }
 
     fn synchronize_native_device(&self) -> anyhow::Result<()> {
+        assert!(self
+            .events
+            .retained
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|probe| probe.retirements() == 0));
         assert!(
             self.events.active.load(Ordering::SeqCst),
             "context must remain current during synchronization"
         );
         self.events.log.lock().unwrap().push("synchronize");
         self.synchronize.apply("sync")
+    }
+
+    fn export_native_device_buffer_raw(
+        &self,
+        handle: &GpuTensorHandle,
+        _: NativeDeviceAccess,
+    ) -> anyhow::Result<NativeDeviceBuffer> {
+        assert!(self.events.active.load(Ordering::SeqCst));
+        assert_eq!(handle.device_id(), self.device_id());
+        assert_eq!(handle.physical().payload_bytes(), 0);
+        self.events.log.lock().unwrap().push("export");
+        Ok(NativeDeviceBuffer {
+            context: NativeDeviceContext {
+                api: NativeDeviceApi::Cuda,
+                provider_device_id: self.device_id(),
+                device_ordinal: 0,
+                context_identity: 1,
+                stream_identity: 1,
+            },
+            device_address: 0,
+            byte_length: 0,
+            descriptor: handle.descriptor(),
+        })
     }
 }

@@ -4,6 +4,8 @@ mod async_request;
 mod boundary;
 #[cfg(not(target_family = "wasm"))]
 mod gpu_abi;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) use gpu_abi::native_device_address;
 mod service_slot;
 mod services;
 

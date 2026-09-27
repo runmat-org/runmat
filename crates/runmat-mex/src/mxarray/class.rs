@@ -26,6 +26,25 @@ pub enum MxClassId {
 }
 
 impl MxClassId {
+    pub(crate) fn from_gpu_handle(handle: &runmat_accelerate_api::GpuTensorHandle) -> Self {
+        use runmat_accelerate_api::NumericElementType;
+        if runmat_accelerate_api::handle_is_logical(handle) {
+            return Self::Logical;
+        }
+        match handle.physical().element_type() {
+            NumericElementType::F64 => Self::Double,
+            NumericElementType::F32 => Self::Single,
+            NumericElementType::I8 => Self::Int8,
+            NumericElementType::I16 => Self::Int16,
+            NumericElementType::I32 => Self::Int32,
+            NumericElementType::I64 => Self::Int64,
+            NumericElementType::U8 => Self::Uint8,
+            NumericElementType::U16 => Self::Uint16,
+            NumericElementType::U32 => Self::Uint32,
+            NumericElementType::U64 => Self::Uint64,
+        }
+    }
+
     pub const fn from_numeric_dtype(dtype: NumericDType) -> Self {
         match dtype {
             NumericDType::F64 => Self::Double,

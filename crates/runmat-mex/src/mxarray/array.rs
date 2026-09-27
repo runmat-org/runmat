@@ -403,7 +403,10 @@ impl MxArray {
         if !class_id.is_numeric() && class_id != MxClassId::Logical {
             return Err("GPU arrays require a numeric or logical underlying class".into());
         }
-        let shape = lease.handle().shape.clone();
+        if class_id != MxClassId::from_gpu_handle(lease.handle()) {
+            return Err("GPU array class does not match its owned allocation view".into());
+        }
+        let shape = lease.handle().shape().to_vec();
         checked_numel(&shape)?;
         Ok(Self {
             class_id: MxClassId::Object,
@@ -498,7 +501,7 @@ impl MxArray {
                 ..
             }) => true,
             MxArrayData::Gpu(MxGpuArray { lease, .. }) => {
-                lease.handle().descriptor.storage
+                lease.handle().descriptor().storage
                     == Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
             }
             _ => false,

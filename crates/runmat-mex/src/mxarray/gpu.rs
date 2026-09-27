@@ -1,89 +1,54 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, NativeDeviceAccess, NativeDeviceApi, NativeDeviceComponent,
+    GpuTensorHandle, GpuTensorStorage, NativeDeviceAccess, NativeDeviceClass, NativeDeviceComponent,
 };
 
 use super::MxClassId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GpuLeaseOrigin {
-    Borrowed,
-    Owned,
-}
-
-#[derive(Debug)]
-struct GpuLeaseInner {
-    handle: GpuTensorHandle,
-    origin: GpuLeaseOrigin,
-    published: AtomicBool,
-}
-
-impl Drop for GpuLeaseInner {
-    fn drop(&mut self) {
-        if self.origin == GpuLeaseOrigin::Owned && !self.published.load(Ordering::Acquire) {
-            if let Some(provider) = runmat_accelerate_api::provider_for_handle(&self.handle) {
-                let _ = provider.free(&self.handle);
-            }
-            runmat_accelerate_api::clear_handle_metadata(&self.handle);
-        }
-    }
-}
-
-/// Invocation-scoped ownership for an `mxGPUArray` payload.
-///
-/// Inputs borrow an existing runtime handle. Provider allocations remain owned
-/// by the call arena until an output is published back to the runtime.
+/// An `mxGPUArray` retains the same allocation authority as runtime values.
+/// Publication creates a validated view, not a transfer flag or second lease.
 #[derive(Debug, Clone)]
 pub struct MxGpuLease {
-    inner: Arc<GpuLeaseInner>,
+    handle: GpuTensorHandle,
 }
 
 impl PartialEq for MxGpuLease {
     fn eq(&self, other: &Self) -> bool {
-        self.inner.handle == other.inner.handle
+        self.handle == other.handle
     }
 }
 
 impl MxGpuLease {
     pub fn borrowed(handle: GpuTensorHandle) -> Self {
-        Self::new(handle, GpuLeaseOrigin::Borrowed)
+        Self { handle }
     }
 
     pub fn owned(handle: GpuTensorHandle) -> Self {
-        Self::new(handle, GpuLeaseOrigin::Owned)
-    }
-
-    fn new(handle: GpuTensorHandle, origin: GpuLeaseOrigin) -> Self {
-        Self {
-            inner: Arc::new(GpuLeaseInner {
-                handle,
-                origin,
-                published: AtomicBool::new(false),
-            }),
-        }
+        Self { handle }
     }
 
     pub fn handle(&self) -> &GpuTensorHandle {
-        &self.inner.handle
+        &self.handle
     }
 
-    pub fn publish(&self, shape: &[usize]) -> GpuTensorHandle {
-        self.inner.published.store(true, Ordering::Release);
-        let mut handle = self.inner.handle.clone();
-        handle.shape = shape.to_vec();
-        handle
+    pub fn publish(&self, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        if shape == self.handle.shape() {
+            return Ok(self.handle.clone());
+        }
+        Ok(self
+            .handle
+            .with_view(self.handle.view().clone().with_shape(shape.to_vec()))?)
     }
 
     pub fn duplicate(&self) -> anyhow::Result<Self> {
         let provider = runmat_accelerate_api::provider_for_handle(self.handle())
             .ok_or_else(|| anyhow::anyhow!("GPU array provider is unavailable"))?;
         let duplicate = provider.copy_native_device_buffer(self.handle())?;
-        validate_result_like(&duplicate, self.handle(), self.handle().descriptor.storage)?;
-        if duplicate.buffer_id == self.handle().buffer_id {
+        validate_result_like(
+            &duplicate,
+            self.handle(),
+            self.handle().descriptor().storage,
+        )?;
+        if duplicate.shares_allocation_with(self.handle()) {
             anyhow::bail!("provider returned the source allocation for an independent GPU copy");
         }
         Ok(Self::owned(duplicate))
@@ -100,7 +65,7 @@ impl MxGpuLease {
     pub fn combine(real: &Self, imaginary: &Self) -> anyhow::Result<Self> {
         let provider = runmat_accelerate_api::provider_for_handle(real.handle())
             .ok_or_else(|| anyhow::anyhow!("GPU array provider is unavailable"))?;
-        if provider.device_id() != imaginary.handle().device_id {
+        if provider.device_id() != imaginary.handle().device_id() {
             anyhow::bail!("complex GPU components belong to different providers");
         }
         let combined =
@@ -114,21 +79,15 @@ impl MxGpuLease {
     }
 
     pub fn device_address(&self, access: NativeDeviceAccess) -> anyhow::Result<u64> {
-        let provider = runmat_accelerate_api::provider_for_handle(self.handle())
-            .ok_or_else(|| anyhow::anyhow!("GPU array provider is unavailable"))?;
-        if provider.native_device_api() != Some(NativeDeviceApi::Cuda) {
-            anyhow::bail!(
-                "GPU array belongs to provider '{}', which does not expose CUDA memory",
-                provider.device_info()
-            );
+        #[cfg(not(target_family = "wasm"))]
+        {
+            crate::host::native_device_address(self.handle(), access)
         }
-        let exported = provider.export_native_device_buffer(self.handle(), access)?;
-        runmat_accelerate_api::validate_native_device_buffer(
-            self.handle(),
-            &exported,
-            NativeDeviceApi::Cuda,
-        )?;
-        Ok(exported.device_address)
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = access;
+            anyhow::bail!("native GPU addresses are unavailable in WebAssembly")
+        }
     }
 }
 
@@ -137,16 +96,17 @@ fn validate_result_like(
     source: &GpuTensorHandle,
     storage: Option<GpuTensorStorage>,
 ) -> anyhow::Result<()> {
-    let element_type = source
-        .descriptor
-        .element_type
-        .ok_or_else(|| anyhow::anyhow!("GPU array has no numeric element type"))?;
+    let class = if runmat_accelerate_api::handle_is_logical(source) {
+        NativeDeviceClass::Logical
+    } else {
+        NativeDeviceClass::Numeric(source.physical().element_type())
+    };
     let storage = storage.ok_or_else(|| anyhow::anyhow!("GPU array has no storage layout"))?;
     runmat_accelerate_api::validate_native_device_result(
         result,
-        source.device_id,
-        &source.shape,
-        element_type,
+        source.device_id(),
+        source.shape(),
+        class,
         storage,
     )
 }
@@ -156,3 +116,6 @@ pub struct MxGpuArray {
     pub class_id: MxClassId,
     pub lease: MxGpuLease,
 }
+
+#[cfg(test)]
+mod tests;

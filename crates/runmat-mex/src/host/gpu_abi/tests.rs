@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::task::{Context, Wake, Waker};
 
 mod provider;
+mod exports;
 use provider::{Fault, Provider};
 
 struct NoopWake;

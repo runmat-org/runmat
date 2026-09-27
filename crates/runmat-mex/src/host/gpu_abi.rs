@@ -3,6 +3,8 @@ use std::ffi::c_void;
 use runmat_accelerate_api::{NativeDeviceApi, NativeDeviceComponent};
 
 mod context;
+mod exports;
+pub(crate) use exports::native_device_address;
 use context::NativeInvocationContext;
 #[cfg(test)]
 mod tests;
