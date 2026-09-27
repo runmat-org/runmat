@@ -26,6 +26,10 @@ mod fusion_outputs;
 pub mod observation;
 mod residency;
 mod numeric_upload;
+mod provider_execution;
+pub use provider_execution::{
+    ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,
+};
 mod placement;
 mod power;
 mod numerical_domain;
@@ -2308,8 +2312,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _second: Option<&'a GpuTensorHandle>,
         _weights: Option<&'a GpuTensorHandle>,
         _options: &'a CovarianceOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("covariance not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("covariance not supported by provider").into())
+        })
     }
 
     /// Compute a correlation coefficient matrix across the columns of `matrix`.
@@ -2317,8 +2323,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _options: &'a CorrcoefOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("corrcoef not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("corrcoef not supported by provider").into())
+        })
     }
 
     /// Convert a resident covariance matrix into correlation and sigma outputs.
@@ -3010,15 +3018,19 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _a: &'a GpuTensorHandle,
         _lower: bool,
-    ) -> AccelProviderFuture<'a, ProviderCholResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("chol not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, ProviderCholResult> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("chol not supported by provider").into())
+        })
     }
     fn qr<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _options: ProviderQrOptions,
-    ) -> AccelProviderFuture<'a, ProviderQrResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("qr not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, ProviderQrResult> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("qr not supported by provider").into())
+        })
     }
     fn take_matmul_sources(
         &self,
@@ -3032,7 +3044,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _product_lhs: Option<&'a GpuTensorHandle>,
         q_handle: &'a GpuTensorHandle,
         options: &'a ProviderQrOptions,
-    ) -> AccelProviderFuture<'a, Option<ProviderQrPowerIterResult>> {
+    ) -> ProviderExecutionFuture<'a, Option<ProviderQrPowerIterResult>> {
         let _ = (product, q_handle, options);
         Box::pin(async move { Ok(None) })
     }
