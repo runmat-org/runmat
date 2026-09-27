@@ -3,10 +3,11 @@ use futures::executor::block_on;
 use runmat_accelerate_api::AccelProvider as _;
 use runmat_value::{LogicalArray, Tensor, Value};
 use std::cell::Cell;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Mutex, MutexGuard, OnceLock,
-};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+#[cfg(test)]
+#[path = "test_support/owning_tests.rs"]
+mod owning_tests;
 
 pub mod fs {
     use std::io;
@@ -147,7 +148,14 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
         if host.data.element_type() == runmat_accelerate_api::NumericElementType::F64 {
             anyhow::bail!("f32 test provider cannot store native double payloads");
         }
-        self.inner.upload_numeric(host)
+        self.inner.upload_numeric_raw(host)
+    }
+
+    fn upload_logical_raw(
+        &self,
+        host: &runmat_accelerate_api::HostLogicalTensorView,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        self.inner.upload_logical_raw(host)
     }
 
     fn download_numeric<'a>(
@@ -163,7 +171,7 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
         let values: Vec<f32> = host.data.iter().map(|value| *value as f32).collect();
         self.inner
-            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+            .upload_numeric_raw(&runmat_accelerate_api::HostNumericTensorView {
                 data: runmat_accelerate_api::HostNumericDataView::F32(&values),
                 shape: host.shape,
                 storage: runmat_accelerate_api::GpuTensorStorage::Real,
@@ -189,10 +197,6 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
         handle: &'a runmat_accelerate_api::GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelIntegerDownloadFuture<'a> {
         self.inner.download_integer(handle)
-    }
-
-    fn free(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-        self.inner.free(handle)
     }
 
     fn device_info(&self) -> String {
@@ -227,8 +231,8 @@ pub struct RejectingNativeResultProvider {
 }
 
 struct CountingHandleOwner {
-    inner: runmat_accelerate::simple_provider::InProcessProvider,
-    free_count: AtomicUsize,
+    owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+    probes: Mutex<Vec<runmat_accelerate_api::test_support::RetirementProbe>>,
 }
 
 impl RejectingNativeResultProvider {
@@ -240,19 +244,27 @@ impl RejectingNativeResultProvider {
     }
 
     pub fn free_count(&self) -> usize {
-        self.rejected_owner.free_count.load(Ordering::SeqCst)
+        self.rejected_owner
+            .probes
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|probe| probe.retirements())
+            .sum()
     }
 
     fn rejected_handle(&self) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-        let mut handle = self
-            .rejected_owner
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &[0.0],
-                shape: &[1, 1],
-            })?;
-        handle.descriptor.storage =
-            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-        Ok(handle)
+        let allocation = self.rejected_owner.owner.allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        )?;
+        self.rejected_owner
+            .probes
+            .lock()
+            .unwrap()
+            .push(allocation.probe);
+        Ok(allocation.handle)
     }
 }
 
@@ -269,10 +281,6 @@ impl runmat_accelerate_api::AccelProvider for RejectingNativeResultProvider {
         handle: &'a runmat_accelerate_api::GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         self.inner.download(handle)
-    }
-
-    fn free(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-        self.inner.free(handle)
     }
 
     fn device_info(&self) -> String {
@@ -315,51 +323,17 @@ impl runmat_accelerate_api::AccelProvider for RejectingNativeResultProvider {
     }
 }
 
-impl runmat_accelerate_api::AccelProvider for CountingHandleOwner {
-    fn upload(
-        &self,
-        host: &runmat_accelerate_api::HostTensorView,
-    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-        self.inner.upload(host)
-    }
-
-    fn download<'a>(
-        &'a self,
-        handle: &'a runmat_accelerate_api::GpuTensorHandle,
-    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-        self.inner.download(handle)
-    }
-
-    fn free(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-        self.free_count.fetch_add(1, Ordering::SeqCst);
-        self.inner.free(handle)
-    }
-
-    fn device_info(&self) -> String {
-        self.inner.device_info()
-    }
-
-    fn device_id(&self) -> u32 {
-        self.inner.device_id()
-    }
-
-    fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
-        self.inner.precision()
-    }
-}
-
 pub fn with_rejecting_native_result_provider<F, R>(f: F) -> R
 where
     F: FnOnce(&'static RejectingNativeResultProvider) -> R,
 {
     let _guard = accel_test_lock();
     let rejected_owner = Box::leak(Box::new(CountingHandleOwner {
-        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
-        free_count: AtomicUsize::new(0),
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+        probes: Mutex::new(Vec::new()),
     }));
     let provider = Box::leak(Box::new(RejectingNativeResultProvider::new(rejected_owner)));
     unsafe {
-        runmat_accelerate_api::register_provider(rejected_owner);
         runmat_accelerate_api::register_provider(provider);
     }
     let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
@@ -368,33 +342,6 @@ where
 
 /// Gather a value (recursively) so assertions can operate on host tensors.
 pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
-    // Ensure the correct provider is active for GPU handles created by the WGPU backend.
-    #[cfg(feature = "wgpu")]
-    {
-        if let Value::GpuTensor(ref h) = value {
-            let active_owner = runmat_accelerate_api::provider()
-                .is_some_and(|provider| provider.device_id() == h.device_id);
-            if h.device_id != 0 && !active_owner {
-                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                );
-            }
-        }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    let provider = match &value {
-        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
-            .or_else(runmat_accelerate_api::provider),
-        _ => runmat_accelerate_api::provider(),
-    };
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let gathered = {
-        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(provider);
-        block_on(crate::dispatcher::gather_if_needed_async(&value))?
-    };
-
-    #[cfg(target_arch = "wasm32")]
     let gathered = block_on(crate::dispatcher::gather_if_needed_async(&value))?;
 
     match gathered {
