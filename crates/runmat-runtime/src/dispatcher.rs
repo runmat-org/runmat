@@ -796,7 +796,7 @@ fn finalize_instance_method_result(
     receiver: &Value,
     result: Result<runmat_value::ValueSequence, RuntimeError>,
 ) -> Result<Value, RuntimeError> {
-    let result = resolve_single_sequence(result?)?;
+    let result = crate::call::arguments::project_legacy_builtin_value_abi(result?);
     const DELETE_METHOD: runmat_types::StaticMethodName =
         runmat_types::StaticMethodName::new("delete");
     if DELETE_METHOD.is(method_name) {
@@ -847,7 +847,9 @@ async fn try_call_registered_static_method(
     )
     .await
     {
-        return result.and_then(resolve_single_sequence).map(Some);
+        return result
+            .map(crate::call::arguments::project_legacy_builtin_value_abi)
+            .map(Some);
     }
     if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != qualified_name
@@ -865,7 +867,9 @@ async fn try_call_registered_static_method(
         )
         .await
         {
-            return result.and_then(resolve_single_sequence).map(Some);
+            return result
+                .map(crate::call::arguments::project_legacy_builtin_value_abi)
+                .map(Some);
         }
         if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != qualified_name
@@ -1138,6 +1142,35 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn instance_method_legacy_boundary_preserves_output_cardinality() {
+        use runmat_value::ValueSequence;
+        let method = runmat_types::MethodName::from("display");
+        let receiver = Value::Num(0.0);
+        for values in [
+            vec![],
+            vec![Value::Num(1.0)],
+            vec![Value::Num(1.0), Value::Num(2.0)],
+        ] {
+            let output = super::finalize_instance_method_result(
+                &method,
+                &receiver,
+                Ok(ValueSequence::comma_separated(values.clone()).unwrap()),
+            )
+            .unwrap();
+            assert_eq!(output, Value::OutputList(values));
+        }
+        assert_eq!(
+            super::finalize_instance_method_result(
+                &method,
+                &receiver,
+                Ok(ValueSequence::single(Value::Num(3.0)).unwrap()),
+            )
+            .unwrap(),
+            Value::Num(3.0),
+        );
+    }
 
     struct EmptyBuiltinService;
 
@@ -1734,13 +1767,40 @@ mod tests {
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             std::sync::Arc::new(move |function, _args, requested_outputs| {
                 assert_eq!(function, 20202);
-                assert_eq!(requested_outputs, 1);
-                Box::pin(async { crate::sequence::single_value_sequence(Value::Num(77.0)) })
+                Box::pin(async move {
+                    if requested_outputs == 1 {
+                        crate::sequence::single_value_sequence(Value::Num(77.0))
+                    } else {
+                        runmat_value::ValueSequence::comma_separated(
+                            (0..requested_outputs)
+                                .map(|index| Value::Num(index as f64))
+                                .collect(),
+                        )
+                        .map_err(crate::sequence::sequence_error_to_runtime)
+                    }
+                })
             }),
         ));
 
         let out = call_builtin(&format!("{class_name}.zero"), &[])
             .expect("dotted static class method call should dispatch");
         assert_eq!(out, Value::Num(77.0));
+        for requested_outputs in [0, 2] {
+            let out = block_on(super::try_call_registered_static_method(
+                &format!("{class_name}.zero"),
+                &[],
+                Some(requested_outputs),
+            ))
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                out,
+                Value::OutputList(
+                    (0..requested_outputs)
+                        .map(|index| Value::Num(index as f64))
+                        .collect(),
+                )
+            );
+        }
     }
 }
