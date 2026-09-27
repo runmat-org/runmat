@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use runmat_execution::state::{AttemptState, TaskState};
 use runmat_execution::TaskId;
+use runmat_execution_runner::driver::DriverEventKind;
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{AttemptSuccess, DriverAction, DriverCommand, DriverSnapshot};
 
@@ -10,8 +11,9 @@ use super::RemotePoolDriver;
 impl RemotePoolDriver {
     pub(super) fn apply_report(self: &Arc<Self>, report: BackendReport) {
         let task_id = report.task_id;
-        let (actions, outcome) = {
+        let (actions, outcome, newly_committed) = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
+            let previous_events = driver.events().len();
             let actions = match driver.handle(DriverCommand::BackendReport(report)) {
                 Ok(actions) => actions,
                 Err(_) => return,
@@ -50,9 +52,17 @@ impl RemotePoolDriver {
                     action => Some(action),
                 })
                 .collect();
-            (actions, outcome)
+            let newly_committed = matches!(&outcome, Some(Ok(_)))
+                && driver.events()[previous_events..].iter().any(|event| {
+                    matches!(&event.kind, DriverEventKind::ResultCommitted { task_id: committed, .. }
+                        if *committed == task_id)
+                });
+            (actions, outcome, newly_committed)
         };
         self.dispatch(actions);
+        if newly_committed {
+            self.committed_task.notify_one();
+        }
         if let Some(outcome) = outcome {
             self.resolve_task(task_id, outcome);
         }

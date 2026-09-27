@@ -82,6 +82,7 @@ pub struct RemotePoolDriver {
     progress: Mutex<HashMap<TaskId, Arc<super::pool_progress::RemoteProgressBuffer>>>,
     admission: Mutex<()>,
     restored_completions: Mutex<HashMap<TaskId, RemoteTaskCompletion>>,
+    committed_task: tokio::sync::Notify,
 }
 
 impl CacheImport for RemotePoolDriver {
@@ -150,6 +151,7 @@ impl RemotePoolDriver {
             progress: Mutex::new(HashMap::new()),
             admission: Mutex::new(()),
             restored_completions: Mutex::new(HashMap::new()),
+            committed_task: tokio::sync::Notify::new(),
         }))
     }
 
@@ -179,6 +181,11 @@ impl RemotePoolDriver {
 
     pub fn value_scope(&self) -> &str {
         &self.value_scope
+    }
+
+    /// Wake the checkpoint publisher after scheduler authority accepts a new result.
+    pub(super) async fn committed_task(&self) {
+        self.committed_task.notified().await;
     }
 
     pub async fn add_worker(

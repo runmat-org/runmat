@@ -21,8 +21,8 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    ProgramExecutionObject, ProgramExecutionObjectLocation, ProgramExecutionOutputs,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionObject, ProgramExecutionObjectClosure, ProgramExecutionObjectLocation,
+    ProgramExecutionOutputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
 };
 use runmat_execution_runner::WorkerSpec;
 use runmat_execution_transport_native::control::{
@@ -86,6 +86,131 @@ struct DurableControl {
 enum ReplacementInterruption {
     RecoveryClosure,
     ReplayableExecutionStart,
+    ThermalCommitted,
+}
+
+/// Inspect only authenticated, already-stored checkpoint objects. Never infer a
+/// completed thermal phase from wall time or from an outer run status.
+fn stored_pool_checkpoint(
+    control: &DurableControl,
+    state: &DurableState,
+    checkpoint: &RemoteDriverCheckpoint,
+) -> Option<(super::RemotePoolCheckpoint, ProgramExecutionObjectClosure)> {
+    let catalog = checkpoint.pool_catalog.as_ref()?;
+    let catalog_artifact = state.artifacts.get(&catalog.artifact_id)?;
+    let catalog_bytes = open_object(
+        &control.run_key,
+        &catalog_artifact.ciphertext,
+        RUN_ID,
+        EncryptionPurpose::Result,
+    )
+    .ok()?;
+    ProgramExecutionObject {
+        reference: catalog.reference.clone(),
+        bytes: catalog_bytes.clone(),
+    }
+    .validate()
+    .ok()?;
+    let closure = ProgramExecutionObjectClosure::from_canonical_bytes(&catalog_bytes).ok()?;
+    let root = closure
+        .objects
+        .iter()
+        .find(|location| location.reference == closure.root)?;
+    let root_artifact = state.artifacts.get(&root.artifact_id)?;
+    let root_bytes = open_object(
+        &control.run_key,
+        &root_artifact.ciphertext,
+        RUN_ID,
+        EncryptionPurpose::Result,
+    )
+    .ok()?;
+    ProgramExecutionObject {
+        reference: root.reference.clone(),
+        bytes: root_bytes.clone(),
+    }
+    .validate()
+    .ok()?;
+    let pool = super::RemotePoolCheckpoint::decode(&root_bytes).ok()?;
+    Some((pool, closure))
+}
+
+fn stored_driver_checkpoint(
+    control: &DurableControl,
+    state: &DurableState,
+    artifact_id: &str,
+) -> RemoteDriverCheckpoint {
+    let artifact = state
+        .artifacts
+        .get(artifact_id)
+        .expect("checkpoint artifact");
+    let bytes = open_object(
+        &control.run_key,
+        &artifact.ciphertext,
+        RUN_ID,
+        EncryptionPurpose::Checkpoint,
+    )
+    .expect("authenticated checkpoint");
+    RemoteDriverCheckpoint::from_canonical_bytes(&bytes).expect("valid checkpoint")
+}
+
+fn committed_thermal_task(
+    control: &DurableControl,
+    state: &DurableState,
+    checkpoint: &RemoteDriverCheckpoint,
+) -> Option<runmat_execution::TaskId> {
+    use runmat_analysis_execution::AnalysisHostWorkload;
+    use runmat_analysis_fea::execution::AnalysisWorkKind;
+    use runmat_execution::value::{ValuePayload, ValueRefKind};
+
+    let (pool, closure) = stored_pool_checkpoint(control, state, checkpoint)?;
+    for (task_id, record) in &pool.test_snapshot().tasks {
+        if record.committed.is_none() {
+            continue;
+        }
+        let Some(program) = pool.test_program(*task_id) else {
+            continue;
+        };
+        let Some(ValuePayload::Object(descriptor)) = program.arguments.first() else {
+            continue;
+        };
+        let Some(location) = closure.objects.iter().find(|location| {
+            location.reference.id == descriptor.id
+                && super::object_transfer::references_share_content_identity(
+                    &location.reference,
+                    descriptor,
+                )
+        }) else {
+            continue;
+        };
+        let Some(stored) = state.artifacts.get(&location.artifact_id) else {
+            continue;
+        };
+        let purpose = match location.reference.kind {
+            ValueRefKind::DriverObject => EncryptionPurpose::Input,
+            ValueRefKind::ResultObject => EncryptionPurpose::Result,
+            _ => continue,
+        };
+        let Ok(bytes) = open_object(&control.run_key, &stored.ciphertext, RUN_ID, purpose) else {
+            continue;
+        };
+        let descriptor_object = ProgramExecutionObject {
+            reference: location.reference.clone(),
+            bytes: bytes.clone(),
+        };
+        if descriptor_object.validate().is_err() {
+            continue;
+        }
+        let access = ArtifactAccess {
+            authorization_scope: RUN_ID.into(),
+            encryption_context: descriptor.encryption_context,
+        };
+        if AnalysisHostWorkload::from_canonical_bytes(&bytes, access)
+            .is_ok_and(|host| host.workload.kind == AnalysisWorkKind::SolveThermal)
+        {
+            return Some(*task_id);
+        }
+    }
+    None
 }
 
 #[async_trait]
@@ -186,9 +311,15 @@ impl DriverControlPlane for DurableControl {
                 )
                 .ok()
                 .and_then(|bytes| RemoteDriverCheckpoint::from_canonical_bytes(&bytes).ok())
-                .is_some_and(|checkpoint| {
-                    self.interruption == ReplacementInterruption::RecoveryClosure
-                        && checkpoint.closure_catalog.is_some()
+                .is_some_and(|checkpoint| match self.interruption {
+                    ReplacementInterruption::RecoveryClosure => {
+                        checkpoint.closure_catalog.is_some()
+                    }
+                    ReplacementInterruption::ThermalCommitted => {
+                        let state = self.state.lock().unwrap();
+                        committed_thermal_task(self, &state, &checkpoint).is_some()
+                    }
+                    ReplacementInterruption::ReplayableExecutionStart => false,
                 })
             });
         let (stored, interrupt_driver) = {
@@ -342,7 +473,25 @@ fn authored_thermal_outer_root_matrix_replays_after_preexecution_driver_replacem
     }
 }
 
+#[test]
+fn authored_thermal_prefix_survives_driver_loss_after_its_commit() {
+    for case in thermal::Case::matrix() {
+        let result = run_actual_driver_replacement_with_interruption(
+            ExactStudyFamily::ThermalPrestress(case),
+            ReplacementInterruption::ThermalCommitted,
+        );
+        assert!(result.is_some());
+    }
+}
+
 fn run_actual_driver_replacement(family: ExactStudyFamily) -> Option<thermal::ColdReplay> {
+    run_actual_driver_replacement_with_interruption(family, family.interruption())
+}
+
+fn run_actual_driver_replacement_with_interruption(
+    family: ExactStudyFamily,
+    interruption: ReplacementInterruption,
+) -> Option<thermal::ColdReplay> {
     std::thread::Builder::new()
         .name(format!("actual-driver-replacement-{family:?}"))
         .stack_size(ACTUAL_DRIVER_TEST_STACK_BYTES)
@@ -351,15 +500,19 @@ fn run_actual_driver_replacement(family: ExactStudyFamily) -> Option<thermal::Co
                 .enable_all()
                 .build()
                 .expect("actual-driver replacement runtime")
-                .block_on(actual_driver_replacement_case(family))
+                .block_on(actual_driver_replacement_case(family, interruption))
         })
         .expect("actual-driver replacement test thread")
         .join()
         .expect("actual-driver replacement test thread panicked")
 }
 
-async fn actual_driver_replacement_case(family: ExactStudyFamily) -> Option<thermal::ColdReplay> {
-    let fixture = exact_study_fixture(family);
+async fn actual_driver_replacement_case(
+    family: ExactStudyFamily,
+    interruption: ReplacementInterruption,
+) -> Option<thermal::ColdReplay> {
+    let mut fixture = exact_study_fixture(family);
+    fixture.control.interruption = interruption;
     let driver_material = driver_identity_material();
     let directory = tempfile::tempdir().unwrap();
     let identity_path = directory.path().join("driver-endpoint.json");
@@ -397,6 +550,29 @@ async fn actual_driver_replacement_case(family: ExactStudyFamily) -> Option<ther
         let state = control.state.lock().unwrap();
         assert!(state.driver_interrupted_at_commit);
         state.latest_checkpoint.clone().unwrap()
+    };
+    let thermal_before = if interruption == ReplacementInterruption::ThermalCommitted {
+        let state = control.state.lock().unwrap();
+        let checkpoint = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
+        let task_id = committed_thermal_task(&control, &state, &checkpoint)
+            .expect("driver loss must follow an authenticated thermal task commit");
+        let (pool, _) = stored_pool_checkpoint(&control, &state, &checkpoint)
+            .expect("committed thermal pool checkpoint");
+        let programs = pool
+            .test_snapshot()
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.committed.is_some())
+            .map(|(id, _)| {
+                (
+                    *id,
+                    pool.test_program(*id).expect("committed program").clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        Some((task_id, pool.test_snapshot().clone(), programs))
+    } else {
+        None
     };
     let second_relay = RelayServer::bind().await;
     let second_authority = driver_authority(2, second_relay.http_base());
@@ -456,6 +632,65 @@ async fn actual_driver_replacement_case(family: ExactStudyFamily) -> Option<ther
             state.bootstrap_checkpoints.clone(),
         )
     };
+    if let Some((task_id, before, prefix_programs)) = thermal_before {
+        let state = control.state.lock().unwrap();
+        let final_id = state
+            .latest_checkpoint
+            .as_ref()
+            .expect("final pool checkpoint");
+        let checkpoint = stored_driver_checkpoint(&control, &state, final_id);
+        let (pool, _) = stored_pool_checkpoint(&control, &state, &checkpoint)
+            .expect("final scheduler authority is published");
+        let after = pool.test_snapshot();
+        assert!(before
+            .tasks
+            .get(&task_id)
+            .is_some_and(|task| task.committed.is_some()));
+        for (committed_id, committed) in before
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.committed.is_some())
+        {
+            assert_eq!(
+                after.tasks.get(committed_id),
+                Some(committed),
+                "a committed prefix task changed identity, commit or accounting"
+            );
+            for (attempt_id, attempt) in &before.attempts {
+                if attempt.request.task_id == *committed_id {
+                    assert_eq!(
+                        after.attempts.get(attempt_id),
+                        Some(attempt),
+                        "a committed prefix attempt was redispatched or altered"
+                    );
+                }
+            }
+        }
+        for (new_id, _) in after
+            .tasks
+            .iter()
+            .filter(|(id, _)| !before.tasks.contains_key(id))
+        {
+            let new_program = pool.test_program(*new_id).expect("final program");
+            assert!(
+                prefix_programs
+                    .iter()
+                    .all(|(_, prefix_program)| prefix_program != new_program),
+                "replacement redispatched a committed prefix under a different task id"
+            );
+        }
+        assert!(
+            after.tasks.iter().any(|(id, task)| {
+                *id != task_id
+                    && task.committed.is_some()
+                    && before
+                        .tasks
+                        .get(id)
+                        .is_none_or(|previous| previous.committed.is_none())
+            }),
+            "replacement must complete downstream work, not replay an already completed study"
+        );
+    }
     assert_eq!(
         bootstraps,
         vec![(1, None), (2, Some(checkpoint_after_loss))]

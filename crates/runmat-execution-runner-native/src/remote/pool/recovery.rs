@@ -44,6 +44,16 @@ pub struct RemotePoolRestoreAuthority {
 }
 
 impl RemotePoolCheckpoint {
+    #[cfg(all(test, feature = "occt-native"))]
+    pub(crate) fn test_snapshot(&self) -> &runmat_execution_runner::DriverSnapshot {
+        &self.scheduler.snapshot
+    }
+
+    #[cfg(all(test, feature = "occt-native"))]
+    pub(crate) fn test_program(&self, task_id: TaskId) -> Option<&ProgramExecutionRequest> {
+        self.tasks.get(&task_id).map(|binding| &binding.program)
+    }
+
     pub fn encode(&self) -> NativeExecutionResult<Vec<u8>> {
         self.validate()?;
         let mut writer = BoundedMetadata(Vec::new());

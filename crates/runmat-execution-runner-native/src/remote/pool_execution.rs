@@ -384,7 +384,7 @@ async fn execute_with_allocated_workers(
     // The study owns physical publications; this clone owns periodic scheduler
     // publications. Both serialize through the same acknowledged sequence.
     let periodic_publisher = recovery_publisher.clone();
-    let mut execution = if geometry_meshing {
+    let execution = if geometry_meshing {
         Box::pin(super::exact_meshing::execute_geometry_root(
             pool_for_execution,
             request,
@@ -435,6 +435,18 @@ async fn execute_with_allocated_workers(
             resources_for_execution,
         ))
     };
+    let terminal_publisher = periodic_publisher.clone();
+    let mut execution = Box::pin(async move {
+        let outcome = execution.await;
+        // Persist the final scheduler state before exposing any terminal outcome,
+        // including when the last task and packaging finish in one executor turn.
+        if let Some(publisher) = terminal_publisher {
+            tokio::time::timeout(WORKER_READY_TIMEOUT, publisher.publish_pool())
+                .await
+                .map_err(|_| protocol("terminal recovery publication exceeded its deadline"))??;
+        }
+        outcome
+    }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + '_>>;
     let mut reconcile_ticks = tokio::time::interval(RECONCILE_INTERVAL);
     reconcile_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut checkpoint_ticks = tokio::time::interval(CHECKPOINT_INTERVAL);
@@ -449,6 +461,12 @@ async fn execute_with_allocated_workers(
             pool.cancel(CancellationReason::User)?;
             cancellation_requested = true;
         }
+        let checkpoint_due = async {
+            tokio::select! {
+                _ = checkpoint_ticks.tick() => {},
+                _ = pool.committed_task() => {},
+            }
+        };
         tokio::select! {
             result = &mut execution => {
                 return if cancellation_requested {
@@ -468,7 +486,7 @@ async fn execute_with_allocated_workers(
             _ = driver_ticks.tick() => {
                 pool.tick()?;
             }
-            _ = checkpoint_ticks.tick(), if periodic_publisher.is_some() && !cancellation_requested => {
+            _ = checkpoint_due, if periodic_publisher.is_some() && !cancellation_requested => {
                 let publisher = periodic_publisher.as_ref().expect("checkpoint branch is enabled");
                 match await_running_operation(
                     publisher.publish_pool(),
