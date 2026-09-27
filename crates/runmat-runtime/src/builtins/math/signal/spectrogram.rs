@@ -374,6 +374,16 @@ fn spectrogram_error_with_detail(
     spectrogram_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
+fn spectrogram_control_error(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut error = spectrogram_error_with_detail(error, source.message());
+    error.source = Some(Box::new(source));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
 fn spectrogram_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -410,6 +420,31 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
+    for (value, extension) in std::iter::once((&x, &SPECTROGRAM_INTEGER_SIGNAL_EXTENSION)).chain(
+        rest.iter()
+            .map(|value| (value, &SPECTROGRAM_INTEGER_CONTROL_EXTENSION)),
+    ) {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+        }
+    }
+    let borrowed = std::iter::once(&x)
+        .chain(rest.iter())
+        .filter_map(|value| {
+            if let Value::GpuTensor(handle) = value {
+                Some(handle.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for handle in &borrowed {
+        super::resident_output::owner(handle, || spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL))?;
+    }
+    let _guards = borrowed
+        .iter()
+        .map(runmat_accelerate_api::ResidencyRestoreGuard::new)
+        .collect::<Vec<_>>();
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &x,
         &SPECTROGRAM_INTEGER_SIGNAL_EXTENSION,
@@ -426,7 +461,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         )
         .await?;
     }
-    if let Value::GpuTensor(handle) = &x {
+    let parsed = if let Value::GpuTensor(handle) = &x {
         let signal_len = gpu_vector_len(BUILTIN_NAME, "x", handle).map_err(|err| {
             spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INVALID_SIGNAL, err.message())
         })?;
@@ -439,16 +474,20 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         if let Some(value) = output_gpu(handle, &options, signal_len).await? {
             return Ok(value);
         }
-    }
+        Some(options)
+    } else {
+        None
+    };
     let signal = value_to_complex_vector(BUILTIN_NAME, "x", x)
         .await
-        .map_err(|err| {
-            spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INVALID_SIGNAL, err.message())
-        })?;
+        .map_err(|source| spectrogram_control_error(&SPECTROGRAM_ERROR_INVALID_SIGNAL, source))?;
     if signal.data.is_empty() {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_SIGNAL));
     }
-    let options = parse_options(rest, signal.data.len(), signal.is_complex).await?;
+    let options = match parsed {
+        Some(options) => options,
+        None => parse_options(rest, signal.data.len(), signal.is_complex).await?,
+    };
     let eval = compute_spectrogram(&signal.data, &options)?;
     output_eval(eval, options.reassigned)
 }
@@ -761,9 +800,7 @@ async fn parse_window(value: Value) -> BuiltinResult<Vec<f64>> {
     }
     let vector = value_to_complex_vector(BUILTIN_NAME, "win", value)
         .await
-        .map_err(|err| {
-            spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INVALID_WINDOW, err.message())
-        })?;
+        .map_err(|source| spectrogram_control_error(&SPECTROGRAM_ERROR_INVALID_WINDOW, source))?;
     if vector.data.is_empty() {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_WINDOW));
     }
@@ -790,9 +827,7 @@ async fn parse_frequency_grid(value: Value) -> BuiltinResult<FrequencyGrid> {
     }
     let vector = value_to_complex_vector(BUILTIN_NAME, "freqSpec", value)
         .await
-        .map_err(|err| {
-            spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INVALID_FREQ, err.message())
-        })?;
+        .map_err(|source| spectrogram_control_error(&SPECTROGRAM_ERROR_INVALID_FREQ, source))?;
     if vector.data.len() < 2 || vector.data.len() > MAX_NFFT {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_FREQ));
     }

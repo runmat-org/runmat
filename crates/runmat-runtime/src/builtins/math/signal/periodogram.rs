@@ -342,6 +342,16 @@ fn periodogram_error_with_detail(
     periodogram_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
+fn periodogram_control_error(
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut error = periodogram_error_with_detail(error, source.message());
+    error.source = Some(Box::new(source));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
 fn periodogram_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -378,6 +388,31 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
+    for (value, extension) in std::iter::once((&x, &PERIODOGRAM_INTEGER_SIGNAL_EXTENSION)).chain(
+        rest.iter()
+            .map(|value| (value, &PERIODOGRAM_INTEGER_CONTROL_EXTENSION)),
+    ) {
+        if crate::builtins::common::validation::value_has_native_integer_class(value) {
+            crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+        }
+    }
+    let borrowed = std::iter::once(&x)
+        .chain(rest.iter())
+        .filter_map(|value| {
+            if let Value::GpuTensor(handle) = value {
+                Some(handle.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    for handle in &borrowed {
+        super::resident_output::owner(handle, || periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
+    }
+    let _guards = borrowed
+        .iter()
+        .map(runmat_accelerate_api::ResidencyRestoreGuard::new)
+        .collect::<Vec<_>>();
     ensure_periodogram_integer_boundary(
         &x,
         &PERIODOGRAM_INTEGER_SIGNAL_EXTENSION,
@@ -400,7 +435,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         )
         .await?;
     }
-    if let Value::GpuTensor(handle) = &x {
+    let parsed = if let Value::GpuTensor(handle) = &x {
         let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle).map_err(|err| {
             periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_SIGNAL, err.message())
         })?;
@@ -410,12 +445,18 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         if let Some(value) = output_gpu(handle, rows, cols, &options).await? {
             return Ok(value);
         }
-    }
+        Some(options)
+    } else {
+        None
+    };
     let input = value_to_signal_columns(x).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_SIGNAL));
     }
-    let options = parse_options(rest, input.rows, input.is_complex).await?;
+    let options = match parsed {
+        Some(options) => options,
+        None => parse_options(rest, input.rows, input.is_complex).await?,
+    };
     let eval = compute_periodogram(&input.columns, &options)?;
     output_eval(eval)
 }
@@ -559,15 +600,22 @@ async fn output_gpu(
 }
 
 async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
-    match value {
+    let value = match value {
         Value::GpuTensor(handle) => {
-            let tensor = crate::builtins::common::gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|err| {
-                    periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_SIGNAL, err.message())
-                })?;
-            tensor_to_signal_columns(tensor)
+            let provider = super::resident_output::owner(&handle, || {
+                periodogram_error(&PERIODOGRAM_ERROR_INTERNAL)
+            })?;
+            crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+                provider, &handle,
+            )
+            .await
+            .map_err(|source| {
+                periodogram_control_error(&PERIODOGRAM_ERROR_INVALID_SIGNAL, source)
+            })?
         }
+        value => value,
+    };
+    match value {
         Value::Tensor(tensor) => tensor_to_signal_columns(tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_signal_columns(tensor),
         Value::LogicalArray(logical) => {
@@ -798,9 +846,7 @@ async fn parse_options(
 async fn parse_window(value: Value, signal_len: usize) -> BuiltinResult<Vec<f64>> {
     let vector = value_to_complex_vector(BUILTIN_NAME, "window", value)
         .await
-        .map_err(|err| {
-            periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_WINDOW, err.message())
-        })?;
+        .map_err(|source| periodogram_control_error(&PERIODOGRAM_ERROR_INVALID_WINDOW, source))?;
     if vector.data.len() != signal_len {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_WINDOW));
     }
@@ -827,9 +873,7 @@ async fn parse_frequency_grid(value: Value) -> BuiltinResult<FrequencyGrid> {
 
     let vector = value_to_complex_vector(BUILTIN_NAME, "nfft", value)
         .await
-        .map_err(|err| {
-            periodogram_error_with_detail(&PERIODOGRAM_ERROR_INVALID_NFFT, err.message())
-        })?;
+        .map_err(|source| periodogram_control_error(&PERIODOGRAM_ERROR_INVALID_NFFT, source))?;
     if vector.data.is_empty() || vector.data.len() > MAX_NFFT {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INVALID_NFFT));
     }

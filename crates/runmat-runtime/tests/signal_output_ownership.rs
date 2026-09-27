@@ -1,6 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 #[path = "signal_output_ownership/provider.rs"]
 mod provider;
+#[path = "signal_output_ownership/preflight.rs"]
+mod preflight;
 #[path = "signal_output_ownership/siblings.rs"]
 mod siblings;
 #[path = "signal_output_ownership/welch.rs"]
