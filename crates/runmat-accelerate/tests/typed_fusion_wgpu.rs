@@ -3,6 +3,8 @@
 //! is counted as a pass; F64-specific coverage is an explicit separate gate.
 #[path = "support/typed_fusion_plan.rs"]
 mod fixture;
+#[path = "support/retirement.rs"]
+mod retirement;
 use fixture::{cast, plan};
 use futures::executor::block_on;
 use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
@@ -59,12 +61,12 @@ fn actual_adapter_single_final_has_typed_f32_storage_and_preserves_nd_shape() {
     let Value::GpuTensor(output) = result.final_value else {
         panic!("resident result required")
     };
-    assert_eq!(output.shape, shape);
+    assert_eq!(output.shape(), shape);
     assert_eq!(
-        output.descriptor.element_type,
+        output.descriptor().element_type,
         Some(NumericElementType::F32)
     );
-    assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+    assert_eq!(output.descriptor().storage, Some(GpuTensorStorage::Real));
     let downloaded = block_on(provider.download_numeric(&output)).unwrap();
     let HostNumericDataOwned::F32(actual) = downloaded.data else {
         panic!("physical F32 payload required")
@@ -73,7 +75,7 @@ fn actual_adapter_single_final_has_typed_f32_storage_and_preserves_nd_shape() {
         &actual,
         &values.iter().map(|value| *value as f32).collect::<Vec<_>>(),
     );
-    provider.free(&output).unwrap();
+    retirement::release_all([output]);
 }
 
 #[test]
@@ -131,20 +133,26 @@ fn actual_f64_adapter_preserves_single_interior_rounding_and_mixed_final_buffers
     let Value::GpuTensor(final_output) = result.final_value else {
         panic!("resident Double")
     };
-    let Value::GpuTensor(single_output) = &result.materialized_stores[0].1 else {
+    let Value::GpuTensor(single_output) = result
+        .materialized_stores
+        .into_iter()
+        .next()
+        .expect("Single materialized store")
+        .1
+    else {
         panic!("resident Single")
     };
     assert_eq!(
-        single_output.descriptor.element_type,
+        single_output.descriptor().element_type,
         Some(NumericElementType::F32)
     );
     assert_eq!(
-        final_output.descriptor.element_type,
+        final_output.descriptor().element_type,
         Some(NumericElementType::F64)
     );
-    assert_eq!(single_output.shape, shape);
-    assert_eq!(final_output.shape, shape);
-    let HostNumericDataOwned::F32(single) = block_on(provider.download_numeric(single_output))
+    assert_eq!(single_output.shape(), shape);
+    assert_eq!(final_output.shape(), shape);
+    let HostNumericDataOwned::F32(single) = block_on(provider.download_numeric(&single_output))
         .unwrap()
         .data
     else {
@@ -168,9 +176,7 @@ fn actual_f64_adapter_preserves_single_interior_rounding_and_mixed_final_buffers
             assert_eq!(actual.to_bits(), expected.to_bits());
         }
     }
-    for handle in [&source, &direct_single, single_output, &final_output] {
-        provider.free(handle).unwrap();
-    }
+    retirement::release_all([source, direct_single, single_output, final_output]);
 }
 
 fn transposed_fusion(
@@ -178,14 +184,21 @@ fn transposed_fusion(
     source: runmat_accelerate_api::GpuTensorHandle,
 ) {
     let transposed = provider.transpose(&source).unwrap();
-    assert_eq!(transposed.shape, vec![3, 2]);
+    assert_eq!(transposed.shape(), vec![3, 2]);
     assert_eq!(
-        transposed.descriptor.element_type,
-        source.descriptor.element_type
+        transposed.descriptor().element_type,
+        source.descriptor().element_type
     );
     assert!(runmat_accelerate_api::handle_is_transposed(&transposed));
-    provider.free(&source).unwrap(); // Alias owns its buffer independently.
-    let before = runmat_accelerate_api::snapshot_handle_metadata(&transposed);
+    assert!(source.shares_allocation_with(&transposed));
+    assert_ne!(source.view_identity(), transposed.view_identity());
+    let source_weak = source.allocation_lease().downgrade();
+    assert_eq!(
+        source.release().unwrap(),
+        runmat_accelerate_api::allocation::AllocationReleaseOutcome::ReferenceReleased
+    );
+    assert!(source_weak.acquire().is_some()); // The admitted transpose view retains the allocation.
+    let before = transposed.wire_descriptor();
     let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
     plan.group.shape = ShapeInfo::Tensor(vec![Some(3), Some(2)]);
     plan.materialized_stores.push(FusionStoreMaterialization {
@@ -202,16 +215,13 @@ fn transposed_fusion(
         runtime: None,
     }))
     .unwrap();
-    assert_eq!(
-        runmat_accelerate_api::snapshot_handle_metadata(&transposed),
-        before
-    );
+    assert_eq!(transposed.wire_descriptor(), before);
     let Value::GpuTensor(output) = result.final_value else {
         panic!("resident materialized result")
     };
-    assert_eq!(output.shape, vec![3, 2]);
+    assert_eq!(output.shape(), vec![3, 2]);
     assert_eq!(
-        output.descriptor.element_type,
+        output.descriptor().element_type,
         Some(NumericElementType::F32)
     );
     assert!(!runmat_accelerate_api::handle_is_transposed(&output));
@@ -221,32 +231,42 @@ fn transposed_fusion(
         panic!("physical Single output")
     };
     same_f32(&actual, &[1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
-    provider.free(&output).unwrap();
-    let Value::GpuTensor(stored) = &result.materialized_stores[0].1 else {
+    let output_weak = output.allocation_lease().downgrade();
+    output.release().unwrap();
+    let Value::GpuTensor(stored) = result
+        .materialized_stores
+        .into_iter()
+        .next()
+        .expect("second materialized store")
+        .1
+    else {
         panic!("resident second fused output")
     };
-    assert_eq!(stored.shape, vec![3, 2]);
+    assert_eq!(stored.shape(), vec![3, 2]);
     let HostNumericDataOwned::F32(actual) =
-        block_on(provider.download_numeric(stored)).unwrap().data
+        block_on(provider.download_numeric(&stored)).unwrap().data
     else {
         panic!("physical Single stored output")
     };
     same_f32(&actual, &[1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
-    provider.free(stored).unwrap();
+    retirement::release_all([stored]);
+    assert!(output_weak.acquire().is_none());
     let materialized = provider.reshape(&transposed, &[3, 2]).unwrap();
     assert_eq!(
-        materialized.descriptor.element_type,
-        transposed.descriptor.element_type
+        materialized.descriptor().element_type,
+        transposed.descriptor().element_type
     );
     assert!(!runmat_accelerate_api::handle_is_transposed(&materialized));
-    provider.free(&transposed).unwrap();
+    assert!(!materialized.shares_allocation_with(&transposed));
+    retirement::release_all([transposed]);
+    assert!(source_weak.acquire().is_none());
     let actual = block_on(provider.download_numeric(&materialized)).unwrap();
     match actual.data {
         HostNumericDataOwned::F32(values) => same_f32(&values, &[1.0, 3.0, 5.0, 2.0, 4.0, 6.0]),
         HostNumericDataOwned::F64(values) => assert_eq!(values, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]),
         _ => panic!("preserved floating storage"),
     }
-    provider.free(&materialized).unwrap();
+    retirement::release_all([materialized]);
 }
 
 #[test]
@@ -302,7 +322,7 @@ fn transposed_power(
     provider: &'static runmat_accelerate::backend::wgpu::provider::WgpuProvider,
     physical_single: bool,
 ) {
-    use runmat_accelerate_api::{snapshot_handle_metadata, PowerResultDomain};
+    use runmat_accelerate_api::PowerResultDomain;
     let upload = |data: &[f64], shape: &[usize]| {
         if physical_single {
             let data: Vec<f32> = data.iter().map(|value| *value as f32).collect();
@@ -322,7 +342,7 @@ fn transposed_power(
     };
     let source = upload(&[4., -9., 16., 25., 36., 49.], &[2, 3]);
     let base = provider.transpose(&source).unwrap();
-    let before = snapshot_handle_metadata(&base);
+    let before = base.wire_descriptor();
     // Logical column-major values are [4,16,36,-9,25,49], not the original bytes.
     for (shape, exponents, domain, expected) in [
         (
@@ -349,7 +369,7 @@ fn transposed_power(
             block_on(provider.classify_real_power(&base, &exponent)).unwrap(),
             domain
         );
-        assert_eq!(snapshot_handle_metadata(&base), before);
+        assert_eq!(base.wire_descriptor(), before);
         if physical_single {
             let error = block_on(provider.real_power_in_domain(&base, &exponent, domain))
                 .expect_err("classifier support does not widen standalone power execution");
@@ -367,7 +387,7 @@ fn transposed_power(
             assert!(runmat_accelerate_api::is_unsupported_provider_operation(
                 &error
             ));
-            provider.free(&native_exponent).unwrap();
+            retirement::release_all([native_exponent]);
         }
         if domain == PowerResultDomain::Real {
             let mut plan = plan(
@@ -396,7 +416,7 @@ fn transposed_power(
             };
             if physical_single {
                 assert_eq!(
-                    output.descriptor.element_type,
+                    output.descriptor().element_type,
                     Some(NumericElementType::F32)
                 );
             }
@@ -406,22 +426,63 @@ fn transposed_power(
             for (actual, expected) in actual.data.iter().zip(expected) {
                 assert!((actual - expected).abs() <= 1e-4 * expected.abs().max(1.0));
             }
-            provider.free(&output).unwrap();
+            retirement::release_all([output]);
         }
-        let mut foreign = exponent.clone();
-        foreign.device_id ^= 0x8000_0000;
-        assert!(block_on(provider.classify_real_power(&base, &foreign)).is_err());
-        let mut wrong_class = exponent.clone();
-        wrong_class.descriptor.element_type = Some(NumericElementType::I32);
+        let foreign = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                shape.clone(),
+                exponent.physical().element_type(),
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert_ne!(foreign.handle.device_id(), exponent.device_id());
+        assert!(block_on(provider.classify_real_power(&base, &foreign.handle)).is_err());
+        retirement::release_all([foreign.handle]);
+        assert_eq!(foreign.probe.retirements(), 1);
+        let integers = vec![2_i32; exponents.len()];
+        let wrong_class = runmat_accelerate_api::upload_numeric_protecting(
+            provider,
+            &runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::I32(&integers),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            },
+            &[&base, &exponent],
+        )
+        .expect("genuine same-provider integer payload");
+        assert_eq!(wrong_class.device_id(), base.device_id());
+        assert_eq!(
+            wrong_class.physical().element_type(),
+            NumericElementType::I32
+        );
         assert!(block_on(provider.classify_real_power(&base, &wrong_class)).is_err());
-        runmat_accelerate_api::record_handle_transpose(&base, 3, 2);
-        assert!(block_on(provider.classify_real_power(&base, &exponent)).is_err());
-        runmat_accelerate_api::restore_handle_metadata(&base, &before);
-        provider.free(&exponent).unwrap();
+        retirement::release_all([wrong_class]);
+        let malformed = base.view().clone().with_layout(
+            runmat_accelerate_api::allocation::GpuTensorLayout::Transpose(
+                runmat_accelerate_api::TransposeInfo {
+                    base_rows: 3,
+                    base_cols: 2,
+                },
+            ),
+        );
+        assert!(
+            base.with_view(malformed).is_err(),
+            "inconsistent transpose must fail admission"
+        );
+        assert_eq!(base.wire_descriptor(), before);
+        assert_eq!(
+            block_on(provider.classify_real_power(&base, &exponent)).unwrap(),
+            domain
+        );
+        retirement::release_all([exponent]);
     }
-    provider.free(&source).unwrap();
-    assert_eq!(snapshot_handle_metadata(&base), before);
-    provider.free(&base).unwrap();
+    let source_weak = source.allocation_lease().downgrade();
+    assert!(source.shares_allocation_with(&base));
+    source.release().unwrap();
+    assert!(source_weak.acquire().is_some());
+    assert_eq!(base.wire_descriptor(), before);
+    retirement::release_all([base]);
+    assert!(source_weak.acquire().is_none());
     for (bases, exponents, domain) in [
         (
             vec![-1e-30, -0.0, f64::NAN],
@@ -442,7 +503,7 @@ fn transposed_power(
             block_on(provider.classify_real_power(&base, &exponent)).unwrap(),
             domain
         );
-        provider.free(&base).unwrap();
-        provider.free(&exponent).unwrap();
+        retirement::release_all([base]);
+        retirement::release_all([exponent]);
     }
 }
