@@ -7,27 +7,46 @@ use runmat_accelerate_api::{
 use runmat_runtime::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
+use std::collections::BTreeSet;
 use std::sync::{
     atomic::{AtomicU32, AtomicUsize, Ordering},
-    OnceLock,
+    Mutex, OnceLock,
 };
 
 struct Owner {
     inner: &'static crate::simple_provider::InProcessProvider,
     device: u32,
     uploads: AtomicUsize,
+    live: Mutex<BTreeSet<u64>>,
 }
 impl Owner {
+    fn publish(&self, mut handle: GpuTensorHandle) -> GpuTensorHandle {
+        assert_eq!(handle.device_id, self.inner.device_id());
+        assert!(self.live.lock().unwrap().insert(handle.buffer_id));
+        handle.device_id = self.device;
+        handle
+    }
+
+    fn backing_handle(&self, handle: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        anyhow::ensure!(handle.device_id == self.device, "fixture: foreign device");
+        anyhow::ensure!(
+            self.live.lock().unwrap().contains(&handle.buffer_id),
+            "fixture: unknown allocation"
+        );
+        let mut backing = handle.clone();
+        backing.device_id = self.inner.device_id();
+        Ok(backing)
+    }
+
     fn input(&self, data: &[f64]) -> GpuTensorHandle {
-        let mut handle = self
+        let handle = self
             .inner
             .upload(&HostTensorView {
                 data,
                 shape: &[1, data.len()],
             })
             .unwrap();
-        handle.device_id = self.device;
-        handle
+        self.publish(handle)
     }
 }
 impl AccelProvider for Owner {
@@ -42,24 +61,27 @@ impl AccelProvider for Owner {
     }
     fn upload(&self, host: &HostTensorView<'_>) -> Result<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
-        let mut handle = self.inner.upload(host)?;
-        handle.device_id = self.device;
-        Ok(handle)
+        Ok(self.publish(self.inner.upload(host)?))
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
-        let mut handle = self.inner.upload_numeric(host)?;
-        handle.device_id = self.device;
-        Ok(handle)
+        Ok(self.publish(self.inner.upload_numeric(host)?))
     }
     fn download<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-        self.inner.download(handle)
+        Box::pin(async move {
+            let backing = self.backing_handle(handle)?;
+            self.inner.download(&backing).await
+        })
     }
     fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
-        self.inner.free(handle)
+        let backing = self.backing_handle(handle)?;
+        self.inner.free(&backing)?;
+        assert!(self.live.lock().unwrap().remove(&handle.buffer_id));
+        runmat_accelerate_api::clear_handle_metadata(handle);
+        Ok(())
     }
     fn query_feasibility(
         &self,
@@ -76,6 +98,7 @@ fn owner() -> &'static Owner {
         inner: INNER.get_or_init(crate::simple_provider::InProcessProvider::new),
         device: NEXT.fetch_add(1, Ordering::Relaxed),
         uploads: AtomicUsize::new(0),
+        live: Mutex::new(BTreeSet::new()),
     }));
     // SAFETY: leaked owners have process lifetime and unique monotonically allocated IDs.
     unsafe {
@@ -145,6 +168,8 @@ fn admitted_mixed_or_other_owner_bypasses_selected_provider_and_preserves_runtim
         assert!(probe.feedback.borrow().is_empty());
         theta_owner.free(&theta).unwrap();
         other.free(&rho).unwrap();
+        assert!(selected.live.lock().unwrap().is_empty());
+        assert!(other.live.lock().unwrap().is_empty());
     }
 }
 
@@ -171,6 +196,11 @@ fn admitted_matching_owner_uses_retained_provider_not_ambient_selection() {
         |value| matches!(value, Value::GpuTensor(handle) if handle.device_id == selected.device)
     ));
     drop(prepared);
+    assert_eq!(
+        selected.live.lock().unwrap().len(),
+        1,
+        "only the borrowed input survives"
+    );
     assert!(probe
         .feedback
         .borrow()
@@ -178,6 +208,7 @@ fn admitted_matching_owner_uses_retained_provider_not_ambient_selection() {
         .all(|feedback| !feedback.succeeded));
     assert!(futures::executor::block_on(selected.download(&borrowed)).is_ok());
     selected.free(&borrowed).unwrap();
+    assert!(selected.live.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -185,6 +216,8 @@ fn admitted_owner_proof_traverses_nested_values_and_rejects_unresolved_handles()
     let selected = owner();
     let other = owner();
     let borrowed = other.input(&[2.0]);
+    assert!(selected.free(&borrowed).is_err());
+    assert!(futures::executor::block_on(other.download(&borrowed)).is_ok());
     let nested = Value::OutputList(vec![Value::OutputList(vec![Value::GpuTensor(
         borrowed.clone(),
     )])]);
