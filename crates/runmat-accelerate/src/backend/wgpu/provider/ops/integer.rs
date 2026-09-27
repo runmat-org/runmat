@@ -1388,7 +1388,7 @@ impl WgpuProvider {
         let raw_len = integer_word_count(target_type, len)?;
         let allocated_bytes = (raw_len as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
         if len == 0 {
-            let out = self.create_storage_buffer(0, "runmat-integer-cast-empty");
+            let out = self.create_integer_word_buffer(0, "runmat-integer-cast-empty")?;
             return Ok(self.register_integer_buffer(out, entry.shape, 0, target_type, 0));
         }
         if len > u32::MAX as usize {
@@ -1402,7 +1402,7 @@ impl WgpuProvider {
                 NumericPrecision::F64 => 9,
             }
         };
-        let raw_out = self.create_storage_buffer_checked(raw_len, "runmat-integer-cast-out")?;
+        let raw_out = self.create_integer_word_buffer(raw_len, "runmat-integer-cast-out")?;
         let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
         let scalar_type = match entry.precision {
             NumericPrecision::F32 => "f32",
@@ -2619,6 +2619,40 @@ mod tests {
                 .data,
             HostIntegerDataOwned::U32(vec![0, 0, 4, 6, 0, u32::MAX])
         );
+    }
+
+    #[test]
+    fn wgpu_integer_cast_actual_buffer_matches_word_allocation() {
+        let Some(provider) = register_wgpu_provider_for_test() else {
+            return; // Actual hardware qualification remains required.
+        };
+        for shape in [vec![1, 0], vec![1, 3]] {
+            let data = vec![7.0; shape[1]];
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &data,
+                    shape: &shape,
+                })
+                .unwrap();
+            for target in [
+                IntegerElementType::I8,
+                IntegerElementType::I16,
+                IntegerElementType::I32,
+                IntegerElementType::I64,
+                IntegerElementType::U8,
+                IntegerElementType::U16,
+                IntegerElementType::U32,
+                IntegerElementType::U64,
+            ] {
+                let output = block_on(provider.cast_to_integer(&input, target)).unwrap();
+                let entry = provider.get_entry_raw(&output).unwrap();
+                let payload_bytes = integer_word_count(target, data.len()).unwrap() as u64 * 4;
+                assert_eq!(entry.buffer.size(), payload_bytes.max(4));
+                assert_eq!(output.shape, shape);
+                provider.free(&output).unwrap();
+            }
+            provider.free(&input).unwrap();
+        }
     }
 
     #[test]
