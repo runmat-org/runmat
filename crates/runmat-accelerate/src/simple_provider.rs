@@ -6,6 +6,7 @@ mod logarithms;
 mod remainder;
 mod unary;
 mod arithmetic;
+mod dimensional_extrema;
 #[cfg(test)]
 mod owning_routes;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
@@ -8935,74 +8936,7 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         dim: usize,
     ) -> AccelProviderFuture<'a, runmat_accelerate_api::ReduceDimResult> {
-        Box::pin(async move {
-            let integer_data = {
-                integer_registry(self.device_id)
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get(&a)
-                    .cloned()
-            };
-            if let Some(data) = integer_data {
-                let (values, indices, shape) =
-                    reduce_integer_extrema_data_dim(&data, a.shape(), dim, true)?;
-                return Ok(runmat_accelerate_api::ReduceDimResult {
-                    values: self.allocate_integer_tensor(values, shape.clone())?,
-                    indices: self.allocate_tensor(indices, shape)?,
-                });
-            }
-            if a.shape().len() != 2 {
-                return Err(anyhow::anyhow!("reduce_min_dim: only 2D supported"));
-            }
-            let rows = a.shape()[0];
-            let cols = a.shape()[1];
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let (vals, inds, vshape) = if dim == 0 {
-                let mut m: Vec<f64> = vec![f64::INFINITY; cols];
-                let mut idx: Vec<f64> = vec![1.0; cols];
-                for c in 0..cols {
-                    for r in 0..rows {
-                        let v = abuf[r + c * rows];
-                        if v < m[c] {
-                            m[c] = v;
-                            idx[c] = (r + 1) as f64;
-                        }
-                    }
-                }
-                (m, idx, vec![1, cols])
-            } else {
-                let mut m: Vec<f64> = vec![f64::INFINITY; rows];
-                let mut idx: Vec<f64> = vec![1.0; rows];
-                for r in 0..rows {
-                    for c in 0..cols {
-                        let v = abuf[r + c * rows];
-                        if v < m[r] {
-                            m[r] = v;
-                            idx[r] = (c + 1) as f64;
-                        }
-                    }
-                }
-                (m, idx, vec![rows, 1])
-            };
-            drop(guard);
-            let shape_vals = vshape.clone();
-            let shape_inds = vshape;
-            Ok(runmat_accelerate_api::ReduceDimResult {
-                values: self.allocate_tensor_with_storage(
-                    vals,
-                    shape_vals,
-                    GpuTensorStorage::Real,
-                )?,
-                indices: self.allocate_tensor_with_storage(
-                    inds,
-                    shape_inds,
-                    GpuTensorStorage::Real,
-                )?,
-            })
-        })
+        Box::pin(async move { self.native_dimensional_extremum(a, dim, true) })
     }
 
     fn reduce_max<'a>(
@@ -9017,74 +8951,7 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         dim: usize,
     ) -> AccelProviderFuture<'a, runmat_accelerate_api::ReduceDimResult> {
-        Box::pin(async move {
-            let integer_data = {
-                integer_registry(self.device_id)
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get(&a)
-                    .cloned()
-            };
-            if let Some(data) = integer_data {
-                let (values, indices, shape) =
-                    reduce_integer_extrema_data_dim(&data, a.shape(), dim, false)?;
-                return Ok(runmat_accelerate_api::ReduceDimResult {
-                    values: self.allocate_integer_tensor(values, shape.clone())?,
-                    indices: self.allocate_tensor(indices, shape)?,
-                });
-            }
-            if a.shape().len() != 2 {
-                return Err(anyhow::anyhow!("reduce_max_dim: only 2D supported"));
-            }
-            let rows = a.shape()[0];
-            let cols = a.shape()[1];
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let (vals, inds, vshape) = if dim == 0 {
-                let mut m: Vec<f64> = vec![f64::NEG_INFINITY; cols];
-                let mut idx: Vec<f64> = vec![1.0; cols];
-                for c in 0..cols {
-                    for r in 0..rows {
-                        let v = abuf[r + c * rows];
-                        if v > m[c] {
-                            m[c] = v;
-                            idx[c] = (r + 1) as f64;
-                        }
-                    }
-                }
-                (m, idx, vec![1, cols])
-            } else {
-                let mut m: Vec<f64> = vec![f64::NEG_INFINITY; rows];
-                let mut idx: Vec<f64> = vec![1.0; rows];
-                for r in 0..rows {
-                    for c in 0..cols {
-                        let v = abuf[r + c * rows];
-                        if v > m[r] {
-                            m[r] = v;
-                            idx[r] = (c + 1) as f64;
-                        }
-                    }
-                }
-                (m, idx, vec![rows, 1])
-            };
-            drop(guard);
-            let shape_vals = vshape.clone();
-            let shape_inds = vshape;
-            Ok(runmat_accelerate_api::ReduceDimResult {
-                values: self.allocate_tensor_with_storage(
-                    vals,
-                    shape_vals,
-                    GpuTensorStorage::Real,
-                )?,
-                indices: self.allocate_tensor_with_storage(
-                    inds,
-                    shape_inds,
-                    GpuTensorStorage::Real,
-                )?,
-            })
-        })
+        Box::pin(async move { self.native_dimensional_extremum(a, dim, false) })
     }
 
     fn cumsum_scan(
