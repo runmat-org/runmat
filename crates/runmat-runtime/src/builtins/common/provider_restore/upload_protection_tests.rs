@@ -1,34 +1,26 @@
 use super::*;
 use crate::builtins::common::test_support;
-use futures::executor::block_on;
-use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, HostNumericTensorView, HostTensorView, ThreadProviderGuard,
+    test_support::{TestAllocation, TestAllocationOwner},
+    GpuTensorStorage, HostNumericTensorView, HostTensorView, NumericElementType,
+    ThreadProviderGuard,
 };
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Mutex,
-};
+use std::sync::Mutex;
 
 struct Provider {
-    inner: InProcessProvider,
+    owner: TestAllocationOwner,
     response: Mutex<Option<GpuTensorHandle>>,
-    frees: AtomicUsize,
 }
 impl Provider {
     fn new() -> &'static Self {
         Box::leak(Box::new(Self {
-            inner: InProcessProvider::new(),
+            owner: TestAllocationOwner::new(),
             response: Mutex::new(None),
-            frees: AtomicUsize::new(0),
         }))
     }
-    fn source(&self) -> GpuTensorHandle {
-        self.inner
-            .upload(&HostTensorView {
-                data: &[0.5],
-                shape: &[1, 1],
-            })
+    fn allocation(&self, shape: Vec<usize>) -> TestAllocation {
+        self.owner
+            .allocate_zeroed(shape, NumericElementType::F64, GpuTensorStorage::Real)
             .unwrap()
     }
 }
@@ -38,63 +30,53 @@ impl AccelProvider for Provider {
             .response
             .lock()
             .unwrap()
-            .as_ref()
-            .expect("configured upload")
-            .clone())
+            .take()
+            .expect("configured upload"))
     }
     fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         Ok(self
             .response
             .lock()
             .unwrap()
-            .as_ref()
-            .expect("configured upload")
-            .clone())
-    }
-    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.inner.download(handle)
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.frees.fetch_add(1, Ordering::SeqCst);
-        self.inner.free(handle)
+            .take()
+            .expect("configured upload"))
     }
     fn device_id(&self) -> u32 {
-        self.inner.device_id()
+        self.owner.device_id()
     }
     fn device_info(&self) -> String {
-        self.inner.device_info()
+        "owned restore fixture".into()
     }
 }
 
 #[test]
-fn protected_restore_rejects_malformed_borrowed_alias_before_low_level_cleanup() {
+fn protected_restore_rejects_borrowed_allocation_and_preserves_typed_error() {
     let _serial = test_support::accel_test_lock();
     let provider = Provider::new();
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let source = provider.source();
-    let mut malformed = source.clone();
-    malformed.descriptor.storage = None;
-    *provider.response.lock().unwrap() = Some(malformed);
+    let source = provider.allocation(vec![1, 1]);
     for value in [
         Value::Num(0.25),
         Value::Complex(0.25, 0.5),
         Value::Tensor(Tensor::new(vec![0.25], vec![1, 1]).unwrap()),
         Value::ComplexTensor(ComplexTensor::new(vec![(0.25, 0.5)], vec![1, 1]).unwrap()),
     ] {
-        assert!(upload_value_protected(
+        *provider.response.lock().unwrap() = Some(source.handle.clone());
+        let error = upload_value_protected(
             provider,
             value,
             "restore-test",
-            std::slice::from_ref(&source)
+            std::slice::from_ref(&source.handle),
         )
-        .is_err());
-        assert_eq!(provider.frees.load(Ordering::SeqCst), 0);
-        assert_eq!(
-            block_on(provider.inner.download(&source)).unwrap().data,
-            vec![0.5]
-        );
+        .unwrap_err();
+        assert!(runmat_accelerate_api::is_invalid_numeric_upload_result(
+            &error
+        ));
+        assert_eq!(source.probe.retirements(), 0);
+        assert!(source.handle.allocation_lease().validate_live().is_ok());
     }
-    provider.inner.free(&source).unwrap();
+    drop(source.handle);
+    assert_eq!(source.probe.retirements(), 1);
 }
 
 #[test]
@@ -102,27 +84,31 @@ fn restore_like_always_protects_its_borrowed_prototype() {
     let _serial = test_support::accel_test_lock();
     let provider = Provider::new();
     let _selected = ThreadProviderGuard::set(Some(provider));
-    let prototype = provider.source();
-    let mut malformed = prototype.clone();
-    malformed.descriptor.storage = None;
-    *provider.response.lock().unwrap() = Some(malformed);
-    assert!(upload_value_like(provider, Value::Num(0.0), "restore-test", &prototype).is_err());
-    assert_eq!(provider.frees.load(Ordering::SeqCst), 0);
-    assert!(block_on(provider.inner.download(&prototype)).is_ok());
-    provider.inner.free(&prototype).unwrap();
+    let prototype = provider.allocation(vec![1, 1]);
+    *provider.response.lock().unwrap() = Some(prototype.handle.clone());
+    assert!(
+        upload_value_like(provider, Value::Num(0.0), "restore-test", &prototype.handle).is_err()
+    );
+    assert_eq!(prototype.probe.retirements(), 0);
+    drop(prototype.handle);
+    assert_eq!(prototype.probe.retirements(), 1);
 }
 
 #[test]
-fn restore_rejection_never_frees_through_unrelated_selected_provider() {
+fn restore_rejection_retires_actual_owner_not_selected_provider() {
     let _serial = test_support::accel_test_lock();
     let invoked = Provider::new();
     let unrelated = Provider::new();
-    let output = invoked.source();
-    *invoked.response.lock().unwrap() = Some(output);
+    let output = invoked.allocation(vec![1, 2]);
+    let borrowed = unrelated.allocation(vec![1, 1]);
+    *invoked.response.lock().unwrap() = Some(output.handle);
     let _selected = ThreadProviderGuard::set(Some(unrelated));
-    // Upload has a valid physical descriptor but no registered exact owner.
-    // The final ownership check rejects it and retains invoked-provider cleanup.
-    assert!(upload_value_protected(invoked, Value::Num(0.25), "restore-test", &[]).is_err());
-    assert_eq!(invoked.frees.load(Ordering::SeqCst), 1);
-    assert_eq!(unrelated.frees.load(Ordering::SeqCst), 0);
+    let error = upload_value_protected(invoked, Value::Num(0.25), "restore-test", &[]).unwrap_err();
+    assert!(runmat_accelerate_api::is_invalid_numeric_upload_result(
+        &error
+    ));
+    assert_eq!(output.probe.retirements(), 1);
+    assert_eq!(borrowed.probe.retirements(), 0);
+    drop(borrowed.handle);
+    assert_eq!(borrowed.probe.retirements(), 1);
 }

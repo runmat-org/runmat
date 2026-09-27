@@ -93,8 +93,8 @@ pub fn select_resident_output_source(
 pub use runmat_accelerate_api::ResidencyRestoreGuard;
 
 mod adoption;
-pub use adoption::{complex_gpu_value, logical_gpu_value, resident_gpu_value};
 pub(crate) use adoption::propagate_output_provenance;
+pub use adoption::{complex_gpu_value, logical_gpu_value, resident_gpu_value};
 mod rejection;
 pub(crate) use rejection::reject_gpu_output;
 
@@ -276,7 +276,7 @@ pub(crate) fn value_from_numeric_download(
 }
 
 pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+    left.view_identity() == right.view_identity()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,8 +300,8 @@ pub fn unary_gpu_output_matches(
     provider: &'static dyn AccelProvider,
     contract: UnaryGpuOutputContract,
 ) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
+    output.shape() == input.shape()
+        && output.device_id() == input.device_id()
         && (matches!(contract.alias, GpuOutputAliasPolicy::AllowInput)
             || !same_gpu_handle(output, input))
         && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
@@ -334,8 +334,8 @@ pub fn binary_gpu_output_matches(
     provider: &'static dyn AccelProvider,
     contract: &BinaryGpuOutputContract,
 ) -> bool {
-    output.shape == contract.shape
-        && output.device_id == provider.device_id()
+    output.shape() == contract.shape
+        && output.device_id() == provider.device_id()
         && (matches!(contract.alias, GpuOutputAliasPolicy::AllowInput)
             || (!same_gpu_handle(output, left) && !same_gpu_handle(output, right)))
         && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
@@ -735,8 +735,13 @@ pub fn upload_complex_tensor_protecting(
         shape: &tensor.shape,
         storage: GpuTensorStorage::ComplexInterleaved,
     };
-    runmat_accelerate_api::upload_numeric_protecting(provider, &transfer, protected)
-        .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())
+    runmat_accelerate_api::upload_numeric_protecting(provider, &transfer, protected).map_err(
+        |error| {
+            build_runtime_error(format!("gpu upload: {error}"))
+                .with_source(error)
+                .build()
+        },
+    )
 }
 
 fn tensor_numeric_view(tensor: &Tensor) -> HostNumericDataView<'_> {
@@ -765,7 +770,7 @@ fn tensor_numeric_view(tensor: &Tensor) -> HostNumericDataView<'_> {
 pub fn upload_tensor(
     provider: &dyn AccelProvider,
     tensor: &Tensor,
-) -> Result<GpuTensorHandle, String> {
+) -> crate::BuiltinResult<GpuTensorHandle> {
     upload_tensor_protecting(provider, tensor, &[])
 }
 
@@ -774,8 +779,12 @@ pub fn upload_tensor_protecting(
     provider: &dyn AccelProvider,
     tensor: &Tensor,
     protected: &[&GpuTensorHandle],
-) -> Result<GpuTensorHandle, String> {
-    upload_tensor_protecting_typed(provider, tensor, protected).map_err(|error| error.to_string())
+) -> crate::BuiltinResult<GpuTensorHandle> {
+    upload_tensor_protecting_typed(provider, tensor, protected).map_err(|error| {
+        build_runtime_error(format!("gpu upload: {error}"))
+            .with_source(error)
+            .build()
+    })
 }
 
 /// Preserve provider error types for callers that distinguish unsupported
@@ -784,7 +793,7 @@ pub fn upload_tensor_protecting_typed(
     provider: &dyn AccelProvider,
     tensor: &Tensor,
     protected: &[&GpuTensorHandle],
-) -> anyhow::Result<GpuTensorHandle> {
+) -> runmat_accelerate_api::NumericUploadResult<GpuTensorHandle> {
     let transfer = HostNumericTensorView {
         data: tensor_numeric_view(tensor),
         shape: &tensor.shape,
@@ -804,7 +813,7 @@ pub fn upload_exact_integer_scalar_like(
     provider: &dyn AccelProvider,
     prototype: &GpuTensorHandle,
     scalar: f64,
-) -> anyhow::Result<Option<GpuTensorHandle>> {
+) -> runmat_accelerate_api::NumericUploadResult<Option<GpuTensorHandle>> {
     if !scalar.is_finite() || scalar.fract() != 0.0 {
         return Ok(None);
     }

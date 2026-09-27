@@ -30,18 +30,27 @@ pub(crate) fn upload_value_like_protected(
     let Value::GpuTensor(mut handle) = output else {
         unreachable!("upload_value always returns a resident value")
     };
-    if handle.device_id != prototype.device_id {
-        free_unless_protected(provider, &handle, &protected);
-        return Err(build_runtime_error(format!(
-            "{builtin}: provider restored the result on the wrong device"
-        ))
-        .with_builtin(builtin)
-        .build());
+    if handle.device_id() != prototype.device_id() {
+        return Err(gpu_helpers::reject_gpu_output(
+            handle,
+            build_runtime_error(format!(
+                "{builtin}: provider restored the result on the wrong device"
+            ))
+            .with_builtin(builtin)
+            .build(),
+        ));
     }
     if let Some(provenance) = runmat_accelerate_api::handle_provenance(prototype) {
-        runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
+        handle = handle.with_provenance(provenance).map_err(|error| {
+            build_runtime_error(format!(
+                "{builtin}: cannot preserve restored result intent: {error}"
+            ))
+            .with_builtin(builtin)
+            .with_source(error)
+            .build()
+        })?;
     }
-    Ok(Value::GpuTensor(handle))
+    gpu_helpers::resident_gpu_value(handle)
 }
 
 pub(crate) fn upload_value_protected(
@@ -118,6 +127,7 @@ pub(crate) fn upload_value_protected(
                         "{builtin}: failed to restore result to input provider: {error}"
                     ))
                     .with_builtin(builtin)
+                    .with_source(error)
                     .build()
                 },
             )?
@@ -135,6 +145,7 @@ pub(crate) fn upload_value_protected(
                         "{builtin}: failed to restore result to input provider: {error}"
                     ))
                     .with_builtin(builtin)
+                    .with_source(error)
                     .build()
                 },
             )?
@@ -146,6 +157,7 @@ pub(crate) fn upload_value_protected(
                         "{builtin}: failed to restore result to input provider: {error}"
                     ))
                     .with_builtin(builtin)
+                    .with_source(error)
                     .build()
                 },
             )?
@@ -163,7 +175,7 @@ pub(crate) fn upload_value_protected(
         }
         other => unreachable!("validated restore value {other:?}"),
     };
-    let valid = handle.shape == expected_shape
+    let valid = handle.shape() == expected_shape
         && runmat_accelerate_api::handle_storage(&handle) == expected_storage
         && runmat_accelerate_api::handle_integer_type(&handle) == expected_integer_type
         && !runmat_accelerate_api::handle_is_logical(&handle)
@@ -173,25 +185,18 @@ pub(crate) fn upload_value_protected(
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && protected
             .iter()
-            .all(|input| !gpu_helpers::same_gpu_handle(&handle, input));
+            .all(|input| !handle.shares_allocation_with(input));
     if !valid {
-        free_unless_protected(provider, &handle, protected);
-        return Err(build_runtime_error(format!(
-            "{builtin}: provider returned an incompatible restored result"
-        ))
-        .with_builtin(builtin)
-        .build());
+        return Err(gpu_helpers::reject_gpu_output(
+            handle,
+            build_runtime_error(format!(
+                "{builtin}: provider returned an incompatible restored result"
+            ))
+            .with_builtin(builtin)
+            .build(),
+        ));
     }
-    Ok(gpu_helpers::resident_gpu_value(handle))
-}
-
-fn free_unless_protected(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-    protected: &[GpuTensorHandle],
-) {
-    let borrowed: Vec<_> = protected.iter().collect();
-    gpu_helpers::free_rejected_provider_output(handle, &borrowed, provider);
+    gpu_helpers::resident_gpu_value(handle)
 }
 
 fn upload_complex_without_precision_override(
@@ -213,8 +218,8 @@ fn upload_complex_without_precision_override(
                 "{builtin}: failed to restore result to input provider: {error}"
             ))
             .with_builtin(builtin)
+            .with_source(error)
             .build()
         })?;
-    runmat_accelerate_api::set_handle_logical(&handle, false);
     Ok(handle)
 }
