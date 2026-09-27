@@ -254,10 +254,15 @@ fn trigonometric_query_does_not_claim_range_dependent_or_compound_kernels() {
         );
     }
     for name in [
-        "sind", "cosd", "tand", "sinpi", "cospi", "deg2rad", "rad2deg", "pol2cart",
+        "sind", "cosd", "tand", "sinpi", "cospi", "deg2rad", "rad2deg",
     ] {
         let mut request = query(DirectUnary::Sin);
         request.operation = ProviderOperationIdentity::new(name);
         assert!(validate(&provider, false, &request).is_none(), "{name}");
     }
+    let mut request = query(DirectUnary::Sin);
+    request.operation = ProviderOperationIdentity::new("pol2cart");
+    assert!(!validate(&provider, false, &request)
+        .expect("registered coordinate operation validates its complete arity")
+        .is_supported());
 }

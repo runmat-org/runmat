@@ -11755,7 +11755,6 @@ mod tests {
     #[test]
     fn covariance_to_correlation_returns_resident_outputs() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(8_100_000, Ordering::Relaxed);
         let shape = [2, 2];
         let covariance = real_handle(&provider, &[4.0, 2.0, 2.0, 9.0], &shape);
 
@@ -11775,7 +11774,6 @@ mod tests {
     #[test]
     fn covariance_to_correlation_rejects_invalid_covariance() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(8_200_000, Ordering::Relaxed);
         let shape = [2, 2];
         let asymmetric = real_handle(&provider, &[1.0, 0.1, 0.2, 1.0], &shape);
 
@@ -11844,11 +11842,10 @@ mod tests {
     #[test]
     fn upload_overwrites_stale_handle_metadata() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_000, Ordering::Relaxed);
         let stale = GpuTensorHandle {
             shape: vec![1, 1],
             device_id: provider.device_id(),
-            buffer_id: 9_000_000,
+            buffer_id: provider.next_id.load(Ordering::Relaxed),
             descriptor: Default::default(),
         };
         runmat_accelerate_api::set_handle_logical(&stale, true);
@@ -11887,7 +11884,6 @@ mod tests {
     #[test]
     fn complex_elementwise_arithmetic_preserves_storage() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_100, Ordering::Relaxed);
         let shape = [1, 2];
         let a = complex_handle(&provider, &[(1.0, 2.0), (-3.0, 0.5)], &shape);
         let b = complex_handle(&provider, &[(4.0, -1.0), (2.0, 3.0)], &shape);
@@ -11911,7 +11907,6 @@ mod tests {
     #[test]
     fn linear_gather_and_scatter_copy_complex_logical_elements() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_150, Ordering::Relaxed);
         let source = complex_handle(
             &provider,
             &[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0), (4.0, 40.0)],
@@ -11940,7 +11935,6 @@ mod tests {
     #[test]
     fn linear_gather_and_scatter_preserve_all_native_integer_classes() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_175, Ordering::Relaxed);
         macro_rules! check {
             ($view:ident, $owned:ident, $values:expr, $expected:expr) => {{
                 let source = provider
@@ -11994,7 +11988,6 @@ mod tests {
     #[test]
     fn iir_filter_preserves_complex_storage_and_filters_lanes() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_175, Ordering::Relaxed);
         let b = real_handle(&provider, &[1.0, 1.0], &[1, 2]);
         let a = real_handle(&provider, &[1.0], &[1, 1]);
         let x = complex_handle(&provider, &[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0)], &[1, 3]);
@@ -12028,7 +12021,6 @@ mod tests {
     #[test]
     fn mixed_real_complex_elementwise_arithmetic_preserves_storage() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_200, Ordering::Relaxed);
         let shape = [1, 2];
         let real = real_handle(&provider, &[2.0, -4.0], &shape);
         let complex = complex_handle(&provider, &[(1.0, 3.0), (-2.0, 0.5)], &shape);
@@ -12050,7 +12042,6 @@ mod tests {
     #[test]
     fn real_elementwise_arithmetic_supports_matlab_broadcasting() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_250, Ordering::Relaxed);
         let a = real_handle(&provider, &[1.0, 2.0], &[2, 1]);
         let b = real_handle(&provider, &[10.0, 20.0, 30.0], &[1, 3]);
 
@@ -12095,7 +12086,6 @@ mod tests {
     #[test]
     fn complex_elementwise_arithmetic_supports_scalar_broadcasting() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_260, Ordering::Relaxed);
         let complex = complex_handle(&provider, &[(1.0, 2.0), (-3.0, 0.5)], &[1, 2]);
         let scalar = real_handle(&provider, &[2.0], &[1, 1]);
 
@@ -12109,7 +12099,6 @@ mod tests {
     #[test]
     fn complex_scalar_arithmetic_preserves_storage() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_300, Ordering::Relaxed);
         let handle = complex_handle(&provider, &[(1.0, 2.0), (-4.0, 0.5)], &[1, 2]);
 
         let add = provider.scalar_add(&handle, 3.0).expect("scalar add");
@@ -12135,7 +12124,6 @@ mod tests {
     #[test]
     fn complex_unary_trig_preserves_storage() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_400, Ordering::Relaxed);
         let values = [(0.5, 0.75), (2.0, -0.25)];
         let handle = complex_handle(&provider, &values, &[1, 2]);
 
@@ -12166,7 +12154,6 @@ mod tests {
     #[test]
     fn expm1_is_precise_for_tiny_real_values_and_real_exp_hooks_reject_complex() {
         let provider = InProcessProvider::new();
-        provider.next_id.store(9_000_450, Ordering::Relaxed);
         let real = real_handle(&provider, &[1.0e-16, -1.0e-16], &[1, 2]);
         let output = block_on(provider.unary_expm1(&real)).expect("expm1");
         assert_real_close(

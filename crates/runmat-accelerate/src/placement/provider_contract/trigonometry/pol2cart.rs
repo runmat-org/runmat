@@ -4,6 +4,7 @@ use super::super::*;
 mod work;
 #[cfg(test)]
 mod tests;
+#[cfg(feature = "wgpu")]
 pub(crate) use work::CoordinateWork;
 
 pub(super) fn operation() -> ProviderCapabilityOperation {

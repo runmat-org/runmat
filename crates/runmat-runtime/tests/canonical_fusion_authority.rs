@@ -3,6 +3,16 @@ use runmat_builtins::{builtin_catalog_entry_by_name, BuiltinBindingIdentity};
 use runmat_runtime::builtins::common::spec::canonical_fusion_declaration;
 
 #[test]
+fn nested_specification_module_joins_the_implementation_binding() {
+    let entry = builtin_catalog_entry_by_name("heaviside").unwrap();
+    let identity = entry.binding_identity(&entry.bindings[0]);
+    let declaration =
+        canonical_fusion_declaration(identity).expect("owning implementation declaration");
+    assert_eq!(declaration.binding, identity);
+    assert!(declaration.spec.elementwise.is_some());
+}
+
+#[test]
 fn selected_binding_cannot_borrow_another_variants_expression() {
     for name in ["single", "double", "power"] {
         let entry = builtin_catalog_entry_by_name(name).expect("canonical entry");

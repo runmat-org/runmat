@@ -4,8 +4,10 @@ type Rejection = (ProviderRejectionCode, &'static str);
 pub(crate) struct CoordinateWork {
     pub(crate) outputs: Vec<ProviderRepresentation>,
     pub(crate) scratch_bytes: u64,
+    #[cfg(any(test, feature = "wgpu"))]
     pub(crate) extra_upload_bytes: u64,
     pub(crate) execution_elements: u64,
+    #[cfg(feature = "wgpu")]
     pub(crate) allocations: u32,
     pub(crate) dispatches: u32,
     pub(crate) queue_submissions: u32,
@@ -164,8 +166,10 @@ pub(super) fn derive(
         } else {
             extra_upload_bytes
         },
+        #[cfg(any(test, feature = "wgpu"))]
         extra_upload_bytes,
         execution_elements: 0,
+        #[cfg(feature = "wgpu")]
         allocations: steps.len() as u32 + u32::from(ones.is_some()),
         dispatches: 0,
         queue_submissions: u32::from(ones.is_some()),

@@ -3949,34 +3949,37 @@ mod tests {
     }
 
     #[test]
-    fn builtin_expr_supports_extended_set() {
+    fn builtin_expressions_respect_canonical_specs() {
         let mut exprs: StdHashMap<ValueId, String> = StdHashMap::new();
         exprs.insert(0, "v0".to_string());
         exprs.insert(1, "v1".to_string());
 
         let log1p = super::builtin_expr("log1p", &[0], &exprs, "f32");
-        assert!(log1p.is_some());
+        assert!(
+            log1p.is_none(),
+            "canonical domain boundary must not borrow a legacy expression"
+        );
 
         let log10 = super::builtin_expr("log10", &[0], &exprs, "f64");
-        assert!(log10.unwrap().contains("log"));
+        assert!(log10.is_none());
 
         let expm1 = super::builtin_expr("expm1", &[0], &exprs, "f32");
-        assert!(expm1.unwrap().contains("exp"));
+        assert!(expm1.is_none());
 
         let floor = super::builtin_expr("floor", &[0], &exprs, "f32");
         assert_eq!(floor.unwrap(), "floor(v0)");
 
         let atan2 = super::builtin_expr("atan2", &[0, 1], &exprs, "f32");
-        assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
+        assert_eq!(atan2.unwrap(), "select(atan2(v0, v1), select(v0, 0.0, bitcast<u32>(v1) == 0x80000000u), (v0 == 0.0) && (v1 == 0.0))");
 
         let asinh = super::builtin_expr("asinh", &[0], &exprs, "f32");
         assert_eq!(asinh.unwrap(), "asinh(v0)");
 
         let acosh = super::builtin_expr("acosh", &[0], &exprs, "f32");
-        assert_eq!(acosh.unwrap(), "acosh(v0)");
+        assert!(acosh.is_none());
 
         let atanh = super::builtin_expr("atanh", &[0], &exprs, "f32");
-        assert_eq!(atanh.unwrap(), "atanh(v0)");
+        assert!(atanh.is_none());
 
         let hypot = super::builtin_expr("hypot", &[0, 1], &exprs, "f32");
         assert_eq!(hypot.unwrap(), "hypot(v0, v1)");
@@ -3989,20 +3992,20 @@ mod tests {
         assert!(heaviside.contains("isNan(v0)"));
 
         let fix = super::builtin_expr("fix", &[0], &exprs, "f32");
-        assert_eq!(fix.unwrap(), "trunc(v0)");
+        assert_eq!(fix.unwrap(), "select(trunc(v0), 0.0, trunc(v0) == 0.0)");
 
         let modulo = super::builtin_expr("mod", &[0, 1], &exprs, "f32");
         let modulo = modulo.unwrap();
         assert!(modulo.contains("floor"));
-        assert!(modulo.contains("isInf"));
+        assert!(modulo.contains("select"));
 
         let rem = super::builtin_expr("rem", &[0, 1], &exprs, "f32");
         let rem = rem.unwrap();
         assert!(rem.contains("trunc"));
-        assert!(rem.contains("isInf"));
+        assert!(rem.contains("v0 / v1"));
 
         let pow2 = super::builtin_expr("pow2", &[0], &exprs, "f32");
-        assert_eq!(pow2.unwrap(), "exp2(v0)");
+        assert_eq!(pow2.unwrap(), "exp(v0 * 0.69314718055994529)");
 
         let single = super::builtin_expr("single", &[0], &exprs, "f32");
         assert_eq!(single.unwrap(), "v0");

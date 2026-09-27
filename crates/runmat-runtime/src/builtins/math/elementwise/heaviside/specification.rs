@@ -6,9 +6,7 @@ use crate::builtins::common::spec::{
 
 use super::BUILTIN_NAME;
 
-#[runmat_macros::register_gpu_spec(
-    builtin_path = "crate::builtins::math::elementwise::heaviside::specification"
-)]
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::heaviside")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: BUILTIN_NAME,
     op_kind: GpuOpKind::Elementwise,
@@ -27,7 +25,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::heaviside::specification"
+    builtin_path = "crate::builtins::math::elementwise::heaviside"
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: BUILTIN_NAME,

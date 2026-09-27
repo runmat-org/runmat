@@ -6,6 +6,7 @@ use super::*;
 
 /// Shared costing consumes the same physical plan as feasibility. This is a
 /// prior for the complete route, not timing evidence from one kernel enqueue.
+#[cfg(feature = "wgpu")]
 pub(crate) fn physical_work(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,

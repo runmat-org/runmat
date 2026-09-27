@@ -1488,8 +1488,14 @@ mod tests {
         ) -> Result<Value> = execute_reduction_with_shape;
         let _: for<'a> fn(FusionExecutionRequest<'a>, usize, usize, u32) -> Result<Value> =
             execute_reduction;
-        let _: for<'a> fn(FusionExecutionRequest<'a>) -> Result<ElementwiseExecutionResult> =
-            execute_elementwise;
+        fn check_elementwise_signature(request: FusionExecutionRequest<'_>) {
+            fn require_future(
+                _: impl std::future::Future<Output = Result<ElementwiseExecutionResult>>,
+            ) {
+            }
+            require_future(execute_elementwise(request));
+        }
+        let _: for<'a> fn(FusionExecutionRequest<'a>) = check_elementwise_signature;
 
         fn require_value_future(_: impl std::future::Future<Output = Result<Value>>) {}
         fn check_async_signatures(request: FusionExecutionRequest<'_>, which: usize) {
