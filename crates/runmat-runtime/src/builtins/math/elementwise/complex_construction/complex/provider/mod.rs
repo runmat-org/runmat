@@ -121,13 +121,13 @@ async fn try_binary_provider(
     if expected_precision != Some(owner.precision()) {
         return Ok(None);
     }
+    let admitted_real = operand::RealOperand::admit(real)?;
+    let admitted_imaginary = operand::RealOperand::admit(imaginary)?;
+    let shape = host::compatible_shapes(admitted_real.shape(), admitted_imaginary.shape())?;
     let mut protected = resident_inputs(real, imaginary);
-    let real = operand::RealGpuOperand::from_value(real, owner, &protected)?;
+    let real = operand::RealGpuOperand::from_admitted(admitted_real, owner, &protected)?;
     protected.push(&real.handle);
-    let imaginary = operand::RealGpuOperand::from_value(imaginary, owner, &protected)?;
-    let Some(shape) = output::compatible_shape(&real.handle.shape, &imaginary.handle.shape) else {
-        return Ok(None);
-    };
+    let imaginary = operand::RealGpuOperand::from_admitted(admitted_imaginary, owner, &protected)?;
     let real_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&real.handle);
     let imaginary_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&imaginary.handle);
     let result = owner

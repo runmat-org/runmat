@@ -12,7 +12,7 @@ use crate::BuiltinResult;
 use super::error;
 
 pub(super) use operand::{from_value, RealInput};
-pub(super) use shape::compatible as compatible_shape;
+pub(super) use shape::{compatible as compatible_shape, compatible_shapes};
 
 pub(super) fn unary(value: Value) -> BuiltinResult<Value> {
     match value {

@@ -4,16 +4,6 @@ use crate::builtins::common::gpu_helpers::{
     self, BinaryGpuOutputContract, GpuOutputAliasPolicy, UnaryGpuOutputContract,
 };
 
-pub(super) fn compatible_shape(real: &[usize], imaginary: &[usize]) -> Option<Vec<usize>> {
-    if real == imaginary || element_count(imaginary) == Some(1) {
-        Some(real.to_vec())
-    } else if element_count(real) == Some(1) {
-        Some(imaginary.to_vec())
-    } else {
-        None
-    }
-}
-
 pub(super) fn valid_unary(
     output: &GpuTensorHandle,
     input: &GpuTensorHandle,
@@ -55,10 +45,4 @@ pub(super) fn valid_binary(
             alias: GpuOutputAliasPolicy::RequireDistinct,
         },
     )
-}
-
-fn element_count(shape: &[usize]) -> Option<usize> {
-    shape
-        .iter()
-        .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
 }

@@ -12,6 +12,7 @@ struct Provider {
     inner: InProcessProvider,
     borrowed: Mutex<Option<GpuTensorHandle>>,
     frees: AtomicUsize,
+    uploads: AtomicUsize,
     hooks: AtomicUsize,
     mode: AtomicUsize,
 }
@@ -29,6 +30,7 @@ impl AccelProvider for Provider {
         self.inner.upload(view)
     }
     fn upload_numeric(&self, view: &HostNumericTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+        self.uploads.fetch_add(1, Ordering::SeqCst);
         if self.mode.load(Ordering::SeqCst) == 2 {
             let mut fresh = self.inner.upload_numeric(view)?;
             fresh.shape = vec![99, 1];
@@ -65,6 +67,7 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
         inner: InProcessProvider::new(),
         borrowed: Mutex::new(None),
         frees: AtomicUsize::new(0),
+        uploads: AtomicUsize::new(0),
         hooks: AtomicUsize::new(0),
         mode: AtomicUsize::new(0),
     });
@@ -114,6 +117,26 @@ fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handl
     }
     // Construction uploads a host component alongside a borrowed resident
     // component. Either argument order must protect the resident allocation.
+    for resident_first in [false, true] {
+        for host in [
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
+            Value::String("not a real numeric component".into()),
+            Value::Complex(1.0, 2.0),
+        ] {
+            let before = provider.uploads.load(Ordering::SeqCst);
+            let resident = Value::GpuTensor(prototype.clone());
+            let args = if resident_first {
+                vec![resident, host]
+            } else {
+                vec![host, resident]
+            };
+            assert!(block_on(runmat_runtime::call_builtin_async_with_outputs(
+                "complex", &args, 1
+            ))
+            .is_err());
+            assert_eq!(provider.uploads.load(Ordering::SeqCst), before);
+        }
+    }
     for mode in 0..3 {
         provider.mode.store(mode, Ordering::SeqCst);
         for resident_first in [false, true] {

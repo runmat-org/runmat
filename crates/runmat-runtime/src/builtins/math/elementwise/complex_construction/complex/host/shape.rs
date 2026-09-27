@@ -10,10 +10,19 @@ pub(in crate::builtins::math::elementwise::complex_construction::complex) fn com
     real: &Tensor,
     imaginary: &Tensor,
 ) -> BuiltinResult<Vec<usize>> {
-    if real.shape == imaginary.shape || is_scalar(imaginary) {
-        Ok(real.shape.clone())
-    } else if is_scalar(real) {
-        Ok(imaginary.shape.clone())
+    compatible_shapes(&real.shape, &imaginary.shape)
+}
+
+pub(in crate::builtins::math::elementwise::complex_construction::complex) fn compatible_shapes(
+    real: &[usize],
+    imaginary: &[usize],
+) -> BuiltinResult<Vec<usize>> {
+    let scalar =
+        |shape: &[usize]| shape.iter().try_fold(1usize, |n, d| n.checked_mul(*d)) == Some(1);
+    if real == imaginary || scalar(imaginary) {
+        Ok(real.to_vec())
+    } else if scalar(real) {
+        Ok(imaginary.to_vec())
     } else {
         Err(error(
             &COMPLEX_ERROR_SIZE_MISMATCH,

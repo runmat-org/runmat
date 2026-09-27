@@ -3,12 +3,35 @@ use runmat_accelerate_api::{
     ProviderPrecision,
 };
 use runmat_builtins::{COMPLEX_ERROR_INTERNAL, COMPLEX_ERROR_INVALID_INPUT};
-use runmat_value::{NumericDType, Value};
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::BuiltinResult;
 
 use super::super::{error, host};
+
+/// Domain admission is separate from uploading: both operands and their shape
+/// relationship must be accepted before allocating anything on a provider.
+pub(super) enum RealOperand<'a> {
+    Resident(&'a GpuTensorHandle),
+    Host(Tensor),
+}
+
+impl<'a> RealOperand<'a> {
+    pub(super) fn admit(value: &'a Value) -> BuiltinResult<Self> {
+        match value {
+            Value::GpuTensor(handle) => Ok(Self::Resident(handle)),
+            value => host::from_value(value.clone()).map(|input| Self::Host(input.tensor)),
+        }
+    }
+
+    pub(super) fn shape(&self) -> &[usize] {
+        match self {
+            Self::Resident(handle) => &handle.shape,
+            Self::Host(tensor) => &tensor.shape,
+        }
+    }
+}
 
 pub(super) struct RealGpuOperand {
     pub(super) handle: GpuTensorHandle,
@@ -17,13 +40,13 @@ pub(super) struct RealGpuOperand {
 }
 
 impl RealGpuOperand {
-    pub(super) fn from_value(
-        value: &Value,
+    pub(super) fn from_admitted(
+        value: RealOperand<'_>,
         provider: &'static dyn AccelProvider,
         protected: &[&GpuTensorHandle],
     ) -> BuiltinResult<Self> {
         match value {
-            Value::GpuTensor(handle) => {
+            RealOperand::Resident(handle) => {
                 let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
                     error(
                         &COMPLEX_ERROR_INVALID_INPUT,
@@ -42,15 +65,13 @@ impl RealGpuOperand {
                     protected: Vec::new(),
                 })
             }
-            value => {
-                let input = host::from_value(value.clone())?;
+            RealOperand::Host(input) => {
                 let _metadata: Vec<_> = protected
                     .iter()
                     .map(|handle| gpu_helpers::HandleMetadataRestoreGuard::new(handle))
                     .collect();
-                let handle =
-                    gpu_helpers::upload_tensor_protecting(provider, &input.tensor, protected)
-                        .map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?;
+                let handle = gpu_helpers::upload_tensor_protecting(provider, &input, protected)
+                    .map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?;
                 runmat_accelerate_api::set_handle_logical(&handle, false);
                 Ok(Self {
                     handle,
