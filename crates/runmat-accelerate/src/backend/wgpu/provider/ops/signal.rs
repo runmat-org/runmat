@@ -722,7 +722,9 @@ impl WgpuProvider {
 
         if output_len == 0 {
             let out_shape = conv1d_output_shape(0, options.orientation);
-            let out_buffer = self.create_storage_buffer(0, "runmat-conv1d-empty");
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-conv1d-empty")
+            })??;
             return self.register_existing_buffer(out_buffer, out_shape, 0);
         }
 
@@ -735,7 +737,9 @@ impl WgpuProvider {
         );
 
         let out_shape = conv1d_output_shape(output_len, options.orientation);
-        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-conv1d-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, output_len, "runmat-conv1d-out")
+        })??;
 
         let params = Conv1dParams {
             signal_len: signal_len as u32,
@@ -743,44 +747,47 @@ impl WgpuProvider {
             output_len: output_len as u32,
             start_offset: start_offset as u32,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-conv1d-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-conv1d-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-conv1d-bind"),
-                layout: &self.pipelines.conv1d.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_signal.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_kernel.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-conv1d-bind"),
+                    layout: &self.pipelines.conv1d.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_signal.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_kernel.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            output_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::conv::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.conv1d.pipeline,
-            &bind_group,
-            workgroups,
-        );
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                output_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::conv::run(
+                emission,
+                pending,
+                &self.pipelines.conv1d.get(emission)?.pipeline,
+                &bind_group,
+                workgroups,
+            )?;
+            Ok(())
+        })??;
 
         let handle = self.register_existing_buffer(out_buffer, out_shape, output_len)?;
 
@@ -1077,18 +1084,35 @@ impl WgpuProvider {
             let b_norm_entry = self.get_entry(&b_norm_handle)?;
             let a_norm_entry = self.get_entry(&a_norm_handle)?;
 
-            let out_buffer = self.create_storage_buffer(entry_x.len, "runmat-iir-filter-out");
-            let states_buffer =
-                self.create_storage_buffer(state_buffer_len, "runmat-iir-filter-state");
-            let final_state_buffer =
-                self.create_storage_buffer(state_total_raw, "runmat-iir-filter-final");
+            let (out_buffer, states_buffer, final_state_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, entry_x.len, "runmat-iir-filter-out")?,
+                        self.create_storage_buffer(
+                            emission,
+                            state_buffer_len,
+                            "runmat-iir-filter-state",
+                        )?,
+                        self.create_storage_buffer(
+                            emission,
+                            state_total_raw,
+                            "runmat-iir-filter-final",
+                        )?,
+                    ))
+                })??;
 
             let (zi_buffer, zi_present_flag) = if let Some(ref zi_handle) = zi {
                 let zi_entry = self.get_entry(zi_handle)?;
                 (zi_entry.buffer, 1u32)
             } else {
                 (
-                    self.create_storage_buffer(state_total_raw, "runmat-iir-filter-zi"),
+                    self.with_emission(|emission, _| {
+                        self.create_storage_buffer(
+                            emission,
+                            state_total_raw,
+                            "runmat-iir-filter-zi",
+                        )
+                    })??,
                     0u32,
                 )
             };
@@ -1123,60 +1147,64 @@ impl WgpuProvider {
                 state_shape: state_shape_arr,
             };
 
-            let params_buffer = self.uniform_buffer(&params, "runmat-iir-filter-params");
+            self.with_emission(|emission, pending| -> Result<()> {
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-iir-filter-params")?;
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-iir-filter-bind"),
-                    layout: &self.pipelines.filter.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry_x.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: b_norm_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: a_norm_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: zi_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: states_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: final_state_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 7,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-iir-filter-bind"),
+                        layout: &self.pipelines.filter.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry_x.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: b_norm_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: a_norm_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: zi_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: states_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 6,
+                                resource: final_state_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 7,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                channel_count as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::filter::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.filter.pipeline,
-                &bind_group,
-                workgroups,
-            );
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    channel_count as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::filter::run(
+                    emission,
+                    pending,
+                    &self.pipelines.filter.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                )?;
+                Ok(())
+            })??;
 
             let output_handle = self.register_existing_buffer_with_storage(
                 out_buffer,
@@ -1299,8 +1327,9 @@ impl WgpuProvider {
         }
 
         let out_shape = request.output_shape.to_vec();
-        let out_buffer =
-            self.create_storage_buffer_checked(output_len, "runmat-moving-window-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, output_len, "runmat-moving-window-out")
+        })??;
         if output_len == 0 {
             return self.register_existing_buffer(out_buffer, out_shape, 0);
         }
@@ -1329,119 +1358,128 @@ impl WgpuProvider {
             normalization: request.normalization,
             fill_value,
         });
-        let shader_module = self
-            .device_ref()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("runmat-moving-window-specialized-shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-            });
-        let pipeline_layout =
-            self.device_ref()
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("runmat-moving-window-specialized-layout"),
-                    bind_group_layouts: &[&self.pipelines.moving_window.layout],
-                    push_constant_ranges: &[],
-                });
-        let pipeline = self.device_ref().create_compute_pipeline(
-            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                label: Some("runmat-moving-window-specialized-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: &shader_module,
-                entry_point: "main",
-            },
-        );
+        self.with_emission(|emission, pending| -> Result<()> {
+            let shader_module =
+                emission
+                    .device()
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("runmat-moving-window-specialized-shader"),
+                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+                    });
+            let pipeline_layout =
+                emission
+                    .device()
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("runmat-moving-window-specialized-layout"),
+                        bind_group_layouts: &[&self.pipelines.moving_window.get(emission)?.layout],
+                        push_constant_ranges: &[],
+                    });
+            let pipeline = emission.device().create_compute_pipeline(
+                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                    label: Some("runmat-moving-window-specialized-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader_module,
+                    entry_point: "main",
+                },
+            );
 
-        let bind_group = match self.precision {
-            NumericPrecision::F64 => {
-                let params = MovingWindowParamsF64 {
-                    meta0: PackedU32([
-                        output_len as u32,
-                        axis_len as u32,
-                        out_axis_len as u32,
-                        stride_before as u32,
-                    ]),
-                    meta1: PackedU32([
-                        endpoint,
-                        nan_mode,
-                        request.before as u32,
-                        request.after as u32,
-                    ]),
-                    meta2: PackedU32([op, normalization, stride_after as u32, 0]),
-                    fill_value,
-                    _pad1: 0.0,
-                };
-                let params_buffer = self.uniform_buffer(&params, "runmat-moving-window-params");
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-moving-window-bind"),
-                        layout: &self.pipelines.moving_window.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
-            }
-            NumericPrecision::F32 => {
-                let params = MovingWindowParamsF32 {
-                    meta0: PackedU32([
-                        output_len as u32,
-                        axis_len as u32,
-                        out_axis_len as u32,
-                        stride_before as u32,
-                    ]),
-                    meta1: PackedU32([
-                        endpoint,
-                        nan_mode,
-                        request.before as u32,
-                        request.after as u32,
-                    ]),
-                    meta2: PackedU32([op, normalization, stride_after as u32, 0]),
-                    meta3: PackedF32([fill_value as f32, 0.0, 0.0, 0.0]),
-                };
-                let params_buffer = self.uniform_buffer(&params, "runmat-moving-window-params");
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-moving-window-bind"),
-                        layout: &self.pipelines.moving_window.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    })
-            }
-        };
+            let bind_group = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = MovingWindowParamsF64 {
+                        meta0: PackedU32([
+                            output_len as u32,
+                            axis_len as u32,
+                            out_axis_len as u32,
+                            stride_before as u32,
+                        ]),
+                        meta1: PackedU32([
+                            endpoint,
+                            nan_mode,
+                            request.before as u32,
+                            request.after as u32,
+                        ]),
+                        meta2: PackedU32([op, normalization, stride_after as u32, 0]),
+                        fill_value,
+                        _pad1: 0.0,
+                    };
+                    let params_buffer =
+                        self.uniform_buffer(emission, &params, "runmat-moving-window-params")?;
+                    emission
+                        .device()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-moving-window-bind"),
+                            layout: &self.pipelines.moving_window.get(emission)?.layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: entry.buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: out_buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: params_buffer.as_entire_binding(),
+                                },
+                            ],
+                        })
+                }
+                NumericPrecision::F32 => {
+                    let params = MovingWindowParamsF32 {
+                        meta0: PackedU32([
+                            output_len as u32,
+                            axis_len as u32,
+                            out_axis_len as u32,
+                            stride_before as u32,
+                        ]),
+                        meta1: PackedU32([
+                            endpoint,
+                            nan_mode,
+                            request.before as u32,
+                            request.after as u32,
+                        ]),
+                        meta2: PackedU32([op, normalization, stride_after as u32, 0]),
+                        meta3: PackedF32([fill_value as f32, 0.0, 0.0, 0.0]),
+                    };
+                    let params_buffer =
+                        self.uniform_buffer(emission, &params, "runmat-moving-window-params")?;
+                    emission
+                        .device()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-moving-window-bind"),
+                            layout: &self.pipelines.moving_window.get(emission)?.layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: entry.buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: out_buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: params_buffer.as_entire_binding(),
+                                },
+                            ],
+                        })
+                }
+            };
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            output_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::diff::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            &bind_group,
-            workgroups,
-        );
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                output_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::diff::run(
+                emission,
+                pending,
+                &pipeline,
+                &bind_group,
+                workgroups,
+            )?;
+            Ok(())
+        })??;
 
         self.register_existing_buffer(out_buffer, out_shape, output_len)
     }
@@ -1476,7 +1514,9 @@ impl WgpuProvider {
         if len_dim <= 1 || entry.len == 0 {
             out_shape[dim] = out_shape[dim].saturating_sub(1);
             let out_len = product_checked(&out_shape).unwrap_or(0);
-            let out_buffer = self.create_storage_buffer(out_len, "runmat-diff-empty");
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, out_len, "runmat-diff-empty")
+            })??;
             return self.register_existing_buffer(out_buffer, out_shape, out_len);
         }
 
@@ -1528,7 +1568,9 @@ impl WgpuProvider {
             "diff: tensor exceeds GPU kernel limits"
         );
 
-        let out_buffer = self.create_storage_buffer(out_len, "runmat-diff-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, out_len, "runmat-diff-out")
+        })??;
         out_shape[dim] = len_dim - 1;
 
         let params = DiffParams {
@@ -1541,40 +1583,43 @@ impl WgpuProvider {
             total_in: entry.len as u32,
             _pad: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-diff-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-diff-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-diff-bind"),
-                layout: &self.pipelines.diff.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-diff-bind"),
+                    layout: &self.pipelines.diff.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            out_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::diff::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.diff.pipeline,
-            &bind_group,
-            workgroups,
-        );
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                out_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::diff::run(
+                emission,
+                pending,
+                &self.pipelines.diff.get(emission)?.pipeline,
+                &bind_group,
+                workgroups,
+            )?;
+            Ok(())
+        })??;
 
         self.register_existing_buffer(out_buffer, out_shape, out_len)
     }
@@ -1681,7 +1726,9 @@ impl WgpuProvider {
             out_shape.push(1);
         }
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-gradient-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, entry.len, "runmat-gradient-out")
+        })??;
         if entry.len == 0 {
             return self.register_existing_buffer_with_storage(
                 out_buffer,
@@ -1739,108 +1786,115 @@ impl WgpuProvider {
             "gradient: tensor exceeds GPU kernel limits"
         );
 
-        let params_buffer = match self.precision {
-            NumericPrecision::F64 => self.uniform_buffer(
-                &GradientParamsF64 {
-                    stride_before: kernel_stride_before as u32,
-                    segment_len: len_dim as u32,
-                    block: kernel_block as u32,
-                    total: entry.len as u32,
-                    spacing: match spacing {
-                        GradientSpacingInput::Scalar(spacing) => spacing,
-                        GradientSpacingInput::Coordinates(_) => 0.0,
-                    },
-                    _pad0: 0.0,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                },
-                "runmat-gradient-params",
-            ),
-            NumericPrecision::F32 => self.uniform_buffer(
-                &GradientParamsF32 {
-                    meta0: crate::backend::wgpu::params::PackedU32([
-                        kernel_stride_before as u32,
-                        len_dim as u32,
-                        kernel_block as u32,
-                        entry.len as u32,
-                    ]),
-                    meta1: crate::backend::wgpu::params::PackedF32([
-                        match spacing {
-                            GradientSpacingInput::Scalar(spacing) => spacing as f32,
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => self.uniform_buffer(
+                    emission,
+                    &GradientParamsF64 {
+                        stride_before: kernel_stride_before as u32,
+                        segment_len: len_dim as u32,
+                        block: kernel_block as u32,
+                        total: entry.len as u32,
+                        spacing: match spacing {
+                            GradientSpacingInput::Scalar(spacing) => spacing,
                             GradientSpacingInput::Coordinates(_) => 0.0,
                         },
-                        0.0,
-                        0.0,
-                        0.0,
-                    ]),
-                },
-                "runmat-gradient-params",
-            ),
-        };
+                        _pad0: 0.0,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
+                    },
+                    "runmat-gradient-params",
+                )?,
+                NumericPrecision::F32 => self.uniform_buffer(
+                    emission,
+                    &GradientParamsF32 {
+                        meta0: crate::backend::wgpu::params::PackedU32([
+                            kernel_stride_before as u32,
+                            len_dim as u32,
+                            kernel_block as u32,
+                            entry.len as u32,
+                        ]),
+                        meta1: crate::backend::wgpu::params::PackedF32([
+                            match spacing {
+                                GradientSpacingInput::Scalar(spacing) => spacing as f32,
+                                GradientSpacingInput::Coordinates(_) => 0.0,
+                            },
+                            0.0,
+                            0.0,
+                            0.0,
+                        ]),
+                    },
+                    "runmat-gradient-params",
+                )?,
+            };
 
-        let (bind_group, pipeline) = if let Some(coordinate_entry) = coordinate_entry.as_ref() {
-            (
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-gradient-coordinates-bind"),
-                        layout: &self.pipelines.gradient_coordinates.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: coordinate_entry.buffer.as_ref().as_entire_binding(),
-                            },
-                        ],
-                    }),
-                &self.pipelines.gradient_coordinates.pipeline,
-            )
-        } else {
-            (
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-gradient-bind"),
-                        layout: &self.pipelines.gradient.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    }),
-                &self.pipelines.gradient.pipeline,
-            )
-        };
+            let (bind_group, pipeline) = if let Some(coordinate_entry) = coordinate_entry.as_ref() {
+                (
+                    emission
+                        .device()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-gradient-coordinates-bind"),
+                            layout: &self.pipelines.gradient_coordinates.get(emission)?.layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: entry.buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: out_buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: params_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: coordinate_entry.buffer.as_ref().as_entire_binding(),
+                                },
+                            ],
+                        }),
+                    &self.pipelines.gradient_coordinates.get(emission)?.pipeline,
+                )
+            } else {
+                (
+                    emission
+                        .device()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-gradient-bind"),
+                            layout: &self.pipelines.gradient.get(emission)?.layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: entry.buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: out_buffer.as_ref().as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: params_buffer.as_entire_binding(),
+                                },
+                            ],
+                        }),
+                    &self.pipelines.gradient.get(emission)?.pipeline,
+                )
+            };
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            entry.len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::gradient::run(
-            self.device_ref(),
-            self.queue_ref(),
-            pipeline,
-            &bind_group,
-            workgroups,
-        );
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                entry.len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::gradient::run(
+                emission,
+                pending,
+                pipeline,
+                &bind_group,
+                workgroups,
+            )?;
+            Ok(())
+        })??;
 
         self.register_existing_buffer_with_storage(
             out_buffer,
@@ -1892,7 +1946,9 @@ impl WgpuProvider {
 
         let segment_len = work_shape[dim];
         if segment_len == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-cumsum-empty");
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-cumsum-empty")
+            })??;
             return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
@@ -1939,7 +1995,9 @@ impl WgpuProvider {
             "cumsum: tensor too large for GPU kernel"
         );
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-cumsum-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, entry.len, "runmat-cumsum-out")
+        })??;
         if entry.len == 0 {
             return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
@@ -1959,40 +2017,43 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cumsum-params");
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cumsum-bind"),
-                layout: &self.pipelines.cumsum.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cumsum.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cumsum-encoder",
-            "runmat-cumsum-pass",
-        );
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-cumsum-params")?;
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cumsum-bind"),
+                    layout: &self.pipelines.cumsum.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                segments as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.cumsum.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cumsum-encoder",
+                "runmat-cumsum-pass",
+            )?;
+            Ok(())
+        })??;
         self.register_existing_buffer(out_buffer, entry.shape, entry.len)
     }
 
@@ -2153,86 +2214,91 @@ impl WgpuProvider {
             }
         };
 
-        let out_buffer = self.create_storage_buffer(output_raw_len, "runmat-trapezoid-out");
-        let params_buffer = match self.precision {
-            NumericPrecision::F64 => {
-                let params = TrapezoidParamsF64 {
-                    segment_len: segment_len as u32,
-                    segments: segments as u32,
-                    stride_before: stride_before as u32,
-                    block: block as u32,
-                    total_len: logical_len as u32,
-                    output_len: output_len as u32,
-                    spacing_kind,
-                    mode: if cumulative { 1 } else { 0 },
-                    lane_factor: lane_factor as u32,
-                    _pad_u32_0: 0,
-                    _pad_u32_1: 0,
-                    _pad_u32_2: 0,
-                    spacing_scalar: scalar,
-                    _pad0: 0.0,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                };
-                self.uniform_buffer(&params, "runmat-trapezoid-params")
-            }
-            NumericPrecision::F32 => {
-                let params = TrapezoidParamsF32 {
-                    meta0: PackedU32([
-                        segment_len as u32,
-                        segments as u32,
-                        stride_before as u32,
-                        block as u32,
-                    ]),
-                    meta1: PackedU32([
-                        logical_len as u32,
-                        output_len as u32,
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, output_raw_len, "runmat-trapezoid-out")
+        })??;
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = TrapezoidParamsF64 {
+                        segment_len: segment_len as u32,
+                        segments: segments as u32,
+                        stride_before: stride_before as u32,
+                        block: block as u32,
+                        total_len: logical_len as u32,
+                        output_len: output_len as u32,
                         spacing_kind,
-                        if cumulative { 1 } else { 0 },
-                    ]),
-                    meta2: PackedU32([lane_factor as u32, 0, 0, 0]),
-                    scalar: PackedF32([scalar as f32, 0.0, 0.0, 0.0]),
-                };
-                self.uniform_buffer(&params, "runmat-trapezoid-params")
-            }
-        };
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-trapezoid-bind"),
-                layout: &self.pipelines.trapezoid.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: spacing_buffer.as_ref().as_entire_binding(),
-                    },
-                ],
-            });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.trapezoid.pipeline,
-            &bind_group,
-            groups,
-            "runmat-trapezoid-encoder",
-            "runmat-trapezoid-pass",
-        );
+                        mode: if cumulative { 1 } else { 0 },
+                        lane_factor: lane_factor as u32,
+                        _pad_u32_0: 0,
+                        _pad_u32_1: 0,
+                        _pad_u32_2: 0,
+                        spacing_scalar: scalar,
+                        _pad0: 0.0,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
+                    };
+                    self.uniform_buffer(emission, &params, "runmat-trapezoid-params")?
+                }
+                NumericPrecision::F32 => {
+                    let params = TrapezoidParamsF32 {
+                        meta0: PackedU32([
+                            segment_len as u32,
+                            segments as u32,
+                            stride_before as u32,
+                            block as u32,
+                        ]),
+                        meta1: PackedU32([
+                            logical_len as u32,
+                            output_len as u32,
+                            spacing_kind,
+                            if cumulative { 1 } else { 0 },
+                        ]),
+                        meta2: PackedU32([lane_factor as u32, 0, 0, 0]),
+                        scalar: PackedF32([scalar as f32, 0.0, 0.0, 0.0]),
+                    };
+                    self.uniform_buffer(emission, &params, "runmat-trapezoid-params")?
+                }
+            };
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-trapezoid-bind"),
+                    layout: &self.pipelines.trapezoid.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: spacing_buffer.as_ref().as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                segments as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.trapezoid.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-trapezoid-encoder",
+                "runmat-trapezoid-pass",
+            )?;
+            Ok(())
+        })??;
         self.register_existing_buffer_with_storage(
             out_buffer,
             output_shape,
@@ -2278,7 +2344,9 @@ impl WgpuProvider {
 
         let segment_len = work_shape[dim];
         if segment_len == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-cumprod-empty");
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-cumprod-empty")
+            })??;
             return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
@@ -2325,7 +2393,9 @@ impl WgpuProvider {
             "cumprod: tensor too large for GPU kernel"
         );
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-cumprod-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, entry.len, "runmat-cumprod-out")
+        })??;
         if entry.len == 0 {
             return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
@@ -2345,40 +2415,43 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cumprod-params");
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cumprod-bind"),
-                layout: &self.pipelines.cumprod.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cumprod.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cumprod-encoder",
-            "runmat-cumprod-pass",
-        );
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-cumprod-params")?;
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cumprod-bind"),
+                    layout: &self.pipelines.cumprod.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                segments as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.cumprod.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cumprod-encoder",
+                "runmat-cumprod-pass",
+            )?;
+            Ok(())
+        })??;
         self.register_existing_buffer(out_buffer, entry.shape, entry.len)
     }
     pub(crate) fn cummin_exec(
@@ -2390,8 +2463,13 @@ impl WgpuProvider {
     ) -> Result<ProviderCumminResult> {
         let entry = self.get_entry(handle)?;
         if entry.len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummin-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummin-indices-empty");
+            let (values_buffer, indices_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, 0, "runmat-cummin-values-empty")?,
+                        self.create_storage_buffer(emission, 0, "runmat-cummin-indices-empty")?,
+                    ))
+                })??;
             let values =
                 self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
             let indices =
@@ -2415,8 +2493,13 @@ impl WgpuProvider {
 
         let segment_len = work_shape[dim];
         if segment_len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummin-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummin-indices-empty");
+            let (values_buffer, indices_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, 0, "runmat-cummin-values-empty")?,
+                        self.create_storage_buffer(emission, 0, "runmat-cummin-indices-empty")?,
+                    ))
+                })??;
             let values =
                 self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
             let indices =
@@ -2467,8 +2550,13 @@ impl WgpuProvider {
             "cummin: tensor too large for GPU kernel"
         );
 
-        let values_buffer = self.create_storage_buffer(entry.len, "runmat-cummin-values");
-        let indices_buffer = self.create_storage_buffer(entry.len, "runmat-cummin-indices");
+        let (values_buffer, indices_buffer) =
+            self.with_emission(|emission, _| -> Result<_> {
+                Ok((
+                    self.create_storage_buffer(emission, entry.len, "runmat-cummin-values")?,
+                    self.create_storage_buffer(emission, entry.len, "runmat-cummin-indices")?,
+                ))
+            })??;
 
         let mut flags = 0u32;
         if matches!(direction, ProviderScanDirection::Reverse) {
@@ -2488,46 +2576,49 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cummin-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-cummin-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cummin-bind"),
-                layout: &self.pipelines.cummin.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cummin-bind"),
+                    layout: &self.pipelines.cummin.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cummin.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cummin-encoder",
-            "runmat-cummin-pass",
-        );
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                segments as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.cummin.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cummin-encoder",
+                "runmat-cummin-pass",
+            )?;
+            Ok(())
+        })??;
 
         let values =
             self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
@@ -2544,8 +2635,13 @@ impl WgpuProvider {
     ) -> Result<ProviderCummaxResult> {
         let entry = self.get_entry(handle)?;
         if entry.len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummax-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummax-indices-empty");
+            let (values_buffer, indices_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, 0, "runmat-cummax-values-empty")?,
+                        self.create_storage_buffer(emission, 0, "runmat-cummax-indices-empty")?,
+                    ))
+                })??;
             let values =
                 self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
             let indices =
@@ -2569,8 +2665,13 @@ impl WgpuProvider {
 
         let segment_len = work_shape[dim];
         if segment_len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummax-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummax-indices-empty");
+            let (values_buffer, indices_buffer) =
+                self.with_emission(|emission, _| -> Result<_> {
+                    Ok((
+                        self.create_storage_buffer(emission, 0, "runmat-cummax-values-empty")?,
+                        self.create_storage_buffer(emission, 0, "runmat-cummax-indices-empty")?,
+                    ))
+                })??;
             let values =
                 self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
             let indices =
@@ -2621,8 +2722,13 @@ impl WgpuProvider {
             "cummax: tensor too large for GPU kernel"
         );
 
-        let values_buffer = self.create_storage_buffer(entry.len, "runmat-cummax-values");
-        let indices_buffer = self.create_storage_buffer(entry.len, "runmat-cummax-indices");
+        let (values_buffer, indices_buffer) =
+            self.with_emission(|emission, _| -> Result<_> {
+                Ok((
+                    self.create_storage_buffer(emission, entry.len, "runmat-cummax-values")?,
+                    self.create_storage_buffer(emission, entry.len, "runmat-cummax-indices")?,
+                ))
+            })??;
 
         let mut flags = 0u32;
         if matches!(direction, ProviderScanDirection::Reverse) {
@@ -2642,46 +2748,49 @@ impl WgpuProvider {
             _pad0: 0,
             _pad1: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cummax-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-cummax-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cummax-bind"),
-                layout: &self.pipelines.cummax.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cummax-bind"),
+                    layout: &self.pipelines.cummax.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cummax.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cummax-encoder",
-            "runmat-cummax-pass",
-        );
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                segments as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::scan::run(
+                emission,
+                pending,
+                &self.pipelines.cummax.get(emission)?.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cummax-encoder",
+                "runmat-cummax-pass",
+            )?;
+            Ok(())
+        })??;
 
         let values =
             self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len)?;
