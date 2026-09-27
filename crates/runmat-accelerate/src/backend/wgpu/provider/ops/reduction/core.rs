@@ -215,9 +215,10 @@ impl WgpuProvider {
             };
             return self.upload_exec(&view);
         }
+        let current = self.with_emission(|emission, pending| -> Result<_> {
         let mut current = if std::env::var("RUNMAT_PROVIDER_REDUCTION_SNAPSHOT").is_ok() {
             let size_bytes = (entry.len * self.element_size) as u64;
-            let snap = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            let snap = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-global-input-snapshot"),
                 size: size_bytes,
                 usage: wgpu::BufferUsages::STORAGE
@@ -226,12 +227,12 @@ impl WgpuProvider {
                 mapped_at_creation: false,
             }));
             let mut enc =
-                self.device_ref()
+                emission.device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-reduce-global-input-snapshot-copy"),
                     });
             enc.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, snap.as_ref(), 0, size_bytes);
-            self.submit(enc);
+            self.submit(emission, pending, enc)?;
             snap
         } else {
             entry.buffer.clone()
@@ -251,7 +252,7 @@ impl WgpuProvider {
                 && std::env::var("RUNMAT_FORCE_REDUCE_SNAPSHOT").is_ok()
             {
                 let size_bytes = (current_len * self.element_size) as u64;
-                let snap = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                let snap = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-reduce-pass-input-snapshot"),
                     size: size_bytes,
                     usage: wgpu::BufferUsages::STORAGE
@@ -260,16 +261,16 @@ impl WgpuProvider {
                     mapped_at_creation: false,
                 }));
                 let mut enc =
-                    self.device_ref()
+                    emission.device()
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("runmat-reduce-pass-input-snapshot-copy"),
                         });
                 enc.copy_buffer_to_buffer(current.as_ref(), 0, snap.as_ref(), 0, size_bytes);
-                self.submit(enc);
+                self.submit(emission, pending, enc)?;
                 input_for_pass = snap;
             }
             let mut out_buffer =
-                self.create_storage_buffer_checked(output_len_total, "runmat-reduce-pass")?;
+                self.create_storage_buffer_checked(emission, output_len_total, "runmat-reduce-pass")?;
             // Prevent aliasing: output buffer must not be the same as input buffer
             if std::ptr::eq(out_buffer.as_ref(), input_for_pass.as_ref()) {
                 if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
@@ -296,7 +297,7 @@ impl WgpuProvider {
                         self.adapter_limits.max_buffer_size,
                     ));
                 }
-                out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                out_buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-reduce-pass-unique"),
                     size: size_bytes,
                     usage: wgpu::BufferUsages::STORAGE
@@ -319,13 +320,12 @@ impl WgpuProvider {
                     offset: in_offset_elems as u32,
                     total: current_len as u32,
                 };
-                let params_buffer = self.uniform_buffer(&params, "runmat-reduce-global-params");
+                let params_buffer = self.uniform_buffer(emission, &params, "runmat-reduce-global-params")?;
 
-                let bind_group = self
-                    .device_ref()
+                let bind_group = emission.device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-reduce-global-bind"),
-                        layout: &self.pipelines.reduce_global.layout,
+                        layout: &self.pipelines.reduce_global.get(emission)?.layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -360,12 +360,12 @@ impl WgpuProvider {
                     );
                 }
                 crate::backend::wgpu::dispatch::reduction::run_single_pass(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &self.pipelines.reduce_global.pipeline,
+                    emission,
+                    pending,
+                    &self.pipelines.reduce_global.get(emission)?.pipeline,
                     &bind_group,
                     groups,
-                );
+                )?;
                 in_offset_elems += chunk_in;
                 _out_offset_elems += chunk_out;
             }
@@ -373,6 +373,8 @@ impl WgpuProvider {
             current = out_buffer;
             current_len = output_len_total;
         }
+        Ok(current)
+        })??;
         if Arc::ptr_eq(&current, &entry.buffer) {
             return Ok(a.with_view(a.view().clone().with_shape(vec![1, 1]).with_logical(false))?);
         }
@@ -422,10 +424,11 @@ impl WgpuProvider {
         } else {
             vec![rows, 1]
         };
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
         // Optional snapshot of input
         let in_buf = if std::env::var("RUNMAT_PROVIDER_REDUCTION_SNAPSHOT").is_ok() {
             let size_bytes = (entry.len * self.element_size) as u64;
-            let snap = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            let snap = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-input-snapshot"),
                 size: size_bytes,
                 usage: wgpu::BufferUsages::STORAGE
@@ -434,18 +437,18 @@ impl WgpuProvider {
                 mapped_at_creation: false,
             }));
             let mut enc =
-                self.device_ref()
+                emission.device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-reduce-dim-input-snapshot-copy"),
                     });
             enc.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, snap.as_ref(), 0, size_bytes);
-            self.submit(enc);
+            self.submit(emission, pending, enc)?;
             snap
         } else {
             entry.buffer.clone()
         };
         let mut out_buffer =
-            self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-out")?;
+            self.create_storage_buffer_checked(emission, out_len, "runmat-reduce-dim-out")?;
         // Prevent aliasing: output must not be identical to input buffer
         if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
             if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
@@ -466,7 +469,7 @@ impl WgpuProvider {
                     self.adapter_limits.max_buffer_size,
                 ));
             }
-            out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            out_buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-out-unique"),
                 size: size_bytes,
                 usage: wgpu::BufferUsages::STORAGE
@@ -476,7 +479,7 @@ impl WgpuProvider {
             }));
         }
         if out_len == 0 {
-            return self.register_existing_buffer(out_buffer, out_shape, out_len);
+            return Ok(out_buffer);
         }
         let params = crate::backend::wgpu::params::ReduceDimParams {
             rows: rows as u32,
@@ -484,12 +487,11 @@ impl WgpuProvider {
             dim: reduce_dim as u32,
             op: op as u32,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-reduce-dim-params");
-        let bind_group = self
-            .device_ref()
+        let params_buffer = self.uniform_buffer(emission, &params, "runmat-reduce-dim-params")?;
+        let bind_group = emission.device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("runmat-reduce-dim-bind"),
-                layout: &self.pipelines.reduce_dim_sum_mean.layout,
+                layout: &self.pipelines.reduce_dim_sum_mean.get(emission)?.layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -521,12 +523,14 @@ impl WgpuProvider {
             );
         }
         crate::backend::wgpu::dispatch::reduction::run_single_pass(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.reduce_dim_sum_mean.pipeline,
+            emission,
+            pending,
+            &self.pipelines.reduce_dim_sum_mean.get(emission)?.pipeline,
             &bind_group,
             groups,
-        );
+        )?;
+        Ok(out_buffer)
+        })??;
         self.register_existing_buffer(out_buffer, out_shape, out_len)
     }
     pub(crate) fn reduce_dim_minmax_exec(
@@ -572,95 +576,101 @@ impl WgpuProvider {
         let reduce_dim = dim + 1;
         let out_len = geometry.length;
         let out_shape = geometry.shape;
-        let mut values_buffer =
-            self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-values")?;
-        let mut indices_buffer =
-            self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-indices")?;
-        // Prevent aliasing either output with input buffer
-        if std::ptr::eq(values_buffer.as_ref(), entry.buffer.as_ref()) {
-            let size_bytes = (out_len * self.element_size) as u64;
-            if size_bytes > self.adapter_limits.max_buffer_size {
-                return Err(gpu_per_buffer_limit_error(
-                    "runmat-reduce-dim-ext-values-unique",
-                    size_bytes,
-                    self.adapter_limits.max_buffer_size,
-                ));
-            }
-            values_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-reduce-dim-ext-values-unique"),
-                size: size_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-        }
-        if std::ptr::eq(indices_buffer.as_ref(), entry.buffer.as_ref()) {
-            let size_bytes = (out_len * self.element_size) as u64;
-            if size_bytes > self.adapter_limits.max_buffer_size {
-                return Err(gpu_per_buffer_limit_error(
-                    "runmat-reduce-dim-ext-indices-unique",
-                    size_bytes,
-                    self.adapter_limits.max_buffer_size,
-                ));
-            }
-            indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-reduce-dim-ext-indices-unique"),
-                size: size_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-        }
-        if out_len == 0 {
-            let values_handle =
-                self.register_existing_buffer(values_buffer, out_shape.clone(), out_len)?;
-            let indices_handle =
-                self.register_existing_buffer(indices_buffer, out_shape, out_len)?;
-            return Ok(ReduceDimResult {
-                values: values_handle,
-                indices: indices_handle,
-            });
-        }
-        let params = crate::backend::wgpu::params::ReduceDimParams {
-            rows,
-            cols,
-            dim: reduce_dim as u32,
-            op: op as u32,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-reduce-dim-ext-params");
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-reduce-dim-ext-bind"),
-                layout: &self.pipelines.reduce_dim_minmax.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-        crate::backend::wgpu::dispatch::reduction::run_single_pass(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.reduce_dim_minmax.pipeline,
-            &bind_group,
-            geometry.groups,
-        );
+        let (values_buffer, indices_buffer) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let mut values_buffer = self.create_storage_buffer_checked(
+                    emission,
+                    out_len,
+                    "runmat-reduce-dim-ext-values",
+                )?;
+                let mut indices_buffer = self.create_storage_buffer_checked(
+                    emission,
+                    out_len,
+                    "runmat-reduce-dim-ext-indices",
+                )?;
+                // Prevent aliasing either output with input buffer
+                if std::ptr::eq(values_buffer.as_ref(), entry.buffer.as_ref()) {
+                    let size_bytes = (out_len * self.element_size) as u64;
+                    if size_bytes > self.adapter_limits.max_buffer_size {
+                        return Err(gpu_per_buffer_limit_error(
+                            "runmat-reduce-dim-ext-values-unique",
+                            size_bytes,
+                            self.adapter_limits.max_buffer_size,
+                        ));
+                    }
+                    values_buffer =
+                        Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("runmat-reduce-dim-ext-values-unique"),
+                            size: size_bytes,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }));
+                }
+                if std::ptr::eq(indices_buffer.as_ref(), entry.buffer.as_ref()) {
+                    let size_bytes = (out_len * self.element_size) as u64;
+                    if size_bytes > self.adapter_limits.max_buffer_size {
+                        return Err(gpu_per_buffer_limit_error(
+                            "runmat-reduce-dim-ext-indices-unique",
+                            size_bytes,
+                            self.adapter_limits.max_buffer_size,
+                        ));
+                    }
+                    indices_buffer =
+                        Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("runmat-reduce-dim-ext-indices-unique"),
+                            size: size_bytes,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }));
+                }
+                if out_len == 0 {
+                    return Ok((values_buffer, indices_buffer));
+                }
+                let params = crate::backend::wgpu::params::ReduceDimParams {
+                    rows,
+                    cols,
+                    dim: reduce_dim as u32,
+                    op: op as u32,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-reduce-dim-ext-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-reduce-dim-ext-bind"),
+                        layout: &self.pipelines.reduce_dim_minmax.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: values_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: indices_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                crate::backend::wgpu::dispatch::reduction::run_single_pass(
+                    emission,
+                    pending,
+                    &self.pipelines.reduce_dim_minmax.get(emission)?.pipeline,
+                    &bind_group,
+                    geometry.groups,
+                )?;
+                Ok((values_buffer, indices_buffer))
+            })??;
         let values_handle =
             self.register_existing_buffer(values_buffer, out_shape.clone(), out_len)?;
         let indices_handle = self.register_existing_buffer(indices_buffer, out_shape, out_len)?;
