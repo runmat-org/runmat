@@ -10397,12 +10397,31 @@ impl AccelProvider for InProcessProvider {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 static INSTANCE: OnceCell<InProcessProvider> = OnceCell::new();
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    // The API retains one provider façade per worker. Its allocation records
+    // remain lease-owned and are removed independently of this façade lifetime.
+    static INSTANCE: std::cell::OnceCell<&'static InProcessProvider> = const { std::cell::OnceCell::new() };
+}
+
+fn inprocess_instance() -> &'static InProcessProvider {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        INSTANCE.get_or_init(InProcessProvider::new)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        INSTANCE.with(|slot| *slot.get_or_init(|| Box::leak(Box::new(InProcessProvider::new()))))
+    }
+}
 
 /// Register the in-process provider as the global acceleration provider.
 /// Safe to call multiple times; only the first call installs the provider.
 pub fn register_inprocess_provider() {
-    let provider: &'static InProcessProvider = INSTANCE.get_or_init(InProcessProvider::new);
+    let provider = inprocess_instance();
     #[cfg(not(test))]
     unsafe {
         // Safety: we intentionally install a reference with 'static lifetime. Always reassert.

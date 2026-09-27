@@ -1,147 +1,213 @@
 use super::*;
-use crate::simple_provider::InProcessProvider;
-use futures::executor::block_on;
-use runmat_accelerate_api::{
-    AccelProvider, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorView, HostTensorView,
-};
+use runmat_accelerate_api::allocation::{AllocationReleaseOutcome, GpuTensorLayout, GpuTensorView};
+use runmat_accelerate_api::{GpuTensorStorage, HostIntegerDataOwned, NumericElementType};
 
-#[test]
-fn state_retains_every_exact_numeric_payload() {
-    let state = NumericAllocationState::default();
-    let payloads = [
-        InProcessNumericData::F64(vec![-0.0, f64::MAX]),
-        InProcessNumericData::F32(vec![-0.0, f32::MAX]),
-        InProcessNumericData::Integer(HostIntegerDataOwned::I8(vec![i8::MIN, i8::MAX])),
-        InProcessNumericData::Integer(HostIntegerDataOwned::I16(vec![i16::MIN, i16::MAX])),
-        InProcessNumericData::Integer(HostIntegerDataOwned::I32(vec![i32::MIN, i32::MAX])),
-        InProcessNumericData::Integer(HostIntegerDataOwned::I64(vec![i64::MIN, i64::MAX])),
-        InProcessNumericData::Integer(HostIntegerDataOwned::U8(vec![0, u8::MAX])),
-        InProcessNumericData::Integer(HostIntegerDataOwned::U16(vec![0, u16::MAX])),
-        InProcessNumericData::Integer(HostIntegerDataOwned::U32(vec![0, u32::MAX])),
-        InProcessNumericData::Integer(HostIntegerDataOwned::U64(vec![0, u64::MAX])),
-    ];
-    for (index, payload) in payloads.iter().enumerate() {
-        assert!(state
-            .lock()
-            .unwrap()
-            .insert(index as u64, payload.clone())
-            .is_none());
-    }
-    for (index, expected) in payloads.into_iter().enumerate() {
-        assert_eq!(state.take(index as u64), Some(expected));
-        assert!(state.take(index as u64).is_none());
-    }
-    assert!(state.lock().unwrap().is_empty());
+fn identity(id: u64) -> AllocationIdentity {
+    AllocationIdentity::new(runmat_accelerate_api::next_device_id(), id, 1)
 }
 
 #[test]
-fn detached_payload_keeps_storage_and_does_not_hold_the_map_lock() {
-    let state = Arc::new(NumericAllocationState::default());
-    let values = vec![3.0_f64; 1024];
-    let pointer = values.as_ptr();
-    state
-        .lock()
-        .unwrap()
-        .insert(1, InProcessNumericData::F64(values));
-    let retained_state = Arc::clone(&state);
-    drop(state);
-    let removed = retained_state.take(1).expect("allocation");
-    let InProcessNumericData::F64(values) = &removed else {
-        panic!("F64 payload")
-    };
-    assert_eq!(
-        values.as_ptr(),
-        pointer,
-        "retirement must not copy the payload"
-    );
-    // A teardown callback may reenter the same allocation owner. Holding the
-    // detached payload cannot retain the map's mutation lock.
-    let mut reentrant = retained_state
-        .allocations
-        .try_lock()
-        .expect("lock released before teardown");
-    reentrant.insert(2, InProcessNumericData::F32(Vec::new()));
-    drop(reentrant);
-    drop(removed);
-    assert_eq!(
-        retained_state.take(2),
-        Some(InProcessNumericData::F32(Vec::new()))
-    );
-}
-
-#[test]
-fn retirement_recovers_the_existing_poisoned_map_without_losing_payloads() {
-    let state = NumericAllocationState::default();
-    state
-        .lock()
-        .unwrap()
-        .insert(1, InProcessNumericData::F64(vec![7.0]));
-    let result = std::panic::catch_unwind(|| {
-        let _guard = state.lock().unwrap();
-        panic!("deterministic lock poisoning");
-    });
-    assert!(result.is_err());
-    assert_eq!(state.take(1), Some(InProcessNumericData::F64(vec![7.0])));
-    assert!(state.take(1).is_none());
-}
-
-#[test]
-fn explicit_free_preserves_provider_namespace_and_existing_idempotence() {
-    let first = InProcessProvider::new();
-    let second = InProcessProvider::new();
-    let view = HostTensorView {
-        data: &[2.0, 5.0],
-        shape: &[1, 2],
-    };
-    let a = first.upload(&view).unwrap();
-    let b = second.upload(&view).unwrap();
-    assert_ne!(a.device_id, b.device_id);
-    assert_ne!(a.buffer_id, b.buffer_id);
-    assert!(second.free(&a).is_err());
-    assert_eq!(block_on(first.download(&a)).unwrap().data, view.data);
-    first.free(&a).unwrap();
-    first
-        .free(&a)
-        .expect("existing InProcess free remains idempotent");
-    assert!(block_on(first.download(&a)).is_err());
-    assert_eq!(block_on(second.download(&b)).unwrap().data, view.data);
-    second.free(&b).unwrap();
-}
-
-#[test]
-fn provider_numeric_routes_share_the_same_state_without_downcasting() {
-    let provider = InProcessProvider::new();
-    let single = provider
-        .upload_numeric(&HostNumericTensorView {
-            data: HostNumericDataView::F32(&[f32::MIN_POSITIVE, -0.0]),
-            shape: &[1, 2],
-            storage: GpuTensorStorage::Real,
-        })
+fn publication_moves_payload_without_copy_and_last_view_retires_same_record() {
+    let owner = Arc::new(NumericAllocationState::default());
+    let mut data = Vec::with_capacity(16);
+    data.extend([-0.0f64, f64::MAX]);
+    let pointer = data.as_ptr();
+    let requested = (data.capacity() * std::mem::size_of::<f64>()) as u64;
+    let pending = owner
+        .stage(
+            identity(1),
+            InProcessNumericData::F64(data),
+            vec![1, 2],
+            GpuTensorStorage::Real,
+            false,
+        )
         .unwrap();
-    let integer = provider
-        .upload_numeric(&HostNumericTensorView {
-            data: HostNumericDataView::U64(&[9_007_199_254_740_993, u64::MAX]),
-            shape: &[1, 2],
-            storage: GpuTensorStorage::Real,
-        })
+    let input = pending.publish().unwrap();
+    assert_eq!(input.physical().payload_bytes(), 16);
+    assert_eq!(input.physical().requested_bytes(), requested);
+    {
+        let guard = owner.lock().unwrap();
+        let Some(InProcessNumericData::F64(data)) = guard.get(&input) else {
+            panic!("typed F64 payload")
+        };
+        assert_eq!(data.as_ptr(), pointer);
+        assert_eq!(data[0].to_bits(), (-0.0f64).to_bits());
+    }
+    let alias = input
+        .with_view(GpuTensorView::contiguous(vec![2, 1]))
         .unwrap();
-    let HostNumericDataOwned::F32(values) =
-        block_on(provider.download_numeric(&single)).unwrap().data
+    let clone = input.clone();
+    assert_eq!(input.view_identity(), clone.view_identity());
+    assert_ne!(input.view_identity(), alias.view_identity());
+    assert!(input.shares_allocation_with(&alias));
+    let wire = input.wire_descriptor();
+    let acquired = owner.acquire(&wire).unwrap();
+    drop(input);
+    drop(clone);
+    drop(alias);
+    assert_eq!(owner.allocations.lock().unwrap().len(), 1);
+    assert_eq!(
+        acquired.release().unwrap(),
+        AllocationReleaseOutcome::Retired
+    );
+    assert!(owner.allocations.lock().unwrap().is_empty());
+    assert!(owner.acquire(&wire).is_err());
+}
+
+#[test]
+fn pending_drop_duplicate_and_invalid_shape_never_publish_or_replace_payloads() {
+    let owner = Arc::new(NumericAllocationState::default());
+    let id = identity(2);
+    let pending = owner
+        .stage(
+            id,
+            InProcessNumericData::F32(vec![3.0]),
+            vec![1],
+            GpuTensorStorage::Real,
+            false,
+        )
+        .unwrap();
+    assert!(owner
+        .stage(
+            id,
+            InProcessNumericData::F32(vec![8.0]),
+            vec![1],
+            GpuTensorStorage::Real,
+            false
+        )
+        .is_err());
+    assert!(owner
+        .stage(
+            identity(3),
+            InProcessNumericData::F32(vec![1.0]),
+            vec![2],
+            GpuTensorStorage::Real,
+            false
+        )
+        .is_err());
+    assert_eq!(owner.allocations.lock().unwrap().len(), 1);
+    drop(pending);
+    assert!(owner.allocations.lock().unwrap().is_empty());
+}
+
+#[test]
+fn exact_integer_and_empty_shape_admission_preserve_storage() {
+    let owner = Arc::new(NumericAllocationState::default());
+    let handle = owner
+        .stage(
+            identity(4),
+            InProcessNumericData::Integer(HostIntegerDataOwned::U64(vec![
+                9_007_199_254_740_993,
+                u64::MAX,
+            ])),
+            vec![1, 2],
+            GpuTensorStorage::Real,
+            false,
+        )
+        .unwrap()
+        .publish()
+        .unwrap();
+    assert_eq!(handle.physical().element_type(), NumericElementType::U64);
+    let guard = owner.lock().unwrap();
+    let Some(InProcessNumericData::Integer(HostIntegerDataOwned::U64(data))) = guard.get(&handle)
     else {
-        panic!("Single storage must stay Single")
+        panic!("exact storage")
     };
-    assert_eq!(
-        values.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
-        vec![f32::MIN_POSITIVE.to_bits(), (-0.0_f32).to_bits()]
+    assert_eq!(data, &[9_007_199_254_740_993, u64::MAX]);
+    drop(guard);
+    let empty = owner
+        .stage(
+            identity(5),
+            InProcessNumericData::F64(Vec::new()),
+            vec![usize::MAX, usize::MAX, 0],
+            GpuTensorStorage::Real,
+            false,
+        )
+        .unwrap()
+        .publish()
+        .unwrap();
+    assert_eq!(empty.physical().payload_bytes(), 0);
+    assert_eq!(empty.shape(), &[usize::MAX, usize::MAX, 0]);
+}
+
+#[test]
+fn wire_cannot_relabel_numeric_as_logical_or_invent_lazy_layout() {
+    let owner = Arc::new(NumericAllocationState::default());
+    let handle = owner
+        .stage(
+            identity(6),
+            InProcessNumericData::F32(vec![0.0, 1.0]),
+            vec![1, 2],
+            GpuTensorStorage::Real,
+            false,
+        )
+        .unwrap()
+        .publish()
+        .unwrap();
+    let mut wire = handle.wire_descriptor();
+    wire.view = wire.view.with_logical(true);
+    assert!(owner.acquire(&wire).is_err());
+    let mut wire = handle.wire_descriptor();
+    wire.view = wire.view.with_shape(vec![1]);
+    assert!(
+        owner.acquire(&wire).is_err(),
+        "prefix views need a real payload-range kernel contract"
     );
-    assert_eq!(
-        block_on(provider.download_numeric(&integer)).unwrap().data,
-        HostNumericDataOwned::U64(vec![9_007_199_254_740_993, u64::MAX])
-    );
-    provider.free(&single).unwrap();
-    provider.free(&integer).unwrap();
-    let state = numeric_registry().lock().unwrap();
-    assert!(!state.contains_key(&single.buffer_id));
-    assert!(!state.contains_key(&integer.buffer_id));
+    let mut wire = handle.wire_descriptor();
+    wire.view = wire
+        .view
+        .with_shape(vec![2, 1])
+        .with_layout(GpuTensorLayout::Transpose(
+            runmat_accelerate_api::TransposeInfo {
+                base_rows: 1,
+                base_cols: 2,
+            },
+        ));
+    assert!(owner.acquire(&wire).is_err());
+}
+
+#[cfg(panic = "unwind")]
+#[test]
+fn pending_unwind_cleans_up_and_poisoned_live_access_fails_closed() {
+    let owner = Arc::new(NumericAllocationState::default());
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _pending = owner
+            .stage(
+                identity(7),
+                InProcessNumericData::F64(vec![1.0]),
+                vec![1],
+                GpuTensorStorage::Real,
+                false,
+            )
+            .unwrap();
+        panic!("abandon pending publication");
+    }));
+    assert!(result.is_err());
+    assert!(owner.allocations.lock().unwrap().is_empty());
+    let handle = owner
+        .stage(
+            identity(8),
+            InProcessNumericData::F64(vec![2.0]),
+            vec![1],
+            GpuTensorStorage::Real,
+            false,
+        )
+        .unwrap()
+        .publish()
+        .unwrap();
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = owner.allocations.lock().unwrap();
+        panic!("poison owner");
+    }));
+    {
+        let guard = owner.lock().unwrap_or_else(|error| error.into_inner());
+        assert!(guard.get(&handle).is_none());
+    }
+    assert!(owner.acquire(&handle.wire_descriptor()).is_err());
+    assert_eq!(handle.release().unwrap(), AllocationReleaseOutcome::Retired);
+    assert!(owner
+        .allocations
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .is_empty());
 }
