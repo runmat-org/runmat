@@ -7,8 +7,9 @@ use runmat_accelerate_api::{
 };
 use runmat_value::{NumericDType, Value};
 
-mod logical;
+mod arithmetic;
 mod integer_conversion;
+mod logical;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ("transfer.upload", ProviderOperationFamily::Upload),
@@ -155,9 +156,10 @@ fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
 pub(crate) fn in_process_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 3, IN_PROCESS_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 4, IN_PROCESS_OPERATIONS);
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
+    arithmetic::append(&mut snapshot);
     snapshot
 }
 
@@ -165,9 +167,10 @@ pub(crate) fn in_process_capability_snapshot(
 pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 4, WGPU_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 5, WGPU_OPERATIONS);
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
+    arithmetic::append(&mut snapshot);
     snapshot
 }
 
@@ -178,8 +181,19 @@ pub(crate) fn in_process_feasibility(
     if let Some(result) = integer_conversion::validate(provider, false, query) {
         return result;
     }
-    logical::validate(logical::HookProfile::InProcess, provider.precision(), query)
-        .unwrap_or_else(|| dense_feasibility(&in_process_capability_snapshot(provider), query))
+    if let Some(result) =
+        logical::validate(logical::HookProfile::InProcess, provider.precision(), query)
+    {
+        return result;
+    }
+    let snapshot = in_process_capability_snapshot(provider);
+    arithmetic::feasibility(
+        arithmetic::HookProfile::InProcess,
+        provider.precision(),
+        &snapshot,
+        query,
+    )
+    .unwrap_or_else(|| dense_feasibility(&snapshot, query))
 }
 
 #[cfg(feature = "wgpu")]
@@ -190,8 +204,18 @@ pub(crate) fn wgpu_feasibility(
     if let Some(result) = integer_conversion::validate(provider, true, query) {
         return result;
     }
-    logical::validate(logical::HookProfile::Wgpu, provider.precision(), query)
-        .unwrap_or_else(|| dense_feasibility(&wgpu_capability_snapshot(provider), query))
+    if let Some(result) = logical::validate(logical::HookProfile::Wgpu, provider.precision(), query)
+    {
+        return result;
+    }
+    let snapshot = wgpu_capability_snapshot(provider);
+    arithmetic::feasibility(
+        arithmetic::HookProfile::Wgpu,
+        provider.precision(),
+        &snapshot,
+        query,
+    )
+    .unwrap_or_else(|| dense_feasibility(&snapshot, query))
 }
 
 pub(crate) fn dense_capability_snapshot(
