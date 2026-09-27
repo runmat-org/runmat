@@ -27,10 +27,11 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
             gpu_helpers::propagate_output_provenance(&mut output, [&input])?;
             gpu_helpers::resident_gpu_value(output)
         }
-        Ok(output) => Err(gpu_helpers::reject_gpu_output(
-            output,
-            errors::internal("provider unary_nextpow2 returned malformed output"),
-        )),
+        Ok(output) => {
+            let mut error = errors::internal("provider unary_nextpow2 returned malformed output");
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(gpu_helpers::reject_gpu_output(output, error))
+        }
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             evaluate_and_restore(&input, provider).await
         }
@@ -71,10 +72,9 @@ async fn evaluate_and_restore(
     let result = operation::transform(gathered)?;
     let mut output = gpu_helpers::upload_tensor_protecting(provider, &result, &[input])?;
     if !output_matches(&output, input, provider, output_representation(input)) {
-        return Err(gpu_helpers::reject_gpu_output(
-            output,
-            errors::internal("provider upload returned malformed fallback output"),
-        ));
+        let mut error = errors::internal("provider upload returned malformed fallback output");
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(output, error));
     }
     gpu_helpers::propagate_output_provenance(&mut output, [input])?;
     gpu_helpers::resident_gpu_value(output)

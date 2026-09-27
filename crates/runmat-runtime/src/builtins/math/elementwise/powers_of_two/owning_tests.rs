@@ -51,6 +51,7 @@ fn powers_of_two_reject_new_view_alias_without_retiring_input() {
         ))
         .unwrap_err();
         assert!(error.message().contains("malformed"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         assert_eq!(input.probe.retirements(), 0);
         input.handle.allocation_lease().validate_live().unwrap();
     }
