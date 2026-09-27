@@ -129,7 +129,10 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         .enable_all()
         .build()
         .map_err(|error| format!("standalone async runtime initialization failed: {error}"))?;
-    let (execution, native_lifecycle, mex_lifecycle) = async_runtime.block_on(async {
+    // Keep the original session owner through foreign teardown and terminal
+    // rendering. ContextFuture performs the existing nonblocking final drain
+    // after inner destruction on success, error, or abandonment.
+    async_runtime.block_on(runtime.clone().scope(async {
         let execution =
             if assembly.executable_identity.entrypoint_kind == ExecutableEntrypointKind::Script {
                 let local_names = function
@@ -146,7 +149,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
                         ..NativeWorkspaceInput::default()
                     },
                     requested_outputs,
-                    runtime,
+                    runtime.clone(),
                 )
                 .await
             } else {
@@ -156,27 +159,26 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
                     entrypoint,
                     Vec::new(),
                     requested_outputs,
-                    runtime,
+                    runtime.clone(),
                 )
                 .await
             };
         let native_lifecycle = native_ffi.shutdown().await;
         let mex_lifecycle = mex_guard.shutdown_gracefully().await;
-        (execution, native_lifecycle, mex_lifecycle)
-    });
-    let execution =
-        execution.map_err(|error| format!("standalone native execution failed: {error}"))?;
-    native_lifecycle
-        .map_err(|error| format!("standalone native-library shutdown failed: {error}"))?;
-    mex_lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
-    if let Some(expression) = execution.expression {
-        crate::output::value(&expression);
-    } else {
-        for output in execution.outputs {
-            crate::output::value(&output);
+        let execution =
+            execution.map_err(|error| format!("standalone native execution failed: {error}"))?;
+        native_lifecycle
+            .map_err(|error| format!("standalone native-library shutdown failed: {error}"))?;
+        mex_lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
+        if let Some(expression) = execution.expression {
+            crate::output::value(&expression);
+        } else {
+            for output in execution.outputs {
+                crate::output::value(&output);
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    }))
 }
 
 /// Initialize language policy from the verified program, independent of the
@@ -198,7 +200,7 @@ fn standalone_runtime(
     };
     runtime.set_language_mode(mode);
     runtime.set_runmat_extensions_enabled(matches!(mode, RuntimeLanguageMode::RunMat));
-    runmat_accelerate::native_auto::install_preparation_service(runtime)
+    crate::program::install_acceleration_services(runtime)
 }
 
 #[cfg(test)]

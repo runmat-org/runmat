@@ -4,6 +4,9 @@ use runmat_native_executor::execute::{NativeExecution, NativeWorkspaceInput};
 use runmat_types::ProgramFunctionId;
 use runmat_value::{Value, ValueSequence};
 
+#[cfg(test)]
+mod tests;
+
 pub async fn invoke(
     executor: Rc<runmat_native_executor::NativeExecutor>,
     program: &runmat_native_codegen::aot::AotProgramManifest,
@@ -12,6 +15,7 @@ pub async fn invoke(
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
+    let runtime = install_acceleration_services(runtime);
     let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime);
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
@@ -31,6 +35,7 @@ pub async fn invoke_workspace(
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
+    let runtime = install_acceleration_services(runtime);
     let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime);
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
@@ -190,7 +195,23 @@ fn isolated_runtime(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> runmat_runtime::context::RuntimeContext {
     let ports = runtime.service_ports().clone().without_workspace();
-    runmat_accelerate::native_auto::install_preparation_service(runtime.with_service_ports(ports))
+    install_acceleration_services(runtime.with_service_ports(ports))
+}
+
+/// A standalone root owns the same existing placement session used by Core.
+/// Supplied services and all nested context clones retain their exact authority.
+pub(crate) fn install_acceleration_services(
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> runmat_runtime::context::RuntimeContext {
+    let runtime = if runtime.service_ports().placement().is_none() {
+        let ports = runtime.service_ports().clone().with_placement(Rc::new(
+            runmat_accelerate::placement::PlacementSession::default(),
+        ));
+        runtime.with_service_ports(ports)
+    } else {
+        runtime
+    };
+    runmat_accelerate::native_auto::install_preparation_service(runtime)
 }
 
 fn normalize_outputs(

@@ -41,6 +41,8 @@ fn standalone_policy_comes_from_program_revision() {
         let _ambient = runmat_runtime::compatibility::push_runmat_extensions_enabled(!extensions);
         let program = revision(mode);
         let runtime = standalone_runtime(&program);
+        assert!(runtime.service_ports().placement().is_some());
+        assert!(runtime.service_ports().acceleration().is_some());
         assert_eq!(runtime.program_revision(), Some(&program));
         assert_eq!(runtime.language_mode(), expected);
         assert_eq!(runtime.runmat_extensions_enabled(), extensions);
