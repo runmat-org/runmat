@@ -25,6 +25,19 @@ pub enum DeferredInvocation {
 }
 
 impl DeferredInvocation {
+    /// Values retained by this invocation, including a forwarded callable's captures.
+    pub fn retained_values(&self) -> Vec<Value> {
+        let mut values = self.arguments().to_vec();
+        if let Self::Callable(crate::call::descriptor::CallableDescriptor {
+            target: crate::call::descriptor::CallableTarget::FevalForward(value),
+            ..
+        }) = self
+        {
+            values.push(value.clone());
+        }
+        values
+    }
+
     pub fn requested_outputs(&self) -> usize {
         match self {
             Self::Callable(descriptor) => descriptor.requested_outputs,
@@ -132,6 +145,12 @@ pub enum AwaitAction {
 }
 
 pub trait RuntimeExecutionServices {
+    /// Complete process-local values retained by this service. `None` means
+    /// alias visibility is unavailable, not that the service retains nothing.
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        None
+    }
+
     fn scope_id(&self) -> ExecutionScopeId;
     fn requires_program_capture(&self) -> bool {
         false
@@ -313,6 +332,23 @@ impl Default for RuntimeExecutionService {
 }
 
 impl RuntimeExecutionServices for RuntimeExecutionService {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        let state = self.state.try_lock().ok()?;
+        let mut values = Vec::new();
+        for future in state.futures.values() {
+            match future {
+                FutureState::Deferred(call) => values.extend(call.invocation.retained_values()),
+                FutureState::Completed(Ok(sequence)) => {
+                    values.extend(sequence.value().iter().cloned())
+                }
+                // The caller owns the moved invocation while Running; its
+                // execution frame must participate in the same root scan.
+                FutureState::Running | FutureState::Completed(Err(_)) | FutureState::Cancelled => {}
+            }
+        }
+        Some(values)
+    }
+
     fn scope_id(&self) -> ExecutionScopeId {
         self.scope_id
     }
@@ -706,6 +742,51 @@ mod tests {
             capabilities: Default::default(),
             program: None,
         }
+    }
+
+    #[test]
+    fn retained_values_cover_deferred_callable_and_completed_outputs() {
+        let service = RuntimeExecutionService::new();
+        let mut call = deferred_call(1, vec![Value::String("argument".into())]);
+        let DeferredInvocation::Callable(descriptor) = &mut call.invocation else {
+            unreachable!()
+        };
+        descriptor.target =
+            crate::call::descriptor::CallableTarget::FevalForward(Value::String("callable".into()));
+        let future = service.create_future(call).unwrap();
+        assert_eq!(
+            service.retained_values(),
+            Some(vec![
+                Value::String("argument".into()),
+                Value::String("callable".into())
+            ])
+        );
+        let action = service.begin_await(Value::Future(future.clone())).unwrap();
+        let AwaitAction::ExecuteFuture { call, .. } = action else {
+            panic!("execute deferred call")
+        };
+        assert_eq!(call.invocation.retained_values().len(), 2);
+        service
+            .complete_future(
+                &future,
+                Ok(runmat_value::ValueSequence::single(Value::String("output".into())).unwrap()),
+            )
+            .unwrap();
+        assert_eq!(
+            service.retained_values(),
+            Some(vec![Value::String("output".into())])
+        );
+        service
+            .cancel(&Value::Future(future), CancellationReason::User)
+            .unwrap();
+        assert_eq!(service.retained_values(), Some(vec![]));
+    }
+
+    #[test]
+    fn retained_values_fail_closed_during_service_mutation() {
+        let service = RuntimeExecutionService::new();
+        let _state = service.state.lock().unwrap();
+        assert!(service.retained_values().is_none());
     }
 
     #[test]

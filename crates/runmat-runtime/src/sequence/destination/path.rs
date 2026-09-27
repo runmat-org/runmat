@@ -10,6 +10,7 @@ use structural::{prepare_step, read_step};
 mod assignment;
 mod conversion;
 mod object_assignment;
+mod retained;
 use conversion::{object_subscript_from_endpoint, object_subscript_from_step};
 
 #[cfg(test)]

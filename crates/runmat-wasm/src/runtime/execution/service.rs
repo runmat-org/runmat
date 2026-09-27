@@ -357,6 +357,26 @@ impl BrowserExecutionService {
 }
 
 impl RuntimeExecutionServices for BrowserExecutionService {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        let state = self.state.try_borrow().ok()?;
+        let mut values = Vec::new();
+        for future in state.futures.values() {
+            match future {
+                FutureState::Deferred(call) => values.extend(call.invocation.retained_values()),
+                FutureState::Completed(Ok(sequence)) => {
+                    values.extend(sequence.value().iter().cloned())
+                }
+                // Caller execution owns its moved invocation; scheduled worker
+                // requests contain serialized payloads, not local Value handles.
+                FutureState::ExecutingInCaller
+                | FutureState::Scheduled(_)
+                | FutureState::Completed(Err(_))
+                | FutureState::Cancelled => {}
+            }
+        }
+        Some(values)
+    }
+
     fn scope_id(&self) -> ExecutionScopeId {
         self.scope_id
     }

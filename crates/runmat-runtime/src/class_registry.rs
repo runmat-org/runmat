@@ -18,6 +18,9 @@ use runmat_types::{
 };
 use runmat_value::Value;
 
+mod retained;
+pub use retained::static_property_retained_values;
+
 #[derive(Debug, Clone)]
 pub struct RuntimeProperty {
     pub name: MemberName,
@@ -193,20 +196,8 @@ pub fn static_property_gc_roots() -> Vec<GcHandle> {
         }
     }
     let mut collector = RootCollector(Vec::new());
-    FALLBACK_STATE.with(|state| {
-        for value in state.borrow().static_values.values() {
-            value.trace(&mut collector);
-        }
-    });
-    CONTEXT_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        states.retain(|state| state.strong_count() > 0);
-        for state in states.iter().filter_map(std::rc::Weak::upgrade) {
-            for value in state.classes.borrow().static_values.values() {
-                value.trace(&mut collector);
-            }
-        }
-    });
+    retained::visit_values(&mut |value| value.trace(&mut collector))
+        .expect("static property registry is borrowed during GC root inspection");
     collector.0
 }
 
@@ -327,6 +318,7 @@ pub fn register_class_with_sealed(def: RuntimeClass, is_sealed: bool) {
 }
 
 pub fn register_class_with_modifiers(def: RuntimeClass, is_sealed: bool, is_abstract: bool) {
+    retained::note_default_roots(&def);
     let class_name = def.name.clone();
     with_state_mut(|state| {
         state.generation = state.generation.wrapping_add(1).max(1);

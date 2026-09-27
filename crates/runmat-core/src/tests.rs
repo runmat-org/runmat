@@ -42,6 +42,10 @@ impl InProcessMultiLabExecutionService {
 }
 
 impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabExecutionService {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        runmat_runtime::execution::RuntimeExecutionServices::retained_values(&self.serial)
+    }
+
     fn scope_id(&self) -> runmat_execution::ExecutionScopeId {
         runmat_runtime::execution::RuntimeExecutionServices::scope_id(&self.serial)
     }

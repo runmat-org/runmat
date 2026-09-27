@@ -96,6 +96,13 @@ pub trait RuntimeWorkspaceService {
 }
 
 pub trait RuntimeObjectService {
+    /// Complete retained values, including published static properties and
+    /// implementation-owned captures. `None` means alias visibility is not
+    /// available; callers must not interpret it as an empty root set.
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        None
+    }
+
     fn class(&self, name: &str) -> Option<RuntimeClass>;
     fn register_class(&self, class: RuntimeClass) -> Result<(), RuntimeError>;
     fn static_property(&self, class: &str, property: &str) -> Option<Value>;

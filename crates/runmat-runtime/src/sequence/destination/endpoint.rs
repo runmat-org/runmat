@@ -21,6 +21,9 @@ pub struct PreparedSequenceEndpoint {
 }
 
 impl PreparedSequenceEndpoint {
+    pub fn visit_retained_values(&self, visitor: &mut impl FnMut(&Value)) {
+        self.spec.visit_retained_values(visitor);
+    }
     pub async fn prepare(base: &Value, spec: SequenceEndpointSpec) -> Result<Self, RuntimeError> {
         let cardinality = match &spec {
             SequenceEndpointSpec::Member(member) => {
@@ -72,6 +75,21 @@ impl PreparedSequenceEndpoint {
             }
             SequenceEndpointSpec::CellContents(indices) => {
                 assign_cell_contents(base, indices, values).await
+            }
+        }
+    }
+}
+
+impl SequenceEndpointSpec {
+    pub(crate) fn visit_retained_values(&self, visitor: &mut impl FnMut(&Value)) {
+        match self {
+            Self::Member(_) => {}
+            Self::CellContents(components) => {
+                for component in components {
+                    if let ObjectIndexComponent::Value(value) = component {
+                        visitor(value);
+                    }
+                }
             }
         }
     }
