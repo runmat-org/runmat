@@ -110,4 +110,41 @@ async fn ordered_matmul_hardware_preserves_domains_orientation_and_diagonal() {
     provider.free(&result).unwrap();
     provider.free(&input).unwrap();
     provider.free(&identity).unwrap();
+
+    // Cross the actual provider's diagonal lane boundary and both matrix tile
+    // boundaries. With RUNMAT_WG=64 the former fixed-512 dispatch left the
+    // final diagonal element unwritten; a two-element witness cannot catch it.
+    let geometry = provider
+        .matmul_geometry()
+        .expect("matrix geometry is required");
+    let n = geometry.diagonal_workgroup_size as usize + 1;
+    let column: Vec<_> = (1..=n).map(|value| value as f64).collect();
+    let row = vec![1.; n];
+    let left = provider
+        .upload(&HostTensorView {
+            data: &column,
+            shape: &[n, 1],
+        })
+        .unwrap();
+    let right = provider
+        .upload(&HostTensorView {
+            data: &row,
+            shape: &[1, n],
+        })
+        .unwrap();
+    let product = provider
+        .matmul_epilogue(&left, &right, &MatmulEpilogue::noop())
+        .await
+        .unwrap();
+    let product_host = provider.download(&product).await.unwrap();
+    assert_eq!(product_host.data.len(), n * n);
+    for actual_column in product_host.data.chunks_exact(n) {
+        assert_eq!(actual_column, column.as_slice());
+    }
+    let diagonal = provider.diag_extract(&product, 0).unwrap();
+    assert_eq!(diagonal.shape, [n, 1]);
+    assert_eq!(provider.download(&diagonal).await.unwrap().data, column);
+    for handle in [&diagonal, &product, &left, &right] {
+        provider.free(handle).unwrap();
+    }
 }
