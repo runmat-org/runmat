@@ -326,3 +326,73 @@ fn cuda_context_pop_unwind_is_contained_and_marks_owner_unavailable() {
         .downcast_ref::<context::ContextUnavailable>()
         .is_some());
 }
+
+#[cfg(panic = "unwind")]
+#[test]
+fn cuda_initializer_unwind_retires_unpublished_pointer_exactly_once() {
+    let (state, driver) = owner();
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = state.allocate(
+            vec![1],
+            GpuTensorDescriptor::numeric(NumericElementType::F64, GpuTensorStorage::Real),
+            8,
+            || Ok(1101),
+            |_| panic!("initializer unwind"),
+        );
+    }))
+    .is_err());
+    assert!(state.records().is_empty());
+    assert_eq!(driver.frees(), vec![1101]);
+    assert_eq!(
+        *driver.events.lock().unwrap(),
+        vec!["push", "pop", "push", "free", "pop"]
+    );
+    drop(state);
+    assert_eq!(driver.frees(), vec![1101]);
+}
+
+#[cfg(panic = "unwind")]
+#[test]
+fn cuda_initializer_unwind_cleanup_failure_remains_uncertain_without_retry() {
+    let (state, driver) = owner();
+    driver.fail_free.store(true, Ordering::SeqCst);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = state.allocate(
+            vec![1],
+            GpuTensorDescriptor::numeric(NumericElementType::F64, GpuTensorStorage::Real),
+            8,
+            || Ok(1102),
+            |_| panic!("initializer unwind"),
+        );
+    }))
+    .is_err());
+    assert!(matches!(state.records()[&1].phase, Phase::Uncertain(_)));
+    assert_eq!(state.records()[&1].allocation.unwrap().pointer, 1102);
+    drop(state);
+    assert_eq!(driver.frees(), vec![1102]);
+}
+
+#[cfg(panic = "unwind")]
+#[test]
+fn cuda_initializer_unwind_pop_failure_preserves_unpublished_pointer_without_unsafe_cleanup() {
+    let (state, driver) = owner();
+    driver.fail_pop.store(true, Ordering::SeqCst);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = state.allocate(
+            vec![1],
+            GpuTensorDescriptor::numeric(NumericElementType::F64, GpuTensorStorage::Real),
+            8,
+            || Ok(1103),
+            |_| panic!("initializer unwind"),
+        );
+    }))
+    .is_err());
+    assert_eq!(state.records()[&1].allocation.unwrap().pointer, 1103);
+    assert!(state
+        .context_identity()
+        .unwrap_err()
+        .downcast_ref::<context::ContextUnavailable>()
+        .is_some());
+    drop(state);
+    assert!(driver.frees().is_empty());
+}

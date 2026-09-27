@@ -168,6 +168,7 @@ impl AllocationState {
         let registration = PendingRegistration {
             owner: self,
             id: buffer_id,
+            active: true,
         };
         let result = self.with_context(|| {
             let pointer = allocate()?;
@@ -185,18 +186,8 @@ impl AllocationState {
             );
             initialize(pointer)
         });
-        drop(registration);
-        if let Err(error) = result {
-            if self.records().contains_key(&buffer_id) {
-                let handle = GpuTensorHandle::new(vec![], self.device_id, buffer_id);
-                if let Err(cleanup) = self.free(&handle) {
-                    log::error!(
-                        "CUDA unpublished allocation remains accounted after failure: {cleanup}"
-                    );
-                }
-            }
-            return Err(error);
-        }
+        result?;
+        registration.publish();
         Ok(GpuTensorHandle {
             shape,
             device_id: self.device_id,
@@ -212,15 +203,41 @@ impl AllocationState {
 struct PendingRegistration<'a> {
     owner: &'a AllocationState,
     id: u64,
+    active: bool,
+}
+impl PendingRegistration<'_> {
+    fn publish(mut self) {
+        self.active = false;
+    }
 }
 impl Drop for PendingRegistration<'_> {
     fn drop(&mut self) {
-        let mut records = self.owner.records();
-        if records
-            .get(&self.id)
-            .is_some_and(|record| matches!(record.phase, Phase::Pending))
-        {
-            records.remove(&self.id);
+        if !self.active {
+            return;
+        }
+        let needs_cleanup = {
+            let mut records = self.owner.records();
+            if records
+                .get(&self.id)
+                .is_some_and(|record| matches!(record.phase, Phase::Pending))
+            {
+                records.remove(&self.id);
+                false
+            } else {
+                records.contains_key(&self.id)
+            }
+        };
+        if needs_cleanup {
+            // The invocation context scope has already exited, including on
+            // initializer unwind. Never perform driver work under the map lock.
+            let _ = catch_allocation_cleanup_unwind(|| {
+                let handle = GpuTensorHandle::new(vec![], self.owner.device_id, self.id);
+                if let Err(cleanup) = self.owner.free(&handle) {
+                    log::error!(
+                        "CUDA unpublished allocation remains accounted after failure: {cleanup}"
+                    );
+                }
+            });
         }
     }
 }
