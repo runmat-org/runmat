@@ -10,13 +10,6 @@ use runmat_value::Value;
 #[runtime_builtin(
     name = "dir",
     binding_variant = "default",
-    category = "io/repl_fs",
-    summary = "Return file and folder metadata.",
-    keywords = "dir,list files,folder contents,metadata,wildcard,struct array",
-    accel = "cpu",
-    suppress_auto_output = true,
-    descriptor(runmat_builtins::DIR_DESCRIPTOR),
-    integer_audit(runmat_builtins::DIR_INTEGER_AUDIT),
     builtin_path = "crate::builtins::io::repl_fs::directory_listing::dir"
 )]
 async fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
