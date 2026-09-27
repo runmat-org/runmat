@@ -46,8 +46,11 @@ mod tests {
                     unreachable!()
                 };
                 assert!(runmat_accelerate_api::handle_is_logical(&output));
-                assert!(gpu_helpers::exact_provider_for_handle(&output)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider)));
+                assert!(
+                    gpu_helpers::exact_provider_for_handle(&output).is_some_and(|owner| {
+                        runmat_accelerate_api::same_provider_instance(owner, provider)
+                    })
+                );
                 assert_eq!(output.shape(), shape);
                 assert!(!output.shares_allocation_with(&source));
                 drop(output);

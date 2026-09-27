@@ -1589,10 +1589,16 @@ mod tests {
             assert!(!same_gpu_handle(counts, &source));
             assert!(!same_gpu_handle(locations, &source));
             assert!(!same_gpu_handle(counts, locations));
-            assert!(runmat_accelerate_api::provider_for_handle(counts)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
-            assert!(runmat_accelerate_api::provider_for_handle(locations)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(counts).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
+            assert!(
+                runmat_accelerate_api::provider_for_handle(locations).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             assert!(runmat_accelerate_api::handle_is_explicit(counts));
             assert!(runmat_accelerate_api::handle_is_explicit(locations));
 

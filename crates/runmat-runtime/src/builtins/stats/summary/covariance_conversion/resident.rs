@@ -30,8 +30,9 @@ impl CovarianceGpuEval {
                 && !runmat_accelerate_api::handle_is_logical(output)
                 && output.allocation_lease().validate_live().is_ok()
                 && !output.shares_allocation_with(input)
-                && gpu_helpers::exact_provider_for_handle(output)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && gpu_helpers::exact_provider_for_handle(output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
         };
         if !valid(&result.correlation, &[dimension, dimension])
             || !valid(&result.sigma, &[dimension, 1])
@@ -98,8 +99,9 @@ impl CovarianceGpuEval {
                     || sigma.physical().storage() != self.sigma.physical().storage()
                     || runmat_accelerate_api::handle_is_logical(&sigma)
                     || sigma.shares_allocation_with(&self.correlation)
-                    || !gpu_helpers::exact_provider_for_handle(&sigma)
-                        .is_some_and(|owner| std::ptr::eq(owner, self.provider))
+                    || !gpu_helpers::exact_provider_for_handle(&sigma).is_some_and(|owner| {
+                        runmat_accelerate_api::same_provider_instance(owner, self.provider)
+                    })
                 {
                     return Err(gpu_helpers::reject_gpu_output(
                         sigma,

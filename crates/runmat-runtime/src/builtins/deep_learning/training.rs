@@ -993,15 +993,17 @@ fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpdateGpuEval>
     let Some(gradient_provider) = runmat_accelerate_api::provider_for_handle(gradient) else {
         return Ok(None);
     };
-    if !std::ptr::eq(gradient_provider, provider) {
+    if !runmat_accelerate_api::same_provider_instance(gradient_provider, provider) {
         return Ok(None);
     }
     if average_grad.is_some_and(|handle| {
-        runmat_accelerate_api::provider_for_handle(handle)
-            .is_none_or(|state_provider| !std::ptr::eq(state_provider, provider))
+        runmat_accelerate_api::provider_for_handle(handle).is_none_or(|state_provider| {
+            !runmat_accelerate_api::same_provider_instance(state_provider, provider)
+        })
     }) || average_sq_grad.is_some_and(|handle| {
-        runmat_accelerate_api::provider_for_handle(handle)
-            .is_none_or(|state_provider| !std::ptr::eq(state_provider, provider))
+        runmat_accelerate_api::provider_for_handle(handle).is_none_or(|state_provider| {
+            !runmat_accelerate_api::same_provider_instance(state_provider, provider)
+        })
     }) {
         return Ok(None);
     }

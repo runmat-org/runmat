@@ -54,7 +54,7 @@ pub(super) fn valid_new_exprnd_gpu_output(
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 pub(super) fn valid_exprnd_gpu_output(
@@ -72,5 +72,5 @@ pub(super) fn valid_exprnd_gpu_output(
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }

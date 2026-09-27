@@ -2390,8 +2390,11 @@ mod tests {
                 resident_error.identifier(),
                 Some("RunMat:compatibility:FitdistResidentFallbackExtension")
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&floating_handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&floating_handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let resident_option_error = block_on(fitdist_builtin(
                 vec_tensor(&[1.0, 2.0, 3.0]),
                 Value::String("Normal".into()),
@@ -2416,8 +2419,11 @@ mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:FitdistIntegerDataExtension")
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
 
             let frequency = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1])
                 .expect("integer Frequency");
@@ -2437,8 +2443,9 @@ mod tests {
                 Some("RunMat:compatibility:FitdistIntegerFrequencyExtension")
             );
             assert!(
-                runmat_accelerate_api::provider_for_handle(&frequency_handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                runmat_accelerate_api::provider_for_handle(&frequency_handle).is_some_and(
+                    |owner| runmat_accelerate_api::same_provider_instance(owner, provider)
+                )
             );
         });
     }

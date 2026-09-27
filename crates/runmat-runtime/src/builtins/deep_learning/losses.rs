@@ -145,7 +145,7 @@ async fn try_crossentropy_gpu(
     let Some(target_provider) = runmat_accelerate_api::provider_for_handle(targets) else {
         return Ok(None);
     };
-    if !std::ptr::eq(provider, target_provider) {
+    if !runmat_accelerate_api::same_provider_instance(provider, target_provider) {
         return Ok(None);
     }
 

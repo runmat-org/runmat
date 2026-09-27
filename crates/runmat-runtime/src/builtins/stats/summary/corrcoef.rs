@@ -541,7 +541,7 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
             let Some(second_provider) = runmat_accelerate_api::provider_for_handle(handle) else {
                 return Ok(None);
             };
-            if !std::ptr::eq(provider, second_provider) {
+            if !runmat_accelerate_api::same_provider_instance(provider, second_provider) {
                 return Ok(None);
             }
             Some(handle)

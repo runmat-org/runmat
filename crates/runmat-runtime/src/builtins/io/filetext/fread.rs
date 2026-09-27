@@ -1736,7 +1736,7 @@ fn validate_resident_like_output(
         && output.device_id() == prototype.device_id()
         && output.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(output) == expected_precision

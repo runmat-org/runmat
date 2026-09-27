@@ -362,7 +362,7 @@ fn valid_gpu_output(
         && handle.device_id() == provider.device_id()
         && handle.shape() == shape
         && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && gpu_helpers::numeric_descriptor_matches(
             handle,
             element_type,

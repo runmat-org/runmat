@@ -522,7 +522,7 @@ async fn imfilter_gpu(
     let mut uploaded_kernel = None;
     let kernel_handle = if let Some(handle) = resident_kernel {
         let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider));
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider));
         if same_owner {
             handle
         } else {
@@ -629,7 +629,7 @@ fn upload_kernel(
         && !aliases_image
         && !aliases_resident_kernel
         && runmat_accelerate_api::provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(&output) == Some(provider.precision())
         && runmat_accelerate_api::handle_integer_type(&output).is_none()
@@ -728,7 +728,7 @@ fn valid_provider_output(
         && output.buffer_id() != image.buffer_id()
         && (output.device_id() != kernel.device_id() || output.buffer_id() != kernel.buffer_id())
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
         && runmat_accelerate_api::handle_integer_type(output).is_none()

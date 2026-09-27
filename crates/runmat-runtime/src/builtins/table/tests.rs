@@ -2949,7 +2949,7 @@ fn head_preserves_resident_integer_class_owner_and_source() {
         assert!(!result.shares_allocation_with(&handle));
         assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
         assert!(runmat_accelerate_api::provider_for_handle(&result)
-            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider)));
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&result),
             Some(runmat_accelerate_api::IntegerElementType::U64)
