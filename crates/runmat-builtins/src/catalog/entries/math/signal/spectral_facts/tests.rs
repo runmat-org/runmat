@@ -139,26 +139,12 @@ fn rejected_literal_grids_never_infer_a_success_cardinality() {
             vec![LiteralValue::Empty, LiteralValue::Number(0.0)],
         ),
         (
-            &super::super::periodogram::PERIODOGRAM_CATALOG_ENTRY,
-            Spectrum::Periodogram,
-            vec![LiteralValue::Empty, LiteralValue::Vector(vec![])],
-        ),
-        (
             &super::super::spectrogram::SPECTROGRAM_CATALOG_ENTRY,
             Spectrum::Spectrogram,
             vec![
                 LiteralValue::Empty,
                 LiteralValue::Empty,
                 LiteralValue::Number(0.0),
-            ],
-        ),
-        (
-            &super::super::spectrogram::SPECTROGRAM_CATALOG_ENTRY,
-            Spectrum::Spectrogram,
-            vec![
-                LiteralValue::Empty,
-                LiteralValue::Empty,
-                LiteralValue::Vector(vec![]),
             ],
         ),
     ] {
@@ -230,5 +216,165 @@ fn singleton_numeric_vector_grid_is_scalar_uniform_nfft_for_both_identities() {
             result.outputs[0].shape,
             ShapeFact::from(vec![Some(2), Some(columns)])
         );
+    }
+}
+
+#[test]
+fn empty_numeric_vector_grid_uses_default_fft_length_for_both_identities() {
+    for (entry, spectrum, controls, columns) in [
+        (
+            &super::super::periodogram::PERIODOGRAM_CATALOG_ENTRY,
+            Spectrum::Periodogram,
+            vec![LiteralValue::Empty, LiteralValue::Vector(vec![])],
+            1,
+        ),
+        (
+            &super::super::spectrogram::SPECTROGRAM_CATALOG_ENTRY,
+            Spectrum::Spectrogram,
+            vec![
+                LiteralValue::Empty,
+                LiteralValue::Empty,
+                LiteralValue::Vector(vec![]),
+            ],
+            8,
+        ),
+    ] {
+        let result = infer(&request([8, 1], controls), entry, spectrum);
+        assert!(!result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-SPECTRAL-GRID"));
+        assert_eq!(
+            result.outputs[0].shape,
+            ShapeFact::from(vec![Some(129), Some(columns)])
+        );
+    }
+}
+
+#[test]
+fn singleton_numeric_spectrogram_window_uses_scalar_hamming_length() {
+    let controls = vec![
+        LiteralValue::Vector(vec![LiteralValue::Number(4.0)]),
+        LiteralValue::Number(2.0),
+        LiteralValue::Empty,
+    ];
+    let result = infer(
+        &request([8, 1], controls),
+        &super::super::spectrogram::SPECTROGRAM_CATALOG_ENTRY,
+        Spectrum::Spectrogram,
+    );
+    assert!(result.diagnostics.is_empty());
+    // Hamming length 4, 50% overlap: starts 0, 2, 4.
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(129), Some(3)])
+    );
+}
+
+#[test]
+fn source_proven_invalid_shapes_and_options_have_no_named_success_fact() {
+    let mut invalid = vec![
+        (
+            request([8, 3], vec![]),
+            Spectrum::Spectrogram,
+            "RM-CATALOG-SPECTRAL-VECTOR",
+        ),
+        (
+            request(
+                [8, 1],
+                vec![LiteralValue::Vector(vec![
+                    LiteralValue::Number(1.0),
+                    LiteralValue::Number(1.0),
+                ])],
+            ),
+            Spectrum::Periodogram,
+            "RM-CATALOG-SPECTRAL-WINDOW",
+        ),
+        (
+            request([8, 1], vec![LiteralValue::Number(0.0)]),
+            Spectrum::Spectrogram,
+            "RM-CATALOG-SPECTRAL-WINDOW",
+        ),
+        (
+            request(
+                [8, 1],
+                vec![LiteralValue::Number(4.0), LiteralValue::Number(4.0)],
+            ),
+            Spectrum::Spectrogram,
+            "RM-CATALOG-SPECTRAL-OVERLAP",
+        ),
+        (
+            request(
+                [8, 1],
+                vec![
+                    LiteralValue::Empty,
+                    LiteralValue::Vector(vec![
+                        LiteralValue::Number(f64::NAN),
+                        LiteralValue::Number(0.5),
+                    ]),
+                ],
+            ),
+            Spectrum::Periodogram,
+            "RM-CATALOG-SPECTRAL-GRID",
+        ),
+        (
+            request(
+                [8, 1],
+                vec![
+                    LiteralValue::Empty,
+                    LiteralValue::Empty,
+                    LiteralValue::Vector(vec![
+                        LiteralValue::Number(0.0),
+                        LiteralValue::Complex {
+                            real: "0.0".into(),
+                            imaginary: "1.0".into(),
+                            class: NumericClass::Double,
+                        },
+                    ]),
+                ],
+            ),
+            Spectrum::Spectrogram,
+            "RM-CATALOG-SPECTRAL-GRID",
+        ),
+        (
+            request([8, 1], vec![LiteralValue::String("reassigned".into())]),
+            Spectrum::Spectrogram,
+            "RM-CATALOG-SPECTRAL-OPTION",
+        ),
+        (
+            request(
+                [8, 1],
+                vec![
+                    LiteralValue::Empty,
+                    LiteralValue::Vector(vec![
+                        LiteralValue::Number(0.0),
+                        LiteralValue::Number(0.5),
+                    ]),
+                    LiteralValue::String("centered".into()),
+                ],
+            ),
+            Spectrum::Periodogram,
+            "RM-CATALOG-SPECTRAL-OPTION",
+        ),
+    ];
+    let mut complex = request([8, 1], vec![LiteralValue::String("onesided".into())]);
+    complex.arguments[0].kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Complex,
+    });
+    invalid.push((complex, Spectrum::Periodogram, "RM-CATALOG-SPECTRAL-OPTION"));
+    for (request, spectrum, code) in invalid {
+        let entry = match spectrum {
+            Spectrum::Periodogram => &super::super::periodogram::PERIODOGRAM_CATALOG_ENTRY,
+            Spectrum::Spectrogram => &super::super::spectrogram::SPECTROGRAM_CATALOG_ENTRY,
+        };
+        let result = infer(&request, entry, spectrum);
+        assert!(
+            result.diagnostics.iter().any(|d| d.code == code),
+            "{code}: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown, "{code}");
+        assert_eq!(result.outputs[0].shape, ShapeFact::Unknown, "{code}");
     }
 }

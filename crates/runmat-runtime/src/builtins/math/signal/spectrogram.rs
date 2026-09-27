@@ -968,6 +968,26 @@ mod tests {
     use runmat_value::{IntegerStorage, Tensor};
 
     #[test]
+    fn empty_numeric_frequency_tensor_selects_default_fft_grid() {
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        let options = block_on(parse_options(
+            &[empty.clone(), empty.clone(), empty],
+            8,
+            false,
+        ))
+        .unwrap();
+        assert!(matches!(options.grid, FrequencyGrid::Uniform { nfft: 256 }));
+    }
+
+    #[test]
+    fn singleton_numeric_window_tensor_selects_scalar_hamming_length() {
+        let win = Value::Tensor(Tensor::new(vec![4.0], vec![1, 1]).unwrap());
+        let options = block_on(parse_options(&[win, Value::Num(2.0)], 8, false)).unwrap();
+        assert_eq!(options.window.len(), 4);
+        assert_eq!(options.n_overlap, 2);
+    }
+
+    #[test]
     fn output_publication_rounds_once_including_reserved_reassignment_coordinates() {
         // Public reassignment remains unsupported. Exercise the existing output
         // carrier directly so its reserved FC/TC slots cannot drift in class.

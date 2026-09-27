@@ -27,7 +27,16 @@ pub(super) fn infer(
     if let Some(diagnostic) = invalid_grid.as_ref() {
         diagnostics.push(diagnostic.clone());
     }
-    if request.arguments.is_empty() || request.arguments.len() > max_args {
+    let invalid_options = geometry::invalid_options(request, spectrum);
+    if let Some(diagnostic) = invalid_options.as_ref() {
+        diagnostics.push(diagnostic.clone());
+    }
+    let invalid_controls = geometry::invalid_controls(request, spectrum);
+    if let Some(diagnostic) = invalid_controls.as_ref() {
+        diagnostics.push(diagnostic.clone());
+    }
+    let invalid_arity = request.arguments.is_empty() || request.arguments.len() > max_args;
+    if invalid_arity {
         diagnostics.push(argument_error(
             "RM-CATALOG-SPECTRAL-ARITY",
             format!(
@@ -65,7 +74,11 @@ pub(super) fn infer(
                     domain: NumericDomain::Real,
                 }));
             }
-            if invalid_grid.is_some() {
+            if invalid_arity
+                || invalid_grid.is_some()
+                || invalid_options.is_some()
+                || invalid_controls.is_some()
+            {
                 return ValueFact::unknown(DynamicReason::RuntimeValue);
             }
             let Some(class) = class else {

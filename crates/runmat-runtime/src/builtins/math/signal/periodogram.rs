@@ -952,6 +952,13 @@ mod tests {
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::IntegerStorage;
 
+    #[test]
+    fn empty_numeric_frequency_tensor_selects_default_fft_grid() {
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        let options = block_on(parse_options(&[empty.clone(), empty], 8, false)).unwrap();
+        assert!(matches!(options.grid, FrequencyGrid::Uniform { nfft: 256 }));
+    }
+
     fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
         block_on(evaluate(x, rest))
