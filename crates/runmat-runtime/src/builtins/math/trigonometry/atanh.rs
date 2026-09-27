@@ -86,6 +86,16 @@ async fn atanh_builtin(value: Value) -> BuiltinResult<Value> {
         &ATANH_CHARACTER_INPUT_EXTENSION,
     )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "atanh")?;
+    crate::builtins::common::real_unary_preparation::execute(
+        &runmat_builtins::ATANH_CATALOG_ENTRY,
+        runmat_types::RealUnaryPredicate::ClosedUnitInterval,
+        value,
+        atanh_execute,
+    )
+    .await
+}
+
+async fn atanh_execute(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => atanh_gpu(handle).await,
         Value::Complex(re, im) => Ok(atanh_complex_scalar(re, im)),

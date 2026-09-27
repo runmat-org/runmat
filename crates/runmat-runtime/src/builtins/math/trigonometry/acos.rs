@@ -80,6 +80,16 @@ async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
         &ACOS_CHARACTER_INPUT_EXTENSION,
     )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "acos")?;
+    crate::builtins::common::real_unary_preparation::execute(
+        &runmat_builtins::ACOS_CATALOG_ENTRY,
+        runmat_types::RealUnaryPredicate::ClosedUnitInterval,
+        value,
+        acos_execute,
+    )
+    .await
+}
+
+async fn acos_execute(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => acos_gpu(handle).await,
         Value::Complex(re, im) => Ok(acos_complex_value(re, im)),

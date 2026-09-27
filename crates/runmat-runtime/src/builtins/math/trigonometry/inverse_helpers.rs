@@ -10,6 +10,9 @@ pub(super) mod like;
 pub(super) mod resident_complex;
 pub(super) mod real_fallback;
 
+#[cfg(test)]
+mod domain_preparation_tests;
+
 pub(crate) fn ensure_input_extensions(
     value: &Value,
     builtin: &str,

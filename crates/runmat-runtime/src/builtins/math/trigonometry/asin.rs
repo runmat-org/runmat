@@ -80,6 +80,16 @@ async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
         &ASIN_CHARACTER_INPUT_EXTENSION,
     )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "asin")?;
+    crate::builtins::common::real_unary_preparation::execute(
+        &runmat_builtins::ASIN_CATALOG_ENTRY,
+        runmat_types::RealUnaryPredicate::ClosedUnitInterval,
+        value,
+        asin_execute,
+    )
+    .await
+}
+
+async fn asin_execute(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => asin_gpu(handle).await,
         Value::Complex(re, im) => Ok(asin_complex_value(re, im)),

@@ -86,6 +86,16 @@ async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
         &ACOSH_CHARACTER_INPUT_EXTENSION,
     )?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "acosh")?;
+    crate::builtins::common::real_unary_preparation::execute(
+        &runmat_builtins::ACOSH_CATALOG_ENTRY,
+        runmat_types::RealUnaryPredicate::AtLeastOne,
+        value,
+        acosh_execute,
+    )
+    .await
+}
+
+async fn acosh_execute(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => acosh_gpu(handle).await,
         Value::Complex(re, im) => Ok(acosh_complex_scalar(re, im)),
