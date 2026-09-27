@@ -1,7 +1,9 @@
 //! MATLAB-compatible `ndgrid` builtin.
 
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderNdgridAxis, ProviderNdgridRequest,
+    GpuTensorHandle, GpuTensorStorage, ProviderNdgridAxis, ProviderNdgridRequest,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -317,28 +319,34 @@ fn try_provider_outputs(
         ));
     }
 
+    let protected: Vec<_> = axes.iter().map(|axis| axis.handle).collect();
     let outputs = result
         .outputs
         .into_iter()
         .enumerate()
         .map(|(dim, handle)| {
-            annotate_provider_output(&handle, parsed.axes[dim].class());
-            NdgridOutput::Gpu(handle)
+            let logical = parsed.axes[dim].class() == OutputClass::Logical;
+            let mut handle =
+                crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+                    BUILTIN_NAME,
+                    provider,
+                    handle,
+                    output_shape,
+                    GpuTensorStorage::Real,
+                    if logical {
+                        None
+                    } else {
+                        runmat_accelerate_api::handle_precision(axes[dim].handle)
+                    },
+                    None,
+                    logical,
+                    &protected,
+                )?;
+            gpu_helpers::propagate_output_provenance(&mut handle, protected.iter().copied())?;
+            Ok(NdgridOutput::Gpu(handle))
         })
-        .collect();
+        .collect::<BuiltinResult<Vec<_>>>()?;
     Ok(Some(outputs))
-}
-
-fn annotate_provider_output(handle: &GpuTensorHandle, class: OutputClass) {
-    match class {
-        OutputClass::Real(_) => {
-            runmat_accelerate_api::set_handle_logical(handle, false);
-        }
-        OutputClass::Logical => {
-            runmat_accelerate_api::set_handle_logical(handle, true);
-        }
-        OutputClass::Complex => {}
-    }
 }
 
 struct ParsedNdgrid {
@@ -899,7 +907,7 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
             Ok(handle) => {
                 return Ok(Value::GpuTensor(handle));
             }
-            Err(err) => return Err(ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, &err)),
+            Err(err) => return Err(err),
         }
     }
     Err(ndgrid_error_with_detail(
@@ -909,45 +917,30 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> BuiltinResult<Value> {
 }
 
 fn to_logical_gpu_value(logical: LogicalArray, device_id: u32) -> BuiltinResult<Value> {
-    let tensor = tensor::logical_to_tensor(&logical)
-        .map_err(|err| ndgrid_error_with_detail(&NDGRID_ERROR_INTERNAL, err))?;
-    if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
-        let data = tensor.as_f64_slice().ok_or_else(|| {
-            ndgrid_error_with_detail(
-                &NDGRID_ERROR_INTERNAL,
-                "logical GPU upload requires double storage",
-            )
-        })?;
-        let view = HostTensorView {
-            data,
-            shape: &tensor.shape,
-        };
-        match provider.upload(&view) {
-            Ok(handle) => return gpu_helpers::logical_gpu_value(handle),
-            Err(err) => {
-                return Err(ndgrid_error_with_detail(
-                    &NDGRID_ERROR_INTERNAL,
-                    err.to_string(),
-                ))
-            }
-        }
-    }
-    Err(ndgrid_error_with_detail(
-        &NDGRID_ERROR_INTERNAL,
-        "no acceleration provider registered for GPU output",
-    ))
+    let provider = runmat_accelerate_api::provider_for_device(device_id).ok_or_else(|| {
+        ndgrid_error_with_detail(
+            &NDGRID_ERROR_INTERNAL,
+            "no acceleration provider registered for GPU output",
+        )
+    })?;
+    let view = runmat_accelerate_api::HostLogicalTensorView {
+        data: &logical.data,
+        shape: &logical.shape,
+    };
+    let handle = provider.upload_logical(&view).map_err(|cause| {
+        crate::build_runtime_error(format!("ndgrid: logical upload failed: {cause}"))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(cause)
+            .build()
+    })?;
+    gpu_helpers::logical_gpu_value(handle)
 }
 
 fn to_complex_gpu_tensor_value(tensor: ComplexTensor, device_id: u32) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
         match gpu_helpers::upload_complex_tensor(provider, &tensor) {
             Ok(handle) => return gpu_helpers::complex_gpu_value(handle),
-            Err(err) => {
-                return Err(ndgrid_error_with_detail(
-                    &NDGRID_ERROR_INTERNAL,
-                    err.to_string(),
-                ))
-            }
+            Err(err) => return Err(err),
         }
     }
     Err(ndgrid_error_with_detail(
@@ -1020,6 +1013,50 @@ mod tests {
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Tensor {
         Tensor::new(data, shape).unwrap()
+    }
+
+    #[test]
+    fn resident_logical_axes_preserve_producer_intent_without_transfers() {
+        test_support::with_test_provider(|provider| {
+            let x = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            let y = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1],
+                    shape: &[1, 3],
+                })
+                .unwrap();
+            provider.reset_telemetry();
+            let grid = eval(
+                &[Value::GpuTensor(x.clone()), Value::GpuTensor(y.clone())],
+                Some(2),
+            )
+            .unwrap();
+            let outputs = [output(&grid, 0).unwrap(), output(&grid, 1).unwrap()];
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.upload_bytes, 0);
+            assert_eq!(telemetry.download_bytes, 0);
+            for (value, expected) in outputs.into_iter().zip([
+                vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                vec![0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            ]) {
+                let Value::GpuTensor(handle) = &value else {
+                    panic!("resident output")
+                };
+                assert!(handle.view().is_logical());
+                assert!(!handle.shares_allocation_with(&x));
+                assert!(!handle.shares_allocation_with(&y));
+                assert_eq!(handle.shape(), &[2, 3]);
+                assert_eq!(
+                    test_support::gather(value).unwrap().materialize_f64(),
+                    expected
+                );
+            }
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1585,8 +1622,8 @@ mod tests {
                 storage.imag,
                 IntegerStorage::U64(vec![u64::MAX, wide, u64::MAX, wide])
             );
-            provider.free(&input).expect("free input");
-            provider.free(&output).expect("free output");
+            drop(input);
+            drop(output);
         });
     }
 }
