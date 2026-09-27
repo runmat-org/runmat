@@ -41,6 +41,7 @@ pub type FusionAdmission = for<'a> fn(FusionAdmissionContext<'a>) -> FusionAdmis
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum FusionMathHelper {
     RealPower,
+    Round,
 }
 
 impl FusionMathHelper {
@@ -48,6 +49,8 @@ impl FusionMathHelper {
         match (self, precision) {
             (Self::RealPower, ScalarType::F32) => Ok("rm_power_f32"),
             (Self::RealPower, ScalarType::F64) => Ok("rm_power_f64"),
+            (Self::Round, ScalarType::F32) => Ok("rm_round_f32"),
+            (Self::Round, ScalarType::F64) => Ok("rm_round_f64"),
             (_, precision) => Err(FusionError::UnsupportedPrecision(precision)),
         }
     }

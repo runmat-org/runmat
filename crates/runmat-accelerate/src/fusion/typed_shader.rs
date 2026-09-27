@@ -108,6 +108,9 @@ impl FusionGroupPlan {
                 FusionMathHelper::RealPower => {
                     math.push_str(&crate::kernel_math::power::functions(precision))
                 }
+                FusionMathHelper::Round => {
+                    math.push_str(&crate::kernel_math::rounding::functions(precision))
+                }
             }
         }
         Ok(format!(
