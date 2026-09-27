@@ -1154,30 +1154,41 @@ pub(crate) mod tests {
 
     #[test]
     fn ones_same_shape_complex_gpu_like_stays_complex_and_resident() {
-        test_support::with_f32_test_provider(|provider| {
-            let prototype = ComplexTensor::from_f32(vec![(1.0, -1.0); 4], vec![2, 2])
-                .expect("complex single prototype");
-            let handle = gpu_helpers::upload_complex_tensor(provider, &prototype).expect("upload");
-            let result = block_on(ones_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::GpuTensor(handle),
-            ]))
-            .expect("ones complex gpu like");
-            let Value::GpuTensor(output) = result else {
-                panic!("expected resident output");
-            };
-            assert_eq!(
-                runmat_accelerate_api::handle_storage(&output),
-                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-            );
-            assert_eq!(
-                runmat_accelerate_api::handle_precision(&output),
-                Some(runmat_accelerate_api::ProviderPrecision::F32)
-            );
-            assert!(runmat_accelerate_api::handle_is_explicit(&output));
-        });
+        for provenance in [
+            runmat_accelerate_api::GpuHandleProvenance::Automatic,
+            runmat_accelerate_api::GpuHandleProvenance::Explicit,
+        ] {
+            test_support::with_f32_test_provider(|provider| {
+                let prototype = ComplexTensor::from_f32(vec![(1.0, -1.0); 4], vec![2, 2])
+                    .expect("complex single prototype");
+                let handle = gpu_helpers::upload_complex_tensor(provider, &prototype)
+                    .expect("upload")
+                    .with_provenance(provenance)
+                    .expect("prototype provenance");
+                let result = block_on(ones_builtin(vec![
+                    Value::Num(2.0),
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(handle.clone()),
+                ]))
+                .expect("ones complex gpu like");
+                let Value::GpuTensor(output) = result else {
+                    panic!("expected resident output");
+                };
+                assert_eq!(
+                    runmat_accelerate_api::handle_storage(&output),
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_precision(&output),
+                    Some(runmat_accelerate_api::ProviderPrecision::F32)
+                );
+                assert_eq!(output.view().provenance(), Some(provenance));
+                assert!(!output.shares_allocation_with(&handle));
+                drop(output);
+                handle.allocation_lease().validate_live().unwrap();
+            });
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

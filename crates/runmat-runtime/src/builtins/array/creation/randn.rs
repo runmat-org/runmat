@@ -881,25 +881,30 @@ pub(crate) mod tests {
     fn randn_gpuarray_keyword_produces_valid_output() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
-        let result = block_on(randn_builtin(args)).expect("randn gpuArray");
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 4]);
-                assert_eq!(t.numeric_dtype(), NumericDType::F64);
-                for &v in &t.materialize_f64() {
-                    assert!(v.is_finite());
+        test_support::with_test_provider(|_| {
+            let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
+            let result = block_on(randn_builtin(args)).expect("randn gpuArray");
+            match result {
+                Value::GpuTensor(h) => {
+                    assert_eq!(h.shape(), vec![3, 4]);
+                    assert!(runmat_accelerate_api::handle_is_explicit(&h));
+                    assert_eq!(
+                        runmat_accelerate_api::handle_precision(&h),
+                        Some(ProviderPrecision::F64)
+                    );
+                    let gathered =
+                        test_support::gather(Value::GpuTensor(h.clone())).expect("gather output");
+                    assert!(gathered
+                        .materialize_f64()
+                        .iter()
+                        .all(|value| value.is_finite()));
+                    let lease = h.allocation_lease().downgrade();
+                    drop(h);
+                    assert!(lease.acquire().is_none());
                 }
+                other => panic!("explicit gpuArray requires resident output, got {other:?}"),
             }
-            Value::GpuTensor(h) => {
-                assert_eq!(h.shape(), vec![3, 4]);
-                assert!(runmat_accelerate_api::handle_is_explicit(&h));
-                let lease = h.allocation_lease().downgrade();
-                drop(h);
-                assert!(lease.acquire().is_none());
-            }
-            other => panic!("expected tensor or gpu tensor, got {other:?}"),
-        }
+        });
     }
 
     #[test]

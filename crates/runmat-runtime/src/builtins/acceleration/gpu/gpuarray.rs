@@ -1352,7 +1352,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn gpu_array_of_existing_single_handle_is_identity() {
+    fn gpu_array_of_existing_single_handle_preserves_allocation() {
         test_support::with_f32_test_provider(|_| {
             let uploaded = call(
                 Value::Tensor(Tensor::from_f32(vec![1.25, -3.5], vec![2, 1]).unwrap()),
@@ -1367,10 +1367,9 @@ pub(crate) mod tests {
             let Value::GpuTensor(identity) = identity else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(
-                runmat_accelerate_api::handle_identity(&identity),
-                runmat_accelerate_api::handle_identity(&handle)
-            );
+            assert!(identity.shares_allocation_with(&handle));
+            assert_eq!(identity.shape(), handle.shape());
+            assert_eq!(identity.physical(), handle.physical());
             assert_eq!(
                 identity.view().provenance(),
                 Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
