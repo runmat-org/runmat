@@ -319,7 +319,7 @@ async fn ishermitian_gpu(
             }
             Err(err) => {
                 return Err(crate::runtime_error::with_provider_execution_source(
-                    ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, &err),
+                    ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, err.to_string()),
                     runmat_accelerate_api::ProviderExecutionError::from(err),
                 ))
             }

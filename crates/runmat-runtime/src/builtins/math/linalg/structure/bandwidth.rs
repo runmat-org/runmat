@@ -409,7 +409,7 @@ async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)
             }
             Err(err) => {
                 return Err(crate::runtime_error::with_provider_execution_source(
-                    bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, &err),
+                    bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, err.to_string()),
                     runmat_accelerate_api::ProviderExecutionError::from(err),
                 ))
             }

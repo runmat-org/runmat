@@ -225,7 +225,7 @@ async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
             Err(err) => {
                 return Err(crate::runtime_error::with_provider_execution_source(
-                    symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, &err),
+                    symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, err.to_string()),
                     runmat_accelerate_api::ProviderExecutionError::from(err),
                 ))
             }

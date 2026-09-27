@@ -315,7 +315,7 @@ async fn issymmetric_gpu(
             }
             Err(err) => {
                 return Err(crate::runtime_error::with_provider_execution_source(
-                    issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, &err),
+                    issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, err.to_string()),
                     runmat_accelerate_api::ProviderExecutionError::from(err),
                 ))
             }
