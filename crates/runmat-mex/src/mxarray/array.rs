@@ -93,15 +93,39 @@ pub enum MxArrayData {
 
 /// Boundary-owned C Matrix API value. C consumers see only an opaque
 /// `mxArray *`; this Rust layout is never a public ABI promise.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct MxArray {
     class_id: MxClassId,
     shape: Vec<usize>,
     data: MxArrayData,
     persistent: bool,
+    #[cfg(not(target_family = "wasm"))]
+    invocation_failure: Option<std::sync::Arc<crate::MexInvocationFailure>>,
+}
+
+// Matrix value equality compares represented data, not the lifetime attachment
+// of a caught native error. Operational failures themselves are not equatable.
+impl PartialEq for MxArray {
+    fn eq(&self, other: &Self) -> bool {
+        self.class_id == other.class_id
+            && self.shape == other.shape
+            && self.data == other.data
+            && self.persistent == other.persistent
+    }
 }
 
 impl MxArray {
+    /// A caught C exception owns its retained cause until the actual mxArray
+    /// (and any clone/duplicate) is destroyed. Conversion to language diagnostic
+    /// fields is an explicit catch/projection boundary, not source transport.
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn with_invocation_failure(
+        mut self,
+        failure: Option<std::sync::Arc<crate::MexInvocationFailure>>,
+    ) -> Self {
+        self.invocation_failure = failure;
+        self
+    }
     pub fn deep_duplicate(&self) -> Result<Self, String> {
         let mut duplicate = self.clone();
         duplicate.detach_shared_storage()?;
@@ -241,6 +265,8 @@ impl MxArray {
                 imag: complexity,
             }),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -251,6 +277,8 @@ impl MxArray {
             shape,
             data: MxArrayData::Interleaved(MxInterleaved { values }),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -285,6 +313,8 @@ impl MxArray {
             shape,
             data: MxArrayData::Logical(values),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -295,6 +325,8 @@ impl MxArray {
             shape,
             data: MxArrayData::Char(values),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -305,6 +337,8 @@ impl MxArray {
             shape,
             data: MxArrayData::String(values),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -315,6 +349,8 @@ impl MxArray {
             shape,
             data: MxArrayData::Cell(values),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -343,6 +379,8 @@ impl MxArray {
             shape,
             data: MxArrayData::Struct { fields, values },
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -376,6 +414,8 @@ impl MxArray {
                 values,
             },
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -385,6 +425,8 @@ impl MxArray {
             shape: vec![1, 1],
             data: MxArrayData::Handle(value),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         }
     }
 
@@ -413,6 +455,8 @@ impl MxArray {
             shape,
             data: MxArrayData::Gpu(MxGpuArray { class_id, lease }),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 
@@ -463,6 +507,8 @@ impl MxArray {
             shape: vec![value.rows, value.cols],
             data: MxArrayData::Sparse(value),
             persistent: false,
+            #[cfg(not(target_family = "wasm"))]
+            invocation_failure: None,
         })
     }
 

@@ -76,7 +76,7 @@ fn fortran_gateway_uses_native_handles_and_fortran_array_copy_routines() {
     assert!(
         matches!(
             error,
-            MexLoadError::Invocation { ref identifier, ref message }
+            MexLoadError::Invocation { ref identifier, ref message, .. }
                 if identifier == " (RunMat:test:arity)"
                     && message == "expected one input and one output"
         ),
@@ -2139,7 +2139,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     let error = module.invoke(&[], 0, module.api_mode()).unwrap_err();
     assert!(matches!(
         error,
-        MexLoadError::Invocation { identifier, message }
+        MexLoadError::Invocation { identifier, message, .. }
             if identifier.contains("Fixture:Expected") && message == "failure 42"
     ));
 }
@@ -2478,7 +2478,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 
     assert!(matches!(
         error,
-        MexLoadError::Invocation { identifier, message }
+        MexLoadError::Invocation { identifier, message, .. }
             if identifier.contains("Fixture:AtExit") && message == "expected teardown failure"
     ));
 }
@@ -2558,7 +2558,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 
     assert!(matches!(
         error,
-        MexLoadError::Invocation { identifier, message }
+        MexLoadError::Invocation { identifier, message, .. }
             if identifier.contains("RunMat:MEX:ReentrantInvocation")
                 && message.contains("recursive invocation of the same C MEX module")
     ));

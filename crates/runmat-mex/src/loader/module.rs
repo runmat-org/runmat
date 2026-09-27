@@ -117,7 +117,14 @@ pub enum MexLoadError {
     #[error("MEX input conversion failed: {0}")]
     Input(String),
     #[error("MEX function failed{identifier}: {message}")]
-    Invocation { identifier: String, message: String },
+    Invocation {
+        identifier: String,
+        message: String,
+        #[source]
+        source: Option<std::sync::Arc<crate::MexInvocationFailure>>,
+    },
+    #[error("{0}")]
+    NativeLane(String),
     #[error("MEX function did not assign output {0}")]
     MissingOutput(usize),
     #[error("MEX output conversion failed: {0}")]
@@ -547,7 +554,8 @@ impl MexModule {
                 identifier: None,
                 message: format!("gateway returned status {status}"),
             });
-            return Err(invocation_error(error));
+            let source = state.take_gpu_failure(&error);
+            return Err(invocation_error(error, source));
         }
         let outputs = output_pointers
             .into_iter()
@@ -602,19 +610,18 @@ impl MexModule {
                 .set_services_for_context(services, call_state.values.clone());
             // SAFETY: lifecycle is serialized and the state remains alive.
             unsafe { self.unload_bound(Some(call_state)) };
-            call_state
-                .call
-                .lock()
-                .map_err(|_| MexLoadError::Poisoned)?
-                .error
-                .take()
+            let mut call = call_state.call.lock().map_err(|_| MexLoadError::Poisoned)?;
+            call.error.take().map(|diagnostic| {
+                let source = call.take_gpu_failure(&diagnostic);
+                invocation_error(diagnostic, source)
+            })
         } else {
             // SAFETY: no state exists, so no registered callback can access it.
             unsafe { self.unload_bound(None) };
             None
         };
         *state = None;
-        lifecycle_error.map_or(Ok(true), |error| Err(invocation_error(error)))
+        lifecycle_error.map_or(Ok(true), Err)
     }
 
     #[doc(hidden)]
@@ -641,19 +648,18 @@ impl MexModule {
             call_state.call.set_boundary_services(services);
             // SAFETY: lifecycle is serialized and the state remains alive.
             unsafe { self.unload_bound(Some(call_state)) };
-            call_state
-                .call
-                .lock()
-                .map_err(|_| MexLoadError::Poisoned)?
-                .error
-                .take()
+            let mut call = call_state.call.lock().map_err(|_| MexLoadError::Poisoned)?;
+            call.error.take().map(|diagnostic| {
+                let source = call.take_gpu_failure(&diagnostic);
+                invocation_error(diagnostic, source)
+            })
         } else {
             // SAFETY: no state exists, so no registered callback can access it.
             unsafe { self.unload_bound(None) };
             None
         };
         *state = None;
-        lifecycle_error.map_or(Ok(true), |error| Err(invocation_error(error)))
+        lifecycle_error.map_or(Ok(true), Err)
     }
 
     /// Force final lifecycle teardown when the owning session exits.
@@ -677,12 +683,11 @@ impl MexModule {
                 .set_services_for_context(services, call_state.values.clone());
             // SAFETY: lifecycle is serialized and the state remains alive.
             unsafe { self.unload_bound(Some(call_state)) };
-            call_state
-                .call
-                .lock()
-                .map_err(|_| MexLoadError::Poisoned)?
-                .error
-                .take()
+            let mut call = call_state.call.lock().map_err(|_| MexLoadError::Poisoned)?;
+            call.error.take().map(|diagnostic| {
+                let source = call.take_gpu_failure(&diagnostic);
+                invocation_error(diagnostic, source)
+            })
         } else {
             // SAFETY: no state exists, so no registered callback can reach a
             // host allocation owned by this loader.
@@ -690,7 +695,7 @@ impl MexModule {
             None
         };
         *state = None;
-        lifecycle_error.map_or(Ok(()), |error| Err(invocation_error(error)))
+        lifecycle_error.map_or(Ok(()), Err)
     }
 
     #[doc(hidden)]
@@ -708,12 +713,11 @@ impl MexModule {
             call_state.call.set_boundary_services(services);
             // SAFETY: lifecycle is serialized and the state remains alive.
             unsafe { self.unload_bound(Some(call_state)) };
-            call_state
-                .call
-                .lock()
-                .map_err(|_| MexLoadError::Poisoned)?
-                .error
-                .take()
+            let mut call = call_state.call.lock().map_err(|_| MexLoadError::Poisoned)?;
+            call.error.take().map(|diagnostic| {
+                let source = call.take_gpu_failure(&diagnostic);
+                invocation_error(diagnostic, source)
+            })
         } else {
             // SAFETY: no state exists, so no registered callback can reach a
             // host allocation owned by this loader.
@@ -721,17 +725,21 @@ impl MexModule {
             None
         };
         *state = None;
-        lifecycle_error.map_or(Ok(()), |error| Err(invocation_error(error)))
+        lifecycle_error.map_or(Ok(()), Err)
     }
 }
 
-fn invocation_error(error: crate::MexDiagnostic) -> MexLoadError {
+fn invocation_error(
+    error: crate::MexDiagnostic,
+    source: Option<std::sync::Arc<crate::MexInvocationFailure>>,
+) -> MexLoadError {
     MexLoadError::Invocation {
         identifier: error
             .identifier
             .map(|value| format!(" ({value})"))
             .unwrap_or_default(),
         message: error.message,
+        source,
     }
 }
 
@@ -779,6 +787,35 @@ impl Drop for MexModule {
 #[cfg(test)]
 mod tests {
     use super::missing_dependency_from_loader_message;
+
+    #[test]
+    fn invocation_failure_survives_native_lane_transport_and_source_projection() {
+        let (cause, lifetime) = crate::gpu_error::retained_upload_fixture();
+        let diagnostic = crate::MexDiagnostic {
+            identifier: Some("MEX:GPU".into()),
+            message: cause.to_string(),
+        };
+        let failure = std::sync::Arc::new(crate::MexInvocationFailure::new(
+            diagnostic.clone(),
+            vec![cause],
+        ));
+        let error = super::invocation_error(diagnostic, Some(failure));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || sender.send(error).unwrap())
+            .join()
+            .unwrap();
+        let error = receiver.recv().unwrap();
+        assert!(lifetime.upgrade().is_some());
+        let mut source = std::error::Error::source(&error);
+        let mut found_upload = false;
+        while let Some(cause) = source {
+            found_upload |= cause.is::<runmat_accelerate_api::NumericUploadError>();
+            source = cause.source();
+        }
+        assert!(found_upload);
+        drop(error);
+        assert!(lifetime.upgrade().is_none());
+    }
 
     #[test]
     fn extracts_named_dependencies_from_platform_loader_diagnostics() {

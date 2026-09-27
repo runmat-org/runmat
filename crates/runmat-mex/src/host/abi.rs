@@ -30,6 +30,8 @@ pub struct MexCallState {
 pub(crate) struct MexCallStateInner {
     pub mx: MxApi,
     pub error: Option<MexDiagnostic>,
+    #[cfg(not(target_family = "wasm"))]
+    gpu_failures: Vec<crate::MexGpuError>,
     pub warnings: Vec<MexDiagnostic>,
     pub console: String,
     field_name_cache: Vec<CString>,
@@ -50,6 +52,8 @@ impl MexCallState {
         Self::from_inner(MexCallStateInner {
             mx: MxApi::new(mode),
             error: None,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_failures: Vec::new(),
             warnings: Vec::new(),
             console: String::new(),
             field_name_cache: Vec::new(),
@@ -74,6 +78,8 @@ impl MexCallState {
         Self::from_inner(MexCallStateInner {
             mx: MxApi::new(mode),
             error: None,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_failures: Vec::new(),
             warnings: Vec::new(),
             console: String::new(),
             field_name_cache: Vec::new(),
@@ -105,6 +111,8 @@ impl MexCallState {
         Self::from_inner(MexCallStateInner {
             mx: MxApi::new(mode),
             error: None,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_failures: Vec::new(),
             warnings: Vec::new(),
             console: String::new(),
             field_name_cache: Vec::new(),
@@ -160,6 +168,8 @@ impl MexCallState {
         Self::from_inner(MexCallStateInner {
             mx: MxApi::new(mode),
             error: None,
+            #[cfg(not(target_family = "wasm"))]
+            gpu_failures: Vec::new(),
             warnings: Vec::new(),
             console: String::new(),
             field_name_cache: Vec::new(),
@@ -306,15 +316,22 @@ impl MexCallState {
 
     pub fn begin_call(&self) {
         let mut state = self.inner.lock().expect("MEX state is not poisoned");
+        #[cfg(not(target_family = "wasm"))]
+        let discarded_failures = std::mem::take(&mut state.gpu_failures);
         state.error = None;
         state.warnings.clear();
         state.console.clear();
         state.field_name_cache.clear();
         state.mx.begin_call();
+        drop(state);
+        #[cfg(not(target_family = "wasm"))]
+        drop(discarded_failures);
     }
 
     pub fn finish_call(&self) {
         let mut state = self.inner.lock().expect("MEX state is not poisoned");
+        #[cfg(not(target_family = "wasm"))]
+        let discarded_failures = std::mem::take(&mut state.gpu_failures);
         state.mx.finish_call();
         state.error = None;
         state.warnings.clear();
@@ -324,10 +341,33 @@ impl MexCallState {
             state.local_service_guard = None;
             state.services = BoundaryServiceSlot::Unavailable;
         }
+        drop(state);
+        #[cfg(not(target_family = "wasm"))]
+        drop(discarded_failures);
     }
 }
 
 impl MexCallStateInner {
+    #[cfg(not(target_family = "wasm"))]
+    pub(super) fn fail_gpu(&mut self, error: crate::MexGpuError) {
+        self.fail(error.to_string());
+        self.gpu_failures.push(error);
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn take_gpu_failure(
+        &mut self,
+        diagnostic: &MexDiagnostic,
+    ) -> Option<Arc<crate::MexInvocationFailure>> {
+        if self.gpu_failures.is_empty() {
+            return None;
+        }
+        Some(Arc::new(crate::MexInvocationFailure::new(
+            diagnostic.clone(),
+            std::mem::take(&mut self.gpu_failures),
+        )))
+    }
+
     pub(super) fn fail(&mut self, message: impl Into<String>) {
         if self.error.is_none() {
             self.error = Some(MexDiagnostic {
@@ -1716,6 +1756,8 @@ unsafe extern "C" fn take_error(host: *mut c_void) -> *mut MxArray {
     let Some(error) = state.error.take() else {
         return std::ptr::null_mut();
     };
+    #[cfg(not(target_family = "wasm"))]
+    let diagnostic = error.clone();
     let mode = state.mx.mode();
     let identifier = value_to_mx_for_interface_in_context(
         &runmat_value::Value::String(error.identifier.unwrap_or_default()),
@@ -1737,7 +1779,11 @@ unsafe extern "C" fn take_error(host: *mut c_void) -> *mut MxArray {
                 vec![1, 1],
             );
             match value {
-                Ok(value) => state.mx.allocate(value),
+                Ok(value) => {
+                    #[cfg(not(target_family = "wasm"))]
+                    let value = value.with_invocation_failure(state.take_gpu_failure(&diagnostic));
+                    state.mx.allocate(value)
+                }
                 Err(error) => {
                     state.fail(error);
                     std::ptr::null_mut()
@@ -1819,6 +1865,44 @@ unsafe extern "C" fn has_error(host: *mut c_void) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn caught_gpu_error_retains_cause_through_native_array_duplication() {
+        let call = MexCallState::new(MxApiMode::InterleavedComplex);
+        let (failure, lifetime) = crate::gpu_error::retained_upload_fixture();
+        call.lock().unwrap().fail_gpu(failure);
+        let api = call.host_api();
+        let pointer = unsafe { take_error(api.host) };
+        assert!(!pointer.is_null());
+        let duplicate = {
+            let state = call.lock().unwrap();
+            assert!(state.error.is_none());
+            assert!(state.gpu_failures.is_empty());
+            state
+                .mx
+                .arena()
+                .get(pointer)
+                .unwrap()
+                .deep_duplicate()
+                .unwrap()
+        };
+        call.finish_call();
+        assert!(lifetime.upgrade().is_some());
+        drop(duplicate);
+        assert!(lifetime.upgrade().is_none());
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn uncaught_gpu_causes_retire_at_invocation_reset() {
+        let call = MexCallState::new(MxApiMode::InterleavedComplex);
+        let (failure, lifetime) = crate::gpu_error::retained_upload_fixture();
+        call.lock().unwrap().fail_gpu(failure);
+        assert!(lifetime.upgrade().is_some());
+        call.finish_call();
+        assert!(lifetime.upgrade().is_none());
+    }
 
     #[test]
     fn allocator_and_data_api_callbacks_extend_complete_previous_prefixes() {

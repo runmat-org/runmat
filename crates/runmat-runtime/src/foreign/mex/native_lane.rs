@@ -74,17 +74,17 @@ enum NativeCommand {
         inputs: Vec<MxArray>,
         requested_outputs: usize,
         service_id: u64,
-        response: oneshot::Sender<Result<MexNativeInvocation, String>>,
+        response: oneshot::Sender<Result<MexNativeInvocation, MexLoadError>>,
     },
     Clear {
         path: PathBuf,
         service_id: u64,
-        response: oneshot::Sender<Result<bool, String>>,
+        response: oneshot::Sender<Result<bool, MexLoadError>>,
     },
     ShutdownModule {
         path: PathBuf,
         service_id: u64,
-        response: oneshot::Sender<Result<(), String>>,
+        response: oneshot::Sender<Result<(), MexLoadError>>,
     },
     Shutdown,
 }
@@ -358,7 +358,7 @@ impl NativeMexLane {
         inputs: Vec<MxArray>,
         requested_outputs: usize,
         services: std::rc::Rc<dyn MexBoundaryHostServices>,
-    ) -> Result<MexNativeInvocation, String> {
+    ) -> Result<MexNativeInvocation, MexLoadError> {
         let service_id = self.register_services(services);
         let (response, receiver) = oneshot::channel();
         self.commands
@@ -369,7 +369,7 @@ impl NativeMexLane {
                 service_id,
                 response,
             })
-            .map_err(|_| "the MEX native lane stopped".to_string())?;
+            .map_err(|_| MexLoadError::NativeLane("the MEX native lane stopped".into()))?;
 
         self.wait_with_callbacks(receiver, "invocation").await
     }
@@ -378,7 +378,7 @@ impl NativeMexLane {
         &self,
         path: &Path,
         services: std::rc::Rc<dyn MexBoundaryHostServices>,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, MexLoadError> {
         let service_id = self.register_services(services);
         let (response, receiver) = oneshot::channel();
         self.commands
@@ -387,7 +387,7 @@ impl NativeMexLane {
                 service_id,
                 response,
             })
-            .map_err(|_| "the MEX native lane stopped".to_string())?;
+            .map_err(|_| MexLoadError::NativeLane("the MEX native lane stopped".into()))?;
         self.wait_with_callbacks(receiver, "clear").await
     }
 
@@ -395,7 +395,7 @@ impl NativeMexLane {
         &self,
         path: &Path,
         services: std::rc::Rc<dyn MexBoundaryHostServices>,
-    ) -> Result<(), String> {
+    ) -> Result<(), MexLoadError> {
         let service_id = self.register_services(services);
         let (response, receiver) = oneshot::channel();
         self.commands
@@ -404,7 +404,7 @@ impl NativeMexLane {
                 service_id,
                 response,
             })
-            .map_err(|_| "the MEX native lane stopped".to_string())?;
+            .map_err(|_| MexLoadError::NativeLane("the MEX native lane stopped".into()))?;
         self.wait_with_callbacks(receiver, "shutdown").await
     }
 
@@ -425,11 +425,11 @@ impl NativeMexLane {
 
     async fn wait_with_callbacks<T>(
         &self,
-        receiver: oneshot::Receiver<Result<T, String>>,
+        receiver: oneshot::Receiver<Result<T, MexLoadError>>,
         operation: &str,
-    ) -> Result<T, String> {
+    ) -> Result<T, MexLoadError> {
         enum WaitEvent<T> {
-            Response(Result<Result<T, String>, oneshot::Canceled>),
+            Response(Result<Result<T, MexLoadError>, oneshot::Canceled>),
             Callback(Option<BoundaryEnvelope>),
         }
 
@@ -450,15 +450,20 @@ impl NativeMexLane {
 
             match event {
                 WaitEvent::Response(response) => {
-                    let response = response
-                        .map_err(|_| format!("the MEX native lane stopped during {operation}"))?;
+                    let response = response.map_err(|_| {
+                        MexLoadError::NativeLane(format!(
+                            "the MEX native lane stopped during {operation}"
+                        ))
+                    })?;
                     self.drain_ready_callbacks();
                     return response;
                 }
                 WaitEvent::Callback(envelope) => {
                     let Some(envelope) = envelope else {
                         return result.await.map_err(|_| {
-                            format!("the MEX native lane stopped during {operation}")
+                            MexLoadError::NativeLane(format!(
+                                "the MEX native lane stopped during {operation}"
+                            ))
                         })?;
                     };
                     // Dispatch only after the callback future has left scope and
@@ -638,7 +643,7 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             let _ = lane
                 .callbacks
                 .unbounded_send(BoundaryEnvelope::InvocationFinished { service_id });
-            let _ = response.send(result.map_err(|error| error.to_string()));
+            let _ = response.send(result);
         }
         NativeCommand::Clear {
             path,
@@ -665,7 +670,7 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             let _ = lane
                 .callbacks
                 .unbounded_send(BoundaryEnvelope::InvocationFinished { service_id });
-            let _ = response.send(result.map_err(|error| error.to_string()));
+            let _ = response.send(result);
         }
         NativeCommand::ShutdownModule {
             path,
@@ -688,7 +693,7 @@ fn process_command(lane: &Rc<NativeLaneState>, command: NativeCommand) -> bool {
             let _ = lane
                 .callbacks
                 .unbounded_send(BoundaryEnvelope::InvocationFinished { service_id });
-            let _ = response.send(result.map_err(|error| error.to_string()));
+            let _ = response.send(result);
         }
         NativeCommand::Shutdown => return false,
     }

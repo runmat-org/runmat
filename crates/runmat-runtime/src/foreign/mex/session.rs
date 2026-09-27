@@ -326,7 +326,11 @@ impl MexRuntimeSession {
         Some(match result {
             Ok(invocation) => decode_native_invocation(invocation, &values)
                 .and_then(|invocation| finish_invocation(invocation, requested_outputs)),
-            Err(error) => Err(runtime_error("MexInvocation", error.to_string())),
+            Err(error) => Err(native_runtime_error(
+                "MexInvocation",
+                error.to_string(),
+                error,
+            )),
         })
     }
 
@@ -527,9 +531,10 @@ impl MexRuntimeSession {
                 Ok(false) => {}
                 Err(error) => {
                     first_error.get_or_insert_with(|| {
-                        runtime_error(
+                        native_runtime_error(
                             "MexClear",
                             format!("could not clear MEX function '{}': {error}", path.display()),
+                            error,
                         )
                     });
                 }
@@ -569,12 +574,13 @@ impl MexRuntimeSession {
             ));
             if let Err(error) = futures::executor::block_on(lane.shutdown_module(&path, services)) {
                 first_error.get_or_insert_with(|| {
-                    runtime_error(
+                    native_runtime_error(
                         "MexShutdown",
                         format!(
                             "could not shut down MEX function '{}': {error}",
                             path.display()
                         ),
+                        error,
                     )
                 });
             }
@@ -736,6 +742,18 @@ fn path_matches_name(path: &Path, name: &str) -> bool {
 fn runtime_error(identifier: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_identifier(format!("RunMat:{identifier}"))
+        .build()
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn native_runtime_error(
+    identifier: &str,
+    message: impl Into<String>,
+    source: runmat_mex::MexLoadError,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(format!("RunMat:{identifier}"))
+        .with_source(source)
         .build()
 }
 

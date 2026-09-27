@@ -4,8 +4,8 @@ use runmat_accelerate_api::{NativeDeviceApi, NativeDeviceComponent};
 
 mod context;
 mod exports;
-pub(crate) use exports::native_device_address;
 pub(crate) use context::NativeInvocationContext;
+pub(crate) use exports::native_device_address;
 #[cfg(test)]
 mod tests;
 
@@ -18,11 +18,15 @@ fn state<'a>(host: *mut c_void) -> Option<std::sync::MutexGuard<'a, MexCallState
     unsafe { host.cast::<MexCallState>().as_ref() }?.lock().ok()
 }
 
-fn fail<T>(state: &mut MexCallStateInner, result: Result<T, String>, fallback: T) -> T {
+fn fail<T, E: Into<crate::MexGpuError>>(
+    state: &mut MexCallStateInner,
+    result: Result<T, E>,
+    fallback: T,
+) -> T {
     match result {
         Ok(value) => value,
         Err(error) => {
-            state.fail(error);
+            state.fail_gpu(error.into());
             fallback
         }
     }

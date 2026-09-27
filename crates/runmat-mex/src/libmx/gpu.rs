@@ -13,7 +13,7 @@ impl MxApi {
         &mut self,
         source: *const MxArray,
         independent_copy: bool,
-    ) -> Result<*mut MxArray, String> {
+    ) -> Result<*mut MxArray, crate::MexGpuError> {
         let source = self.arena.get(source).map_err(|error| error.to_string())?;
         if let MxArrayData::Gpu(gpu) = source.data() {
             let target = cuda_provider()?;
@@ -21,7 +21,9 @@ impl MxApi {
                 .ok_or_else(|| "GPU array provider is unavailable".to_string())?;
             if owner.device_id() == target.device_id() {
                 let lease = if independent_copy {
-                    gpu.lease.duplicate().map_err(|error| error.to_string())?
+                    gpu.lease
+                        .duplicate()
+                        .map_err(crate::MexGpuError::Provider)?
                 } else {
                     gpu.lease.clone()
                 };
@@ -47,7 +49,10 @@ impl MxApi {
                     &[gpu.lease.handle()],
                 )
             }
-            .map_err(|error| format!("could not upload GPU array to CUDA: {error}"))?;
+            .map_err(|source| crate::MexGpuError::Upload {
+                context: "could not upload GPU array to CUDA",
+                source,
+            })?;
             let value = MxArray::gpu_owned(gpu.class_id, MxGpuLease::owned(handle))?;
             return Ok(self.arena.allocate(value));
         }
@@ -65,7 +70,10 @@ impl MxApi {
                 runmat_accelerate_api::upload_logical_protecting(provider, view, &[])
             }
         }
-        .map_err(|error| format!("could not upload array to CUDA: {error}"))?;
+        .map_err(|source| crate::MexGpuError::Upload {
+            context: "could not upload array to CUDA",
+            source,
+        })?;
         let value = MxArray::gpu_owned(class_id, MxGpuLease::owned(handle))?;
         Ok(self.arena.allocate(value))
     }

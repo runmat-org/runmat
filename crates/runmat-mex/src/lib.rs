@@ -15,6 +15,11 @@ pub mod libmx;
 pub mod loader;
 pub mod mxarray;
 
+#[cfg(not(target_family = "wasm"))]
+mod gpu_error;
+#[cfg(not(target_family = "wasm"))]
+pub use gpu_error::{MexGpuError, MexInvocationFailure};
+
 pub use arena::{MxArena, MxArenaError};
 pub use build::{
     mex_suffix, MexApi, MexArgumentError, MexArtifactBundle, MexArtifactBundleEntry,
