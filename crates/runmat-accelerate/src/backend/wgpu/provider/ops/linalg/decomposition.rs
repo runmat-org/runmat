@@ -362,7 +362,7 @@ impl WgpuProvider {
         &self,
         product: &GpuTensorHandle,
         options: &ProviderQrOptions,
-    ) -> Result<Option<ProviderQrPowerIterResult>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderQrPowerIterResult>> {
         let host_product = self.download_exec(product).await?;
         let tensor =
             Tensor::new(host_product.data.clone(), host_product.shape.clone()).map_err(|e| {
@@ -381,7 +381,7 @@ impl WgpuProvider {
         &self,
         tensor: Tensor,
         options: &ProviderQrOptions,
-    ) -> Result<ProviderQrResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderQrResult> {
         let mut args = Vec::new();
         if options.economy {
             args.push(Value::Num(0.0));
@@ -394,7 +394,7 @@ impl WgpuProvider {
             &args,
         )
         .await
-        .map_err(|err| runtime_flow_to_anyhow("qr", err))?;
+        .map_err(runtime_flow_to_provider_error)?;
 
         let q_tensor = host_tensor_from_value("qr", eval.q())?;
         let r_tensor = host_tensor_from_value("qr", eval.r())?;
@@ -481,7 +481,7 @@ impl WgpuProvider {
         &self,
         handle: &GpuTensorHandle,
         lower: bool,
-    ) -> Result<ProviderCholResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderCholResult> {
         let host = self.download_exec(handle).await?;
         let tensor =
             Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("chol: {e}"))?;
@@ -494,7 +494,7 @@ impl WgpuProvider {
             &args,
         )
         .await
-        .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
+        .map_err(runtime_flow_to_provider_error)?;
         let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
         let factor_data = factor_tensor.materialize_f64();
         let factor = self.upload_exec(&HostTensorView {
@@ -511,7 +511,7 @@ impl WgpuProvider {
         &self,
         handle: &GpuTensorHandle,
         options: ProviderQrOptions,
-    ) -> Result<ProviderQrResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderQrResult> {
         let host = self.download_exec(handle).await?;
         let tensor =
             Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("qr: {e}"))?;

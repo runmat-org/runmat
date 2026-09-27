@@ -219,6 +219,13 @@ fn chol_invalid_input(message: impl Into<String>) -> RuntimeError {
     chol_error_with_message(message, &CHOL_ERROR_INVALID_INPUT)
 }
 
+fn chol_provider_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        chol_internal_error(error.to_string()),
+        error,
+    )
+}
+
 fn chol_internal_error(message: impl Into<String>) -> RuntimeError {
     chol_error_with_message(message, &CHOL_ERROR_INTERNAL)
 }
@@ -496,8 +503,10 @@ async fn evaluate_gpu(
 ) -> BuiltinResult<Option<CholEval>> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
         let lower = matches!(triangle, CholTriangle::Lower);
-        if let Ok(result) = provider.chol(handle, lower).await {
-            return Ok(Some(CholEval::from_provider(result, triangle)));
+        match provider.chol(handle, lower).await {
+            Ok(result) => return Ok(Some(CholEval::from_provider(result, triangle))),
+            Err(error) if error.is_unsupported() => {}
+            Err(error) => return Err(chol_provider_error(error)),
         }
     }
     Ok(None)

@@ -1463,8 +1463,10 @@ fn heaviside_scalar_host(value: f64) -> f64 {
     }
 }
 
-fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
-    anyhow::Error::new(err)
+fn runtime_flow_to_provider_error(
+    err: RuntimeError,
+) -> runmat_accelerate_api::ProviderExecutionError {
+    runmat_accelerate_api::ProviderExecutionError::from_source(err)
 }
 
 #[derive(Clone, Copy)]
@@ -5271,7 +5273,7 @@ impl AccelProvider for InProcessProvider {
         second: Option<&'a GpuTensorHandle>,
         weights: Option<&'a GpuTensorHandle>,
         options: &'a CovarianceOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let host_matrix = <Self as AccelProvider>::download(self, matrix).await?;
             let left = Tensor::new(host_matrix.data.clone(), host_matrix.shape.clone())
@@ -5299,14 +5301,14 @@ impl AccelProvider for InProcessProvider {
             };
 
             let result = runtime_cov_from_tensors(left, right, options.rows, weight_spec)
-                .map_err(|flow| runtime_flow_to_anyhow("covariance", flow))?;
+                .map_err(runtime_flow_to_provider_error)?;
 
             let result_data = result.materialize_f64();
             let view = HostTensorView {
                 data: &result_data,
                 shape: &result.shape,
             };
-            self.upload(&view)
+            self.upload(&view).map_err(Into::into)
         })
     }
 
@@ -5314,20 +5316,20 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         options: &'a CorrcoefOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let host = <Self as AccelProvider>::download(self, matrix).await?;
             let tensor = Tensor::new(host.data.clone(), host.shape.clone())
                 .map_err(|e| anyhow!("corrcoef: {e}"))?;
             let result =
                 runtime_corrcoef_from_tensors(tensor, None, options.normalization, options.rows)
-                    .map_err(|flow| runtime_flow_to_anyhow("corrcoef", flow))?;
+                    .map_err(runtime_flow_to_provider_error)?;
             let result_data = result.materialize_f64();
             let view = HostTensorView {
                 data: &result_data,
                 shape: &result.shape,
             };
-            self.upload(&view)
+            self.upload(&view).map_err(Into::into)
         })
     }
 
@@ -9349,7 +9351,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         lower: bool,
-    ) -> AccelProviderFuture<'a, ProviderCholResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderCholResult> {
         Box::pin(async move {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
@@ -9368,7 +9370,7 @@ impl AccelProvider for InProcessProvider {
                 &args,
             )
             .await
-            .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
+            .map_err(runtime_flow_to_provider_error)?;
             let factor_tensor = tensor_from_value("chol", eval.factor())?;
             let factor =
                 self.allocate_tensor(factor_tensor.materialize_f64(), factor_tensor.shape.clone())?;
@@ -9383,7 +9385,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
         options: ProviderQrOptions,
-    ) -> AccelProviderFuture<'a, ProviderQrResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderQrResult> {
         Box::pin(async move {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
@@ -9406,7 +9408,7 @@ impl AccelProvider for InProcessProvider {
                 &args,
             )
             .await
-            .map_err(|err| runtime_flow_to_anyhow("qr", err))?;
+            .map_err(runtime_flow_to_provider_error)?;
 
             let q_tensor = tensor_from_value("qr", eval.q())?;
             let r_tensor = tensor_from_value("qr", eval.r())?;
@@ -9764,7 +9766,7 @@ impl AccelProvider for InProcessProvider {
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
         options: &'a ProviderLinsolveOptions,
-    ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderLinsolveResult> {
         Box::pin(async move {
             let start = Instant::now();
             let (lhs_data, rhs_data) = {
@@ -10011,7 +10013,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let start = Instant::now();
             let (lhs_data, rhs_data) = {
@@ -10046,7 +10048,7 @@ impl AccelProvider for InProcessProvider {
 
             let shape = result.shape.clone();
             let data = result.materialize_f64();
-            self.allocate_tensor(data, shape)
+            self.allocate_tensor(data, shape).map_err(Into::into)
         })
     }
 
@@ -10054,7 +10056,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let start = Instant::now();
             let (lhs_data, rhs_data) = {
@@ -10089,7 +10091,7 @@ impl AccelProvider for InProcessProvider {
 
             let shape = result.shape.clone();
             let data = result.materialize_f64();
-            self.allocate_tensor(data, shape)
+            self.allocate_tensor(data, shape).map_err(Into::into)
         })
     }
 
@@ -10097,8 +10099,13 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         _a: &'a GpuTensorHandle,
         _compute_left: bool,
-    ) -> AccelProviderFuture<'a, ProviderEigResult> {
-        Box::pin(async move { Err(anyhow!("eig: not supported by in-process provider")) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderEigResult> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "eig: not supported by in-process provider",
+            )
+            .into())
+        })
     }
 
     fn sub2ind(

@@ -10,7 +10,7 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
-    ) -> Result<ProviderLinsolveResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderLinsolveResult> {
         if let Some(result) = self.try_linsolve_device(lhs, rhs, options).await? {
             return Ok(result);
         }
@@ -139,7 +139,7 @@ impl WgpuProvider {
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let start = Instant::now();
         if let Some(result) = self
             .try_linsolve_device(lhs, rhs, &ProviderLinsolveOptions::default())
@@ -180,7 +180,7 @@ impl WgpuProvider {
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let start = Instant::now();
         if let Some(result) = self.try_mrdivide_device(lhs, rhs).await? {
             self.telemetry.record_mrdivide_duration(start.elapsed());
@@ -301,14 +301,18 @@ impl WgpuProvider {
         Ok(Self::diagonal_rcond(min_diag, max_diag))
     }
 
-    async fn svd_rcond(&self, label: &str, factor: &GpuTensorHandle) -> Result<f64> {
+    async fn svd_rcond(
+        &self,
+        label: &str,
+        factor: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<f64> {
         let tensor = self.host_tensor_from_handle(label, factor).await?;
         let eval = runmat_runtime::builtins::math::linalg::factor::svd::evaluate(
             Value::Tensor(tensor),
             &[],
         )
         .await
-        .map_err(|err| runtime_flow_to_anyhow(label, err))?;
+        .map_err(runtime_flow_to_provider_error)?;
         let singular_values = host_tensor_from_value(label, eval.singular_values())?;
         Ok(Self::singular_value_rcond(
             &singular_values.materialize_f64(),
@@ -620,7 +624,7 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
-    ) -> Result<Option<ProviderLinsolveResult>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderLinsolveResult>> {
         if !options.posdef || options.lower || options.upper || options.rectangular {
             return Ok(None);
         }
@@ -656,7 +660,7 @@ impl WgpuProvider {
             if let Err(err) = self.enforce_device_rcond(options, rcond) {
                 drop(r_handle);
                 drop(r_inv_handle);
-                return Err(err);
+                return Err(err.into());
             }
             rcond
         } else {
@@ -667,7 +671,7 @@ impl WgpuProvider {
             Err(err) => {
                 drop(r_handle);
                 drop(r_inv_handle);
-                return Err(err);
+                return Err(err.into());
             }
         };
         let mut solution = match self.run_triangular_linsolve_device(
@@ -681,7 +685,7 @@ impl WgpuProvider {
                 drop(projected_rhs.solution);
                 drop(r_handle);
                 drop(r_inv_handle);
-                return Err(err);
+                return Err(err.into());
             }
         };
         drop(projected_rhs.solution);
@@ -708,7 +712,7 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
-    ) -> Result<Option<ProviderLinsolveResult>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderLinsolveResult>> {
         if options.lower || options.upper {
             return Ok(None);
         }
@@ -766,7 +770,7 @@ impl WgpuProvider {
                     if let Err(err) = self.enforce_device_rcond(options, rcond) {
                         drop(q_handle);
                         drop(r_handle);
-                        return Err(err);
+                        return Err(err.into());
                     }
                     rcond
                 } else {
@@ -825,7 +829,7 @@ impl WgpuProvider {
                     drop(q_handle);
                     drop(r_handle);
                     drop(lhs_t);
-                    return Err(err);
+                    return Err(err.into());
                 }
                 rcond
             } else {
@@ -932,7 +936,7 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
-    ) -> Result<Option<ProviderLinsolveResult>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderLinsolveResult>> {
         if let Some(result) = self
             .try_triangular_linsolve_device(lhs, rhs, options)
             .await?
@@ -949,7 +953,7 @@ impl WgpuProvider {
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
-    ) -> Result<Option<GpuTensorHandle>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         let _ = Self::matrix_dims_for_solve(lhs.shape())?;
         let _ = Self::matrix_dims_for_solve(rhs.shape())?;
         let rhs_t = self.permute_exec(rhs, &[1, 0])?;

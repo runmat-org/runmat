@@ -5,7 +5,7 @@ impl WgpuProvider {
         &self,
         handle: &GpuTensorHandle,
         compute_left: bool,
-    ) -> Result<ProviderEigResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderEigResult> {
         let host = self.download_exec(handle).await?;
         let tensor =
             Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("eig: {e}"))?;
@@ -15,17 +15,14 @@ impl WgpuProvider {
             compute_left,
         )
         .await
-        .map_err(|err| runtime_flow_to_anyhow("eig", err))?;
+        .map_err(runtime_flow_to_provider_error)?;
 
         let eigenvalues_tensor = host_tensor_from_value("eig", eval.eigenvalues())?;
         let diagonal_tensor = host_tensor_from_value("eig", eval.diagonal_matrix())?;
         let right_tensor = host_tensor_from_value("eig", eval.right())?;
 
         let left_value = if compute_left {
-            Some(
-                eval.left()
-                    .map_err(|err| runtime_flow_to_anyhow("eig", err))?,
-            )
+            Some(eval.left().map_err(runtime_flow_to_provider_error)?)
         } else {
             None
         };
@@ -60,9 +57,10 @@ impl WgpuProvider {
         };
 
         if compute_left && left.is_none() {
-            return Err(anyhow!(
+            return Err((anyhow!(
                 "eig: left eigenvectors are not available for the requested matrix"
-            ));
+            ))
+            .into());
         }
 
         Ok(ProviderEigResult {

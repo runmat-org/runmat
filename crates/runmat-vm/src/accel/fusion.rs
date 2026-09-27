@@ -514,7 +514,10 @@ pub async fn execute_fusion_special_kind(
             Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
                 Ok(FusionExecutionOutcome::SharedRuntime(observation))
             }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+            Err(err) => {
+                let error = mex("FusionExecutionFailed", &err.to_string());
+                Err(runmat_runtime::runtime_error::with_provider_execution_source(error, err))
+            }
         },
         FusionKind::PowerStepNormalize => {
             match execute_power_step_normalize_placed(request).await {

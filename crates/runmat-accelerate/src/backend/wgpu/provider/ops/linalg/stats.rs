@@ -18,9 +18,11 @@ impl WgpuProvider {
         options: &CovarianceOptions,
     ) -> Result<GpuTensorHandle> {
         if options.rows != CovRows::All {
-            return Err(anyhow!(
-                "covariance: rows option {:?} not supported by WGPU provider",
-                options.rows
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                format!(
+                    "covariance: rows option {:?} not supported by WGPU provider",
+                    options.rows
+                ),
             ));
         }
 
@@ -748,9 +750,11 @@ impl WgpuProvider {
         options: &CovarianceOptions,
     ) -> Result<GpuTensorHandle> {
         if options.rows != CovRows::All {
-            return Err(anyhow!(
-                "covariance: rows option {:?} not supported by WGPU provider",
-                options.rows
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                format!(
+                    "covariance: rows option {:?} not supported by WGPU provider",
+                    options.rows
+                ),
             ));
         }
         if options.has_weight_vector && weights.is_none() {
@@ -834,9 +838,11 @@ impl WgpuProvider {
         options: &CorrcoefOptions,
     ) -> Result<GpuTensorHandle> {
         if options.rows != CorrcoefRows::All {
-            return Err(anyhow!(
-                "corrcoef: rows option {:?} not supported by WGPU provider",
-                options.rows
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                format!(
+                    "corrcoef: rows option {:?} not supported by WGPU provider",
+                    options.rows
+                ),
             ));
         }
 

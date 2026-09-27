@@ -3,6 +3,32 @@ pub use runmat_async::{
     RuntimeErrorBuilder,
 };
 
+#[cfg(test)]
+mod provider_sources;
+
+/// Attach an owning provider failure without erasing a nested language error.
+/// Provider failures are not implicit gather-and-retry requests.
+pub fn with_provider_execution_source(
+    mut fallback: RuntimeError,
+    source: runmat_accelerate_api::ProviderExecutionError,
+) -> RuntimeError {
+    let mut cursor: &(dyn std::error::Error + 'static) = &source;
+    loop {
+        if let Some(runtime) = cursor.downcast_ref::<RuntimeError>() {
+            fallback.message = runtime.message.clone();
+            fallback.identifier = runtime.identifier.clone();
+            fallback.span = runtime.span;
+            fallback.context = runtime.context.clone();
+            break;
+        }
+        let Some(next) = cursor.source() else { break };
+        cursor = next;
+    }
+    fallback.gpu_gather_retry = GpuGatherRetry::Never;
+    fallback.source = Some(Box::new(source));
+    fallback
+}
+
 /// Construct a language-semantic runtime error in the active session's
 /// namespace. Executors may attach frame and source-span information, but the
 /// identifier and message are executor-neutral runtime semantics.

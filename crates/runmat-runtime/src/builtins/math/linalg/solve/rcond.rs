@@ -352,7 +352,15 @@ async fn rcond_gpu_via_linsolve(
 
     let result = match outcome {
         Ok(res) => res,
-        Err(_) => return Ok(None),
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(source) => {
+            let fallback = build_runtime_error(source.to_string())
+                .with_builtin(NAME)
+                .build();
+            return Err(crate::runtime_error::with_provider_execution_source(
+                fallback, source,
+            ));
+        }
     };
 
     let rcond_value = result.reciprocal_condition;

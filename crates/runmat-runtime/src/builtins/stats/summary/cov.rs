@@ -408,6 +408,13 @@ fn cov_error_with_detail(
     cov_error_with(error, format!("{}: {detail}", error.message))
 }
 
+fn cov_provider_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        cov_internal_error(error.to_string()),
+        error,
+    )
+}
+
 fn cov_internal_error(message: impl Into<String>) -> RuntimeError {
     cov_error_with(&COV_ERROR_INTERNAL, message)
 }
@@ -710,9 +717,13 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
             free_temporary_gpu_inputs(provider, temporary_inputs);
             Ok(Some(Value::GpuTensor(result)))
         }
-        Err(_) => {
+        Err(error) => {
             free_temporary_gpu_inputs(provider, temporary_inputs);
-            Ok(None)
+            if error.is_unsupported() {
+                Ok(None)
+            } else {
+                Err(cov_provider_error(error))
+            }
         }
     }
 }

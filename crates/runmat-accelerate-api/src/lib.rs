@@ -2939,8 +2939,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _lhs: &'a GpuTensorHandle,
         _rhs: &'a GpuTensorHandle,
         _options: &'a ProviderLinsolveOptions,
-    ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
-        unsupported_future("linsolve not supported by provider")
+    ) -> ProviderExecutionFuture<'a, ProviderLinsolveResult> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("linsolve not supported by provider").into())
+        })
     }
     fn inv<'a>(
         &'a self,
@@ -2993,22 +2995,28 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _lhs: &'a GpuTensorHandle,
         _rhs: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("mldivide not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(unsupported_provider_operation("mldivide not supported by provider").into())
+        })
     }
     fn mrdivide<'a>(
         &'a self,
         _lhs: &'a GpuTensorHandle,
         _rhs: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("mrdivide not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(unsupported_provider_operation("mrdivide not supported by provider").into())
+        })
     }
     fn eig<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _compute_left: bool,
-    ) -> AccelProviderFuture<'a, ProviderEigResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("eig not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, ProviderEigResult> {
+        Box::pin(async move {
+            Err(unsupported_provider_operation("eig not supported by provider").into())
+        })
     }
     fn lu<'a>(&'a self, _a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, ProviderLuResult> {
         Box::pin(async move { Err(anyhow::anyhow!("lu not supported by provider")) })

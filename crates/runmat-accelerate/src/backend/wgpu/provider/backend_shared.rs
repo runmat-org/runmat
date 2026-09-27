@@ -1,7 +1,9 @@
 use super::*;
 
-pub(super) fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
-    anyhow::Error::new(err)
+pub(super) fn runtime_flow_to_provider_error(
+    err: RuntimeError,
+) -> runmat_accelerate_api::ProviderExecutionError {
+    runmat_accelerate_api::ProviderExecutionError::from_source(err)
 }
 
 pub(super) fn validate_compute_binding_counts(

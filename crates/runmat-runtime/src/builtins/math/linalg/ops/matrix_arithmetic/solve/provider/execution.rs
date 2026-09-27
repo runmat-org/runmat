@@ -1,8 +1,8 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
 
+use crate::builtins::common::binary;
 use crate::builtins::common::gpu_helpers::{BinaryGpuOutputContract, GpuOutputAliasPolicy};
-use crate::builtins::common::{binary, gpu_helpers};
 use crate::BuiltinResult;
 
 use super::super::{errors, SolveOrientation};
@@ -20,11 +20,15 @@ pub(super) async fn invoke(
     };
     let output = match result {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) if error.is_unsupported() => return Ok(None),
         Err(error) => {
-            return Err(errors::internal(
+            let runtime_error = errors::internal(
                 orientation,
                 format!("{}: provider solve failed: {error}", orientation.name()),
+            );
+            return Err(crate::runtime_error::with_provider_execution_source(
+                runtime_error,
+                error,
             ));
         }
     };

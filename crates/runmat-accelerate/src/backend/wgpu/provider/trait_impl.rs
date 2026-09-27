@@ -1404,14 +1404,14 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         lower: bool,
-    ) -> AccelProviderFuture<'a, ProviderCholResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderCholResult> {
         Box::pin(async move { self.chol_exec(a, lower).await })
     }
     fn qr<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
         options: ProviderQrOptions,
-    ) -> AccelProviderFuture<'a, ProviderQrResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderQrResult> {
         Box::pin(async move { self.qr_exec(handle, options).await })
     }
 
@@ -1428,7 +1428,7 @@ impl AccelProvider for WgpuProvider {
         product_lhs: Option<&'a GpuTensorHandle>,
         q_handle: &'a GpuTensorHandle,
         options: &'a ProviderQrOptions,
-    ) -> AccelProviderFuture<'a, Option<ProviderQrPowerIterResult>> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<ProviderQrPowerIterResult>> {
         Box::pin(async move {
             self.qr_power_iter_exec(product, product_lhs, q_handle, options)
                 .await
@@ -1478,18 +1478,23 @@ impl AccelProvider for WgpuProvider {
         second: Option<&'a GpuTensorHandle>,
         weights: Option<&'a GpuTensorHandle>,
         options: &'a CovarianceOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.covariance_with_optional_exec(matrix, second, weights, options)
                 .await
+                .map_err(Into::into)
         })
     }
     fn corrcoef<'a>(
         &'a self,
         matrix: &'a GpuTensorHandle,
         options: &'a CorrcoefOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.corrcoef_exec(matrix, options).await })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.corrcoef_exec(matrix, options)
+                .await
+                .map_err(Into::into)
+        })
     }
 
     fn covariance_to_correlation(
@@ -1504,7 +1509,7 @@ impl AccelProvider for WgpuProvider {
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
         options: &'a ProviderLinsolveOptions,
-    ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderLinsolveResult> {
         Box::pin(async move { self.linsolve_exec(lhs, rhs, options).await })
     }
     fn inv<'a>(
@@ -1565,7 +1570,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.mldivide_exec(lhs, rhs).await })
     }
 
@@ -1573,7 +1578,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.mrdivide_exec(lhs, rhs).await })
     }
 
@@ -1589,7 +1594,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
         compute_left: bool,
-    ) -> AccelProviderFuture<'a, ProviderEigResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderEigResult> {
         Box::pin(async move { self.eig_exec(handle, compute_left).await })
     }
 

@@ -32,7 +32,7 @@ impl WgpuProvider {
         product_lhs: Option<&GpuTensorHandle>,
         q_handle: &GpuTensorHandle,
         options: &ProviderQrOptions,
-    ) -> Result<Option<ProviderQrPowerIterResult>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderQrPowerIterResult>> {
         let debug_qr = std::env::var("RUNMAT_DEBUG_QR").is_ok();
         if !options.economy {
             return Ok(None);

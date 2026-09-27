@@ -782,18 +782,20 @@ pub fn execute_reduction_with_shape_placed(
 
 /// Direct provider execution retaining the established value-returning API.
 /// Executors that can run shared bytecode use the placement-aware entrypoint.
-pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_centered_gram(
+    request: FusionExecutionRequest<'_>,
+) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
     match execute_centered_gram_placed(request).await? {
         FusionExecutionOutcome::Executed(value) => Ok(value),
         FusionExecutionOutcome::SharedRuntime(_) => {
-            Err(anyhow!("direct fusion request selected shared runtime"))
+            Err((anyhow!("direct fusion request selected shared runtime")).into())
         }
     }
 }
 
 pub async fn execute_centered_gram_placed(
     request: FusionExecutionRequest<'_>,
-) -> Result<FusionExecutionOutcome<Value>> {
+) -> runmat_accelerate_api::ProviderExecutionResult<FusionExecutionOutcome<Value>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -802,7 +804,7 @@ pub async fn execute_centered_gram_placed(
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::CenteredGram {
-        return Err(anyhow!("unsupported fusion kind"));
+        return Err((anyhow!("unsupported fusion kind")).into());
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
@@ -818,7 +820,7 @@ pub async fn execute_centered_gram_placed(
             matrix,
             normalization,
         }) => (*matrix, *normalization),
-        _ => return Err(anyhow!("centered gram: missing pattern metadata")),
+        _ => return Err((anyhow!("centered gram: missing pattern metadata")).into()),
     };
 
     let matrix_index = request
@@ -1282,7 +1284,15 @@ mod tests {
         fn require_value_future(_: impl std::future::Future<Output = Result<Value>>) {}
         fn check_async_signatures(request: FusionExecutionRequest<'_>, which: usize) {
             match which {
-                0 => require_value_future(execute_centered_gram(request)),
+                0 => {
+                    fn require_local_future(
+                        _: impl std::future::Future<
+                            Output = runmat_accelerate_api::ProviderExecutionResult<Value>,
+                        >,
+                    ) {
+                    }
+                    require_local_future(execute_centered_gram(request));
+                }
                 1 => require_value_future(execute_power_step_normalize(request)),
                 2 => require_value_future(execute_explained_variance(request)),
                 3 => require_value_future(execute_image_normalize(request)),

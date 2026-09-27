@@ -325,6 +325,13 @@ fn qr_invalid_input(message: impl Into<String>) -> RuntimeError {
     qr_error_with_message(message, &QR_ERROR_INVALID_INPUT)
 }
 
+fn qr_provider_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        qr_internal_error(error.to_string()),
+        error,
+    )
+}
+
 fn qr_internal_error(message: impl Into<String>) -> RuntimeError {
     qr_error_with_message(message, &QR_ERROR_INTERNAL)
 }
@@ -582,9 +589,8 @@ async fn evaluate_gpu(
             Ok(None) => {
                 // fall through to standard qr
             }
-            Err(err) => {
-                log::debug!("qr_power_iter fallback: {}", err);
-            }
+            Err(err) if err.is_unsupported() => {}
+            Err(err) => return Err(qr_provider_error(err)),
         }
     }
     match provider.qr(handle, provider_options).await {
@@ -596,7 +602,8 @@ async fn evaluate_gpu(
             mode: options.mode,
             pivot_mode: options.pivot,
         })),
-        Err(_) => Ok(None),
+        Err(error) if error.is_unsupported() => Ok(None),
+        Err(error) => Err(qr_provider_error(error)),
     }
 }
 

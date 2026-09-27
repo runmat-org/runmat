@@ -454,57 +454,67 @@ impl AccelProvider for TestProvider {
         second: Option<&'a GpuTensorHandle>,
         weights: Option<&'a GpuTensorHandle>,
         options: &'a CovarianceOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if second.is_some() {
-                bail!("test provider: covariance secondary input unsupported");
-            }
-            if weights.is_some() || options.has_weight_vector {
-                bail!("test provider: covariance weights unsupported");
-            }
-            if options.rows != CovRows::All {
-                bail!(
-                    "test provider: covariance row option {:?} unsupported",
-                    options.rows
-                );
-            }
-            let (data, shape) = self.pull(matrix)?;
-            let rows = shape.first().copied().unwrap_or(1);
-            let cols = if shape.len() > 1 { shape[1] } else { 1 };
-            if rows == 0 || cols == 0 {
-                return Ok(self.push(Vec::new(), vec![cols, cols]));
-            }
-            let mut means = vec![0.0f64; cols];
-            for (c, mean) in means.iter_mut().enumerate().take(cols) {
-                for r in 0..rows {
-                    let idx = r + rows * c;
-                    if let Some(value) = data.get(idx) {
-                        *mean += *value;
-                    }
+            let result: anyhow::Result<GpuTensorHandle> = async move {
+                if second.is_some() {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "test provider: covariance secondary input unsupported",
+                    ));
                 }
-                *mean /= rows as f64;
-            }
-            let denom = match options.normalization {
-                CovNormalization::Unbiased => (rows as f64) - 1.0,
-                CovNormalization::Biased => rows as f64,
-            };
-            let denom = if denom <= 0.0 { 1.0 } else { denom };
-            let mut cov = vec![0.0f64; cols * cols];
-            for c1 in 0..cols {
-                for c2 in 0..cols {
-                    let mut acc = 0.0f64;
+                if weights.is_some() || options.has_weight_vector {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "test provider: covariance weights unsupported",
+                    ));
+                }
+                if options.rows != CovRows::All {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        format!(
+                            "test provider: covariance row option {:?} unsupported",
+                            options.rows
+                        ),
+                    ));
+                }
+                let (data, shape) = self.pull(matrix)?;
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = if shape.len() > 1 { shape[1] } else { 1 };
+                if rows == 0 || cols == 0 {
+                    return Ok(self.push(Vec::new(), vec![cols, cols]));
+                }
+                let mut means = vec![0.0f64; cols];
+                for (c, mean) in means.iter_mut().enumerate().take(cols) {
                     for r in 0..rows {
-                        let idx1 = r + rows * c1;
-                        let idx2 = r + rows * c2;
-                        let val1 = data.get(idx1).copied().unwrap_or(0.0);
-                        let val2 = data.get(idx2).copied().unwrap_or(0.0);
-                        acc += (val1 - means[c1]) * (val2 - means[c2]);
+                        let idx = r + rows * c;
+                        if let Some(value) = data.get(idx) {
+                            *mean += *value;
+                        }
                     }
-                    let idx = c1 + cols * c2;
-                    cov[idx] = acc / denom;
+                    *mean /= rows as f64;
                 }
+                let denom = match options.normalization {
+                    CovNormalization::Unbiased => (rows as f64) - 1.0,
+                    CovNormalization::Biased => rows as f64,
+                };
+                let denom = if denom <= 0.0 { 1.0 } else { denom };
+                let mut cov = vec![0.0f64; cols * cols];
+                for c1 in 0..cols {
+                    for c2 in 0..cols {
+                        let mut acc = 0.0f64;
+                        for r in 0..rows {
+                            let idx1 = r + rows * c1;
+                            let idx2 = r + rows * c2;
+                            let val1 = data.get(idx1).copied().unwrap_or(0.0);
+                            let val2 = data.get(idx2).copied().unwrap_or(0.0);
+                            acc += (val1 - means[c1]) * (val2 - means[c2]);
+                        }
+                        let idx = c1 + cols * c2;
+                        cov[idx] = acc / denom;
+                    }
+                }
+                Ok(self.push(cov, vec![cols, cols]))
             }
-            Ok(self.push(cov, vec![cols, cols]))
+            .await;
+            result.map_err(Into::into)
         })
     }
 
@@ -629,8 +639,13 @@ impl AccelProvider for TestProvider {
         &'a self,
         _a: &'a GpuTensorHandle,
         _compute_left: bool,
-    ) -> AccelProviderFuture<'a, ProviderEigResult> {
-        Box::pin(async move { bail!("eig not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderEigResult> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "eig not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn linsolve<'a>(
@@ -638,8 +653,13 @@ impl AccelProvider for TestProvider {
         _lhs: &'a GpuTensorHandle,
         _rhs: &'a GpuTensorHandle,
         _options: &'a ProviderLinsolveOptions,
-    ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
-        Box::pin(async move { bail!("linsolve not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderLinsolveResult> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "linsolve not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn pinv<'a>(
@@ -767,7 +787,7 @@ impl AccelProvider for TestProvider {
         &'a self,
         lhs: &'a GpuTensorHandle,
         rhs: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let (lhs_data, lhs_shape) = self.pull(lhs)?;
             let (rhs_data, rhs_shape) = self.pull(rhs)?;
@@ -810,8 +830,13 @@ impl AccelProvider for TestProvider {
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _options: &'a CorrcoefOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow!("corrcoef (test provider): not implemented")) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "corrcoef (test provider): not implemented",
+            )
+            .into())
+        })
     }
 
     fn unary_sin<'a>(

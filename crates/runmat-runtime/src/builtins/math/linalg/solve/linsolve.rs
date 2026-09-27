@@ -589,10 +589,21 @@ async fn try_gpu_linsolve(
         return Ok(None);
     }
     provider_opts.need_rcond = wants_second_output || options.rcond.is_some();
-    let result = provider
+    let result = match provider
         .linsolve(lhs_operand.handle(), rhs_operand.handle(), &provider_opts)
         .await
-        .ok();
+    {
+        Ok(result) => Some(result),
+        Err(error) if error.is_unsupported() => None,
+        Err(source) => {
+            release_operand(provider, &mut lhs_operand);
+            release_operand(provider, &mut rhs_operand);
+            return Err(crate::runtime_error::with_provider_execution_source(
+                builtin_error(source.to_string()),
+                source,
+            ));
+        }
+    };
 
     if let Some(ProviderLinsolveResult {
         mut solution,

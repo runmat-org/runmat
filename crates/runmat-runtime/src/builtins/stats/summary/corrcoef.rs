@@ -281,6 +281,13 @@ fn corrcoef_error_with_detail(
     corrcoef_error_with(error, format!("{}: {detail}", error.message))
 }
 
+fn corrcoef_provider_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        corrcoef_internal_error(error.to_string()),
+        error,
+    )
+}
+
 fn corrcoef_internal_error(message: impl Into<String>) -> RuntimeError {
     corrcoef_error_with(&CORRCOEF_ERROR_INTERNAL, message)
 }
@@ -587,11 +594,15 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
             }
             Ok(Some(Value::GpuTensor(result)))
         }
-        Err(_) => {
+        Err(error) => {
             if let Some(temp) = owned_concat {
                 let _ = provider.free(&temp);
             }
-            Ok(None)
+            if error.is_unsupported() {
+                Ok(None)
+            } else {
+                Err(corrcoef_provider_error(error))
+            }
         }
     }
 }

@@ -34,6 +34,12 @@ fn nested_error_retains_actual_owner_until_final_error_drop() {
 
 #[test]
 fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
+    assert!(
+        ProviderExecutionError::from(crate::unsupported_provider_operation(
+            "direct unsupported marker"
+        ))
+        .is_unsupported()
+    );
     let unsupported = ProviderExecutionError::from(
         crate::unsupported_provider_operation("unsupported shape").context("provider execution"),
     );

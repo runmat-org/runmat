@@ -546,7 +546,11 @@ async fn evaluate_gpu(
                 Ok(None)
             }
         }
-        Err(_) => Ok(None),
+        Err(error) if error.is_unsupported() => Ok(None),
+        Err(source) => Err(crate::runtime_error::with_provider_execution_source(
+            eig_internal_error(source.to_string()),
+            source,
+        )),
     }
 }
 
