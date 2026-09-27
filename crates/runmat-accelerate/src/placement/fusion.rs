@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use runmat_accelerate_api::{
     AccelProvider, ProviderFeasibility, ProviderFeasibilityQuery, ProviderOperationFamily,
-    ProviderOperationIdentity, ProviderWorkload,
+    ProviderOperationIdentity, ProviderRepresentation, ProviderWorkload,
 };
 use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
@@ -9,8 +9,8 @@ use runmat_value::Value;
 use crate::fusion::FusionKind;
 
 use super::{
-    dense_output_representation, provider_rejection_token, record_event, tensor_representation,
-    PlacementAttribute, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
+    provider_rejection_token, record_event, tensor_representation, PlacementAttribute,
+    PlacementCorrelationId, PlacementEventKind, PlacementVariant,
 };
 
 pub fn fusion_operation_token(kind: &FusionKind) -> &'static str {
@@ -40,7 +40,7 @@ impl FusionPlacementObserver {
         provider: &dyn AccelProvider,
         kind: &FusionKind,
         inputs: &[Value],
-        output_shapes: &[Vec<usize>],
+        outputs: &[ProviderRepresentation],
         elements: Option<usize>,
         batch: Option<usize>,
     ) -> Result<ProviderFeasibilityQuery> {
@@ -49,15 +49,11 @@ impl FusionPlacementObserver {
             .iter()
             .filter_map(|value| tensor_representation(value, provider.precision()))
             .collect();
-        let outputs = output_shapes
-            .iter()
-            .map(|shape| dense_output_representation(provider.precision(), shape))
-            .collect();
         let query = ProviderFeasibilityQuery {
             operation: ProviderOperationIdentity::new(fusion_operation_token(kind)),
             family: ProviderOperationFamily::Fusion,
             inputs,
-            outputs,
+            outputs: outputs.to_vec(),
             workload: ProviderWorkload {
                 elements: elements.and_then(|value| u64::try_from(value).ok()),
                 flops: None,

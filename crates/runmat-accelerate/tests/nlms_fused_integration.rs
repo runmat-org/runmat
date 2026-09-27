@@ -383,7 +383,8 @@ fn nlms_two_fused_reductions_integration() {
             placement: None,
             runtime: None,
         };
-        let e_val = execute_elementwise(req).expect("fused elementwise sub");
+        let e_val =
+            futures::executor::block_on(execute_elementwise(req)).expect("fused elementwise sub");
         match e_val.final_value {
             Value::GpuTensor(h) => h,
             _ => panic!("expected GPU tensor for e"),

@@ -40,7 +40,7 @@ enum VarKey {
 
 impl<'a> GraphBuilder<'a> {
     fn new(instructions: &'a [Instr], var_types: &'a [Type]) -> Self {
-        let builtin_cache = builtin_functions()
+        let mut builtin_cache: HashMap<_, _> = builtin_functions()
             .iter()
             .map(|func| {
                 let name = func.name.to_ascii_lowercase();
@@ -60,6 +60,32 @@ impl<'a> GraphBuilder<'a> {
                 (name, BuiltinInfo { category, tags })
             })
             .collect();
+        // Canonical placement and selected expression declarations supersede
+        // legacy AccelTags. Inference categories do not authorize fusion.
+        for entry in runmat_builtins::builtin_catalog_entries() {
+            let mut info = BuiltinInfo {
+                category: AccelOpCategory::Other,
+                tags: Vec::new(),
+            };
+            if entry.placement.fusion == runmat_builtins::BuiltinFusionPolicy::Candidate {
+                if let [binding] = entry.bindings {
+                    if let Some(spec) =
+                        runmat_runtime::builtins::common::spec::canonical_fusion_spec(
+                            entry.binding_identity(binding),
+                        )
+                    {
+                        if spec.elementwise.is_some() {
+                            info.category = AccelOpCategory::Elementwise;
+                            info.tags.push(AccelGraphTag::Elementwise);
+                        } else if spec.reduction.is_some() {
+                            info.category = AccelOpCategory::Reduction;
+                            info.tags.push(AccelGraphTag::Reduction);
+                        }
+                    }
+                }
+            }
+            builtin_cache.insert(entry.identity.name.to_ascii_lowercase(), info);
+        }
         Self {
             instructions,
             var_types,

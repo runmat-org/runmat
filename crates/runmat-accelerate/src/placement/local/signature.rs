@@ -3,6 +3,17 @@ use super::super::residency::ResidencySummary;
 use runmat_accelerate_api::ProviderCostQuery;
 use runmat_execution::{CandidatePreparationState, Digest, PlacementResourceSnapshot};
 
+pub(super) fn with_semantic_identity(facts: Digest, semantic: Option<Digest>) -> Digest {
+    let Some(semantic) = semantic else {
+        return facts;
+    };
+    let mut bytes = Vec::with_capacity(96);
+    bytes.extend_from_slice(b"runmat-local-typed-program-v1");
+    bytes.extend_from_slice(facts.bytes());
+    bytes.extend_from_slice(semantic.bytes());
+    Digest::sha256(bytes)
+}
+
 pub(super) fn runtime_facts(
     cost: &ProviderCostQuery,
     cpu_preparation: CandidatePreparationState,
@@ -33,6 +44,23 @@ mod tests {
         ProviderFeasibilityQuery, ProviderOperationFamily, ProviderOperationIdentity,
         ProviderWorkload,
     };
+
+    #[test]
+    fn semantic_identity_extends_without_erasing_existing_argument_facts() {
+        let first = Digest::sha256(b"first argument facts");
+        let second = Digest::sha256(b"second argument facts");
+        let direct = Digest::sha256(b"double operation");
+        let rounded = Digest::sha256(b"single intermediate then double operation");
+        assert_eq!(with_semantic_identity(first, None), first);
+        assert_ne!(
+            with_semantic_identity(first, Some(direct)),
+            with_semantic_identity(first, Some(rounded))
+        );
+        assert_ne!(
+            with_semantic_identity(first, Some(direct)),
+            with_semantic_identity(second, Some(direct))
+        );
+    }
 
     #[test]
     fn preparation_and_materialization_do_not_share_feedback_series() {

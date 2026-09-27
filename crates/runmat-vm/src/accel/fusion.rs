@@ -492,13 +492,13 @@ pub fn write_elementwise_materialized_stores(
     }
 }
 
-pub fn execute_fusion_elementwise(
+pub async fn execute_fusion_elementwise(
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
     vars: &mut Vec<Value>,
     context: &mut ExecutionContext,
 ) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
-    match execute_elementwise_placed(request) {
+    match execute_elementwise_placed(request).await {
         Ok(FusionExecutionOutcome::Executed(result)) => {
             write_elementwise_materialized_stores(result.materialized_stores, vars, context);
             stack_guard.commit();
@@ -1113,7 +1113,7 @@ pub async fn try_execute_fusion_group(
         plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
-        execute_fusion_elementwise(request, stack_guard, vars, context)
+        execute_fusion_elementwise(request, stack_guard, vars, context).await
     } else if plan.group.kind.is_reduction() {
         execute_fusion_reduction(
             plan,

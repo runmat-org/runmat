@@ -1,5 +1,8 @@
-use super::{builtin_fusion_specs, BuiltinFusionSpec};
-use runmat_builtins::{builtin_catalog_entry_by_name, BuiltinBindingIdentity};
+use super::{builtin_fusion_spec_registrations, BuiltinFusionSpec};
+use runmat_builtins::{
+    builtin_catalog_entry_by_name, builtin_implementation_provenance, BuiltinBindingIdentity,
+    BuiltinImplementationAuthority,
+};
 
 /// Resolve a fusion declaration for an already selected canonical binding.
 ///
@@ -7,8 +10,9 @@ use runmat_builtins::{builtin_catalog_entry_by_name, BuiltinBindingIdentity};
 /// therefore authorize only an unambiguous, single-binding catalog entry. A
 /// future multi-variant owner must declare variant-specific fusion semantics
 /// before it can use this boundary. Duplicate declarations fail closed.
-/// Physical declaration provenance remains checked by the migration inventory;
-/// this lookup is not a replacement for that whole-registry validation.
+/// The selected binding's compiled implementation provenance is the join key.
+/// A spec's textual name is checked for consistency, never used to select an
+/// implementation. Whole-registry validation remains the inventory's owner.
 pub fn canonical_fusion_spec(
     identity: BuiltinBindingIdentity,
 ) -> Option<&'static BuiltinFusionSpec> {
@@ -19,9 +23,23 @@ pub fn canonical_fusion_spec(
     if entry.binding_identity(binding) != identity {
         return None;
     }
-    let mut candidates = builtin_fusion_specs().filter(|spec| spec.name == identity.builtin.name);
-    let spec = candidates.next()?;
-    candidates.next().is_none().then_some(spec)
+    let provenance = builtin_implementation_provenance();
+    let mut implementations = provenance.iter().filter(|implementation| {
+        implementation.authority == BuiltinImplementationAuthority::CanonicalBinding
+            && implementation.name == identity.builtin.name
+            && implementation.binding_variant == Some(identity.variant)
+    });
+    let implementation = implementations.next()?;
+    if implementations.next().is_some() {
+        return None;
+    }
+    let mut candidates = builtin_fusion_spec_registrations()
+        .filter(|spec| spec.builtin_path == implementation.builtin_path);
+    let registration = candidates.next()?;
+    if candidates.next().is_some() || registration.spec.name != identity.builtin.name {
+        return None;
+    }
+    Some(registration.spec)
 }
 
 #[cfg(test)]

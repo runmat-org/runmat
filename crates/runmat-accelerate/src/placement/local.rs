@@ -17,6 +17,9 @@ mod signature;
 
 pub(crate) struct LocalPlacementRequest<'a> {
     pub(crate) operation: &'a str,
+    /// Optional deterministic identity of the selected typed program. This
+    /// augments, rather than replaces, argument/resource/preparation facts.
+    pub(crate) semantic_identity: Option<Digest>,
     pub(crate) family: ProviderOperationFamily,
     pub(crate) provider_kind: ExecutionCandidateKind,
     pub(crate) inputs: &'a [&'a Value],
@@ -166,12 +169,15 @@ pub(crate) fn plan_local(
                 let signature = PlacementSignature {
                     region: cpu.region,
                     operation: request.operation.into(),
-                    runtime_facts: signature::runtime_facts(
-                        &cost_query,
-                        cpu.preparation,
-                        &residency,
-                        &resources,
-                        host_resources.epoch,
+                    runtime_facts: signature::with_semantic_identity(
+                        signature::runtime_facts(
+                            &cost_query,
+                            cpu.preparation,
+                            &residency,
+                            &resources,
+                            host_resources.epoch,
+                        ),
+                        request.semantic_identity,
                     ),
                     revision: PlacementRevision {
                         program: runtime.program_revision().cloned(),

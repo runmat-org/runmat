@@ -1301,6 +1301,7 @@ impl NativeAutoOffload {
             self.provider,
             LocalPlacementRequest {
                 operation,
+                semantic_identity: None,
                 family,
                 provider_kind,
                 inputs: values,

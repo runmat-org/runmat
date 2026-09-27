@@ -90,9 +90,9 @@ pub fn select_resident_output_source(
     Ok(selected.map(|(handle, _)| handle))
 }
 
-pub(crate) use runmat_accelerate_api::HandleMetadataRestoreGuard;
 pub use runmat_accelerate_api::{
     restore_handle_metadata, snapshot_handle_metadata, GpuHandleMetadataSnapshot,
+    HandleMetadataRestoreGuard,
 };
 
 pub fn expected_gpu_class_identity(

@@ -19,6 +19,8 @@ use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, Reduction
 use runmat_accelerate_api::CovNormalization;
 
 mod expression;
+pub(crate) mod semantics;
+mod typed_shader;
 
 /// Fusion plans can contain `Value` constants, including GC handles. Keep them
 /// thread-confined so the type system does not imply cross-thread GC safety.
@@ -2952,6 +2954,11 @@ fn builtin_expr(
     scalar_ty: &str,
 ) -> Option<String> {
     if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) {
+        let scalar_ty = match scalar_ty {
+            "f32" => runmat_runtime::builtins::common::spec::ScalarType::F32,
+            "f64" => runmat_runtime::builtins::common::spec::ScalarType::F64,
+            _ => return None,
+        };
         return expression::canonical_expression(entry, inputs, exprs, scalar_ty);
     }
     let func = match name.to_ascii_lowercase().as_str() {

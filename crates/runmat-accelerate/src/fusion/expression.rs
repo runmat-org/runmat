@@ -13,18 +13,13 @@ pub(super) fn canonical_expression(
     entry: &BuiltinCatalogEntry,
     inputs: &[ValueId],
     expressions: &HashMap<ValueId, String>,
-    scalar_type: &str,
+    scalar_ty: ScalarType,
 ) -> Option<String> {
     let [binding] = entry.bindings else {
         return None;
     };
     let spec = canonical_fusion_spec(entry.binding_identity(binding))?;
     let template = spec.elementwise.as_ref()?;
-    let scalar_ty = match scalar_type {
-        "f32" => ScalarType::F32,
-        "f64" => ScalarType::F64,
-        _ => return None,
-    };
     if !template.scalar_precisions.contains(&scalar_ty) {
         return None;
     }
@@ -53,11 +48,11 @@ mod tests {
         let entry = runmat_builtins::builtin_catalog_entry_by_name("single").unwrap();
         let expressions = HashMap::from([(0, "source".to_owned())]);
         assert_eq!(
-            canonical_expression(entry, &[0], &expressions, "f64").as_deref(),
+            canonical_expression(entry, &[0], &expressions, ScalarType::F64).as_deref(),
             Some("f64(f32(source))")
         );
         assert_eq!(
-            canonical_expression(entry, &[0], &expressions, "f32").as_deref(),
+            canonical_expression(entry, &[0], &expressions, ScalarType::F32).as_deref(),
             Some("source")
         );
     }

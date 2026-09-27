@@ -2939,12 +2939,12 @@ fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
         );
 
         let x = Tensor::new(vec![-2.5, -1.25, 0.5], vec![1, 3]).expect("tensor x");
-        let result = execute_elementwise(FusionExecutionRequest {
+        let result = block_on(execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(2.0)],
             placement: None,
             runtime: None,
-        })
+        }))
         .expect("direct fusion execution");
 
         match result.final_value {
@@ -2977,12 +2977,12 @@ fn direct_execution_of_inverse_hyperbolic_group_returns_gpu_tensor() {
             .expect("supported elementwise fusion group");
 
         let x = Tensor::new(vec![0.25, 0.5, 0.75], vec![1, 3]).expect("tensor x");
-        let result = execute_elementwise(FusionExecutionRequest {
+        let result = block_on(execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(1.0)],
             placement: None,
             runtime: None,
-        })
+        }))
         .expect("direct fusion execution");
 
         match result.final_value {
@@ -3015,12 +3015,12 @@ fn direct_execution_of_mod_and_rem_group_returns_gpu_tensor() {
             .expect("supported elementwise fusion group");
 
         let x = Tensor::new(vec![-5.5, -1.25, 5.5], vec![1, 3]).expect("tensor x");
-        let result = execute_elementwise(FusionExecutionRequest {
+        let result = block_on(execute_elementwise(FusionExecutionRequest {
             plan: group_plan,
             inputs: vec![Value::Tensor(x), Value::Num(2.0), Value::Num(2.0)],
             placement: None,
             runtime: None,
-        })
+        }))
         .expect("direct fusion execution");
 
         match result.final_value {
