@@ -24,12 +24,14 @@ async fn missing_aliases_match_nan_flags() {
 
 #[tokio::test]
 async fn extra_outputs_require_extensions_before_provider_access() {
-    let providerless = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 1],
-        device_id: u32::MAX - 392,
-        buffer_id: u64::MAX - 392,
-        descriptor: Default::default(),
-    });
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident reduction admission fixture");
+    let providerless = Value::GpuTensor(allocation.handle.clone());
     {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let _outputs = crate::output_count::push_output_count(Some(3));
@@ -45,6 +47,15 @@ async fn extra_outputs_require_extensions_before_provider_access() {
         .await
         .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:bounds:InvalidArgument"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    drop(error);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[tokio::test]

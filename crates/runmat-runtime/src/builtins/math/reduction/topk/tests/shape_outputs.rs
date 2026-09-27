@@ -26,12 +26,14 @@ async fn zero_k_on_trailing_dimension_creates_an_empty_axis() {
 
 #[tokio::test]
 async fn topk_output_and_argument_preflight_precedes_provider_lookup() {
-    let providerless = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 1],
-        device_id: u32::MAX - 393,
-        buffer_id: u64::MAX - 393,
-        descriptor: Default::default(),
-    });
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident reduction admission fixture");
+    let providerless = Value::GpuTensor(allocation.handle.clone());
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for kind in [TopKKind::Max, TopKKind::Min] {
         {
@@ -52,7 +54,16 @@ async fn topk_output_and_argument_preflight_precedes_provider_lookup() {
                 .await
                 .is_err()
         );
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
     }
+    drop(providerless);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[tokio::test]

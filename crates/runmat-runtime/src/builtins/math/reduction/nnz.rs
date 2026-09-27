@@ -993,18 +993,29 @@ pub(crate) mod tests {
     #[test]
     fn nnz_dimension_extension_gates_before_provider_access() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let source = Value::GpuTensor(GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_419_008,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident reduction admission fixture");
+        let source = Value::GpuTensor(allocation.handle.clone());
         let error = block_on(nnz_builtin(source, vec![Value::Int(IntValue::U8(1))]))
             .expect_err("undocumented dimension overload must gate");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:NnzDimensionExtension")
         );
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        drop(error);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
