@@ -838,6 +838,9 @@ fn solve_polyfit(
         validate_weights(w)?;
     }
 
+    // Structural geometry is checked before numerical payload validation,
+    // matching resident preflight and the provider's real-data adapter.
+    let geometry = SolverGeometry::new(x_data.len(), degree)?;
     let mean = x_data.iter().sum::<f64>() / x_data.len() as f64;
     if !mean.is_finite() {
         return Err(PolyfitKernelError::input(
@@ -853,7 +856,6 @@ fn solve_polyfit(
             )));
         }
     }
-    let geometry = SolverGeometry::new(x_data.len(), degree)?;
     let scaled: Vec<f64> = x_data.iter().map(|&v| (v - mean) / scale).collect();
     let mut rhs = y_data.to_vec();
     if let Some(w) = weights {

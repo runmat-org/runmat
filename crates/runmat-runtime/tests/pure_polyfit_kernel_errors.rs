@@ -126,7 +126,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
     let x = provider
         .inner
         .upload(&runmat_accelerate_api::HostTensorView {
-            data: &[0., 1.],
+            data: &[f64::NAN, 1.],
             shape: &[2, 1],
         })
         .unwrap();
@@ -137,6 +137,11 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
             shape: &[2, 1],
         })
         .unwrap();
+    let combined: runmat_runtime::RuntimeError =
+        polyfit_host_real_for_provider(&[f64::NAN, 1.], &[1., 3.], usize::MAX, None)
+            .err()
+            .unwrap()
+            .into();
     for resident in [false, true] {
         let args = if resident {
             vec![
@@ -146,7 +151,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
             ]
         } else {
             vec![
-                Value::Tensor(Tensor::new(vec![0., 1.], vec![2, 1]).unwrap()),
+                Value::Tensor(Tensor::new(vec![f64::NAN, 1.], vec![2, 1]).unwrap()),
                 Value::Tensor(Tensor::new(vec![1., 3.], vec![2, 1]).unwrap()),
                 Value::Int(runmat_value::IntValue::U64(usize::MAX as u64)),
             ]
@@ -155,6 +160,7 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
             futures::executor::block_on(runmat_runtime::call_builtin_async("polyfit", &args))
                 .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:polyfit:InvalidArgument"));
+        assert_eq!(error.message(), combined.message());
         let mut source: &(dyn Error + 'static) = &error;
         while !source.is::<PolyfitKernelError>() {
             source = source.source().expect("typed geometry failure");
@@ -163,6 +169,20 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
     }
     x.allocation_lease().validate_live().unwrap();
     y.allocation_lease().validate_live().unwrap();
+    // Existing structural and weight diagnostics retain precedence in the
+    // pure adapter; geometry only precedes numerical sample validation.
+    let mismatch = polyfit_host_real_for_provider(&[0., 1.], &[1.], usize::MAX, None)
+        .err()
+        .unwrap();
+    assert_eq!(
+        mismatch.to_string(),
+        "polyfit: X and Y vectors must be the same length"
+    );
+    let weights =
+        polyfit_host_real_for_provider(&[0., 1.], &[1., 3.], usize::MAX, Some(&[-1., 1.]))
+            .err()
+            .unwrap();
+    assert_eq!(weights.to_string(), "polyfit: weights must be non-negative");
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
