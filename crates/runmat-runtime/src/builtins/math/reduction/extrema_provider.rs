@@ -3,10 +3,11 @@
 //! `None` means a typed capability rejection, never a provider execution error.
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_value::{Tensor, Value};
 
 mod indices;
+mod reduction;
 
 /// Single has no immediate scalar `Value` representation. Its scalar extrema
 /// must use the same typed storage selection as its nonscalar extrema, not the
@@ -105,13 +106,18 @@ impl ExtremaKind {
         self,
         input: &GpuTensorHandle,
         dimension: usize,
-    ) -> BuiltinResult<Option<ReduceDimResult>> {
+    ) -> BuiltinResult<Option<(Value, Value)>> {
         let provider = self.owner(input)?;
         let result = match self {
             Self::Min => provider.reduce_min_dim(input, dimension).await,
             Self::Max => provider.reduce_max_dim(input, dimension).await,
         };
-        self.optional("dimensional extrema reduction", result)
+        let Some(result) = self.optional("dimensional extrema reduction", result)? else {
+            return Ok(None);
+        };
+        self.adopt_reduction_result(provider, input, dimension, result)
+            .await
+            .map(Some)
     }
 
     pub(super) fn pair_owner(

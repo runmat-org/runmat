@@ -1,7 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelDownloadFuture, AccelProviderFuture, GpuTensorStorage,
-    HostTensorOwned, HostTensorView, NumericElementType, ThreadProviderGuard,
+    HostTensorOwned, HostTensorView, NumericElementType, ReduceDimResult, ThreadProviderGuard,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 

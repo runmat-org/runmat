@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -1143,10 +1143,7 @@ async fn reduction_max_gpu(
     Ok(super::extrema_provider::ExtremaKind::Max
         .reduce_dim(&handle, zero_based)
         .await?
-        .map(|ReduceDimResult { values, indices }| MaxEvaluation {
-            values: Value::GpuTensor(values),
-            indices: Value::GpuTensor(indices),
-        }))
+        .map(|(values, indices)| MaxEvaluation { values, indices }))
 }
 
 fn reduction_max_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MaxEvaluation> {

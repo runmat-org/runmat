@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
-use runmat_accelerate_api::{GpuTensorHandle, ReduceDimResult};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
@@ -914,10 +914,7 @@ async fn reduction_min_gpu(
     Ok(super::extrema_provider::ExtremaKind::Min
         .reduce_dim(&handle, zero_based)
         .await?
-        .map(|ReduceDimResult { values, indices }| MinEvaluation {
-            values: Value::GpuTensor(values),
-            indices: Value::GpuTensor(indices),
-        }))
+        .map(|(values, indices)| MinEvaluation { values, indices }))
 }
 
 fn reduction_min_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MinEvaluation> {
