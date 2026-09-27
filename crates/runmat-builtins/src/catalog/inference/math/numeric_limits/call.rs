@@ -17,7 +17,7 @@ pub(in crate::catalog::inference) fn infer(
     match request.arguments.as_slice() {
         [] => {}
         [class] => match request.literals.literal_args.first().and_then(literal_text) {
-            Some(name) => match NumericClass::from_class_name(&name) {
+            Some(name) => match NumericClass::from_class_name(name.trim()) {
                 Some(class) if super::output::accepts(rule, class) => {
                     output = super::output::scalar(class, runmat_types::NumericDomain::Real);
                 }

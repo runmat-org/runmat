@@ -24,7 +24,13 @@ pub(super) fn accepts(rule: NumericLimitRule, class: NumericClass) -> bool {
 }
 
 pub(super) fn scalar(class: NumericClass, domain: NumericDomain) -> ValueFact {
-    ValueFact::scalar(ValueKindFact::Numeric(NumericFact { class, domain }))
+    let mut output = ValueFact::scalar(ValueKindFact::Numeric(NumericFact { class, domain }));
+    if class == NumericClass::Single
+        || (class.integer_class().is_some() && domain == NumericDomain::Complex)
+    {
+        output.storage = StorageFact::Dense;
+    }
+    output
 }
 
 pub(super) fn like(
@@ -56,10 +62,13 @@ pub(super) fn like(
     }
 
     let mut output = scalar(numeric.class, numeric.domain);
-    output.storage = if matches!(prototype.storage, StorageFact::Sparse) {
-        StorageFact::Sparse
-    } else {
-        StorageFact::Scalar
+    output.storage = match (&prototype.residency, prototype.storage) {
+        (runmat_types::ResidencyFact::Device { .. }, _) => StorageFact::Opaque,
+        (runmat_types::ResidencyFact::Host, StorageFact::Sparse) => StorageFact::Sparse,
+        (runmat_types::ResidencyFact::Host, StorageFact::Scalar | StorageFact::Dense) => {
+            output.storage
+        }
+        _ => StorageFact::Unknown,
     };
     output.residency = prototype.residency.clone();
     output

@@ -3,6 +3,7 @@ mod integer;
 mod provider;
 mod provider_rejection;
 mod admission;
+mod facts;
 
 use runmat_value::Value;
 

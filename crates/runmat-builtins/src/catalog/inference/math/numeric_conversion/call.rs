@@ -144,6 +144,16 @@ fn apply_like_prototype_residency(
     prototype: &ValueFact,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) {
+    if prototype.storage == runmat_types::StorageFact::Sparse {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-NUMERIC-CONVERSION-PROTOTYPE",
+            "sparse numeric conversion prototypes are not supported",
+            2,
+        ));
+        output.residency = ResidencyFact::Unknown;
+        output.storage = runmat_types::StorageFact::Unknown;
+        return;
+    }
     match prototype.kind {
         ValueKindFact::Numeric(NumericFact {
             domain: NumericDomain::Real,
@@ -170,12 +180,20 @@ fn apply_like_prototype_residency(
             domain: NumericDomain::Complex,
             ..
         }) => {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-NUMERIC-CONVERSION-PROTOTYPE",
-                "complex numeric conversion prototypes are not supported",
-                2,
-            ));
-            output.residency = ResidencyFact::Unknown;
+            output.residency = match &prototype.residency {
+                ResidencyFact::Device { provider } => ResidencyFact::Device {
+                    provider: provider.clone(),
+                },
+                ResidencyFact::Host | ResidencyFact::Remote { .. } => {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-NUMERIC-CONVERSION-PROTOTYPE",
+                        "complex host numeric conversion prototypes are not supported",
+                        2,
+                    ));
+                    ResidencyFact::Unknown
+                }
+                ResidencyFact::Unknown => ResidencyFact::Unknown,
+            };
         }
         ValueKindFact::Unknown => output.residency = ResidencyFact::Unknown,
         _ => {
@@ -187,4 +205,9 @@ fn apply_like_prototype_residency(
             output.residency = ResidencyFact::Unknown;
         }
     }
+    output.storage = match &output.residency {
+        ResidencyFact::Device { .. } => runmat_types::StorageFact::Opaque,
+        ResidencyFact::Host => output.storage,
+        _ => runmat_types::StorageFact::Unknown,
+    };
 }

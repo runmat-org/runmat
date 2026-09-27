@@ -15,6 +15,9 @@ pub fn infer_numeric_conversion(source: &ValueFact, target: NumericClass) -> Fac
         ValueKindFact::Logical | ValueKindFact::Character | ValueKindFact::Symbolic => {
             Some(NumericDomain::Real)
         }
+        ValueKindFact::String if matches!(target, NumericClass::Double | NumericClass::Single) => {
+            Some(NumericDomain::Real)
+        }
         ValueKindFact::Unknown => None,
         _ => {
             return FactInference {
@@ -110,6 +113,27 @@ fn conversion_storage(
 mod tests {
     use super::*;
     use crate::{CertaintyFact, DimensionFact, ResidencyFact, ShapeFact};
+
+    #[test]
+    fn string_conversion_is_supported_only_for_floating_targets() {
+        let source = ValueFact::scalar(ValueKindFact::String);
+        for target in [NumericClass::Double, NumericClass::Single] {
+            let inferred = infer_numeric_conversion(&source, target);
+            assert!(inferred.diagnostics.is_empty());
+            assert_eq!(inferred.fact.numeric().unwrap().domain, NumericDomain::Real);
+            assert_eq!(
+                inferred.fact.storage,
+                if target == NumericClass::Single {
+                    StorageFact::Dense
+                } else {
+                    StorageFact::Scalar
+                }
+            );
+        }
+        assert!(!infer_numeric_conversion(&source, NumericClass::Int32)
+            .diagnostics
+            .is_empty());
+    }
 
     #[test]
     fn numeric_conversion_preserves_shape_domain_sparse_storage_and_residency() {

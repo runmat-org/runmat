@@ -78,6 +78,16 @@ pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let result = value_from_exact_integers(values, plan.output_shape().to_vec(), class)
         .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))?;
+    let result = match result {
+        Value::Int(value) if output_source.is_some() => Value::Tensor(
+            Tensor::new_integer(
+                runmat_value::IntegerStorage::from_scalar(value),
+                plan.output_shape().to_vec(),
+            )
+            .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))?,
+        ),
+        other => other,
+    };
     let protected: Vec<_> = borrowed.iter().collect();
     resident_output::restore_to_source_provider_protecting(
         result,

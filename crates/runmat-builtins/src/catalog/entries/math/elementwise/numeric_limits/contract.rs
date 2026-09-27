@@ -52,7 +52,7 @@ pub const NUMERIC_LIMIT_ERROR_INVALID_CLASS: BuiltinErrorDescriptor = BuiltinErr
 pub const NUMERIC_LIMIT_ERROR_INVALID_SYNTAX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NUMERIC_LIMITS.INVALID_SYNTAX",
     identifier: Some("RunMat:numericLimits:InvalidSyntax"),
-    when: "The arguments do not match a documented type-name or like-prototype form.",
+    when: "The arguments do not match a documented type-name or like-prototype form, or more than one output is requested.",
     message: "numeric limit: invalid syntax",
 };
 pub const NUMERIC_LIMIT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

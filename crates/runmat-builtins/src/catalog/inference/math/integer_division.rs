@@ -64,6 +64,11 @@ pub(in crate::catalog::inference) fn infer(
     } else {
         runmat_types::ResidencyFact::Unknown
     };
+    output.storage = match &output.residency {
+        runmat_types::ResidencyFact::Device { .. } => StorageFact::Opaque,
+        runmat_types::ResidencyFact::Host => output.storage,
+        _ => StorageFact::Unknown,
+    };
     finish_fixed(entry, request, output, diagnostics)
 }
 

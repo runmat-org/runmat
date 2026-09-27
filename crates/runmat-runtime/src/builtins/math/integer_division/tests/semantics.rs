@@ -193,6 +193,30 @@ fn idivide_preserves_exact_supported_gpu_residency() {
     });
 }
 
+#[test]
+fn resident_singleton_retains_full_nd_shape() {
+    test_support::with_test_provider(|provider| {
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX - 1]), vec![1, 1, 1]).unwrap();
+        let source = gpu_helpers::upload_tensor(provider, &input).unwrap();
+        let output = block_on(idivide_builtin(vec![
+            Value::GpuTensor(source.clone()),
+            Value::Int(IntValue::U64(2)),
+        ]))
+        .unwrap();
+        let Value::GpuTensor(output) = output else {
+            panic!("resident singleton");
+        };
+        assert_eq!(output.shape, vec![1, 1, 1]);
+        assert_eq!(
+            block_on(provider.download_integer(&output)).unwrap().data,
+            runmat_accelerate_api::HostIntegerDataOwned::U64(vec![(u64::MAX - 1) / 2])
+        );
+        provider.free(&source).unwrap();
+        provider.free(&output).unwrap();
+    });
+}
+
 #[cfg(feature = "wgpu")]
 #[test]
 fn idivide_preserves_actual_wgpu_residency() {

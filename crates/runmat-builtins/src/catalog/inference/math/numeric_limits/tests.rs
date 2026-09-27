@@ -37,6 +37,14 @@ fn class_names_determine_scalar_output_class() {
             })
         );
         assert_eq!(inference.outputs[0].shape, ShapeFact::Scalar);
+        assert_eq!(
+            inference.outputs[0].storage,
+            if class == NumericClass::Single {
+                StorageFact::Dense
+            } else {
+                StorageFact::Scalar
+            }
+        );
     }
 }
 
