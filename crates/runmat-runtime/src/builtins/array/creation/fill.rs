@@ -2,7 +2,7 @@
 //!
 //! The implementation mirrors the modern RunMat builtin blueprint with GPU-aware semantics.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
@@ -243,7 +243,7 @@ pub const CREATE_ARRAY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
 )]
 async fn create_array_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedFill::parse_create_array(args).await?;
-    build_output(parsed).map_err(Into::into)
+    build_output(parsed)
 }
 
 // Retained as a source-local regression harness for the constant-fill kernel
@@ -255,7 +255,7 @@ async fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         .map_err(|e| format!("createArray: {e}"))?;
     let scalar = FillScalar::from_value(&gathered_value)?;
     let parsed = ParsedFill::parse(scalar, rest).await?;
-    build_output(parsed).map_err(Into::into)
+    build_output(parsed)
 }
 
 struct ParsedFill {
@@ -711,7 +711,7 @@ fn template_from_fill_value(value: &Value, fill: &FillScalar) -> OutputTemplate 
     }
 }
 
-fn build_output(parsed: ParsedFill) -> Result<Value, String> {
+fn build_output(parsed: ParsedFill) -> crate::BuiltinResult<Value> {
     let residency = parsed.residency;
     let output = match parsed.template {
         OutputTemplate::Double
@@ -746,7 +746,7 @@ fn build_output(parsed: ParsedFill) -> Result<Value, String> {
         OutputTemplate::Integer(storage) => {
             fill_integer_like(&parsed.fill, &parsed.shape, &storage)
         }
-        OutputTemplate::Like(proto) => fill_like(&parsed.fill, &parsed.shape, &proto),
+        OutputTemplate::Like(proto) => Ok(fill_like(&parsed.fill, &parsed.shape, &proto)?),
     }?;
     match residency {
         Some(owner) => upload_created_output(output, &parsed.shape, &owner),
@@ -758,62 +758,72 @@ fn upload_created_output(
     output: Value,
     shape: &[usize],
     owner: &GpuTensorHandle,
-) -> Result<Value, String> {
-    let provider = runmat_accelerate_api::provider_for_handle(owner).ok_or_else(|| {
-        "createArray: GPU FillValue has no registered owning provider".to_string()
-    })?;
-    let handle = match output {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?,
+) -> crate::BuiltinResult<Value> {
+    let provider = gpu_helpers::exact_provider_for_handle(owner)
+        .ok_or("createArray: GPU FillValue has no registered owning provider")?;
+    let mut handle = match output {
+        Value::Tensor(tensor) => {
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[owner])?
+        }
         Value::Num(value) => {
-            let tensor = Tensor::new(vec![value], shape.to_vec())
-                .map_err(|error| format!("createArray: {error}"))?;
-            gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?
+            let tensor = Tensor::new(vec![value], shape.to_vec())?;
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[owner])?
         }
         Value::Int(value) => {
-            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), shape.to_vec())
-                .map_err(|error| format!("createArray: {error}"))?;
-            gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), shape.to_vec())?;
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[owner])?
         }
         Value::LogicalArray(array) => {
-            let data = array
-                .data
-                .iter()
-                .map(|value| if *value == 0 { 0.0 } else { 1.0 })
-                .collect();
-            let tensor =
-                Tensor::new(data, array.shape).map_err(|error| format!("createArray: {error}"))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?;
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-            handle
+            upload_logical_fill_value(provider, &array.data, &array.shape, owner)?
         }
         Value::Bool(value) => {
-            let tensor = Tensor::new(vec![if value { 1.0 } else { 0.0 }], shape.to_vec())
-                .map_err(|error| format!("createArray: {error}"))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?;
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-            handle
+            upload_logical_fill_value(provider, &[u8::from(value)], shape, owner)?
         }
-        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
-            .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?,
+        Value::ComplexTensor(tensor) => {
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[owner])?
+        }
         Value::Complex(real, imag) => {
-            let tensor = ComplexTensor::new(vec![(real, imag)], shape.to_vec())
-                .map_err(|error| format!("createArray: {error}"))?;
-            gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU FillValue upload failed: {error}"))?
+            let tensor = ComplexTensor::new(vec![(real, imag)], shape.to_vec())?;
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[owner])?
         }
         other => {
             return Err(format!(
                 "createArray: cannot preserve GPU FillValue residency for {other:?}"
-            ));
+            )
+            .into())
         }
     };
-    validate_like_gpu_owner(owner, &handle, shape, provider).map_err(|error| error.to_string())?;
-    Ok(Value::GpuTensor(handle))
+    if handle.shape() != shape
+        || handle.shares_allocation_with(owner)
+        || !gpu_helpers::exact_provider_for_handle(&handle)
+            .is_some_and(|actual| std::ptr::eq(actual, provider))
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            handle,
+            crate::RuntimeError::from("createArray: invalid uploaded output owner, shape or alias"),
+        ));
+    }
+    gpu_helpers::propagate_output_provenance(&mut handle, [owner])?;
+    gpu_helpers::resident_gpu_value(handle)
+}
+
+fn upload_logical_fill_value(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    data: &[u8],
+    shape: &[usize],
+    owner: &GpuTensorHandle,
+) -> crate::BuiltinResult<GpuTensorHandle> {
+    runmat_accelerate_api::upload_logical_protecting(
+        provider,
+        &runmat_accelerate_api::HostLogicalTensorView { data, shape },
+        &[owner],
+    )
+    .map_err(|cause| {
+        crate::build_runtime_error(format!("createArray: logical upload failed: {cause}"))
+            .with_builtin("createArray")
+            .with_source(cause)
+            .build()
+    })
 }
 
 fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorage> {
@@ -865,7 +875,7 @@ fn fill_complex_single(fill: &FillScalar, shape: &[usize]) -> Result<Value, Stri
     .map_err(|error| format!("createArray: {error}"))
 }
 
-fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value, String> {
+fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) if fill.is_complex() => fill_complex(fill, shape),
         Value::LogicalArray(_) | Value::Bool(_) => fill_logical(fill, shape),
@@ -877,7 +887,7 @@ fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value,
             None => fill_complex(fill, shape),
         },
         Value::Complex(_, _) => fill_complex(fill, shape),
-        Value::GpuTensor(handle) => fill_like_gpu(fill, shape, handle),
+        Value::GpuTensor(handle) => return fill_like_gpu(fill, shape, handle),
         Value::Tensor(tensor) => match tensor.integer_storage() {
             Some(storage) if fill.is_complex() => {
                 let prototype =
@@ -916,6 +926,7 @@ fn fill_like(fill: &FillScalar, shape: &[usize], proto: &Value) -> Result<Value,
             other
         )),
     }
+    .map_err(Into::into)
 }
 
 fn fill_integer_like(
@@ -966,109 +977,79 @@ fn fill_like_gpu(
     fill: &FillScalar,
     shape: &[usize],
     prototype: &GpuTensorHandle,
-) -> Result<Value, String> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        let active_owner = runmat_accelerate_api::provider()
-            .is_some_and(|provider| provider.device_id() == prototype.device_id);
-        if prototype.device_id != 0 && !active_owner {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
-    if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(prototype) {
-        let prototype_storage = integer_storage_prototype(integer_type);
-        if fill.is_complex()
-            || runmat_accelerate_api::handle_storage(prototype)
-                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-        {
-            let component = prototype_storage;
-            let complex_prototype =
-                IntegerComplexStorage::new(component.zeros_like(0), component.zeros_like(0))?;
-            let Value::ComplexTensor(tensor) =
-                fill_complex_integer_like(fill, shape, &complex_prototype)?
-            else {
-                unreachable!("complex integer fill produces a complex tensor")
-            };
-            let provider =
-                runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-                    "createArray: GPU Like prototype has no registered owning provider".to_string()
-                })?;
-            let uploaded = gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map_err(|error| format!("createArray: GPU Like upload failed: {error}"))?;
-            validate_like_gpu_owner(prototype, &uploaded, shape, provider)
-                .map_err(|error| error.to_string())?;
-            return Ok(Value::GpuTensor(uploaded));
-        }
-        let storage = exact_integer_fill_storage(fill, shape, &prototype_storage)?;
-        let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-            "createArray: GPU Like prototype has no registered owning provider".to_string()
-        })?;
-        let view = integer_tensor_view(&storage, shape);
-        return provider
-            .upload_integer(&view)
-            .and_then(|output| {
-                validate_like_gpu_owner(prototype, &output, shape, provider)?;
-                Ok(Value::GpuTensor(output))
-            })
-            .map_err(|e| {
-                format!("fill: provider cannot preserve native integer gpuArray output: {e}")
-            });
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-        "createArray: GPU Like prototype has no registered owning provider".to_string()
-    })?;
-    let prototype_is_complex = runmat_accelerate_api::handle_storage(prototype)
-        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-    if fill.is_complex() || prototype_is_complex {
-        let tensor = make_complex_tensor(fill, shape)?;
-        if let Ok(uploaded) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
-            validate_like_gpu_owner(prototype, &uploaded, shape, provider)
-                .map_err(|error| error.to_string())?;
-            return Ok(Value::GpuTensor(uploaded));
-        }
-        return Err(
-            "createArray: prototype owner could not upload complex GPU Like output".to_string(),
-        );
-    }
-    let value = fill.as_real()?;
-    let attempt = if prototype.shape() == shape {
-        provider.fill_like(prototype, value)
+) -> crate::BuiltinResult<Value> {
+    use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+    let provider = gpu_helpers::exact_provider_for_handle(prototype)
+        .ok_or("createArray: GPU Like prototype has no registered owning provider")?;
+    let logical = prototype.view().is_logical() && !fill.is_complex();
+    let complex = !logical
+        && (fill.is_complex()
+            || prototype.physical().storage() == GpuTensorStorage::ComplexInterleaved);
+    let integer = if prototype.view().is_logical() {
+        None
     } else {
-        provider.fill(shape, value)
+        runmat_accelerate_api::handle_integer_type(prototype)
     };
-    if let Ok(gpu) = attempt {
-        if validate_like_gpu_owner(prototype, &gpu, shape, provider).is_ok() {
-            return Ok(Value::GpuTensor(gpu));
+    let precision = if prototype.view().is_logical() {
+        Some(ProviderPrecision::F64)
+    } else {
+        runmat_accelerate_api::handle_precision(prototype)
+    };
+    let attempt = if logical {
+        Some(provider.logical_fill(shape, fill.as_bool()))
+    } else if !complex && integer.is_none() && precision == Some(provider.precision()) {
+        let value = fill.as_real()?;
+        Some(if prototype.shape() == shape {
+            provider.fill_like(prototype, value)
+        } else {
+            provider.fill(shape, value)
+        })
+    } else {
+        None
+    };
+    if let Some(attempt) = attempt {
+        match attempt {
+            Ok(output) => {
+                let mut output = crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+                    "createArray", provider, output, shape, GpuTensorStorage::Real,
+                    if logical { None } else { precision }, None, logical, &[prototype],
+                )?;
+                gpu_helpers::propagate_output_provenance(&mut output, [prototype])?;
+                return gpu_helpers::resident_gpu_value(output);
+            }
+            Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {}
+            Err(cause) => {
+                return Err(crate::build_runtime_error(format!(
+                    "createArray: provider fill failed: {cause}"
+                ))
+                .with_builtin("createArray")
+                .with_source(cause)
+                .build())
+            }
         }
     }
-
-    let tensor = make_real_tensor_from_value(value, shape)?;
-    if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &tensor) {
-        validate_like_gpu_owner(prototype, &uploaded, shape, provider)
-            .map_err(|error| error.to_string())?;
-        return Ok(Value::GpuTensor(uploaded));
-    }
-    Err("createArray: prototype owner could not upload GPU Like output".to_string())
-}
-
-fn validate_like_gpu_owner(
-    prototype: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    expected_shape: &[usize],
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) -> anyhow::Result<()> {
-    if output.device_id() != prototype.device_id()
-        || output.shape() != expected_shape
-        || !runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-    {
-        let output_owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(provider);
-        let _ = output_owner.free(output);
-        anyhow::bail!("createArray: GPU Like output did not remain on the prototype owner/device");
-    }
-    Ok(())
+    let host = if logical {
+        fill_logical(fill, shape)?
+    } else if let Some(integer) = integer {
+        let storage = integer_storage_prototype(integer);
+        if complex {
+            let paired = IntegerComplexStorage::new(storage.zeros_like(0), storage.zeros_like(0))?;
+            fill_complex_integer_like(fill, shape, &paired)?
+        } else {
+            fill_integer_like(fill, shape, &storage)?
+        }
+    } else {
+        match (
+            complex,
+            precision.ok_or("createArray: floating prototype is missing precision")?,
+        ) {
+            (true, ProviderPrecision::F32) => fill_complex_single(fill, shape)?,
+            (true, ProviderPrecision::F64) => fill_complex(fill, shape)?,
+            (false, ProviderPrecision::F32) => fill_single(fill, shape)?,
+            (false, ProviderPrecision::F64) => fill_double(fill, shape)?,
+        }
+    };
+    upload_created_output(host, shape, prototype)
 }
 
 fn make_real_tensor(fill: &FillScalar, shape: &[usize]) -> Result<Tensor, String> {
@@ -1129,29 +1110,78 @@ fn integer_storage_prototype(
     }
 }
 
-fn integer_tensor_view<'a>(
-    storage: &'a IntegerStorage,
-    shape: &'a [usize],
-) -> HostIntegerTensorView<'a> {
-    let data = match storage {
-        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-    };
-    HostIntegerTensorView { data, shape }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
+
+    #[test]
+    fn resident_single_like_complex_fill_keeps_single_components() {
+        test_support::with_test_provider(|provider| {
+            let host = Tensor::from_f32(vec![7.0], vec![1, 1]).unwrap();
+            let input = gpu_helpers::upload_tensor(provider, &host).unwrap();
+            let value = fill_like_gpu(&FillScalar::Complex(1.5, -2.25), &[2, 3], &input).unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident output")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                output.physical().element_type(),
+                runmat_accelerate_api::NumericElementType::F32
+            );
+            assert_eq!(
+                output.physical().storage(),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            let Value::ComplexTensor(result) =
+                block_on(gpu_helpers::gather_value_async(&value)).unwrap()
+            else {
+                panic!("complex output")
+            };
+            assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
+            assert_eq!(result.shape, vec![2, 3]);
+            for index in 0..6 {
+                let number = tensor::complex_tensor_value_complex64(&result, index);
+                assert_eq!((number.re, number.im), (1.5, -2.25));
+            }
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(input))
+                    .unwrap()
+                    .as_f32_slice(),
+                Some(&[7.0][..])
+            );
+        });
+    }
+
+    #[test]
+    fn resident_logical_like_fill_uses_logical_producer() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let value = fill_like_gpu(&FillScalar::Real(2.0), &[2, 3], &input).unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident output")
+            };
+            assert!(output.view().is_logical());
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                test_support::gather(value).unwrap().materialize_f64(),
+                vec![1.0; 6]
+            );
+            assert_eq!(
+                test_support::gather(Value::GpuTensor(input))
+                    .unwrap()
+                    .materialize_f64(),
+                vec![0.0]
+            );
+        });
+    }
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
@@ -1522,8 +1552,8 @@ pub(crate) mod tests {
             let storage = gathered.integer_storage().expect("paired integer storage");
             assert_eq!(storage.real, IntegerStorage::U64(vec![wide; 4]));
             assert_eq!(storage.imag, IntegerStorage::U64(vec![u64::MAX; 4]));
-            provider.free(&prototype).expect("free prototype");
-            provider.free(&output).expect("free output");
+            drop(prototype);
+            drop(output);
         });
     }
 
