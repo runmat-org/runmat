@@ -5,6 +5,10 @@ use super::ProductResult as BuiltinResult;
 use crate::builtins::common::gpu_helpers::{BinaryGpuOutputContract, GpuOutputAliasPolicy};
 use crate::builtins::common::{binary, gpu_helpers, tensor};
 
+#[cfg(test)]
+#[path = "provider_owning_tests.rs"]
+mod owning_tests;
+
 pub(super) async fn try_product(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
     if contains_complex(lhs) || contains_complex(rhs) {
         return Ok(None);
@@ -27,21 +31,19 @@ pub(super) async fn try_product(lhs: &Value, rhs: &Value) -> BuiltinResult<Optio
     if let Some(result) = try_scalar_product(provider, lhs, rhs).await? {
         return Ok(Some(result));
     }
-    let Some(lhs) = PreparedOperand::new(lhs, provider)? else {
+    let mut protected = resident_inputs(lhs, rhs);
+    let Some(lhs) = PreparedOperand::new(lhs, provider, &protected)? else {
         return Ok(None);
     };
-    let Some(rhs) = PreparedOperand::new(rhs, provider)? else {
+    protected.push(lhs.handle());
+    let Some(rhs) = PreparedOperand::new(rhs, provider, &protected)? else {
         return Ok(None);
     };
     let expected_shape = product_shape(lhs.handle(), rhs.handle())?;
     let output = match provider.matmul(lhs.handle(), rhs.handle()).await {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => {
-            return Err(super::errors::internal(format!(
-                "mtimes: provider matrix multiplication failed: {error}"
-            )))
-        }
+        Err(error) => return Err(provider_failure("matrix multiplication", error)),
     };
     finish_binary_output(output, provider, lhs.handle(), rhs.handle(), expected_shape).map(Some)
 }
@@ -51,13 +53,14 @@ async fn try_scalar_product(
     lhs: &Value,
     rhs: &Value,
 ) -> BuiltinResult<Option<Value>> {
+    let protected = resident_inputs(lhs, rhs);
     if let Some(scalar) = real_scalar_value(provider, lhs).await? {
-        if let Some(operand) = PreparedOperand::new(rhs, provider)? {
+        if let Some(operand) = PreparedOperand::new(rhs, provider, &protected)? {
             return invoke_scalar_product(provider, &operand, scalar);
         }
     }
     if let Some(scalar) = real_scalar_value(provider, rhs).await? {
-        if let Some(operand) = PreparedOperand::new(lhs, provider)? {
+        if let Some(operand) = PreparedOperand::new(lhs, provider, &protected)? {
             return invoke_scalar_product(provider, &operand, scalar);
         }
     }
@@ -74,11 +77,7 @@ fn invoke_scalar_product(
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             return Ok(None);
         }
-        Err(error) => {
-            return Err(super::errors::internal(format!(
-                "mtimes: provider scalar multiplication failed: {error}"
-            )))
-        }
+        Err(error) => return Err(provider_failure("scalar multiplication", error)),
     };
     let contract = output_contract(operand.handle().shape().to_vec(), provider);
     if gpu_helpers::unary_gpu_output_matches(
@@ -90,15 +89,21 @@ fn invoke_scalar_product(
             precision: contract.precision,
             integer: contract.integer,
             logical: contract.logical,
-            alias: GpuOutputAliasPolicy::RequireDistinct,
+            alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     ) {
-        gpu_helpers::propagate_output_provenance(&mut output, [operand.handle()]);
-        return Ok(Some(gpu_helpers::resident_gpu_value(output)));
+        gpu_helpers::propagate_output_provenance(&mut output, [operand.handle()])
+            .map_err(super::errors::map_control_flow)?;
+        return gpu_helpers::resident_gpu_value(output)
+            .map(Some)
+            .map_err(super::errors::map_control_flow);
     }
-    gpu_helpers::free_rejected_provider_output(&output, &[operand.handle()], provider);
-    Err(super::errors::internal(
+    let mut error = crate::RuntimeError::new(
         "mtimes: provider returned invalid scalar-product output metadata",
+    );
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    Err(super::errors::map_control_flow(
+        gpu_helpers::reject_gpu_output(output, error),
     ))
 }
 
@@ -124,7 +129,7 @@ fn output_contract(
         precision: Some(provider.precision()),
         integer: None,
         logical: false,
-        alias: GpuOutputAliasPolicy::RequireDistinct,
+        alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
     }
 }
 
@@ -144,11 +149,7 @@ async fn real_scalar_value(
         Value::GpuTensor(handle) if is_scalar(handle) => {
             let host = gpu_helpers::download_floating_projection_async(provider, handle)
                 .await
-                .map_err(|error| {
-                    super::errors::internal(format!(
-                        "mtimes: failed to read resident scalar: {error}"
-                    ))
-                })?;
+                .map_err(super::errors::map_control_flow)?;
             Ok(host.data.first().copied())
         }
         _ => Ok(None),
@@ -171,51 +172,46 @@ fn contains_complex(value: &Value) -> bool {
 }
 
 fn is_scalar(handle: &GpuTensorHandle) -> bool {
-    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
+    crate::builtins::common::shape::is_scalar_shape(handle.shape())
 }
 
 struct PreparedOperand {
-    provider: &'static dyn AccelProvider,
     handle: GpuTensorHandle,
-    owned: bool,
 }
 
 impl PreparedOperand {
-    fn new(value: &Value, provider: &'static dyn AccelProvider) -> BuiltinResult<Option<Self>> {
+    fn new(
+        value: &Value,
+        provider: &'static dyn AccelProvider,
+        protected: &[&GpuTensorHandle],
+    ) -> BuiltinResult<Option<Self>> {
         match value {
             Value::GpuTensor(handle) if compatible(handle, provider) && !is_scalar(handle) => {
-                Ok(Some(Self::borrowed(provider, handle)))
+                Ok(Some(Self {
+                    handle: handle.clone(),
+                }))
             }
             Value::GpuTensor(_) => Ok(None),
             Value::Tensor(value) if !tensor::is_scalar_tensor(value) => {
-                Self::upload(provider, value).map(Some)
+                Self::upload(provider, value, protected).map(Some)
             }
             Value::LogicalArray(value) if value.data.len() != 1 => {
                 let value =
                     tensor::logical_to_tensor(value).map_err(super::errors::invalid_input)?;
-                Self::upload(provider, &value).map(Some)
+                Self::upload(provider, &value, protected).map(Some)
             }
             _ => Ok(None),
         }
     }
 
-    fn borrowed(provider: &'static dyn AccelProvider, handle: &GpuTensorHandle) -> Self {
-        Self {
-            provider,
-            handle: handle.clone(),
-            owned: false,
-        }
-    }
-
-    fn upload(provider: &'static dyn AccelProvider, value: &Tensor) -> BuiltinResult<Self> {
-        let handle = gpu_helpers::upload_tensor(provider, value).map_err(|error| {
-            super::errors::internal(format!("mtimes: provider upload failed: {error}"))
-        })?;
-        Ok(Self {
-            provider,
-            handle,
-            owned: true,
-        })
+    fn upload(
+        provider: &'static dyn AccelProvider,
+        value: &Tensor,
+        protected: &[&GpuTensorHandle],
+    ) -> BuiltinResult<Self> {
+        let handle = gpu_helpers::upload_tensor_protecting(provider, value, protected)
+            .map_err(super::errors::map_control_flow)?;
+        Ok(Self { handle })
     }
 
     fn handle(&self) -> &GpuTensorHandle {
@@ -223,12 +219,22 @@ impl PreparedOperand {
     }
 }
 
-impl Drop for PreparedOperand {
-    fn drop(&mut self) {
-        if self.owned && self.provider.free(&self.handle).is_ok() {
-            runmat_accelerate_api::clear_handle_metadata(&self.handle);
-        }
-    }
+fn resident_inputs<'a>(lhs: &'a Value, rhs: &'a Value) -> Vec<&'a GpuTensorHandle> {
+    [lhs, rhs]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect()
+}
+
+fn provider_failure(operation: &str, source: anyhow::Error) -> super::errors::ProductError {
+    let mut error =
+        crate::RuntimeError::new(format!("mtimes: provider {operation} failed: {source}"));
+    error.source = Some(source.into_boxed_dyn_error());
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    super::errors::map_control_flow(error)
 }
 
 fn compatible(handle: &GpuTensorHandle, provider: &'static dyn AccelProvider) -> bool {
