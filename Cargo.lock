@@ -7531,6 +7531,7 @@ dependencies = [
  "serde_json",
  "stacker",
  "tracing",
+ "wasm-bindgen-test",
 ]
 
 [[package]]

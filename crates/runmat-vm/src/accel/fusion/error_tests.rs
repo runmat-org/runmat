@@ -5,6 +5,9 @@ use std::error::Error;
 use std::fmt;
 
 #[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[cfg(target_arch = "wasm32")]
 use std::rc::Rc as Owner;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc as Owner;
