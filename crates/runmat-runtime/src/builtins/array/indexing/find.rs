@@ -477,9 +477,11 @@ pub async fn evaluate(value: Value, args: &[Value]) -> crate::BuiltinResult<Find
                     return Ok(FindEval::from_gpu(result));
                 }
             }
-            let (storage, _) = materialize_input(Value::GpuTensor(handle)).await?;
+            let (storage, _) = materialize_input(Value::GpuTensor(handle.clone())).await?;
             let result = compute_find(&storage, &options);
-            Ok(FindEval::from_host(result, Some(owner)))
+            let mut evaluation = FindEval::from_host(result, Some(owner));
+            evaluation.source = Some(handle);
+            Ok(evaluation)
         }
         Value::SparseTensor(sparse) => {
             let result = compute_find_sparse(&sparse, &options);
@@ -584,6 +586,8 @@ enum FindValues {
 
 pub struct FindEval {
     inner: FindEvalInner,
+    // Retain the original allocation until deferred output uploads finish.
+    source: Option<runmat_accelerate_api::GpuTensorHandle>,
 }
 
 enum FindEvalInner {
@@ -602,6 +606,7 @@ impl FindEval {
         output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
     ) -> Self {
         Self {
+            source: None,
             inner: FindEvalInner::Host {
                 result,
                 output_provider,
@@ -611,6 +616,7 @@ impl FindEval {
 
     fn from_gpu(result: ProviderFindResult) -> Self {
         Self {
+            source: None,
             inner: FindEvalInner::Gpu { result },
         }
     }
@@ -659,7 +665,7 @@ impl FindEval {
             FindEvalInner::Host {
                 result,
                 output_provider,
-            } => result.values_value(*output_provider),
+            } => result.values_value(*output_provider, self.source.as_ref()),
             FindEvalInner::Gpu { result } => result
                 .values
                 .as_ref()
@@ -1177,6 +1183,7 @@ impl FindResult {
     fn values_value(
         &self,
         output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+        source: Option<&runmat_accelerate_api::GpuTensorHandle>,
     ) -> crate::BuiltinResult<Value> {
         match &self.values {
             FindValues::Real(values) => {
@@ -1198,15 +1205,31 @@ impl FindResult {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
                 if let Some(provider) = output_provider {
-                    let tensor = Tensor::new(
-                        values.iter().map(|&value| f64::from(value)).collect(),
-                        logical.shape.clone(),
-                    )
-                    .map_err(|e| {
-                        find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
-                    })?;
-                    if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
-                        return gpu_helpers::logical_gpu_value(handle);
+                    let protected: Vec<_> = source.into_iter().collect();
+                    match runmat_accelerate_api::upload_logical_protecting(
+                        provider,
+                        &runmat_accelerate_api::HostLogicalTensorView {
+                            data: &logical.data,
+                            shape: &logical.shape,
+                        },
+                        &protected,
+                    ) {
+                        Ok(mut handle) => {
+                            gpu_helpers::propagate_output_provenance(&mut handle, source)?;
+                            return gpu_helpers::logical_gpu_value(handle);
+                        }
+                        Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                            if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+                        }
+                        Err(error) => {
+                            return Err(crate::build_runtime_error(format!(
+                                "find: logical output upload failed: {error}"
+                            ))
+                            .with_builtin(BUILTIN_NAME)
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                            .with_source(error)
+                            .build());
+                        }
                     }
                 }
                 Ok(Value::LogicalArray(logical))
