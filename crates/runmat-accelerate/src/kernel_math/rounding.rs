@@ -2,8 +2,10 @@
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 
+#[cfg(feature = "wgpu")]
 mod digits;
 
+#[cfg(feature = "wgpu")]
 pub(crate) fn digit_functions(precision: ProviderPrecision) -> String {
     functions(precision) + &digits::functions(precision)
 }

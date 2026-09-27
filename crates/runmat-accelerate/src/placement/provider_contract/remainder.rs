@@ -3,11 +3,10 @@ use super::*;
 use runmat_accelerate_api::NumericalDomainEvidence;
 use runmat_types::FloatingRemainderKind;
 
+#[cfg(feature = "wgpu")]
 mod work;
 #[cfg(feature = "wgpu")]
 pub(crate) use work::wgpu_work;
-#[cfg(not(feature = "wgpu"))]
-pub(crate) use work::RemainderWork;
 #[cfg(test)]
 mod tests;
 
