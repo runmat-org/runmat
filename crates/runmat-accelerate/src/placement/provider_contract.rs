@@ -12,6 +12,7 @@ mod complex_components;
 mod floating_conversion;
 mod integer_conversion;
 mod logical;
+pub(crate) mod power;
 mod trigonometry;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
@@ -159,13 +160,14 @@ fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
 pub(crate) fn in_process_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 4, IN_PROCESS_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 5, IN_PROCESS_OPERATIONS);
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
     floating_conversion::append(&mut snapshot);
     trigonometry::append(&mut snapshot);
+    power::append(&mut snapshot);
     snapshot
 }
 
@@ -173,13 +175,14 @@ pub(crate) fn in_process_capability_snapshot(
 pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 5, WGPU_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 6, WGPU_OPERATIONS);
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
     floating_conversion::append(&mut snapshot);
     trigonometry::append(&mut snapshot);
+    power::append(&mut snapshot);
     snapshot
 }
 
@@ -202,6 +205,14 @@ pub(crate) fn in_process_feasibility(
         return result;
     }
     let snapshot = in_process_capability_snapshot(provider);
+    if let Some(result) = power::feasibility(
+        power::HookProfile::InProcess,
+        provider.precision(),
+        &snapshot,
+        query,
+    ) {
+        return result;
+    }
     arithmetic::feasibility(
         arithmetic::HookProfile::InProcess,
         provider.precision(),
@@ -238,6 +249,14 @@ pub(crate) fn wgpu_feasibility(
         return result;
     }
     let snapshot = wgpu_capability_snapshot(provider);
+    if let Some(result) = power::feasibility(
+        power::HookProfile::Wgpu,
+        provider.precision(),
+        &snapshot,
+        query,
+    ) {
+        return result;
+    }
     arithmetic::feasibility(
         arithmetic::HookProfile::Wgpu,
         provider.precision(),
