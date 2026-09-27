@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::thread::{self, ThreadId};
+mod retained;
 
 use runmat_value::{
     record_host_copy, CellArray, CharArray, ComplexElement, ComplexStorage, ComplexTensor,

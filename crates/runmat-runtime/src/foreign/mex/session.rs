@@ -20,6 +20,7 @@ use crate::context::ForeignCall;
 use crate::context::RuntimeContext;
 use crate::user_functions::DynamicFunctionClearRequest;
 use crate::{build_runtime_error, RuntimeError};
+mod retained;
 
 #[derive(Clone)]
 struct InstalledMexArtifact {
@@ -585,6 +586,10 @@ impl MexRuntimeSession {
 }
 
 impl super::super::ForeignAdapter for MexRuntimeSession {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+        self.visit_session_retained_values(visitor)
+    }
+
     fn descriptor(&self) -> super::super::ForeignAdapterDescriptor {
         let mut capabilities = BTreeSet::from([
             CapabilityRequirement::ForeignRuntime,
