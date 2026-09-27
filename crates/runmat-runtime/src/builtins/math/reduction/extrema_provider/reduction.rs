@@ -19,6 +19,14 @@ impl ExtremaKind {
             mut values,
             mut indices,
         } = result;
+        let Some(axis_extent) = input.shape().get(dimension).copied() else {
+            let error =
+                self.contract_error("dimensional extrema axis is outside the admitted input rank");
+            return Err(gpu_helpers::reject_gpu_output(
+                indices,
+                gpu_helpers::reject_gpu_output(values, error),
+            ));
+        };
         let mut shape = input.shape().to_vec();
         // The owning host reduction preserves empty shape rather than inventing
         // a nonempty identity along a zero-length dimension.
@@ -63,7 +71,7 @@ impl ExtremaKind {
             provider,
             &index_contract,
         ) && (index_precision != Some(ProviderPrecision::F32)
-            || input.shape()[dimension] <= (1 << 24));
+            || axis_extent <= (1 << 24));
         if !valid {
             let error = self.contract_error("dimensional extrema returned invalid owner, shape, value class, or index representation");
             return Err(gpu_helpers::reject_gpu_output(
@@ -107,12 +115,21 @@ impl ExtremaKind {
                     ))
                 }
             };
+            if host.shape != index_contract.shape
+                || host.numeric_dtype() != runmat_value::NumericDType::F32
+            {
+                let error = self.contract_error("index download changed native class or shape");
+                return Err(gpu_helpers::reject_gpu_output(
+                    indices,
+                    gpu_helpers::reject_gpu_output(values, error),
+                ));
+            }
             let data = crate::builtins::common::tensor::tensor_into_values_f64(host);
             if data.iter().any(|index| {
                 !index.is_finite()
                     || index.fract() != 0.0
                     || *index < 1.0
-                    || *index > input.shape()[dimension] as f64
+                    || *index > axis_extent as f64
             }) {
                 let error =
                     self.contract_error("dimensional extrema returned an invalid one-based index");

@@ -281,3 +281,32 @@ fn dimensional_owned_output_contract_rejects_wrong_class_owner_and_indices() {
         assert_eq!(input.probe.retirements(), 1);
     }
 }
+
+#[test]
+fn dimensional_publication_checks_axis_before_shape_access() {
+    let provider = provider(false);
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    for shape in [vec![], vec![1, 2, 3]] {
+        let dimension = shape.len();
+        let input = provider.allocate(shape, NumericElementType::F32, 0.0);
+        let values = provider.allocate(vec![1, 1], NumericElementType::F32, 0.0);
+        let indices = provider.allocate(vec![1, 1], NumericElementType::F32, 1.0);
+        let error = futures::executor::block_on(ExtremaKind::Min.adopt_reduction_result(
+            provider,
+            &input.handle,
+            dimension,
+            ReduceDimResult {
+                values: values.handle,
+                indices: indices.handle,
+            },
+        ))
+        .unwrap_err();
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(values.probe.retirements(), 1);
+        assert_eq!(indices.probe.retirements(), 1);
+        assert_eq!(input.probe.retirements(), 0);
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
+    }
+}
