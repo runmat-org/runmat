@@ -282,8 +282,14 @@ fn integer_roles_validate_exact_wide_values_and_compatibility_independently() {
     let _guard = crate::output_count::push_output_count(Some(3));
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let exact = runmat_value::IntValue::U64(1_u64 << 63);
-    let values =
-        output_list(call(Value::Num(0.0), Value::Int(exact), vec![Value::Int(exact)]).unwrap());
+    let values = output_list(
+        call(
+            Value::Num(0.0),
+            Value::Int(exact.clone()),
+            vec![Value::Int(exact)],
+        )
+        .unwrap(),
+    );
     assert_eq!(data(&values[0]), vec![(1_u64 << 63) as f64]);
     assert_eq!(data(&values[2]), vec![(1_u64 << 63) as f64]);
     for position in 0..3 {

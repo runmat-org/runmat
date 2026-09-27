@@ -158,6 +158,7 @@ fn actual_f64_adapter_preserves_single_interior_rounding_and_mixed_final_buffers
     else {
         panic!("physical F64")
     };
+    assert_eq!(final_values.len(), values.len());
     for (actual, input) in final_values.iter().zip(&values) {
         let rounded = *input as f32;
         let expected = f64::from(rounded + rounded);
@@ -353,6 +354,7 @@ fn actual_adapter_power_classifies_exact_transposed_pairs_and_broadcasts() {
             };
             let actual = block_on(provider.download(&output)).unwrap();
             assert_eq!(actual.shape, vec![3, 2]);
+            assert_eq!(actual.data.len(), expected.len());
             for (actual, expected) in actual.data.iter().zip(expected) {
                 assert!((actual - expected).abs() <= 1e-4 * expected.abs().max(1.0));
             }
