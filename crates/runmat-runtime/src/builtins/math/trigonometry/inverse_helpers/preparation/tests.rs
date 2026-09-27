@@ -205,9 +205,9 @@ fn floating_trig_preparation_drop_and_replacement_cannot_record_success() {
 
 #[test]
 fn floating_trig_like_controls_are_admitted_before_service_and_remain_local() {
-    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let events = Events::default();
     let _context = enter(&events, Mode::Pass);
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in ["sin", "cos", "tan", "atan"] {
         let invalid = [
             Value::Num(0.5),
@@ -239,5 +239,31 @@ fn floating_trig_like_controls_are_admitted_before_service_and_remain_local() {
             assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
             events.borrow_mut().clear();
         }
+    }
+}
+
+#[test]
+fn floating_trig_like_strict_mode_rejects_before_preparation() {
+    let events = Events::default();
+    let _context = enter(&events, Mode::Pass);
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    for (name, identifier) in [
+        ("sin", "RunMat:compatibility:SinLikeOutputExtension"),
+        ("cos", "RunMat:compatibility:CosLikeOutputExtension"),
+        ("tan", "RunMat:compatibility:TanLikeOutputExtension"),
+        (
+            "atan",
+            "RunMat:compatibility:AtanLikeOutputTemplateExtension",
+        ),
+    ] {
+        let args = [
+            Value::Num(0.5),
+            Value::String("like".into()),
+            Value::Num(0.0),
+        ];
+        let error = block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap_err();
+        assert_eq!(error.identifier(), Some(identifier));
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(events.borrow().is_empty());
     }
 }

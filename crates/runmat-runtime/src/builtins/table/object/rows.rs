@@ -34,6 +34,7 @@ pub(super) fn selected_row_times(
 pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => Ok(tensor.rows()),
+        Value::GpuTensor(handle) => Ok(handle.shape().first().copied().unwrap_or(1)),
         Value::ComplexTensor(tensor) => Ok(tensor.rows),
         Value::StringArray(array) => Ok(array.rows()),
         Value::LogicalArray(array) => Ok(array.shape.first().copied().unwrap_or(array.data.len())),

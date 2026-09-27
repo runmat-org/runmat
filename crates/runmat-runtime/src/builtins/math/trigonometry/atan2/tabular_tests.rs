@@ -171,11 +171,20 @@ fn atan2_tabular_admits_every_column_before_first_download() {
         ],
     )
     .unwrap();
-    assert!(block_on(crate::dispatcher::call_builtin_async(
+    assert_eq!(borrowed[0].shape(), [2, 1]);
+    let Value::Object(object) = &table else {
+        panic!("table fixture")
+    };
+    assert_eq!(crate::builtins::table::table_height(object).unwrap(), 2);
+    let error = block_on(crate::dispatcher::call_builtin_async(
         "atan2",
-        &[table, Value::Num(1.0)]
+        &[table, Value::Num(1.0)],
     ))
-    .is_err());
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        ATAN2_ERROR_COMPLEX_UNSUPPORTED.identifier
+    );
     let state = provider.state.lock().unwrap();
     assert_eq!(state.downloads, 0);
     assert!(state.outputs.is_empty());
@@ -185,6 +194,48 @@ fn atan2_tabular_admits_every_column_before_first_download() {
     drop(state);
     for handle in borrowed {
         handle.release().unwrap();
+    }
+}
+
+#[test]
+fn resident_table_columns_use_admitted_shape_without_download() {
+    let _serial = test_support::accel_test_lock();
+    let owner = test_owner::Owner::new();
+    for shape in [
+        vec![],
+        vec![2],
+        vec![2, 1],
+        vec![1, 2],
+        vec![0, 2],
+        vec![2, 1, 2],
+    ] {
+        let data = vec![0.0; shape.iter().product()];
+        let handle = owner
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .unwrap();
+        let probe = owner.probe(&handle);
+        let host = runmat_value::Tensor::new(data, shape.clone()).unwrap();
+        let expected_rows = host.rows();
+        let table = crate::builtins::table::table_from_columns(
+            vec!["Resident".into(), "Host".into()],
+            vec![Value::GpuTensor(handle.clone()), Value::Tensor(host)],
+        )
+        .unwrap();
+        let Value::Object(object) = &table else {
+            panic!("table")
+        };
+        assert_eq!(
+            crate::builtins::table::table_height(object).unwrap(),
+            expected_rows
+        );
+        assert_eq!(handle.shape(), shape);
+        assert_eq!(probe.retirements(), 0);
+        drop(table);
+        handle.release().unwrap();
+        assert_eq!(probe.retirements(), 1);
     }
 }
 
