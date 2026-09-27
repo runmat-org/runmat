@@ -21,34 +21,33 @@ enum Step {
 }
 
 fn broadcast(left: &[u64], right: &[u64]) -> Result<Vec<u64>, Rejection> {
-    let rank = left.len().max(right.len());
-    let align = |shape: &[u64]| {
-        let mut shape = if shape.len() == 1 && rank >= 2 {
-            vec![1, shape[0]]
-        } else {
-            shape.to_vec()
-        };
-        shape.resize(rank, 1);
+    let convert = |shape: &[u64]| {
         shape
+            .iter()
+            .map(|dimension| usize::try_from(*dimension))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| {
+                (
+                    ProviderRejectionCode::ResourceLimit,
+                    "pol2cart.dimension.overflow",
+                )
+            })
     };
-    align(left)
-        .iter()
-        .zip(align(right))
-        .map(|(&left, right)| {
-            if left == right {
-                Ok(left)
-            } else if left == 1 {
-                Ok(right)
-            } else if right == 1 {
-                Ok(left)
-            } else {
-                Err((
-                    ProviderRejectionCode::InvalidShape,
-                    "pol2cart.broadcast.invalid",
-                ))
-            }
-        })
-        .collect()
+    let shape = runmat_runtime::builtins::common::broadcast::broadcast_shapes(
+        "pol2cart",
+        &convert(left)?,
+        &convert(right)?,
+    )
+    .map_err(|_| {
+        (
+            ProviderRejectionCode::InvalidShape,
+            "pol2cart.broadcast.invalid",
+        )
+    })?;
+    Ok(shape
+        .into_iter()
+        .map(|dimension| dimension as u64)
+        .collect())
 }
 fn elements(shape: &[u64]) -> Result<u64, Rejection> {
     if shape.contains(&0) {

@@ -2,7 +2,7 @@
 use runmat_value::Value;
 
 pub(super) fn broadcast_elements(values: &[Value]) -> Option<usize> {
-    let mut shape = runmat_types::ShapeFact::from(vec![Some(1), Some(1)]);
+    let mut shape = vec![1, 1];
     for value in values {
         let dimensions = match value {
             Value::Num(_) => vec![1, 1],
@@ -10,16 +10,20 @@ pub(super) fn broadcast_elements(values: &[Value]) -> Option<usize> {
             Value::GpuTensor(handle) => handle.shape.clone(),
             _ => return None,
         };
-        let dimensions = if dimensions.len() == 1 {
-            vec![1, dimensions[0]]
-        } else {
-            dimensions
-        };
-        let fact =
-            runmat_types::ShapeFact::from(dimensions.into_iter().map(Some).collect::<Vec<_>>());
-        shape = runmat_types::broadcast_shape(&shape, &fact).ok()?;
+        shape = runmat_runtime::builtins::common::broadcast::broadcast_shapes(
+            "N-ary preparation",
+            &shape,
+            &dimensions,
+        )
+        .ok()?;
     }
-    shape.element_count()
+    if shape.contains(&0) {
+        Some(0)
+    } else {
+        shape
+            .iter()
+            .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
+    }
 }
 
 #[cfg(test)]

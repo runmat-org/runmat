@@ -68,6 +68,16 @@ fn roles_reference_existing_signatures_without_claiming_control_operands() {
 
 #[test]
 fn duplicate_and_inconsistent_forms_are_rejected() {
+    assert!(!errors(&[BuiltinPreparationForm {
+        operation: BuiltinPreparationOperation::ElementwiseNary { data_arity: 1 },
+        ..FORM
+    }])
+    .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        operation: BuiltinPreparationOperation::ElementwiseNary { data_arity: 3 },
+        ..FORM
+    }])
+    .is_empty());
     assert!(!errors(&[]).is_empty());
     assert!(!errors(&[FORM, FORM]).is_empty());
     assert!(!errors(&[BuiltinPreparationForm {

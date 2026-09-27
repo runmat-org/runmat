@@ -19,6 +19,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Provider execution",
         paragraphs: &[
+            "Homogeneous floating inputs can be placed automatically after the complete two- or three-input form is validated. All data operands, the expanded output shape, and the requested output count participate in placement. Mixed floating classes retain the host formula so that coordinate and elevation precision are not silently changed.",
             "Compatible real resident inputs can use their exact owning provider's sine, cosine, and broadcasted multiply operations. Borrowed input handles are preserved. Newly allocated intermediates and unrequested outputs are released on completion, failure, or cancellation.",
             "Only an unsupported provider operation selects host fallback. Other provider failures and invalid output metadata remain errors. Mixed physical floating classes or providers use the host formula. Unsupported paths can return host values, so residency is not guaranteed for every input form.",
             "This multiple-output transform terminates elementwise fusion rather than presenting a scalar fusion template. Distributed inputs use the shared materialization route.",

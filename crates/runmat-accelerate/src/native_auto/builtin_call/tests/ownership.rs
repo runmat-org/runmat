@@ -190,6 +190,51 @@ fn second_upload_failure_releases_first_success() {
 }
 
 #[test]
+fn nary_preparation_releases_each_partial_upload_and_abandoned_execution() {
+    use std::{
+        future::Future,
+        task::{Context, Poll},
+    };
+    let prepare_nary = |provider: &'static CounterProvider| {
+        let probe = Rc::new(Probe::default());
+        probe.provider.set(true);
+        NativeAutoOffload::new(provider, ThresholdConfig::default()).prepare_operation(
+            "owned.nary.test",
+            &[host(), host(), host()],
+            Some(&runtime(&probe)),
+            ArgumentOperation::ElementwiseNary {
+                data_arity: 3,
+                requested_outputs: Some(3),
+            },
+        )
+    };
+    for failure in 1..=3 {
+        let provider = provider(Some(failure));
+        assert!(prepare_nary(provider).is_err());
+        assert_eq!(
+            *provider.freed.lock().unwrap(),
+            (1..failure).collect::<Vec<_>>()
+        );
+    }
+    for poll_once in [false, true] {
+        let provider = provider(None);
+        let prepared = prepare_nary(provider).unwrap();
+        let mut future =
+            Box::pin(prepared.execute(|_| std::future::pending::<Result<Value, RuntimeError>>()));
+        if poll_once {
+            assert!(matches!(
+                future
+                    .as_mut()
+                    .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
+                Poll::Pending
+            ));
+        }
+        drop(future);
+        assert_eq!(*provider.freed.lock().unwrap(), vec![1, 2, 3]);
+    }
+}
+
+#[test]
 fn abandoned_preparation_and_failed_call_release_uploads() {
     for fail_call in [false, true] {
         let provider = provider(None);
