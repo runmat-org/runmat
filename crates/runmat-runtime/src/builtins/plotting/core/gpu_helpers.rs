@@ -12,6 +12,14 @@ use super::plotting_error;
 #[path = "gpu_bounds.rs"]
 mod bounds;
 
+pub(crate) async fn axis_bounds_protecting(
+    handle: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
+    context: &'static str,
+) -> BuiltinResult<(f32, f32)> {
+    bounds::axis_bounds_protecting(handle, protected, context).await
+}
+
 #[cfg(feature = "plot-core")]
 use glam::Vec3;
 #[cfg(feature = "plot-core")]
