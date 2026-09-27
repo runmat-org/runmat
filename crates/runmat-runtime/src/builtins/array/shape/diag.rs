@@ -2725,6 +2725,12 @@ mod tests {
                     shape: &[1, 2],
                 })
                 .unwrap();
+            // This reference provider encodes logical payloads in native F64;
+            // the logical class is independent of its physical encoding.
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&logical_handle),
+                Some(ProviderPrecision::F64)
+            );
             let logical_out = run_diag(
                 Value::GpuTensor(logical_handle),
                 vec![Value::from("logical")],
@@ -2736,7 +2742,7 @@ mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&logical_result));
             assert_eq!(
                 runmat_accelerate_api::handle_precision(&logical_result),
-                Some(ProviderPrecision::F32)
+                Some(ProviderPrecision::F64)
             );
             let gathered =
                 test_support::gather(Value::GpuTensor(logical_result)).expect("gather logical");
