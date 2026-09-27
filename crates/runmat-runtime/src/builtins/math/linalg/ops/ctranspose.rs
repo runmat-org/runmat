@@ -588,7 +588,7 @@ fn reject_native_output(output: GpuTensorHandle, detail: &str) -> RuntimeError {
 fn native_provider_error(source: anyhow::Error) -> RuntimeError {
     let mut error = internal_error(format!("ctranspose: provider failed: {source}"));
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-    error.source = Some(source.into_boxed_dyn_error());
+    error = crate::runtime_error::with_provider_execution_source(error, source.into());
     error
 }
 

@@ -17,10 +17,25 @@ impl std::error::Error for BoundaryFailure {}
 
 struct Provider {
     owner: TestAllocationOwner,
+    failure: &'static str,
     trace: Mutex<Vec<&'static str>>,
     probes: Mutex<Vec<(u64, RetirementProbe)>>,
 }
 impl Provider {
+    fn allocate(
+        &self,
+        shape: Vec<usize>,
+        storage: GpuTensorStorage,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let result = self
+            .owner
+            .allocate_zeroed(shape, NumericElementType::F64, storage)?;
+        self.probes
+            .lock()
+            .unwrap()
+            .push((result.handle.buffer_id(), result.probe));
+        Ok(result.handle)
+    }
     fn fail<T>(&self, hook: &'static str) -> anyhow::Result<T> {
         self.trace.lock().unwrap().push(hook);
         Err(anyhow::Error::new(BoundaryFailure(hook)))
@@ -114,6 +129,45 @@ impl AccelProvider for Provider {
     unary!(unary_imag);
     unary!(unary_conj);
     unary!(complex_from_real);
+    fn transpose(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        if self.failure == "transpose" {
+            return self.fail("transpose");
+        }
+        assert_eq!(self.failure, "unary_conj");
+        self.trace.lock().unwrap().push("transpose");
+        let mut shape = input.shape().to_vec();
+        shape.swap(0, 1);
+        self.allocate(shape, handle_storage(input))
+    }
+    fn permute(&self, _: &GpuTensorHandle, _: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        self.fail("permute")
+    }
+    fn scalar_mul(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.fail("scalar_mul")
+    }
+    fn matmul<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail("matmul") })
+    }
+    fn dot<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+        _: Option<usize>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail("dot") })
+    }
+    fn cross(
+        &self,
+        _: &GpuTensorHandle,
+        _: &GpuTensorHandle,
+        _: Option<usize>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.fail("cross")
+    }
     fn complex_from_real_imag<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
@@ -124,24 +178,51 @@ impl AccelProvider for Provider {
 }
 
 fn check(name: &str, hook: &'static str, probe: bool, binary: bool) {
+    let expected = if probe {
+        vec!["reduce_min", "download_probe", hook]
+    } else {
+        vec![hook]
+    };
+    check_case(
+        name,
+        hook,
+        &expected,
+        vec![2, 1],
+        GpuTensorStorage::Real,
+        |left, right| {
+            let mut args = vec![Value::GpuTensor(left.clone())];
+            if binary {
+                args.push(Value::GpuTensor(right.clone()));
+            }
+            args
+        },
+    );
+}
+
+fn check_case(
+    name: &str,
+    hook: &'static str,
+    expected: &[&str],
+    shape: Vec<usize>,
+    storage: GpuTensorStorage,
+    arguments: impl FnOnce(&GpuTensorHandle, &GpuTensorHandle) -> Vec<Value>,
+) {
     let provider = Box::leak(Box::new(Provider {
         owner: TestAllocationOwner::new(),
+        failure: hook,
         trace: Mutex::new(Vec::new()),
         probes: Mutex::new(Vec::new()),
     }));
     let _selected = ThreadProviderGuard::set(Some(provider));
     let left = provider
         .owner
-        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .allocate_zeroed(shape.clone(), NumericElementType::F64, storage)
         .unwrap();
     let right = provider
         .owner
-        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .allocate_zeroed(shape, NumericElementType::F64, storage)
         .unwrap();
-    let mut args = vec![Value::GpuTensor(left.handle.clone())];
-    if binary {
-        args.push(Value::GpuTensor(right.handle.clone()));
-    }
+    let args = arguments(&left.handle, &right.handle);
     let error =
         futures::executor::block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap_err();
     assert_eq!(
@@ -162,11 +243,6 @@ fn check(name: &str, hook: &'static str, probe: bool, binary: bool) {
             .unwrap_or_else(|| panic!("{name}: original typed cause lost: {error:?}"));
     }
     assert!(carrier, "{name}: provider execution carrier missing");
-    let expected = if probe {
-        vec!["reduce_min", "download_probe", hook]
-    } else {
-        vec![hook]
-    };
     assert_eq!(*provider.trace.lock().unwrap(), expected, "{name}");
     assert!(provider
         .probes
@@ -211,4 +287,68 @@ fn unary_and_complex_dispatch_preserve_exact_terminal_causes() {
         check(name, hook, probe, false);
     }
     check("complex", "complex_from_real_imag", false, true);
+}
+
+#[test]
+fn matrix_dispatch_preserves_each_provider_boundary_and_owned_transpose() {
+    for (name, hook, shape) in [
+        ("dot", "dot", vec![3, 1]),
+        ("cross", "cross", vec![3, 1]),
+        ("mtimes", "matmul", vec![2, 2]),
+    ] {
+        check_case(
+            name,
+            hook,
+            &[hook],
+            shape,
+            GpuTensorStorage::Real,
+            |left, right| {
+                vec![
+                    Value::GpuTensor(left.clone()),
+                    Value::GpuTensor(right.clone()),
+                ]
+            },
+        );
+    }
+    for scalar_first in [false, true] {
+        check_case(
+            "mtimes",
+            "scalar_mul",
+            &["scalar_mul"],
+            vec![2, 2],
+            GpuTensorStorage::Real,
+            |left, _| {
+                let resident = Value::GpuTensor(left.clone());
+                if scalar_first {
+                    vec![Value::Num(2.0), resident]
+                } else {
+                    vec![resident, Value::Num(2.0)]
+                }
+            },
+        );
+    }
+    for (hook, shape, storage, trace) in [
+        (
+            "transpose",
+            vec![2, 3],
+            GpuTensorStorage::Real,
+            vec!["transpose"],
+        ),
+        (
+            "permute",
+            vec![2, 3, 2],
+            GpuTensorStorage::Real,
+            vec!["permute"],
+        ),
+        (
+            "unary_conj",
+            vec![2, 3],
+            GpuTensorStorage::ComplexInterleaved,
+            vec!["transpose", "unary_conj"],
+        ),
+    ] {
+        check_case("ctranspose", hook, &trace, shape, storage, |left, _| {
+            vec![Value::GpuTensor(left.clone())]
+        });
+    }
 }

@@ -418,7 +418,10 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
                                 "cross: provider execution failed: {err}"
                             ));
                             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                            error.source = Some(err.into_boxed_dyn_error());
+                            error = crate::runtime_error::with_provider_execution_source(
+                                error,
+                                err.into(),
+                            );
                             return Err(error);
                         }
                     }
