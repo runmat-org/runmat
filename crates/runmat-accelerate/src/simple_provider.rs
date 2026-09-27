@@ -7375,6 +7375,27 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn unary_log2<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.logarithm(input, logarithms::Logarithm::Binary) })
+    }
+
+    fn unary_log10<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.logarithm(input, logarithms::Logarithm::Common) })
+    }
+
+    fn unary_log1p<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.logarithm(input, logarithms::Logarithm::OnePlus) })
+    }
+
     fn unary_sqrt<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

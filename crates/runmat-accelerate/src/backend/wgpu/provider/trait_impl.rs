@@ -914,6 +914,24 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn unary_log2<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log2, input)
+        })
+    }
+
+    fn unary_log10<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Log10, input)
+        })
+    }
+
     fn unary_log1p<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
