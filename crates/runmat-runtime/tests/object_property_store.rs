@@ -346,7 +346,7 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
             setter(&mut definition, "Restricted.set.Dependent");
             definition
                 .methods
-                .get_mut(&"set.Dependent".into())
+                .get_mut(&runmat_types::MethodName::from("set.Dependent"))
                 .unwrap()
                 .access = MemberAccess::Private;
             register_class(definition);
