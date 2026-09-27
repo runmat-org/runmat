@@ -1,5 +1,5 @@
 use crate::catalog::inference::argument_error;
-use runmat_types::{CallRequest, InferenceDiagnostic, ValueFact};
+use runmat_types::{CallRequest, InferenceDiagnostic, ValueFact, ValueKindFact};
 
 pub(super) struct AdmittedCall<'a> {
     pub left: Option<&'a ValueFact>,
@@ -20,12 +20,17 @@ pub(super) fn inspect(request: &CallRequest) -> AdmittedCall<'_> {
     }
 
     let prototype = if request.arguments.len() == 4 {
-        if request.literals.literal_string_at(2).as_deref() == Some("like") {
+        let keyword = request.literals.literal_string_at(2);
+        let possible_text = matches!(
+            request.arguments[2].kind,
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+        );
+        if possible_text && keyword.as_deref().is_none_or(|value| value == "like") {
             request.arguments.get(3)
         } else {
             diagnostics.push(argument_error(
                 "RM-CATALOG-BINARY-ARITHMETIC-OPTION",
-                "the third input must be the literal 'like'",
+                "the third input must be 'like'",
                 2,
             ));
             None

@@ -82,3 +82,60 @@ fn preserves_integer_and_applies_typed_like_placement() {
         }
     );
 }
+
+#[test]
+fn dynamic_like_keyword_is_not_a_proven_argument_error() {
+    for name in ["plus", "minus", "times", "rdivide", "ldivide", "power"] {
+        let entry = crate::builtin_catalog_entry_by_name(name).expect("binary entry");
+        let operand = numeric(
+            NumericClass::Double,
+            NumericDomain::Real,
+            &[Some(2), Some(3)],
+        );
+        for option in [
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+        ] {
+            let call = request(vec![
+                operand.clone(),
+                operand.clone(),
+                option,
+                operand.clone(),
+            ]);
+            let inferred = infer_catalog_call(entry, &call);
+            assert!(
+                inferred.diagnostics.is_empty(),
+                "{name}: {:?}",
+                inferred.diagnostics
+            );
+        }
+        let mut call = request(vec![
+            operand.clone(),
+            operand.clone(),
+            ValueFact::scalar(ValueKindFact::String),
+            operand.clone(),
+        ]);
+        call.literals.literal_args = vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Keyword("not-like".into()),
+            LiteralValue::Unknown,
+        ];
+        assert!(
+            infer_catalog_call(entry, &call)
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "RM-CATALOG-BINARY-ARITHMETIC-OPTION"),
+            "{name}"
+        );
+        call.arguments[2] = operand;
+        call.literals = Default::default();
+        assert!(
+            infer_catalog_call(entry, &call)
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "RM-CATALOG-BINARY-ARITHMETIC-OPTION"),
+            "{name}"
+        );
+    }
+}
