@@ -188,17 +188,12 @@ async fn convert_to_gpu_complex(
                         return gpu_helpers::complex_gpu_value(output);
                     }
                     Ok(output) => {
-                        let mut all_borrowed = borrowed.clone();
-                        all_borrowed.push(&handle);
-                        gpu_helpers::free_rejected_provider_output(
-                            &output,
-                            &all_borrowed,
-                            provider,
-                        );
-                        return Err(sin_error_with_detail(
+                        let mut error = sin_error_with_detail(
                             &SIN_ERROR_INTERNAL,
                             "provider returned an invalid complex conversion result",
-                        ));
+                        );
+                        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        return Err(gpu_helpers::reject_gpu_output(output, error));
                     }
                     Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
                     Err(error) => {

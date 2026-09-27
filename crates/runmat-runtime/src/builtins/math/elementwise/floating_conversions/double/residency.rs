@@ -84,16 +84,22 @@ fn upload_double_like_real(
     tensor: &Tensor,
     protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_tensor_protecting(provider, tensor, protected)
-        .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?;
+    let handle =
+        gpu_helpers::upload_tensor_protecting(provider, tensor, protected).map_err(|source| {
+            let mut error = double_error_with_detail(&DOUBLE_ERROR_INTERNAL, &source);
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error.source = Some(Box::new(source));
+            error
+        })?;
     if valid_double_like_output(&handle, prototype, provider, &tensor.shape, false) {
         Ok(Value::GpuTensor(handle))
     } else {
-        gpu_helpers::free_rejected_provider_output(&handle, protected, provider);
-        Err(double_error_with_detail(
+        let mut error = double_error_with_detail(
             &DOUBLE_ERROR_INTERNAL,
             "provider returned malformed GPU output for 'like'",
-        ))
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        Err(gpu_helpers::reject_gpu_output(handle, error))
     }
 }
 
@@ -104,15 +110,21 @@ fn upload_double_like_complex(
     protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let handle = gpu_helpers::upload_complex_tensor_protecting(provider, tensor, protected)
-        .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?;
+        .map_err(|source| {
+            let mut error = double_error_with_detail(&DOUBLE_ERROR_INTERNAL, &source);
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error.source = Some(Box::new(source));
+            error
+        })?;
     if valid_double_like_output(&handle, prototype, provider, &tensor.shape, true) {
         gpu_helpers::complex_gpu_value(handle)
     } else {
-        gpu_helpers::free_rejected_provider_output(&handle, protected, provider);
-        Err(double_error_with_detail(
+        let mut error = double_error_with_detail(
             &DOUBLE_ERROR_INTERNAL,
             "provider returned malformed complex GPU output for 'like'",
-        ))
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        Err(gpu_helpers::reject_gpu_output(handle, error))
     }
 }
 

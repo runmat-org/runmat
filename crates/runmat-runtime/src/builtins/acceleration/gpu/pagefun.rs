@@ -84,9 +84,9 @@ async fn pagefun_builtin(
     }
     let result = pagefun_impl(func, first, rest).await?;
     if crate::output_count::current_output_count() == Some(0) {
-        if let Value::GpuTensor(handle) = &result {
-            gpu_helpers::free_unprotected_exact_owner(handle, &[]);
-        }
+        // Discard our owning result, not the allocation behind a borrowed
+        // handle. Any independently published aliases keep their own leases.
+        drop(result);
         Ok(Value::OutputList(Vec::new()))
     } else {
         Ok(result)

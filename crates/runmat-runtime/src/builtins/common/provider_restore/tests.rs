@@ -1,4 +1,4 @@
-use super::upload_value_protected;
+use super::upload::upload_value_protected;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_accelerate_api::GpuTensorHandle;

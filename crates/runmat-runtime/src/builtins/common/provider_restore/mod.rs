@@ -10,7 +10,7 @@ pub(crate) use execution::{
     validate_real_unary_provider_output_protecting,
 };
 pub(crate) use precision::align_floating_value_precision;
-pub(crate) use upload::{upload_value_like, upload_value_like_protected, upload_value_protected};
+pub(crate) use upload::{upload_value_like, upload_value_like_protected};
 
 #[cfg(test)]
 mod tests;

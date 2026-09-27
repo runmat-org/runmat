@@ -178,7 +178,6 @@ async fn ensure_cos_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
 }
 
 async fn cos_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> BuiltinResult<Value> {
-    let borrowed: Vec<_> = std::iter::once(&handle).chain(protected.iter()).collect();
     let provider = gpu_helpers::exact_provider_for_handle(&handle);
     let requires_exact_host_path = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle);
@@ -205,11 +204,12 @@ async fn cos_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
                     return gpu_helpers::resident_gpu_value(output);
                 }
                 Ok(output) => {
-                    gpu_helpers::free_rejected_provider_output(&output, &borrowed, provider);
-                    return Err(cos_error_with_detail(
+                    let mut error = cos_error_with_detail(
                         &COS_ERROR_INTERNAL,
                         "provider returned an invalid unary cosine result",
-                    ));
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(output, error));
                 }
                 Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
                 Err(error) => {

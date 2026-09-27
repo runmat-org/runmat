@@ -180,12 +180,12 @@ async fn atan2_gpu_pair(
                     .iter()
                     .any(|input| gpu_helpers::same_gpu_handle(input, &output))
                 {
-                    let borrowed: Vec<_> = protected.iter().chain([&y, &x]).collect();
-                    gpu_helpers::free_rejected_provider_output(&output, &borrowed, owner);
-                    return Err(atan2_error_with_detail(
+                    let mut error = atan2_error_with_detail(
                         &ATAN2_ERROR_INTERNAL,
                         "provider aliased a borrowed coordinate operand",
-                    ));
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(output, error));
                 }
                 let contract = gpu_helpers::BinaryGpuOutputContract {
                     shape: y.shape().to_vec(),

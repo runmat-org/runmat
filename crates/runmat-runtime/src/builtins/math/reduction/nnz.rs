@@ -283,11 +283,10 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
             if let Some(p) = provider {
                 match p.reduce_nnz(&handle).await {
                     Ok(result) => {
-                        validate_provider_result(p, &handle, &result, &[1, 1])?;
+                        let result = validate_provider_result(p, &handle, result, &[1, 1])?;
                         let host =
                             gpu_helpers::download_value_preserving_residency_async(p, &result)
                                 .await;
-                        gpu_helpers::free_unprotected_exact_owner(&result, &[&handle]);
                         let host = host.map_err(|error| {
                             nnz_terminal_provider_error(format!(
                                 "reduce_nnz result download failed: {error}"
@@ -324,11 +323,11 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
                         Ok(result) => {
                             let mut expected_shape = normalize_scalar_shape(handle.shape());
                             expected_shape[zero_based] = 1;
-                            validate_provider_result(p, &handle, &result, &expected_shape)?;
+                            let result =
+                                validate_provider_result(p, &handle, result, &expected_shape)?;
                             let host =
                                 gpu_helpers::download_value_preserving_residency_async(p, &result)
                                     .await;
-                            gpu_helpers::free_unprotected_exact_owner(&result, &[&handle]);
                             let host = host.map_err(|error| {
                                 nnz_terminal_provider_error(format!(
                                     "reduce_nnz_dim result download failed: {error}"
@@ -380,26 +379,33 @@ fn nnz_terminal_provider_error(detail: impl AsRef<str>) -> RuntimeError {
 fn validate_provider_result(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     source: &GpuTensorHandle,
-    result: &GpuTensorHandle,
+    result: GpuTensorHandle,
     expected_shape: &[usize],
-) -> BuiltinResult<()> {
-    let valid = !gpu_helpers::same_gpu_handle(source, result)
+) -> BuiltinResult<GpuTensorHandle> {
+    let valid = !source.shares_allocation_with(&result)
         && result.shape() == expected_shape
         && result.device_id() == provider.device_id()
-        && gpu_helpers::exact_provider_for_handle(result)
+        && gpu_helpers::exact_provider_for_handle(&result)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(result)
+        && runmat_accelerate_api::handle_storage(&result)
             == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(result).is_none()
-        && !runmat_accelerate_api::handle_is_logical(result)
-        && runmat_accelerate_api::handle_precision(result) == Some(provider.precision())
-        && gpu_helpers::gpu_class_metadata_matches(result, Some(provider.precision()), None, false);
+        && runmat_accelerate_api::handle_integer_type(&result).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&result)
+        && runmat_accelerate_api::handle_precision(&result) == Some(provider.precision())
+        && gpu_helpers::gpu_class_metadata_matches(
+            &result,
+            Some(provider.precision()),
+            None,
+            false,
+        );
     if valid {
-        return Ok(());
+        return Ok(result);
     }
-    gpu_helpers::free_unprotected_exact_owner(result, &[source]);
-    Err(nnz_terminal_provider_error(
-        "provider returned a malformed, aliased, or foreign reduction result",
+    Err(gpu_helpers::reject_gpu_output(
+        result,
+        nnz_terminal_provider_error(
+            "provider returned a malformed, aliased, or foreign reduction result",
+        ),
     ))
 }
 
@@ -862,6 +868,25 @@ fn describe_value_kind(value: &Value) -> String {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn nnz_rejected_result_consumes_only_its_owned_alias() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let output = input.with_view(input.view().clone()).unwrap();
+            let error =
+                super::validate_provider_result(provider, &input, output, &[1, 1]).unwrap_err();
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            input.allocation_lease().validate_live().unwrap();
+            let host = futures::executor::block_on(provider.download(&input)).unwrap();
+            assert_eq!(host.data, vec![1.0]);
+        });
+    }
+
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;

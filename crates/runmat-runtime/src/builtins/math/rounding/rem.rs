@@ -205,11 +205,12 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
         match result {
             Ok(output) => {
                 if !gpu_helpers::numeric_descriptor_matches_source(&a, &output) {
-                    gpu_helpers::free_rejected_provider_output(&output, &[&a, &b], provider);
-                    return Err(rem_error_with_detail(
+                    let mut error = rem_error_with_detail(
                         &REM_ERROR_INTERNAL,
                         "provider returned malformed binary output",
-                    ));
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(output, error));
                 }
                 let contract = gpu_helpers::BinaryGpuOutputContract {
                     shape: floating_shape.clone().unwrap_or_else(|| a.shape().to_vec()),

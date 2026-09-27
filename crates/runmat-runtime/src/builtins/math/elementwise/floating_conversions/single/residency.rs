@@ -75,16 +75,22 @@ fn upload_single_like(
     tensor: &Tensor,
     protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_tensor_protecting(provider, tensor, protected)
-        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?;
+    let handle =
+        gpu_helpers::upload_tensor_protecting(provider, tensor, protected).map_err(|source| {
+            let mut error = single_error_with_detail(&SINGLE_ERROR_INTERNAL, &source);
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error.source = Some(Box::new(source));
+            error
+        })?;
     if valid_single_like_output(&handle, prototype, provider, &tensor.shape) {
         Ok(Value::GpuTensor(handle))
     } else {
-        gpu_helpers::free_rejected_provider_output(&handle, protected, provider);
-        Err(single_error_with_detail(
+        let mut error = single_error_with_detail(
             &SINGLE_ERROR_INTERNAL,
             "provider returned malformed GPU output for 'like'",
-        ))
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        Err(gpu_helpers::reject_gpu_output(handle, error))
     }
 }
 
