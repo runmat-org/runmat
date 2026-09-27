@@ -179,12 +179,31 @@ fn strided_single_materialization_and_widening_have_distinct_scratch_allocations
 
 #[test]
 fn shared_resident_fact_preserves_lazy_transpose_layout() {
-    let handle = runmat_accelerate_api::GpuTensorHandle::new(vec![3, 2], u32::MAX - 286, 1)
-        .with_numeric_descriptor(
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 3],
             runmat_accelerate_api::NumericElementType::F32,
             runmat_accelerate_api::GpuTensorStorage::Real,
-        );
-    runmat_accelerate_api::record_handle_transpose(&handle, 2, 3);
+        )
+        .unwrap();
+    let handle = allocation
+        .handle
+        .with_view(
+            allocation
+                .handle
+                .view()
+                .clone()
+                .with_shape(vec![3, 2])
+                .with_layout(
+                    runmat_accelerate_api::allocation::GpuTensorLayout::Transpose(
+                        runmat_accelerate_api::TransposeInfo {
+                            base_rows: 2,
+                            base_cols: 3,
+                        },
+                    ),
+                ),
+        )
+        .unwrap();
     let fact = super::super::tensor_representation(
         &runmat_value::Value::GpuTensor(handle.clone()),
         ProviderPrecision::F64,
@@ -193,7 +212,16 @@ fn shared_resident_fact_preserves_lazy_transpose_layout() {
     assert_eq!(fact.element_type, ProviderElementType::F32);
     assert_eq!(fact.shape, vec![3, 2]);
     assert_eq!(fact.layout, ProviderLayout::Strided);
-    runmat_accelerate_api::clear_handle_metadata(&handle);
+    assert_eq!(allocation.handle.shape(), &[2, 3]);
+    drop(handle);
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
@@ -279,9 +307,6 @@ fn host_single_staging_counts_both_actual_conversion_passes_on_f32_abi() {
             _: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
             Box::pin(async { anyhow::bail!("geometry fixture cannot execute") })
-        }
-        fn free(&self, _: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            anyhow::bail!("geometry fixture cannot execute")
         }
     }
     let query = ProviderFeasibilityQuery {

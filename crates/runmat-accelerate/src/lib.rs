@@ -605,11 +605,12 @@ mod native_gather_tests {
             vec![1, 2],
         )
         .unwrap();
-        let mut handle = runmat_runtime::builtins::common::gpu_helpers::upload_complex_tensor(
+        let handle = runmat_runtime::builtins::common::gpu_helpers::upload_complex_tensor(
             provider, &expected,
         )
-        .expect("native complex integer upload");
-        runmat_accelerate_api::mark_handle_automatic(&mut handle);
+        .expect("native complex integer upload")
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
         let accelerator = Accelerator::new(Planner::new(None));
 
         let gathered = block_on(accelerator.gather_handle(&handle)).expect("native gather");
@@ -620,15 +621,23 @@ mod native_gather_tests {
             runmat_accelerate_api::handle_provenance(&handle),
             Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         );
-        provider.free(&handle).expect("free handle");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        handle.release().expect("release handle");
 
-        let unowned = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        assert!(block_on(accelerator.gather_handle(&unowned)).is_err());
+        let unregistered = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert!(block_on(accelerator.gather_handle(&unregistered.handle)).is_err());
+        unregistered
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(unregistered.probe.retirements(), 0);
+        drop(unregistered.handle);
+        assert_eq!(unregistered.probe.retirements(), 1);
     }
 }

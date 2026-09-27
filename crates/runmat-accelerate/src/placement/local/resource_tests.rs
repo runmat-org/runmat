@@ -22,9 +22,6 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         panic!("planning must not download")
     }
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        panic!("planning must not free")
-    }
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }

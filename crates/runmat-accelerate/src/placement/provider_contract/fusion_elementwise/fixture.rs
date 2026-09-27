@@ -25,7 +25,4 @@ impl AccelProvider for GeometryProvider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("geometry fixture cannot execute") })
     }
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        anyhow::bail!("geometry fixture cannot execute")
-    }
 }

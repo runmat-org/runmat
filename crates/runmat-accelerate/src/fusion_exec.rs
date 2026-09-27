@@ -1329,32 +1329,32 @@ mod tests {
 
     #[test]
     fn fusion_output_inherits_explicit_intent_or_remains_automatic() {
-        let explicit_input = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 901,
-            buffer_id: 1,
-            descriptor: Default::default(),
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocate = || {
+            owner
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
         };
-        let mut automatic_output = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 901,
-            buffer_id: 2,
-            descriptor: Default::default(),
-        };
-        let mut explicit_output = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 901,
-            buffer_id: 3,
-            descriptor: Default::default(),
-        };
-        let mut explicit_input = explicit_input;
-        runmat_accelerate_api::mark_handle_explicit(&mut explicit_input);
+        let input = allocate();
+        let automatic = allocate();
+        let explicit = allocate();
+        let explicit_input = input
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        let mut automatic_output = automatic.handle;
+        let mut explicit_output = explicit.handle;
 
-        mark_fusion_output(&mut automatic_output, &[Value::Num(1.0)]);
+        mark_fusion_output(&mut automatic_output, &[Value::Num(1.0)]).unwrap();
         mark_fusion_output(
             &mut explicit_output,
             &[Value::GpuTensor(explicit_input.clone())],
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             runmat_accelerate_api::handle_provenance(&automatic_output),
@@ -1362,7 +1362,14 @@ mod tests {
         );
         assert!(runmat_accelerate_api::handle_is_explicit(&explicit_output));
         for handle in [&explicit_input, &automatic_output, &explicit_output] {
-            runmat_accelerate_api::clear_handle_metadata(handle);
+            handle.allocation_lease().validate_live().unwrap();
+        }
+        for probe in [&input.probe, &automatic.probe, &explicit.probe] {
+            assert_eq!(probe.retirements(), 0);
+        }
+        drop((explicit_input, automatic_output, explicit_output));
+        for probe in [&input.probe, &automatic.probe, &explicit.probe] {
+            assert_eq!(probe.retirements(), 1);
         }
     }
 
