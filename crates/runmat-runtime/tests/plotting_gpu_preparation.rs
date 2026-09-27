@@ -71,6 +71,9 @@ fn exported_gpu_geometry_does_not_retry_device_errors_or_publish_pending_plots()
         bounds: AtomicUsize::new(0),
         frees: AtomicUsize::new(0),
     }));
+    // This fixture owns the newly allocated device namespace for the process
+    // lifetime. Register that owner independently of ambient provider selection.
+    unsafe { runmat_accelerate_api::register_device_provider(provider) };
     let _plot = lock_plot_test_context();
     let _provider = ThreadProviderGuard::set(Some(provider));
     let input = provider
@@ -80,6 +83,19 @@ fn exported_gpu_geometry_does_not_retry_device_errors_or_publish_pending_plots()
         })
         .unwrap();
     assert!(provider.export_wgpu_buffer(&input).is_some());
+    assert_eq!(
+        input.device_id,
+        provider.device_id(),
+        "uploaded device identity"
+    );
+    assert!(
+        runmat_accelerate_api::provider_for_device(input.device_id).is_some(),
+        "registered device owner"
+    );
+    assert!(
+        runmat_accelerate_api::export_wgpu_buffer(&input).is_some(),
+        "registered buffer export"
+    );
     for name in ["stairs", "area", "quiver", "errorbar", "scatter3"] {
         let figure = new_figure_handle();
         let resident = Value::GpuTensor(input.clone());
@@ -101,13 +117,9 @@ fn exported_gpu_geometry_does_not_retry_device_errors_or_publish_pending_plots()
         provider.mode.store(0, Ordering::SeqCst);
         provider.bounds.store(0, Ordering::SeqCst);
         let mut pending = Box::pin(runmat_runtime::call_builtin_async(name, &args));
-        assert!(
-            matches!(
-                pending.poll_unpin(&mut Context::from_waker(&noop_waker())),
-                Poll::Pending
-            ),
-            "{name}"
-        );
+        if let Poll::Ready(result) = pending.poll_unpin(&mut Context::from_waker(&noop_waker())) {
+            panic!("{name}: bounds probe did not suspend: {result:?}");
+        }
         assert_eq!(provider.bounds.load(Ordering::SeqCst), 1, "{name}");
         assert_eq!(clone_figure(figure).unwrap().plots().count(), 0, "{name}");
         drop(pending);
