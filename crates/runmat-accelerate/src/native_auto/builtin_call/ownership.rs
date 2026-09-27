@@ -3,6 +3,19 @@ use super::*;
 use runmat_accelerate_api::GpuTensorHandle;
 use std::collections::BTreeSet;
 
+pub(super) struct UploadCleanupFailure {
+    failed: usize,
+    first: (u32, u64),
+}
+impl UploadCleanupFailure {
+    pub(super) fn report(&self, phase: &'static str) {
+        // Fixed schema and bounded scalar fields, not arbitrary backend text.
+        log::warn!(target: "runmat::placement::cleanup",
+            "event=prepared_operand_retirement_failed phase={} device_id={} buffer_id={} failed_allocations={}",
+            phase, self.first.0, self.first.1, self.failed);
+    }
+}
+
 pub(super) struct OwnedUploads {
     provider: &'static dyn AccelProvider,
     borrowed: BTreeSet<(u32, u64)>,
@@ -66,12 +79,31 @@ impl OwnedUploads {
     pub(super) fn transfer_all(mut self) {
         self.owned.clear();
     }
+
+    /// Attempt each remaining retirement once. A failed free may already have
+    /// released backend storage, so drain it even on error: Drop must not retry.
+    /// Failure persistence/teardown remains the captured provider's authority.
+    pub(super) fn release(&mut self) -> std::result::Result<(), UploadCleanupFailure> {
+        let mut failure: Option<UploadCleanupFailure> = None;
+        for handle in self.owned.drain(..) {
+            if self.provider.free(&handle).is_err() {
+                let failure = failure.get_or_insert(UploadCleanupFailure {
+                    failed: 0,
+                    first: (handle.device_id, handle.buffer_id),
+                });
+                failure.failed += 1; // bounded by the original owned Vec length
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
 }
 
 impl Drop for OwnedUploads {
     fn drop(&mut self) {
-        for handle in self.owned.drain(..) {
-            let _ = self.provider.free(&handle);
+        // Invocation observation is already unsuccessful on abandonment. Never
+        // mutate an ambient recorder here: it may belong to another invocation.
+        if let Err(error) = self.release() {
+            error.report("abandonment");
         }
     }
 }

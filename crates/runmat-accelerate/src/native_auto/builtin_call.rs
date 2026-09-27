@@ -39,6 +39,17 @@ impl BuiltinCallGuard {
             uploads.adopt(value)?;
         }
         // Release unused staging before sealing the candidate's publication.
+        if let Some(uploads) = self.uploads.as_mut() {
+            if let Err(error) = uploads.release() {
+                error.report("completion");
+                if let Some(observation) = self.observation.as_mut() {
+                    observation.cleanup_failed();
+                }
+                // Preserve the body's result/error. Replacing a valid result
+                // could orphan its already-adopted resident outputs. Cleanup
+                // failure invalidates measurement, never trains success.
+            }
+        }
         drop(self.uploads.take());
         if let Some(observation) = self.observation.take() {
             observation.finish(result);

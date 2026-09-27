@@ -90,6 +90,18 @@ impl BuiltinCallObservation {
         }
     }
 
+    pub(super) fn cleanup_failed(&mut self) {
+        if let Some(receipt) = self.receipt.as_mut() {
+            receipt.fail(
+                runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+            );
+        }
+        self.report(false);
+        if let Some(trace) = self.trace.take() {
+            trace.fallback(None, "provider_cleanup_failed", None);
+        }
+    }
+
     pub(super) fn preparation_only(mut self) {
         self.feedback = None;
         if let Some(trace) = self.trace.take() {
