@@ -107,6 +107,9 @@ mod tests {
     fn compensation_does_not_replace_large_fractional_quotient_reduction() {
         assert_eq!(reduce_f64(2.0, 0.1), 0.0);
         assert_eq!(reduce_f32(2.0, 0.1), 0.0);
+        // A rounded product can land just below its mathematical multiple;
+        // normalized near-multiple compensation includes that side too.
+        assert_eq!(reduce_f64(3.0 * 0.7, 0.7), 0.0);
         // Scale exact whole operands by a power of two: the integer oracle
         // remains exact, while the divisor is no longer a whole number.
         let a = 100_000_000_000_000_000_i128;

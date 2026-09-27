@@ -9,6 +9,68 @@ use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogEntry, BuiltinPrepar
 use runmat_value::{NumericDType, Value};
 use std::future::Future;
 
+pub(super) async fn remainder<F, Fut>(
+    entry: &'static BuiltinCatalogEntry,
+    kind: runmat_types::FloatingRemainderKind,
+    left: Value,
+    right: Value,
+    shape_error: impl FnOnce(String) -> crate::RuntimeError,
+    body: F,
+) -> BuiltinResult<Value>
+where
+    F: FnOnce(Value, Value) -> Fut,
+    Fut: Future<Output = BuiltinResult<Value>>,
+{
+    let eligible = matches!((&left, &right), (Value::Tensor(a), Value::Tensor(b))
+        if matches!(a.numeric_dtype(), NumericDType::F32 | NumericDType::F64)
+            && a.numeric_dtype() == b.numeric_dtype());
+    if !eligible {
+        return body(left, right).await;
+    }
+    let (Value::Tensor(a), Value::Tensor(b)) = (&left, &right) else {
+        unreachable!()
+    };
+    let shape = crate::builtins::common::broadcast::broadcast_shapes(
+        entry.identity.name,
+        &a.shape,
+        &b.shape,
+    );
+    let shape = shape
+        .and_then(|shape| {
+            if !shape.contains(&0)
+                && shape
+                    .iter()
+                    .try_fold(1_usize, |n, d| n.checked_mul(*d))
+                    .is_none()
+            {
+                Err("broadcast element count overflow".into())
+            } else {
+                Ok(shape)
+            }
+        })
+        .map_err(shape_error)?;
+    let _ = shape;
+    let request = AdmittedBuiltinPreparation::new(
+        BuiltinPreparationAdmission {
+            binding: BuiltinBindingIdentity {
+                builtin: entry.identity,
+                variant: "default",
+            },
+            form: BuiltinPreparationFormId(0),
+            signature: 0,
+            input_count: 2,
+            requested_outputs: crate::output_count::current_output_count(),
+        },
+        vec![left, right],
+    )?
+    .with_numerical_domain(|_| Ok(NumericalDomainEvidence::FloatingRemainder(kind)))?;
+    execute_current_request(request, |mut values| {
+        let right = values.remove(1);
+        body(values.remove(0), right)
+    })
+    .await
+}
+
 pub(super) async fn digits<F, Fut>(
     value: Value,
     digits: i32,

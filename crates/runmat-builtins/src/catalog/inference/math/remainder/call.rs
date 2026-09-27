@@ -79,7 +79,12 @@ pub(super) fn infer(
             ShapeFact::Unknown
         }
     };
+    let prepared_pair = matches!((&left.kind, &right.kind),
+        (ValueKindFact::Numeric(a), ValueKindFact::Numeric(b))
+        if a.class == b.class && matches!(a.class, runmat_types::NumericClass::Single | runmat_types::NumericClass::Double)
+            && left.storage != StorageFact::Scalar && right.storage != StorageFact::Scalar);
     output.residency = match (&left.residency, &right.residency) {
+        (ResidencyFact::Host, ResidencyFact::Host) if prepared_pair => ResidencyFact::Unknown,
         (ResidencyFact::Host, ResidencyFact::Host)
         | (ResidencyFact::Host, ResidencyFact::Device { .. })
         | (ResidencyFact::Device { .. }, ResidencyFact::Host) => ResidencyFact::Host,

@@ -37,10 +37,21 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Native integer providers may execute exact mod directly. Floating execution may fuse; the standalone runtime path uses validated owner-specific host fallback and restores compatible residency.",
+        "Matching real floating operands use the provider's broadcasted mod hook; exact integer hooks remain separate. Unsupported hooks retain validated owner-specific fallback.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::modulus")]
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration {
+        binding: runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::MOD_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        revision: 1,
+        admit: None,
+        helpers: &[crate::builtins::common::spec::FusionMathHelper::FloatingRemainder],
+    };
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::modulus", semantics = FUSION_SEMANTICS)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "mod",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -48,19 +59,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
+            if ctx.inputs.len() != 2 { return Err(FusionError::Message("remainder requires two operands")); }
             let a = ctx
                 .inputs
                 .first()
                 .ok_or(FusionError::MissingInput(0))?;
             let b = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!(
-                "select({a} - {b} * floor({a} / {b}), {a}, {b} == 0.0)"
-            ))
+            let helper = crate::builtins::common::spec::FusionMathHelper::FloatingRemainder.entrypoint(ctx.scalar_ty)?;
+            Ok(format!("{helper}({a}, {b}, true)"))
         },
     }),
     reduction: None,
     emits_nan: true,
-    notes: "Fusion applies a - b * floor(a / b), including the documented mod(a, 0) = a convention; providers may substitute specialised kernels when available.",
+    notes: "Fusion shares encoded floating reduction and exceptional-value rules with direct execution.",
 };
 
 const BUILTIN_NAME: &str = "mod";
@@ -143,6 +154,18 @@ async fn mod_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME)
         .map_err(|error| mod_error_with_detail(&MOD_ERROR_INVALID_INPUT, error))?;
+    super::preparation::remainder(
+        &runmat_builtins::MOD_CATALOG_ENTRY,
+        runmat_types::FloatingRemainderKind::Modulus,
+        lhs,
+        rhs,
+        |error| mod_error_with_detail(&MOD_ERROR_SIZE_MISMATCH, error),
+        mod_values,
+    )
+    .await
+}
+
+async fn mod_values(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     match (lhs, rhs) {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => mod_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
@@ -167,9 +190,12 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
 async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = gpu_helpers::exact_provider_for_binary_inputs(&a, &b)
         .map_err(|error| mod_error_with_detail(&MOD_ERROR_INVALID_INPUT, error))?;
-    if runmat_accelerate_api::handle_integer_type(&a).is_some()
-        && runmat_accelerate_api::handle_integer_type(&b).is_some()
-        && common_binary::matching_physical_inputs(&a, &b)
+    let floating_shape = super::binary::floating_pair_shape(&a, &b, BUILTIN_NAME)
+        .map_err(|error| mod_error_with_detail(&MOD_ERROR_SIZE_MISMATCH, error))?;
+    if floating_shape.is_some()
+        || (runmat_accelerate_api::handle_integer_type(&a).is_some()
+            && runmat_accelerate_api::handle_integer_type(&b).is_some()
+            && common_binary::matching_physical_inputs(&a, &b))
     {
         let result = {
             let _left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&a);
@@ -186,7 +212,7 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                     ));
                 }
                 let contract = gpu_helpers::BinaryGpuOutputContract {
-                    shape: a.shape.clone(),
+                    shape: floating_shape.clone().unwrap_or_else(|| a.shape.clone()),
                     storage: runmat_accelerate_api::GpuTensorStorage::Real,
                     precision: runmat_accelerate_api::handle_precision(&a),
                     integer: runmat_accelerate_api::handle_integer_type(&a),
@@ -275,67 +301,11 @@ fn tensor_value_f32(tensor: &Tensor, index: usize) -> f32 {
 }
 
 fn mod_real_scalar_f32(a: f32, b: f32) -> f32 {
-    if a.is_nan() || b.is_nan() {
-        return f32::NAN;
-    }
-    if b == 0.0 {
-        return a;
-    }
-    if !a.is_finite() && b.is_finite() {
-        return f32::NAN;
-    }
-    if b.is_infinite() && a.is_finite() {
-        if a == 0.0 {
-            return 0.0;
-        }
-        return if a.signum() == b.signum() { a } else { b };
-    }
-    let mut remainder = super::floating_remainder::reduce_f32(a, b);
-    if !remainder.is_finite() && !a.is_finite() {
-        return f32::NAN;
-    }
-    if remainder != 0.0 && remainder.signum() != b.signum() {
-        remainder += b;
-    }
-    if remainder == -0.0 {
-        0.0
-    } else {
-        remainder
-    }
+    super::floating_remainder::apply_f32(a, b, runmat_types::FloatingRemainderKind::Modulus)
 }
 
 fn mod_real_scalar(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        return f64::NAN;
-    }
-    if b == 0.0 {
-        return a;
-    }
-    if !a.is_finite() && b.is_finite() {
-        return f64::NAN;
-    }
-    let mut remainder = super::floating_remainder::reduce_f64(a, b);
-    if remainder == 0.0 {
-        remainder = 0.0;
-    }
-    if b.is_infinite() && a.is_finite() {
-        // MATLAB sign-correction: mod(a, ±Inf) returns a when signs match, ±Inf otherwise.
-        if a == 0.0 {
-            return 0.0;
-        }
-        return if a.signum() == b.signum() { a } else { b };
-    }
-    if !remainder.is_finite() && !a.is_finite() {
-        return f64::NAN;
-    }
-    let same_sign = remainder == 0.0 || remainder.signum() == b.signum();
-    if !same_sign {
-        remainder += b;
-    }
-    if remainder == -0.0 {
-        remainder = 0.0;
-    }
-    remainder
+    super::floating_remainder::apply_f64(a, b, runmat_types::FloatingRemainderKind::Modulus)
 }
 
 fn scalar_real_value(value: &Value) -> Option<f64> {

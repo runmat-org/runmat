@@ -17,7 +17,17 @@ impl RuntimeAccelerationService for Recorder {
         _: RuntimeContext,
         request: AdmittedBuiltinPreparation,
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
-        assert_eq!(request.form().data_arguments, &[0]);
+        assert_eq!(
+            request.form().data_arguments,
+            if matches!(
+                request.form().operation,
+                runmat_builtins::BuiltinPreparationOperation::FloatingRemainder(_)
+            ) {
+                &[0, 1][..]
+            } else {
+                &[0][..]
+            }
+        );
         match request.form().operation {
             runmat_builtins::BuiltinPreparationOperation::Unary => {
                 assert_eq!(request.admission().input_count, 1);
@@ -35,6 +45,15 @@ impl RuntimeAccelerationService for Recorder {
                 ));
                 assert_eq!(request.operands().len(), 1);
             }
+            runmat_builtins::BuiltinPreparationOperation::FloatingRemainder(kind) => {
+                assert_eq!(request.admission().input_count, 2);
+                assert_eq!(request.admission().signature, 0);
+                assert_eq!(
+                    request.numerical_domain(),
+                    runmat_accelerate_api::NumericalDomainEvidence::FloatingRemainder(kind)
+                );
+                assert_eq!(request.operands().len(), 2);
+            }
             other => panic!("unexpected rounding operation: {other:?}"),
         }
         self.0
@@ -45,6 +64,62 @@ impl RuntimeAccelerationService for Recorder {
                 request.into_operands(),
             ))
         })
+    }
+}
+
+#[test]
+fn admitted_floating_remainder_validates_shape_and_outputs_before_preparation() {
+    let records = Rc::new(RefCell::new(Vec::new()));
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_acceleration(Rc::new(Recorder(records.clone()))),
+    );
+    let left = Value::Tensor(Tensor::new(vec![7.0, -7.0], vec![2, 1]).unwrap());
+    let right = Value::Tensor(Tensor::new(vec![3.0, -3.0, 2.0], vec![1, 3]).unwrap());
+    for (name, expected) in [
+        ("mod", vec![1.0, 2.0, -2.0, -1.0, 1.0, 1.0]),
+        ("rem", vec![1.0, -1.0, 1.0, -1.0, 1.0, -1.0]),
+    ] {
+        for outputs in [0, 1] {
+            let before = records.borrow().len();
+            let result = block_on(context.scope(call_builtin_async_with_outputs(
+                name,
+                &[left.clone(), right.clone()],
+                outputs,
+            )))
+            .unwrap();
+            assert_eq!(records.borrow().len(), before + 1);
+            if outputs == 1 {
+                let Value::Tensor(result) = result else {
+                    panic!("floating matrix")
+                };
+                assert_eq!(result.shape, vec![2, 3]);
+                assert_eq!(result.as_f64_slice().unwrap(), expected);
+            }
+        }
+        let before = records.borrow().len();
+        assert!(block_on(context.scope(call_builtin_async_with_outputs(
+            name,
+            &[left.clone(), right.clone()],
+            2
+        )))
+        .is_err());
+        let wrong = Value::Tensor(Tensor::new(vec![1.0; 3], vec![3, 1]).unwrap());
+        assert!(block_on(context.scope(call_builtin_async_with_outputs(
+            name,
+            &[left.clone(), wrong],
+            1
+        )))
+        .is_err());
+        assert!(block_on(context.scope(call_builtin_async_with_outputs(
+            name,
+            &[Value::Complex(1.0, 2.0), right.clone()],
+            1
+        )))
+        .is_err());
+        assert_eq!(records.borrow().len(), before);
     }
 }
 

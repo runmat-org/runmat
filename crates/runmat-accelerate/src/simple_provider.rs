@@ -1,6 +1,7 @@
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 mod power;
 mod logarithms;
+mod remainder;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};
@@ -5496,6 +5497,26 @@ impl AccelProvider for InProcessProvider {
         Ok(ProviderCovarianceToCorrelationResult {
             correlation: self.allocate_tensor(correlation, vec![rows, cols]),
             sigma: self.allocate_tensor(sigma, vec![rows, 1]),
+        })
+    }
+
+    fn elem_rem<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.floating_remainder_impl(a, b, runmat_types::FloatingRemainderKind::Remainder)
+        })
+    }
+
+    fn elem_mod<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.floating_remainder_impl(a, b, runmat_types::FloatingRemainderKind::Modulus)
         })
     }
 

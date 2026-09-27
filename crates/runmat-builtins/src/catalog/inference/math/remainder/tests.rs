@@ -64,7 +64,8 @@ fn single_remainder_singletons_stay_dense_and_mixed_residency_gathers() {
         );
         let right = left.clone();
         let result = infer_catalog_call(entry, &request(vec![left.clone(), right.clone()]));
-        assert_eq!(result.outputs[0].storage, StorageFact::Dense);
+        assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
+        assert_eq!(result.outputs[0].storage, StorageFact::Unknown);
         let mut resident = left;
         resident.residency = ResidencyFact::Device {
             provider: Some("test".into()),

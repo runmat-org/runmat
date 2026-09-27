@@ -242,59 +242,86 @@ fn rounding_dispatch_preserves_borrowed_metadata_and_releases_invalid_outputs() 
 fn exercise_remainder_lifetimes(provider: &'static Provider) {
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     for name in ["mod", "rem"] {
-        for fault in [
-            Fault::Pending,
-            Fault::Failed,
-            Fault::Alias,
-            Fault::MissingStorage,
-        ] {
-            *provider.state.lock().unwrap() = State {
-                fault,
-                ..State::default()
-            };
-            let left = provider
-                .inner
-                .upload_integer(&HostIntegerTensorView {
-                    data: HostIntegerDataView::I64(&[7, -7]),
-                    shape: &[1, 2],
-                })
-                .unwrap();
-            let right = provider
-                .inner
-                .upload_integer(&HostIntegerTensorView {
-                    data: HostIntegerDataView::I64(&[3, 3]),
-                    shape: &[1, 2],
-                })
-                .unwrap();
-            let args = [
-                Value::GpuTensor(left.clone()),
-                Value::GpuTensor(right.clone()),
-            ];
-            let mut call = Box::pin(runmat_runtime::call_builtin_async_with_outputs(
-                name, &args, 1,
-            ));
-            let result = call.as_mut().poll(&mut Context::from_waker(&noop_waker()));
-            if matches!(fault, Fault::Pending) {
-                assert!(matches!(result, Poll::Pending), "{name}");
-            } else {
-                assert!(matches!(result, Poll::Ready(Err(_))), "{name}");
+        for floating in [false, true] {
+            for fault in [
+                Fault::Pending,
+                Fault::Failed,
+                Fault::Alias,
+                Fault::MissingStorage,
+            ] {
+                *provider.state.lock().unwrap() = State {
+                    fault,
+                    ..State::default()
+                };
+                let left = if floating {
+                    provider
+                        .inner
+                        .upload(&HostTensorView {
+                            data: &[7.0, -7.0],
+                            shape: &[1, 2],
+                        })
+                        .unwrap()
+                } else {
+                    provider
+                        .inner
+                        .upload_integer(&HostIntegerTensorView {
+                            data: HostIntegerDataView::I64(&[7, -7]),
+                            shape: &[1, 2],
+                        })
+                        .unwrap()
+                };
+                let right = if floating {
+                    provider
+                        .inner
+                        .upload(&HostTensorView {
+                            data: &[3.0, 3.0],
+                            shape: &[1, 2],
+                        })
+                        .unwrap()
+                } else {
+                    provider
+                        .inner
+                        .upload_integer(&HostIntegerTensorView {
+                            data: HostIntegerDataView::I64(&[3, 3]),
+                            shape: &[1, 2],
+                        })
+                        .unwrap()
+                };
+                let args = [
+                    Value::GpuTensor(left.clone()),
+                    Value::GpuTensor(right.clone()),
+                ];
+                let mut call = Box::pin(runmat_runtime::call_builtin_async_with_outputs(
+                    name, &args, 1,
+                ));
+                let result = call.as_mut().poll(&mut Context::from_waker(&noop_waker()));
+                if matches!(fault, Fault::Pending) {
+                    assert!(matches!(result, Poll::Pending), "{name}");
+                } else {
+                    assert!(matches!(result, Poll::Ready(Err(_))), "{name}");
+                }
+                drop(call);
+                assert!(!runmat_accelerate_api::handle_is_logical(&left));
+                assert!(!runmat_accelerate_api::handle_is_logical(&right));
+                let state = provider.state.lock().unwrap();
+                assert_eq!(state.calls, 1);
+                assert!(!state.freed.contains(&left.buffer_id));
+                assert!(!state.freed.contains(&right.buffer_id));
+                assert_eq!(
+                    state.freed.len(),
+                    usize::from(matches!(fault, Fault::MissingStorage))
+                );
+                drop(state);
+                if floating {
+                    block_on(provider.inner.download(&left)).unwrap();
+                    block_on(provider.inner.download(&right)).unwrap();
+                } else {
+                    block_on(provider.inner.download_integer(&left)).unwrap();
+                    block_on(provider.inner.download_integer(&right)).unwrap();
+                }
+                provider.inner.free(&left).unwrap();
+                provider.inner.free(&right).unwrap();
             }
-            drop(call);
-            assert!(!runmat_accelerate_api::handle_is_logical(&left));
-            assert!(!runmat_accelerate_api::handle_is_logical(&right));
-            let state = provider.state.lock().unwrap();
-            assert_eq!(state.calls, 1);
-            assert!(!state.freed.contains(&left.buffer_id));
-            assert!(!state.freed.contains(&right.buffer_id));
-            assert_eq!(
-                state.freed.len(),
-                usize::from(matches!(fault, Fault::MissingStorage))
-            );
-            drop(state);
-            block_on(provider.inner.download_integer(&left)).unwrap();
-            block_on(provider.inner.download_integer(&right)).unwrap();
-            provider.inner.free(&left).unwrap();
-            provider.inner.free(&right).unwrap();
         }
     }
 }

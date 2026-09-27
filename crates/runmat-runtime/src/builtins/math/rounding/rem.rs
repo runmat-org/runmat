@@ -37,10 +37,21 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Native integer providers may execute exact rem directly. Floating execution may fuse; the standalone runtime path uses validated owner-specific host fallback and restores compatible residency.",
+        "Matching real floating operands use the provider's broadcasted rem hook; exact integer hooks remain separate. Unsupported hooks retain validated owner-specific fallback.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::rem")]
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration {
+        binding: runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::REM_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        revision: 1,
+        admit: None,
+        helpers: &[crate::builtins::common::spec::FusionMathHelper::FloatingRemainder],
+    };
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::rounding::rem", semantics = FUSION_SEMANTICS)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rem",
     shape: ShapeRequirements::BroadcastCompatible,
@@ -48,17 +59,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
         wgsl_body: |ctx: &FusionExprContext| {
+            if ctx.inputs.len() != 2 { return Err(FusionError::Message("remainder requires two operands")); }
             let a = ctx
                 .inputs
                 .first()
                 .ok_or(FusionError::MissingInput(0))?;
             let b = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!("{a} - {b} * trunc({a} / {b})"))
+            let helper = crate::builtins::common::spec::FusionMathHelper::FloatingRemainder.entrypoint(ctx.scalar_ty)?;
+            Ok(format!("{helper}({a}, {b}, false)"))
         },
     }),
     reduction: None,
     emits_nan: true,
-    notes: "Fusion expands rem as trunc(a / b) followed by a - b * q; providers may override with specialised kernels.",
+    notes: "Fusion shares encoded floating reduction and exceptional-value rules with direct execution.",
 };
 
 const BUILTIN_NAME: &str = "rem";
@@ -141,6 +154,18 @@ async fn rem_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME)
         .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?;
+    super::preparation::remainder(
+        &runmat_builtins::REM_CATALOG_ENTRY,
+        runmat_types::FloatingRemainderKind::Remainder,
+        lhs,
+        rhs,
+        |error| rem_error_with_detail(&REM_ERROR_SIZE_MISMATCH, error),
+        rem_values,
+    )
+    .await
+}
+
+async fn rem_values(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     match (lhs, rhs) {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => rem_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
@@ -165,9 +190,12 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
 async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = gpu_helpers::exact_provider_for_binary_inputs(&a, &b)
         .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?;
-    if runmat_accelerate_api::handle_integer_type(&a).is_some()
-        && runmat_accelerate_api::handle_integer_type(&b).is_some()
-        && common_binary::matching_physical_inputs(&a, &b)
+    let floating_shape = super::binary::floating_pair_shape(&a, &b, BUILTIN_NAME)
+        .map_err(|error| rem_error_with_detail(&REM_ERROR_SIZE_MISMATCH, error))?;
+    if floating_shape.is_some()
+        || (runmat_accelerate_api::handle_integer_type(&a).is_some()
+            && runmat_accelerate_api::handle_integer_type(&b).is_some()
+            && common_binary::matching_physical_inputs(&a, &b))
     {
         let result = {
             let _left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&a);
@@ -184,7 +212,7 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                     ));
                 }
                 let contract = gpu_helpers::BinaryGpuOutputContract {
-                    shape: a.shape.clone(),
+                    shape: floating_shape.clone().unwrap_or_else(|| a.shape.clone()),
                     storage: runmat_accelerate_api::GpuTensorStorage::Real,
                     precision: runmat_accelerate_api::handle_precision(&a),
                     integer: runmat_accelerate_api::handle_integer_type(&a),
@@ -273,35 +301,11 @@ fn tensor_value_f32(tensor: &Tensor, index: usize) -> f32 {
 }
 
 fn rem_real_scalar_f32(a: f32, b: f32) -> f32 {
-    if a.is_nan() || b.is_nan() || (b == 0.0) || (!a.is_finite() && b.is_finite()) {
-        return f32::NAN;
-    }
-    if b.is_infinite() && a.is_finite() {
-        return if a == -0.0 { 0.0 } else { a };
-    }
-    let remainder = super::floating_remainder::reduce_f32(a, b);
-    if remainder == -0.0 {
-        0.0
-    } else {
-        remainder
-    }
+    super::floating_remainder::apply_f32(a, b, runmat_types::FloatingRemainderKind::Remainder)
 }
 
 fn rem_real_scalar(a: f64, b: f64) -> f64 {
-    if a.is_nan() || b.is_nan() {
-        return f64::NAN;
-    }
-    if b == 0.0 {
-        return f64::NAN;
-    }
-    if !a.is_finite() && b.is_finite() {
-        return f64::NAN;
-    }
-    if b.is_infinite() && a.is_finite() {
-        return normalize_zero(a);
-    }
-    let remainder = super::floating_remainder::reduce_f64(a, b);
-    normalize_zero(remainder)
+    super::floating_remainder::apply_f64(a, b, runmat_types::FloatingRemainderKind::Remainder)
 }
 
 fn scalar_real_value(value: &Value) -> Option<f64> {
@@ -328,14 +332,6 @@ fn scalar_rem_value(lhs: &Value, rhs: &Value) -> Option<Value> {
         scalar_real_value(lhs)?,
         scalar_real_value(rhs)?,
     )))
-}
-
-fn normalize_zero(value: f64) -> f64 {
-    if value == -0.0 {
-        0.0
-    } else {
-        value
-    }
 }
 
 fn value_into_real_tensor(value: Value) -> BuiltinResult<Tensor> {

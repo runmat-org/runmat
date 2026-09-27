@@ -141,7 +141,16 @@ pub const REM_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
-        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+        preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+            id: crate::BuiltinPreparationFormId(0),
+            binding_variant: "default",
+            signatures: &[0],
+            data_arguments: &[0, 1],
+            operation: crate::BuiltinPreparationOperation::FloatingRemainder(
+                runmat_types::FloatingRemainderKind::Remainder,
+            ),
+            provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+        }]),
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,

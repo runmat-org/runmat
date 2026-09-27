@@ -3,6 +3,34 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::{binary::BinaryInputPlan, tensor};
 use crate::BuiltinResult;
 
+pub(super) fn floating_pair_shape(
+    left: &runmat_accelerate_api::GpuTensorHandle,
+    right: &runmat_accelerate_api::GpuTensorHandle,
+    builtin: &str,
+) -> Result<Option<Vec<usize>>, String> {
+    use runmat_accelerate_api::NumericElementType;
+    if !matches!(
+        left.descriptor.element_type,
+        Some(NumericElementType::F32 | NumericElementType::F64)
+    ) || left.descriptor.element_type != right.descriptor.element_type
+        || runmat_accelerate_api::handle_is_logical(left)
+        || runmat_accelerate_api::handle_is_logical(right)
+    {
+        return Ok(None);
+    }
+    let shape =
+        crate::builtins::common::broadcast::broadcast_shapes(builtin, &left.shape, &right.shape)?;
+    if !shape.contains(&0)
+        && shape
+            .iter()
+            .try_fold(1_usize, |n, d| n.checked_mul(*d))
+            .is_none()
+    {
+        return Err("broadcast element count overflow".into());
+    }
+    Ok(Some(shape))
+}
+
 pub(super) fn admit_real_resident(
     value: &Value,
     builtin: &str,

@@ -450,7 +450,15 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.integer_arithmetic_exec(5, "elem_rem", a, b) })
+        Box::pin(async move {
+            if self.get_entry_raw(a)?.integer_type().is_some()
+                || self.get_entry_raw(b)?.integer_type().is_some()
+            {
+                self.integer_arithmetic_exec(5, "elem_rem", a, b)
+            } else {
+                self.floating_remainder_exec(a, b, runmat_types::FloatingRemainderKind::Remainder)
+            }
+        })
     }
 
     fn elem_mod<'a>(
@@ -458,7 +466,15 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.integer_arithmetic_exec(6, "elem_mod", a, b) })
+        Box::pin(async move {
+            if self.get_entry_raw(a)?.integer_type().is_some()
+                || self.get_entry_raw(b)?.integer_type().is_some()
+            {
+                self.integer_arithmetic_exec(6, "elem_mod", a, b)
+            } else {
+                self.floating_remainder_exec(a, b, runmat_types::FloatingRemainderKind::Modulus)
+            }
+        })
     }
 
     fn elem_pow<'a>(
