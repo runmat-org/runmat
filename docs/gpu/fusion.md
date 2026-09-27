@@ -64,6 +64,8 @@ Clamp, power, and diagonal declarations apply only to the builtin implementation
 
 The request-local `ProviderWorkload.matmul` records data operand roles, dimensions, and exact scalar-control bits. Feasibility checks derive and verify the output shape. Cost estimates include retained product storage, diagonal warmup submission, uniforms, and data uploads. These are checked resource counts and static estimates, not measured execution times. Without an exact provider cache-readiness query, matrix preparation uses a cold-start estimate.
 
+For WGPU elementwise fusion, preparation queries inspect the exact shader, binding layout, workgroup size, and required conversion pipelines without compiling or dispatching work. Cache contention leaves readiness unknown. A cold cache contributes an explicitly marked estimate; it is not a measured compilation time. Workgroup and matrix-tile dimensions come from the provider instance so shader generation, dispatch, and resource estimates use the same geometry.
+
 ## Runtime Gating
 
 The interpreter only executes a fusion group when the current program counter matches the group's span start and the group is safe to replace. A group is skipped if the span contains VM barriers such as indexed assignment, member writes, or stack shapes that do not produce one live result.
@@ -89,7 +91,7 @@ flowchart LR
   Resident["fusion_residency::mark"]
   GpuValue["Value::GpuTensor"]
   Gather["provider.download()"]
-  Clear["clear_value() / clear_value_excluding()"]
+  Clear["retained-root ownership check"]
   Free["provider.free()"]
 
   Host --> Upload --> Handle
@@ -99,7 +101,7 @@ flowchart LR
   GpuValue --> Clear --> Free
 ```
 
-Residency cleanup is recursive. The VM clears GPU handles inside cells, structs, objects, handle objects, closures, and output lists. Overwrite paths use exclusion sets so a shared incoming handle is not freed while replacing an older value.
+Residency cleanup accounts for GPU handles inside cells, structs, objects, handle objects, closures, and output lists. VM replacement and completion paths check retained roots before retiring discarded allocations. If a service cannot expose its retained values, cleanup remains conservative; an unavailable root view is not treated as empty.
 
 ## Auto-Promotion
 
