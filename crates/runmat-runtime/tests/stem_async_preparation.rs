@@ -61,7 +61,9 @@ fn dispatched_stem_and_stairs_publish_only_after_preparation_completes() {
     });
     let _plot = lock_plot_test_context();
     let _current = ThreadProviderGuard::set(Some(provider));
-    for name in ["stem", "stairs", "quiver3", "area", "quiver", "errorbar"] {
+    for name in [
+        "stem", "stairs", "quiver3", "area", "quiver", "errorbar", "scatter3",
+    ] {
         provider.mode.store(0, Ordering::SeqCst);
         provider.freed.store(0, Ordering::SeqCst);
         assert_preparation_lifecycle(name, provider);
@@ -88,7 +90,7 @@ fn assert_preparation_lifecycle(name: &str, provider: &Provider) {
             host,
             Value::GpuTensor(input.clone()),
         ]
-    } else if name == "errorbar" {
+    } else if name == "errorbar" || name == "scatter3" {
         vec![host.clone(), host, Value::GpuTensor(input.clone())]
     } else if name == "quiver" {
         vec![
