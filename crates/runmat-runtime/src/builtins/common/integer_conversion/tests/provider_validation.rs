@@ -11,7 +11,7 @@ use runmat_types::IntegerClass;
 use runmat_value::Value;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Mutex, OnceLock,
+    Mutex,
 };
 
 #[derive(Clone, Copy)]
@@ -29,7 +29,7 @@ struct Provider {
     mode: Mutex<ResultMode>,
     calls: AtomicUsize,
     downloads: AtomicUsize,
-    created: Mutex<Vec<runmat_accelerate_api::WeakGpuTensorHandle>>,
+    created: Mutex<Vec<runmat_accelerate_api::allocation::WeakAllocationLease>>,
 }
 
 impl AccelProvider for Provider {
@@ -97,7 +97,10 @@ impl AccelProvider for Provider {
                         })?;
                         foreign.cast_to_integer(&foreign_input, target).await?
                     };
-                    self.created.lock().unwrap().push(output.downgrade());
+                    self.created
+                        .lock()
+                        .unwrap()
+                        .push(output.allocation_lease().downgrade());
                     Ok(output)
                 }
             }
@@ -132,23 +135,19 @@ fn abandoning_pending_cast_restores_borrowed_metadata_and_allocation() {
     );
     assert!(provider.created.lock().unwrap().is_empty());
     assert!(block_on(provider.inner.download(&input)).is_ok());
+    let physical = input.allocation_lease().downgrade();
     drop(input);
+    assert!(physical.acquire().is_none());
 }
 
 fn provider(mode: ResultMode) -> &'static Provider {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
+    Box::leak(Box::new(Provider {
         inner: InProcessProvider::new(),
         mode: Mutex::new(mode),
         calls: AtomicUsize::new(0),
         downloads: AtomicUsize::new(0),
         created: Mutex::new(Vec::new()),
-    });
-    *provider.mode.lock().unwrap() = mode;
-    provider.calls.store(0, Ordering::Relaxed);
-    provider.downloads.store(0, Ordering::Relaxed);
-    provider.created.lock().unwrap().clear();
-    provider
+    }))
 }
 
 fn input(provider: &Provider) -> GpuTensorHandle {
@@ -181,10 +180,12 @@ fn malformed_fresh_outputs_are_freed_without_touching_borrowed_input() {
             created.len(),
             usize::from(!matches!(mode, ResultMode::Alias))
         );
-        assert!(created.iter().all(|output| output.acquire().is_err()));
+        assert!(created.iter().all(|output| output.acquire().is_none()));
         assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
         assert!(block_on(provider.inner.download(&input)).is_ok());
+        let physical = input.allocation_lease().downgrade();
         drop(input);
+        assert!(physical.acquire().is_none());
     }
 }
 

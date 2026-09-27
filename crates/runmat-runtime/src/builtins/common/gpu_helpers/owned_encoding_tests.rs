@@ -43,7 +43,7 @@ fn logical_u8_owner_preserves_physical_type_and_logical_host_class() {
     let Value::LogicalArray(value) = value else {
         panic!("logical producer must remain logical")
     };
-    assert_eq!(value.data, [0, 1]);
+    assert_eq!(&*value.data, &[0, 1]);
     assert_eq!(value.shape, [1, 2]);
     drop(allocation.handle);
     assert_eq!(allocation.probe.retirements(), 1);
