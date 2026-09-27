@@ -206,7 +206,7 @@ fn submission_checks_owner_native_storage_layout_and_actual_allocation_extent() 
             .allocate_zeroed(
                 vec![4, 2],
                 NumericElementType::F32,
-                GpuTensorStorage::Complex,
+                GpuTensorStorage::ComplexInterleaved,
             )
             .unwrap(),
         owner
