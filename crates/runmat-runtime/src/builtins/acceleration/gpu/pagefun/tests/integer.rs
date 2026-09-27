@@ -88,12 +88,19 @@ fn pagefun_resident_integer_fallback_restores_exact_owner_and_class() {
         let Value::GpuTensor(result) = result else {
             panic!("expected resident result");
         };
-        assert_eq!(result.device_id, source.device_id);
+        assert_eq!(result.device_id(), source.device_id());
         assert_eq!(
             block_on(provider.download_integer(&result))
                 .expect("download exact result")
                 .data,
             HostIntegerDataOwned::U64(vec![9_007_199_254_740_993, u64::MAX])
         );
+        let input_lease = source.allocation_lease().downgrade();
+        let result_lease = result.allocation_lease().downgrade();
+        drop(result);
+        assert!(input_lease.acquire().is_some());
+        drop(source);
+        assert!(input_lease.acquire().is_none());
+        assert!(result_lease.acquire().is_none());
     });
 }

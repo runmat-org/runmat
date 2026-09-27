@@ -1,6 +1,8 @@
 use super::*;
+use runmat_accelerate_api::allocation::WeakAllocationLease;
 use runmat_accelerate_api::{AccelProvider, GpuTensorStorage};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 #[derive(Clone, Copy)]
 enum Response {
@@ -15,7 +17,7 @@ struct Provider {
     inner: runmat_accelerate::simple_provider::InProcessProvider,
     response: Response,
     calls: AtomicUsize,
-    frees: AtomicUsize,
+    produced: Mutex<Vec<WeakAllocationLease>>,
 }
 impl AccelProvider for Provider {
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -26,10 +28,6 @@ impl AccelProvider for Provider {
         handle: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         self.inner.download(handle)
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.frees.fetch_add(1, Ordering::SeqCst);
-        self.inner.free(handle)
     }
     fn device_id(&self) -> u32 {
         self.inner.device_id()
@@ -49,15 +47,27 @@ impl AccelProvider for Provider {
             }
             _ => {}
         }
-        let mut output = self.inner.upload(&HostTensorView {
-            data: &[1., 0., 0., 1.],
-            shape: &[2, 2],
-        })?;
-        match self.response {
-            Response::WrongShape => output.shape = vec![1, 4],
-            Response::WrongStorage => runmat_accelerate_api::set_handle_logical(&output, true),
-            _ => {}
-        }
+        let output = match self.response {
+            Response::WrongStorage => {
+                self.inner
+                    .upload_logical_raw(&runmat_accelerate_api::HostLogicalTensorView {
+                        data: &[1, 0, 0, 1],
+                        shape: &[2, 2],
+                    })?
+            }
+            _ => self.inner.upload(&HostTensorView {
+                data: &[1., 0., 0., 1.],
+                shape: if matches!(self.response, Response::WrongShape) {
+                    &[1, 4]
+                } else {
+                    &[2, 2]
+                },
+            })?,
+        };
+        self.produced
+            .lock()
+            .unwrap()
+            .push(output.allocation_lease().downgrade());
         Ok(output)
     }
 }
@@ -66,7 +76,7 @@ fn fixture(response: Response) -> &'static Provider {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
         response,
         calls: AtomicUsize::new(0),
-        frees: AtomicUsize::new(0),
+        produced: Mutex::new(Vec::new()),
     }));
     unsafe {
         runmat_accelerate_api::register_device_provider(provider);
@@ -90,7 +100,8 @@ fn result_contract_rejects_bad_metadata_without_freeing_borrowed_inputs() {
                 shape: &[2, 2],
             })
             .unwrap();
-        let before = gpu_helpers::snapshot_handle_metadata(&input);
+        let before = input.wire_descriptor();
+        let input_lease = input.allocation_lease().downgrade();
         let values = [
             Value::GpuTensor(input.clone()),
             Value::GpuTensor(input.clone()),
@@ -98,13 +109,20 @@ fn result_contract_rejects_bad_metadata_without_freeing_borrowed_inputs() {
         let error = try_pagefun_gpu(&PageOperation::Mtimes, &values).unwrap_err();
         assert_eq!(error.identifier(), PAGEFUN_ERROR_INTERNAL.identifier);
         assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+        drop(error);
+        let produced = provider.produced.lock().unwrap();
         assert_eq!(
-            provider.frees.load(Ordering::SeqCst),
+            produced.len(),
             usize::from(!matches!(response, Response::Alias))
         );
-        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), before);
+        assert!(produced.iter().all(|lease| lease.acquire().is_none()));
+        drop(produced);
+        assert_eq!(input.wire_descriptor(), before);
         assert!(block_on(provider.download(&input)).is_ok());
-        provider.free(&input).unwrap();
+        drop(values);
+        assert!(input_lease.acquire().is_some());
+        drop(input);
+        assert!(input_lease.acquire().is_none());
     }
 }
 
@@ -120,6 +138,7 @@ fn unsupported_allows_fallback_but_execution_failure_does_not() {
                 shape: &[2, 2],
             })
             .unwrap();
+        let input_lease = input.allocation_lease().downgrade();
         let values = [
             Value::GpuTensor(input.clone()),
             Value::GpuTensor(input.clone()),
@@ -134,7 +153,10 @@ fn unsupported_allows_fallback_but_execution_failure_does_not() {
                 .contains("injected device allocation failure"));
         }
         assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
-        provider.free(&input).unwrap();
+        drop(values);
+        assert!(input_lease.acquire().is_some());
+        drop(input);
+        assert!(input_lease.acquire().is_none());
     }
 }
 
@@ -144,13 +166,15 @@ fn exact_owner_is_used_instead_of_active_provider_and_discard_releases_result() 
     let owner = fixture(Response::Valid);
     let unrelated = fixture(Response::Failure);
     let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(unrelated));
-    let mut input = owner
+    let input = owner
         .upload(&HostTensorView {
             data: &[1., 0., 0., 1.],
             shape: &[2, 2],
         })
-        .unwrap();
-    runmat_accelerate_api::mark_handle_explicit(&mut input);
+        .unwrap()
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .expect("explicit immutable view");
+    let input_lease = input.allocation_lease().downgrade();
     for count in [0, 1] {
         let _outputs = crate::output_count::push_output_count(Some(count));
         let result = block_on(pagefun_builtin(
@@ -170,11 +194,14 @@ fn exact_owner_is_used_instead_of_active_provider_and_discard_releases_result() 
                 runmat_accelerate_api::handle_storage(&output),
                 GpuTensorStorage::Real
             );
-            owner.free(&output).unwrap();
+            output.release().expect("release owned result");
         }
     }
     assert_eq!(owner.calls.load(Ordering::SeqCst), 2);
-    assert_eq!(owner.frees.load(Ordering::SeqCst), 2);
+    let produced = owner.produced.lock().unwrap();
+    assert_eq!(produced.len(), 2);
+    assert!(produced.iter().all(|lease| lease.acquire().is_none()));
     assert_eq!(unrelated.calls.load(Ordering::SeqCst), 0);
-    owner.free(&input).unwrap();
+    drop(input);
+    assert!(input_lease.acquire().is_none());
 }

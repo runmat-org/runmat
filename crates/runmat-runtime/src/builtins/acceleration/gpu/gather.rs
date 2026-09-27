@@ -174,8 +174,12 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit immutable view");
+            drop(handle);
+            let handle = explicit;
+            let lease = handle.allocation_lease().downgrade();
             let result =
                 block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())])).expect("gather");
             match result {
@@ -188,7 +192,8 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_explicit(&handle));
             block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())]))
                 .expect("source handle remains gatherable");
-            provider.free(&handle).ok();
+            handle.release().expect("release caller lease");
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -196,14 +201,13 @@ pub(crate) mod tests {
     #[test]
     fn gather_preserves_logical_gpu_tensors() {
         test_support::with_test_provider(|provider| {
-            let data = vec![0.0, 1.0, 1.0, 0.0];
-            let tensor = Tensor::new(data.clone(), vec![2, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1, 0],
+                    shape: &[2, 2],
+                })
+                .expect("logical producer upload");
+            let lease = handle.allocation_lease().downgrade();
             let result = block_on(gather_builtin(vec![Value::GpuTensor(handle)])).expect("gather");
             match result {
                 Value::LogicalArray(logical) => {
@@ -212,6 +216,7 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected logical array, got {other:?}"),
             }
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -299,6 +304,7 @@ pub(crate) mod tests {
                 })
                 .expect("upload");
             let cell = CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell");
+            provider.reset_telemetry();
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(gather_builtin(vec![Value::Cell(cell)]))
                 .expect_err("recursive gather is an extension");
@@ -306,7 +312,14 @@ pub(crate) mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:GatherRecursiveContainerExtension")
             );
-            provider.free(&handle).ok();
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(
+                block_on(provider.download(&handle)).is_ok(),
+                "caller alias remains live"
+            );
+            handle
+                .release()
+                .expect("release caller reference; managed cell remains GC-owned");
         });
     }
 
@@ -360,7 +373,9 @@ pub(crate) mod tests {
                     }
                     other => panic!("expected tensor value, got {other:?}"),
                 }
-                let _ = provider.free(&handle);
+                let lease = handle.allocation_lease().downgrade();
+                handle.release().expect("release caller lease");
+                assert!(lease.acquire().is_none());
             }
             Err(err) => {
                 tracing::warn!("Skipping gather_wgpu_provider_roundtrip: {err}");

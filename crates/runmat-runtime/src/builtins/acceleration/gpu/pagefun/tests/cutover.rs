@@ -73,12 +73,16 @@ fn catalog_binding_replaces_metadata_and_type_resolver_authorities() {
 
 #[test]
 fn illegal_outputs_and_nested_inputs_fail_before_provider_ownership_access() {
-    let resident = Value::GpuTensor(GpuTensorHandle {
-        shape: vec![2, 2],
-        device_id: u32::MAX - 737,
-        buffer_id: u64::MAX - 737,
-        descriptor: Default::default(),
-    });
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 2],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let original = allocation.handle.wire_descriptor();
+    assert!(gpu_helpers::exact_provider_for_handle(&allocation.handle).is_none());
+    let resident = Value::GpuTensor(allocation.handle.clone());
     {
         let _outputs = crate::output_count::push_output_count(Some(2));
         let error = block_on(pagefun_builtin(
@@ -97,6 +101,12 @@ fn illegal_outputs_and_nested_inputs_fail_before_provider_ownership_access() {
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), PAGEFUN_ERROR_INVALID_INPUT.identifier);
+    assert_eq!(allocation.handle.wire_descriptor(), original);
+    assert_eq!(
+        allocation.probe.retirements(),
+        0,
+        "caller and managed cell retain their own leases"
+    );
 }
 
 #[test]
