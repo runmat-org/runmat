@@ -1,0 +1,150 @@
+use crate::context::preparation::{
+    AdmittedBuiltinPreparation, BuiltinPreparationObservation, PreparedBuiltinOperands,
+};
+use crate::context::{
+    RuntimeAccelerationService, RuntimeContext, RuntimeContextGuard, RuntimeServiceFuture,
+    RuntimeServicePorts,
+};
+use crate::RuntimeError;
+use futures::executor::block_on;
+use runmat_value::{Tensor, Value};
+use std::{cell::RefCell, rc::Rc};
+
+type Events = Rc<RefCell<Vec<&'static str>>>;
+struct Observation(Events);
+impl BuiltinPreparationObservation for Observation {
+    fn begin_execution(&mut self) {
+        self.0.borrow_mut().push("begin");
+    }
+    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+        self.0
+            .borrow_mut()
+            .push(if result.is_ok() { "success" } else { "failure" });
+        Ok(())
+    }
+    fn abort(self: Box<Self>) {
+        self.0.borrow_mut().push("abort");
+    }
+}
+struct Service {
+    events: Events,
+    replace: bool,
+}
+impl RuntimeAccelerationService for Service {
+    fn supports_operation(&self, _: &str) -> bool {
+        true
+    }
+    fn prepare_admitted(
+        &self,
+        _: RuntimeContext,
+        request: AdmittedBuiltinPreparation,
+    ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
+        let admission = request.admission();
+        assert!(["double", "single"].contains(&admission.binding.builtin.name));
+        assert_eq!(request.form().data_arguments, &[0]);
+        assert_eq!(
+            admission.input_count,
+            if admission.signature == 0 { 1 } else { 3 }
+        );
+        self.events.borrow_mut().push("prepare");
+        let mut operands = request.into_operands();
+        assert_eq!(
+            operands.len(),
+            1,
+            "option and prototype must stay domain-local"
+        );
+        if self.replace {
+            operands[0] = Value::OutputList(vec![]);
+        }
+        let observer = Observation(self.events.clone());
+        Box::pin(async move {
+            Ok(PreparedBuiltinOperands::new(
+                operands,
+                Some(Box::new(observer)),
+            ))
+        })
+    }
+}
+fn enter(events: &Events, replace: bool) -> RuntimeContextGuard {
+    RuntimeContextGuard::enter(
+        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+            .with_service_ports(RuntimeServicePorts::default().with_acceleration(Rc::new(
+                Service {
+                    events: events.clone(),
+                    replace,
+                },
+            ))),
+    )
+}
+
+#[test]
+fn base_and_like_forms_prepare_only_data_and_observe_execution_once() {
+    let events = Events::default();
+    let _context = enter(&events, false);
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    for name in ["double", "single"] {
+        let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
+        assert!(runmat_builtins::validate_builtin_preparation(entry).is_empty());
+        assert_eq!(
+            entry.contract.async_behavior,
+            runmat_builtins::BuiltinAsyncBehavior::MaySuspend
+        );
+        for shape in [vec![0, 2, 3], vec![1, 1, 2]] {
+            let len = shape.iter().product();
+            for like in [false, true] {
+                let mut args = vec![Value::Tensor(
+                    Tensor::new(vec![1.25; len], shape.clone()).unwrap(),
+                )];
+                if like {
+                    args.extend([Value::from("like"), Value::Num(0.0)]);
+                }
+                let result = block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap();
+                let Value::Tensor(output) = result else {
+                    panic!("dense shape-preserving output");
+                };
+                assert_eq!(output.shape, shape);
+                assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+                events.borrow_mut().clear();
+            }
+        }
+    }
+}
+
+#[test]
+fn invalid_options_prototypes_and_output_counts_never_prepare() {
+    let events = Events::default();
+    let _context = enter(&events, false);
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    for name in ["double", "single"] {
+        for args in [
+            vec![Value::Num(1.0), Value::from("invalid"), Value::Num(0.0)],
+            vec![Value::Num(1.0), Value::from("like"), Value::from("invalid")],
+            vec![Value::OutputList(vec![])],
+        ] {
+            assert!(block_on(crate::dispatcher::call_builtin_async(name, &args)).is_err());
+            assert!(events.borrow().is_empty());
+        }
+        assert!(block_on(crate::dispatcher::call_builtin_async_with_outputs(
+            name,
+            &[Value::Num(1.0)],
+            2
+        ))
+        .is_err());
+        assert!(events.borrow().is_empty());
+    }
+}
+
+#[test]
+fn deliberate_service_replacement_is_revalidated_by_conversion_body() {
+    let events = Events::default();
+    let _context = enter(&events, true);
+    for name in ["double", "single"] {
+        assert!(block_on(crate::dispatcher::call_builtin_async(
+            name,
+            &[Value::Num(1.0)]
+        ))
+        .is_err());
+        assert_eq!(&*events.borrow(), &["prepare", "begin", "failure"]);
+        events.borrow_mut().clear();
+    }
+}

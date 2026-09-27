@@ -55,34 +55,20 @@ async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             }
         })
         .collect();
-    let protected: Vec<_> = borrowed.iter().collect();
-    let _borrowed_metadata: Vec<_> = protected
-        .iter()
-        .map(|handle| crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(handle))
-        .collect();
-    let converted = match value {
-        Value::GpuTensor(handle) => double_from_gpu(handle, &protected).await?,
-        host => host::convert(host)?,
-    };
-    let owned =
-        crate::builtins::common::resident_output::ResidentResultGuard::new(&converted, &protected)
-            .map_err(|detail| {
-                double_error_with_detail(&runmat_builtins::DOUBLE_ERROR_INTERNAL, detail)
-            })?;
-    let intermediate = match &converted {
-        Value::GpuTensor(handle) => Some(handle.clone()),
-        _ => None,
-    };
-    let mut template_protected = protected.clone();
-    if let Some(handle) = &intermediate {
-        template_protected.push(handle);
-    }
-    let result = apply_output_template(converted, &template, &template_protected).await?;
-    owned.publish(&result);
-    Ok(result)
+    let signature = usize::from(!rest.is_empty());
+    let input_count = 1 + rest.len();
+    super::preparation::execute(
+        runmat_builtins::DOUBLE_CATALOG_ENTRY.identity,
+        value,
+        signature,
+        input_count,
+        |value| execution::convert(value, template, borrowed),
+    )
+    .await
 }
 
 mod host;
+mod execution;
 mod provider;
 mod residency;
 mod template;

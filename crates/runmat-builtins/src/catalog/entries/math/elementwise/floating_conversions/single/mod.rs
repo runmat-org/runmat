@@ -7,6 +7,7 @@ define_floating_conversion_contract!(
     "single",
     "SINGLE",
     NumericClass::Single,
+    crate::BuiltinPreparationProviderRequirement::InputSupported,
     SINGLE_DOCUMENTATION,
     "Single-precision output value.",
     "binary32 storage",

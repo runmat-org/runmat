@@ -18,6 +18,7 @@ macro_rules! define_floating_conversion_contract {
         $name:literal,
         $upper:literal,
         $class:expr,
+        $preparation_requirement:expr,
         $documentation:expr,
         $output_description:literal,
         $gpu_storage_description:literal,
@@ -82,7 +83,7 @@ macro_rules! define_floating_conversion_contract {
         pub const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
             code: concat!("RM.", $upper, ".INVALID_ARGUMENT"),
             identifier: Some(concat!("RunMat:", $name, ":InvalidArgument")),
-            when: "Optional arguments are malformed or unsupported.",
+            when: "Optional arguments are malformed or unsupported, or more than one output is requested.",
             message: concat!($name, ": invalid argument"),
         };
         pub const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -153,7 +154,7 @@ macro_rules! define_floating_conversion_contract {
             }];
 
         const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-        const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+        const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 
         pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -167,7 +168,7 @@ macro_rules! define_floating_conversion_contract {
                     MathInferenceRule::NumericConversionWithLike($class),
                 ),
                 compatibility: BuiltinCompatibility::Matlab,
-                async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+                async_behavior: BuiltinAsyncBehavior::MaySuspend,
                 purity: BuiltinPurity::Pure,
                 semantic_kind: BuiltinSemanticKind::General,
                 workspace_effect: None,
@@ -176,7 +177,14 @@ macro_rules! define_floating_conversion_contract {
                 capabilities: &[],
             },
             placement: BuiltinPlacementContract {
-                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+                preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+                    id: crate::BuiltinPreparationFormId(0),
+                    binding_variant: "default",
+                    signatures: &[0, 1],
+                    data_arguments: &[0],
+                    operation: crate::BuiltinPreparationOperation::Unary,
+                    provider_requirement: $preparation_requirement,
+                }]),
                 portability: BuiltinPortability::NativeAndWasm,
                 accelerator: BuiltinAcceleratorPolicy::Optional,
                 residency: BuiltinResidencyPolicy::Dynamic,

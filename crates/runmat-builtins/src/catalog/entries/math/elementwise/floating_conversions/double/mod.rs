@@ -7,6 +7,7 @@ define_floating_conversion_contract!(
     "double",
     "DOUBLE",
     NumericClass::Double,
+    crate::BuiltinPreparationProviderRequirement::F64,
     DOUBLE_DOCUMENTATION,
     "Double-precision output value.",
     "binary64 storage",
