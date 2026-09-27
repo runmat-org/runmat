@@ -58,8 +58,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   output.data[i] = input0.data[i] + 1.0;
 }
 "#;
+    let (shader, output_class) = match provider.precision() {
+        runmat_accelerate_api::ProviderPrecision::F32 => (
+            shader.to_owned(),
+            runmat_accelerate_api::ProviderElementType::F32,
+        ),
+        runmat_accelerate_api::ProviderPrecision::F64 => (
+            shader.replace("f32", "f64"),
+            runmat_accelerate_api::ProviderElementType::F64,
+        ),
+    };
     let _ = provider
-        .fused_elementwise(shader, std::slice::from_ref(&elem), &elem_shape, elem_len)
+        .fused_elementwise(
+            &shader,
+            std::slice::from_ref(&elem),
+            &elem_shape,
+            elem_len,
+            output_class,
+        )
         .expect("fused_elementwise");
 
     let mat_shape = [2usize, 2usize];
@@ -144,9 +160,9 @@ fn telemetry_records_chunked_matmul_activity() {
         telemetry.kernel_launches
     );
 
-    let _ = provider.free(&a);
-    let _ = provider.free(&b);
-    let _ = provider.free(&c);
+    a.release().unwrap();
+    b.release().unwrap();
+    c.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -180,8 +196,8 @@ fn corrcoef_device_path_avoids_host_downloads() {
         "corrcoef device path should not download tensors to host"
     );
 
-    let _ = provider.free(&input);
-    let _ = provider.free(&out);
+    input.release().unwrap();
+    out.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -234,15 +250,15 @@ fn qr_power_iter_device_path_avoids_host_downloads() {
         telemetry.download_bytes, 0,
         "qr_power_iter device path should not download tensors to host"
     );
-    assert_eq!(qr.q.shape, vec![n, k], "unexpected Q shape");
-    assert_eq!(qr.r.shape, vec![k, k], "unexpected R shape");
+    assert_eq!(qr.q.shape(), vec![n, k], "unexpected Q shape");
+    assert_eq!(qr.r.shape(), vec![k, k], "unexpected R shape");
 
-    let _ = provider.free(&lhs_handle);
-    let _ = provider.free(&q_handle);
-    let _ = provider.free(&qr.q);
-    let _ = provider.free(&qr.r);
-    let _ = provider.free(&qr.perm_matrix);
-    let _ = provider.free(&qr.perm_vector);
+    lhs_handle.release().unwrap();
+    q_handle.release().unwrap();
+    qr.q.release().unwrap();
+    qr.r.release().unwrap();
+    qr.perm_matrix.release().unwrap();
+    qr.perm_vector.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -302,12 +318,12 @@ fn qr_power_iter_zero_product_path_remains_stable() {
         "R contained non-finite values in zero-product edge path"
     );
 
-    let _ = provider.free(&lhs_handle);
-    let _ = provider.free(&q_handle);
-    let _ = provider.free(&qr.q);
-    let _ = provider.free(&qr.r);
-    let _ = provider.free(&qr.perm_matrix);
-    let _ = provider.free(&qr.perm_vector);
+    lhs_handle.release().unwrap();
+    q_handle.release().unwrap();
+    qr.q.release().unwrap();
+    qr.r.release().unwrap();
+    qr.perm_matrix.release().unwrap();
+    qr.perm_vector.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -375,12 +391,12 @@ fn qr_power_iter_rank_deficient_path_remains_finite() {
         "R contained non-finite values in rank-deficient edge path"
     );
 
-    let _ = provider.free(&lhs_handle);
-    let _ = provider.free(&q_handle);
-    let _ = provider.free(&qr.q);
-    let _ = provider.free(&qr.r);
-    let _ = provider.free(&qr.perm_matrix);
-    let _ = provider.free(&qr.perm_vector);
+    lhs_handle.release().unwrap();
+    q_handle.release().unwrap();
+    qr.q.release().unwrap();
+    qr.r.release().unwrap();
+    qr.perm_matrix.release().unwrap();
+    qr.perm_vector.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -416,8 +432,8 @@ fn qr_column_counts_use_correctness_fallback() {
         telem64.download_bytes > 0,
         "cols=64 should use the correctness-first host QR fallback"
     );
-    assert_eq!(qr64.q.shape, vec![rows, cols_device]);
-    assert_eq!(qr64.r.shape, vec![cols_device, cols_device]);
+    assert_eq!(qr64.q.shape(), vec![rows, cols_device]);
+    assert_eq!(qr64.r.shape(), vec![cols_device, cols_device]);
 
     let cols_host = 65usize;
     let mut data_65 = vec![0.0f64; rows * cols_host];
@@ -439,17 +455,17 @@ fn qr_column_counts_use_correctness_fallback() {
         telem65.download_bytes > 0,
         "cols=65 should use the correctness-first host QR fallback"
     );
-    assert_eq!(qr65.q.shape, vec![rows, cols_host]);
-    assert_eq!(qr65.r.shape, vec![cols_host, cols_host]);
+    assert_eq!(qr65.q.shape(), vec![rows, cols_host]);
+    assert_eq!(qr65.r.shape(), vec![cols_host, cols_host]);
 
-    let _ = provider.free(&h64);
-    let _ = provider.free(&h65);
-    let _ = provider.free(&qr64.q);
-    let _ = provider.free(&qr64.r);
-    let _ = provider.free(&qr64.perm_matrix);
-    let _ = provider.free(&qr64.perm_vector);
-    let _ = provider.free(&qr65.q);
-    let _ = provider.free(&qr65.r);
-    let _ = provider.free(&qr65.perm_matrix);
-    let _ = provider.free(&qr65.perm_vector);
+    h64.release().unwrap();
+    h65.release().unwrap();
+    qr64.q.release().unwrap();
+    qr64.r.release().unwrap();
+    qr64.perm_matrix.release().unwrap();
+    qr64.perm_vector.release().unwrap();
+    qr65.q.release().unwrap();
+    qr65.r.release().unwrap();
+    qr65.perm_matrix.release().unwrap();
+    qr65.perm_vector.release().unwrap();
 }

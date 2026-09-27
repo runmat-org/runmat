@@ -24,22 +24,22 @@ fn actual_wgpu_single_buffers_preserve_f32_empty_nd_and_independent_handle_lifet
             })
             .unwrap();
         let output = block_on(provider.unary_single(&input)).unwrap();
-        assert_ne!(output.buffer_id, input.buffer_id);
-        assert_eq!(output.shape, shape);
+        assert!(output.shares_allocation_with(&input));
+        assert_eq!(output.shape(), shape);
         assert_eq!(
-            output.descriptor.element_type,
+            output.descriptor().element_type,
             Some(NumericElementType::F32)
         );
         assert_eq!(
             provider.get_entry_raw(&output).unwrap().allocated_bytes,
             values.len() as u64 * 4
         );
-        provider.free(&input).unwrap();
+        input.release().unwrap();
         assert_eq!(
             block_on(provider.download_numeric(&output)).unwrap().data,
             HostNumericDataOwned::F32(values)
         );
-        provider.free(&output).unwrap();
+        output.release().unwrap();
     }
 }
 
@@ -66,9 +66,9 @@ fn actual_wgpu_f64_to_f32_uses_target_sized_storage_and_preserves_input() {
             })
             .unwrap();
         let output = block_on(provider.unary_single(&input)).unwrap();
-        assert_eq!(output.shape, shape);
+        assert_eq!(output.shape(), shape);
         assert_eq!(
-            output.descriptor.element_type,
+            output.descriptor().element_type,
             Some(NumericElementType::F32)
         );
         assert_eq!(
@@ -86,15 +86,15 @@ fn actual_wgpu_f64_to_f32_uses_target_sized_storage_and_preserves_input() {
                 actual.to_bits() == expected.to_bits() || (actual.is_nan() && expected.is_nan())
             );
         }
-        provider.free(&output).unwrap();
+        output.release().unwrap();
         assert!(block_on(provider.download_numeric(&input)).is_ok());
         let duplicate = block_on(provider.unary_double(&input)).unwrap();
-        provider.free(&input).unwrap();
+        input.release().unwrap();
         assert_eq!(
-            duplicate.descriptor.element_type,
+            duplicate.descriptor().element_type,
             Some(NumericElementType::F64)
         );
         assert!(block_on(provider.download_numeric(&duplicate)).is_ok());
-        provider.free(&duplicate).unwrap();
+        duplicate.release().unwrap();
     }
 }

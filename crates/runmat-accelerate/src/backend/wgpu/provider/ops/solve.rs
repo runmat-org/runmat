@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "solve/ownership_tests.rs"]
+mod ownership_tests;
+
 impl WgpuProvider {
     pub(crate) async fn linsolve_exec(
         &self,
@@ -425,15 +429,15 @@ impl WgpuProvider {
         transpose: bool,
         effective_lower: bool,
     ) -> Result<ProviderLinsolveResult> {
-        let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(&lhs.shape)?;
-        let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(&rhs.shape)?;
+        let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(lhs.shape())?;
+        let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(rhs.shape())?;
         ensure!(
             lhs_rows == lhs_cols && rhs_rows == lhs_rows,
             "linsolve: triangular device path requires square lhs and matching rhs rows"
         );
         if lhs_rows == 0 || rhs_cols == 0 {
             return Ok(ProviderLinsolveResult {
-                solution: self.zeros(&rhs.shape)?,
+                solution: self.zeros(rhs.shape())?,
                 reciprocal_condition: f64::NAN,
             });
         }
@@ -441,8 +445,8 @@ impl WgpuProvider {
         let len = rhs_rows
             .checked_mul(rhs_cols)
             .ok_or_else(|| anyhow!("linsolve: rhs dimensions overflow"))?;
-        let mut current = self.zeros(&rhs.shape)?;
-        let mut scratch = self.zeros(&rhs.shape)?;
+        let mut current = self.zeros(rhs.shape())?;
+        let mut scratch = self.zeros(rhs.shape())?;
         let bind_group_layout = self.triangular_solve_bind_group_layout();
         let pipeline = self.triangular_solve_pipeline(transpose, effective_lower);
         crate::backend::wgpu::dispatch::solve::warmup_noop(
@@ -490,7 +494,7 @@ impl WgpuProvider {
             );
             std::mem::swap(&mut current, &mut scratch);
         }
-        let _ = self.free_exec(&scratch);
+        drop(scratch);
         Ok(ProviderLinsolveResult {
             solution: current,
             reciprocal_condition: f64::NAN,
@@ -503,129 +507,112 @@ impl WgpuProvider {
         rows: usize,
         label: &str,
     ) -> Result<(GpuTensorHandle, GpuTensorHandle)> {
-        let mut registrations = self.registration_batch();
-        let result = (|| {
-            let matrix_entry = self.get_entry(matrix)?;
-            let len_out = rows
-                .checked_mul(rows)
-                .ok_or_else(|| anyhow!("linsolve: SPD matrix dimensions overflow"))?;
-            ensure!(
-                matrix_entry.len == len_out,
-                "linsolve: SPD factor expects square matrix buffer (expected {}, got {})",
-                len_out,
-                matrix_entry.len
-            );
+        let matrix_entry = self.get_entry(matrix)?;
+        let len_out = rows
+            .checked_mul(rows)
+            .ok_or_else(|| anyhow!("linsolve: SPD matrix dimensions overflow"))?;
+        ensure!(
+            matrix_entry.len == len_out,
+            "linsolve: SPD factor expects square matrix buffer (expected {}, got {})",
+            len_out,
+            matrix_entry.len
+        );
 
-            let bytes = (len_out as u64) * (self.element_size as u64);
-            let gram_buffer = self.kernel_resources.scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
+        let bytes = (len_out as u64) * (self.element_size as u64);
+        let gram_buffer = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
+            bytes,
+            "runmat-chol-gram-scratch",
+        );
+        if bytes > 0 {
+            let copy_label = format!("{label}-gram-copy");
+            let mut encoder =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(copy_label.as_str()),
+                    });
+            encoder.copy_buffer_to_buffer(
+                matrix_entry.buffer.as_ref(),
+                0,
+                gram_buffer.as_ref(),
+                0,
                 bytes,
-                "runmat-chol-gram-scratch",
             );
-            if bytes > 0 {
-                let copy_label = format!("{label}-gram-copy");
-                let mut encoder =
+            self.submit(encoder);
+        }
+
+        let r_buffer = self.create_storage_buffer_checked(len_out, "runmat-chol-r")?;
+        let r_inv_buffer = self.create_storage_buffer_checked(len_out, "runmat-chol-rinv")?;
+
+        let params = QrPowerIterParams {
+            cols: rows as u32,
+            stride: rows as u32,
+            _pad0: [0, 0],
+        };
+        let params_buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::UniformBufferKey::QrPowerIterParams,
+            std::mem::size_of::<QrPowerIterParams>() as u64,
+            "runmat-chol-params",
+        );
+        self.queue_ref()
+            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+
+        let layout = &self.pipelines.qr_power_iter.layout;
+        let bind_entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: gram_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: r_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: r_inv_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buffer.as_entire_binding(),
+            },
+        ];
+        let bind_group = self
+            .bind_group_cache
+            .get_or_create(layout, &bind_entries, || {
+                Arc::new(
                     self.device_ref()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some(copy_label.as_str()),
-                        });
-                encoder.copy_buffer_to_buffer(
-                    matrix_entry.buffer.as_ref(),
-                    0,
-                    gram_buffer.as_ref(),
-                    0,
-                    bytes,
-                );
-                self.submit(encoder);
-            }
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-chol-bind"),
+                            layout,
+                            entries: &bind_entries,
+                        }),
+                )
+            });
+        crate::backend::wgpu::dispatch::qr_power_iter::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.qr_power_iter.pipeline,
+            bind_group.as_ref(),
+        );
 
-            let r_buffer = self.kernel_resources.scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrR,
-                bytes,
-                "runmat-chol-r-scratch",
-            );
-            let r_inv_buffer = self.kernel_resources.scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrRInv,
-                bytes,
-                "runmat-chol-rinv-scratch",
-            );
-
-            let params = QrPowerIterParams {
-                cols: rows as u32,
-                stride: rows as u32,
-                _pad0: [0, 0],
-            };
-            let params_buffer = self.kernel_resources.uniform_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::UniformBufferKey::QrPowerIterParams,
-                std::mem::size_of::<QrPowerIterParams>() as u64,
-                "runmat-chol-params",
-            );
-            self.queue_ref()
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-
-            let layout = &self.pipelines.qr_power_iter.layout;
-            let bind_entries = [
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: gram_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: r_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: r_inv_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ];
-            let bind_group = self
-                .bind_group_cache
-                .get_or_create(layout, &bind_entries, || {
-                    Arc::new(
-                        self.device_ref()
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("runmat-chol-bind"),
-                                layout,
-                                entries: &bind_entries,
-                            }),
-                    )
-                });
-            crate::backend::wgpu::dispatch::qr_power_iter::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.qr_power_iter.pipeline,
-                bind_group.as_ref(),
-            );
-
-            let shape = vec![rows, rows];
-            let r_handle = registrations.track(self.register_existing_buffer_with_usage(
-                r_buffer.clone(),
-                shape.clone(),
-                len_out,
-                BufferUsageClass::FusionOut,
-            ))?;
-            self.mark_buffer_usage(&r_handle, BufferUsageClass::FusionOut);
-            let r_inv_handle = registrations.track(self.register_existing_buffer_with_usage(
-                r_inv_buffer.clone(),
-                shape,
-                len_out,
-                BufferUsageClass::FusionOut,
-            ))?;
-            self.mark_buffer_usage(&r_inv_handle, BufferUsageClass::FusionOut);
-            Ok((r_handle, r_inv_handle))
-        })();
-        registrations.finish(result, |batch, out| {
-            batch.publish(&out.0);
-            batch.publish(&out.1);
-        })
+        let shape = vec![rows, rows];
+        let r_handle = self.register_existing_buffer_with_usage(
+            r_buffer.clone(),
+            shape.clone(),
+            len_out,
+            BufferUsageClass::FusionOut,
+        )?;
+        self.mark_buffer_usage(&r_handle, BufferUsageClass::FusionOut);
+        let r_inv_handle = self.register_existing_buffer_with_usage(
+            r_inv_buffer.clone(),
+            shape,
+            len_out,
+            BufferUsageClass::FusionOut,
+        )?;
+        self.mark_buffer_usage(&r_inv_handle, BufferUsageClass::FusionOut);
+        Ok((r_handle, r_inv_handle))
     }
 
     async fn try_posdef_linsolve_device(
@@ -641,8 +628,8 @@ impl WgpuProvider {
             return Ok(None);
         }
 
-        let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(&lhs.shape)?;
-        let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(&rhs.shape)?;
+        let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(lhs.shape())?;
+        let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(rhs.shape())?;
         if lhs_rows != lhs_cols || rhs_rows != lhs_rows {
             return Ok(None);
         }
@@ -660,15 +647,15 @@ impl WgpuProvider {
             let factor_rcond = match self.svd_rcond("linsolve_posdef_rcond", &r_handle).await {
                 Ok(value) => value,
                 Err(err) => {
-                    let _ = self.free_exec(&r_handle);
-                    let _ = self.free_exec(&r_inv_handle);
+                    drop(r_handle);
+                    drop(r_inv_handle);
                     return Err(err);
                 }
             };
             let rcond = factor_rcond * factor_rcond;
             if let Err(err) = self.enforce_device_rcond(options, rcond) {
-                let _ = self.free_exec(&r_handle);
-                let _ = self.free_exec(&r_inv_handle);
+                drop(r_handle);
+                drop(r_inv_handle);
                 return Err(err);
             }
             rcond
@@ -678,8 +665,8 @@ impl WgpuProvider {
         let projected_rhs = match self.run_triangular_linsolve_device(&r_handle, rhs, true, true) {
             Ok(value) => value,
             Err(err) => {
-                let _ = self.free_exec(&r_handle);
-                let _ = self.free_exec(&r_inv_handle);
+                drop(r_handle);
+                drop(r_inv_handle);
                 return Err(err);
             }
         };
@@ -691,15 +678,15 @@ impl WgpuProvider {
         ) {
             Ok(value) => value,
             Err(err) => {
-                let _ = self.free_exec(&projected_rhs.solution);
-                let _ = self.free_exec(&r_handle);
-                let _ = self.free_exec(&r_inv_handle);
+                drop(projected_rhs.solution);
+                drop(r_handle);
+                drop(r_inv_handle);
                 return Err(err);
             }
         };
-        let _ = self.free_exec(&projected_rhs.solution);
-        let _ = self.free_exec(&r_handle);
-        let _ = self.free_exec(&r_inv_handle);
+        drop(projected_rhs.solution);
+        drop(r_handle);
+        drop(r_inv_handle);
         solution.reciprocal_condition = rcond;
 
         self.telemetry.record_linsolve_duration(start.elapsed());
@@ -736,8 +723,8 @@ impl WgpuProvider {
         };
         let solve_lhs = transposed_lhs.as_ref().unwrap_or(lhs);
         let result = async {
-            let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(&solve_lhs.shape)?;
-            let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(&rhs.shape)?;
+            let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(solve_lhs.shape())?;
+            let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(rhs.shape())?;
             if rhs_rows != lhs_rows {
                 return Ok(None);
             }
@@ -764,7 +751,6 @@ impl WgpuProvider {
                     solve_lhs,
                     lhs_rows,
                     lhs_cols,
-                    None,
                     "runmat-linsolve-tall",
                     false,
                 )?;
@@ -772,14 +758,14 @@ impl WgpuProvider {
                     let rcond = match self.svd_rcond("linsolve_tall_qr_rcond", &r_handle).await {
                         Ok(value) => value,
                         Err(err) => {
-                            let _ = self.free_exec(&q_handle);
-                            let _ = self.free_exec(&r_handle);
+                            drop(q_handle);
+                            drop(r_handle);
                             return Err(err);
                         }
                     };
                     if let Err(err) = self.enforce_device_rcond(options, rcond) {
-                        let _ = self.free_exec(&q_handle);
-                        let _ = self.free_exec(&r_handle);
+                        drop(q_handle);
+                        drop(r_handle);
                         return Err(err);
                     }
                     rcond
@@ -791,10 +777,10 @@ impl WgpuProvider {
                     self.matmul_exec_with_usage(&q_t_handle, rhs, BufferUsageClass::FusionOut)?;
                 let mut triangular =
                     self.run_triangular_linsolve_device(&r_handle, &projected_rhs, false, false)?;
-                let _ = self.free_exec(&projected_rhs);
-                let _ = self.free_exec(&q_t_handle);
-                let _ = self.free_exec(&q_handle);
-                let _ = self.free_exec(&r_handle);
+                drop(projected_rhs);
+                drop(q_t_handle);
+                drop(q_handle);
+                drop(r_handle);
                 triangular.reciprocal_condition = rcond;
                 self.telemetry.record_linsolve_duration(start.elapsed());
                 let shape = [
@@ -823,28 +809,22 @@ impl WgpuProvider {
 
             let start = Instant::now();
             let lhs_t = self.permute_exec(solve_lhs, &[1, 0])?;
-            let (q_handle, r_handle, _) = self.qr_factor_device(
-                &lhs_t,
-                lhs_cols,
-                lhs_rows,
-                None,
-                "runmat-linsolve-wide",
-                false,
-            )?;
+            let (q_handle, r_handle, _) =
+                self.qr_factor_device(&lhs_t, lhs_cols, lhs_rows, "runmat-linsolve-wide", false)?;
             let rcond = if Self::needs_rcond(options) {
                 let rcond = match self.svd_rcond("linsolve_wide_qr_rcond", &r_handle).await {
                     Ok(value) => value,
                     Err(err) => {
-                        let _ = self.free_exec(&q_handle);
-                        let _ = self.free_exec(&r_handle);
-                        let _ = self.free_exec(&lhs_t);
+                        drop(q_handle);
+                        drop(r_handle);
+                        drop(lhs_t);
                         return Err(err);
                     }
                 };
                 if let Err(err) = self.enforce_device_rcond(options, rcond) {
-                    let _ = self.free_exec(&q_handle);
-                    let _ = self.free_exec(&r_handle);
-                    let _ = self.free_exec(&lhs_t);
+                    drop(q_handle);
+                    drop(r_handle);
+                    drop(lhs_t);
                     return Err(err);
                 }
                 rcond
@@ -857,10 +837,10 @@ impl WgpuProvider {
                 &intermediate.solution,
                 BufferUsageClass::FusionOut,
             )?;
-            let _ = self.free_exec(&intermediate.solution);
-            let _ = self.free_exec(&q_handle);
-            let _ = self.free_exec(&r_handle);
-            let _ = self.free_exec(&lhs_t);
+            drop(intermediate.solution);
+            drop(q_handle);
+            drop(r_handle);
+            drop(lhs_t);
             self.telemetry.record_linsolve_duration(start.elapsed());
             let shape = [
                 ("rows", lhs_rows as u64),
@@ -878,9 +858,7 @@ impl WgpuProvider {
             }))
         }
         .await;
-        if let Some(handle) = transposed_lhs.as_ref() {
-            let _ = self.free_exec(handle);
-        }
+        drop(transposed_lhs);
         result
     }
 
@@ -897,13 +875,13 @@ impl WgpuProvider {
             return Ok(None);
         }
 
-        let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(&lhs.shape)?;
-        let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(&rhs.shape)?;
+        let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(lhs.shape())?;
+        let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(rhs.shape())?;
         if lhs_rows != lhs_cols || rhs_rows != lhs_rows {
             return Ok(None);
         }
         if lhs_rows == 0 || rhs_cols == 0 {
-            let solution = self.zeros(&rhs.shape)?;
+            let solution = self.zeros(rhs.shape())?;
             return Ok(Some(ProviderLinsolveResult {
                 solution,
                 reciprocal_condition: f64::NAN,
@@ -972,8 +950,8 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
     ) -> Result<Option<GpuTensorHandle>> {
-        let _ = Self::matrix_dims_for_solve(&lhs.shape)?;
-        let _ = Self::matrix_dims_for_solve(&rhs.shape)?;
+        let _ = Self::matrix_dims_for_solve(lhs.shape())?;
+        let _ = Self::matrix_dims_for_solve(rhs.shape())?;
         let rhs_t = self.permute_exec(rhs, &[1, 0])?;
         let lhs_t = self.permute_exec(lhs, &[1, 0])?;
         let result = self
@@ -981,13 +959,13 @@ impl WgpuProvider {
             .await?;
         let output = if let Some(result) = result {
             let transposed = self.permute_exec(&result.solution, &[1, 0])?;
-            let _ = self.free_exec(&result.solution);
+            drop(result.solution);
             Some(transposed)
         } else {
             None
         };
-        let _ = self.free_exec(&rhs_t);
-        let _ = self.free_exec(&lhs_t);
+        drop(rhs_t);
+        drop(lhs_t);
         Ok(output)
     }
 }

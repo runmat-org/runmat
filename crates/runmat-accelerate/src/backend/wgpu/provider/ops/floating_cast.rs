@@ -24,7 +24,7 @@ impl WgpuProvider {
         // Casting is elementwise in physical order. Preserve the validated
         // logical view rather than materializing or reinterpreting its order.
         ensure!(
-            input.shape == entry.shape,
+            input.shape() == entry.shape,
             "floating cast view shape mismatch"
         );
         ensure!(
@@ -54,19 +54,8 @@ impl WgpuProvider {
             NumericPrecision::F32 => NumericElementType::F32,
             NumericPrecision::F64 => NumericElementType::F64,
         };
-        if entry.precision == target {
-            let output = self.register_numeric_buffer(
-                entry.buffer,
-                NumericBufferRegistration {
-                    shape: entry.shape,
-                    len: entry.len,
-                    physical_element_type: target_type,
-                    storage: GpuTensorStorage::Real,
-                    allocated_bytes: entry.allocated_bytes,
-                    usage: entry.usage,
-                },
-            )?;
-            return self.finish_floating_cast_view(output, transpose);
+        if entry.precision == target && !self.allocations.requires_logical_encoding(input)? {
+            return Ok(input.with_view(input.view().clone().with_logical(false))?);
         }
         let len = entry.len;
         if len > u32::MAX as usize {
@@ -85,6 +74,29 @@ impl WgpuProvider {
         // The existing checked raw-word allocator is independent of provider
         // float precision; typed registration below owns the interpretation.
         let output = self.create_integer_word_buffer(words, "runmat-floating-cast")?;
+        if entry.precision == target {
+            if len != 0 {
+                let mut encoder =
+                    self.device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-logical-to-numeric-copy"),
+                        });
+                encoder.copy_buffer_to_buffer(&entry.buffer, 0, &output, 0, allocated_bytes);
+                self.queue.submit(Some(encoder.finish()));
+            }
+            let output = self.register_numeric_buffer(
+                output,
+                NumericBufferRegistration {
+                    shape: entry.shape,
+                    len,
+                    physical_element_type: target_type,
+                    storage: GpuTensorStorage::Real,
+                    allocated_bytes,
+                    usage: BufferUsageClass::Generic,
+                },
+            )?;
+            return self.finish_floating_cast_view(output, transpose);
+        }
         if len != 0 {
             let workgroup_size = self.workgroup_config.scalar;
             let recipe = super::pipeline_recipe::PipelineRecipe::floating_cast(
@@ -171,15 +183,9 @@ impl WgpuProvider {
         transpose: Option<runmat_accelerate_api::TransposeInfo>,
     ) -> Result<GpuTensorHandle> {
         if let Some(info) = transpose {
-            runmat_accelerate_api::record_handle_transpose(&output, info.base_rows, info.base_cols);
-            if runmat_accelerate_api::handle_transpose_info(&output) != Some(info) {
-                // A fresh registration owns this output, including same-type
-                // aliases. Never free the borrowed input registration.
-                self.free(&output)?;
-                return Err(anyhow!(
-                    "floating cast could not publish transpose metadata"
-                ));
-            }
+            return Ok(output.with_view(output.view().clone().with_layout(
+                runmat_accelerate_api::allocation::GpuTensorLayout::Transpose(info),
+            ))?);
         }
         Ok(output)
     }

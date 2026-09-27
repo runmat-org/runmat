@@ -32,7 +32,7 @@ fn read_f32(provider: &WgpuProvider, exported: &WgpuBufferRef) -> Vec<u32> {
 fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_or_registration_leak(
 ) {
     let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
-    let baseline = provider.placement_resources().live_bytes;
+    let baseline = provider.allocations.retained_bytes();
     let values = [1.25_f32, -0.0, 3.5, 4.25, 5.75, 6.125];
     let input = provider
         .upload_numeric(&HostNumericTensorView {
@@ -49,7 +49,7 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
     let class = runmat_accelerate_api::handle_class_identity(&transposed);
     let provenance = runmat_accelerate_api::handle_provenance(&transposed);
     let before = provider.telemetry_snapshot();
-    let registered = provider.placement_resources().live_bytes;
+    let registered = provider.allocations.retained_bytes();
     let contiguous = provider.export_wgpu_buffer_exec(&input).unwrap();
     assert!(Arc::ptr_eq(
         &contiguous.buffer,
@@ -87,14 +87,18 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
     assert_eq!(after.upload_bytes, before.upload_bytes);
     assert_eq!(after.download_bytes, before.download_bytes);
     assert_eq!(
-        provider.placement_resources().live_bytes,
-        registered,
-        "export introduces no temporary tensor registrations"
+        provider.allocations.retained_bytes(),
+        registered + exported.buffer.size(),
+        "materialized export retains its own physical allocation accounting"
     );
-
-    provider.free_exec(&transposed).unwrap();
-    provider.free_exec(&input).unwrap();
-    assert_eq!(provider.placement_resources().live_bytes, baseline);
+    assert!(!exported
+        .owning_handle()
+        .shares_allocation_with(contiguous.owning_handle()));
+    drop((transposed, input, original));
+    assert_eq!(
+        provider.allocations.retained_bytes(),
+        registered + exported.buffer.size()
+    );
     // Both Arc exports, including the materialized independent allocation,
     // remain valid after source registration retirement and later allocation.
     let replacement = provider
@@ -113,7 +117,17 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
         read_f32(&provider, &exported),
         [values[0], values[2], values[4], values[1], values[3], values[5]].map(f32::to_bits)
     );
-    provider.free_exec(&replacement).unwrap();
+    drop(replacement);
+    let export_clone = exported.clone();
+    drop(exported);
+    assert_eq!(
+        provider.allocations.retained_bytes(),
+        registered + export_clone.buffer.size()
+    );
+    drop(export_clone);
+    assert_eq!(provider.allocations.retained_bytes(), registered);
+    drop(contiguous);
+    assert_eq!(provider.allocations.retained_bytes(), baseline);
 }
 
 #[test]
@@ -132,12 +146,19 @@ fn malformed_export_layout_is_rejected_before_dispatch_or_registration() {
         .unwrap();
     let transposed = provider.transpose_exec(&input).unwrap();
     let before = provider.placement_resources().live_bytes;
-    runmat_accelerate_api::record_handle_transpose(&transposed, 1, 6);
+    let mut wire = transposed.wire_descriptor();
+    wire.view = wire
+        .view
+        .with_layout(runmat_accelerate_api::GpuTensorLayout::Transpose(
+            runmat_accelerate_api::TransposeInfo {
+                base_rows: 1,
+                base_cols: 6,
+            },
+        ));
     let mut receipt = ProviderOperationReceipt::new();
     assert!(
-        with_provider_observation(Some(receipt.recorder()), || provider
-            .export_wgpu_buffer_exec(&transposed))
-        .is_none()
+        with_provider_observation(Some(receipt.recorder()), || provider.acquire_live(&wire))
+            .is_err()
     );
     receipt.publish().unwrap();
     assert!(matches!(
@@ -145,6 +166,5 @@ fn malformed_export_layout_is_rejected_before_dispatch_or_registration() {
         ProviderObservationStatus::Completed { submissions: 0, .. }
     ));
     assert_eq!(provider.placement_resources().live_bytes, before);
-    provider.free_exec(&transposed).unwrap();
-    provider.free_exec(&input).unwrap();
+    drop((transposed, input));
 }

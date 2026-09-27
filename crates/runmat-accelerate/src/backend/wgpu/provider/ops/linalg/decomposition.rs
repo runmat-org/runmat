@@ -75,11 +75,11 @@ impl WgpuProvider {
         );
         match reduce {
             Ok(handle) => {
-                let _ = self.free_exec(&product);
+                drop(product);
                 Ok(handle)
             }
             Err(err) => {
-                let _ = self.free_exec(&product);
+                drop(product);
                 Err(err)
             }
         }
@@ -170,51 +170,35 @@ impl WgpuProvider {
 
         // Track every intermediate handle outside the computation closure so that
         // handles allocated before a failing `?` are still freed on error.
-        let mut to_free: Vec<GpuTensorHandle> = Vec::with_capacity(15);
 
         let compute_result: Result<GpuTensorHandle> = (|| {
             let a1 = self.gather_linear_exec(lhs, &comp1, &reduced_shape)?;
-            to_free.push(a1.clone());
             let a2 = self.gather_linear_exec(lhs, &comp2, &reduced_shape)?;
-            to_free.push(a2.clone());
             let a3 = self.gather_linear_exec(lhs, &comp3, &reduced_shape)?;
-            to_free.push(a3.clone());
             let b1 = self.gather_linear_exec(rhs, &comp1, &reduced_shape)?;
-            to_free.push(b1.clone());
             let b2 = self.gather_linear_exec(rhs, &comp2, &reduced_shape)?;
-            to_free.push(b2.clone());
             let b3 = self.gather_linear_exec(rhs, &comp3, &reduced_shape)?;
-            to_free.push(b3.clone());
 
             let a2b3 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b3)?;
-            to_free.push(a2b3.clone());
             let a3b2 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b2)?;
-            to_free.push(a3b2.clone());
             let c1 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a2b3, &a3b2)?;
-            to_free.push(c1.clone());
 
             let a3b1 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b1)?;
-            to_free.push(a3b1.clone());
             let a1b3 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b3)?;
-            to_free.push(a1b3.clone());
             let c2 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a3b1, &a1b3)?;
-            to_free.push(c2.clone());
 
             let a1b2 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b2)?;
-            to_free.push(a1b2.clone());
             let a2b1 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b1)?;
-            to_free.push(a2b1.clone());
             let c3 =
                 self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a1b2, &a2b1)?;
-            to_free.push(c3.clone());
 
             let out = self.zeros_exec(&shape)?;
             let scatter_result = (|| -> Result<()> {
@@ -227,15 +211,11 @@ impl WgpuProvider {
             match scatter_result {
                 Ok(()) => Ok(out),
                 Err(err) => {
-                    let _ = self.free_exec(&out);
+                    drop(out);
                     Err(err)
                 }
             }
         })();
-
-        for h in &to_free {
-            let _ = self.free_exec(h);
-        }
 
         compute_result
     }
@@ -245,193 +225,137 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         rows: usize,
         cols: usize,
-        reuse_q: Option<&GpuTensorHandle>,
         label: &str,
         retain_r_inv: bool,
     ) -> Result<(GpuTensorHandle, GpuTensorHandle, Option<GpuTensorHandle>)> {
-        let mut registrations = self.registration_batch();
-        let result = (|| {
-            ensure!(rows >= cols, "qr: rows must be >= cols for device path");
-            ensure!(
-                cols > 0,
-                "qr: zero-column input not supported for device path"
-            );
+        ensure!(rows >= cols, "qr: rows must be >= cols for device path");
+        ensure!(
+            cols > 0,
+            "qr: zero-column input not supported for device path"
+        );
 
-            let gram_handle = registrations.track(self.syrk_exec(matrix))?;
+        let gram_handle = self.syrk_exec(matrix)?;
 
-            let gram_entry = self.get_entry(&gram_handle)?;
-            let gram_len = cols * cols;
-            ensure!(
-                gram_entry.len == gram_len,
-                "qr: gram len mismatch (expected {}, got {})",
-                gram_len,
-                gram_entry.len
-            );
-            let gram_bytes = (gram_len as u64) * (self.element_size as u64);
-            let gram_scratch = self.kernel_resources.scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
+        let gram_entry = self.get_entry(&gram_handle)?;
+        let gram_len = cols * cols;
+        ensure!(
+            gram_entry.len == gram_len,
+            "qr: gram len mismatch (expected {}, got {})",
+            gram_len,
+            gram_entry.len
+        );
+        let gram_bytes = (gram_len as u64) * (self.element_size as u64);
+        let gram_scratch = self.kernel_resources.scratch_storage_buffer(
+            self.device_ref(),
+            crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
+            gram_bytes,
+            "runmat-qr-gram-scratch",
+        );
+        if gram_bytes > 0 {
+            let gram_copy_label = format!("{label}-gram-copy");
+            let mut encoder =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some(gram_copy_label.as_str()),
+                    });
+            encoder.copy_buffer_to_buffer(
+                gram_entry.buffer.as_ref(),
+                0,
+                gram_scratch.as_ref(),
+                0,
                 gram_bytes,
-                "runmat-qr-gram-scratch",
             );
-            if gram_bytes > 0 {
-                let gram_copy_label = format!("{label}-gram-copy");
-                let mut encoder =
+            self.submit(encoder);
+        }
+
+        let len_out = cols * cols;
+        // These buffers escape as owning results; reusable scratch cannot back
+        // them while an earlier result or exported view remains live.
+        let r_buffer = self.create_storage_buffer_checked(len_out, "runmat-qr-r")?;
+        let r_inv_buffer = self.create_storage_buffer_checked(len_out, "runmat-qr-rinv")?;
+
+        let params = QrPowerIterParams {
+            cols: cols as u32,
+            stride: cols as u32,
+            _pad0: [0, 0],
+        };
+        let params_buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            UniformBufferKey::QrPowerIterParams,
+            std::mem::size_of::<QrPowerIterParams>() as u64,
+            "runmat-qr-power-params",
+        );
+        self.queue
+            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+
+        let layout = &self.pipelines.qr_power_iter.layout;
+        let bind_entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: gram_scratch.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: r_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: r_inv_buffer.as_ref().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: params_buffer.as_entire_binding(),
+            },
+        ];
+        let bind_group = self
+            .bind_group_cache
+            .get_or_create(layout, &bind_entries, || {
+                Arc::new(
                     self.device_ref()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some(gram_copy_label.as_str()),
-                        });
-                encoder.copy_buffer_to_buffer(
-                    gram_entry.buffer.as_ref(),
-                    0,
-                    gram_scratch.as_ref(),
-                    0,
-                    gram_bytes,
-                );
-                self.submit(encoder);
-            }
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-qr-power-bind"),
+                            layout,
+                            entries: &bind_entries,
+                        }),
+                )
+            });
+        crate::backend::wgpu::dispatch::qr_power_iter::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.qr_power_iter.pipeline,
+            bind_group.as_ref(),
+        );
 
-            let len_out = cols * cols;
-            let r_bytes = (len_out as u64) * (self.element_size as u64);
-            let r_buffer = self.kernel_resources.scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrR,
-                r_bytes,
-                "runmat-qr-r-scratch",
-            );
-            let r_inv_buffer = self.kernel_resources.scratch_storage_buffer(
-                self.device_ref(),
-                crate::backend::wgpu::resources::ScratchBufferKind::QrRInv,
-                r_bytes,
-                "runmat-qr-rinv-scratch",
-            );
+        drop(gram_handle);
 
-            let params = QrPowerIterParams {
-                cols: cols as u32,
-                stride: cols as u32,
-                _pad0: [0, 0],
-            };
-            let params_buffer = self.kernel_resources.uniform_buffer(
-                self.device_ref(),
-                UniformBufferKey::QrPowerIterParams,
-                std::mem::size_of::<QrPowerIterParams>() as u64,
-                "runmat-qr-power-params",
-            );
-            self.queue
-                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+        let r_shape = vec![cols, cols];
+        let r_handle = self.register_existing_buffer_with_usage(
+            r_buffer.clone(),
+            r_shape.clone(),
+            len_out,
+            BufferUsageClass::FusionOut,
+        )?;
+        self.mark_buffer_usage(&r_handle, BufferUsageClass::FusionOut);
 
-            let layout = &self.pipelines.qr_power_iter.layout;
-            let bind_entries = [
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: gram_scratch.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: r_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: r_inv_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ];
-            let bind_group = self
-                .bind_group_cache
-                .get_or_create(layout, &bind_entries, || {
-                    Arc::new(
-                        self.device_ref()
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("runmat-qr-power-bind"),
-                                layout,
-                                entries: &bind_entries,
-                            }),
-                    )
-                });
-            crate::backend::wgpu::dispatch::qr_power_iter::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.qr_power_iter.pipeline,
-                bind_group.as_ref(),
-            );
+        let r_inv_handle = self.register_existing_buffer_with_usage(
+            r_inv_buffer.clone(),
+            r_shape,
+            len_out,
+            BufferUsageClass::FusionOut,
+        )?;
+        self.mark_buffer_usage(&r_inv_handle, BufferUsageClass::FusionOut);
 
-            let _ = self.free_exec(&gram_handle);
+        let q_result =
+            self.matmul_exec_with_usage(matrix, &r_inv_handle, BufferUsageClass::FusionOut)?;
 
-            let r_shape = vec![cols, cols];
-            let r_handle = registrations.track(self.register_existing_buffer_with_usage(
-                r_buffer.clone(),
-                r_shape.clone(),
-                len_out,
-                BufferUsageClass::FusionOut,
-            ))?;
-            self.mark_buffer_usage(&r_handle, BufferUsageClass::FusionOut);
+        let r_inv_result = if retain_r_inv {
+            Some(r_inv_handle)
+        } else {
+            drop(r_inv_handle);
+            None
+        };
 
-            let r_inv_handle = registrations.track(self.register_existing_buffer_with_usage(
-                r_inv_buffer.clone(),
-                r_shape,
-                len_out,
-                BufferUsageClass::FusionOut,
-            ))?;
-            self.mark_buffer_usage(&r_inv_handle, BufferUsageClass::FusionOut);
-
-            let q_temp = registrations.track(self.matmul_exec_with_usage(
-                matrix,
-                &r_inv_handle,
-                BufferUsageClass::FusionOut,
-            ))?;
-
-            let q_temp_entry = self.get_entry(&q_temp)?;
-            let q_result = if let Some(target) = reuse_q {
-                let target_entry = self.get_entry(target)?;
-                if Arc::strong_count(&target_entry.buffer) <= 2
-                    && target_entry.len == q_temp_entry.len
-                {
-                    let bytes = (target_entry.len as u64) * self.element_size as u64;
-                    if bytes > 0 {
-                        let copy_label = format!("{label}-reuse-copy");
-                        let mut encoder = self.device_ref().create_command_encoder(
-                            &wgpu::CommandEncoderDescriptor {
-                                label: Some(copy_label.as_str()),
-                            },
-                        );
-                        encoder.copy_buffer_to_buffer(
-                            q_temp_entry.buffer.as_ref(),
-                            0,
-                            target_entry.buffer.as_ref(),
-                            0,
-                            bytes,
-                        );
-                        self.submit(encoder);
-                    }
-                    let _ = self.free_exec(&q_temp);
-                    self.mark_buffer_usage(target, BufferUsageClass::FusionOut);
-                    target.clone()
-                } else {
-                    q_temp
-                }
-            } else {
-                q_temp
-            };
-
-            let r_inv_result = if retain_r_inv {
-                Some(r_inv_handle)
-            } else {
-                let _ = self.free_exec(&r_inv_handle);
-                None
-            };
-
-            Ok((q_result, r_handle, r_inv_result))
-        })();
-        registrations.finish(result, |batch, out| {
-            batch.publish(&out.0);
-            batch.publish(&out.1);
-            if let Some(handle) = &out.2 {
-                batch.publish(handle);
-            }
-        })
+        Ok((q_result, r_handle, r_inv_result))
     }
 
     pub(super) async fn qr_power_iter_host(
@@ -445,7 +369,6 @@ impl WgpuProvider {
                 anyhow!("qr_power_iter: failed to construct host tensor for fallback: {e}")
             })?;
         let host_result = self.qr_host_result(tensor, options).await?;
-        let _ = self.free_exec(product);
         Ok(Some(ProviderQrPowerIterResult {
             q: host_result.q,
             r: host_result.r,

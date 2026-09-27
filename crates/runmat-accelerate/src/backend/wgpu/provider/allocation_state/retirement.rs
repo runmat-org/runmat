@@ -1,36 +1,8 @@
 use super::*;
 
-pub(super) fn terminal_residency(phase: Phase, clear: impl FnOnce() -> bool) -> bool {
-    match phase.residency_cleanup() {
-        lifecycle::ResidencyCleanup::Pending => clear(),
-        lifecycle::ResidencyCleanup::Complete => true,
-        lifecycle::ResidencyCleanup::Incomplete => false,
-    }
-}
-
 impl AllocationState {
-    pub(in super::super) fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
-        self.free_with_residency(handle, runmat_accelerate_api::clear_residency_checked)
-    }
-
-    pub(super) fn free_with_residency(
-        &self,
-        handle: &GpuTensorHandle,
-        clear_residency: impl FnOnce(
-            &GpuTensorHandle,
-        ) -> std::result::Result<
-            (),
-            runmat_accelerate_api::allocation::AllocationCleanupPanicked,
-        >,
-    ) -> Result<()> {
-        if handle.device_id != self.device_id {
-            return Err(anyhow!(
-                "free: handle belongs to device {}, but this provider owns device {}",
-                handle.device_id,
-                self.device_id
-            ));
-        }
-        let id = handle.buffer_id;
+    // Invoked only by the captured final physical lease, never a borrowed view.
+    pub(super) fn retire_physical(&self, id: u64) -> Result<()> {
         let mut entry = {
             let mut records = self.lock_records()?;
             let Some(record) = records.get_mut(&id) else {
@@ -59,19 +31,8 @@ impl AllocationState {
                 resources.clear_matmul_source_checked(id)?;
             }
             failure.set(Failure::MapPoisoned);
-            self.retirement_stage(id, Stage::Residency)?;
-            stage.set(Stage::Residency);
-            failure.set(Failure::Callback);
-            clear_residency(handle).map_err(|_| AllocationStateError::Cleanup {
-                stage: stage.get(),
-                failure: failure.get(),
-            })?;
-            failure.set(Failure::MapPoisoned);
-            self.retirement_stage(id, Stage::Annotations)?;
-            stage.set(Stage::Annotations);
-            failure.set(Failure::AnnotationLock);
-            runmat_accelerate_api::clear_handle_annotations_checked(handle)?;
-            failure.set(Failure::MapPoisoned);
+            // Per-view residency cleanup already belongs to the final view
+            // owner. Physical retirement must not repeat those callbacks.
             self.retirement_stage(id, Stage::Resource)?;
             stage.set(Stage::Resource);
             // Once consumed, an unwind is uncertain release, never retryable.
@@ -141,7 +102,7 @@ impl Drop for AllocationState {
         // this terminal disposition. WGPU has no driver-pointer free to retry.
         let records = std::mem::take(self.buffers.get_mut().unwrap_or_else(|e| e.into_inner()));
         for (id, record) in records {
-            let Some(mut entry) = record.entry else {
+            let Some(entry) = record.entry else {
                 if matches!(
                     record.phase,
                     Phase::Failed {
@@ -155,12 +116,6 @@ impl Drop for AllocationState {
                 }
                 continue;
             };
-            let handle = GpuTensorHandle {
-                shape: std::mem::take(&mut entry.shape),
-                device_id: self.device_id,
-                buffer_id: id,
-                descriptor: GpuTensorDescriptor::numeric(entry.element_type, entry.storage),
-            };
             let cache = catch_allocation_cleanup_unwind(|| {
                 self.bind_groups
                     .invalidate_buffer(Arc::as_ptr(&entry.buffer) as usize)
@@ -171,16 +126,8 @@ impl Drop for AllocationState {
                 }
                 Ok(())
             });
-            let residency = terminal_residency(record.phase, || {
-                runmat_accelerate_api::clear_residency_checked(&handle).is_ok()
-            });
-            let annotations = catch_allocation_cleanup_unwind(|| {
-                runmat_accelerate_api::clear_handle_annotations_checked(&handle)
-            });
-            let bookkeeping_complete = matches!(cache, Ok(Ok(())))
-                && matches!(provenance, Ok(Ok(())))
-                && residency
-                && matches!(annotations, Ok(Ok(())));
+            let bookkeeping_complete =
+                matches!(cache, Ok(Ok(()))) && matches!(provenance, Ok(Ok(())));
             let release = catch_allocation_cleanup_unwind(|| drop(entry));
             if !bookkeeping_complete || release.is_err() {
                 // Reporting is best effort and cannot turn Drop into a second

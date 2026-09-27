@@ -11,6 +11,25 @@ pub(crate) struct FusedReductionTelemetryRequest<'a> {
 }
 
 impl WgpuProvider {
+    pub(super) fn fused_logical_with_telemetry_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+    ) -> Result<GpuTensorHandle> {
+        self.fused_elementwise_with_representation_telemetry_exec(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            super::elementwise::FusedElementwiseRepresentation {
+                input_precision: self.precision,
+                output_storage: GpuTensorStorage::Real,
+                logical_output: true,
+            },
+        )
+    }
     pub(crate) fn fused_elementwise_with_telemetry_exec(
         &self,
         shader: &str,
@@ -43,6 +62,7 @@ impl WgpuProvider {
             super::elementwise::FusedElementwiseRepresentation {
                 input_precision: self.precision,
                 output_storage,
+                logical_output: false,
             },
         )
     }
@@ -79,11 +99,11 @@ impl WgpuProvider {
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         len: usize,
-        num_outputs: usize,
+        output_classes: &[runmat_accelerate_api::ProviderElementType],
     ) -> Result<Vec<GpuTensorHandle>> {
         let start = Instant::now();
         let result =
-            self.fused_elementwise_multi_exec(shader, inputs, output_shape, len, num_outputs);
+            self.fused_elementwise_multi_exec(shader, inputs, output_shape, len, output_classes);
         if result.is_ok() {
             let elapsed = start.elapsed();
             self.telemetry.record_fused_elementwise_duration(elapsed);
@@ -91,7 +111,7 @@ impl WgpuProvider {
                 ("len", len as u64),
                 ("inputs", inputs.len() as u64),
                 ("rank", output_shape.len() as u64),
-                ("num_outputs", num_outputs as u64),
+                ("num_outputs", output_classes.len() as u64),
             ];
             let wg = crate::backend::wgpu::config::effective_workgroup_size() as u64;
             let tuning = [("wg", wg)];

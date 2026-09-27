@@ -952,12 +952,12 @@ impl WgpuProvider {
                     let elapsed = start.elapsed();
                     if best_time.is_none_or(|t| elapsed < t) {
                         if let Some(existing) = best_handle.replace(handle) {
-                            let _ = self.free_exec(&existing);
+                            drop(existing);
                         }
                         best_time = Some(elapsed);
                         best_tuning = Some(sanitized);
                     } else {
-                        let _ = self.free_exec(&handle);
+                        drop(handle);
                     }
                 }
                 Err(err) => {

@@ -1,8 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 #[path = "allocation_state.rs"]
 mod allocation_state;
-#[path = "registration.rs"]
-mod registration;
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use futures::channel::oneshot;
 use log::{debug, error};

@@ -162,6 +162,7 @@ impl WgpuProvider {
         let out_shape = dst_shape;
         if storage_total == 0 {
             return Ok(BufferEntry {
+                logical: entry.logical,
                 allocated_bytes: out_buffer.size(),
                 buffer: out_buffer,
                 shape: out_shape,
@@ -250,6 +251,7 @@ impl WgpuProvider {
         }
 
         Ok(BufferEntry {
+            logical: entry.logical,
             allocated_bytes: out_buffer.size(),
             buffer: out_buffer,
             shape: out_shape,

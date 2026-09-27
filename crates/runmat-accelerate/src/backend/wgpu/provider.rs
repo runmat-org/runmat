@@ -1,6 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 use anyhow::anyhow;
 use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
 use once_cell::sync::OnceCell;
 
 mod backend;
@@ -41,17 +42,25 @@ pub fn register_wgpu_provider(_opts: WgpuProviderOptions) -> Result<&'static Wgp
 pub async fn register_wgpu_provider_async(
     opts: WgpuProviderOptions,
 ) -> Result<&'static WgpuProvider> {
-    static INSTANCE: OnceCell<Box<WgpuProvider>> = OnceCell::new();
-    if INSTANCE.get().is_none() {
-        let provider = Box::new(WgpuProvider::new_async(opts).await?);
-        if INSTANCE.set(provider).is_err() {
-            log::warn!("RunMat Accelerate: WGPU provider was initialized concurrently; reusing existing instance");
-        }
+    thread_local! {
+        // The public provider ABI retains its façade for this worker's lifetime;
+        // individual payloads still retire through their allocation leases.
+        static INSTANCE: std::cell::Cell<Option<&'static WgpuProvider>> = const { std::cell::Cell::new(None) };
     }
-    let leaked: &'static WgpuProvider = INSTANCE
-        .get()
-        .map(|boxed| boxed.as_ref())
-        .ok_or_else(|| anyhow!("wgpu provider failed to initialize"))?;
+    let leaked = if let Some(existing) = INSTANCE.with(std::cell::Cell::get) {
+        existing
+    } else {
+        let provider = Box::new(WgpuProvider::new_async(opts).await?);
+        // Another task in this worker may have initialized during the await.
+        if let Some(existing) = INSTANCE.with(std::cell::Cell::get) {
+            drop(provider);
+            existing
+        } else {
+            let retained: &'static WgpuProvider = Box::leak(provider);
+            INSTANCE.with(|cell| cell.set(Some(retained)));
+            retained
+        }
+    };
     unsafe { runmat_accelerate_api::register_provider(leaked) };
     runmat_accelerate_api::set_thread_provider(Some(leaked));
     Ok(leaked)

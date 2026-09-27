@@ -22,7 +22,12 @@ pub enum UniformBufferKey {
 
 pub struct KernelResourceRegistry {
     uniform_buffers: Mutex<HashMap<UniformBufferKey, Arc<wgpu::Buffer>>>,
-    matmul_sources: Mutex<HashMap<u64, (GpuTensorHandle, GpuTensorHandle)>>,
+    matmul_sources: Mutex<
+        HashMap<
+            runmat_accelerate_api::allocation::TensorViewIdentity,
+            (GpuTensorHandle, GpuTensorHandle),
+        >,
+    >,
     scratch_buffers: Mutex<HashMap<ScratchBufferKind, (u64, Arc<wgpu::Buffer>)>>,
 }
 
@@ -46,8 +51,6 @@ impl Default for KernelResourceRegistry {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ScratchBufferKind {
     QrGram,
-    QrR,
-    QrRInv,
     SyrkOut,
     ReductionOut,
     ReductionPartials,
@@ -140,7 +143,9 @@ impl KernelResourceRegistry {
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
-        guard.insert(kind, (alloc_size, buffer.clone()));
+        let replaced = guard.insert(kind, (alloc_size, buffer.clone()));
+        drop(guard);
+        drop(replaced);
         buffer
     }
 
@@ -150,11 +155,10 @@ impl KernelResourceRegistry {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
     ) {
-        let replaced = self
-            .matmul_sources
-            .lock()
-            .ok()
-            .and_then(|mut map| map.insert(product.buffer_id, (lhs.clone(), rhs.clone())));
+        let replaced =
+            self.matmul_sources.lock().ok().and_then(|mut map| {
+                map.insert(product.view_identity(), (lhs.clone(), rhs.clone()))
+            });
         drop(replaced);
     }
 
@@ -165,15 +169,31 @@ impl KernelResourceRegistry {
         self.matmul_sources
             .lock()
             .ok()
-            .and_then(|mut map| map.remove(&product.buffer_id))
+            .and_then(|mut map| map.remove(&product.view_identity()))
     }
 
     pub(crate) fn clear_matmul_source_checked(&self, product_id: u64) -> anyhow::Result<()> {
-        let removed = self
-            .matmul_sources
-            .lock()
-            .map_err(|_| KernelProvenanceLockPoisoned)?
-            .remove(&product_id);
+        let removed = {
+            let mut map = self
+                .matmul_sources
+                .lock()
+                .map_err(|_| KernelProvenanceLockPoisoned)?;
+            let mut keys = Vec::new();
+            keys.try_reserve(map.len())?;
+            keys.extend(
+                map.keys()
+                    .filter(|key| key.allocation().allocation_id() == product_id)
+                    .copied(),
+            );
+            let mut removed = Vec::new();
+            removed.try_reserve(keys.len())?;
+            for key in keys {
+                if let Some(value) = map.remove(&key) {
+                    removed.push(value);
+                }
+            }
+            removed
+        };
         drop(removed);
         Ok(())
     }

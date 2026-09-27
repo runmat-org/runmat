@@ -187,7 +187,7 @@ pub(super) fn build_matrix_operand_view(
     if entry.shape.len() < 2 {
         return Err(anyhow!(
             "matrix operand requires at least 2D tensor (buffer {} shape {:?})",
-            handle.buffer_id,
+            handle.buffer_id(),
             entry.shape
         ));
     }
@@ -197,7 +197,7 @@ pub(super) fn build_matrix_operand_view(
         if rows != info.base_cols || cols != info.base_rows {
             return Err(anyhow!(
                 "transpose metadata mismatch for buffer {}",
-                handle.buffer_id
+                handle.buffer_id()
             ));
         }
         let lda = u32::try_from(info.base_rows)
@@ -252,7 +252,7 @@ pub(super) fn fusion_operand_layout(
     output_shape: &[usize],
 ) -> Result<(Vec<u32>, Vec<u32>)> {
     ensure!(
-        handle.shape == entry.shape,
+        handle.shape() == entry.shape,
         "fusion operand shape does not match allocation"
     );
     let rank = output_shape.len();

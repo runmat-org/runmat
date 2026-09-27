@@ -23,7 +23,7 @@ fn non512_lazy_transpose_materialization_covers_chunk_boundary() {
     assert!(runmat_accelerate_api::handle_is_transposed(&transposed));
     let output = provider.reshape_exec(&transposed, &[columns, 2]).unwrap();
     assert!(!runmat_accelerate_api::handle_is_transposed(&output));
-    assert_eq!(output.shape, vec![columns, 2]);
+    assert_eq!(output.shape(), [columns, 2]);
     let downloaded = futures::executor::block_on(provider.download_numeric(&output)).unwrap();
     let HostNumericDataOwned::F32(actual) = downloaded.data else {
         panic!("materialization changed physical storage");
@@ -36,9 +36,9 @@ fn non512_lazy_transpose_materialization_covers_chunk_boundary() {
             "logical index {index}"
         );
     }
-    provider.free(&output).unwrap();
-    if transposed.buffer_id != source.buffer_id {
-        provider.free(&transposed).unwrap();
+    output.release().unwrap();
+    if transposed.buffer_id() != source.buffer_id() {
+        transposed.release().unwrap();
     }
-    provider.free(&source).unwrap();
+    source.release().unwrap();
 }

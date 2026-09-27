@@ -12,26 +12,12 @@ impl WgpuProvider {
     ) -> Result<BufferEntry> {
         let entry = self.get_entry_raw(handle)?;
         ensure!(
-            handle.shape == entry.shape
-                && handle.descriptor.element_type == Some(entry.element_type)
-                && handle.descriptor.storage == Some(entry.storage),
+            handle.shape() == entry.shape
+                && handle.physical().element_type() == entry.element_type
+                && handle.physical().storage() == entry.storage,
             "{operation}: storage move descriptor does not match allocation"
         );
         Ok(entry)
-    }
-
-    pub(super) fn register_storage_move_alias(
-        &self,
-        entry: &BufferEntry,
-        shape: Vec<usize>,
-    ) -> Result<GpuTensorHandle> {
-        self.register_storage_move_buffer(
-            entry.buffer.clone(),
-            entry,
-            shape,
-            entry.len,
-            entry.allocated_bytes,
-        )
     }
 
     pub(super) fn register_storage_move_buffer(
@@ -42,7 +28,7 @@ impl WgpuProvider {
         len: usize,
         allocated_bytes: u64,
     ) -> Result<GpuTensorHandle> {
-        self.register_numeric_buffer(
+        self.register_numeric_buffer_produced(
             buffer,
             NumericBufferRegistration {
                 shape,
@@ -52,6 +38,7 @@ impl WgpuProvider {
                 allocated_bytes,
                 usage: BufferUsageClass::Generic,
             },
+            source.logical,
         )
     }
 }

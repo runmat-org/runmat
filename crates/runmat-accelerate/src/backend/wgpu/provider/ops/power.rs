@@ -5,16 +5,6 @@ use crate::backend::wgpu::types::NumericPrecision;
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, PowerResultDomain};
 
-struct Temporary<'a> {
-    provider: &'a WgpuProvider,
-    handle: GpuTensorHandle,
-}
-impl Drop for Temporary<'_> {
-    fn drop(&mut self) {
-        let _ = self.provider.free_exec(&self.handle);
-    }
-}
-
 impl WgpuProvider {
     fn admitted_power_shape(
         &self,
@@ -25,7 +15,7 @@ impl WgpuProvider {
         for handle in [base, exponent] {
             let entry = self.get_entry_raw(handle)?;
             ensure!(
-                handle.descriptor.element_type == Some(entry.element_type)
+                handle.descriptor().element_type == Some(entry.element_type)
                     && runmat_accelerate_api::handle_class_identity(handle)
                         .is_none_or(|class| class == entry.element_type.class_identity()),
                 "real power class metadata mismatch"
@@ -41,7 +31,7 @@ impl WgpuProvider {
             );
             ensure!(
                 entry.storage == GpuTensorStorage::Real
-                    && handle.descriptor.storage == Some(GpuTensorStorage::Real),
+                    && handle.descriptor().storage == Some(GpuTensorStorage::Real),
                 "real power requires real storage"
             );
             ensure!(
@@ -55,11 +45,11 @@ impl WgpuProvider {
                 "real power precision mismatch"
             );
             ensure!(
-                entry.shape == handle.shape,
+                entry.shape == handle.shape(),
                 "real power shape metadata mismatch"
             );
             let len = handle
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |n, d| n.checked_mul(*d))
                 .ok_or_else(|| anyhow!("power input size overflow"))?;
@@ -67,8 +57,8 @@ impl WgpuProvider {
         }
         let shape = runmat_runtime::builtins::common::broadcast::broadcast_shapes(
             "power",
-            &base.shape,
-            &exponent.shape,
+            base.shape(),
+            exponent.shape(),
         )
         .map_err(|e| anyhow!(e))?;
         ensure!(
@@ -115,27 +105,22 @@ impl WgpuProvider {
         // Exact widening occurs in registers. Flags and the existing scalar
         // reductions retain native precision, so probe allocations/readback
         // geometry is unchanged: no input staging or hidden layout dispatch.
-        let flags = Temporary {
-            provider: self,
-            handle: self.fused_elementwise_with_representation_telemetry_exec(
-                &classification_shader(input_precision, self.precision),
-                &[base.clone(), exponent.clone()],
-                &shape,
-                len,
-                super::elementwise::FusedElementwiseRepresentation {
-                    input_precision,
-                    output_storage: GpuTensorStorage::Real,
-                },
-            )?,
-        };
+        let flags = self.fused_elementwise_with_representation_telemetry_exec(
+            &classification_shader(input_precision, self.precision),
+            &[base.clone(), exponent.clone()],
+            &shape,
+            len,
+            super::elementwise::FusedElementwiseRepresentation {
+                input_precision,
+                output_storage: GpuTensorStorage::Real,
+                logical_output: false,
+            },
+        )?;
         // This buffer is owned here, so reshaping it cannot change an input's
         // metadata. Existing two-dimensional full reduction handles all ranks.
-        let flat = self.reshape_exec(&flags.handle, &[len, 1])?;
-        let reduced = Temporary {
-            provider: self,
-            handle: self.reduce_any_exec(&flat, true)?,
-        };
-        let result = self.download_exec(&reduced.handle).await?;
+        let flat = self.reshape_exec(&flags, &[len, 1])?;
+        let reduced = self.reduce_any_exec(&flat, true)?;
+        let result = self.download_exec(&reduced).await?;
         ensure!(
             result.data.len() == 1 && (result.data[0] == 0.0 || result.data[0] == 1.0),
             "power domain reduction returned an invalid flag"
@@ -236,13 +221,13 @@ mod tests {
                 assert!((actual.data[1] - 2.0).abs() < tolerance);
             } else {
                 assert_eq!(
-                    output.descriptor.storage,
+                    output.descriptor().storage,
                     Some(GpuTensorStorage::ComplexInterleaved)
                 );
                 assert!((actual.data[3] - 2.0).abs() < tolerance);
             }
-            for handle in [&base, &exponent, &output] {
-                provider.free(handle).unwrap();
+            for handle in [base, exponent, output] {
+                handle.release().unwrap();
             }
         }
         let base = provider
@@ -272,8 +257,8 @@ mod tests {
         assert!((actual[1] / 1e-15 - 1.0).abs() < tolerance);
         assert!(actual[2].is_nan() && actual[4].is_nan());
         assert_eq!(actual[6], f64::NEG_INFINITY);
-        for handle in [&base, &exponent, &output] {
-            provider.free(handle).unwrap();
+        for handle in [base, exponent, output] {
+            handle.release().unwrap();
         }
     }
 }

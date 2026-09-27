@@ -14,11 +14,11 @@ impl WgpuProvider {
         let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
         match self.reduce_dim_sum_mean_exec(&first, 1, op) {
             Ok(handle) => {
-                let _ = self.free_exec(&first);
+                drop(first);
                 Ok(handle)
             }
             Err(err) => {
-                let _ = self.free_exec(&first);
+                drop(first);
                 Err(err)
             }
         }
@@ -34,29 +34,29 @@ impl WgpuProvider {
         } else {
             crate::backend::wgpu::types::DimReduceOp::AllInclude
         };
-        let total_elems = if a.shape.is_empty() {
+        let total_elems = if a.shape().is_empty() {
             1
         } else {
-            product_checked(&a.shape)
+            product_checked(a.shape())
                 .ok_or_else(|| anyhow!("reduce_all: tensor size exceeds GPU limits"))?
         };
         if total_elems == 0 {
             return self.fill_exec(&[1usize, 1usize], f64::NAN);
         }
-        if a.shape.len() <= 2 {
+        if a.shape().len() <= 2 {
             let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
             match self.reduce_dim_sum_mean_exec(&first, 1, op) {
                 Ok(handle) => {
-                    let _ = self.free_exec(&first);
+                    drop(first);
                     Ok(handle)
                 }
                 Err(err) => {
-                    let _ = self.free_exec(&first);
+                    drop(first);
                     Err(err)
                 }
             }
         } else {
-            let original_shape = a.shape.clone();
+            let original_shape = a.shape().to_vec();
             let flattened_shape = vec![total_elems, 1usize];
             let flattened = self.reshape_exec(a, &flattened_shape)?;
             let result = self.reduce_dim_sum_mean_exec(&flattened, 0, op);
@@ -147,7 +147,7 @@ impl WgpuProvider {
             &sum_handle,
             scalar,
         )?;
-        let _ = self.free_exec(&sum_handle);
+        drop(sum_handle);
         Ok(out)
     }
 
@@ -373,6 +373,9 @@ impl WgpuProvider {
             current = out_buffer;
             current_len = output_len_total;
         }
+        if Arc::ptr_eq(&current, &entry.buffer) {
+            return Ok(a.with_view(a.view().clone().with_shape(vec![1, 1]).with_logical(false))?);
+        }
         self.register_existing_buffer(current, vec![1, 1], 1)
     }
     pub(crate) fn reduce_dim_sum_mean_exec(
@@ -532,153 +535,133 @@ impl WgpuProvider {
         dim: usize,
         op: crate::backend::wgpu::types::DimReduceExtrema,
     ) -> Result<ReduceDimResult> {
-        let mut registrations = self.registration_batch();
-        let result = (|| {
-            if self.get_entry_raw(a)?.integer_type().is_some() {
-                return self.integer_reduce_extrema_dim_exec(
-                    matches!(op, crate::backend::wgpu::types::DimReduceExtrema::Min),
-                    dim,
-                    match op {
-                        crate::backend::wgpu::types::DimReduceExtrema::Min => "reduce_min_dim",
-                        crate::backend::wgpu::types::DimReduceExtrema::Max => "reduce_max_dim",
-                    },
-                    a,
-                );
-            }
-            let entry = self.get_entry(a)?;
-            if entry.shape.len() != 2 {
-                return Err(anyhow!("reduce: only 2D tensors supported"));
-            }
-            let rows = entry.shape[0];
-            let cols = entry.shape[1];
-            let reduce_dim = match dim {
-                0 => 1,
-                1 => 2,
-                _ => return Err(anyhow!("reduce_dim: only dims 0 or 1 supported")),
-            };
-            let out_len = if reduce_dim == 1 { cols } else { rows };
-            let out_shape = if reduce_dim == 1 {
-                vec![1, cols]
-            } else {
-                vec![rows, 1]
-            };
-            let mut values_buffer =
-                self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-values")?;
-            let mut indices_buffer =
-                self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-indices")?;
-            // Prevent aliasing either output with input buffer
-            if std::ptr::eq(values_buffer.as_ref(), entry.buffer.as_ref()) {
-                let size_bytes = (out_len * self.element_size) as u64;
-                if size_bytes > self.adapter_limits.max_buffer_size {
-                    return Err(gpu_per_buffer_limit_error(
-                        "runmat-reduce-dim-ext-values-unique",
-                        size_bytes,
-                        self.adapter_limits.max_buffer_size,
-                    ));
-                }
-                values_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-reduce-dim-ext-values-unique"),
-                    size: size_bytes,
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_SRC
-                        | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }));
-            }
-            if std::ptr::eq(indices_buffer.as_ref(), entry.buffer.as_ref()) {
-                let size_bytes = (out_len * self.element_size) as u64;
-                if size_bytes > self.adapter_limits.max_buffer_size {
-                    return Err(gpu_per_buffer_limit_error(
-                        "runmat-reduce-dim-ext-indices-unique",
-                        size_bytes,
-                        self.adapter_limits.max_buffer_size,
-                    ));
-                }
-                indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-reduce-dim-ext-indices-unique"),
-                    size: size_bytes,
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_SRC
-                        | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }));
-            }
-            if out_len == 0 {
-                let values_handle = registrations.track(self.register_existing_buffer(
-                    values_buffer,
-                    out_shape.clone(),
-                    out_len,
-                ))?;
-                let indices_handle = registrations.track(self.register_existing_buffer(
-                    indices_buffer,
-                    out_shape,
-                    out_len,
-                ))?;
-                return Ok(ReduceDimResult {
-                    values: values_handle,
-                    indices: indices_handle,
-                });
-            }
-            let params = crate::backend::wgpu::params::ReduceDimParams {
-                rows: rows as u32,
-                cols: cols as u32,
-                dim: reduce_dim as u32,
-                op: op as u32,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-reduce-dim-ext-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-reduce-dim-ext-bind"),
-                    layout: &self.pipelines.reduce_dim_minmax.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: values_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: indices_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                out_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
+        if self.get_entry_raw(a)?.integer_type().is_some() {
+            return self.integer_reduce_extrema_dim_exec(
+                matches!(op, crate::backend::wgpu::types::DimReduceExtrema::Min),
+                dim,
+                match op {
+                    crate::backend::wgpu::types::DimReduceExtrema::Min => "reduce_min_dim",
+                    crate::backend::wgpu::types::DimReduceExtrema::Max => "reduce_max_dim",
+                },
+                a,
             );
-            crate::backend::wgpu::dispatch::reduction::run_single_pass(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.reduce_dim_minmax.pipeline,
-                &bind_group,
-                groups,
-            );
-            let values_handle = registrations.track(self.register_existing_buffer(
-                values_buffer,
-                out_shape.clone(),
-                out_len,
-            ))?;
-            let indices_handle = registrations.track(self.register_existing_buffer(
-                indices_buffer,
-                out_shape,
-                out_len,
-            ))?;
-            Ok(ReduceDimResult {
+        }
+        let entry = self.get_entry(a)?;
+        if entry.shape.len() != 2 {
+            return Err(anyhow!("reduce: only 2D tensors supported"));
+        }
+        let rows = entry.shape[0];
+        let cols = entry.shape[1];
+        let reduce_dim = match dim {
+            0 => 1,
+            1 => 2,
+            _ => return Err(anyhow!("reduce_dim: only dims 0 or 1 supported")),
+        };
+        let out_len = if reduce_dim == 1 { cols } else { rows };
+        let out_shape = if reduce_dim == 1 {
+            vec![1, cols]
+        } else {
+            vec![rows, 1]
+        };
+        let mut values_buffer =
+            self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-values")?;
+        let mut indices_buffer =
+            self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-indices")?;
+        // Prevent aliasing either output with input buffer
+        if std::ptr::eq(values_buffer.as_ref(), entry.buffer.as_ref()) {
+            let size_bytes = (out_len * self.element_size) as u64;
+            if size_bytes > self.adapter_limits.max_buffer_size {
+                return Err(gpu_per_buffer_limit_error(
+                    "runmat-reduce-dim-ext-values-unique",
+                    size_bytes,
+                    self.adapter_limits.max_buffer_size,
+                ));
+            }
+            values_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-reduce-dim-ext-values-unique"),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        if std::ptr::eq(indices_buffer.as_ref(), entry.buffer.as_ref()) {
+            let size_bytes = (out_len * self.element_size) as u64;
+            if size_bytes > self.adapter_limits.max_buffer_size {
+                return Err(gpu_per_buffer_limit_error(
+                    "runmat-reduce-dim-ext-indices-unique",
+                    size_bytes,
+                    self.adapter_limits.max_buffer_size,
+                ));
+            }
+            indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-reduce-dim-ext-indices-unique"),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        if out_len == 0 {
+            let values_handle =
+                self.register_existing_buffer(values_buffer, out_shape.clone(), out_len)?;
+            let indices_handle =
+                self.register_existing_buffer(indices_buffer, out_shape, out_len)?;
+            return Ok(ReduceDimResult {
                 values: values_handle,
                 indices: indices_handle,
-            })
-        })();
-        registrations.finish(result, |batch, out| {
-            batch.publish(&out.values);
-            batch.publish(&out.indices);
+            });
+        }
+        let params = crate::backend::wgpu::params::ReduceDimParams {
+            rows: rows as u32,
+            cols: cols as u32,
+            dim: reduce_dim as u32,
+            op: op as u32,
+        };
+        let params_buffer = self.uniform_buffer(&params, "runmat-reduce-dim-ext-params");
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-reduce-dim-ext-bind"),
+                layout: &self.pipelines.reduce_dim_minmax.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: values_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: indices_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            out_len as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::reduction::run_single_pass(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.reduce_dim_minmax.pipeline,
+            &bind_group,
+            groups,
+        );
+        let values_handle =
+            self.register_existing_buffer(values_buffer, out_shape.clone(), out_len)?;
+        let indices_handle = self.register_existing_buffer(indices_buffer, out_shape, out_len)?;
+        Ok(ReduceDimResult {
+            values: values_handle,
+            indices: indices_handle,
         })
     }
 
@@ -697,7 +680,7 @@ impl WgpuProvider {
             &sum_handle,
             &sum_handle,
         )?;
-        let _ = self.free_exec(&sum_handle);
+        drop(sum_handle);
 
         let sum_shape = self.get_entry(&sum_squared)?.shape.clone();
         let scale_tensor = self.fill_exec(&sum_shape, inv_len)?;
@@ -706,15 +689,15 @@ impl WgpuProvider {
             &sum_squared,
             &scale_tensor,
         )?;
-        let _ = self.free_exec(&scale_tensor);
+        drop(scale_tensor);
         let variance_numer = self.binary_op_exec(
             crate::backend::wgpu::types::BinaryOpCode::Sub,
             &sum_sq_handle,
             &sum_squared_scaled,
         )?;
-        let _ = self.free_exec(&sum_sq_handle);
-        let _ = self.free_exec(&sum_squared);
-        let _ = self.free_exec(&sum_squared_scaled);
+        drop(sum_sq_handle);
+        drop(sum_squared);
+        drop(sum_squared_scaled);
 
         let denom = match normalization {
             ProviderStdNormalization::Sample => {
@@ -727,7 +710,7 @@ impl WgpuProvider {
             ProviderStdNormalization::Population => sample_count as f64,
         };
         if denom == 0.0 {
-            let _ = self.free_exec(&variance_numer);
+            drop(variance_numer);
             return self.fill_exec(nan_shape, f64::NAN);
         }
 
@@ -738,8 +721,8 @@ impl WgpuProvider {
             &variance_numer,
             &denom_tensor,
         )?;
-        let _ = self.free_exec(&denom_tensor);
-        let _ = self.free_exec(&variance_numer);
+        drop(denom_tensor);
+        drop(variance_numer);
 
         let abs_variance =
             self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, &variance)?;
@@ -748,8 +731,8 @@ impl WgpuProvider {
             &variance,
             &abs_variance,
         )?;
-        let _ = self.free_exec(&abs_variance);
-        let _ = self.free_exec(&variance);
+        drop(abs_variance);
+        drop(variance);
 
         let half_shape = self.get_entry(&variance_plus_abs)?.shape.clone();
         let half_tensor = self.fill_exec(&half_shape, 0.5)?;
@@ -758,12 +741,12 @@ impl WgpuProvider {
             &variance_plus_abs,
             &half_tensor,
         )?;
-        let _ = self.free_exec(&half_tensor);
-        let _ = self.free_exec(&variance_plus_abs);
+        drop(half_tensor);
+        drop(variance_plus_abs);
 
         let std_handle =
             self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &clamped)?;
-        let _ = self.free_exec(&clamped);
+        drop(clamped);
         Ok(std_handle)
     }
 
@@ -807,7 +790,7 @@ impl WgpuProvider {
             dim,
             crate::backend::wgpu::types::DimReduceOp::Sum,
         )?;
-        let _ = self.free_exec(&squared);
+        drop(squared);
         self.finish_std_from_sums_exec(
             sum_handle,
             sum_sq_handle,
@@ -840,7 +823,7 @@ impl WgpuProvider {
         let squared = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, a, a)?;
         let sum_sq_handle =
             self.reduce_global_exec(&squared, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
-        let _ = self.free_exec(&squared);
+        drop(squared);
         self.finish_std_from_sums_exec(sum_handle, sum_sq_handle, len, normalization, &scalar_shape)
     }
 }

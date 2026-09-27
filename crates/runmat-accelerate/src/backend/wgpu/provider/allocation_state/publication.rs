@@ -1,124 +1,93 @@
 use super::*;
+use runmat_accelerate_api::allocation::{
+    AllocationIdentity, AllocationLease, GpuPhysicalDescriptor, GpuTensorView,
+};
 
 impl AllocationState {
-    pub(in super::super) fn register(&self, entry: BufferEntry) -> Result<GpuTensorHandle> {
-        self.register_with_residency(entry, runmat_accelerate_api::clear_residency_checked)
-    }
-
-    pub(super) fn next_identifier(&self) -> Result<u64> {
-        self.next_id
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-            .map_err(|_| AllocationStateError::IdentifierExhausted.into())
-    }
-
-    pub(super) fn register_with_residency(
-        &self,
+    /// Only provider kernels/uploads which produce canonical boolean encoding
+    /// may request logical classification. No public view flag grants it.
+    pub(in super::super) fn register_produced(
+        self: &Arc<Self>,
         entry: BufferEntry,
-        clear_residency: impl FnOnce(
-            &GpuTensorHandle,
-        ) -> std::result::Result<
-            (),
-            runmat_accelerate_api::allocation::AllocationCleanupPanicked,
-        >,
+        logical: bool,
     ) -> Result<GpuTensorHandle> {
         if self.is_lost() {
             return Err(AllocationStateError::DeviceLost.into());
         }
-        // Burn failed IDs too. Exhaustion never wraps or replaces a prior view.
-        let id = self.next_identifier()?;
-        let handle = GpuTensorHandle {
-            device_id: self.device_id,
-            buffer_id: id,
-            shape: entry.shape.clone(),
-            descriptor: GpuTensorDescriptor::numeric(entry.element_type, entry.storage),
+        let lanes = match entry.storage {
+            runmat_accelerate_api::GpuTensorStorage::Real => 1,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => 2,
         };
+        anyhow::ensure!(
+            entry.len % lanes == 0,
+            "WGPU allocation has incomplete complex lanes"
+        );
+        let capacity = (entry.len / lanes) as u64;
+        let width = entry
+            .integer_type()
+            .map_or(entry.element_type.element_size() as u64, |kind| {
+                crate::backend::wgpu_storage::integer_words_per_element(kind) as u64 * 4
+            });
+        let payload = (entry.len as u64)
+            .checked_mul(width)
+            .ok_or(AllocationStateError::Capacity)?;
+        let physical = GpuPhysicalDescriptor::new(
+            entry.element_type,
+            entry.storage,
+            capacity,
+            payload,
+            entry.buffer.size(),
+        )?;
+        let view = GpuTensorView::contiguous(entry.shape.clone()).with_logical(logical);
+        view.validate(&physical)?;
+        let id = self.next_identifier()?;
         {
             let mut records = self.lock_records()?;
             records
                 .try_reserve(1)
                 .map_err(|_| AllocationStateError::Capacity)?;
-            // IDs are monotonic and never exposed before the record is Live.
             if records.contains_key(&id) {
                 return Err(AllocationStateError::IdentifierExhausted.into());
             }
             records.insert(
                 id,
                 Record {
-                    phase: Phase::Registering(Stage::RegistrationResidency),
-                    retained_bytes: entry.allocated_bytes,
+                    phase: Phase::Registering(Stage::Registration),
+                    retained_bytes: entry.buffer.size(),
                     entry: Some(entry),
+                    physical,
+                    lease: None,
+                    logical_producer: logical,
                 },
             );
         }
-        if !matches!(
-            catch_allocation_cleanup_unwind(|| clear_residency(&handle)),
-            Ok(Ok(()))
-        ) {
-            self.fail(
-                id,
-                Stage::RegistrationResidency,
-                Failure::Callback,
-                Disposition::Retained,
-                None,
-            );
-            return Err(AllocationStateError::Cleanup {
-                stage: Stage::RegistrationResidency,
-                failure: Failure::Callback,
+        let identity = AllocationIdentity::new(self.device_id, id, 1);
+        let lease = match AllocationLease::register(identity, self.clone()) {
+            Ok(lease) => lease,
+            Err(error) => {
+                // No lease is armed. Keep an observable unpublished failure
+                // record; final owner teardown disposes its resource reference.
+                self.fail(
+                    id,
+                    Stage::Registration,
+                    if self.is_lost() {
+                        Failure::DeviceLost
+                    } else {
+                        Failure::MapPoisoned
+                    },
+                    Disposition::Retained,
+                    None,
+                );
+                return Err(anyhow!("WGPU lease registration rejected: {error:?}"));
             }
-            .into());
-        }
-        if let Err(error) = self.registration_stage(id, Stage::RegistrationAnnotations) {
-            self.fail(
-                id,
-                Stage::RegistrationAnnotations,
-                Failure::MapPoisoned,
-                Disposition::Retained,
-                None,
-            );
-            return Err(error);
-        }
-        if let Err(error) = runmat_accelerate_api::clear_handle_annotations_checked(&handle) {
-            self.fail(
-                id,
-                Stage::RegistrationAnnotations,
-                Failure::AnnotationLock,
-                Disposition::Retained,
-                None,
-            );
-            return Err(error.into());
-        }
-        let publication: Result<()> = (|| {
-            let mut records = self.lock_records()?;
-            if self.is_lost() {
-                return Err(AllocationStateError::DeviceLost.into());
-            }
-            let record = records.get_mut(&id).ok_or(AllocationStateError::Missing)?;
-            record.phase = Phase::Live;
-            Ok(())
-        })();
-        if let Err(error) = publication {
-            self.fail(
-                id,
-                Stage::RegistrationAnnotations,
-                if self.is_lost() {
-                    Failure::DeviceLost
-                } else {
-                    Failure::MapPoisoned
-                },
-                Disposition::Retained,
-                None,
-            );
-            return Err(error);
-        }
-        Ok(handle)
+        };
+        Ok(GpuTensorHandle::from_allocation(lease, view)?)
     }
 
-    fn registration_stage(&self, id: u64, stage: Stage) -> Result<()> {
-        self.lock_records()?
-            .get_mut(&id)
-            .ok_or(AllocationStateError::Missing)?
-            .phase = Phase::Registering(stage);
-        Ok(())
+    pub(super) fn next_identifier(&self) -> Result<u64> {
+        self.next_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map_err(|_| AllocationStateError::IdentifierExhausted.into())
     }
 
     pub(super) fn fail(
@@ -129,9 +98,6 @@ impl AllocationState {
         disposition: Disposition,
         entry: Option<BufferEntry>,
     ) {
-        // Poison recovery is restricted to quarantine bookkeeping, never live
-        // operations. The existing record remains reachable; no insert or
-        // allocation is needed on this failure path.
         let mut detached = entry;
         {
             let mut records = self
@@ -154,7 +120,6 @@ impl AllocationState {
                 }
             }
         }
-        // Defensive orphan disposition is outside the map lock as well.
         let _ = catch_allocation_cleanup_unwind(|| drop(detached));
     }
 }

@@ -164,7 +164,7 @@ impl WgpuProvider {
                     && entry.shape[0] == info.base_cols
                     && entry.shape[1] == info.base_rows,
                 "reshape: transpose metadata mismatch for buffer {}",
-                handle.buffer_id
+                handle.buffer_id()
             );
             let storage = if runmat_accelerate_api::handle_storage(handle)
                 == GpuTensorStorage::ComplexInterleaved
@@ -192,29 +192,20 @@ impl WgpuProvider {
                     .and_then(|len| len.checked_mul(lane_factor))
                     == Some(entry.len),
                 "reshape: transpose metadata product mismatch for buffer {}",
-                handle.buffer_id
+                handle.buffer_id()
             );
 
-            let canonical =
-                self.register_storage_move_alias(&entry, vec![info.base_rows, info.base_cols])?;
-            let materialized = match self.permute_exec(&canonical, &[1, 0]) {
-                Ok(handle) => handle,
-                Err(err) => {
-                    self.free_exec(&canonical).ok();
-                    return Err(err);
-                }
-            };
-            self.free_exec(&canonical).ok();
-            let reshaped = match self.reshape_exec(&materialized, new_shape) {
-                Ok(handle) => handle,
-                Err(err) => {
-                    self.free_exec(&materialized).ok();
-                    return Err(err);
-                }
-            };
-            return Ok(reshaped);
+            let canonical = handle.with_view(
+                handle
+                    .view()
+                    .clone()
+                    .with_shape(vec![info.base_rows, info.base_cols])
+                    .with_layout(runmat_accelerate_api::allocation::GpuTensorLayout::Contiguous),
+            )?;
+            let materialized = self.permute_exec(&canonical, &[1, 0])?;
+            return self.reshape_exec(&materialized, new_shape);
         }
-        let entry = self.allocations.live_entry(handle.buffer_id)?;
+        let entry = self.get_entry_raw(handle)?;
         let storage = if runmat_accelerate_api::handle_storage(handle)
             == GpuTensorStorage::ComplexInterleaved
         {
@@ -235,13 +226,7 @@ impl WgpuProvider {
             new_len,
             entry.len / lane_factor
         );
-        self.allocations
-            .reshape(handle.buffer_id, new_shape.to_vec(), expected_len, storage)?;
-        let mut updated = handle.clone();
-        updated.shape = new_shape.to_vec();
-        updated.descriptor.storage = Some(storage);
-        runmat_accelerate_api::clear_handle_transpose(&updated);
-        Ok(updated)
+        Ok(handle.with_view(handle.view().clone().with_shape(new_shape.to_vec()))?)
     }
 
     pub(crate) fn repmat_exec(
@@ -874,15 +859,23 @@ impl WgpuProvider {
             let base_rows = info.base_rows;
             let base_cols = info.base_cols;
             let shape = vec![base_rows, base_cols];
-            let handle = self.register_storage_move_alias(&entry, shape)?;
-            runmat_accelerate_api::clear_handle_transpose(&handle);
-            return Ok(handle);
+            return Ok(a.with_view(
+                a.view()
+                    .clone()
+                    .with_shape(shape)
+                    .with_layout(runmat_accelerate_api::allocation::GpuTensorLayout::Contiguous),
+            )?);
         }
 
         let shape = vec![cols, rows];
-        let handle = self.register_storage_move_alias(&entry, shape)?;
-        runmat_accelerate_api::record_handle_transpose(&handle, rows, cols);
-        Ok(handle)
+        Ok(a.with_view(a.view().clone().with_shape(shape).with_layout(
+            runmat_accelerate_api::allocation::GpuTensorLayout::Transpose(
+                runmat_accelerate_api::TransposeInfo {
+                    base_rows: rows,
+                    base_cols: cols,
+                },
+            ),
+        ))?)
     }
 
     pub(crate) fn permute_exec(
@@ -1665,7 +1658,7 @@ mod tests {
             .expect("upload");
 
         let transposed = provider.transpose_exec(&handle).expect("transpose");
-        assert_eq!(transposed.shape, vec![3, 2]);
+        assert_eq!(transposed.shape(), vec![3, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(&transposed),
             GpuTensorStorage::ComplexInterleaved
@@ -1732,13 +1725,13 @@ mod tests {
             .expect("upload");
 
         let transposed = provider.transpose_exec(&handle).expect("transpose");
-        assert_eq!(transposed.shape, vec![3, 2]);
+        assert_eq!(transposed.shape(), vec![3, 2]);
         assert!(runmat_accelerate_api::handle_transpose_info(&transposed).is_some());
 
         let reshaped = provider
             .reshape_exec(&transposed, &[2, 3])
             .expect("reshape lazy transpose");
-        assert_eq!(reshaped.shape, vec![2, 3]);
+        assert_eq!(reshaped.shape(), vec![2, 3]);
         assert!(runmat_accelerate_api::handle_transpose_info(&reshaped).is_none());
         let reshaped_host = block_on(provider.download_exec(&reshaped)).expect("download reshape");
         assert_eq!(reshaped_host.shape, vec![2, 3]);
@@ -1768,7 +1761,7 @@ mod tests {
             .expect("upload");
 
         let permuted = provider.permute_exec(&handle, &[1, 0, 2]).expect("permute");
-        assert_eq!(permuted.shape, vec![2, 2, 2]);
+        assert_eq!(permuted.shape(), vec![2, 2, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(&permuted),
             GpuTensorStorage::ComplexInterleaved
@@ -1806,10 +1799,11 @@ mod tests {
             .expect("integer permute");
 
         assert_ne!(
-            input.buffer_id, permuted.buffer_id,
+            input.buffer_id(),
+            permuted.buffer_id(),
             "permute must materialize on device"
         );
-        assert_eq!(permuted.shape, vec![3, 2]);
+        assert_eq!(permuted.shape(), vec![3, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&permuted),
             Some(IntegerElementType::U64)
@@ -1855,10 +1849,11 @@ mod tests {
         let flipped = provider.flip_exec(&input, &[0]).expect("integer flip");
 
         assert_ne!(
-            input.buffer_id, flipped.buffer_id,
+            input.buffer_id(),
+            flipped.buffer_id(),
             "flip must materialize on device"
         );
-        assert_eq!(flipped.shape, vec![2, 3]);
+        assert_eq!(flipped.shape(), vec![2, 3]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&flipped),
             Some(IntegerElementType::I64)
@@ -1899,7 +1894,8 @@ mod tests {
             .expect("integer repmat");
 
         assert_ne!(
-            input.buffer_id, tiled.buffer_id,
+            input.buffer_id(),
+            tiled.buffer_id(),
             "repmat must materialize on device"
         );
         assert_eq!(
@@ -1913,7 +1909,7 @@ mod tests {
             raw.allocated_bytes,
             9 * 2 * std::mem::size_of::<u32>() as u64
         );
-        assert_eq!(tiled.shape, vec![3, 3]);
+        assert_eq!(tiled.shape(), vec![3, 3]);
         let gathered =
             block_on(provider.download_integer_exec(&tiled)).expect("exact integer download");
         assert_eq!(
@@ -1953,10 +1949,11 @@ mod tests {
             .expect("integer circshift");
 
         assert_ne!(
-            input.buffer_id, shifted.buffer_id,
+            input.buffer_id(),
+            shifted.buffer_id(),
             "circshift must materialize on device"
         );
-        assert_eq!(shifted.shape, vec![2, 3]);
+        assert_eq!(shifted.shape(), vec![2, 3]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&shifted),
             Some(IntegerElementType::U64)

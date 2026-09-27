@@ -71,7 +71,7 @@ impl WgpuProvider {
             &entry.shape,
             entry.len,
         );
-        let _ = self.free_exec(&alpha_tensor);
+        drop(alpha_tensor);
         result
     }
 
@@ -469,301 +469,287 @@ impl WgpuProvider {
         &self,
         request: &ProviderAdamUpdateRequest<'_>,
     ) -> Result<ProviderAdamUpdateResult> {
-        let mut registrations = self.registration_batch();
-        let result = (|| {
-            ensure!(
-                request.iteration > 0,
-                "adam_update: iteration must be positive"
-            );
-            ensure!(
-                request.learn_rate > 0.0 && request.learn_rate.is_finite(),
-                "adam_update: learnRate must be positive and finite"
-            );
-            ensure!(
-                (0.0..1.0).contains(&request.gradient_decay_factor)
-                    && request.gradient_decay_factor.is_finite(),
-                "adam_update: gradient decay factor must be in [0, 1)"
-            );
-            ensure!(
-                (0.0..1.0).contains(&request.squared_gradient_decay_factor)
-                    && request.squared_gradient_decay_factor.is_finite(),
-                "adam_update: squared gradient decay factor must be in [0, 1)"
-            );
-            ensure!(
-                request.epsilon > 0.0 && request.epsilon.is_finite(),
-                "adam_update: epsilon must be positive and finite"
-            );
+        ensure!(
+            request.iteration > 0,
+            "adam_update: iteration must be positive"
+        );
+        ensure!(
+            request.learn_rate > 0.0 && request.learn_rate.is_finite(),
+            "adam_update: learnRate must be positive and finite"
+        );
+        ensure!(
+            (0.0..1.0).contains(&request.gradient_decay_factor)
+                && request.gradient_decay_factor.is_finite(),
+            "adam_update: gradient decay factor must be in [0, 1)"
+        );
+        ensure!(
+            (0.0..1.0).contains(&request.squared_gradient_decay_factor)
+                && request.squared_gradient_decay_factor.is_finite(),
+            "adam_update: squared gradient decay factor must be in [0, 1)"
+        );
+        ensure!(
+            request.epsilon > 0.0 && request.epsilon.is_finite(),
+            "adam_update: epsilon must be positive and finite"
+        );
 
-            let parameters_entry = self.get_entry(request.parameters)?;
-            let gradient_entry = self.get_entry(request.gradient)?;
-            let average_grad_entry = request
-                .average_grad
-                .map(|handle| self.get_entry(handle))
-                .transpose()?;
-            let average_sq_grad_entry = request
-                .average_sq_grad
-                .map(|handle| self.get_entry(handle))
-                .transpose()?;
+        let parameters_entry = self.get_entry(request.parameters)?;
+        let gradient_entry = self.get_entry(request.gradient)?;
+        let average_grad_entry = request
+            .average_grad
+            .map(|handle| self.get_entry(handle))
+            .transpose()?;
+        let average_sq_grad_entry = request
+            .average_sq_grad
+            .map(|handle| self.get_entry(handle))
+            .transpose()?;
 
-            ensure!(
-                parameters_entry.len > 0,
-                "adam_update: parameters must not be empty"
-            );
-            ensure!(
-                parameters_entry.storage != GpuTensorStorage::ComplexInterleaved
-                    && gradient_entry.storage != GpuTensorStorage::ComplexInterleaved
-                    && average_grad_entry
-                        .as_ref()
-                        .is_none_or(|entry| entry.storage != GpuTensorStorage::ComplexInterleaved)
-                    && average_sq_grad_entry
-                        .as_ref()
-                        .is_none_or(|entry| entry.storage != GpuTensorStorage::ComplexInterleaved),
-                "adam_update: complex optimizer tensors are not supported"
-            );
-            ensure!(
-                gradient_entry.shape == parameters_entry.shape
-                    && average_grad_entry
-                        .as_ref()
-                        .is_none_or(|entry| entry.shape == parameters_entry.shape)
-                    && average_sq_grad_entry
-                        .as_ref()
-                        .is_none_or(|entry| entry.shape == parameters_entry.shape),
-                "adam_update: optimizer tensors must match parameter shape"
-            );
-            ensure!(
-                parameters_entry.len <= u32::MAX as usize,
-                "adam_update: tensor length exceeds GPU dispatch limits"
-            );
+        ensure!(
+            parameters_entry.len > 0,
+            "adam_update: parameters must not be empty"
+        );
+        ensure!(
+            parameters_entry.storage != GpuTensorStorage::ComplexInterleaved
+                && gradient_entry.storage != GpuTensorStorage::ComplexInterleaved
+                && average_grad_entry
+                    .as_ref()
+                    .is_none_or(|entry| entry.storage != GpuTensorStorage::ComplexInterleaved)
+                && average_sq_grad_entry
+                    .as_ref()
+                    .is_none_or(|entry| entry.storage != GpuTensorStorage::ComplexInterleaved),
+            "adam_update: complex optimizer tensors are not supported"
+        );
+        ensure!(
+            gradient_entry.shape == parameters_entry.shape
+                && average_grad_entry
+                    .as_ref()
+                    .is_none_or(|entry| entry.shape == parameters_entry.shape)
+                && average_sq_grad_entry
+                    .as_ref()
+                    .is_none_or(|entry| entry.shape == parameters_entry.shape),
+            "adam_update: optimizer tensors must match parameter shape"
+        );
+        ensure!(
+            parameters_entry.len <= u32::MAX as usize,
+            "adam_update: tensor length exceeds GPU dispatch limits"
+        );
 
-            let mut temporary_inputs = Vec::new();
-            let average_grad = match request.average_grad {
-                Some(handle) => handle.clone(),
-                None => {
-                    let zero = self.fill_exec(&parameters_entry.shape, 0.0)?;
-                    temporary_inputs.push(zero.clone());
-                    zero
-                }
-            };
-            let average_sq_grad = match request.average_sq_grad {
-                Some(handle) => handle.clone(),
-                None => {
-                    let zero = self.fill_exec(&parameters_entry.shape, 0.0)?;
-                    temporary_inputs.push(zero.clone());
-                    zero
-                }
-            };
-            let average_grad_entry = self.get_entry(&average_grad)?;
-            let average_sq_grad_entry = self.get_entry(&average_sq_grad)?;
+        let mut temporary_inputs = Vec::new();
+        let average_grad = match request.average_grad {
+            Some(handle) => handle.clone(),
+            None => {
+                let zero = self.fill_exec(&parameters_entry.shape, 0.0)?;
+                temporary_inputs.push(zero.clone());
+                zero
+            }
+        };
+        let average_sq_grad = match request.average_sq_grad {
+            Some(handle) => handle.clone(),
+            None => {
+                let zero = self.fill_exec(&parameters_entry.shape, 0.0)?;
+                temporary_inputs.push(zero.clone());
+                zero
+            }
+        };
+        let average_grad_entry = self.get_entry(&average_grad)?;
+        let average_sq_grad_entry = self.get_entry(&average_sq_grad)?;
 
-            let out_parameters = self.create_storage_buffer_checked(
-                parameters_entry.len,
-                "runmat-adamupdate-params-out",
-            )?;
-            let out_average_grad = self
-                .create_storage_buffer_checked(parameters_entry.len, "runmat-adamupdate-avg-out")?;
-            let out_average_sq_grad = self.create_storage_buffer_checked(
-                parameters_entry.len,
-                "runmat-adamupdate-avg-sq-out",
-            )?;
+        let out_parameters = self
+            .create_storage_buffer_checked(parameters_entry.len, "runmat-adamupdate-params-out")?;
+        let out_average_grad =
+            self.create_storage_buffer_checked(parameters_entry.len, "runmat-adamupdate-avg-out")?;
+        let out_average_sq_grad = self
+            .create_storage_buffer_checked(parameters_entry.len, "runmat-adamupdate-avg-sq-out")?;
 
-            let mut validation_result = Ok(());
-            if parameters_entry.len > 0 {
-                let error_buffer =
-                    self.device_ref()
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-adamupdate-error"),
-                            contents: bytes_of(&0u32),
-                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                        });
-                let shader = adam_update_shader(self.precision);
-                let shader_module =
-                    self.device_ref()
-                        .create_shader_module(wgpu::ShaderModuleDescriptor {
-                            label: Some("runmat-adamupdate-shader"),
-                            source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                        });
-                let bind_layout =
-                    self.device_ref()
-                        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                            label: Some("runmat-adamupdate-layout"),
-                            entries: &adam_update_bind_layout_entries(),
-                        });
-                let pipeline_layout =
-                    self.device_ref()
-                        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                            label: Some("runmat-adamupdate-pipeline-layout"),
-                            bind_group_layouts: &[&bind_layout],
-                            push_constant_ranges: &[],
-                        });
-                let pipeline = self.device_ref().create_compute_pipeline(
-                    &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                        label: Some("runmat-adamupdate-pipeline"),
-                        layout: Some(&pipeline_layout),
-                        module: &shader_module,
-                        entry_point: "main",
-                    },
-                );
-
-                let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS
-                    as usize)
-                    * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-                let mut offset = 0usize;
-                while offset < parameters_entry.len {
-                    let chunk_len = (parameters_entry.len - offset).min(chunk_capacity);
-                    let params_buffer = match self.precision {
-                        NumericPrecision::F64 => self.uniform_buffer(
-                            &AdamUpdateParamsF64 {
-                                total: parameters_entry.len as u32,
-                                offset: offset as u32,
-                                chunk: chunk_len as u32,
-                                _pad0: 0,
-                                iteration: request.iteration as f64,
-                                learn_rate: request.learn_rate,
-                                gradient_decay_factor: request.gradient_decay_factor,
-                                squared_gradient_decay_factor: request
-                                    .squared_gradient_decay_factor,
-                                epsilon: request.epsilon,
-                            },
-                            "runmat-adamupdate-params",
-                        ),
-                        NumericPrecision::F32 => self.uniform_buffer(
-                            &AdamUpdateParamsF32 {
-                                total: parameters_entry.len as u32,
-                                offset: offset as u32,
-                                chunk: chunk_len as u32,
-                                _pad0: 0,
-                                iteration: request.iteration as f32,
-                                learn_rate: request.learn_rate as f32,
-                                gradient_decay_factor: request.gradient_decay_factor as f32,
-                                squared_gradient_decay_factor: request.squared_gradient_decay_factor
-                                    as f32,
-                                epsilon: request.epsilon as f32,
-                                _pad1: [0.0; 3],
-                            },
-                            "runmat-adamupdate-params",
-                        ),
-                    };
-                    let bind_group =
-                        self.device_ref()
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("runmat-adamupdate-bind"),
-                                layout: &bind_layout,
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: parameters_entry.buffer.as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: gradient_entry.buffer.as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 2,
-                                        resource: average_grad_entry.buffer.as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 3,
-                                        resource: average_sq_grad_entry.buffer.as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 4,
-                                        resource: out_parameters.as_ref().as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 5,
-                                        resource: out_average_grad.as_ref().as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 6,
-                                        resource: out_average_sq_grad.as_ref().as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 7,
-                                        resource: params_buffer.as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 8,
-                                        resource: error_buffer.as_entire_binding(),
-                                    },
-                                ],
-                            });
-                    let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                        chunk_len as u32,
-                        crate::backend::wgpu::config::WORKGROUP_SIZE,
-                    );
-                    crate::backend::wgpu::dispatch::creation::run(
-                        self.device_ref(),
-                        self.queue_ref(),
-                        &pipeline,
-                        &bind_group,
-                        workgroups,
-                        "runmat-adamupdate-encoder",
-                        "runmat-adamupdate-pass",
-                    );
-                    offset += chunk_len;
-                }
-
-                let error_size = std::mem::size_of::<u32>() as u64;
-                let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-adamupdate-error-staging"),
-                    size: error_size,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                let mut encoder =
-                    self.device_ref()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-adamupdate-error-copy"),
-                        });
-                encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
-                self.submit(encoder);
-                validation_result = self
-                    .map_readback_bytes_sync(staging, error_size, "adamupdate")
-                    .and_then(|bytes| {
-                        let code = u32::from_le_bytes(
-                            bytes
-                                .get(..4)
-                                .ok_or_else(|| anyhow!("adam_update: short error readback"))?
-                                .try_into()
-                                .map_err(|_| anyhow!("adam_update: invalid error readback"))?,
-                        );
-                        Ok(code)
-                    })
-                    .and_then(|code| match code {
-                        0 => Ok(()),
-                        1 => Err(anyhow!("adam_update: inputs must contain finite values")),
-                        2 => Err(anyhow!("adam_update: update produced a non-finite value")),
-                        other => Err(anyhow!("adam_update: validation failed with code {other}")),
+        let mut validation_result = Ok(());
+        if parameters_entry.len > 0 {
+            let error_buffer =
+                self.device_ref()
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-adamupdate-error"),
+                        contents: bytes_of(&0u32),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                     });
+            let shader = adam_update_shader(self.precision);
+            let shader_module =
+                self.device_ref()
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("runmat-adamupdate-shader"),
+                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+                    });
+            let bind_layout =
+                self.device_ref()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-adamupdate-layout"),
+                        entries: &adam_update_bind_layout_entries(),
+                    });
+            let pipeline_layout =
+                self.device_ref()
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("runmat-adamupdate-pipeline-layout"),
+                        bind_group_layouts: &[&bind_layout],
+                        push_constant_ranges: &[],
+                    });
+            let pipeline = self.device_ref().create_compute_pipeline(
+                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                    label: Some("runmat-adamupdate-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader_module,
+                    entry_point: "main",
+                },
+            );
+
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut offset = 0usize;
+            while offset < parameters_entry.len {
+                let chunk_len = (parameters_entry.len - offset).min(chunk_capacity);
+                let params_buffer = match self.precision {
+                    NumericPrecision::F64 => self.uniform_buffer(
+                        &AdamUpdateParamsF64 {
+                            total: parameters_entry.len as u32,
+                            offset: offset as u32,
+                            chunk: chunk_len as u32,
+                            _pad0: 0,
+                            iteration: request.iteration as f64,
+                            learn_rate: request.learn_rate,
+                            gradient_decay_factor: request.gradient_decay_factor,
+                            squared_gradient_decay_factor: request.squared_gradient_decay_factor,
+                            epsilon: request.epsilon,
+                        },
+                        "runmat-adamupdate-params",
+                    ),
+                    NumericPrecision::F32 => self.uniform_buffer(
+                        &AdamUpdateParamsF32 {
+                            total: parameters_entry.len as u32,
+                            offset: offset as u32,
+                            chunk: chunk_len as u32,
+                            _pad0: 0,
+                            iteration: request.iteration as f32,
+                            learn_rate: request.learn_rate as f32,
+                            gradient_decay_factor: request.gradient_decay_factor as f32,
+                            squared_gradient_decay_factor: request.squared_gradient_decay_factor
+                                as f32,
+                            epsilon: request.epsilon as f32,
+                            _pad1: [0.0; 3],
+                        },
+                        "runmat-adamupdate-params",
+                    ),
+                };
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-adamupdate-bind"),
+                        layout: &bind_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: parameters_entry.buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: gradient_entry.buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: average_grad_entry.buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: average_sq_grad_entry.buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: out_parameters.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: out_average_grad.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 6,
+                                resource: out_average_sq_grad.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 7,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 8,
+                                resource: error_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-adamupdate-encoder",
+                    "runmat-adamupdate-pass",
+                );
+                offset += chunk_len;
             }
 
-            for handle in temporary_inputs {
-                let _ = self.free_exec(&handle);
-            }
-            validation_result?;
+            let error_size = std::mem::size_of::<u32>() as u64;
+            let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-adamupdate-error-staging"),
+                size: error_size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-adamupdate-error-copy"),
+                    });
+            encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
+            self.submit(encoder);
+            validation_result = self
+                .map_readback_bytes_sync(staging, error_size, "adamupdate")
+                .and_then(|bytes| {
+                    let code = u32::from_le_bytes(
+                        bytes
+                            .get(..4)
+                            .ok_or_else(|| anyhow!("adam_update: short error readback"))?
+                            .try_into()
+                            .map_err(|_| anyhow!("adam_update: invalid error readback"))?,
+                    );
+                    Ok(code)
+                })
+                .and_then(|code| match code {
+                    0 => Ok(()),
+                    1 => Err(anyhow!("adam_update: inputs must contain finite values")),
+                    2 => Err(anyhow!("adam_update: update produced a non-finite value")),
+                    other => Err(anyhow!("adam_update: validation failed with code {other}")),
+                });
+        }
 
-            Ok(ProviderAdamUpdateResult {
-                parameters: registrations.track(self.register_existing_buffer(
-                    out_parameters,
-                    parameters_entry.shape.clone(),
-                    parameters_entry.len,
-                ))?,
-                average_grad: registrations.track(self.register_existing_buffer(
-                    out_average_grad,
-                    parameters_entry.shape.clone(),
-                    parameters_entry.len,
-                ))?,
-                average_sq_grad: registrations.track(self.register_existing_buffer(
-                    out_average_sq_grad,
-                    parameters_entry.shape.clone(),
-                    parameters_entry.len,
-                ))?,
-            })
-        })();
-        registrations.finish(result, |batch, out| {
-            batch.publish(&out.parameters);
-            batch.publish(&out.average_grad);
-            batch.publish(&out.average_sq_grad);
+        for handle in temporary_inputs {
+            drop(handle);
+        }
+        validation_result?;
+
+        Ok(ProviderAdamUpdateResult {
+            parameters: self.register_existing_buffer(
+                out_parameters,
+                parameters_entry.shape.clone(),
+                parameters_entry.len,
+            )?,
+            average_grad: self.register_existing_buffer(
+                out_average_grad,
+                parameters_entry.shape.clone(),
+                parameters_entry.len,
+            )?,
+            average_sq_grad: self.register_existing_buffer(
+                out_average_sq_grad,
+                parameters_entry.shape.clone(),
+                parameters_entry.len,
+            )?,
         })
     }
 }
@@ -1374,13 +1360,13 @@ mod tests {
         }
 
         for handle in [
-            &parameters,
-            &gradient,
-            &result.parameters,
-            &result.average_grad,
-            &result.average_sq_grad,
+            parameters,
+            gradient,
+            result.parameters,
+            result.average_grad,
+            result.average_sq_grad,
         ] {
-            provider.free(handle).ok();
+            handle.release().unwrap();
         }
     }
 
@@ -1411,8 +1397,8 @@ mod tests {
                 "got {actual}, expected {expected}"
             );
         }
-        provider.free(&input).ok();
-        provider.free(&output).ok();
+        input.release().unwrap();
+        output.release().unwrap();
     }
 
     #[test]
@@ -1451,8 +1437,8 @@ mod tests {
                 "got {actual}, expected {expected}"
             );
         }
-        provider.free(&input).ok();
-        provider.free(&output).ok();
+        input.release().unwrap();
+        output.release().unwrap();
     }
 
     #[test]
@@ -1472,7 +1458,7 @@ mod tests {
         assert!(error
             .to_string()
             .contains("softmax produced invalid normalization"));
-        provider.free(&input).ok();
+        input.release().unwrap();
     }
 
     #[test]
@@ -1531,8 +1517,8 @@ mod tests {
             );
         }
 
-        for handle in [&predictions, &targets, &weights, &mask, &result.losses] {
-            provider.free(handle).ok();
+        for handle in [predictions, targets, weights, mask, result.losses] {
+            handle.release().unwrap();
         }
     }
 }

@@ -13,17 +13,6 @@ use crate::backend::wgpu::types::NumericPrecision;
 
 const CPU_COMMS_FAST_PATH_MAX_LOGICAL_LEN: usize = 4096;
 
-struct UploadedTemp<'a> {
-    provider: &'a WgpuProvider,
-    handle: GpuTensorHandle,
-}
-
-impl Drop for UploadedTemp<'_> {
-    fn drop(&mut self) {
-        self.provider.free_exec(&self.handle).ok();
-    }
-}
-
 impl WgpuProvider {
     fn upload_complex_interleaved_exec(
         &self,
@@ -167,14 +156,11 @@ impl WgpuProvider {
         }
 
         let table_shape = [request.constellation.len(), 1usize];
-        let table = UploadedTemp {
-            provider: self,
-            handle: self.upload_exec(&HostTensorView {
-                data: request.constellation,
-                shape: &table_shape,
-            })?,
-        };
-        let table_entry = self.get_entry(&table.handle)?;
+        let table = self.upload_exec(&HostTensorView {
+            data: request.constellation,
+            shape: &table_shape,
+        })?;
+        let table_entry = self.get_entry(&table)?;
         let output =
             self.create_storage_buffer_checked(out_len, "runmat-modulate-constellation")?;
         let error_words = [u32::MAX, 0, 0, 0];
@@ -469,14 +455,11 @@ impl WgpuProvider {
         }
 
         let table_shape = [request.constellation.len(), 1usize];
-        let table = UploadedTemp {
-            provider: self,
-            handle: self.upload_exec(&HostTensorView {
-                data: request.constellation,
-                shape: &table_shape,
-            })?,
-        };
-        let table_entry = self.get_entry(&table.handle)?;
+        let table = self.upload_exec(&HostTensorView {
+            data: request.constellation,
+            shape: &table_shape,
+        })?;
+        let table_entry = self.get_entry(&table)?;
         let output =
             self.create_storage_buffer_checked(out_len, "runmat-modulate-bits-constellation")?;
         let error_words = [u32::MAX, 0, 0, 0];
@@ -666,8 +649,8 @@ mod tests {
         for (actual, expected) in gathered.data.iter().zip(constellation.iter()) {
             assert!((actual - expected).abs() < 1.0e-12);
         }
-        provider.free(&input).ok();
-        provider.free(&output).ok();
+        input.release().unwrap();
+        output.release().unwrap();
     }
 
     #[test]
@@ -690,7 +673,7 @@ mod tests {
         }))
         .expect_err("invalid symbol should fail");
         assert!(err.to_string().contains("nonnegative integers"), "{err}");
-        provider.free(&input).ok();
+        input.release().unwrap();
     }
 
     #[test]
@@ -730,7 +713,7 @@ mod tests {
                 "constellation lane {idx}: actual={actual} expected={expected}"
             );
         }
-        provider.free(&input).ok();
-        provider.free(&output).ok();
+        input.release().unwrap();
+        output.release().unwrap();
     }
 }

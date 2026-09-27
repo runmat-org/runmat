@@ -348,6 +348,45 @@ impl WgpuProvider {
         &self,
         host: &HostNumericTensorView,
     ) -> Result<GpuTensorHandle> {
+        self.upload_numeric_produced(host, false)
+    }
+
+    pub(crate) fn upload_logical_exec(
+        &self,
+        host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
+    ) -> Result<GpuTensorHandle> {
+        host.validate()?;
+        match self.precision {
+            NumericPrecision::F32 => {
+                let data: Vec<f32> = host.data.iter().map(|&value| f32::from(value)).collect();
+                self.upload_numeric_produced(
+                    &HostNumericTensorView {
+                        data: HostNumericDataView::F32(&data),
+                        shape: host.shape,
+                        storage: GpuTensorStorage::Real,
+                    },
+                    true,
+                )
+            }
+            NumericPrecision::F64 => {
+                let data: Vec<f64> = host.data.iter().map(|&value| f64::from(value)).collect();
+                self.upload_numeric_produced(
+                    &HostNumericTensorView {
+                        data: HostNumericDataView::F64(&data),
+                        shape: host.shape,
+                        storage: GpuTensorStorage::Real,
+                    },
+                    true,
+                )
+            }
+        }
+    }
+
+    fn upload_numeric_produced(
+        &self,
+        host: &HostNumericTensorView<'_>,
+        logical: bool,
+    ) -> Result<GpuTensorHandle> {
         host.validate()?;
         let element_type = host.element_type();
         let len = host.data.len();
@@ -399,7 +438,7 @@ impl WgpuProvider {
         };
         self.telemetry.record_upload_bytes(bytes);
         record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
-        self.register_numeric_buffer(
+        self.register_numeric_buffer_produced(
             buffer,
             NumericBufferRegistration {
                 shape: host.shape.to_vec(),
@@ -409,6 +448,7 @@ impl WgpuProvider {
                 allocated_bytes: bytes,
                 usage: crate::backend::wgpu::residency::BufferUsageClass::Generic,
             },
+            logical,
         )
     }
 
@@ -477,14 +517,14 @@ impl WgpuProvider {
             GpuTensorStorage::Real => 1usize,
             GpuTensorStorage::ComplexInterleaved => 2usize,
         };
-        let mut shape = handle.shape.clone();
+        let mut shape = handle.shape().to_vec();
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
             let logical_len = data.len() / lane_factor;
             ensure!(
                 data.len() % lane_factor == 0
                     && info.base_rows.checked_mul(info.base_cols) == Some(logical_len),
                 "numeric download: transpose metadata mismatch for buffer {}",
-                handle.buffer_id
+                handle.buffer_id()
             );
             if shape.len() == 2 {
                 transpose_numeric_data(&mut data, lane_factor, info.base_rows, info.base_cols);
@@ -509,15 +549,15 @@ impl WgpuProvider {
     pub(crate) async fn download_exec(&self, handle: &GpuTensorHandle) -> Result<HostTensorOwned> {
         let span = info_span!(
             "gpu.transfer.download",
-            shape = ?handle.shape,
-            buffer_id = handle.buffer_id
+            shape = ?handle.shape(),
+            buffer_id = handle.buffer_id()
         );
         let entry = {
             let _guard = span.enter();
             log::trace!(
                 "wgpu download id={} shape={:?}",
-                handle.buffer_id,
-                &handle.shape
+                handle.buffer_id(),
+                handle.shape()
             );
             let entry = self.get_entry_raw(handle)?;
             ensure!(
@@ -529,13 +569,13 @@ impl WgpuProvider {
         if let Some(last) = entry.last_submission_id {
             log::trace!(
                 "wgpu download id={} last_submission_id={}",
-                handle.buffer_id,
+                handle.buffer_id(),
                 last
             );
         } else {
             log::trace!(
                 "wgpu download id={} last_submission_id=<none>",
-                handle.buffer_id
+                handle.buffer_id()
             );
         }
         let storage = if runmat_accelerate_api::handle_storage(handle)
@@ -548,7 +588,7 @@ impl WgpuProvider {
         if entry.len == 0 {
             return Ok(HostTensorOwned {
                 data: Vec::new(),
-                shape: handle.shape.clone(),
+                shape: handle.shape().to_vec(),
                 storage,
             });
         }
@@ -559,7 +599,7 @@ impl WgpuProvider {
             let data = slice.get_mapped_range();
             log::trace!(
                 "wgpu download copying data id={} len={} bytes={}",
-                handle.buffer_id,
+                handle.buffer_id(),
                 entry.len,
                 size_bytes
             );
@@ -576,7 +616,7 @@ impl WgpuProvider {
             }
             drop(data);
             staging.unmap();
-            log::trace!("wgpu download finished copy id={}", handle.buffer_id);
+            log::trace!("wgpu download finished copy id={}", handle.buffer_id());
             self.telemetry.record_download_bytes(size_bytes);
             record_provider_copy(runmat_value::HostCopyReason::ProviderReadback, size_bytes);
 
@@ -584,7 +624,7 @@ impl WgpuProvider {
                 GpuTensorStorage::Real => 1usize,
                 GpuTensorStorage::ComplexInterleaved => 2usize,
             };
-            let mut shape = handle.shape.clone();
+            let mut shape = handle.shape().to_vec();
             if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
                 let base_rows = info.base_rows;
                 let base_cols = info.base_cols;
@@ -594,7 +634,7 @@ impl WgpuProvider {
                 {
                     return Err(anyhow!(
                         "download: transpose metadata mismatch for buffer {}",
-                        handle.buffer_id
+                        handle.buffer_id()
                     ));
                 }
                 if shape.len() == 2 {
@@ -617,7 +657,7 @@ impl WgpuProvider {
 
             log::trace!(
                 "wgpu download complete id={} final_shape={:?}",
-                handle.buffer_id,
+                handle.buffer_id(),
                 shape
             );
 
@@ -630,7 +670,7 @@ impl WgpuProvider {
 
         log::trace!(
             "wgpu download creating staging buffer id={} bytes={}",
-            handle.buffer_id,
+            handle.buffer_id(),
             size_bytes
         );
         let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -649,7 +689,7 @@ impl WgpuProvider {
         let slice = staging.slice(..);
         let (tx, rx) = oneshot::channel();
 
-        let map_buffer_id = handle.buffer_id;
+        let map_buffer_id = handle.buffer_id();
         slice.map_async(wgpu::MapMode::Read, move |res| {
             log::trace!(
                 "wgpu download map_async callback id={} status={:?}",
@@ -660,24 +700,23 @@ impl WgpuProvider {
         });
         log::trace!(
             "wgpu download awaiting map_async completion id={} bytes={}",
-            handle.buffer_id,
+            handle.buffer_id(),
             size_bytes
         );
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.device.poll(wgpu::Maintain::Wait);
         }
-        let map_result = rx
-            .await
-            .map_err(|_| anyhow!("map_async callback dropped for buffer {}", handle.buffer_id))?;
+        let map_result = rx.await.map_err(|_| {
+            anyhow!(
+                "map_async callback dropped for buffer {}",
+                handle.buffer_id()
+            )
+        })?;
 
-        log::trace!("wgpu download map_async success id={}", handle.buffer_id);
+        log::trace!("wgpu download map_async success id={}", handle.buffer_id());
         map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
         finish_readback(staging, size_bytes)
-    }
-
-    pub(crate) fn free_exec(&self, handle: &GpuTensorHandle) -> Result<()> {
-        self.allocations.free(handle)
     }
 
     pub(crate) fn device_info_exec(&self) -> String {
@@ -709,27 +748,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn free_rejects_handles_owned_by_another_device() {
-        let Ok(provider) = WgpuProvider::new(WgpuProviderOptions::default()) else {
-            return;
-        };
+    #[ignore = "requires provisioned WGPU adapter; run with --ignored"]
+    fn operations_reject_authentic_handles_owned_by_another_device() {
+        let provider =
+            WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU adapter");
+        let other =
+            WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU adapter");
         let handle = provider
             .upload_exec(&HostTensorView {
                 data: &[1.0, 2.0],
                 shape: &[2, 1],
             })
             .expect("upload");
-        let foreign = GpuTensorHandle {
-            device_id: handle.device_id.wrapping_add(1),
-            ..handle.clone()
-        };
-
-        let error = provider
-            .free_exec(&foreign)
-            .expect_err("foreign handle must not free a local buffer");
-        assert!(error.to_string().contains("belongs to device"));
+        let foreign = other
+            .upload_exec(&HostTensorView {
+                data: &[7.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        assert!(provider.get_entry_raw(&foreign).is_err());
+        foreign.release().unwrap();
         futures::executor::block_on(provider.download_exec(&handle))
             .expect("the locally owned buffer must remain live");
-        provider.free_exec(&handle).expect("free local handle");
+        handle.release().unwrap();
     }
 }

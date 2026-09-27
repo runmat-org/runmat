@@ -15,7 +15,10 @@ impl Default for WgpuProviderOptions {
     }
 }
 
-pub(super) type MomentsKey = (u64, Vec<usize>);
+pub(super) type MomentsKey = (
+    runmat_accelerate_api::allocation::TensorViewIdentity,
+    Vec<usize>,
+);
 pub(super) type MomentsValue = (GpuTensorHandle, GpuTensorHandle);
 pub(super) type MomentsCache = HashMap<MomentsKey, MomentsValue>;
 
@@ -59,18 +62,21 @@ pub struct WgpuProvider {
     #[allow(dead_code)]
     pub(super) autotune_device_tag: String,
     // Optimization caches
-    pub(super) pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
-    pub(super) moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
+    pub(super) pow2_of: Mutex<
+        HashMap<
+            runmat_accelerate_api::allocation::TensorViewIdentity,
+            runmat_accelerate_api::allocation::WeakGpuTensorHandle,
+        >,
+    >,
+    pub(super) moments_cache: Mutex<MomentsCache>, // (base view, dims) -> (mean, ex2)
     pub(super) fft_twiddle_cache: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>, // (len, mode) -> twiddle buffer
 }
 
-#[cfg(target_arch = "wasm32")]
-unsafe impl Send for WgpuProvider {}
-#[cfg(target_arch = "wasm32")]
-unsafe impl Sync for WgpuProvider {}
-
 #[derive(Clone)]
 pub(super) struct BufferEntry {
+    /// Operation-local interpretation copied from an admitted view. The owning
+    /// record separately retains immutable logical producer authority.
+    pub(super) logical: bool,
     pub(super) buffer: Arc<wgpu::Buffer>,
     pub(super) len: usize,
     pub(super) shape: Vec<usize>,

@@ -23,8 +23,16 @@ use crate::backend::wgpu::types::NumericPrecision;
 use crate::fusion::active_fusion;
 
 impl WgpuProvider {
-    pub(super) fn registration_batch(&self) -> super::registration::RegistrationBatch<'_> {
-        super::registration::RegistrationBatch::new(&self.allocations)
+    pub(super) fn inherit_elementwise_layout(
+        &self,
+        output: GpuTensorHandle,
+        source: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        if runmat_accelerate_api::handle_is_transposed(source) {
+            Ok(output.with_view(output.view().clone().with_layout(source.view().layout()))?)
+        } else {
+            Ok(output)
+        }
     }
     pub(super) async fn map_readback_bytes(
         &self,
@@ -154,6 +162,41 @@ impl WgpuProvider {
         buffer: Arc<wgpu::Buffer>,
         registration: NumericBufferRegistration,
     ) -> Result<GpuTensorHandle> {
+        self.register_numeric_buffer_produced(buffer, registration, false)
+    }
+
+    pub(super) fn register_logical_buffer(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        shape: Vec<usize>,
+        len: usize,
+        usage: BufferUsageClass,
+    ) -> Result<GpuTensorHandle> {
+        let physical_element_type = match self.precision {
+            NumericPrecision::F32 => NumericElementType::F32,
+            NumericPrecision::F64 => NumericElementType::F64,
+        };
+        let allocated_bytes = buffer.size();
+        self.register_numeric_buffer_produced(
+            buffer,
+            NumericBufferRegistration {
+                shape,
+                len,
+                physical_element_type,
+                storage: GpuTensorStorage::Real,
+                allocated_bytes,
+                usage,
+            },
+            true,
+        )
+    }
+
+    pub(super) fn register_numeric_buffer_produced(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        registration: NumericBufferRegistration,
+        logical: bool,
+    ) -> Result<GpuTensorHandle> {
         let NumericBufferRegistration {
             shape,
             len,
@@ -164,6 +207,7 @@ impl WgpuProvider {
         } = registration;
 
         let entry = BufferEntry {
+            logical,
             buffer,
             len,
             shape,
@@ -178,7 +222,7 @@ impl WgpuProvider {
             usage,
             last_submission_id: None,
         };
-        self.allocations.register(entry)
+        self.allocations.register_produced(entry, logical)
     }
 
     pub(super) fn register_integer_buffer(
@@ -208,14 +252,17 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
     ) {
-        if lhs.device_id != self.runtime_device_id || rhs.device_id != self.runtime_device_id {
+        if self.get_entry_raw(product).is_err()
+            || self.get_entry_raw(lhs).is_err()
+            || self.get_entry_raw(rhs).is_err()
+        {
             return;
         }
         log::debug!(
             "remember_matmul_sources: product={} lhs={} rhs={} active_fusion={:?}",
-            product.buffer_id,
-            lhs.buffer_id,
-            rhs.buffer_id,
+            product.buffer_id(),
+            lhs.buffer_id(),
+            rhs.buffer_id(),
             active_fusion()
         );
         self.kernel_resources
@@ -224,8 +271,8 @@ impl WgpuProvider {
 
     pub(super) fn mark_buffer_usage(&self, handle: &GpuTensorHandle, usage: BufferUsageClass) {
         // Usage is an optional pooling hint, never a live-operation admission.
-        if handle.device_id == self.runtime_device_id {
-            let _ = self.allocations.mark_usage(handle.buffer_id, usage);
+        if handle.device_id() == self.runtime_device_id {
+            let _ = self.allocations.mark_usage(handle.buffer_id(), usage);
         }
     }
 
@@ -386,19 +433,7 @@ impl WgpuProvider {
     }
 
     pub(super) fn get_entry_raw(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
-        if handle.device_id != self.runtime_device_id {
-            return Err(anyhow!(
-                "handle device mismatch: expected {}, got {}",
-                self.runtime_device_id,
-                handle.device_id
-            ));
-        }
-        let mut entry = self.allocations.live_entry(handle.buffer_id)?;
-        let handle_storage = runmat_accelerate_api::handle_storage(handle);
-        if handle_storage == GpuTensorStorage::ComplexInterleaved {
-            entry.storage = GpuTensorStorage::ComplexInterleaved;
-        }
-        Ok(entry)
+        self.allocations.entry_for_handle(handle)
     }
 
     pub(super) fn get_entry_for_storage_move(

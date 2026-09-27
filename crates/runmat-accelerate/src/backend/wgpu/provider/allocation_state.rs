@@ -1,12 +1,12 @@
 //! Existing WGPU allocation table and physical retirement dependencies.
-//! This preparation slice deliberately preserves explicit-free semantics.
+//! Physical records hold weak leases; tensor views retain the captured owner.
 use super::backend_types::BufferEntry;
 use crate::backend::wgpu::cache::bind_group::BindGroupCache;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::resources::KernelResourceRegistry;
 use anyhow::{anyhow, Result};
 use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
-use runmat_accelerate_api::{GpuTensorDescriptor, GpuTensorHandle};
+use runmat_accelerate_api::GpuTensorHandle;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -17,6 +17,8 @@ mod lifecycle;
 mod publication;
 #[path = "allocation_state/retirement.rs"]
 mod retirement;
+#[path = "allocation_state/owner.rs"]
+mod owner;
 use lifecycle::{AllocationStateError, Disposition, Failure, Phase, Record, Stage};
 
 pub(super) struct AllocationState {
@@ -67,21 +69,6 @@ impl AllocationState {
         self.lost.store(true, Ordering::Release);
     }
 
-    pub(super) fn live_entry(&self, id: u64) -> Result<BufferEntry> {
-        if self.is_lost() {
-            return Err(AllocationStateError::DeviceLost.into());
-        }
-        let records = self.lock_records()?;
-        let record = records.get(&id).ok_or(AllocationStateError::Missing)?;
-        if record.phase != Phase::Live {
-            return Err(AllocationStateError::NotLive.into());
-        }
-        record
-            .entry
-            .clone()
-            .ok_or_else(|| AllocationStateError::NotLive.into())
-    }
-
     pub(super) fn retained_bytes(&self) -> u64 {
         self.lock_records()
             .map(|records| {
@@ -117,31 +104,6 @@ impl AllocationState {
             .as_mut()
             .ok_or(AllocationStateError::NotLive)?
             .last_submission_id = Some(submission);
-        Ok(())
-    }
-
-    pub(super) fn reshape(
-        &self,
-        id: u64,
-        shape: Vec<usize>,
-        expected_len: usize,
-        storage: runmat_accelerate_api::GpuTensorStorage,
-    ) -> Result<()> {
-        let old_shape = {
-            let mut records = self.lock_records()?;
-            let record = records.get_mut(&id).ok_or(AllocationStateError::Missing)?;
-            if record.phase != Phase::Live {
-                return Err(AllocationStateError::NotLive.into());
-            }
-            let entry = record.entry.as_mut().ok_or(AllocationStateError::NotLive)?;
-            anyhow::ensure!(
-                entry.len == expected_len,
-                "reshape: product of dimensions must equal original tensor length"
-            );
-            entry.storage = storage;
-            std::mem::replace(&mut entry.shape, shape)
-        };
-        drop(old_shape);
         Ok(())
     }
 

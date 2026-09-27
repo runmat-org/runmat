@@ -60,8 +60,8 @@ impl WgpuProvider {
             "interp1: Xq length does not match query_len"
         );
         ensure!(
-            request.x.device_id == request.y.device_id
-                && request.y.device_id == request.xq.device_id,
+            request.x.device_id() == request.y.device_id()
+                && request.y.device_id() == request.xq.device_id(),
             "interp1: input tensors must be on the same device"
         );
         ensure!(
@@ -255,11 +255,11 @@ mod tests {
             assert_eq!(nearest_host.shape, output_shape);
             assert_values_close(&linear_host.data, &[12.0, 30.0, 120.0, 300.0], 1.0e-5);
             assert_eq!(nearest_host.data, vec![10.0, 20.0, 100.0, 200.0]);
-            provider.free(&x).ok();
-            provider.free(&y).ok();
-            provider.free(&xq).ok();
-            provider.free(&linear).ok();
-            provider.free(&nearest).ok();
+            x.release().unwrap();
+            y.release().unwrap();
+            xq.release().unwrap();
+            linear.release().unwrap();
+            nearest.release().unwrap();
         }) else {
             return;
         };

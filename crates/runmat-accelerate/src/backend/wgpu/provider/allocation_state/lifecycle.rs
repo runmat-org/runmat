@@ -2,12 +2,9 @@ use super::BufferEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Stage {
-    RegistrationResidency,
-    RegistrationAnnotations,
+    Registration,
     Cache,
     Provenance,
-    Residency,
-    Annotations,
     Resource,
     Complete,
 }
@@ -24,8 +21,6 @@ pub(super) enum Failure {
     MapPoisoned,
     Cache,
     Provenance,
-    Callback,
-    AnnotationLock,
     Unwind,
     DeviceLost,
 }
@@ -42,49 +37,15 @@ pub(super) enum Phase {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ResidencyCleanup {
-    Pending,
-    Complete,
-    Incomplete,
-}
-
-impl Phase {
-    pub(super) fn residency_cleanup(self) -> ResidencyCleanup {
-        match self {
-            Self::Live
-            | Self::Retiring(Stage::Cache | Stage::Provenance)
-            | Self::Failed {
-                stage: Stage::Cache | Stage::Provenance,
-                ..
-            } => ResidencyCleanup::Pending,
-            Self::Registering(Stage::RegistrationAnnotations)
-            | Self::Retiring(Stage::Annotations | Stage::Resource | Stage::Complete)
-            | Self::Failed {
-                stage:
-                    Stage::RegistrationAnnotations
-                    | Stage::Annotations
-                    | Stage::Resource
-                    | Stage::Complete,
-                ..
-            }
-            | Self::Failed {
-                stage: Stage::Residency,
-                failure: Failure::MapPoisoned,
-                ..
-            } => ResidencyCleanup::Complete,
-            // Invocation was recorded before entering an external callback.
-            // Missing a completion receipt is not success or retry authority.
-            _ => ResidencyCleanup::Incomplete,
-        }
-    }
-}
-
 pub(super) struct Record {
     pub(super) phase: Phase,
     pub(super) entry: Option<BufferEntry>,
     /// Includes a temporarily detached retirement ticket, until released.
     pub(super) retained_bytes: u64,
+    pub(super) physical: runmat_accelerate_api::allocation::GpuPhysicalDescriptor,
+    pub(super) lease: Option<runmat_accelerate_api::allocation::WeakAllocationLease>,
+    /// Set only by a logical-producing upload/kernel at physical registration.
+    pub(super) logical_producer: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -188,7 +188,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.zeros_exec(&prototype.shape)
+        self.zeros_exec(prototype.shape())
     }
 
     fn zeros_integer_like(
@@ -221,7 +221,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn fill_like(&self, prototype: &GpuTensorHandle, value: f64) -> Result<GpuTensorHandle> {
-        self.fill_exec(&prototype.shape, value)
+        self.fill_exec(prototype.shape(), value)
     }
 
     fn eye(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -229,7 +229,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn eye_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.eye_exec(&prototype.shape)
+        self.eye_exec(prototype.shape())
     }
 
     fn meshgrid(&self, axes: &[MeshgridAxisView<'_>]) -> Result<ProviderMeshgridResult> {
@@ -1901,8 +1901,14 @@ impl AccelProvider for WgpuProvider {
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         len: usize,
+        output_class: runmat_accelerate_api::ProviderElementType,
     ) -> Result<GpuTensorHandle> {
-        self.fused_elementwise_with_telemetry_exec(shader, inputs, output_shape, len)
+        runmat_accelerate_api::validate_fused_output_classes(self.precision(), &[output_class])?;
+        if output_class == runmat_accelerate_api::ProviderElementType::Logical {
+            self.fused_logical_with_telemetry_exec(shader, inputs, output_shape, len)
+        } else {
+            self.fused_elementwise_with_telemetry_exec(shader, inputs, output_shape, len)
+        }
     }
 
     fn fused_elementwise_multi(
@@ -1911,14 +1917,14 @@ impl AccelProvider for WgpuProvider {
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         len: usize,
-        num_outputs: usize,
+        output_classes: &[runmat_accelerate_api::ProviderElementType],
     ) -> Result<Vec<GpuTensorHandle>> {
         self.fused_elementwise_multi_with_telemetry_exec(
             shader,
             inputs,
             output_shape,
             len,
-            num_outputs,
+            output_classes,
         )
     }
 
@@ -2036,6 +2042,12 @@ impl AccelProvider for WgpuProvider {
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
         self.upload_numeric_exec(host)
     }
+    fn upload_logical_raw(
+        &self,
+        host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
+    ) -> Result<GpuTensorHandle> {
+        self.upload_logical_exec(host)
+    }
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move { self.download_numeric_exec(h).await })
     }
@@ -2045,12 +2057,19 @@ impl AccelProvider for WgpuProvider {
     fn download_integer<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
         Box::pin(async move { self.download_integer_exec(h).await })
     }
-    fn free(&self, h: &GpuTensorHandle) -> Result<()> {
-        self.free_exec(h)
-    }
 
     fn device_info(&self) -> String {
         self.device_info_exec()
+    }
+
+    fn acquire_live(
+        &self,
+        wire: &runmat_accelerate_api::GpuTensorWireDescriptor,
+    ) -> std::result::Result<
+        GpuTensorHandle,
+        runmat_accelerate_api::allocation::AllocationAcquisitionError,
+    > {
+        self.allocations.acquire_tensor(wire)
     }
 
     fn device_info_struct(&self) -> ApiDeviceInfo {

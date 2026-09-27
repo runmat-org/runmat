@@ -28,21 +28,21 @@ impl WgpuProvider {
                 "floating remainder requires floating operands"
             );
             ensure!(
-                handle.descriptor.element_type == Some(entry.element_type)
+                handle.descriptor().element_type == Some(entry.element_type)
                     && runmat_accelerate_api::handle_class_identity(handle)
                         .is_none_or(|class| class == entry.element_type.class_identity()),
                 "floating remainder class metadata mismatch"
             );
             ensure!(
                 entry.storage == GpuTensorStorage::Real
-                    && handle.descriptor.storage == Some(GpuTensorStorage::Real),
+                    && handle.descriptor().storage == Some(GpuTensorStorage::Real),
                 "floating remainder requires real storage"
             );
             ensure!(
-                entry.shape == handle.shape,
+                entry.shape == handle.shape(),
                 "floating remainder shape metadata mismatch"
             );
-            let count = checked_count(&handle.shape)?;
+            let count = checked_count(handle.shape())?;
             ensure!(
                 entry.len == count,
                 "floating remainder storage length mismatch"
@@ -50,8 +50,8 @@ impl WgpuProvider {
         }
         let shape = runmat_runtime::builtins::common::broadcast::broadcast_shapes(
             "remainder",
-            &a.shape,
-            &b.shape,
+            a.shape(),
+            b.shape(),
         )
         .map_err(|error| anyhow!(error))?;
         ensure!(

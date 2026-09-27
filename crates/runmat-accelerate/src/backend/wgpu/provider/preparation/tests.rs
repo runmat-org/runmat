@@ -99,8 +99,8 @@ fn actual_single_cast_execution_populates_exact_preparation_key() {
     assert_eq!(warm.identity, cold.identity);
     assert_eq!(warm.state, Some(CandidatePreparationState::Warm));
     assert_eq!((warm.cold_pipelines, warm.warm_pipelines), (0, 1));
-    provider.free(&input).unwrap();
-    provider.free(&output).unwrap();
+    input.release().unwrap();
+    output.release().unwrap();
 }
 
 #[test]

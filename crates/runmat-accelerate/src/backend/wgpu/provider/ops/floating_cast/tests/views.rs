@@ -20,9 +20,9 @@ fn cast_view(provider: &WgpuProvider, source: NumericPrecision, target: NumericP
             let view = provider.transpose_exec(&input).unwrap();
             let metadata = runmat_accelerate_api::handle_transpose_info(&view).unwrap();
             let output = provider.floating_cast_exec(&view, target).unwrap();
-            assert_eq!(output.shape, vec![shape[1], shape[0]]);
-            assert_eq!(output.device_id, view.device_id);
-            assert_ne!(output.buffer_id, view.buffer_id);
+            assert_eq!(output.shape(), [shape[1], shape[0]]);
+            assert_eq!(output.device_id(), view.device_id());
+            assert_eq!(output.shares_allocation_with(&view), source == target);
             assert_eq!(
                 runmat_accelerate_api::handle_transpose_info(&output),
                 Some(metadata)
@@ -32,19 +32,19 @@ fn cast_view(provider: &WgpuProvider, source: NumericPrecision, target: NumericP
                 Some(metadata)
             );
             assert_eq!(
-                output.descriptor.element_type,
+                output.descriptor().element_type,
                 Some(match target {
                     NumericPrecision::F32 => NumericElementType::F32,
                     NumericPrecision::F64 => NumericElementType::F64,
                 })
             );
-            assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+            assert_eq!(output.descriptor().storage, Some(GpuTensorStorage::Real));
             let source_entry = provider.get_entry_raw(&view).unwrap();
             let output_entry = provider.get_entry_raw(&output).unwrap();
             assert_eq!(
                 Arc::ptr_eq(&source_entry.buffer, &output_entry.buffer),
                 source == target,
-                "same-type conversion is a new registration, not a payload copy"
+                "same-type conversion shares the physical lease without copying"
             );
             drop(source_entry);
             drop(output_entry);
@@ -62,9 +62,10 @@ fn cast_view(provider: &WgpuProvider, source: NumericPrecision, target: NumericP
                     });
                 }
             }
-            provider.free(&input).unwrap();
+            input.release().unwrap();
+            let mut source_view = Some(view);
             if release_source_first {
-                provider.free(&view).unwrap();
+                source_view.take().unwrap().release().unwrap();
             }
             let downloaded = block_on(provider.download_numeric(&output)).unwrap();
             assert_eq!(downloaded.shape, vec![shape[1], shape[0]]);
@@ -74,14 +75,14 @@ fn cast_view(provider: &WgpuProvider, source: NumericPrecision, target: NumericP
                 other => panic!("floating cast returned {other:?}"),
             };
             assert_eq!(actual, expected);
-            provider.free(&output).unwrap();
-            if !release_source_first {
+            output.release().unwrap();
+            if let Some(view) = source_view {
                 assert!(block_on(provider.download_numeric(&view)).is_ok());
                 assert_eq!(
                     runmat_accelerate_api::handle_transpose_info(&view),
                     Some(metadata)
                 );
-                provider.free(&view).unwrap();
+                view.release().unwrap();
             }
         }
     }
@@ -120,23 +121,28 @@ fn actual_wgpu_cast_rejects_incoherent_view_before_allocating_result() {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    runmat_accelerate_api::record_handle_transpose(&input, 1, 4);
     let allocations = provider.allocations.record_count().unwrap();
     let pipelines = provider.fused_pipeline_cache.lock().unwrap().len();
-    assert!(provider
-        .floating_cast_exec(&input, NumericPrecision::F32)
-        .is_err());
+    let mut wire = input.wire_descriptor();
+    wire.view = wire
+        .view
+        .with_layout(runmat_accelerate_api::GpuTensorLayout::Transpose(
+            runmat_accelerate_api::TransposeInfo {
+                base_rows: 1,
+                base_cols: 4,
+            },
+        ));
+    assert!(provider.acquire_live(&wire).is_err());
     assert_eq!(provider.allocations.record_count().unwrap(), allocations);
     assert_eq!(
         provider.fused_pipeline_cache.lock().unwrap().len(),
         pipelines
     );
-    runmat_accelerate_api::clear_handle_transpose(&input);
     assert_eq!(
         block_on(provider.download_numeric(&input)).unwrap().data,
         HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
     );
-    provider.free(&input).unwrap();
+    input.release().unwrap();
 }
 
 #[test]
@@ -170,9 +176,9 @@ fn actual_wgpu_single_view_preserves_signed_zero_and_subnormal_bits() {
         actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
         [0, 2, 4, 1, 3, 5].map(|i| values[i].to_bits())
     );
-    provider.free(&input).unwrap();
-    provider.free(&view).unwrap();
-    provider.free(&output).unwrap();
+    input.release().unwrap();
+    view.release().unwrap();
+    output.release().unwrap();
 }
 
 #[test]
@@ -208,7 +214,7 @@ fn actual_wgpu_cross_precision_view_preserves_signed_zero_and_tiny_conversion() 
         actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
         [0, 2, 4, 1, 3, 5].map(|i| (values[i] as f32).to_bits())
     );
-    provider.free(&input).unwrap();
-    provider.free(&view).unwrap();
-    provider.free(&output).unwrap();
+    input.release().unwrap();
+    view.release().unwrap();
+    output.release().unwrap();
 }

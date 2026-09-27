@@ -38,14 +38,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   output.data[i] = input0.data[i];
 }
 "#;
+    let (shader, output_class) = match provider.precision() {
+        runmat_accelerate_api::ProviderPrecision::F32 => (
+            shader.to_owned(),
+            runmat_accelerate_api::ProviderElementType::F32,
+        ),
+        runmat_accelerate_api::ProviderPrecision::F64 => (
+            shader.replace("f32", "f64"),
+            runmat_accelerate_api::ProviderElementType::F64,
+        ),
+    };
 
     // First run: expect miss and metadata creation
     let _out = provider
         .fused_elementwise(
-            shader,
+            &shader,
             std::slice::from_ref(&handle),
             &[rows * cols],
             rows * cols,
+            output_class,
         )
         .expect("fused_elementwise");
     let (hits1, misses1) = provider.fused_cache_counters();
@@ -54,10 +65,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Second run: should hit cache
     let _out2 = provider
         .fused_elementwise(
-            shader,
+            &shader,
             std::slice::from_ref(&handle),
             &[rows * cols],
             rows * cols,
+            output_class,
         )
         .expect("fused_elementwise 2");
     let (hits2, _misses2) = provider.fused_cache_counters();

@@ -53,17 +53,18 @@ impl WgpuProvider {
             }
             entry.shape = vec![info.base_rows, info.base_cols];
             entry = self.permute_buffer_exec(&entry, &[1, 0]).ok()?;
+            let materialized = self
+                .register_storage_move_buffer(
+                    entry.buffer.clone(),
+                    &entry,
+                    entry.shape.clone(),
+                    entry.len,
+                    entry.allocated_bytes,
+                )
+                .ok()?;
+            return WgpuBufferRef::from_owned_buffer(entry.buffer, materialized).ok();
         }
-        Some(WgpuBufferRef {
-            buffer: entry.buffer,
-            len: entry.len,
-            shape: entry.shape,
-            element_size: entry.element_type.element_size(),
-            precision: match entry.precision {
-                NumericPrecision::F32 => ProviderPrecision::F32,
-                NumericPrecision::F64 => ProviderPrecision::F64,
-            },
-        })
+        WgpuBufferRef::from_owned_buffer(entry.buffer, handle.clone()).ok()
     }
 
     pub(crate) fn provider_precision_exec(&self) -> ProviderPrecision {
