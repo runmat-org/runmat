@@ -1,5 +1,6 @@
 //! Exact-class floating remainder on the provider's validated native layouts.
 use super::backend_types::WgpuProvider;
+use crate::backend::wgpu::types::NumericPrecision;
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_types::FloatingRemainderKind;
@@ -14,12 +15,8 @@ impl WgpuProvider {
         for handle in [a, b] {
             let entry = self.get_entry(handle)?;
             let physical = match self.precision {
-                runmat_accelerate_api::ProviderPrecision::F32 => {
-                    runmat_accelerate_api::NumericElementType::F32
-                }
-                runmat_accelerate_api::ProviderPrecision::F64 => {
-                    runmat_accelerate_api::NumericElementType::F64
-                }
+                NumericPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
             };
             if entry.element_type != physical {
                 return Err(runmat_accelerate_api::unsupported_provider_operation(
