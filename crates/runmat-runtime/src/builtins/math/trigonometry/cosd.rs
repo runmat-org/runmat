@@ -162,7 +162,7 @@ fn ensure_exact(value: &Value) -> BuiltinResult<()> {
 }
 
 async fn cosd_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle);
+    let source = handle.clone();
     let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
     ensure_exact(&gathered)?;
     let host = match gathered {
@@ -173,11 +173,12 @@ async fn cosd_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         Value::ComplexTensor(tensor) => cosd_complex_tensor(tensor)?,
         other => cosd_real(other)?,
     };
-    if let Some(provider) = provider {
-        upload_gpu_output(provider, host)
-    } else {
-        Ok(host)
-    }
+    let host = crate::builtins::math::resident_real_unary::preserve_elementwise_scalar_shape(
+        host,
+        source.shape(),
+        BUILTIN_NAME,
+    )?;
+    gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
 }
 
 fn cosd_real(value: Value) -> BuiltinResult<Value> {
@@ -229,47 +230,6 @@ fn cosd_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
     }
     .map_err(|err| cosd_error_with_detail(&COSD_ERROR_INTERNAL, err))?;
     Ok(complex_tensor_into_value(converted))
-}
-
-fn upload_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    value: Value,
-) -> BuiltinResult<Value> {
-    match value {
-        Value::Num(value) => upload_real_gpu_output(
-            provider,
-            Tensor::new(vec![value], vec![1, 1])
-                .map_err(|e| cosd_error_with_detail(&COSD_ERROR_INTERNAL, e))?,
-        ),
-        Value::Tensor(tensor) => upload_real_gpu_output(provider, tensor),
-        Value::Complex(re, im) => upload_complex_gpu_output(
-            provider,
-            ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cosd_error_with_detail(&COSD_ERROR_INTERNAL, e))?,
-        ),
-        Value::ComplexTensor(tensor) => upload_complex_gpu_output(provider, tensor),
-        other => Err(cosd_error_with_detail(
-            &COSD_ERROR_INTERNAL,
-            format!("cannot restore GPU output {other:?}"),
-        )),
-    }
-}
-
-fn upload_real_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    tensor: Tensor,
-) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|e| cosd_error_with_detail(&COSD_ERROR_INTERNAL, e))?;
-    gpu_helpers::resident_gpu_value(handle)
-}
-
-fn upload_complex_gpu_output(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    tensor: ComplexTensor,
-) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-    gpu_helpers::complex_gpu_value(handle)
 }
 
 #[cfg(test)]

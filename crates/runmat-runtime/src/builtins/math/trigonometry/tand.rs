@@ -156,13 +156,13 @@ async fn tand_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             Ok(Value::Complex(out_re, out_im))
         }
         Value::ComplexTensor(tensor) => tand_complex_tensor(tensor),
-        Value::Tensor(tensor) => tand_tensor(tensor).map(tensor::tensor_into_value),
-        Value::Num(value) => Ok(Value::Num(tand_scalar(value))),
-        other => Err(tand_error_with_detail(
-            &TAND_ERROR_INVALID_INPUT,
-            format!("unsupported gathered gpuArray value {other:?}"),
-        )),
+        other => tand_real(other),
     }?;
+    let host = crate::builtins::math::resident_real_unary::preserve_elementwise_scalar_shape(
+        host,
+        source.shape(),
+        BUILTIN_NAME,
+    )?;
     gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
 }
 
