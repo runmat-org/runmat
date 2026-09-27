@@ -601,8 +601,9 @@ async fn diff_gpu(
             && runmat_accelerate_api::handle_integer_type(&device_result).is_none()
             && !runmat_accelerate_api::handle_is_logical(&device_result)
             && (order == 0 || !device_result.shares_allocation_with(&handle))
-            && runmat_accelerate_api::provider_for_handle(&device_result)
-                .is_some_and(|owner| std::ptr::eq(owner, provider));
+            && runmat_accelerate_api::provider_for_handle(&device_result).is_some_and(|owner| {
+                runmat_accelerate_api::same_provider_instance(owner, provider)
+            });
         if valid {
             gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])?;
             return gpu_helpers::resident_gpu_value(device_result);
@@ -1282,8 +1283,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_precision(handle),
                 Some(runmat_accelerate_api::ProviderPrecision::F64)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             match block_on(gpu_helpers::gather_value_async(&output)).expect("gather") {
                 Value::ComplexTensor(result) => {
                     assert_eq!(result.materialize_f64(), vec![(2.0, 1.0), (3.0, 3.0)])

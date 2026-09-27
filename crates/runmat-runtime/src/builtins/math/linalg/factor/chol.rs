@@ -521,8 +521,9 @@ async fn evaluate_gpu(
                     && !runmat_accelerate_api::handle_is_transposed(&result.factor)
                     && result.factor.physical().element_type() == handle.physical().element_type()
                     && result.factor.physical().storage() == handle.physical().storage()
-                    && gpu_helpers::exact_provider_for_handle(&result.factor)
-                        .is_some_and(|owner| std::ptr::eq(owner, provider));
+                    && gpu_helpers::exact_provider_for_handle(&result.factor).is_some_and(
+                        |owner| runmat_accelerate_api::same_provider_instance(owner, provider),
+                    );
                 if !valid {
                     return Err(gpu_helpers::reject_gpu_output(
                         result.factor,

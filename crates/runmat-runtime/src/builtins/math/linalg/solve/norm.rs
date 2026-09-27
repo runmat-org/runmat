@@ -452,7 +452,7 @@ fn valid_provider_norm_result(
         && result.shape() == [1, 1]
         && result.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(result)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(result)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(result)

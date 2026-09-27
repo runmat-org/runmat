@@ -477,8 +477,9 @@ fn native_spacing_is_eligible(
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_storage(handle)
                 == runmat_accelerate_api::GpuTensorStorage::Real
-                && gpu_helpers::exact_provider_for_handle(handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && gpu_helpers::exact_provider_for_handle(handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
         }
         _ => true,
     }
@@ -500,7 +501,7 @@ fn native_result_is_valid(
         && runmat_accelerate_api::handle_precision(result)
             == runmat_accelerate_api::handle_precision(input)
         && gpu_helpers::exact_provider_for_handle(result)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn restore_to_owner(

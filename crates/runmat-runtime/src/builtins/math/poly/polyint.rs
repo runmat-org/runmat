@@ -311,8 +311,9 @@ fn try_polyint_gpu(
                 || result.physical().storage() != handle.physical().storage()
                 || runmat_accelerate_api::handle_is_logical(&result)
                 || runmat_accelerate_api::handle_is_transposed(&result)
-                || gpu_helpers::exact_provider_for_handle(&result)
-                    .is_none_or(|owner| !std::ptr::eq(owner, provider))
+                || gpu_helpers::exact_provider_for_handle(&result).is_none_or(|owner| {
+                    !runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
                 || std::iter::once(handle)
                     .chain(protected.iter())
                     .any(|input| result.shares_allocation_with(input))

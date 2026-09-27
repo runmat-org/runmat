@@ -391,7 +391,7 @@ async fn try_provider_dot(
     let Some(rhs_owner) = resolved_actual_dot_owner(rhs_handle) else {
         return Ok(None);
     };
-    if !std::ptr::eq(provider, rhs_owner) {
+    if !runmat_accelerate_api::same_provider_instance(provider, rhs_owner) {
         return Ok(None);
     }
     match provider.dot(lhs_handle, rhs_handle, dim).await {
@@ -437,7 +437,8 @@ fn valid_provider_dot_output(
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::handle_precision(output)
             == requested_dot_precision_for_handles(lhs, rhs)
-        && resolved_actual_dot_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && resolved_actual_dot_owner(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn requested_dot_precision_for_handles(
@@ -891,7 +892,8 @@ fn valid_dot_uploaded_output(
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
-        && resolved_actual_dot_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && resolved_actual_dot_owner(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn resolved_actual_dot_owner(

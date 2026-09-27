@@ -130,7 +130,10 @@ impl ExtremaKind {
         let right_owner = self.owner(right)?;
         // The existing mixed-provider route gathers each input through its
         // own provider. Never dispatch one owner's allocation to the other.
-        Ok(std::ptr::eq(left_owner, right_owner).then_some(left_owner))
+        Ok(
+            runmat_accelerate_api::same_provider_instance(left_owner, right_owner)
+                .then_some(left_owner),
+        )
     }
 
     pub(super) async fn gather_tensor(self, input: &GpuTensorHandle) -> BuiltinResult<Tensor> {

@@ -20,7 +20,7 @@ fn owner(inputs: &[&GpuTensorHandle]) -> BuiltinResult<Option<&'static dyn Accel
     for input in inputs {
         let actual = gpu_helpers::exact_provider_for_handle(input)
             .ok_or_else(|| polyder_error("polyder: no exact owner for resident input"))?;
-        if !std::ptr::eq(actual, provider)
+        if !runmat_accelerate_api::same_provider_instance(actual, provider)
             || input.physical().storage() != GpuTensorStorage::Real
             || runmat_accelerate_api::handle_is_logical(input)
             || runmat_accelerate_api::handle_precision(input) != Some(provider.precision())
@@ -78,7 +78,7 @@ fn valid(output: &GpuTensorHandle, inputs: &[&GpuTensorHandle], max_len: usize) 
         && !runmat_accelerate_api::handle_is_transposed(output)
         && gpu_helpers::exact_provider_for_handle(output)
             .zip(gpu_helpers::exact_provider_for_handle(inputs[0]))
-            .is_some_and(|(left, right)| std::ptr::eq(left, right))
+            .is_some_and(|(left, right)| runmat_accelerate_api::same_provider_instance(left, right))
         && inputs
             .iter()
             .all(|input| !output.shares_allocation_with(input))

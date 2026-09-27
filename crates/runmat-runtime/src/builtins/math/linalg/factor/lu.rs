@@ -600,8 +600,9 @@ fn valid_provider_lu_result(
             && !runmat_accelerate_api::handle_is_logical(output)
             && runmat_accelerate_api::handle_precision(output)
                 == runmat_accelerate_api::handle_precision(input)
-            && gpu_helpers::exact_provider_for_handle(output)
-                .is_some_and(|candidate| std::ptr::eq(candidate, owner))
+            && gpu_helpers::exact_provider_for_handle(output).is_some_and(|candidate| {
+                runmat_accelerate_api::same_provider_instance(candidate, owner)
+            })
     }) && outputs.iter().enumerate().all(|(index, output)| {
         outputs
             .iter()

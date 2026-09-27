@@ -2341,10 +2341,9 @@ async fn ensure_device(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
                 Value::GpuTensor(output) => {
                     let expected = gpu_helpers::exact_provider_for_handle(source);
                     let actual = gpu_helpers::exact_provider_for_handle(&output);
-                    if !expected
-                        .zip(actual)
-                        .is_some_and(|(expected, actual)| std::ptr::eq(expected, actual))
-                    {
+                    if !expected.zip(actual).is_some_and(|(expected, actual)| {
+                        runmat_accelerate_api::same_provider_instance(expected, actual)
+                    }) {
                         return Err(gpu_helpers::reject_gpu_output(
                             output,
                             mean_internal_error("mean: result belongs to a different provider"),
