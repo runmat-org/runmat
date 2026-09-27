@@ -3,7 +3,7 @@
 use crate::allocation::*;
 use crate::*;
 use std::sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     Arc, Mutex,
 };
 
@@ -103,6 +103,14 @@ pub struct RetirementProbe {
     owner: Arc<FixtureOwner>,
 }
 impl RetirementProbe {
+    /// Make this fixture allocation unavailable, as when its device is lost.
+    /// Existing owners still retain the actual payload until final retirement;
+    /// this neither frees storage nor records a retirement attempt. The
+    /// transition is terminal and does not affect other fixture allocations.
+    pub fn mark_unavailable(&self) {
+        self.owner.available.store(false, Ordering::Release);
+    }
+
     /// Inject a retained-payload retirement failure. Keep this probe alive to
     /// retain the failure record and payload until the fixture is torn down.
     pub fn fail_retirement(&self, detail: impl Into<String>) {
@@ -163,6 +171,7 @@ pub(crate) struct FixtureOwner {
     identity: AllocationIdentity,
     physical: GpuPhysicalDescriptor,
     logical: bool,
+    available: AtomicBool,
     record: Mutex<(Option<HostNumericDataOwned>, Option<WeakAllocationLease>)>,
     pub retired: AtomicUsize,
     retirement_failure: Mutex<Option<String>>,
@@ -177,7 +186,7 @@ impl AllocationOwner for FixtureOwner {
             return Err(AllocationRegistrationError::WrongOwner);
         }
         let mut record = self.record.lock().unwrap();
-        if record.0.is_none() {
+        if !self.available.load(Ordering::Acquire) || record.0.is_none() {
             return Err(AllocationRegistrationError::NotLive);
         }
         if record.1.is_some() {
@@ -193,7 +202,10 @@ impl AllocationOwner for FixtureOwner {
         if identity != self.identity {
             return Err(AllocationAcquisitionError::WrongOwner);
         }
-        if self.retired.load(Ordering::SeqCst) != 0 || self.record.lock().unwrap().0.is_none() {
+        if !self.available.load(Ordering::Acquire)
+            || self.retired.load(Ordering::SeqCst) != 0
+            || self.record.lock().unwrap().0.is_none()
+        {
             return Err(AllocationAcquisitionError::NotLive);
         }
         Ok(())
@@ -267,6 +279,7 @@ fn owned_data(
             bytes as u64,
         )?,
         logical,
+        available: AtomicBool::new(true),
         record: Mutex::new((Some(host.data), None)),
         retired: AtomicUsize::new(0),
         retirement_failure: Mutex::new(None),

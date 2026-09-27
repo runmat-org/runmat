@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn unavailable_allocation_keeps_borrowed_payload_until_final_owner_drops() {
+    let factory = TestAllocationOwner::new();
+    let allocation = factory
+        .allocate_zeroed(vec![4, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let other = factory
+        .allocate_zeroed(vec![1, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let alias = allocation.handle.clone();
+    let weak = allocation.handle.downgrade();
+    allocation.probe.mark_unavailable();
+    allocation.probe.mark_unavailable(); // terminal and idempotent, not another free
+    assert!(matches!(
+        alias.allocation_lease().validate_live(),
+        Err(AllocationAcquisitionError::NotLive)
+    ));
+    assert!(matches!(
+        weak.acquire(),
+        Err(AllocationAcquisitionError::NotLive)
+    ));
+    assert!(allocation.probe.with_data(&alias, |_| ()).is_err());
+    assert!(other.handle.allocation_lease().validate_live().is_ok());
+    assert_eq!(allocation.probe.retirements(), 0);
+    assert!(allocation.probe.owner.record.lock().unwrap().0.is_some());
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 0);
+    assert!(allocation.probe.owner.record.lock().unwrap().0.is_some());
+    drop(alias);
+    assert_eq!(allocation.probe.retirements(), 1);
+    assert!(allocation.probe.owner.record.lock().unwrap().0.is_none());
+    drop(other.handle);
+    assert_eq!(other.probe.retirements(), 1);
+}
+
+#[test]
 fn injected_retirement_failure_retains_payload_without_reacquisition_or_retry() {
     let allocation = TestAllocationOwner::new()
         .allocate_zeroed(vec![2], NumericElementType::U64, GpuTensorStorage::Real)
