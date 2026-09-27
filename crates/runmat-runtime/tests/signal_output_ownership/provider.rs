@@ -40,6 +40,10 @@ pub struct Provider {
     pub produced: Mutex<Vec<RetirementProbe>>,
     pub source: Mutex<Option<RetirementProbe>>,
     pub borrowed: Mutex<Option<GpuTensorHandle>>,
+    pub stage: AtomicUsize,
+    pub fail_stage: AtomicUsize,
+    pub pending_stage: AtomicUsize,
+    pub malformed_stage: AtomicUsize,
 }
 impl Provider {
     pub fn new(mode: Mode, upload: Upload) -> &'static Self {
@@ -54,7 +58,56 @@ impl Provider {
             produced: Mutex::new(Vec::new()),
             source: Mutex::new(None),
             borrowed: Mutex::new(None),
+            stage: AtomicUsize::new(0),
+            fail_stage: AtomicUsize::new(usize::MAX),
+            pending_stage: AtomicUsize::new(usize::MAX),
+            malformed_stage: AtomicUsize::new(usize::MAX),
         }))
+    }
+    fn step(&self) -> anyhow::Result<usize> {
+        let stage = self.stage.fetch_add(1, Ordering::SeqCst);
+        if stage == self.fail_stage.load(Ordering::SeqCst) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "spectral continuation failure",
+            )
+            .into());
+        }
+        Ok(stage)
+    }
+    fn shaped(
+        &self,
+        input: &GpuTensorHandle,
+        mut shape: Vec<usize>,
+        storage: GpuTensorStorage,
+        stage: usize,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if stage == self.malformed_stage.load(Ordering::SeqCst) {
+            shape[0] += 1;
+        }
+        let owner = if matches!(self.mode, Mode::Foreign | Mode::Dead) {
+            &self.foreign
+        } else {
+            &self.owner
+        };
+        let output = if matches!(self.mode, Mode::Logical) {
+            owner.allocate_logical_zeroed(shape, ProviderPrecision::F64)?
+        } else {
+            owner.allocate_zeroed(
+                shape,
+                if matches!(self.mode, Mode::Class) {
+                    NumericElementType::F32
+                } else {
+                    input.physical().element_type()
+                },
+                storage,
+            )?
+        };
+        if matches!(self.mode, Mode::Dead) {
+            output.probe.mark_unavailable();
+        }
+        self.produced.lock().unwrap().push(output.probe);
+        Ok(output.handle)
     }
     fn output(
         &self,
@@ -121,6 +174,7 @@ impl AccelProvider for Provider {
             )
             .into());
         }
+        let stage = self.step()?;
         match self.upload {
             Upload::Unsupported => {
                 return Err(unsupported_provider_operation(
@@ -144,7 +198,11 @@ impl AccelProvider for Provider {
         };
         let output = self.owner.allocate_numeric(HostNumericTensorOwned {
             data,
-            shape: host.shape.to_vec(),
+            shape: if stage == self.malformed_stage.load(Ordering::SeqCst) {
+                host.shape.iter().rev().copied().collect()
+            } else {
+                host.shape.to_vec()
+            },
             storage: host.storage,
         })?;
         self.produced.lock().unwrap().push(output.probe);
@@ -173,6 +231,77 @@ impl AccelProvider for Provider {
                         storage: input.physical().storage(),
                     }
                 })
+        })
+    }
+    fn uniform_spectral_estimate<'a>(
+        &'a self,
+        request: &'a ProviderSpectralRequest<'a>,
+    ) -> ProviderExecutionFuture<'a, ProviderSpectralResult> {
+        Box::pin(async move {
+            self.hooks.fetch_add(1, Ordering::SeqCst);
+            let stage = self.step()?;
+            if matches!(self.mode, Mode::Unsupported) {
+                return Err(unsupported_provider_operation("spectral fixture unsupported").into());
+            }
+            let rows = match request.range {
+                ProviderSpectralRange::Onesided => request.nfft / 2 + 1,
+                _ => request.nfft,
+            };
+            let cols = request.frame_count;
+            let s = self.shaped(
+                request.input,
+                vec![rows, cols],
+                GpuTensorStorage::ComplexInterleaved,
+                stage,
+            )?;
+            let ps = if matches!(self.mode, Mode::Alias) {
+                request.input.clone()
+            } else {
+                self.shaped(
+                    request.input,
+                    vec![rows, cols],
+                    GpuTensorStorage::Real,
+                    stage,
+                )?
+            };
+            if stage == self.pending_stage.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            Ok(ProviderSpectralResult {
+                s,
+                ps,
+                rows: if matches!(self.mode, Mode::Shape) {
+                    rows + 1
+                } else {
+                    rows
+                },
+                cols,
+            })
+        })
+    }
+    fn reshape(&self, input: &GpuTensorHandle, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        let stage = self.step()?;
+        if stage == self.malformed_stage.load(Ordering::SeqCst) {
+            return self.shaped(input, shape.to_vec(), GpuTensorStorage::Real, stage);
+        }
+        Ok(input.with_view(input.view().clone().with_shape(shape.to_vec()))?)
+    }
+    fn reduce_mean_nd<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        dims: &'a [usize],
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let stage = self.step()?;
+            let mut shape = input.shape().to_vec();
+            for &dim in dims {
+                shape[dim] = 1;
+            }
+            let output = self.shaped(input, shape, GpuTensorStorage::Real, stage)?;
+            if stage == self.pending_stage.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            Ok(output)
         })
     }
     fn signal_hilbert<'a>(
@@ -206,6 +335,9 @@ impl AccelProvider for Provider {
             } else {
                 self.output(request.input, GpuTensorStorage::Real)?
             };
+            if matches!(self.mode, Mode::Pending) {
+                std::future::pending::<()>().await;
+            }
             let lower = if matches!(self.mode, Mode::ExplicitSibling) {
                 lower
                     .with_provenance(GpuHandleProvenance::Explicit)
@@ -217,9 +349,6 @@ impl AccelProvider for Provider {
             } else {
                 lower
             };
-            if matches!(self.mode, Mode::Pending) {
-                std::future::pending::<()>().await;
-            }
             Ok(ProviderEnvelopeResult { upper, lower })
         })
     }

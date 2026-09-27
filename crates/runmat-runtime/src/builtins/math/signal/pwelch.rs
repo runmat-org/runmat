@@ -392,6 +392,21 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)?;
     }
+    if let Value::GpuTensor(handle) = &x {
+        if runmat_accelerate_api::handle_is_logical(handle) {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PWELCH_LOGICAL_INPUT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PWELCH_INTEGER_SIGNAL_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+        super::resident_output::owner(handle, || pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+    }
     ensure_pwelch_integer_boundary(
         &x,
         &PWELCH_INTEGER_SIGNAL_EXTENSION,
@@ -413,65 +428,48 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     };
-    if let Some(handle) = source_handle.as_ref() {
+    let protected = rest
+        .iter()
+        .filter_map(|value| {
+            if let Value::GpuTensor(handle) = value {
+                Some(handle)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let _guards = source_handle
+        .iter()
+        .chain(protected.iter().copied())
+        .map(runmat_accelerate_api::ResidencyRestoreGuard::new)
+        .collect::<Vec<_>>();
+    let parsed = if let Some(handle) = source_handle.as_ref() {
+        super::resident_output::owner(handle, || pwelch_error(&PWELCH_ERROR_INTERNAL))?;
         let (rows, cols) = gpu_matrix_shape(BUILTIN_NAME, "x", handle)
             .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err.message()))?;
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(rest, rows, complex_input).await?;
-        if let Some(value) = output_gpu(handle, rows, cols, &options).await? {
+        if let Some(value) = output_gpu(handle, rows, cols, &options, &protected).await? {
             return Ok(value);
         }
-    }
+        Some(options)
+    } else {
+        None
+    };
     let input = value_to_signal_columns(x).await?;
     if input.rows == 0 || input.cols == 0 {
         return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL));
     }
-    let options = parse_options(rest, input.rows, input.is_complex).await?;
+    let options = match parsed {
+        Some(options) => options,
+        None => parse_options(rest, input.rows, input.is_complex).await?,
+    };
     let eval = compute_pwelch(&input.columns, &options)?;
     let output = output_eval(eval, input.output_dtype)?;
     match source_handle.as_ref() {
-        Some(source) => restore_pwelch_output(source, output),
+        Some(source) => super::resident_output::restore(source, output, BUILTIN_NAME, &protected),
         None => Ok(output),
-    }
-}
-
-fn restore_pwelch_output(
-    source: &runmat_accelerate_api::GpuTensorHandle,
-    output: Value,
-) -> BuiltinResult<Value> {
-    fn restore_one(
-        source: &runmat_accelerate_api::GpuTensorHandle,
-        value: Value,
-    ) -> BuiltinResult<Value> {
-        let numeric_output = matches!(
-            value,
-            Value::Tensor(_) | Value::ComplexTensor(_) | Value::LogicalArray(_)
-        );
-        let restored = crate::builtins::common::gpu_helpers::restore_class_preserving_value(
-            source,
-            value,
-            BUILTIN_NAME,
-        )?;
-        if numeric_output
-            && runmat_accelerate_api::handle_is_explicit(source)
-            && !matches!(restored, Value::GpuTensor(_))
-        {
-            return Err(pwelch_error_with_detail(
-                &PWELCH_ERROR_INTERNAL,
-                "provider cannot preserve explicit gpuArray output residency and required floating class",
-            ));
-        }
-        Ok(restored)
-    }
-
-    match output {
-        Value::OutputList(values) => values
-            .into_iter()
-            .map(|value| restore_one(source, value))
-            .collect::<BuiltinResult<Vec<_>>>()
-            .map(Value::OutputList),
-        value => restore_one(source, value),
     }
 }
 
@@ -539,6 +537,7 @@ async fn output_gpu(
     rows: usize,
     cols: usize,
     options: &PwelchOptions,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Option<Value>> {
     let FrequencyGrid::Uniform { nfft } = options.grid else {
         return Ok(None);
@@ -562,9 +561,7 @@ async fn output_gpu(
         .checked_mul(cols)
         .ok_or_else(|| pwelch_error(&PWELCH_ERROR_INTERNAL))?;
     let range = gpu_range(options.range);
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
-        return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
-    };
+    let provider = super::resident_output::owner(handle, || pwelch_error(&PWELCH_ERROR_INTERNAL))?;
     let request = ProviderSpectralRequest {
         input: handle,
         input_len,
@@ -594,6 +591,14 @@ async fn output_gpu(
             ))
         }
     };
+    let output_error = || {
+        pwelch_error_with_detail(
+            &PWELCH_ERROR_INTERNAL,
+            "provider returned malformed spectral output",
+        )
+    };
+    let estimate =
+        super::resident_output::spectral(estimate, &request, provider, protected, output_error)?;
 
     let ps_frames = match provider.reshape(&estimate.ps, &[estimate.rows, segment_count, cols]) {
         Ok(ps_frames) => ps_frames,
@@ -610,6 +615,19 @@ async fn output_gpu(
             ));
         }
     };
+    let mut contract = super::resident_output::floating_contract(
+        handle,
+        vec![estimate.rows, segment_count, cols],
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    );
+    let ps_frames = super::resident_output::admit(
+        ps_frames,
+        handle,
+        provider,
+        &contract,
+        protected,
+        output_error,
+    )?;
     let ps_mean = match provider.reduce_mean_nd(&ps_frames, &[1]).await {
         Ok(ps_mean) => ps_mean,
         Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
@@ -625,6 +643,21 @@ async fn output_gpu(
             ));
         }
     };
+    contract.shape = vec![estimate.rows, 1, cols];
+    let mut protected_mean = protected.to_vec();
+    protected_mean.push(&estimate.s);
+    if segment_count > 1 {
+        protected_mean.extend([&ps_frames, &estimate.ps]);
+    }
+    let ps_mean = super::resident_output::admit(
+        ps_mean,
+        handle,
+        provider,
+        &contract,
+        &protected_mean,
+        output_error,
+    )?;
+    drop(protected_mean);
     let pxx = match provider.reshape(&ps_mean, &[estimate.rows, cols]) {
         Ok(pxx) => pxx,
         Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
@@ -640,6 +673,21 @@ async fn output_gpu(
             ));
         }
     };
+    contract.shape = vec![estimate.rows, cols];
+    let mut protected_final = protected.to_vec();
+    protected_final.push(&estimate.s);
+    if segment_count > 1 {
+        protected_final.extend([&ps_frames, &estimate.ps]);
+    }
+    let pxx = super::resident_output::admit(
+        pxx,
+        handle,
+        provider,
+        &contract,
+        &protected_final,
+        output_error,
+    )?;
+    drop(protected_final);
 
     drop(ps_frames);
     drop(ps_mean);
@@ -655,25 +703,26 @@ async fn output_gpu(
         }
         let f_values = frequency_vector(nfft, options.fs, options.range);
         let f_shape = [estimate.rows, 1usize];
-        let f = match provider.upload(&runmat_accelerate_api::HostTensorView {
-            data: &f_values,
-            shape: &f_shape,
-        }) {
-            Ok(f) => f,
-            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
-                return Ok(None)
-            }
-            Err(err) => {
-                return Err(crate::runtime_error::with_provider_execution_source(
-                    pwelch_error_with_detail(
-                        &PWELCH_ERROR_INTERNAL,
-                        format!("provider output preparation failed: {err}"),
-                    ),
-                    err.into(),
-                ));
-            }
+        let f = if contract.precision == Some(runmat_accelerate_api::ProviderPrecision::F32) {
+            Tensor::from_f32(
+                f_values.into_iter().map(|value| value as f32).collect(),
+                f_shape.to_vec(),
+            )
+        } else {
+            Tensor::new(f_values, f_shape.to_vec())
+        }
+        .map_err(|cause| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, cause))?;
+        let mut protected_frequency = protected.to_vec();
+        let Value::GpuTensor(pxx_handle) = &pxx else {
+            unreachable!("adopted PSD")
         };
-        let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
+        protected_frequency.push(pxx_handle);
+        let f = super::resident_output::restore(
+            handle,
+            Value::Tensor(f),
+            BUILTIN_NAME,
+            &protected_frequency,
+        )?;
         return Ok(Some(crate::output_count::output_list_with_padding(
             out_count,
             vec![pxx, f],
@@ -685,12 +734,32 @@ async fn output_gpu(
 async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
     match value {
         Value::GpuTensor(handle) => {
-            let tensor = crate::builtins::common::gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|err| {
-                    pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err.message())
-                })?;
-            tensor_to_signal_columns(tensor)
+            let provider =
+                super::resident_output::owner(&handle, || pwelch_error(&PWELCH_ERROR_INTERNAL))?;
+            let value =
+                crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+                    provider, &handle,
+                )
+                .await?;
+            match value {
+                Value::Tensor(tensor) => tensor_to_signal_columns(tensor),
+                Value::ComplexTensor(tensor) => complex_tensor_to_signal_columns(tensor),
+                Value::LogicalArray(logical) => {
+                    let tensor = crate::builtins::common::tensor::logical_to_tensor(&logical)
+                        .map_err(|err| {
+                            pwelch_error_with_detail(&PWELCH_ERROR_INVALID_SIGNAL, err)
+                        })?;
+                    tensor_to_signal_columns(tensor)
+                }
+                Value::Num(value) => tensor_to_signal_columns(
+                    Tensor::new(vec![value], handle.shape().to_vec())
+                        .map_err(|cause| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, cause))?,
+                ),
+                other => Err(pwelch_error_with_detail(
+                    &PWELCH_ERROR_INVALID_SIGNAL,
+                    format!("unexpected downloaded signal {other:?}"),
+                )),
+            }
         }
         Value::Tensor(tensor) => tensor_to_signal_columns(tensor),
         Value::ComplexTensor(tensor) => complex_tensor_to_signal_columns(tensor),

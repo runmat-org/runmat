@@ -3,6 +3,8 @@
 mod provider;
 #[path = "signal_output_ownership/siblings.rs"]
 mod siblings;
+#[path = "signal_output_ownership/welch.rs"]
+mod welch;
 
 use futures::{executor::block_on, task::noop_waker};
 use provider::{Mode, Provider, Upload};

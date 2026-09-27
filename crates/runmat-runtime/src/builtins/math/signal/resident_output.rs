@@ -94,3 +94,82 @@ pub(super) fn restore(
     }
     Ok(Value::OutputList(outputs))
 }
+
+/// Validate both members before any consumer can reshape, reduce, or publish
+/// either one. Result-reported dimensions are not a geometry authority.
+pub(super) fn spectral(
+    result: runmat_accelerate_api::ProviderSpectralResult,
+    request: &runmat_accelerate_api::ProviderSpectralRequest<'_>,
+    provider: &'static dyn AccelProvider,
+    protected: &[&GpuTensorHandle],
+    error: impl Fn() -> RuntimeError,
+) -> BuiltinResult<runmat_accelerate_api::ProviderSpectralResult> {
+    use runmat_accelerate_api::{GpuTensorStorage, ProviderSpectralRange};
+    let rows = match request.range {
+        ProviderSpectralRange::Onesided => request.nfft / 2 + 1,
+        ProviderSpectralRange::Twosided | ProviderSpectralRange::Centered => request.nfft,
+    };
+    if result.rows != rows || result.cols != request.frame_count {
+        let mut error = error();
+        error.gpu_gather_retry = GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(
+            result.ps,
+            gpu_helpers::reject_gpu_output(result.s, error),
+        ));
+    }
+    let mut contract = floating_contract(
+        request.input,
+        vec![rows, request.frame_count],
+        GpuTensorStorage::ComplexInterleaved,
+    );
+    let mut protect = protected.to_vec();
+    protect.push(&result.ps);
+    let s = admit(
+        result.s,
+        request.input,
+        provider,
+        &contract,
+        &protect,
+        &error,
+    )?;
+    drop(protect);
+    contract.storage = GpuTensorStorage::Real;
+    let mut protect = protected.to_vec();
+    protect.push(&s);
+    let ps = admit(
+        result.ps,
+        request.input,
+        provider,
+        &contract,
+        &protect,
+        error,
+    )?;
+    Ok(runmat_accelerate_api::ProviderSpectralResult {
+        s,
+        ps,
+        rows,
+        cols: request.frame_count,
+    })
+}
+
+pub(super) fn floating_contract(
+    input: &GpuTensorHandle,
+    shape: Vec<usize>,
+    storage: runmat_accelerate_api::GpuTensorStorage,
+) -> BinaryGpuOutputContract {
+    let precision = if runmat_accelerate_api::handle_is_logical(input)
+        || runmat_accelerate_api::handle_integer_type(input).is_some()
+    {
+        Some(runmat_accelerate_api::ProviderPrecision::F64)
+    } else {
+        runmat_accelerate_api::handle_precision(input)
+    };
+    BinaryGpuOutputContract {
+        shape,
+        storage,
+        precision,
+        integer: None,
+        logical: false,
+        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+    }
+}
