@@ -2267,46 +2267,51 @@ mod tests {
     #[test]
     fn store_var_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_var()
     {
-        use runmat_accelerate::fusion_residency;
+        runmat_gc::gc_test_context(|| {
+            use runmat_accelerate::fusion_residency;
 
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![24.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
+            let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+            let handle = upload_provider_handle(vec![24.0], vec![1]);
+            assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+            fusion_residency::mark(&handle);
 
-        let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 2);
-        let mut seed_vars = vec![Value::Num(0.0), Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-        let nested = Value::HandleObject(HandleRef {
-            class_name: "Payload".into(),
-            target,
-            valid: true,
-        });
-        state.vars = vec![nested.clone(), nested.clone()];
-        state.stack.push(Value::Num(0.0));
+            let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 2);
+            let mut seed_vars = vec![Value::Num(0.0), Value::Num(0.0)];
+            let mut state =
+                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut payload = StructValue::new();
+            payload
+                .fields
+                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+            let target =
+                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let nested = Value::HandleObject(HandleRef {
+                class_name: "Payload".into(),
+                target,
+                valid: true,
+            });
+            state.vars = vec![nested.clone(), nested.clone()];
+            state.stack.push(Value::Num(0.0));
 
-        let mut result_vars = state.vars.clone();
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("store var overwrite should complete for aliased nested handle-object values");
-        assert!(
+            let mut result_vars = state.vars.clone();
+            let _ = block_on(run_interpreter_inner(state, &mut result_vars)).expect(
+                "store var overwrite should complete for aliased nested handle-object values",
+            );
+            assert!(
             fusion_residency::is_resident(&handle),
             "store var overwrite should preserve residency for nested handle-object handles still live in other vars"
         );
-        assert!(
+            assert!(
             block_on(TEST_PROVIDER.download(&handle)).is_ok(),
             "store var overwrite should not release provider storage for nested handle-object handles still live in other vars"
         );
-        let weak = handle.downgrade();
-        drop(seed_vars);
-        drop(result_vars);
-        drop(handle);
-        runmat_gc::gc_collect_major().unwrap();
-        assert!(weak.acquire().is_err(), "all actual owners were released");
+            let weak = handle.downgrade();
+            drop(seed_vars);
+            drop(result_vars);
+            drop(handle);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(weak.acquire().is_err(), "all actual owners were released");
+        });
     }
 
     #[cfg(feature = "native-accel")]
@@ -2620,57 +2625,62 @@ mod tests {
     #[cfg(feature = "native-accel")]
     #[test]
     fn store_local_overwrite_preserves_nested_handle_object_provider_alias() {
-        use runmat_accelerate::fusion_residency;
+        runmat_gc::gc_test_context(|| {
+            use runmat_accelerate::fusion_residency;
 
-        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
-        let handle = upload_provider_handle(vec![30.0], vec![1]);
-        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
-        fusion_residency::mark(&handle);
+            let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+            let handle = upload_provider_handle(vec![30.0], vec![1]);
+            assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+            fusion_residency::mark(&handle);
 
-        let bytecode = Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
-        let mut seed_vars = vec![Value::Num(0.0)];
-        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-        let nested = Value::HandleObject(HandleRef {
-            class_name: "Payload".into(),
-            target,
-            valid: true,
-        });
-        state.stack.push(Value::Num(0.0));
-        state.vars = vec![Value::Num(0.0)];
-        state
-            .context
-            .call_stack
-            .push(crate::bytecode::program::CallFrame {
-                function_name: "<local>".into(),
-                return_address: 0,
-                locals_start: 0,
-                locals_count: 2,
-                expected_outputs: 0,
+            let bytecode =
+                Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
+            let mut seed_vars = vec![Value::Num(0.0)];
+            let mut state =
+                InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+            let mut payload = StructValue::new();
+            payload
+                .fields
+                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+            let target =
+                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let nested = Value::HandleObject(HandleRef {
+                class_name: "Payload".into(),
+                target,
+                valid: true,
             });
-        state.context.locals.push(nested.clone());
-        state.context.locals.push(nested);
+            state.stack.push(Value::Num(0.0));
+            state.vars = vec![Value::Num(0.0)];
+            state
+                .context
+                .call_stack
+                .push(crate::bytecode::program::CallFrame {
+                    function_name: "<local>".into(),
+                    return_address: 0,
+                    locals_start: 0,
+                    locals_count: 2,
+                    expected_outputs: 0,
+                });
+            state.context.locals.push(nested.clone());
+            state.context.locals.push(nested);
 
-        let mut result_vars = state.vars.clone();
-        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect("store local overwrite should complete when alias lives in other local");
-        assert!(
+            let mut result_vars = state.vars.clone();
+            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+                .expect("store local overwrite should complete when alias lives in other local");
+            assert!(
             fusion_residency::is_resident(&handle),
             "store local overwrite should preserve residency for nested handle-object handles still live in other locals"
         );
-        assert!(
+            assert!(
             block_on(TEST_PROVIDER.download(&handle)).is_ok(),
             "store local overwrite should not release provider storage for nested handle-object handles still live in other locals"
         );
-        let weak = handle.downgrade();
-        drop(seed_vars);
-        drop(result_vars);
-        drop(handle);
-        runmat_gc::gc_collect_major().unwrap();
-        assert!(weak.acquire().is_err(), "all actual owners were released");
+            let weak = handle.downgrade();
+            drop(seed_vars);
+            drop(result_vars);
+            drop(handle);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(weak.acquire().is_err(), "all actual owners were released");
+        });
     }
 }
