@@ -325,13 +325,12 @@ async fn hilbert_gpu_tensor(
     handle: GpuTensorHandle,
     length: Option<usize>,
 ) -> BuiltinResult<Value> {
-    let provider = super::resident_output::owner(
-        &handle,
+    let provider = super::resident_output::owner(&handle, || {
         hilbert_terminal_error(
             &HILBERT_ERROR_INTERNAL,
             "GPU provider unavailable for input",
-        ),
-    )?;
+        )
+    })?;
     let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(&handle);
     let complex_input =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
@@ -371,10 +370,12 @@ async fn hilbert_gpu_tensor(
                         alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
                     },
                     &[],
-                    hilbert_terminal_error(
-                        &HILBERT_ERROR_INTERNAL,
-                        "provider signal_hilbert returned malformed output",
-                    ),
+                    || {
+                        hilbert_terminal_error(
+                            &HILBERT_ERROR_INTERNAL,
+                            "provider signal_hilbert returned malformed output",
+                        )
+                    },
                 )?;
                 return gpu_helpers::complex_gpu_value(out);
             }

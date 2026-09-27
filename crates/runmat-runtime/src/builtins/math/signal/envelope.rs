@@ -343,7 +343,7 @@ async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         return Err(envelope_error(&ENVELOPE_ERROR_TOO_MANY_OUTPUTS));
     }
     let source = if let Value::GpuTensor(handle) = &x {
-        super::resident_output::owner(handle, envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
+        super::resident_output::owner(handle, || envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
         Some(handle.clone())
     } else {
         None
@@ -422,7 +422,8 @@ async fn try_gpu_envelope(
     {
         return Ok(None);
     }
-    let provider = super::resident_output::owner(handle, envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
+    let provider =
+        super::resident_output::owner(handle, || envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
     let Some(method) = provider_envelope_method(options) else {
         return Ok(None);
     };
@@ -469,16 +470,10 @@ async fn try_gpu_envelope(
         provider,
         &contract,
         &[&result.lower],
-        error(),
+        error,
     )?;
-    let lower = super::resident_output::admit(
-        result.lower,
-        handle,
-        provider,
-        &contract,
-        &[&upper],
-        error(),
-    )?;
+    let lower =
+        super::resident_output::admit(result.lower, handle, provider, &contract, &[&upper], error)?;
     Ok(Some(gpu_envelope_value(
         ProviderEnvelopeResult { upper, lower },
         out_count,

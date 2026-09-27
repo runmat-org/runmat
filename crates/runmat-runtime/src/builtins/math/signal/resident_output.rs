@@ -10,16 +10,21 @@ use crate::{BuiltinResult, GpuGatherRetry, RuntimeError};
 
 pub(super) fn owner(
     input: &GpuTensorHandle,
-    mut error: RuntimeError,
+    error: impl FnOnce() -> RuntimeError,
 ) -> BuiltinResult<&'static dyn AccelProvider> {
-    error.gpu_gather_retry = GpuGatherRetry::Never;
     if let Err(cause) = input.allocation_lease().validate_live() {
+        let mut error = error();
+        error.gpu_gather_retry = GpuGatherRetry::Never;
         return Err(crate::runtime_error::with_provider_execution_source(
             error,
             ProviderExecutionError::from_source(cause),
         ));
     }
-    gpu_helpers::exact_provider_for_handle(input).ok_or(error)
+    gpu_helpers::exact_provider_for_handle(input).ok_or_else(|| {
+        let mut error = error();
+        error.gpu_gather_retry = GpuGatherRetry::Never;
+        error
+    })
 }
 
 pub(super) fn admit(
@@ -28,20 +33,24 @@ pub(super) fn admit(
     provider: &'static dyn AccelProvider,
     contract: &BinaryGpuOutputContract,
     protected: &[&GpuTensorHandle],
-    mut error: RuntimeError,
+    error: impl FnOnce() -> RuntimeError,
 ) -> BuiltinResult<GpuTensorHandle> {
-    error.gpu_gather_retry = GpuGatherRetry::Never;
     if let Err(cause) = output.allocation_lease().validate_live() {
-        return Err(crate::runtime_error::with_provider_execution_source(
+        let mut error = error();
+        error.gpu_gather_retry = GpuGatherRetry::Never;
+        let error = crate::runtime_error::with_provider_execution_source(
             error,
             ProviderExecutionError::from_source(cause),
-        ));
+        );
+        return Err(gpu_helpers::reject_gpu_output(output, error));
     }
     if !gpu_helpers::binary_gpu_output_matches(&output, input, input, provider, contract)
         || protected
             .iter()
             .any(|value| output.shares_allocation_with(value))
     {
+        let mut error = error();
+        error.gpu_gather_retry = GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(output, error));
     }
     gpu_helpers::propagate_output_provenance(
