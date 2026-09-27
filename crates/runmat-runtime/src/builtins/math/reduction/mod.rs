@@ -31,6 +31,7 @@ pub(crate) mod topk;
 pub(crate) mod trapz;
 pub(crate) mod type_resolvers;
 pub(crate) mod var;
+mod extrema_provider;
 
 pub use cummax::evaluate as evaluate_cummax;
 pub use cummin::evaluate as evaluate_cummin;
