@@ -18,7 +18,7 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
                 shape: &[2, 2, 2],
             })
             .unwrap();
-        let before = input.descriptor.clone();
+        let before = input.descriptor;
         let output = match operation {
             0 => provider.unary_log2(&input).await,
             1 => provider.unary_log10(&input).await,
@@ -56,9 +56,7 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
             };
             if expected.is_nan() {
                 assert!(actual.is_nan());
-            } else if expected.is_infinite() {
-                assert_eq!(*actual, expected);
-            } else if expected == 0.0 {
+            } else if expected.is_infinite() || expected == 0.0 {
                 assert_eq!(*actual, expected);
             } else {
                 assert!(

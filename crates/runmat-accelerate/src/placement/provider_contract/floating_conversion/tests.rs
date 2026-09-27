@@ -112,7 +112,7 @@ fn cast_physical_work_tracks_frozen_geometry_and_requested_storage() {
     for lanes in [64, 256, 512] {
         let provider = GeometryProvider(lanes);
         let capacity =
-            u64::from(crate::backend::wgpu_geometry::elementwise_chunk_capacity(lanes).unwrap());
+            crate::backend::wgpu_geometry::elementwise_chunk_capacity(lanes).unwrap();
         for elements in [capacity - 1, capacity, capacity + 1] {
             let mut request = query(
                 SINGLE_CATALOG_ENTRY.identity.name,
