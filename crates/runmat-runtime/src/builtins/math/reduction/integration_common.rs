@@ -233,7 +233,7 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
 
     if let Value::GpuTensor(handle) = value {
         if gpu_helpers::exact_provider_for_handle(&handle)
-            .is_none_or(|owner| !std::ptr::eq(owner, provider))
+            .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
         {
             return Err(integration_error(
                 name,
@@ -337,7 +337,7 @@ fn admit_spacing_upload(
 ) -> BuiltinResult<GpuTensorHandle> {
     if handle.shape() != shape
         || !gpu_helpers::exact_provider_for_handle(&handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         || runmat_accelerate_api::handle_storage(&handle) != GpuTensorStorage::Real
         || runmat_accelerate_api::handle_precision(&handle) != Some(provider.precision())
         || runmat_accelerate_api::handle_is_logical(&handle)

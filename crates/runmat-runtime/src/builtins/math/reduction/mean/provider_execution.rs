@@ -77,7 +77,7 @@ fn admit_result(
     let valid = precision.is_some()
         && output.shape() == shape
         && gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_precision(&output) == precision
         && runmat_accelerate_api::handle_storage(&output) == storage
         && runmat_accelerate_api::handle_integer_type(&output).is_none()

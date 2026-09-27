@@ -41,8 +41,14 @@ fn resident_integer_result_restores_to_the_input_owner_not_the_ambient_provider(
     };
     let result_owner =
         runmat_accelerate_api::provider_for_handle(&result_handle).expect("restored owner");
-    assert!(std::ptr::eq(result_owner, owner));
-    assert!(!std::ptr::eq(result_owner, ambient));
+    assert!(runmat_accelerate_api::same_provider_instance(
+        result_owner,
+        owner
+    ));
+    assert!(!runmat_accelerate_api::same_provider_instance(
+        result_owner,
+        ambient
+    ));
     let gathered = block_on(owner.download_integer(&result_handle)).expect("owner download");
     assert_eq!(
         gathered.data,

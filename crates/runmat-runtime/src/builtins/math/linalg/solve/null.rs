@@ -388,7 +388,7 @@ async fn null_gpu(handle: GpuTensorHandle, mode: NullMode) -> BuiltinResult<Valu
     let gathered = gathered_result.map_err(map_control_flow)?;
     let basis = null_real_tensor(&gathered, mode)?;
     if gpu_helpers::exact_provider_for_handle(&handle)
-        .is_none_or(|candidate| !std::ptr::eq(candidate, owner))
+        .is_none_or(|candidate| !runmat_accelerate_api::same_provider_instance(candidate, owner))
     {
         return Err(internal_error(format!(
             "{NAME}: input provider ownership changed during fallback"
@@ -1416,7 +1416,7 @@ pub(crate) mod tests {
         );
         assert!(runmat_accelerate_api::handle_integer_type(output).is_none());
         assert!(gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider)));
         let gathered = test_support::gather(gpu_value).expect("gather");
         assert_eq!(gathered.shape, cpu.shape);
         assert_close(&gathered.materialize_f64(), &cpu.materialize_f64(), 5e-5);

@@ -527,7 +527,7 @@ async fn try_gpu_linsolve(
     };
     if gpu_handles.iter().any(|handle| {
         gpu_helpers::exact_provider_for_handle(handle)
-            .is_none_or(|owner| !std::ptr::eq(owner, provider))
+            .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
     }) {
         return Ok(None);
     }
@@ -613,8 +613,9 @@ async fn try_gpu_linsolve(
             && !aliases_rhs
             && solution.shape() == vec![expected_rows, expected_cols]
             && solution.device_id() == provider.device_id()
-            && gpu_helpers::exact_provider_for_handle(&solution)
-                .is_some_and(|owner| std::ptr::eq(owner, provider))
+            && gpu_helpers::exact_provider_for_handle(&solution).is_some_and(|owner| {
+                runmat_accelerate_api::same_provider_instance(owner, provider)
+            })
             && runmat_accelerate_api::handle_storage(&solution)
                 == runmat_accelerate_api::GpuTensorStorage::Real
             && runmat_accelerate_api::handle_precision(&solution) == Some(provider.precision())
@@ -896,8 +897,9 @@ fn prepare_gpu_operand(
     match value {
         Value::GpuTensor(handle) => {
             if handle.device_id() != provider.device_id()
-                || gpu_helpers::exact_provider_for_handle(handle)
-                    .is_none_or(|owner| !std::ptr::eq(owner, provider))
+                || gpu_helpers::exact_provider_for_handle(handle).is_none_or(|owner| {
+                    !runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
                 || is_scalar_handle(handle)
             {
                 Ok(None)

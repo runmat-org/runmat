@@ -1052,8 +1052,9 @@ async fn moving_gpu_provider(
             };
             let valid = output.shape() == output_shape
                 && output.device_id() == handle.device_id()
-                && runmat_accelerate_api::provider_for_handle(&output)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && runmat_accelerate_api::provider_for_handle(&output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
                 && runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::Real
                 && runmat_accelerate_api::handle_integer_type(&output) == expected_integer
                 && runmat_accelerate_api::handle_precision(&output) == expected_precision

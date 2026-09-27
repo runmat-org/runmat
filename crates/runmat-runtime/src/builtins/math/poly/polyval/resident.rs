@@ -160,7 +160,7 @@ impl Request {
             || runmat_accelerate_api::handle_is_logical(&output)
             || runmat_accelerate_api::handle_is_transposed(&output)
             || gpu_helpers::exact_provider_for_handle(&output)
-                .is_none_or(|actual| !std::ptr::eq(actual, owner))
+                .is_none_or(|actual| !runmat_accelerate_api::same_provider_instance(actual, owner))
             || protected
                 .into_iter()
                 .any(|input| output.shares_allocation_with(input))

@@ -382,7 +382,7 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
                 gpu_helpers::exact_provider_for_handle(lhs_handle),
                 gpu_helpers::exact_provider_for_handle(rhs_handle),
             ) {
-                if !std::ptr::eq(provider, rhs_provider) {
+                if !runmat_accelerate_api::same_provider_instance(provider, rhs_provider) {
                     // Mixed-owner handles must gather independently.
                 } else {
                     let expected = if single_output {
@@ -494,7 +494,7 @@ fn native_result_matches_provider(
         && !runmat_accelerate_api::handle_is_logical(handle)
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
         && gpu_helpers::exact_provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn value_is_complex(value: &Value) -> bool {

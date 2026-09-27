@@ -296,7 +296,7 @@ fn valid_inv_gpu_output(
         && output.device_id() == input.device_id()
         && !input.shares_allocation_with(output)
         && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == expected_storage
         && runmat_accelerate_api::handle_precision(output) == expected_precision
         && runmat_accelerate_api::handle_integer_type(output).is_none()

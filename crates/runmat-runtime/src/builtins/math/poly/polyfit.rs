@@ -515,7 +515,7 @@ async fn try_gpu_polyfit(
     for input in &inputs {
         let owner = gpu_helpers::exact_provider_for_handle(input)
             .ok_or_else(|| polyfit_internal_error("polyfit: no exact owner for resident input"))?;
-        if !std::ptr::eq(owner, provider)
+        if !runmat_accelerate_api::same_provider_instance(owner, provider)
             || input.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
             || runmat_accelerate_api::handle_is_logical(input)
             || runmat_accelerate_api::handle_precision(input) != Some(provider.precision())

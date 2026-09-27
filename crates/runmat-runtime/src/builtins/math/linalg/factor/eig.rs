@@ -624,7 +624,8 @@ fn valid_provider_eig_result(
             || handle.device_id() != input.device_id()
             || handle.shape() != *expected_shape
             || runmat_accelerate_api::handle_is_transposed(handle)
-            || resolved_actual_eig_owner(handle).is_none_or(|owner| !std::ptr::eq(owner, provider))
+            || resolved_actual_eig_owner(handle)
+                .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
             || !matches!(
                 storage,
                 runmat_accelerate_api::GpuTensorStorage::Real

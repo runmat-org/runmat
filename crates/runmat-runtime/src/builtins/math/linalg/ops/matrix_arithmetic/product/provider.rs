@@ -239,7 +239,7 @@ fn provider_failure(operation: &str, source: anyhow::Error) -> super::errors::Pr
 
 fn compatible(handle: &GpuTensorHandle, provider: &'static dyn AccelProvider) -> bool {
     gpu_helpers::exact_provider_for_handle(handle)
-        .is_some_and(|owner| std::ptr::eq(owner, provider))
+        .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(handle)
