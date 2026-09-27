@@ -7,6 +7,9 @@ use runmat_runtime::{call_builtin_async_with_outputs, GpuGatherRetry};
 use runmat_value::Value;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[path = "provider_execution_sources/extrema_continuations.rs"]
+mod extrema_continuations;
+
 #[derive(Debug)]
 struct DeviceFailure;
 impl std::fmt::Display for DeviceFailure {
