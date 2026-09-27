@@ -179,12 +179,6 @@ impl WgpuCleanup<'_> {
     pub fn unmap_buffer(&self, buffer: &wgpu::Buffer) {
         buffer.unmap();
     }
-    pub fn release_buffer(&self, buffer: wgpu::Buffer) {
-        drop(buffer);
-    }
-    pub fn release_shared_buffer(&self, buffer: std::sync::Arc<wgpu::Buffer>) {
-        drop(buffer);
-    }
 }
 impl WgpuEmission<'_> {
     /// Clone the authority, not a raw device, when handing completed resources

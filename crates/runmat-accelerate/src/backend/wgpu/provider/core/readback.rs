@@ -18,7 +18,7 @@ impl Readback {
                     if self.map_registered {
                         cleanup.unmap_buffer(&buffer);
                     }
-                    cleanup.release_buffer(buffer);
+                    drop(buffer);
                 }
             })
         }));

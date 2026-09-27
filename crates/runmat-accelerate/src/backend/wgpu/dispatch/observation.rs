@@ -61,7 +61,7 @@ impl FenceCompletion {
                 access.with_cleanup(|cleanup| {
                     if let Some(fence) = self.fence.take() {
                         cleanup.unmap_buffer(&fence);
-                        cleanup.release_shared_buffer(fence);
+                        drop(fence);
                     }
                 })
             })),

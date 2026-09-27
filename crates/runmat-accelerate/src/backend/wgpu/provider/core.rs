@@ -67,8 +67,9 @@ impl WgpuProvider {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = size_bytes;
-            self.access
-                .with_cleanup(|cleanup| cleanup.release_buffer(staging))?;
+            // Ordinary Buffer Drop does not emit into WGPU error scopes; only
+            // explicit unmap (not used on this unsupported path) needs access.
+            drop(staging);
             Err(anyhow!("{context}: readback requires async path on wasm"))
         }
         #[cfg(not(target_arch = "wasm32"))]
