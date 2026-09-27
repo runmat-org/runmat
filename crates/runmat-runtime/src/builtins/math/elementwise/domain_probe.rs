@@ -80,7 +80,7 @@ pub(super) async fn probe_gpu_lower_bound(
         Err(error) => return Err(GpuDomainProbeError::ProviderReduce(error)),
     };
 
-    if gpu_helpers::same_gpu_handle(&minimum, handle) {
+    if minimum.shares_allocation_with(handle) {
         return Err(GpuDomainProbeError::AliasedReduction);
     }
     if minimum.device_id() != handle.device_id()
@@ -98,16 +98,11 @@ pub(super) async fn probe_gpu_lower_bound(
             .try_fold(1usize, |count, extent| count.checked_mul(*extent))
             != Some(1)
     {
-        gpu_helpers::free_rejected_provider_output(&minimum, &[handle], provider);
         return Err(GpuDomainProbeError::MalformedReduction);
     }
 
-    let minimum = Reduction {
-        provider,
-        handle: minimum,
-    };
     let _metadata = gpu_helpers::ResidencyRestoreGuard::new(handle);
-    let host = gpu_helpers::download_floating_projection_async(provider, &minimum.handle).await;
+    let host = gpu_helpers::download_floating_projection_async(provider, &minimum).await;
     let host = host.map_err(|error| GpuDomainProbeError::ProviderDownload(Box::new(error)))?;
     if host.data.iter().any(|value| value.is_nan()) {
         return Ok(GpuLowerBoundResult::Unknown);
@@ -119,16 +114,6 @@ pub(super) async fn probe_gpu_lower_bound(
     }
 }
 
-/// A validated, distinct reduction allocation retains its owner across awaits.
-struct Reduction {
-    provider: &'static dyn AccelProvider,
-    handle: GpuTensorHandle,
-}
-
-impl Drop for Reduction {
-    fn drop(&mut self) {
-        if self.provider.free(&self.handle).is_ok() {
-            runmat_accelerate_api::clear_handle_metadata(&self.handle);
-        }
-    }
-}
+#[cfg(test)]
+#[path = "domain_probe/owning_tests.rs"]
+mod owning_tests;
