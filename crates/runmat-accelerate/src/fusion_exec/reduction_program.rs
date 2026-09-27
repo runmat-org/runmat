@@ -34,6 +34,9 @@ pub struct ResolvedReductionProgram<'a> {
     preamble: String,
     expression: String,
     identity: Digest,
+    data_classes: Vec<NumericClass>,
+    execution_precision: ProviderPrecision,
+    producer_work_units: u64,
 }
 impl<'a> ResolvedReductionProgram<'a> {
     pub fn data_inputs(&self) -> &[ReductionDataInput<'a>] {
@@ -53,6 +56,17 @@ impl<'a> ResolvedReductionProgram<'a> {
     }
     pub fn identity(&self) -> Digest {
         self.identity
+    }
+    /// Effective leaf classes after the existing precision policy. Physical
+    /// source carriers remain unchanged; a recipe must declare any adapter.
+    pub fn data_classes(&self) -> &[NumericClass] {
+        &self.data_classes
+    }
+    pub fn execution_precision(&self) -> ProviderPrecision {
+        self.execution_precision
+    }
+    pub fn producer_work_units(&self) -> u64 {
+        self.producer_work_units
     }
 }
 
@@ -184,6 +198,16 @@ pub async fn resolve_reduction_program<'a>(
         .map_err(ProviderExecutionError::from_source)?,
     );
     let identity = bindings.identity(Some(semantic))?;
+    let data_classes = mapped
+        .data
+        .iter()
+        .map(|input| program.floating_class(input.value_id))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let elements =
+        runmat_runtime::builtins::common::spec::checked_reduction_elements(&contract.input_shape)
+            .and_then(|elements| u64::try_from(elements).ok())
+            .ok_or_else(|| anyhow::anyhow!("reduction producer cardinality overflow"))?;
+    let producer_work_units = program.scalar_work_units(&mapped.producer, elements)?;
     Ok(Some(ResolvedReductionProgram {
         data: mapped.data,
         contract,
@@ -191,5 +215,8 @@ pub async fn resolve_reduction_program<'a>(
         preamble,
         expression,
         identity,
+        data_classes,
+        execution_precision: precision,
+        producer_work_units,
     }))
 }
