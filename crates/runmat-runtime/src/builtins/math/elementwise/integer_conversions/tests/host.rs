@@ -23,6 +23,37 @@ fn classes() -> [(IntegerClass, &'static str); 8] {
 }
 
 #[test]
+fn singleton_symbolic_storage_inference_matches_runtime_for_integer_and_float() {
+    use crate::value_fact::value_fact;
+    use runmat_types::{infer_numeric_conversion, NumericClass};
+    let input = Value::SymbolicArray(
+        SymbolicArray::new(vec![SymbolicExpr::constant(7.0)], vec![1, 1]).unwrap(),
+    );
+    for (target, name) in [
+        (NumericClass::Int8, "int8"),
+        (NumericClass::UInt64, "uint64"),
+        (NumericClass::Single, "single"),
+        (NumericClass::Double, "double"),
+    ] {
+        let inferred = infer_numeric_conversion(&value_fact(&input), target).fact;
+        let actual = value_fact(&call(name, input.clone()));
+        assert_eq!(inferred.kind, actual.kind, "{name}");
+        assert_eq!(inferred.shape, actual.shape, "{name}");
+        assert_eq!(inferred.storage, actual.storage, "{name}");
+    }
+    for (target, name) in [
+        (NumericClass::Single, "single"),
+        (NumericClass::Double, "double"),
+    ] {
+        let input = Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap());
+        let inferred = infer_numeric_conversion(&value_fact(&input), target).fact;
+        let actual = value_fact(&call(name, input));
+        assert_eq!(inferred.kind, actual.kind, "{name}");
+        assert_eq!(inferred.storage, actual.storage, "{name}");
+    }
+}
+
+#[test]
 fn every_identity_rounds_saturates_and_retains_its_typed_scalar() {
     for (class, name) in classes() {
         assert_eq!(

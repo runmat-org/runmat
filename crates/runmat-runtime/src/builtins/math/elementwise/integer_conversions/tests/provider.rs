@@ -9,6 +9,38 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::test_support;
 
 #[test]
+fn singleton_resident_inference_matches_actual_opaque_result() {
+    use crate::value_fact::value_fact;
+    use runmat_types::{infer_numeric_conversion, NumericClass};
+    test_support::with_test_provider(|provider| {
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[7.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        for (target, name) in [
+            (NumericClass::Int8, "int8"),
+            (NumericClass::UInt64, "uint64"),
+        ] {
+            let source = Value::GpuTensor(input.clone());
+            let inferred = infer_numeric_conversion(&value_fact(&source), target).fact;
+            let output = crate::dispatcher::call_builtin(name, &[source]).unwrap();
+            let actual = value_fact(&output);
+            assert_eq!(inferred.kind, actual.kind);
+            assert_eq!(inferred.shape, actual.shape);
+            assert_eq!(inferred.storage, actual.storage);
+            assert_eq!(inferred.residency, actual.residency);
+            let Value::GpuTensor(output) = output else {
+                panic!("resident output")
+            };
+            provider.free(&output).unwrap();
+        }
+        provider.free(&input).unwrap();
+    });
+}
+
+#[test]
 fn every_identity_returns_typed_resident_storage() {
     test_support::with_test_provider(|provider| {
         for (name, element_type) in [

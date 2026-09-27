@@ -1,7 +1,7 @@
 use crate::{
     AliasFact, ContiguityFact, DynamicReason, FactInference, InferenceDiagnostic, LayoutFact,
-    MutationFact, NumericClass, NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact,
-    ValueKindFact, ViewFact,
+    MutationFact, NumericClass, NumericDomain, NumericFact, StorageFact, ValueFact, ValueKindFact,
+    ViewFact,
 };
 
 /// Infer a value converted to one of the built-in numeric classes.
@@ -42,7 +42,7 @@ pub fn infer_numeric_conversion(source: &ValueFact, target: NumericClass) -> Fac
     if domain.is_none() && !matches!(output.certainty, crate::CertaintyFact::Dynamic(_)) {
         output.certainty = crate::CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
     }
-    output.storage = conversion_storage(&source.shape, source.storage, domain, target);
+    output.storage = conversion_storage(source, domain, target);
     output.layout = match output.storage {
         StorageFact::Scalar | StorageFact::Dense | StorageFact::Sparse => LayoutFact::ColumnMajor,
         StorageFact::Unknown | StorageFact::Opaque => LayoutFact::Unknown,
@@ -58,15 +58,39 @@ pub fn infer_numeric_conversion(source: &ValueFact, target: NumericClass) -> Fac
 }
 
 fn conversion_storage(
-    shape: &ShapeFact,
-    source: StorageFact,
+    source: &ValueFact,
     domain: Option<NumericDomain>,
     target: NumericClass,
 ) -> StorageFact {
-    if source == StorageFact::Sparse {
+    if source.storage == StorageFact::Sparse {
         return StorageFact::Sparse;
     }
-    if shape.element_count() == Some(1) {
+    // Opaque device handles are not host scalar carriers, even at one element.
+    if source.storage == StorageFact::Opaque {
+        return if target.integer_class().is_some()
+            && matches!(source.residency, crate::ResidencyFact::Device { .. })
+        {
+            StorageFact::Opaque
+        } else {
+            StorageFact::Unknown
+        };
+    }
+    if matches!(source.kind, ValueKindFact::Symbolic) && source.storage == StorageFact::Dense {
+        return StorageFact::Dense;
+    }
+    // Floating tensor conversions retain their array carrier; single has no
+    // scalar Value representation at all. Keep these separate from the integer
+    // domain's deliberate real singleton collapse.
+    if target == NumericClass::Single && !matches!(source.kind, ValueKindFact::Unknown) {
+        return StorageFact::Dense;
+    }
+    if target == NumericClass::Double
+        && source.storage == StorageFact::Dense
+        && matches!(source.kind, ValueKindFact::Numeric(_))
+    {
+        return StorageFact::Dense;
+    }
+    if source.shape.element_count() == Some(1) {
         if domain.is_none() {
             return StorageFact::Unknown;
         }
@@ -75,7 +99,7 @@ fn conversion_storage(
         }
         return StorageFact::Scalar;
     }
-    match source {
+    match source.storage {
         StorageFact::Sparse => StorageFact::Sparse,
         StorageFact::Scalar | StorageFact::Dense => StorageFact::Dense,
         StorageFact::Unknown | StorageFact::Opaque => StorageFact::Unknown,
@@ -85,7 +109,7 @@ fn conversion_storage(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CertaintyFact, DimensionFact, ResidencyFact};
+    use crate::{CertaintyFact, DimensionFact, ResidencyFact, ShapeFact};
 
     #[test]
     fn numeric_conversion_preserves_shape_domain_sparse_storage_and_residency() {
