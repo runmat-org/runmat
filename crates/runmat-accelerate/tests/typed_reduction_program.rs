@@ -21,6 +21,9 @@ use std::{
 };
 use support::*;
 
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 fn tensor(single: bool, shape: Vec<usize>) -> Value {
     let count = shape.iter().product();
     Value::Tensor(if single {
@@ -37,14 +40,15 @@ fn add(left: u32, right: u32, output: u32) -> FusionOp {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn actual_host_controls_fail_before_any_producer_probe_for_all_four_owners() {
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
     for name in ["sum", "mean", "min", "max"] {
-        OWNER.reset();
-        let left = OWNER.input();
-        let right = OWNER.input();
+        owner.reset();
+        let left = owner.input();
+        let right = owner.input();
         let mut controls = Vec::new();
         if matches!(name, "min" | "max") {
             controls.push(tensor(false, vec![0, 0]));
@@ -88,7 +92,7 @@ fn actual_host_controls_fail_before_any_producer_probe_for_all_four_owners() {
         .unwrap_err();
         assert_eq!(actual.identifier(), expected.identifier());
         assert_eq!(actual.to_string(), expected.to_string());
-        assert_eq!(OWNER.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(owner.calls.load(Ordering::SeqCst), 0);
         assert_eq!(left.probe.retirements(), 0);
         assert_eq!(right.probe.retirements(), 0);
         drop(request);
@@ -108,14 +112,15 @@ impl RuntimeBuiltinService for DenyBindings {
         Vec::new()
     }
 }
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_next_request() {
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
-    OWNER.reset();
-    OWNER.ready.store(false, Ordering::SeqCst);
-    let left = OWNER.input();
-    let right = OWNER.input();
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
+    owner.reset();
+    owner.ready.store(false, Ordering::SeqCst);
+    let left = owner.input();
+    let right = owner.input();
     let plan = reduction(
         fixture::plan(
             vec![
@@ -139,7 +144,7 @@ fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_
     let mut future = Box::pin(resolve_reduction_program(&request, ProviderPrecision::F64));
     let mut task = Context::from_waker(futures::task::noop_waker_ref());
     assert!(future.as_mut().poll(&mut task).is_pending());
-    assert_eq!(OWNER.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(owner.calls.load(Ordering::SeqCst), 1);
     let denied = Rc::new(DenyBindings {
         calls: Cell::new(0),
     });
@@ -148,7 +153,7 @@ fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_
     ))
     .with_service_ports(RuntimeServicePorts::default().with_builtin(denied.clone()));
     let _context = context.enter();
-    OWNER.ready.store(true, Ordering::SeqCst);
+    owner.ready.store(true, Ordering::SeqCst);
     let receipt = match future.as_mut().poll(&mut task) {
         Poll::Ready(Ok(Some(receipt))) => receipt,
         _ => panic!("captured owner declarations must finish after the real-domain probe"),
@@ -168,7 +173,7 @@ fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_
             .unwrap()
             .is_none()
     );
-    assert_eq!(OWNER.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(owner.calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         denied.calls.get(),
         1,
@@ -183,14 +188,15 @@ fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_
     assert_eq!(right.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn probe_operational_errors_keep_the_original_source() {
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
-    OWNER.reset();
-    OWNER.fail.store(true, Ordering::SeqCst);
-    let left = OWNER.input();
-    let right = OWNER.input();
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
+    owner.reset();
+    owner.fail.store(true, Ordering::SeqCst);
+    let left = owner.input();
+    let right = owner.input();
     let plan = reduction(
         fixture::plan(
             vec![
@@ -214,17 +220,18 @@ fn probe_operational_errors_keep_the_original_source() {
         _ => panic!("probe failed"),
     };
     assert!(error.source().unwrap().is::<ProbeFailure>());
-    assert_eq!(OWNER.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(owner.calls.load(Ordering::SeqCst), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn cancelled_admission_does_not_retire_borrowed_inputs_or_publish_a_receipt() {
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
-    OWNER.reset();
-    OWNER.ready.store(false, Ordering::SeqCst);
-    let left = OWNER.input();
-    let right = OWNER.input();
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
+    owner.reset();
+    owner.ready.store(false, Ordering::SeqCst);
+    let left = owner.input();
+    let right = owner.input();
     let plan = reduction(
         fixture::plan(
             vec![
@@ -248,7 +255,7 @@ fn cancelled_admission_does_not_retire_borrowed_inputs_or_publish_a_receipt() {
         .as_mut()
         .poll(&mut Context::from_waker(futures::task::noop_waker_ref()))
         .is_pending());
-    assert_eq!(OWNER.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(owner.calls.load(Ordering::SeqCst), 1);
     drop(future);
     assert_eq!(left.probe.retirements(), 0);
     assert_eq!(right.probe.retirements(), 0);
@@ -257,7 +264,8 @@ fn cancelled_admission_does_not_retire_borrowed_inputs_or_publish_a_receipt() {
     assert_eq!(right.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn original_slots_constants_and_host_controls_have_disjoint_recipe_roles() {
     let plan = reduction(
         fixture::plan(vec![add(0, 4, 10), builtin("sum", vec![10, 9], 11)], 11),
@@ -331,7 +339,8 @@ fn original_slots_constants_and_host_controls_have_disjoint_recipe_roles() {
     ));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn strict_accumulator_and_mixed_class_proofs_are_not_weakened() {
     for single in [true, false] {
         let plan = reduction(
@@ -387,7 +396,8 @@ fn strict_accumulator_and_mixed_class_proofs_are_not_weakened() {
     assert_eq!(receipt.contract().accumulator_class, NumericClass::Single);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn conflicting_missing_computed_and_extra_dependencies_fail_closed() {
     let base = reduction(
         fixture::plan(vec![add(0, 1, 10), builtin("sum", vec![10, 2], 11)], 11),
@@ -435,7 +445,8 @@ fn conflicting_missing_computed_and_extra_dependencies_fail_closed() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn input_only_root_is_borrowed_and_buffer_contents_do_not_change_recipe_identity() {
     let plan = reduction(
         fixture::plan(vec![builtin("sum", vec![0], 11)], 11),
@@ -464,7 +475,8 @@ fn input_only_root_is_borrowed_and_buffer_contents_do_not_change_recipe_identity
     assert_eq!(first_receipt.identity(), second_receipt.identity());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn captured_bindings_preserve_real_catalog_spelling_resolution() {
     use runmat_runtime::builtins::common::spec::{selected_fusion_binding, SelectedFusionIdentity};
     let canonical = runmat_builtins::builtin_catalog_entry_by_name("sin").unwrap();

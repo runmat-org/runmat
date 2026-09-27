@@ -12,7 +12,7 @@ use runmat_value::Value;
 use std::future::Future;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    LazyLock, Mutex,
+    Mutex,
 };
 use std::task::{Context, Poll};
 
@@ -22,13 +22,17 @@ struct Recorder {
     mode: AtomicUsize,
     allocations: Mutex<Vec<(RetirementProbe, WeakGpuTensorHandle)>>,
 }
-static OWNER: LazyLock<Recorder> = LazyLock::new(|| Recorder {
-    owner: TestAllocationOwner::new(),
-    casts: AtomicUsize::new(0),
-    mode: AtomicUsize::new(0),
-    allocations: Mutex::new(Vec::new()),
-});
-static SERIAL: Mutex<()> = Mutex::new(());
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+fn new_owner() -> &'static Recorder {
+    Box::leak(Box::new(Recorder {
+        owner: TestAllocationOwner::new(),
+        casts: AtomicUsize::new(0),
+        mode: AtomicUsize::new(0),
+        allocations: Mutex::new(Vec::new()),
+    }))
+}
 impl Recorder {
     fn input(&self, element: NumericElementType) -> TestAllocation {
         self.owner
@@ -117,7 +121,11 @@ impl AccelProvider for Recorder {
             _ => {}
         }
         let output = self.fresh(input.physical().element_type());
-        Ok(output.with_view(GpuTensorView::contiguous(shape.to_vec()))?)
+        // Every admitted layout request in this fixture preserves its two
+        // elements; a failed view construction is a fixture invariant failure.
+        Ok(output
+            .with_view(GpuTensorView::contiguous(shape.to_vec()))
+            .expect("fixture materialization preserves the allocated extent"))
     }
     fn fused_elementwise_multi(
         &self,
@@ -212,16 +220,17 @@ fn request<'a>(
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn second_adapter_suspend_or_error_releases_every_fresh_allocation_without_publishing() {
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
     for mode in [0, 1] {
-        OWNER.reset(mode);
+        owner.reset(mode);
         let TestAllocation {
             handle: input,
             probe,
-        } = OWNER.input(NumericElementType::F64);
+        } = owner.input(NumericElementType::F64);
         let before = facts(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
         plan.materialized_stores.push(FusionStoreMaterialization {
@@ -246,18 +255,19 @@ fn second_adapter_suspend_or_error_releases_every_fresh_allocation_without_publi
         }
         drop(future);
         assert_eq!(facts(&input), before);
-        OWNER.assert_retirements(&[1, 1, 1]);
+        owner.assert_retirements(&[1, 1, 1]);
         assert_eq!(probe.retirements(), 0);
         drop(input);
         assert_eq!(probe.retirements(), 1);
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn duplicate_materialized_bindings_adopt_one_completed_result() {
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
-    OWNER.reset(2);
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
+    owner.reset(2);
     let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
     for index in [0, 1] {
         plan.materialized_stores.push(FusionStoreMaterialization {
@@ -271,7 +281,7 @@ fn duplicate_materialized_bindings_adopt_one_completed_result() {
     let TestAllocation {
         handle: input,
         probe,
-    } = OWNER.input(NumericElementType::F64);
+    } = owner.input(NumericElementType::F64);
     let result = futures::executor::block_on(execute_elementwise(request(&plan, input))).unwrap();
     let Value::GpuTensor(first) = &result.materialized_stores[0].1 else {
         panic!("resident output")
@@ -282,25 +292,26 @@ fn duplicate_materialized_bindings_adopt_one_completed_result() {
     assert!(first.shares_allocation_with(second));
     assert_eq!(first.view_identity(), second.view_identity());
     assert_eq!(first.physical().element_type(), NumericElementType::F32);
-    OWNER.assert_retirements(&[1, 1, 0, 0]);
+    owner.assert_retirements(&[1, 1, 0, 0]);
     let retained = first.clone();
     drop(result);
-    OWNER.assert_retirements(&[1, 1, 1, 0]);
+    owner.assert_retirements(&[1, 1, 1, 0]);
     drop(retained);
-    OWNER.assert_retirements(&[1, 1, 1, 1]);
+    owner.assert_retirements(&[1, 1, 1, 1]);
     assert_eq!(probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn only_typed_unsupported_multi_falls_back_to_single_dispatches() {
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
     for mode in [3, 4] {
-        OWNER.reset(mode);
+        owner.reset(mode);
         let TestAllocation {
             handle: input,
             probe,
-        } = OWNER.input(NumericElementType::F64);
+        } = owner.input(NumericElementType::F64);
         let before = facts(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
         plan.materialized_stores.push(FusionStoreMaterialization {
@@ -319,8 +330,8 @@ fn only_typed_unsupported_multi_falls_back_to_single_dispatches() {
                 .unwrap()
                 .to_string()
                 .contains("multi execution failed"));
-            OWNER.assert_retirements(&[]);
-            assert_eq!(OWNER.casts.load(Ordering::SeqCst), 0);
+            owner.assert_retirements(&[]);
+            assert_eq!(owner.casts.load(Ordering::SeqCst), 0);
         } else {
             let result = result.unwrap();
             let Value::GpuTensor(_) = &result.final_value else {
@@ -330,7 +341,7 @@ fn only_typed_unsupported_multi_falls_back_to_single_dispatches() {
                 panic!("resident")
             };
             drop(result);
-            OWNER.assert_retirements(&[1, 1, 1, 1]);
+            owner.assert_retirements(&[1, 1, 1, 1]);
         }
         assert_eq!(probe.retirements(), 0);
         drop(input);
@@ -351,7 +362,8 @@ impl AccelProvider for DefaultMulti {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn provider_default_multi_declares_unsupported_not_execution_failure() {
     let error = DefaultMulti
         .fused_elementwise_multi("", &[], &[1, 2], 2, &[ProviderElementType::F64; 2])
@@ -359,16 +371,17 @@ fn provider_default_multi_declares_unsupported_not_execution_failure() {
     assert!(is_unsupported_provider_operation(&error));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn mismatched_fresh_producer_facts_are_rejected_and_borrowed_aliases_stay_live() {
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
     for mode in [5, 6, 7] {
-        OWNER.reset(mode);
+        owner.reset(mode);
         let TestAllocation {
             handle: input,
             probe,
-        } = OWNER.input(NumericElementType::F64);
+        } = owner.input(NumericElementType::F64);
         let before = facts(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
         plan.materialized_stores.push(FusionStoreMaterialization {
@@ -383,25 +396,26 @@ fn mismatched_fresh_producer_facts_are_rejected_and_borrowed_aliases_stay_live()
                 .is_err()
         );
         assert_eq!(facts(&input), before);
-        assert_eq!(OWNER.casts.load(Ordering::SeqCst), 0);
-        OWNER.assert_retirements(if mode == 7 { &[1] } else { &[1, 1] });
+        assert_eq!(owner.casts.load(Ordering::SeqCst), 0);
+        owner.assert_retirements(if mode == 7 { &[1] } else { &[1, 1] });
         assert_eq!(probe.retirements(), 0);
         drop(input);
         assert_eq!(probe.retirements(), 1);
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn materialized_input_is_owned_through_later_suspension_and_layout_failures_preserve_source() {
     use runmat_accelerate::fusion_exec::{execute_elementwise_placed, FusionExecutionOutcome};
-    let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    let owner = new_owner();
+    let _provider = ThreadProviderGuard::set(Some(owner));
     for mode in [0, 8, 9, 10] {
-        OWNER.reset(mode);
+        owner.reset(mode);
         let TestAllocation {
             handle: input,
             probe,
-        } = OWNER.input(NumericElementType::F32);
+        } = owner.input(NumericElementType::F32);
         let input = transposed(input);
         let before = facts(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
@@ -427,7 +441,7 @@ fn materialized_input_is_owned_through_later_suspension_and_layout_failures_pres
         }
         drop(future);
         assert_eq!(facts(&input), before);
-        OWNER.assert_retirements(if mode == 0 { &[1, 1, 1, 1, 1] } else { &[] });
+        owner.assert_retirements(if mode == 0 { &[1, 1, 1, 1, 1] } else { &[] });
         assert_eq!(probe.retirements(), 0);
         drop(input);
         assert_eq!(probe.retirements(), 1);

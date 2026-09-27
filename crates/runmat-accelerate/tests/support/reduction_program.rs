@@ -4,18 +4,16 @@ use runmat_accelerate::fusion_exec::FusionExecutionRequest;
 use runmat_accelerate_api::test_support::{TestAllocation, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use runmat_value::Value;
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    LazyLock, Mutex,
-};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-pub static SERIAL: Mutex<()> = Mutex::new(());
-pub static OWNER: LazyLock<ProbeOwner> = LazyLock::new(|| ProbeOwner {
-    owner: TestAllocationOwner::new(),
-    calls: AtomicUsize::new(0),
-    ready: AtomicBool::new(true),
-    fail: AtomicBool::new(false),
-});
+pub fn new_owner() -> &'static ProbeOwner {
+    Box::leak(Box::new(ProbeOwner {
+        owner: TestAllocationOwner::new(),
+        calls: AtomicUsize::new(0),
+        ready: AtomicBool::new(true),
+        fail: AtomicBool::new(false),
+    }))
+}
 pub struct ProbeOwner {
     owner: TestAllocationOwner,
     pub calls: AtomicUsize,
