@@ -279,7 +279,12 @@ fn assert_power_execution(provider: &dyn runmat_accelerate_api::AccelProvider) {
                     }
                     Value::ComplexTensor(tensor) if *complex => {
                         assert_eq!(&tensor.shape, shape);
-                        tensor.as_f64_slice().unwrap().to_vec()
+                        tensor
+                            .as_f64_slice()
+                            .unwrap()
+                            .iter()
+                            .map(|value| (value.0, value.1))
+                            .collect::<Vec<_>>()
                     }
                     other => panic!("power representation mismatch: {other:?}"),
                 };
