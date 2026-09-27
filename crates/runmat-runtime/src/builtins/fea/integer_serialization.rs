@@ -294,6 +294,32 @@ pub(in crate::builtins::fea) fn promote_json_integer_kinds(
     json: &serde_json::Value,
 ) -> BuiltinResult<()> {
     match (value, json) {
+        (target @ Value::Struct(_), serde_json::Value::Array(items)) if items.len() == 1 => {
+            promote_json_integer_kinds(builtin, error, target, &items[0])?;
+        }
+        (Value::StructArray(array), serde_json::Value::Array(items)) => {
+            let Some((json_shape, leaves)) =
+                crate::builtins::io::json::layout::rectangular_leaves(items)
+            else {
+                return Ok(());
+            };
+            let shape = if json_shape.len() == 1 {
+                vec![json_shape[0], 1]
+            } else {
+                json_shape
+            };
+            if shape != array.shape() {
+                return Ok(());
+            }
+            let leaves = crate::builtins::io::json::layout::row_to_column_major(leaves, &shape)
+                .map_err(|message| builtin_error(builtin, error, message))?;
+            array.try_for_each_indexed_value_mut(|name, index, target| -> BuiltinResult<()> {
+                if let Some(child) = leaves.get(index).and_then(|record| record.get(name)) {
+                    promote_json_integer_kinds(builtin, error, target, child)?;
+                }
+                Ok(())
+            })?;
+        }
         (target, serde_json::Value::Number(number)) if number.is_u64() => {
             *target = Value::Int(IntValue::U64(
                 number.as_u64().expect("checked unsigned number"),

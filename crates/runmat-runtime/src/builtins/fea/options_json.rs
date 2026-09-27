@@ -10,6 +10,10 @@ use runmat_value::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+#[cfg(test)]
+#[path = "options_json/tests.rs"]
+mod tests;
+
 pub(in crate::builtins::fea) struct NameValuePair<'a> {
     pub(in crate::builtins::fea) name: &'a Value,
     pub(in crate::builtins::fea) key: String,
@@ -190,13 +194,20 @@ pub(in crate::builtins::fea) fn value_to_json(
                 .map(|item| value_to_json(builtin, item))
                 .collect::<BuiltinResult<Vec<_>>>()?,
         )),
-        Value::Struct(fields) => {
-            let mut object = serde_json::Map::new();
-            for (key, value) in &fields.fields {
-                object.insert(canonical_field_name(key), value_to_json(builtin, value)?);
-            }
-            Ok(serde_json::Value::Object(object))
-        }
+        Value::Struct(fields) => record_to_json(builtin, fields.fields.iter()),
+        // FEA option sequences follow the same column-major flattening as
+        // numeric tensors and cells above. This is not jsonencode's nested
+        // matrix layout. Scalar records remain objects; empty arrays remain [].
+        Value::StructArray(array) => Ok(serde_json::Value::Array(
+            (0..array.len())
+                .map(|index| {
+                    let element = array.get_linear(index).ok_or_else(|| {
+                        builtin_error(builtin, &ERROR_INTERNAL, "invalid structure-array offset")
+                    })?;
+                    record_to_json(builtin, element.fields.iter())
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?,
+        )),
         Value::Object(object) => {
             if let Some(Value::String(json)) = object.properties.get(FEA_PAYLOAD_JSON_PROPERTY) {
                 serde_json::from_str(json).map_err(|err| {
@@ -219,6 +230,17 @@ pub(in crate::builtins::fea) fn value_to_json(
             format!("cannot convert value to FEA JSON payload: {other:?}"),
         )),
     }
+}
+
+fn record_to_json<'a>(
+    builtin: &'static str,
+    fields: impl IntoIterator<Item = (&'a String, &'a Value)>,
+) -> BuiltinResult<serde_json::Value> {
+    let mut object = serde_json::Map::new();
+    for (key, value) in fields {
+        object.insert(canonical_field_name(key), value_to_json(builtin, value)?);
+    }
+    Ok(serde_json::Value::Object(object))
 }
 
 pub(in crate::builtins::fea) fn numeric_scalar_to_json(

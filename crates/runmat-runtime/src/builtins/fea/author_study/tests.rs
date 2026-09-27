@@ -630,3 +630,36 @@ fn requires_geometry_asset() {
     assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
     assert!(err.message().contains("fea.authorStudy geometry"));
 }
+
+#[test]
+fn decoded_summary_accepts_scalar_material_and_multiple_boundary_records() {
+    let summary = mesh_authoring_summary_from_value(&authoring_summary_value()).unwrap();
+    assert_eq!(summary.regions.material_regions.len(), 1);
+    assert_eq!(summary.regions.material_regions[0].region_id, "solid");
+    assert_eq!(summary.regions.boundary_regions.len(), 2);
+    assert_eq!(summary.regions.boundary_regions[0].region_id, "root");
+    assert_eq!(summary.regions.boundary_regions[1].region_id, "tip");
+}
+
+#[test]
+fn summary_normalization_preserves_exact_integers_and_schema_cardinality() {
+    let mut value = serde_json::json!({
+        "exact": u64::MAX - 1,
+        "wide": (1u64 << 53) + 1,
+        "count": 17.0,
+        "too_large": 18446744073709551616.0,
+        "regions": { "material_regions": {"region_id":"solid"}, "boundary_regions":[] },
+        "other_record": {"region_id":"unrelated"}
+    });
+    normalize_mesh_authoring_summary_json(&mut value);
+    assert_eq!(value["exact"].as_u64(), Some(u64::MAX - 1));
+    assert_eq!(value["wide"].as_u64(), Some((1u64 << 53) + 1));
+    assert_eq!(value["count"].as_u64(), Some(17));
+    assert!(value["too_large"].as_u64().is_none());
+    assert_eq!(
+        value["regions"]["material_regions"],
+        serde_json::json!([{"region_id":"solid"}])
+    );
+    assert_eq!(value["regions"]["boundary_regions"], serde_json::json!([]));
+    assert!(value["other_record"].is_object());
+}

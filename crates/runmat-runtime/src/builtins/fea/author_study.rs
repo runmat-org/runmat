@@ -197,6 +197,19 @@ fn mesh_authoring_summary_from_json(
 fn normalize_mesh_authoring_summary_json(value: &mut serde_json::Value) {
     normalize_integral_json_numbers(value);
     wrap_scalar_string_arrays(value);
+    // Language scalar structures have no surviving one-element-array tag.
+    // Restore cardinality only for the fields whose owning schema is a list.
+    if let Some(regions) = value
+        .get_mut("regions")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for key in ["material_regions", "boundary_regions"] {
+            if let Some(record @ serde_json::Value::Object(_)) = regions.get_mut(key) {
+                let scalar = std::mem::take(record);
+                *record = serde_json::Value::Array(vec![scalar]);
+            }
+        }
+    }
 }
 
 fn normalize_integral_json_numbers(value: &mut serde_json::Value) {
@@ -212,13 +225,16 @@ fn normalize_integral_json_numbers(value: &mut serde_json::Value) {
             }
         }
         serde_json::Value::Number(number) => {
+            if number.is_u64() || number.is_i64() {
+                return;
+            }
             let Some(value) = number.as_f64() else {
                 return;
             };
             if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
                 return;
             }
-            if value > u64::MAX as f64 {
+            if value >= u64::MAX as f64 {
                 return;
             }
             *number = serde_json::Number::from(value as u64);
