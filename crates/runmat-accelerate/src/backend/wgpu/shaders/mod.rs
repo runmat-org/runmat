@@ -29,6 +29,7 @@ pub mod nan;
 pub mod permute;
 pub mod polyder;
 pub mod polyint;
+pub(crate) mod power;
 pub mod polyval;
 pub mod qr_power_iter;
 pub mod reduction;

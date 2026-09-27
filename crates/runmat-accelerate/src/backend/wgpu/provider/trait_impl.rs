@@ -501,6 +501,23 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn classify_real_power<'a>(
+        &'a self,
+        base: &'a GpuTensorHandle,
+        exponent: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::PowerResultDomain> {
+        Box::pin(async move { self.classify_real_power_exec(base, exponent).await })
+    }
+
+    fn real_power_in_domain<'a>(
+        &'a self,
+        base: &'a GpuTensorHandle,
+        exponent: &'a GpuTensorHandle,
+        domain: runmat_accelerate_api::PowerResultDomain,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.real_power_in_domain_exec(base, exponent, domain) })
+    }
+
     fn complex_from_real<'a>(
         &'a self,
         real: &'a GpuTensorHandle,
