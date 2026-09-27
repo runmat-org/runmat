@@ -1,6 +1,7 @@
 //! Bit-preserving storage moves use the allocation's physical element type,
 //! independently of the provider's arithmetic precision.
 use super::*;
+mod permutation;
 
 impl WgpuProvider {
     pub(super) fn get_entry_for_bitwise_move(

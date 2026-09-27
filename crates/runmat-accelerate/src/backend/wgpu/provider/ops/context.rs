@@ -7,6 +7,10 @@ use super::{NumericPrecision, WgpuProvider};
 
 const WGPU_SPAWN_HANDLE_CONCURRENCY: SpawnHandleConcurrency = SpawnHandleConcurrency::Reject;
 
+#[cfg(test)]
+#[path = "context/export_tests.rs"]
+mod export_tests;
+
 impl WgpuProvider {
     pub(crate) fn device_id_exec(&self) -> u32 {
         self.runtime_device_id
@@ -31,11 +35,24 @@ impl WgpuProvider {
         &self,
         handle: &GpuTensorHandle,
     ) -> Option<WgpuBufferRef> {
-        let entry = self.get_entry_raw(handle).ok()?;
+        let mut entry = self
+            .get_entry_for_bitwise_move(handle, "WGPU export")
+            .ok()?;
         if entry.integer_type().is_some()
             || entry.storage != runmat_accelerate_api::GpuTensorStorage::Real
         {
             return None;
+        }
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
+            // Validate the full view before any device dispatch. This local
+            // entry clone changes no borrowed handle or allocation-map record.
+            if entry.shape.as_slice() != [info.base_cols, info.base_rows]
+                || info.base_rows.checked_mul(info.base_cols) != Some(entry.len)
+            {
+                return None;
+            }
+            entry.shape = vec![info.base_rows, info.base_cols];
+            entry = self.permute_buffer_exec(&entry, &[1, 0]).ok()?;
         }
         Some(WgpuBufferRef {
             buffer: entry.buffer,

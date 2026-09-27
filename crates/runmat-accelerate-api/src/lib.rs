@@ -783,7 +783,12 @@ pub struct WgpuContextHandle {
     pub features: wgpu::Features,
 }
 
-/// Borrowed reference to a provider-owned WGPU buffer corresponding to a `GpuTensorHandle`.
+/// Retained WGPU storage in the tensor's logical column-major contiguous order.
+/// Contiguous inputs share their original Arc without copying. Providers must
+/// materialize lazy views on-device before export; shape never describes a
+/// transpose while the buffer silently retains its original physical order.
+/// The Arc owns the exported backing, which can differ from the source tensor's
+/// allocation. Consumers may retain it without retaining a source handle.
 ///
 /// Providers that expose this handle must ensure the buffer was created with
 /// `wgpu::BufferUsages::COPY_SRC`, so zero-copy consumers can export or inspect

@@ -1,0 +1,150 @@
+use super::*;
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
+};
+use std::sync::Arc;
+
+fn read_f32(provider: &WgpuProvider, exported: &WgpuBufferRef) -> Vec<u32> {
+    let bytes = (exported.len * 4) as u64;
+    let staging = provider.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("logical-export-test-readback"),
+        size: bytes,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut encoder = provider.device.create_command_encoder(&Default::default());
+    encoder.copy_buffer_to_buffer(&exported.buffer, 0, &staging, 0, bytes);
+    provider.submit(encoder);
+    let data = futures::executor::block_on(provider.map_readback_bytes(
+        staging,
+        bytes,
+        "logical export test",
+    ))
+    .unwrap();
+    assert_eq!(data.len(), bytes as usize);
+    data.chunks_exact(4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect()
+}
+
+#[test]
+#[ignore = "requires actual WGPU device; explicitly run, no unavailable-device skip"]
+fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_or_registration_leak(
+) {
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    let baseline = provider.placement_resources().live_bytes;
+    let values = [1.25_f32, -0.0, 3.5, 4.25, 5.75, 6.125];
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&values),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let transposed = provider.transpose_exec(&input).unwrap();
+    let original = transposed.clone();
+    let layout = runmat_accelerate_api::handle_transpose_info(&transposed);
+    assert!(layout.is_some());
+    let logical = runmat_accelerate_api::handle_is_logical(&transposed);
+    let class = runmat_accelerate_api::handle_class_identity(&transposed);
+    let provenance = runmat_accelerate_api::handle_provenance(&transposed);
+    let before = provider.telemetry_snapshot();
+    let registered = provider.placement_resources().live_bytes;
+    let contiguous = provider.export_wgpu_buffer_exec(&input).unwrap();
+    assert!(Arc::ptr_eq(
+        &contiguous.buffer,
+        &provider.get_entry_raw(&input).unwrap().buffer
+    ));
+    let exported = provider.export_wgpu_buffer_exec(&transposed).unwrap();
+    assert_eq!(exported.shape, vec![3, 2]);
+    assert_eq!(exported.len, 6);
+    assert_eq!(exported.element_size, 4);
+    assert_eq!(exported.precision, ProviderPrecision::F32);
+    assert_eq!(exported.buffer.size(), 24);
+    assert!(!Arc::ptr_eq(&exported.buffer, &contiguous.buffer));
+    assert_eq!(transposed, original);
+    assert_eq!(
+        runmat_accelerate_api::handle_transpose_info(&transposed),
+        layout
+    );
+    assert_eq!(
+        runmat_accelerate_api::handle_is_logical(&transposed),
+        logical
+    );
+    assert_eq!(
+        runmat_accelerate_api::handle_class_identity(&transposed),
+        class
+    );
+    assert_eq!(
+        runmat_accelerate_api::handle_provenance(&transposed),
+        provenance
+    );
+    assert_eq!(
+        provider.get_entry_raw(&transposed).unwrap().shape,
+        vec![3, 2]
+    );
+    let after = provider.telemetry_snapshot();
+    assert_eq!(after.upload_bytes, before.upload_bytes);
+    assert_eq!(after.download_bytes, before.download_bytes);
+    assert_eq!(
+        provider.placement_resources().live_bytes,
+        registered,
+        "export introduces no temporary tensor registrations"
+    );
+
+    provider.free_exec(&transposed).unwrap();
+    provider.free_exec(&input).unwrap();
+    assert_eq!(provider.placement_resources().live_bytes, baseline);
+    // Both Arc exports, including the materialized independent allocation,
+    // remain valid after source registration retirement and later allocation.
+    let replacement = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[99.0; 6]),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(!Arc::ptr_eq(
+        &provider.get_entry_raw(&replacement).unwrap().buffer,
+        &contiguous.buffer
+    ));
+    assert_eq!(read_f32(&provider, &contiguous), values.map(f32::to_bits));
+    assert_eq!(
+        read_f32(&provider, &exported),
+        [values[0], values[2], values[4], values[1], values[3], values[5]].map(f32::to_bits)
+    );
+    provider.free_exec(&replacement).unwrap();
+}
+
+#[test]
+#[ignore = "requires actual WGPU device; explicitly run, no unavailable-device skip"]
+fn malformed_export_layout_is_rejected_before_dispatch_or_registration() {
+    use runmat_accelerate_api::observation::{
+        with_provider_observation, ProviderObservationStatus, ProviderOperationReceipt,
+    };
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0; 6]),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let transposed = provider.transpose_exec(&input).unwrap();
+    let before = provider.placement_resources().live_bytes;
+    runmat_accelerate_api::record_handle_transpose(&transposed, 1, 6);
+    let mut receipt = ProviderOperationReceipt::new();
+    assert!(
+        with_provider_observation(Some(receipt.recorder()), || provider
+            .export_wgpu_buffer_exec(&transposed))
+        .is_none()
+    );
+    receipt.publish().unwrap();
+    assert!(matches!(
+        receipt.take_completed().unwrap().status,
+        ProviderObservationStatus::Completed { submissions: 0, .. }
+    ));
+    assert_eq!(provider.placement_resources().live_bytes, before);
+    provider.free_exec(&transposed).unwrap();
+    provider.free_exec(&input).unwrap();
+}
