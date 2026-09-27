@@ -121,8 +121,12 @@ fn evaluate_complex(operation: LogarithmOperation, tensor: ComplexTensor) -> Bui
 }
 
 fn evaluate_characters(operation: LogarithmOperation, chars: CharArray) -> BuiltinResult<Value> {
-    let values = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(values, vec![chars.rows, chars.cols])
+    let values = chars
+        .to_column_major()
+        .iter()
+        .map(|&ch| ch as u32 as f64)
+        .collect();
+    let tensor = Tensor::new(values, chars.shape)
         .map_err(|error| super::errors::internal(operation, &error))?;
     evaluate_tensor(operation, tensor)
 }

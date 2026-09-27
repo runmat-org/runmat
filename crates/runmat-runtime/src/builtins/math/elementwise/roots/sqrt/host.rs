@@ -30,16 +30,16 @@ pub(super) fn evaluate_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 
 pub(super) fn evaluate_characters(chars: CharArray) -> BuiltinResult<Value> {
     let values = chars
-        .data
+        .to_column_major()
         .into_iter()
         .map(|value| super::complex::zero_f64((value as u32 as f64).sqrt()))
         .collect();
-    let tensor = Tensor::new(values, vec![chars.rows, chars.cols]).map_err(errors::internal)?;
+    let tensor = Tensor::new(values, chars.shape).map_err(errors::internal)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn evaluate_f64(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
-    if values.iter().all(|value| *value >= 0.0) {
+    if !values.iter().any(|value| *value < 0.0) {
         let output = values
             .into_iter()
             .map(|value| super::complex::zero_f64(value.sqrt()))
@@ -64,7 +64,7 @@ fn evaluate_f64(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
 }
 
 fn evaluate_f32(values: Vec<f32>, shape: Vec<usize>) -> BuiltinResult<Value> {
-    if values.iter().all(|value| *value >= 0.0) {
+    if !values.iter().any(|value| *value < 0.0) {
         let output = values
             .into_iter()
             .map(|value| super::complex::zero_f32(value.sqrt()))

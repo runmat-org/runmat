@@ -6,8 +6,6 @@ use crate::BuiltinResult;
 
 use super::errors;
 
-const ZERO_EPS: f64 = 1e-12;
-
 pub(super) fn evaluate_scalar(real: f64, imag: f64) -> Value {
     let (real, imag) = parts_f64(real, imag);
     Value::Complex(zero_f64(real), zero_f64(imag))
@@ -80,7 +78,7 @@ pub(super) fn parts_f32(real: f32, imag: f32) -> (f32, f32) {
 }
 
 pub(super) fn zero_f64(value: f64) -> f64 {
-    if value.abs() < ZERO_EPS {
+    if value == 0.0 {
         0.0
     } else {
         value
@@ -88,7 +86,7 @@ pub(super) fn zero_f64(value: f64) -> f64 {
 }
 
 pub(super) fn zero_f32(value: f32) -> f32 {
-    if value.abs() < ZERO_EPS as f32 {
+    if value == 0.0 {
         0.0
     } else {
         value

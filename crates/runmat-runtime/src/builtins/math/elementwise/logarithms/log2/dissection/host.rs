@@ -6,12 +6,12 @@ use runmat_value::{CharArray, NumericStorage, Tensor, Value};
 
 pub(super) fn characters(chars: CharArray) -> BuiltinResult<(Value, Value)> {
     let values = chars
-        .data
+        .to_column_major()
         .iter()
         .map(|character| *character as u32 as f64)
         .collect();
-    let tensor = Tensor::new(values, vec![chars.rows, chars.cols])
-        .map_err(|error| errors::internal(OPERATION, &error))?;
+    let tensor =
+        Tensor::new(values, chars.shape).map_err(|error| errors::internal(OPERATION, &error))?;
     tensor_values(tensor)
 }
 
