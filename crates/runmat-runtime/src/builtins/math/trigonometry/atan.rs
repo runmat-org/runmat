@@ -121,6 +121,21 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        return super::inverse_helpers::resident_complex::compute(handle, BUILTIN_NAME, |value| {
+            match value {
+                Value::Complex(re, im) => {
+                    let (re, im) = atan_complex_components(re, im);
+                    Ok(Value::Complex(re, im))
+                }
+                Value::ComplexTensor(tensor) => atan_complex_tensor(tensor),
+                other => atan_real(other),
+            }
+        })
+        .await;
+    }
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {

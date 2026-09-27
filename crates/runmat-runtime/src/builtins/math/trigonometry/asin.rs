@@ -94,6 +94,18 @@ async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn asin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        return super::inverse_helpers::resident_complex::compute(handle, BUILTIN_NAME, |value| {
+            match value {
+                Value::Complex(re, im) => Ok(asin_complex_value(re, im)),
+                Value::ComplexTensor(tensor) => asin_complex_tensor(tensor),
+                other => asin_real(other),
+            }
+        })
+        .await;
+    }
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {

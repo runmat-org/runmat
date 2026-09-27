@@ -97,6 +97,18 @@ async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn acosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        return super::inverse_helpers::resident_complex::compute(handle, BUILTIN_NAME, |value| {
+            match value {
+                Value::Complex(re, im) => Ok(acosh_complex_scalar(re, im)),
+                Value::ComplexTensor(tensor) => acosh_complex_tensor(tensor),
+                other => acosh_real(other),
+            }
+        })
+        .await;
+    }
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {

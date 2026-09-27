@@ -94,6 +94,18 @@ async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_storage(&handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    {
+        return super::inverse_helpers::resident_complex::compute(handle, BUILTIN_NAME, |value| {
+            match value {
+                Value::Complex(re, im) => Ok(acos_complex_value(re, im)),
+                Value::ComplexTensor(tensor) => acos_complex_tensor(tensor),
+                other => acos_real(other),
+            }
+        })
+        .await;
+    }
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {
