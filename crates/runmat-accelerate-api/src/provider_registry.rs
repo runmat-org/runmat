@@ -4,6 +4,21 @@
 use crate::AccelProvider;
 use std::collections::HashMap;
 
+/// Compare retained provider facades under the registry's unique, stable
+/// device-namespace and process/worker-lifetime registration contract.
+///
+/// Both the device namespace and facade data address must agree. Trait-object
+/// vtable addresses are not identity: codegen may duplicate or deduplicate
+/// vtables. Distinct facade objects are not equivalent merely because they
+/// report the same namespace.
+///
+/// This does not register a provider, authorize execution, authenticate a
+/// handle, or compare physical allocation leases. Callers must obtain the
+/// actual registered owners and retain their normal handle/liveness checks.
+pub fn same_provider_instance(left: &dyn AccelProvider, right: &dyn AccelProvider) -> bool {
+    left.device_id() == right.device_id() && std::ptr::addr_eq(left, right)
+}
+
 #[derive(Default)]
 struct Registry {
     default: Option<&'static dyn AccelProvider>,

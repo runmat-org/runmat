@@ -15,6 +15,7 @@ use std::sync::Arc;
 pub mod test_support;
 mod platform;
 mod provider_registry;
+pub use provider_registry::same_provider_instance;
 pub use platform::AcceleratorThreadBound;
 pub mod allocation;
 pub use allocation::{

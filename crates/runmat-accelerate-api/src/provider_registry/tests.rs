@@ -20,6 +20,54 @@ static FIRST: Provider = Provider(91);
 static SECOND: Provider = Provider(92);
 
 #[test]
+fn provider_instance_requires_namespace_and_facade_not_vtable_identity() {
+    fn erase(provider: &Provider) -> &dyn AccelProvider {
+        provider
+    }
+    let first = Provider(next_device_id());
+    let distinct = Provider(first.device_id());
+    let other_namespace = Provider(next_device_id());
+    let direct: &dyn AccelProvider = &first;
+    assert!(same_provider_instance(direct, erase(&first)));
+    assert!(same_provider_instance(erase(&first), direct));
+    // Deliberately do not register these duplicate-namespace objects: the
+    // registry forbids ambiguous live owners. Identity still rejects them.
+    assert!(!same_provider_instance(&first, &distinct));
+    assert!(!same_provider_instance(&first, &other_namespace));
+}
+
+#[test]
+fn same_data_address_does_not_override_a_different_namespace() {
+    #[repr(C)]
+    struct Facade {
+        inner: Provider,
+        namespace: u32,
+    }
+    impl AccelProvider for Facade {
+        fn device_id(&self) -> u32 {
+            self.namespace
+        }
+        fn device_info(&self) -> String {
+            "outer fixture facade".into()
+        }
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload(host)
+        }
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+    }
+    let facade = Facade {
+        inner: Provider(next_device_id()),
+        namespace: next_device_id(),
+    };
+    let outer: &dyn AccelProvider = &facade;
+    let inner: &dyn AccelProvider = &facade.inner;
+    assert!(std::ptr::addr_eq(outer, inner));
+    assert!(!same_provider_instance(outer, inner));
+}
+
+#[test]
 fn worker_registry_state_and_default_reset_do_not_cross_owners() {
     let mut first = Registry::default();
     let mut second = Registry::default();

@@ -65,7 +65,8 @@ pub(crate) fn validate_constructor_gpu_output_protecting(
             .any(|input| output.shares_allocation_with(input))
         && output.device_id() == provider.device_id()
         && output.shape() == expected_shape
-        && exact_provider_for_handle(&output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && exact_provider_for_handle(&output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && output.descriptor().storage == Some(expected_storage)
         && (if expected_logical {
             expected_storage == runmat_accelerate_api::GpuTensorStorage::Real
