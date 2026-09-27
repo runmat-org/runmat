@@ -1041,167 +1041,141 @@ pub(crate) mod tests {
     #[test]
     fn dot_validates_requested_precision_and_hostile_result_metadata() {
         test_support::with_test_provider(|provider| {
-            let lhs_f32 = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
-                    shape: &[2, 3],
-                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                })
-                .expect("single lhs upload");
-            let rhs_f32 = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F32(&[6.0, 5.0, 4.0, 3.0, 2.0, 1.0]),
-                    shape: &[2, 3],
-                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                })
-                .expect("single rhs upload");
-            let mut f32_output = provider
-                .upload_numeric(&HostNumericTensorView {
-                    data: HostNumericDataView::F32(&[21.0, 22.0, 23.0]),
-                    shape: &[1, 3],
-                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                })
-                .expect("single result upload");
+            let upload_single = |data: &[f32], shape: &[usize]| {
+                runmat_accelerate_api::upload_numeric_protecting(
+                    provider,
+                    &HostNumericTensorView {
+                        data: HostNumericDataView::F32(data),
+                        shape,
+                        storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    },
+                    &[],
+                )
+                .unwrap()
+            };
+            let lhs_single = upload_single(&[1.0; 6], &[2, 3]);
+            let rhs_single = upload_single(&[2.0; 6], &[2, 3]);
+            let single_output = upload_single(&[4.0; 3], &[1, 3]);
             assert!(valid_provider_dot_output(
-                &f32_output,
-                &lhs_f32,
-                &rhs_f32,
+                &single_output,
+                &lhs_single,
+                &rhs_single,
                 provider,
-                Some(1),
+                Some(1)
             ));
-
-            f32_output.descriptor.element_type =
-                Some(runmat_accelerate_api::NumericElementType::F64);
+            let double_output = provider
+                .upload(&HostTensorView {
+                    data: &[4.0; 3],
+                    shape: &[1, 3],
+                })
+                .unwrap();
             assert!(!valid_provider_dot_output(
-                &f32_output,
-                &lhs_f32,
-                &rhs_f32,
+                &double_output,
+                &lhs_single,
+                &rhs_single,
                 provider,
-                Some(1),
+                Some(1)
             ));
-            provider.free(&f32_output).expect("free precision result");
-            provider.free(&lhs_f32).expect("free single lhs");
-            provider.free(&rhs_f32).expect("free single rhs");
 
             let lhs = provider
                 .upload(&HostTensorView {
-                    data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    data: &[1.0; 6],
                     shape: &[2, 3],
                 })
-                .expect("lhs upload");
+                .unwrap();
             let rhs = provider
                 .upload(&HostTensorView {
-                    data: &[6.0, 5.0, 4.0, 3.0, 2.0, 1.0],
+                    data: &[2.0; 6],
                     shape: &[2, 3],
                 })
-                .expect("rhs upload");
-            let make_output = || {
-                provider
-                    .upload(&HostTensorView {
-                        data: &[21.0, 22.0, 23.0],
-                        shape: &[1, 3],
-                    })
-                    .expect("result upload")
-            };
-
-            let wrong_shape = {
-                let mut handle = make_output();
-                handle.shape = vec![3, 1];
-                handle
-            };
-            assert!(!valid_provider_dot_output(
-                &wrong_shape,
+                .unwrap();
+            assert!(valid_provider_dot_output(
+                &double_output,
                 &lhs,
                 &rhs,
                 provider,
-                Some(1),
+                Some(1)
             ));
-            provider
-                .free(&wrong_shape)
-                .expect("free wrong-shape result");
-
-            let mut wrong_storage = make_output();
-            wrong_storage.descriptor.storage =
-                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
+            let wrong_shape = double_output
+                .with_view(double_output.view().clone().with_shape(vec![3, 1]))
+                .unwrap();
+            let complex = gpu_helpers::upload_complex_tensor_protecting(
+                provider,
+                &ComplexTensor::new(vec![(1.0, 2.0); 3], vec![1, 3]).unwrap(),
+                &[&lhs, &rhs],
+            )
+            .unwrap();
+            let integer = runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::I16(&[1; 3]),
+                    shape: &[1, 3],
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                },
+                &[&lhs, &rhs],
+            )
+            .unwrap();
+            let logical = runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1; 3],
+                    shape: &[1, 3],
+                },
+                &[&lhs, &rhs],
+            )
+            .unwrap();
+            for rejected in [wrong_shape, complex, integer, logical] {
+                assert!(!valid_provider_dot_output(
+                    &rejected,
+                    &lhs,
+                    &rhs,
+                    provider,
+                    Some(1)
+                ));
+                let error = reject_dot_output(rejected);
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            }
+            let alias = lhs.with_view(lhs.view().clone()).unwrap();
             assert!(!valid_provider_dot_output(
-                &wrong_storage,
+                &alias,
                 &lhs,
                 &rhs,
                 provider,
-                Some(1),
-            ));
-            provider
-                .free(&wrong_storage)
-                .expect("free wrong-storage result");
-
-            let mut integer = make_output();
-            integer.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::I16);
-            assert!(!valid_provider_dot_output(
-                &integer,
-                &lhs,
-                &rhs,
-                provider,
-                Some(1),
-            ));
-            provider.free(&integer).expect("free integer result");
-
-            let logical = make_output();
-            runmat_accelerate_api::set_handle_logical(&logical, true);
-            assert!(!valid_provider_dot_output(
-                &logical,
-                &lhs,
-                &rhs,
-                provider,
-                Some(1),
-            ));
-            provider.free(&logical).expect("free logical result");
-
-            let mut owned_rejection = make_output();
-            owned_rejection.descriptor.storage =
-                Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-            let error = reject_dot_output(owned_rejection);
-            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
-
-            let mut native_alias = lhs.clone();
-            native_alias.shape = vec![1, 3];
-            assert!(!valid_provider_dot_output(
-                &native_alias,
-                &lhs,
-                &rhs,
-                provider,
-                Some(1),
+                Some(1)
             ));
             assert!(!valid_dot_uploaded_output(
-                &native_alias,
+                &alias,
                 &lhs,
                 provider,
                 &[1, 3],
-                runmat_accelerate_api::ProviderPrecision::F64,
+                runmat_accelerate_api::ProviderPrecision::F64
             ));
-            let error = reject_dot_output(native_alias);
-            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
-            assert!(block_on(provider.download(&lhs)).is_ok());
+            let _error = reject_dot_output(alias);
+            lhs.allocation_lease().validate_live().unwrap();
+            rhs.allocation_lease().validate_live().unwrap();
 
-            let unowned_rejection = runmat_accelerate_api::GpuTensorHandle {
-                device_id: lhs.device_id.wrapping_add(10_000),
-                buffer_id: lhs.buffer_id,
-                shape: vec![1, 3],
-                descriptor: Default::default(),
-            };
+            let foreign_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+            let foreign = foreign_owner
+                .allocate_zeroed(
+                    vec![1, 3],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
             assert!(!valid_provider_dot_output(
-                &unowned_rejection,
+                &foreign.handle,
                 &lhs,
                 &rhs,
                 provider,
-                Some(1),
+                Some(1)
             ));
-            assert!(resolved_actual_dot_owner(&unowned_rejection).is_none());
-            let error = reject_dot_output(unowned_rejection);
-            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
-            assert!(block_on(provider.download(&lhs)).is_ok());
-
-            provider.free(&lhs).expect("free lhs");
-            provider.free(&rhs).expect("free rhs");
+            assert!(resolved_actual_dot_owner(&foreign.handle).is_none());
+            let _error = reject_dot_output(foreign.handle);
+            assert_eq!(foreign.probe.retirements(), 1);
+            assert_eq!(
+                block_on(provider.download(&lhs)).unwrap().data,
+                vec![1.0; 6]
+            );
         });
     }
 
@@ -1629,14 +1603,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
+    #[ignore = "requires an actual WGPU adapter; run the explicit hardware gate"]
     fn dot_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _guard = test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .expect("requested vector-product hardware gate requires an actual WGPU adapter");
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let lhs = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![6.0, 3.0, 5.0, 1.0], vec![2, 2]).unwrap();
         let cpu = dot_real_tensor(&lhs, &rhs, Some(1)).expect("cpu dot");
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_lhs = HostTensorView {
             data: &lhs.materialize_f64(),
             shape: &lhs.shape,

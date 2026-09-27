@@ -1272,7 +1272,7 @@ pub(crate) mod tests {
         else {
             panic!("owner-restored output")
         };
-        assert_eq!(output.device_id, provider_a.device_id());
+        assert_eq!(output.device_id(), provider_a.device_id());
         let gathered = block_on(provider_a.download(&output)).unwrap();
         assert_eq!(gathered.data, vec![0.0, 0.0, 1.0]);
     }
@@ -1470,7 +1470,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn cross_frees_rejected_native_result_before_fallback() {
+    fn cross_retires_rejected_native_result_without_fallback() {
         test_support::with_rejecting_native_result_provider(|provider| {
             let lhs = provider
                 .upload(&HostTensorView {
@@ -1484,11 +1484,15 @@ pub(crate) mod tests {
                     shape: &[1, 3],
                 })
                 .unwrap();
-            let result = cross_builtin(Value::GpuTensor(lhs), Value::GpuTensor(rhs), Vec::new())
-                .expect("cross fallback");
-            let result = test_support::gather(result).expect("gather fallback");
-            assert_eq!(result.shape, vec![1, 3]);
-            assert_eq!(result.materialize_f64(), vec![0.0, 0.0, 1.0]);
+            let error = cross_builtin(
+                Value::GpuTensor(lhs.clone()),
+                Value::GpuTensor(rhs.clone()),
+                Vec::new(),
+            )
+            .expect_err("malformed provider output is not an Unsupported route");
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            lhs.allocation_lease().validate_live().unwrap();
+            rhs.allocation_lease().validate_live().unwrap();
             assert_eq!(provider.free_count(), 1);
         });
     }
@@ -1496,14 +1500,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
+    #[ignore = "requires an actual WGPU adapter; run the explicit hardware gate"]
     fn cross_wgpu_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        let _guard = test_support::accel_test_lock();
+        let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
+        )
+        .expect("requested vector-product hardware gate requires an actual WGPU adapter");
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let lhs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
         let rhs = Tensor::new(vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0], vec![2, 3]).unwrap();
         let cpu = cross_real_tensor(&lhs, &rhs, Some(2), false).expect("cpu cross");
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view_lhs = HostTensorView {
             data: &lhs.materialize_f64(),
             shape: &lhs.shape,
