@@ -608,7 +608,6 @@ mod tests {
             let double_handle =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &double)
                     .expect("upload");
-            runmat_accelerate_api::set_handle_class_identity(&double_handle, "double");
             call_with_mode(Value::GpuTensor(double_handle), false)
                 .expect("provider precision does not change documented double class");
 
@@ -617,7 +616,6 @@ mod tests {
                     Tensor::from_f32(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
                 let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix)
                     .expect("upload");
-                runmat_accelerate_api::set_handle_class_identity(&handle, "single");
                 handle
             };
             let error = call_with_mode(Value::GpuTensor(upload()), false)

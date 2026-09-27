@@ -1,9 +1,7 @@
 //! Black-Scholes option pricing and implied volatility builtins.
 
-use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
-    ProviderBlackScholesPriceInput, ProviderBlackScholesPriceRequest,
-};
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -283,6 +281,13 @@ async fn blsprice_builtin(
     if matches!(requested_outputs, Some(0)) {
         return Ok(Value::OutputList(Vec::new()));
     }
+    if matches!(requested_outputs, Some(count) if count > 2) {
+        return Err(error(
+            BLSPRICE,
+            "blsprice: too many output arguments",
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
     if rest.len() > 1 {
         return Err(error(
             BLSPRICE,
@@ -492,174 +497,8 @@ fn numeric_input(builtin: &'static str, value: Value) -> BuiltinResult<NumericIn
     })
 }
 
-struct BlsPriceGpuEval {
-    provider: &'static dyn AccelProvider,
-    call: GpuTensorHandle,
-    put: GpuTensorHandle,
-}
-
-impl BlsPriceGpuEval {
-    fn output(self, requested_outputs: Option<usize>) -> BuiltinResult<Value> {
-        match requested_outputs {
-            Some(0) => {
-                let _ = self.provider.free(&self.call);
-                let _ = self.provider.free(&self.put);
-                Ok(Value::OutputList(Vec::new()))
-            }
-            Some(1) => {
-                let _ = self.provider.free(&self.put);
-                Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
-                    self.call,
-                )]))
-            }
-            Some(2) => Ok(Value::OutputList(vec![
-                gpu_helpers::resident_gpu_value(self.call),
-                gpu_helpers::resident_gpu_value(self.put),
-            ])),
-            Some(_) => {
-                let _ = self.provider.free(&self.call);
-                let _ = self.provider.free(&self.put);
-                Err(error(
-                    BLSPRICE,
-                    "blsprice: too many output arguments",
-                    &ERROR_INVALID_ARGUMENT,
-                ))
-            }
-            None => {
-                let _ = self.provider.free(&self.put);
-                Ok(gpu_helpers::resident_gpu_value(self.call))
-            }
-        }
-    }
-}
-
-struct GpuPreparedNumericInput {
-    handle: GpuTensorHandle,
-    shape: Vec<usize>,
-    aligned_shape: Vec<usize>,
-    strides: Vec<usize>,
-    temporary: bool,
-}
-
-impl GpuPreparedNumericInput {
-    fn free_if_temporary(&self, provider: &'static dyn AccelProvider) {
-        if self.temporary {
-            let _ = provider.free(&self.handle);
-        }
-    }
-}
-
-async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<BlsPriceGpuEval>> {
-    let Some(anchor) = values.iter().find_map(|value| match value {
-        Value::GpuTensor(handle) => Some(handle),
-        _ => None,
-    }) else {
-        return Ok(None);
-    };
-
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(anchor) else {
-        return Ok(None);
-    };
-
-    let mut prepared = Vec::with_capacity(values.len());
-    for value in values {
-        prepared.push(prepare_blsprice_gpu_input(provider, value)?);
-    }
-
-    let mut output_shape = vec![1, 1];
-    for input in &prepared {
-        output_shape = broadcast::broadcast_shapes(BLSPRICE, &output_shape, &input.shape)
-            .map_err(|err| error(BLSPRICE, format!("{BLSPRICE}: {err}"), &ERROR_INVALID_INPUT))?;
-    }
-    let len = shape_len_checked(BLSPRICE, &output_shape)?;
-    let rank = output_shape.len();
-    for input in &mut prepared {
-        input.aligned_shape = broadcast::align_shape(&input.shape, rank);
-        input.strides = broadcast::compute_strides(&input.aligned_shape);
-    }
-
-    let request_inputs = prepared
-        .iter()
-        .map(|input| ProviderBlackScholesPriceInput {
-            handle: &input.handle,
-            shape: &input.aligned_shape,
-            strides: &input.strides,
-        })
-        .collect::<Vec<_>>();
-    let result = provider.black_scholes_price(&ProviderBlackScholesPriceRequest {
-        inputs: &request_inputs,
-        output_shape: &output_shape,
-        len,
-    });
-
-    for input in &prepared {
-        input.free_if_temporary(provider);
-    }
-
-    match result {
-        Ok(result) => Ok(Some(BlsPriceGpuEval {
-            provider,
-            call: result.call,
-            put: result.put,
-        })),
-        Err(_) => Ok(None),
-    }
-}
-
-fn prepare_blsprice_gpu_input(
-    provider: &'static dyn AccelProvider,
-    value: &Value,
-) -> BuiltinResult<GpuPreparedNumericInput> {
-    match value {
-        Value::GpuTensor(handle) => {
-            if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
-            {
-                return Err(error(
-                    BLSPRICE,
-                    "blsprice: complex gpuArray inputs are not supported",
-                    &ERROR_INVALID_INPUT,
-                ));
-            }
-            Ok(GpuPreparedNumericInput {
-                handle: handle.clone(),
-                shape: canonical_shape(&handle.shape),
-                aligned_shape: Vec::new(),
-                strides: Vec::new(),
-                temporary: false,
-            })
-        }
-        other => {
-            let numeric = numeric_input(BLSPRICE, other.clone())?;
-            upload_blsprice_gpu_input(provider, numeric.values, numeric.shape)
-        }
-    }
-}
-
-fn upload_blsprice_gpu_input(
-    provider: &'static dyn AccelProvider,
-    data: Vec<f64>,
-    shape: Vec<usize>,
-) -> BuiltinResult<GpuPreparedNumericInput> {
-    let handle = provider
-        .upload(&HostTensorView {
-            data: &data,
-            shape: &shape,
-        })
-        .map_err(|err| {
-            error(
-                BLSPRICE,
-                format!("blsprice: gpu upload failed: {err}"),
-                &ERROR_INTERNAL,
-            )
-        })?;
-    Ok(GpuPreparedNumericInput {
-        handle,
-        shape,
-        aligned_shape: Vec::new(),
-        strides: Vec::new(),
-        temporary: true,
-    })
-}
+mod resident;
+use resident::try_blsprice_gpu;
 
 fn tensor_shape(shape: &[usize], rows: usize, cols: usize) -> Vec<usize> {
     if shape.is_empty() {
