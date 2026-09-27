@@ -154,11 +154,11 @@ impl FixtureCudaProvider {
 
 impl AccelProvider for FixtureCudaProvider {
     fn upload(&self, host: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
-        self.upload_numeric(&HostNumericTensorView {
+        Ok(self.upload_numeric(&HostNumericTensorView {
             data: HostNumericDataView::F64(host.data),
             shape: host.shape,
             storage: GpuTensorStorage::Real,
-        })
+        })?)
     }
 
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
