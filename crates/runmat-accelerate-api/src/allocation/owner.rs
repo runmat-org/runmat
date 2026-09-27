@@ -80,10 +80,12 @@ pub trait AllocationOwner: AllocationOwnerThreadBound + 'static {
 
     /// Admit the requested interpretation using the existing allocation/view
     /// record and trusted producer facts. Structural capacity validation alone
-    /// does not prove logical payload encoding. A numeric allocation cannot
+    /// does not establish an admitted logical type. A numeric allocation cannot
     /// acquire logical classification from a caller or deserialized flag;
     /// only an already admitted producer result (or lawful transformation of
-    /// that result) supplies that evidence. Do not scan or download payloads
+    /// that result) supplies that evidence. Native ABI uninitialized logical
+    /// allocations carry class intent, not proof of initialized 0/1 values.
+    /// Do not scan or download payloads
     /// here. Reject interpretations lacking existing evidence.
     ///
     /// The lease stays strong throughout this call. As with live validation,

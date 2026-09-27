@@ -42,6 +42,32 @@ pub enum NativeDeviceInitialization {
     Zeroed,
 }
 
+/// Admitted native ABI class, not a claim about values in uninitialized memory.
+/// Logical native arrays are byte-addressable; callers cannot supply a
+/// contradictory independent element type and logical flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeDeviceClass {
+    Numeric(NumericElementType),
+    Logical,
+}
+impl NativeDeviceClass {
+    pub const fn element_type(self) -> NumericElementType {
+        match self {
+            Self::Numeric(element) => element,
+            Self::Logical => NumericElementType::U8,
+        }
+    }
+    pub const fn is_logical(self) -> bool {
+        matches!(self, Self::Logical)
+    }
+    pub fn validate_storage(self, storage: GpuTensorStorage) -> anyhow::Result<()> {
+        if self.is_logical() && storage != GpuTensorStorage::Real {
+            anyhow::bail!("native logical arrays require real byte storage");
+        }
+        Ok(())
+    }
+}
+
 /// Component selected from an interleaved complex native buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeDeviceComponent {
@@ -177,9 +203,11 @@ pub fn validate_native_device_result(
     handle: &GpuTensorHandle,
     provider_device_id: u32,
     shape: &[usize],
-    element_type: NumericElementType,
+    class: NativeDeviceClass,
     storage: GpuTensorStorage,
 ) -> anyhow::Result<()> {
+    class.validate_storage(storage)?;
+    let element_type = class.element_type();
     if handle.device_id() != provider_device_id {
         anyhow::bail!(
             "provider returned device {} for an operation on device {}",
@@ -194,7 +222,10 @@ pub fn validate_native_device_result(
             shape
         );
     }
-    if handle.physical().element_type() != element_type || handle.physical().storage() != storage {
+    if handle.physical().element_type() != element_type
+        || handle.physical().storage() != storage
+        || handle.view().is_logical() != class.is_logical()
+    {
         anyhow::bail!(
             "provider returned numeric layout {:?}; requested {:?} {:?}",
             handle.descriptor(),
@@ -251,7 +282,7 @@ mod tests {
             &expected,
             41,
             &[2, 3],
-            NumericElementType::F64,
+            NativeDeviceClass::Numeric(NumericElementType::F64),
             GpuTensorStorage::Real,
         )
         .unwrap();
@@ -266,7 +297,7 @@ mod tests {
             &wrong_device,
             41,
             &[2, 3],
-            NumericElementType::F64,
+            NativeDeviceClass::Numeric(NumericElementType::F64),
             GpuTensorStorage::Real,
         )
         .is_err());
@@ -278,7 +309,7 @@ mod tests {
             &wrong_shape,
             41,
             &[2, 3],
-            NumericElementType::F64,
+            NativeDeviceClass::Numeric(NumericElementType::F64),
             GpuTensorStorage::Real,
         )
         .is_err());
@@ -293,7 +324,7 @@ mod tests {
             &wrong_layout,
             41,
             &[2, 3],
-            NumericElementType::F64,
+            NativeDeviceClass::Numeric(NumericElementType::F64),
             GpuTensorStorage::Real,
         )
         .is_err());
@@ -310,5 +341,53 @@ mod tests {
         let error = guard.leave().unwrap_err();
         assert_eq!(error.to_string(), "fixture context-pop failure");
         assert_eq!(attempts.get(), 1);
+    }
+
+    #[test]
+    fn logical_native_class_preserves_byte_encoding_and_rejects_numeric_relabeling() {
+        assert_eq!(
+            NativeDeviceClass::Logical.element_type(),
+            NumericElementType::U8
+        );
+        assert!(NativeDeviceClass::Logical
+            .validate_storage(GpuTensorStorage::ComplexInterleaved)
+            .is_err());
+        let (logical, _) = crate::test_support::owned(
+            41,
+            vec![2],
+            NumericElementType::U8,
+            GpuTensorStorage::Real,
+            true,
+        );
+        validate_native_device_result(
+            &logical,
+            41,
+            &[2],
+            NativeDeviceClass::Logical,
+            GpuTensorStorage::Real,
+        )
+        .unwrap();
+        let numeric = crate::test_support::handle(
+            41,
+            vec![2],
+            NumericElementType::U8,
+            GpuTensorStorage::Real,
+        );
+        assert!(validate_native_device_result(
+            &numeric,
+            41,
+            &[2],
+            NativeDeviceClass::Logical,
+            GpuTensorStorage::Real
+        )
+        .is_err());
+        assert!(validate_native_device_result(
+            &logical,
+            41,
+            &[2],
+            NativeDeviceClass::Numeric(NumericElementType::U8),
+            GpuTensorStorage::Real
+        )
+        .is_err());
     }
 }

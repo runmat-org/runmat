@@ -1612,7 +1612,7 @@ pub trait AccelProvider: Send + Sync {
     fn allocate_native_device_buffer(
         &self,
         _shape: &[usize],
-        _element_type: NumericElementType,
+        _class: NativeDeviceClass,
         _storage: GpuTensorStorage,
         _initialization: NativeDeviceInitialization,
     ) -> anyhow::Result<GpuTensorHandle> {
