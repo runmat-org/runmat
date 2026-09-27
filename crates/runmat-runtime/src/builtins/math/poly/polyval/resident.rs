@@ -7,7 +7,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderExecutionError, ProviderPolyvalMu,
     ProviderPolyvalOptions, ProviderPrecision,
 };
-use runmat_value::{NumericStorage, Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 #[cfg(test)]
 #[path = "resident_tests.rs"]
@@ -46,18 +46,17 @@ impl Request {
     }
 
     fn native_tensor(&self, data: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Tensor> {
-        let storage = match self
+        let tensor = match self
             .owner
             .expect("owner admitted before preparation")
             .precision()
         {
             ProviderPrecision::F32 => {
-                NumericStorage::F32(data.into_iter().map(|value| value as f32).collect())
+                Tensor::from_f32(data.into_iter().map(|value| value as f32).collect(), shape)
             }
-            ProviderPrecision::F64 => NumericStorage::F64(data),
+            ProviderPrecision::F64 => Tensor::new(data, shape),
         };
-        Tensor::new_numeric(storage, shape)
-            .map_err(|error| polyval_error(format!("polyval: {error}")))
+        tensor.map_err(|error| polyval_error(format!("polyval: {error}")))
     }
 
     fn upload(
