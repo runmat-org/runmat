@@ -15,6 +15,8 @@ pub enum Mode {
     Dead,
     Alias,
     Siblings,
+    ExplicitSibling,
+    LowerShape,
     Pending,
     Unsupported,
 }
@@ -24,6 +26,7 @@ pub enum Upload {
     Unsupported,
     Failure,
     Alias,
+    SecondFailure,
 }
 
 pub struct Provider {
@@ -110,7 +113,14 @@ impl AccelProvider for Provider {
         panic!("native download required")
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.uploads.fetch_add(1, Ordering::SeqCst);
+        let upload = self.uploads.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.upload, Upload::SecondFailure) && upload == 1 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "second upload failure",
+            )
+            .into());
+        }
         match self.upload {
             Upload::Unsupported => {
                 return Err(unsupported_provider_operation(
@@ -125,7 +135,7 @@ impl AccelProvider for Provider {
                 .into())
             }
             Upload::Alias => return Ok(self.borrowed.lock().unwrap().as_ref().unwrap().clone()),
-            Upload::Good => {}
+            Upload::Good | Upload::SecondFailure => {}
         }
         let data = match host.data {
             HostNumericDataView::F32(data) => HostNumericDataOwned::F32(data.to_vec()),
@@ -195,6 +205,13 @@ impl AccelProvider for Provider {
                 upper.clone()
             } else {
                 self.output(request.input, GpuTensorStorage::Real)?
+            };
+            let lower = if matches!(self.mode, Mode::ExplicitSibling) {
+                lower.with_provenance(GpuHandleProvenance::Explicit)?
+            } else if matches!(self.mode, Mode::LowerShape) {
+                lower.with_view(lower.view().clone().with_shape(vec![1, 4]))?
+            } else {
+                lower
             };
             if matches!(self.mode, Mode::Pending) {
                 std::future::pending::<()>().await;

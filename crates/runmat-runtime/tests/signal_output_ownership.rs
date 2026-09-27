@@ -1,6 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 #[path = "signal_output_ownership/provider.rs"]
 mod provider;
+#[path = "signal_output_ownership/siblings.rs"]
+mod siblings;
 
 use futures::{executor::block_on, task::noop_waker};
 use provider::{Mode, Provider, Upload};

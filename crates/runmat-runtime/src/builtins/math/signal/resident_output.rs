@@ -53,11 +53,8 @@ pub(super) fn admit(
         error.gpu_gather_retry = GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(output, error));
     }
-    gpu_helpers::propagate_output_provenance(
-        &mut output,
-        std::iter::once(input).chain(protected.iter().copied()),
-    )
-    .map_err(|mut error| {
+    // Protected siblings are alias exclusions, not caller intent authorities.
+    gpu_helpers::propagate_output_provenance(&mut output, [input]).map_err(|mut error| {
         error.gpu_gather_retry = GpuGatherRetry::Never;
         error
     })?;
