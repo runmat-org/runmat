@@ -36,6 +36,16 @@ impl std::fmt::Display for GpuDomainProbeError {
     }
 }
 
+impl std::error::Error for GpuDomainProbeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ProviderReduce(error) => Some(error.as_ref()),
+            Self::ProviderDownload(error) => Some(error.as_ref()),
+            _ => None,
+        }
+    }
+}
+
 /// Determine whether any real resident input value falls below a caller-defined bound.
 ///
 /// A provider that does not implement `reduce_min` leaves the requirement

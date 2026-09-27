@@ -1,5 +1,7 @@
 pub(super) mod contract;
 mod restore;
+#[cfg(test)]
+mod owning_tests;
 
 use super::super::domain_probe::{probe_gpu_lower_bound, GpuLowerBoundResult};
 use super::operation::LogarithmOperation;
@@ -20,18 +22,22 @@ pub(super) async fn evaluate(
             "GPU input class metadata contradicts its physical storage",
         )
     })?;
-    let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     if requires_host_input(&handle) {
-        return restore::fallback(operation, provider, &handle, &metadata).await;
+        return restore::fallback(operation, provider, &handle).await;
     }
 
     match probe_gpu_lower_bound(provider, &handle, operation.real_boundary())
         .await
-        .map_err(|error| super::errors::internal(operation, error.to_string()))?
-    {
+        .map_err(|error| {
+            let mut failure = super::errors::internal(operation, error.to_string());
+            failure.source = Some(Box::new(error));
+            failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            failure
+        })? {
         GpuLowerBoundResult::Below => {
             ensure_explicit_complex_extension(operation, &handle)?;
-            restore::fallback(operation, provider, &handle, &metadata).await
+            restore::fallback(operation, provider, &handle).await
         }
         GpuLowerBoundResult::AtOrAbove => {
             let result = {
@@ -41,17 +47,20 @@ pub(super) async fn evaluate(
             match result {
                 Ok(output) => contract::validate(operation, provider, &handle, output),
                 Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                    restore::fallback(operation, provider, &handle, &metadata).await
+                    restore::fallback(operation, provider, &handle).await
                 }
-                Err(error) => Err(super::errors::internal(
-                    operation,
-                    format!("provider unary operation failed: {error}"),
-                )),
+                Err(error) => {
+                    let mut failure = super::errors::internal(
+                        operation,
+                        format!("provider unary operation failed: {error}"),
+                    );
+                    failure.source = Some(error.into_boxed_dyn_error());
+                    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    Err(failure)
+                }
             }
         }
-        GpuLowerBoundResult::Unknown => {
-            restore::fallback(operation, provider, &handle, &metadata).await
-        }
+        GpuLowerBoundResult::Unknown => restore::fallback(operation, provider, &handle).await,
     }
 }
 

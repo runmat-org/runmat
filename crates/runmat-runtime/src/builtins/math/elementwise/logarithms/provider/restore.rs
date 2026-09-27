@@ -8,13 +8,11 @@ pub(super) async fn fallback(
     operation: LogarithmOperation,
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-    metadata: &gpu_helpers::GpuHandleMetadataSnapshot,
 ) -> BuiltinResult<Value> {
     let gathered = {
         let _metadata = gpu_helpers::ResidencyRestoreGuard::new(handle);
         gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await
     };
-    gpu_helpers::restore_handle_metadata(handle, metadata);
     let gathered =
         gathered.map_err(|flow| map_control_flow_with_builtin(flow, operation.name()))?;
     let result = super::super::host::evaluate(operation, gathered)?;
@@ -44,5 +42,4 @@ fn restore(
         ));
     }
     gpu_helpers::restore_class_preserving_value(handle, result, operation.name())
-        .map_err(|error| super::super::errors::internal(operation, error.message()))
 }
