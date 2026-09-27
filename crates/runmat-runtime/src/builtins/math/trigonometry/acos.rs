@@ -105,8 +105,8 @@ async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         .await;
     }
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        match detect_gpu_requires_complex(provider, &handle).await {
-            Ok(false) => match provider.unary_acos(&handle).await {
+        match detect_gpu_requires_complex(provider, &handle).await? {
+            Some(false) => match provider.unary_acos(&handle).await {
                 Ok(output) => {
                     return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
                         provider,
@@ -123,7 +123,7 @@ async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     ))
                 }
             },
-            Ok(true) => {
+            Some(true) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &ACOS_GPU_REAL_COMPLEX_EXTENSION,
                     BUILTIN_NAME,
@@ -135,7 +135,7 @@ async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 )
                 .await;
             }
-            Err(_) => {
+            None => {
                 // Fall back to host path below.
             }
         }
@@ -151,57 +151,14 @@ async fn acos_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
-) -> BuiltinResult<bool> {
-    let min_handle = provider.reduce_min(handle).await.map_err(|e| {
-        acos_error_with_detail(&ACOS_ERROR_INTERNAL, format!("reduce_min failed: {e}"))
-    })?;
-    let max_handle = match provider.reduce_max(handle).await {
-        Ok(handle) => handle,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            return Err(acos_error_with_detail(
-                &ACOS_ERROR_INTERNAL,
-                format!("reduce_max failed: {err}"),
-            ));
-        }
-    };
-    let min_host = match gpu_helpers::download_native_values_async(provider, &min_handle).await {
-        Ok(host) => host,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return Err(acos_error_with_detail(
-                &ACOS_ERROR_INTERNAL,
-                format!("reduce_min download failed: {err}"),
-            ));
-        }
-    };
-    let max_host = match gpu_helpers::download_native_values_async(provider, &max_handle).await {
-        Ok(host) => host,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return Err(acos_error_with_detail(
-                &ACOS_ERROR_INTERNAL,
-                format!("reduce_max download failed: {err}"),
-            ));
-        }
-    };
-    let _ = provider.free(&min_handle);
-    let _ = provider.free(&max_handle);
-    if min_host.data.iter().any(|value| value.is_nan())
-        || max_host.data.iter().any(|value| value.is_nan())
-    {
-        return Err(acos_error_with_detail(
-            &ACOS_ERROR_INTERNAL,
-            "reduction results contained NaN",
-        ));
-    }
-    Ok(min_host
-        .data
-        .iter()
-        .chain(&max_host.data)
-        .any(|value| value.is_outside_closed_unit_interval(0.0)))
+) -> BuiltinResult<Option<bool>> {
+    super::inverse_helpers::resident_range::requires_complex(
+        provider,
+        handle,
+        super::inverse_helpers::resident_range::RealDomain::ClosedUnitInterval,
+        BUILTIN_NAME,
+    )
+    .await
 }
 
 fn acos_real(value: Value) -> BuiltinResult<Value> {

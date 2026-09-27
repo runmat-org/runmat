@@ -133,75 +133,13 @@ async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<Option<bool>> {
-    if handle.shape.contains(&0) {
-        return Ok(None);
-    }
-    let min_handle = match provider.reduce_min(handle).await {
-        Ok(handle) => handle,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => {
-            return Err(atanh_error_with_detail(
-                &ATANH_ERROR_INTERNAL,
-                format!("reduce_min failed: {error}"),
-            ))
-        }
-    };
-    let max_handle = match provider.reduce_max(handle).await {
-        Ok(handle) => handle,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-            let _ = provider.free(&min_handle);
-            return Ok(None);
-        }
-        Err(error) => {
-            let _ = provider.free(&min_handle);
-            return Err(atanh_error_with_detail(
-                &ATANH_ERROR_INTERNAL,
-                format!("reduce_max failed: {error}"),
-            ));
-        }
-    };
-
-    let min_host = match gpu_helpers::download_native_values_async(provider, &min_handle).await {
-        Ok(values) => values,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return Err(atanh_error_with_detail(
-                &ATANH_ERROR_INTERNAL,
-                format!("reduce_min download failed: {err}"),
-            ));
-        }
-    };
-    let max_host = match gpu_helpers::download_native_values_async(provider, &max_handle).await {
-        Ok(values) => values,
-        Err(err) => {
-            let _ = provider.free(&min_handle);
-            let _ = provider.free(&max_handle);
-            return Err(atanh_error_with_detail(
-                &ATANH_ERROR_INTERNAL,
-                format!("reduce_max download failed: {err}"),
-            ));
-        }
-    };
-
-    let _ = provider.free(&min_handle);
-    let _ = provider.free(&max_handle);
-
-    if min_host
-        .data
-        .iter()
-        .chain(&max_host.data)
-        .any(|value| value.is_nan())
-    {
-        return Ok(None);
-    }
-    Ok(Some(
-        min_host
-            .data
-            .iter()
-            .chain(&max_host.data)
-            .any(|value| value.is_outside_closed_unit_interval(0.0)),
-    ))
+    super::inverse_helpers::resident_range::requires_complex(
+        provider,
+        handle,
+        super::inverse_helpers::resident_range::RealDomain::ClosedUnitInterval,
+        BUILTIN_NAME,
+    )
+    .await
 }
 
 async fn atanh_gather_compute_restore(handle: GpuTensorHandle) -> BuiltinResult<Value> {

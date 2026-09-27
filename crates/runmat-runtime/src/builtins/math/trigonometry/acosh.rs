@@ -133,32 +133,13 @@ async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<Option<bool>> {
-    let min_handle = match provider.reduce_min(handle).await {
-        Ok(handle) => handle,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => {
-            return Err(acosh_error_with_detail(
-                &ACOSH_ERROR_INTERNAL,
-                format!("reduce_min failed: {error}"),
-            ))
-        }
-    };
-    let min_host = gpu_helpers::download_native_values_async(provider, &min_handle)
-        .await
-        .map_err(|e| {
-            let _ = provider.free(&min_handle);
-            acosh_error_with_detail(
-                &ACOSH_ERROR_INTERNAL,
-                format!("reduce_min download failed: {e}"),
-            )
-        })?;
-    let _ = provider.free(&min_handle);
-    if min_host.data.iter().any(|value| value.is_nan()) {
-        return Ok(None);
-    }
-    Ok(Some(
-        min_host.data.iter().any(|value| value.is_less_than_one()),
-    ))
+    super::inverse_helpers::resident_range::requires_complex(
+        provider,
+        handle,
+        super::inverse_helpers::resident_range::RealDomain::AtLeastOne,
+        BUILTIN_NAME,
+    )
+    .await
 }
 
 async fn acosh_gather_compute_restore(handle: GpuTensorHandle) -> BuiltinResult<Value> {

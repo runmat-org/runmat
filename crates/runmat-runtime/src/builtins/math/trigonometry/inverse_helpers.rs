@@ -4,6 +4,8 @@ use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value}
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::{build_runtime_error, BuiltinResult};
 
+pub(super) mod resident_range;
+
 pub(crate) fn ensure_input_extensions(
     value: &Value,
     builtin: &str,
