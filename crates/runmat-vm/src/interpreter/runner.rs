@@ -198,7 +198,7 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
     let _ = input_residency;
     #[cfg(feature = "native-accel")]
     let _borrowed_arguments = matches!(input_residency, InputResidency::Borrowed)
-        .then(|| super::resident_ownership::BorrowedInputs::new(args))
+        .then(|| crate::runtime::gc::ManagedRoots::new(args))
         .transpose()
         .map_err(RuntimeError::new)?;
     let function_id = runmat_hir::FunctionId(function);
@@ -574,8 +574,8 @@ async fn interpret_with_vars_inner(
     );
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
     #[cfg(feature = "native-accel")]
-    let borrowed_inputs =
-        super::resident_ownership::BorrowedInputs::new(initial_vars).map_err(RuntimeError::new)?;
+    let _borrowed_inputs =
+        crate::runtime::gc::ManagedRoots::new(initial_vars).map_err(RuntimeError::new)?;
     let state = Box::new(InterpreterState::new_in_context(
         bytecode.clone(),
         initial_vars,
@@ -584,11 +584,7 @@ async fn interpret_with_vars_inner(
         runtime,
     ));
     match Box::pin(run_interpreter(state, initial_vars)).await {
-        Ok(outcome) => {
-            #[cfg(feature = "native-accel")]
-            borrowed_inputs.complete(initial_vars);
-            Ok(outcome)
-        }
+        Ok(outcome) => Ok(outcome),
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
             let current_name = current_function_name.unwrap_or("<main>");
@@ -820,7 +816,7 @@ async fn run_interpreter_inner(
                     );
                     if !has_barrier {
                         let _consumed_fusion =
-                            super::resident_ownership::ConsumedValues::new(&stack);
+                            crate::runtime::gc::ManagedRoots::new(&stack).map_err(RuntimeError::new)?;
                         match accel_fusion::try_execute_fusion_group(
                         &plan,
                         graph,
@@ -932,14 +928,14 @@ async fn run_interpreter_inner(
             let _consumed_call = match &bytecode.instructions[pc] {
                 Instr::CallBuiltinMulti(_, count, _)
                 | Instr::CallBuiltinMultiUsingOutputSlot(_, count, _) => {
-                    Some(super::resident_ownership::ConsumedValues::new(
+                    Some(crate::runtime::gc::ManagedRoots::new(
                         &stack[stack.len().saturating_sub(*count)..],
-                    ))
+                    ).map_err(RuntimeError::new)?)
                 }
                 // Expanded arguments can reference sequence registers within
                 // the stack; retain the full represented range, never guess.
                 Instr::CallBuiltinExpandMultiOutput(..) => {
-                    Some(super::resident_ownership::ConsumedValues::new(&stack))
+                    Some(crate::runtime::gc::ManagedRoots::new(&stack).map_err(RuntimeError::new)?)
                 }
                 _ => None,
             };

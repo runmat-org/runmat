@@ -4,6 +4,9 @@ use runmat_gc::{GcHandle, GcRoot, RootId, Trace, Tracer};
 use runmat_value::Value;
 use std::collections::HashSet;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) struct ManagedRoots(Option<RootId>);
 
 impl ManagedRoots {

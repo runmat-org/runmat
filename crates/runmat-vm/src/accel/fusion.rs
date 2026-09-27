@@ -441,21 +441,11 @@ pub fn gather_fusion_inputs<'a>(
     })
 }
 
-#[must_use = "adopt the final fusion output before retiring overwritten stores"]
-pub struct RetiredFusionStores(crate::interpreter::resident_ownership::ConsumedValues);
-
-impl RetiredFusionStores {
-    pub fn finish(self, outputs: &[Value]) {
-        self.0.finish(outputs);
-    }
-}
-
 pub fn write_elementwise_materialized_stores(
     materialized_stores: Vec<(FusionStoreMaterialization, Value)>,
     vars: &mut Vec<Value>,
     context: &mut ExecutionContext,
-) -> RetiredFusionStores {
-    let mut retired = Vec::new();
+) {
     for (store, value) in materialized_stores {
         match store.binding.kind {
             VarKind::Global => {
@@ -464,7 +454,7 @@ pub fn write_elementwise_materialized_stores(
                     vars.resize(i + 1, Value::Num(0.0));
                     refresh_workspace_state(vars);
                 }
-                retired.push(std::mem::replace(&mut vars[i], value));
+                vars[i] = value;
             }
             VarKind::Local => {
                 if let Some(frame) = context.call_stack.last() {
@@ -472,22 +462,18 @@ pub fn write_elementwise_materialized_stores(
                     while context.locals.len() <= absolute {
                         context.locals.push(Value::Num(0.0));
                     }
-                    retired.push(std::mem::replace(&mut context.locals[absolute], value));
+                    context.locals[absolute] = value;
                 } else {
                     let i = store.binding.index;
                     if i >= vars.len() {
                         vars.resize(i + 1, Value::Num(0.0));
                         refresh_workspace_state(vars);
                     }
-                    retired.push(std::mem::replace(&mut vars[i], value));
+                    vars[i] = value;
                 }
             }
         }
     }
-    let mut retired = crate::interpreter::resident_ownership::ConsumedValues::new(&retired);
-    retired.protect(vars);
-    retired.protect(&context.locals);
-    RetiredFusionStores(retired)
 }
 
 pub async fn execute_fusion_elementwise(
@@ -498,9 +484,7 @@ pub async fn execute_fusion_elementwise(
 ) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
     match execute_elementwise_placed(request).await {
         Ok(FusionExecutionOutcome::Executed(result)) => {
-            let retired =
-                write_elementwise_materialized_stores(result.materialized_stores, vars, context);
-            retired.finish(std::slice::from_ref(&result.final_value));
+            write_elementwise_materialized_stores(result.materialized_stores, vars, context);
             stack_guard.commit();
             Ok(FusionExecutionOutcome::Executed(result.final_value))
         }
@@ -1223,7 +1207,7 @@ mod tests {
             )];
             let _frame_roots = crate::runtime::gc::InterpretContext::new(&stack, &vars).unwrap();
             let mut context = ExecutionContext::default();
-            let retired = write_elementwise_materialized_stores(
+            write_elementwise_materialized_stores(
                 vec![(
                     FusionStoreMaterialization {
                         value_id: 1,
@@ -1242,7 +1226,6 @@ mod tests {
             assert!(block_on(PROVIDER.download(&shared)).is_ok());
             assert!(block_on(PROVIDER.download(&old_only)).is_ok());
             assert!(fusion_residency::is_resident(&old_only));
-            retired.finish(std::slice::from_ref(&vars[0]));
             assert_eq!(
                 block_on(PROVIDER.download(&shared)).unwrap().data,
                 vec![7.0]
