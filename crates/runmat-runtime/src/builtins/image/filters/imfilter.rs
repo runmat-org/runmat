@@ -197,6 +197,10 @@ fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
 
+#[path = "imfilter/kernel_error.rs"]
+pub mod kernel_error;
+use kernel_error::{ImfilterKernelError, ImfilterKernelResult};
+
 fn imfilter_descriptor_error(
     error: &'static BuiltinErrorDescriptor,
     detail: Option<&str>,
@@ -226,7 +230,9 @@ fn imfilter_map_error(
     if err.identifier().is_some() {
         err
     } else {
-        imfilter_error_with_detail(fallback, err.message())
+        let mut mapped = imfilter_error_with_detail(fallback, err.message());
+        mapped.source = Some(Box::new(err));
+        mapped
     }
 }
 
@@ -914,9 +920,9 @@ pub fn build_imfilter_plan(
     kernel: &Tensor,
     options: &ImfilterOptions,
     builtin: &str,
-) -> BuiltinResult<ImfilterPlan> {
+) -> ImfilterKernelResult<ImfilterPlan> {
     if kernel.is_empty() || kernel.shape.contains(&0) {
-        return Err(filter_error(
+        return Err(ImfilterKernelError::new(
             builtin,
             format!("{builtin}: filter must be non-empty along every dimension"),
         ));
@@ -991,12 +997,12 @@ pub fn apply_imfilter_tensor(
     kernel: &Tensor,
     options: &ImfilterOptions,
     builtin: &str,
-) -> BuiltinResult<Tensor> {
+) -> ImfilterKernelResult<Tensor> {
     let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
     let image_values = tensor::tensor_values_f64_cow(image);
     let data = plan.evaluate(&image_values, options);
     Tensor::new(data, plan.final_shape.clone())
-        .map_err(|e| filter_error(builtin, format!("{builtin}: {e}")))
+        .map_err(|e| ImfilterKernelError::new(builtin, format!("{builtin}: {e}")))
 }
 
 fn apply_imfilter_host(
@@ -1091,11 +1097,11 @@ fn validate_kernel_shape(
     image_shape: &[usize],
     kernel_ext: &[usize],
     builtin: &str,
-) -> BuiltinResult<()> {
+) -> ImfilterKernelResult<()> {
     for (dim_idx, &ker_dim) in kernel_ext.iter().enumerate() {
         let img_dim = image_shape.get(dim_idx).copied().unwrap_or(1);
         if dim_idx >= image_shape.len() && ker_dim > 1 {
-            return Err(filter_error(
+            return Err(ImfilterKernelError::new(
                 builtin,
                 format!(
                     "{builtin}: filter dimension {} is {}, but the image has no corresponding axis",
@@ -1105,7 +1111,7 @@ fn validate_kernel_shape(
             ));
         }
         if img_dim == 0 {
-            return Err(filter_error(
+            return Err(ImfilterKernelError::new(
                 builtin,
                 format!("{builtin}: image must not have zero-length dimensions"),
             ));

@@ -57,7 +57,7 @@ impl WgpuProvider {
 
         let plan = match build_imfilter_plan(&image_shape, &kernel_tensor, options, "imfilter") {
             Ok(plan) => plan,
-            Err(err) => return Err(anyhow!("{err}")),
+            Err(err) => return Err(anyhow!(err)),
         };
 
         if plan.rank > crate::backend::wgpu::params::IMFILTER_MAX_RANK {
@@ -523,7 +523,7 @@ impl WgpuProvider {
 
         let result =
             runtime_apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, "imfilter")
-                .map_err(|err| anyhow!("{err}"))?;
+                .map_err(|err| anyhow!(err))?;
         let data_owned = result.materialize_f64();
         let shape_owned = result.shape;
         let view = HostTensorView {
