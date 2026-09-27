@@ -1,0 +1,35 @@
+//! No recursive acquisition: nested helpers receive the existing permit.
+use super::WgpuAccessError;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::RwLock;
+
+#[derive(Default)]
+pub(super) struct Gate {
+    #[cfg(not(target_arch = "wasm32"))]
+    state: RwLock<()>,
+    #[cfg(target_arch = "wasm32")]
+    state: RefCell<()>,
+}
+
+impl Gate {
+    pub fn shared<T>(&self, operation: impl FnOnce() -> T) -> Result<T, WgpuAccessError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _guard = self.state.read().map_err(|_| WgpuAccessError::Poisoned)?;
+        #[cfg(target_arch = "wasm32")]
+        let _guard = self.state.try_borrow().map_err(|_| WgpuAccessError::Busy)?;
+        Ok(operation())
+    }
+
+    pub fn exclusive<T>(&self, operation: impl FnOnce() -> T) -> Result<T, WgpuAccessError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _guard = self.state.write().map_err(|_| WgpuAccessError::Poisoned)?;
+        #[cfg(target_arch = "wasm32")]
+        let _guard = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| WgpuAccessError::Busy)?;
+        Ok(operation())
+    }
+}

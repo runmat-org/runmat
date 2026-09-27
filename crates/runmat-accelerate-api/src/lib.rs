@@ -34,6 +34,13 @@ mod placement;
 mod power;
 mod numerical_domain;
 pub mod reduction;
+#[cfg(feature = "wgpu")]
+mod wgpu_access;
+#[cfg(feature = "wgpu")]
+pub use wgpu_access::{
+    WgpuAccessError, WgpuDeviceAccess, WgpuEmission, WgpuScopeErrorKind, WgpuScopeErrors,
+    WgpuScopeReceipt,
+};
 
 pub use fusion_outputs::validate_fused_output_classes;
 pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
@@ -606,8 +613,7 @@ impl AccelContextHandle {
 #[derive(Clone)]
 pub struct WgpuContextHandle {
     pub instance: Arc<wgpu::Instance>,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
+    pub access: WgpuDeviceAccess,
     pub adapter: Arc<wgpu::Adapter>,
     pub adapter_info: wgpu::AdapterInfo,
     pub limits: wgpu::Limits,
@@ -630,7 +636,8 @@ pub struct WgpuBufferRef {
     // Retains allocation accounting as well as the backend buffer. The backend
     // must associate this exact buffer with this handle before construction.
     owner: GpuTensorHandle,
-    pub buffer: Arc<wgpu::Buffer>,
+    buffer: Arc<wgpu::Buffer>,
+    access: WgpuDeviceAccess,
     pub len: usize,
     pub shape: Vec<usize>,
     pub element_size: usize,
@@ -642,9 +649,12 @@ impl WgpuBufferRef {
     /// Publish an export after the backend has authenticated the buffer against
     /// its existing allocation record. Materialized exports must pass their own
     /// newly admitted allocation, never the source allocation's lease.
+    /// `access` must be the existing authority which created this backing;
+    /// raw buffer properties cannot authenticate its device association.
     pub fn from_owned_buffer(
         buffer: Arc<wgpu::Buffer>,
         handle: GpuTensorHandle,
+        access: WgpuDeviceAccess,
     ) -> anyhow::Result<Self> {
         handle.allocation_lease().validate_live()?;
         anyhow::ensure!(
@@ -685,6 +695,7 @@ impl WgpuBufferRef {
             shape: handle.shape().to_vec(),
             owner: handle,
             buffer,
+            access,
             len,
             element_size,
             precision,
@@ -693,6 +704,24 @@ impl WgpuBufferRef {
 
     pub fn owning_handle(&self) -> &GpuTensorHandle {
         &self.owner
+    }
+
+    /// The backend must establish this association at construction. Reusing an
+    /// export on another actual device is rejected before exposing its buffer.
+    pub fn buffer<'a>(
+        &'a self,
+        permit: &'a WgpuEmission<'_>,
+    ) -> Result<&'a wgpu::Buffer, WgpuAccessError> {
+        permit.ensure_device(&self.access)?;
+        self.owner
+            .allocation_lease()
+            .validate_live()
+            .map_err(WgpuAccessError::Allocation)?;
+        Ok(self.buffer.as_ref())
+    }
+
+    pub fn access(&self) -> &WgpuDeviceAccess {
+        &self.access
     }
 }
 
