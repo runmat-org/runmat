@@ -1,8 +1,7 @@
 use futures::executor::block_on;
 use runmat_runtime::context::preparation::{AdmittedBuiltinPreparation, PreparedBuiltinOperands};
 use runmat_runtime::context::{
-    RuntimeAccelerationService, RuntimeContext, RuntimeContextGuard, RuntimeServiceFuture,
-    RuntimeServicePorts,
+    RuntimeAccelerationService, RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts,
 };
 use runmat_runtime::{call_builtin_async_with_outputs, RuntimeError};
 use runmat_value::{NumericDType, Tensor, Value};
@@ -53,7 +52,6 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
     .with_service_ports(
         RuntimeServicePorts::default().with_acceleration(Rc::new(Recorder(calls.clone()))),
     );
-    let _scope = RuntimeContextGuard::enter(context);
     for single in [false, true] {
         for (name, count) in [
             ("conj", 1),
@@ -66,7 +64,8 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
                 let before = calls.get();
                 let args = vec![data(single); count];
                 let result =
-                    block_on(call_builtin_async_with_outputs(name, &args, outputs)).unwrap();
+                    block_on(context.scope(call_builtin_async_with_outputs(name, &args, outputs)))
+                        .unwrap();
                 let expected_class = if single {
                     NumericDType::F32
                 } else {
@@ -107,11 +106,11 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
                 assert_eq!(calls.get(), before + 1, "{name}");
             }
             let before = calls.get();
-            assert!(block_on(call_builtin_async_with_outputs(
+            assert!(block_on(context.scope(call_builtin_async_with_outputs(
                 name,
                 &vec![data(single); count],
                 2
-            ))
+            )))
             .is_err());
             assert_eq!(calls.get(), before);
         }
@@ -125,7 +124,9 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
         ],
         vec![data(false), data(false), data(false)],
     ] {
-        assert!(block_on(call_builtin_async_with_outputs("complex", &args, 1)).is_err());
+        assert!(
+            block_on(context.scope(call_builtin_async_with_outputs("complex", &args, 1))).is_err()
+        );
     }
     assert_eq!(calls.get(), before);
 }

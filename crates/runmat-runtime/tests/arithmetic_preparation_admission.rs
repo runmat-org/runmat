@@ -1,8 +1,7 @@
 use futures::executor::block_on;
 use runmat_runtime::context::preparation::{AdmittedBuiltinPreparation, PreparedBuiltinOperands};
 use runmat_runtime::context::{
-    RuntimeAccelerationService, RuntimeContext, RuntimeContextGuard, RuntimeServiceFuture,
-    RuntimeServicePorts,
+    RuntimeAccelerationService, RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts,
 };
 use runmat_runtime::{call_builtin_async_with_outputs, RuntimeError};
 use runmat_value::{Tensor, Value};
@@ -57,7 +56,6 @@ fn actual_dispatch_prepares_admitted_pairs_and_preserves_results() {
     .with_service_ports(
         RuntimeServicePorts::default().with_acceleration(Rc::new(Recorder(calls.clone()))),
     );
-    let _scope = RuntimeContextGuard::enter(context);
     for (name, expected) in [
         ("plus", [3.0, 6.0]),
         ("minus", [1.0, 2.0]),
@@ -68,11 +66,11 @@ fn actual_dispatch_prepares_admitted_pairs_and_preserves_results() {
     ] {
         for outputs in [0, 1] {
             let before = calls.get();
-            let result = block_on(call_builtin_async_with_outputs(
+            let result = block_on(context.scope(call_builtin_async_with_outputs(
                 name,
                 &[tensor(&[2.0, 4.0], &[1, 2]), tensor(&[1.0, 2.0], &[1, 2])],
                 outputs,
-            ))
+            )))
             .unwrap();
             let Value::Tensor(value) = result else {
                 panic!("{name}: expected tensor")
@@ -104,7 +102,8 @@ fn actual_dispatch_prepares_admitted_pairs_and_preserves_results() {
             ),
         ] {
             assert!(
-                block_on(call_builtin_async_with_outputs(name, &args, outputs)).is_err(),
+                block_on(context.scope(call_builtin_async_with_outputs(name, &args, outputs)))
+                    .is_err(),
                 "{name}"
             );
         }
