@@ -614,49 +614,57 @@ impl CovarianceGpuEval {
         let (first, second) = match kind {
             ConversionKind::Corrcov => (self.correlation, self.sigma),
             ConversionKind::Cov2corr => {
-                let len = self.sigma.shape.iter().copied().product::<usize>();
-                let sigma = match self.provider.reshape(&self.sigma, &[1, len]) {
-                    Ok(handle) => handle,
-                    Err(err) => {
-                        let _ = self.provider.free(&self.correlation);
-                        let _ = self.provider.free(&self.sigma);
-                        return Err(conversion_error(name, format!("{name}: {err}")));
-                    }
+                let len = if self.sigma.shape().contains(&0) {
+                    0
+                } else {
+                    self.sigma
+                        .shape()
+                        .iter()
+                        .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+                        .ok_or_else(|| {
+                            conversion_error(name, format!("{name}: sigma shape overflow"))
+                        })?
                 };
-                if sigma.buffer_id != self.sigma.buffer_id {
-                    let _ = self.provider.free(&self.sigma);
+                let sigma = self
+                    .provider
+                    .reshape(&self.sigma, &[1, len])
+                    .map_err(|error| {
+                        let message = format!("{name}: {error}");
+                        crate::runtime_error::with_provider_execution_source(
+                            conversion_error(name, message),
+                            runmat_accelerate_api::ProviderExecutionError::from(error),
+                        )
+                    })?;
+                if sigma.shape() != [1, len]
+                    || sigma.physical().element_type() != self.sigma.physical().element_type()
+                    || sigma.physical().storage() != self.sigma.physical().storage()
+                    || runmat_accelerate_api::handle_is_logical(&sigma)
+                    || sigma.shares_allocation_with(&self.correlation)
+                    || !gpu_helpers::exact_provider_for_handle(&sigma)
+                        .is_some_and(|owner| std::ptr::eq(owner, self.provider))
+                {
+                    return Err(gpu_helpers::reject_gpu_output(
+                        sigma,
+                        conversion_error(name, format!("{name}: invalid sigma reshape result")),
+                    ));
                 }
                 (sigma, self.correlation)
             }
         };
         match crate::output_count::current_output_count() {
-            Some(0) => {
-                let _ = self.provider.free(&first);
-                let _ = self.provider.free(&second);
-                Ok(Value::OutputList(Vec::new()))
-            }
-            Some(1) => {
-                let _ = self.provider.free(&second);
-                Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
-                    first,
-                )]))
-            }
+            Some(0) => Ok(Value::OutputList(Vec::new())),
+            Some(1) => Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+                first,
+            )?])),
             Some(2) => Ok(Value::OutputList(vec![
-                gpu_helpers::resident_gpu_value(first),
-                gpu_helpers::resident_gpu_value(second),
+                gpu_helpers::resident_gpu_value(first)?,
+                gpu_helpers::resident_gpu_value(second)?,
             ])),
-            Some(_) => {
-                let _ = self.provider.free(&first);
-                let _ = self.provider.free(&second);
-                Err(conversion_error(
-                    name,
-                    format!("{name}: too many output arguments; maximum is 2"),
-                ))
-            }
-            None => {
-                let _ = self.provider.free(&second);
-                gpu_helpers::resident_gpu_value(first)
-            }
+            Some(_) => Err(conversion_error(
+                name,
+                format!("{name}: too many output arguments; maximum is 2"),
+            )),
+            None => gpu_helpers::resident_gpu_value(first),
         }
     }
 }
@@ -838,6 +846,44 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn resident_output_arity_keeps_only_returned_allocation_leases() {
+        test_support::with_test_provider(|provider| {
+            for count in [Some(0), Some(1), Some(2), Some(3), None] {
+                let correlation = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[1.0, 0.0, 0.0, 1.0],
+                        shape: &[2, 2],
+                    })
+                    .unwrap();
+                let sigma = provider
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: &[1.0, 1.0],
+                        shape: &[2, 1],
+                    })
+                    .unwrap();
+                let correlation_weak = correlation.downgrade();
+                let sigma_weak = sigma.downgrade();
+                let _outputs = crate::output_count::push_output_count(count);
+                let result = CovarianceGpuEval {
+                    provider,
+                    correlation,
+                    sigma,
+                }
+                .output(ConversionKind::Corrcov, "corrcov");
+                assert_eq!(result.is_err(), count == Some(3));
+                assert_eq!(
+                    correlation_weak.acquire().is_ok(),
+                    matches!(count, None | Some(1 | 2))
+                );
+                assert_eq!(sigma_weak.acquire().is_ok(), count == Some(2));
+                drop(result);
+                assert!(correlation_weak.acquire().is_err());
+                assert!(sigma_weak.acquire().is_err());
+            }
+        });
+    }
 
     fn assert_close(actual: f64, expected: f64) {
         assert!(
