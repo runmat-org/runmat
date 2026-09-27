@@ -2,11 +2,13 @@
 //! No dispatch, runtime context, alternate inventory, or cached authority lives here.
 
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinIntegerAuditDescriptor, BuiltinIntegerCapabilityDescriptor,
+    BuiltinDescriptor, BuiltinExtensionDescriptor, BuiltinIntegerAuditDescriptor,
+    BuiltinIntegerCapabilityDescriptor,
 };
 
 pub(super) struct IntegerMetadata {
     pub name: &'static str,
+    pub descriptor: Option<&'static BuiltinDescriptor>,
     pub integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
     pub integer_audit: Option<&'static BuiltinIntegerAuditDescriptor>,
     pub extensions: &'static [BuiltinExtensionDescriptor],
@@ -20,6 +22,7 @@ pub(super) fn integer_metadata() -> Vec<IntegerMetadata> {
         .iter()
         .map(|entry| IntegerMetadata {
             name: entry.identity.name,
+            descriptor: Some(entry.descriptor),
             integer_capabilities: entry.integer_capabilities,
             integer_audit: entry.integer_audit,
             extensions: entry.extensions,
@@ -29,6 +32,7 @@ pub(super) fn integer_metadata() -> Vec<IntegerMetadata> {
                 .into_iter()
                 .map(|entry| IntegerMetadata {
                     name: entry.name,
+                    descriptor: entry.descriptor,
                     integer_capabilities: entry.integer_capabilities,
                     integer_audit: entry.integer_audit,
                     extensions: entry.extensions,

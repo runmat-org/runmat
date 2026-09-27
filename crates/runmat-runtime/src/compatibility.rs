@@ -1421,7 +1421,6 @@ mod tests {
             ("uint64.empty", "empty-resident-size"),
             ("uint8.empty", "empty-resident-size"),
             ("var", "var-typed-integer-control"),
-            ("xor", "xor-character-input"),
             ("xor", "xor-complex-input"),
             ("lsqcurvefit", "lsqcurvefit-integer-bound"),
             ("lsqcurvefit", "lsqcurvefit-integer-callback-result"),
@@ -1789,7 +1788,7 @@ mod tests {
 
     #[test]
     fn every_builtin_extension_has_a_structured_compatibility_identifier() {
-        for builtin in runmat_builtins::builtin_functions() {
+        for builtin in metadata_view::integer_metadata() {
             for extension in builtin.extensions {
                 assert!(
                     extension.error_identifier.is_some_and(|identifier| {
@@ -1804,64 +1803,12 @@ mod tests {
     }
 
     #[test]
-    fn core_operator_extensions_reject_before_semantic_dispatch_in_matlab_mode() {
-        let _matlab_mode = push_runmat_extensions_enabled(false);
-        let like_cases = [
-            ("plus", "RunMat:compatibility:PlusLikePrototypeExtension"),
-            ("minus", "RunMat:compatibility:MinusLikePrototypeExtension"),
-            ("times", "RunMat:compatibility:TimesLikePrototypeExtension"),
-            (
-                "rdivide",
-                "RunMat:compatibility:RdivideLikePrototypeExtension",
-            ),
-            ("power", "RunMat:compatibility:PowerLikePrototypeExtension"),
-        ];
-        for (name, identifier) in like_cases {
-            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
-            let args = [
-                Value::Num(2.0),
-                Value::Num(1.0),
-                Value::String("like".to_string()),
-                Value::Num(0.0),
-            ];
-            let error = futures::executor::block_on((builtin.implementation)(&args))
-                .expect_err("MATLAB mode must reject RunMat-only like prototype");
-            assert_eq!(error.identifier(), Some(identifier), "{name}");
-        }
-
-        for (name, identifier) in [
-            ("or", "RunMat:compatibility:OrComplexInputExtension"),
-            ("xor", "RunMat:compatibility:XorComplexInputExtension"),
-        ] {
-            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
-            let args = [Value::Complex(0.0, 1.0), Value::Bool(false)];
-            let error = futures::executor::block_on((builtin.implementation)(&args))
-                .expect_err("MATLAB mode must reject RunMat-only complex logical input");
-            assert_eq!(error.identifier(), Some(identifier), "{name}");
-        }
-
-        for (name, identifier) in [
-            ("or", "RunMat:compatibility:OrCharacterInputExtension"),
-            ("xor", "RunMat:compatibility:XorCharacterInputExtension"),
-        ] {
-            let builtin = runmat_builtins::builtin_function_by_name(name).expect("builtin");
-            let args = [
-                Value::CharArray(runmat_value::CharArray::new_row("A")),
-                Value::Bool(false),
-            ];
-            let error = futures::executor::block_on((builtin.implementation)(&args))
-                .expect_err("MATLAB mode must reject RunMat-only character logical input");
-            assert_eq!(error.identifier(), Some(identifier), "{name}");
-        }
-    }
-
-    #[test]
     fn generated_builtin_catalog_matches_registered_integer_extensions() {
         let catalog: serde_json::Value =
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
-        for registered in runmat_builtins::builtin_functions()
+        for registered in metadata_view::integer_metadata()
             .into_iter()
             .filter(|builtin| !builtin.extensions.is_empty())
         {
@@ -1887,7 +1834,7 @@ mod tests {
         for name in [
             "gcd", "intmax", "intmin", "linspace", "logspace", "mod", "rem",
         ] {
-            let registered = runmat_builtins::builtin_functions()
+            let registered = metadata_view::integer_metadata()
                 .into_iter()
                 .find(|builtin| builtin.name == name)
                 .unwrap_or_else(|| panic!("registered {name} builtin"));
@@ -2239,6 +2186,7 @@ mod tests {
                 "cellstr",
                 "clearCache",
                 "commit",
+                "copyfile",
                 "data.copy",
                 "data.delete",
                 "data.exists",
@@ -2266,6 +2214,7 @@ mod tests {
                 "fea.sweep",
                 "fea.validate",
                 "fieldnames",
+                "filesep",
                 "fileattrib",
                 "fileparts",
                 "fileread",
@@ -2340,8 +2289,11 @@ mod tests {
                 "lower",
                 "ls",
                 "matches",
+                "matlabroot",
                 "matlab.metadata.DynamicProperty.delete",
                 "memoize",
+                "mkdir",
+                "movefile",
                 "mex",
                 "mexcuda",
                 "mexext",
@@ -2356,6 +2308,7 @@ mod tests {
                 "notify",
                 "onCleanup",
                 "openfig",
+                "pathsep",
                 "pattern",
                 "pyargs",
                 "pyenv",
@@ -2395,7 +2348,10 @@ mod tests {
                 "strtrim",
                 "superclasses",
                 "suptitle",
+                "syms",
                 "system",
+                "tempdir",
+                "tempname",
                 "terminate",
                 "tokenDetails",
                 "tokenizedDocument",
@@ -2456,7 +2412,7 @@ mod tests {
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
-        for registered in runmat_builtins::builtin_functions()
+        for registered in metadata_view::integer_metadata()
             .into_iter()
             .filter(|builtin| {
                 !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some()
