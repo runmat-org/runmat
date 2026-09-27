@@ -13,8 +13,8 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) fn valid_real_bina
         && output.device_id() == class_source.device_id()
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
-        && !gpu_helpers::same_gpu_handle(output, class_source)
-        && other_source.is_none_or(|source| !gpu_helpers::same_gpu_handle(output, source))
+        && !output.shares_allocation_with(class_source)
+        && other_source.is_none_or(|source| !output.shares_allocation_with(source))
         && output.descriptor().storage == Some(GpuTensorStorage::Real)
         && gpu_helpers::expected_handle_numeric_element_type(output).is_ok()
         && gpu_helpers::gpu_class_metadata_matches(

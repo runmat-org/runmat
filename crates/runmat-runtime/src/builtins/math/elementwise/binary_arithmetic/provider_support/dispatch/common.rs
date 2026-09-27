@@ -25,12 +25,14 @@ pub(super) fn accept_output(
         provider,
         expected_shape,
     ) {
-        Ok(Some(resident_output_from_sources(output, sources)))
+        resident_output_from_sources(output, sources).map(Some)
     } else {
-        gpu_helpers::free_rejected_provider_output(&output, &sources, provider);
-        Err(provider_contract_error(
-            operation,
-            "provider returned invalid element-wise output metadata",
+        Err(gpu_helpers::reject_gpu_output(
+            output,
+            provider_contract_error(
+                operation,
+                "provider returned invalid element-wise output metadata",
+            ),
         ))
     }
 }
@@ -52,7 +54,7 @@ pub(super) fn common_owner(
 ) -> Option<&'static dyn AccelProvider> {
     let left_owner = gpu_helpers::exact_provider_for_handle(left)?;
     let right_owner = gpu_helpers::exact_provider_for_handle(right)?;
-    (std::ptr::eq(left_owner, right_owner) && left.device_id == right.device_id)
+    (std::ptr::eq(left_owner, right_owner) && left.device_id() == right.device_id())
         .then_some(left_owner)
 }
 

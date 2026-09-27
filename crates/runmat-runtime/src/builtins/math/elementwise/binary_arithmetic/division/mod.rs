@@ -75,12 +75,12 @@ pub(super) async fn execute(
         _ => None,
     };
     if let Some(output) = resident {
-        return Ok(super::provider_support::resident_output_from_sources(
+        return super::provider_support::resident_output_from_sources(
             output,
             [source_handle(&numerator), source_handle(&denominator)]
                 .into_iter()
                 .flatten(),
-        ));
+        );
     }
     let numerator = gather_operand(context, numerator).await?;
     let denominator = gather_operand(context, denominator).await?;

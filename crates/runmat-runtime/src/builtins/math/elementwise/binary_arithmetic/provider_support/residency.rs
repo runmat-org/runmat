@@ -8,35 +8,40 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) fn resident_output
 >(
     mut output: GpuTensorHandle,
     sources: impl IntoIterator<Item = &'a GpuTensorHandle>,
-) -> Value {
-    let provenance = if sources
-        .into_iter()
-        .any(runmat_accelerate_api::handle_is_explicit)
-    {
-        runmat_accelerate_api::GpuHandleProvenance::Explicit
-    } else {
-        runmat_accelerate_api::GpuHandleProvenance::Automatic
-    };
-    runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+) -> crate::BuiltinResult<Value> {
+    gpu_helpers::propagate_output_provenance(&mut output, sources)?;
     gpu_helpers::resident_gpu_value(output)
 }
 
 #[cfg(test)]
 mod tests {
     use super::resident_output_from_sources;
-    use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle};
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuHandleProvenance, GpuTensorStorage,
+        NumericElementType,
+    };
     use runmat_value::Value;
 
     #[test]
     fn preserves_explicit_source_intent() {
-        let automatic =
-            GpuTensorHandle::new(vec![2, 2], 1, 1).with_provenance(GpuHandleProvenance::Automatic);
-        let explicit =
-            GpuTensorHandle::new(vec![2, 2], 1, 2).with_provenance(GpuHandleProvenance::Explicit);
-        let output = GpuTensorHandle::new(vec![2, 2], 1, 3);
+        let owner = TestAllocationOwner::new();
+        let allocate = || {
+            owner
+                .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap()
+        };
+        let automatic = allocate()
+            .handle
+            .with_provenance(GpuHandleProvenance::Automatic)
+            .unwrap();
+        let explicit = allocate()
+            .handle
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        let output = allocate().handle;
 
         let Value::GpuTensor(output) =
-            resident_output_from_sources(output, [&automatic, &explicit])
+            resident_output_from_sources(output, [&automatic, &explicit]).unwrap()
         else {
             panic!("resident output must remain a GPU tensor");
         };

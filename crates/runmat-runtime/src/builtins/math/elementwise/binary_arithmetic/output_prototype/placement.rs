@@ -43,7 +43,7 @@ async fn convert_to_gpu(
     };
     let host_value = match value {
         Value::GpuTensor(handle) if same_placement(provider, prototype, &handle) => {
-            return Ok(resident_output_from_sources(handle, [prototype]));
+            return resident_output_from_sources(handle, [prototype]);
         }
         Value::GpuTensor(handle) => gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
             .await
@@ -52,9 +52,15 @@ async fn convert_to_gpu(
     };
     let tensor = host_value_to_tensor(context, host_value)?;
     let _prototype_metadata = gpu_helpers::ResidencyRestoreGuard::new(prototype);
-    let handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype])
-        .map_err(|error| context.internal_error(format!("failed to upload GPU result: {error}")))?;
-    Ok(resident_output_from_sources(handle, [prototype]))
+    let handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype]).map_err(
+        |source| {
+            let mut error =
+                context.internal_error(format!("failed to upload GPU result: {source}"));
+            error.source = Some(Box::new(source));
+            error
+        },
+    )?;
+    resident_output_from_sources(handle, [prototype])
 }
 
 fn same_placement(
@@ -62,7 +68,7 @@ fn same_placement(
     prototype: &GpuTensorHandle,
     output: &GpuTensorHandle,
 ) -> bool {
-    prototype.device_id == output.device_id
+    prototype.device_id() == output.device_id()
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|output_provider| std::ptr::eq(output_provider, prototype_provider))
 }

@@ -1,6 +1,6 @@
 use runmat_accelerate_api::{
-    handle_integer_type, handle_is_logical, handle_precision, handle_provenance, handle_storage,
-    set_handle_provenance, AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage,
+    handle_integer_type, handle_is_logical, handle_precision, handle_storage, AccelProvider,
+    GpuTensorHandle, GpuTensorStorage,
 };
 use runmat_value::Value;
 
@@ -46,31 +46,34 @@ async fn try_provider(
 ) -> BuiltinResult<Option<Value>> {
     let storage = handle_storage(input);
     let metadata = gpu_helpers::ResidencyRestoreGuard::new(input);
-    let provenance = handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
     let result = provider.unary_conj(input).await;
     drop(metadata);
     match result {
         Ok(mut output) if valid_output(&output, input, provider) => {
-            set_handle_provenance(&mut output, provenance);
+            gpu_helpers::propagate_output_provenance(&mut output, [input])?;
             let value = if storage == GpuTensorStorage::ComplexInterleaved {
                 gpu_helpers::complex_gpu_value(output)
             } else {
                 gpu_helpers::resident_gpu_value(output)
             };
-            Ok(Some(value))
+            value.map(Some)
         }
-        Ok(output) => {
-            gpu_helpers::free_unprotected_exact_owner(&output, &[input]);
-            Err(builtin_error_with_detail(
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            builtin_error_with_detail(
                 &CONJ_ERROR_INTERNAL,
                 "provider unary_conj returned malformed output",
-            ))
-        }
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-        Err(error) => Err(builtin_error_with_detail(
-            &CONJ_ERROR_INTERNAL,
-            format!("provider unary_conj failed: {error}"),
+            ),
         )),
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Err(source) => {
+            let mut error = builtin_error_with_detail(
+                &CONJ_ERROR_INTERNAL,
+                format!("provider unary_conj failed: {source}"),
+            );
+            error.source = Some(Box::new(source));
+            Err(error)
+        }
     }
 }
 
@@ -83,7 +86,7 @@ fn valid_output(
     let alias = if storage == GpuTensorStorage::Real {
         GpuOutputAliasPolicy::AllowInput
     } else {
-        GpuOutputAliasPolicy::RequireDistinct
+        GpuOutputAliasPolicy::RequireDistinctAllocation
     };
     gpu_helpers::unary_gpu_output_matches(
         output,
@@ -106,9 +109,42 @@ async fn gather_conjugate_restore(
     let metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
     drop(metadata);
-    let host_value = gathered
-        .map_err(|error| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, error.to_string()))?;
+    let host_value = gathered.map_err(|source| {
+        let mut error = builtin_error_with_detail(&CONJ_ERROR_INTERNAL, source.to_string());
+        error.source = Some(Box::new(source));
+        error
+    })?;
     let conjugated = host::execute(host_value)?;
-    gpu_helpers::restore_class_preserving_value(&handle, conjugated, BUILTIN_NAME)
-        .map_err(|error| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, error.message()))
+    gpu_helpers::restore_class_preserving_value(&handle, conjugated, BUILTIN_NAME).map_err(
+        |source| {
+            let mut error = builtin_error_with_detail(&CONJ_ERROR_INTERNAL, source.message());
+            error.source = Some(Box::new(source));
+            error
+        },
+    )
+}
+
+#[cfg(test)]
+mod owned_tests {
+    use super::*;
+
+    #[test]
+    fn complex_conjugation_requires_fresh_physical_output_but_real_identity_may_alias() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let real = runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+            let real = gpu_helpers::upload_tensor(provider, &real).unwrap();
+            assert!(valid_output(&real, &real, provider));
+            let complex =
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![1, 2])
+                    .unwrap();
+            let source = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+            let alias = source.with_view(source.view().clone()).unwrap();
+            assert_ne!(alias.view_identity(), source.view_identity());
+            assert!(!valid_output(&alias, &source, provider));
+            let output = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+            assert!(valid_output(&output, &source, provider));
+            drop(alias);
+            source.allocation_lease().validate_live().unwrap();
+        });
+    }
 }
