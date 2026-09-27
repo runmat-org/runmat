@@ -93,7 +93,17 @@ pub(super) fn infer_numeric_component_call(
     }
 
     if materializes {
-        output.storage = if output.is_scalar() {
+        // Conjugation retains the scalar/array complex representation. Native
+        // single components also remain tensors: tensor_into_value only
+        // extracts double and integer scalars from a one-element tensor.
+        let retains_representation = input.numeric().is_some_and(|numeric| {
+            numeric.class == NumericClass::Single
+                || (rule == NumericComponentRule::Conjugate
+                    && numeric.domain == NumericDomain::Complex)
+        });
+        output.storage = if retains_representation {
+            input.storage
+        } else if output.is_scalar() {
             StorageFact::Scalar
         } else {
             StorageFact::Dense

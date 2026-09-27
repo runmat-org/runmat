@@ -4,6 +4,42 @@ use crate::{
 };
 
 #[test]
+fn one_element_complex_tensors_keep_the_runtime_representation() {
+    use runmat_types::{
+        CallRequest, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+    for (name, class, expected) in [
+        ("conj", NumericClass::Double, StorageFact::Dense),
+        ("conj", NumericClass::Single, StorageFact::Dense),
+        ("conj", NumericClass::UInt64, StorageFact::Dense),
+        ("real", NumericClass::Single, StorageFact::Dense),
+        ("imag", NumericClass::Single, StorageFact::Dense),
+        ("real", NumericClass::Double, StorageFact::Scalar),
+        ("imag", NumericClass::UInt64, StorageFact::Scalar),
+    ] {
+        let input = ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class,
+                domain: NumericDomain::Complex,
+            }),
+            ShapeFact::from(vec![Some(1), Some(1)]),
+            StorageFact::Dense,
+        );
+        let inferred = infer_catalog_call(
+            builtin_catalog_entry_by_name(name).unwrap(),
+            &CallRequest {
+                arguments: vec![input],
+                literals: Default::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert!(inferred.diagnostics.is_empty(), "{name}");
+        assert_eq!(inferred.outputs[0].storage, expected, "{name} {class:?}");
+    }
+}
+
+#[test]
 fn numeric_component_contracts_preserve_exact_facts_and_transform_only_the_component_domain() {
     use runmat_types::{
         AliasFact, CallRequest, ContiguityFact, LayoutFact, MutationFact, NumericClass,
