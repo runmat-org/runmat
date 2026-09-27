@@ -472,6 +472,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let args = CovArgs::parse(value, rest)?;
     ensure_cov_extensions(&args)?;
+    // Preserve weight admission precedence while rejecting invalid metadata
+    // before any upload, download, or covariance hook.
+    if let (Some(input), Some(weights)) = (
+        covariance_input_shape(&args.first),
+        args.weight_vector.as_ref().and_then(covariance_input_shape),
+    ) {
+        validate_weight_shape(
+            weights,
+            covariance_observation_count(input, args.second.is_some())?,
+        )?;
+    }
     if let (Some(left), Some(right)) = (
         covariance_input_shape(&args.first),
         args.second.as_ref().and_then(covariance_input_shape),
@@ -723,7 +734,7 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
         None => None,
     };
 
-    let rows = gpu_observation_count(first_handle, maybe_second_handle.is_some())?;
+    let rows = covariance_observation_count(first_handle.shape(), maybe_second_handle.is_some())?;
     if let Some(second) = maybe_second_handle {
         validate_covariance_pair_shapes(first_handle.shape(), second.shape())?;
     }
@@ -832,15 +843,15 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
     }
 }
 
-fn gpu_observation_count(handle: &GpuTensorHandle, paired_input: bool) -> BuiltinResult<usize> {
-    if handle.shape().len() > 2 {
+fn covariance_observation_count(shape: &[usize], paired_input: bool) -> BuiltinResult<usize> {
+    if shape.len() > 2 {
         return Err(cov_error_with_detail(
             &COV_ERROR_INVALID_ARGUMENT,
             "inputs must be 2-D matrices or vectors",
         ));
     }
-    let len = covariance_element_count(handle.shape())?;
-    Ok(match handle.shape() {
+    let len = covariance_element_count(shape)?;
+    Ok(match shape {
         [] => 1,
         _ if paired_input => len,
         [length] => *length,

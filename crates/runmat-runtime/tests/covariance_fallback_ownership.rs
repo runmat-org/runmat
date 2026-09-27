@@ -343,6 +343,29 @@ fn invalid_pair_geometry_and_empty_weight_cardinality_precede_all_hooks() {
 }
 
 #[test]
+fn invalid_weight_cardinality_keeps_priority_over_pair_shape_without_effects() {
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let provider = Provider::new(Mode::Pending);
+    let _active = ThreadProviderGuard::set(Some(provider));
+    let left = provider.input(&[1.; 6], &[3, 2]);
+    let right = provider.input(&[1.; 3], &[3, 1]);
+    let weights = Value::Tensor(Tensor::new(vec![1., 2.], vec![2, 1]).unwrap());
+    let error = block_on(call_builtin_async_with_outputs(
+        "cov",
+        &[Value::GpuTensor(left), Value::GpuTensor(right), weights],
+        1,
+    ))
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:cov:WeightVectorLengthMismatch")
+    );
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn cancelling_pending_fallback_download_preserves_all_original_leases() {
     use std::{
         future::Future,
