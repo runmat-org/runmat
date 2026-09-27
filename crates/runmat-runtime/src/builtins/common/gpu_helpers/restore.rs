@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "restore_owned_tests.rs"]
+mod owned_tests;
+
 /// Restore a class-preserving host value to the provider that owns `source`.
 ///
 /// If the owner cannot physically represent the floating class, the host value
@@ -79,7 +83,7 @@ pub fn restore_class_preserving_value_protecting(
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
     })?;
-    let source_guard = ResidencyRestoreGuard::new(source);
+    let _source_guard = ResidencyRestoreGuard::new(source);
     let protected = std::iter::once(source)
         .chain(protected.iter().copied())
         .collect::<Vec<_>>();
@@ -121,7 +125,7 @@ pub fn restore_class_preserving_value_protecting(
                 Err(error)
                     if expected_integer.is_none()
                         && !explicit
-                        && !runmat_accelerate_api::is_invalid_numeric_upload_result(&error) =>
+                        && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if provider_hook_is_unsupported(error)) =>
                 {
                     return Ok(value)
                 }
@@ -130,6 +134,7 @@ pub fn restore_class_preserving_value_protecting(
                         "{builtin}: failed to restore GPU result: {error}"
                     ))
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .with_source(error)
                     .build())
                 }
             };
@@ -143,33 +148,30 @@ pub fn restore_class_preserving_value_protecting(
             )
         }
         Value::LogicalArray(array) => {
-            let storage = match provider.precision() {
-                ProviderPrecision::F32 => {
-                    NumericStorage::F32(array.data.iter().map(|bit| f32::from(*bit != 0)).collect())
-                }
-                ProviderPrecision::F64 => {
-                    NumericStorage::F64(array.data.iter().map(|bit| f64::from(*bit != 0)).collect())
-                }
-            };
-            let tensor =
-                Tensor::from_numeric_storage(storage, array.shape.clone()).map_err(|error| {
-                    build_runtime_error(format!("{builtin}: invalid logical result: {error}"))
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
-                })?;
-            let output =
-                upload_tensor_protecting(provider, &tensor, &protected).map_err(|error| {
-                    build_runtime_error(format!("{builtin}: failed to restore GPU result: {error}"))
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
-                })?;
-            runmat_accelerate_api::set_handle_logical(&output, true);
+            let output = runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &array.data,
+                    shape: &array.shape,
+                },
+                &protected,
+            )
+            .map_err(|error| {
+                build_runtime_error(format!(
+                    "{builtin}: failed to restore logical GPU result: {error}"
+                ))
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .with_source(error)
+                .build()
+            })?;
+            let precision = runmat_accelerate_api::handle_precision(&output);
+            let integer = runmat_accelerate_api::handle_integer_type(&output);
             (
                 output,
                 array.shape.clone(),
                 GpuTensorStorage::Real,
-                Some(provider.precision()),
-                None,
+                precision,
+                integer,
                 true,
             )
         }
@@ -198,7 +200,7 @@ pub fn restore_class_preserving_value_protecting(
                 Err(error)
                     if expected_integer.is_none()
                         && !explicit
-                        && !runmat_accelerate_api::is_invalid_numeric_upload_result(&error) =>
+                        && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if provider_hook_is_unsupported(error)) =>
                 {
                     return Ok(value)
                 }
@@ -207,6 +209,7 @@ pub fn restore_class_preserving_value_protecting(
                         "{builtin}: failed to restore GPU result: {error}"
                     ))
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .with_source(error)
                     .build())
                 }
             };
@@ -224,17 +227,20 @@ pub fn restore_class_preserving_value_protecting(
 
     let aliases_source = protected
         .iter()
-        .any(|input| same_gpu_handle(&output, input));
+        .any(|input| output.shares_allocation_with(input));
     if aliases_source {
-        return Err(build_runtime_error(format!(
-            "{builtin}: provider aliased the protected input while restoring the result"
-        ))
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-        .build());
+        return Err(reject_gpu_output(
+            output,
+            build_runtime_error(format!(
+                "{builtin}: provider aliased the protected input while restoring the result"
+            ))
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build(),
+        ));
     }
 
-    let valid = output.shape == expected_shape
-        && output.device_id == provider.device_id()
+    let valid = output.shape() == expected_shape
+        && output.device_id() == provider.device_id()
         && exact_provider_for_handle(&output).is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(&output) == expected_storage
         && expected_precision.is_none_or(|precision| {
@@ -244,22 +250,27 @@ pub fn restore_class_preserving_value_protecting(
         && runmat_accelerate_api::handle_is_logical(&output) == logical
         && gpu_class_metadata_matches(&output, expected_precision, expected_integer, logical);
     if !valid {
-        free_rejected_provider_output(&output, &protected, provider);
-        return Err(build_runtime_error(format!(
-            "{builtin}: provider returned an invalid restored result"
-        ))
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-        .build());
+        return Err(reject_gpu_output(
+            output,
+            build_runtime_error(format!(
+                "{builtin}: provider returned an invalid restored result"
+            ))
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build(),
+        ));
     }
     let provenance = if explicit {
         runmat_accelerate_api::GpuHandleProvenance::Explicit
     } else {
-        source_guard
-            .original_descriptor()
-            .provenance
+        runmat_accelerate_api::handle_provenance(source)
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic)
     };
-    output.descriptor.provenance = Some(provenance);
-    runmat_accelerate_api::mark_residency(&output);
-    Ok(Value::GpuTensor(output))
+    output = output.with_provenance(provenance).map_err(|error| {
+        build_runtime_error(format!(
+            "{builtin}: cannot preserve restored result intent: {error}"
+        ))
+        .with_source(error)
+        .build()
+    })?;
+    resident_gpu_value(output)
 }
