@@ -3632,7 +3632,7 @@ pub trait AccelProvider: Send + Sync {
         _num_outputs: usize,
     ) -> anyhow::Result<Vec<GpuTensorHandle>> {
         Err(unsupported_provider_operation(
-            "fused_elementwise_multi not supported by provider"
+            "fused_elementwise_multi not supported by provider",
         ))
     }
 

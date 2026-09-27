@@ -88,11 +88,12 @@ pub(crate) fn wgpu_cost_estimate(
     // A single elementwise enqueue sample does not measure the composite
     // classification/reduction/readback/kernel route. Keep its prior explicit
     // until the existing invocation feedback supplies a matching observation.
-    let observed_execution_ns = if power_work.is_some() || unary_work.is_some() || fusion_work.is_some() {
-        None
-    } else {
-        average_ns(stats)
-    };
+    let observed_execution_ns =
+        if power_work.is_some() || unary_work.is_some() || fusion_work.is_some() {
+            None
+        } else {
+            average_ns(stats)
+        };
     let execution_ns = observed_execution_ns
         .unwrap_or_else(|| {
             operation_prior_ns(query).saturating_mul(if fusion_work.is_some() {
