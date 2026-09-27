@@ -7,6 +7,10 @@ use crate::BuiltinResult;
 
 mod errors;
 pub(crate) mod spec;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use spec::{
+    __runmat_wasm_register_fusion_spec_FUSION_SPEC, __runmat_wasm_register_gpu_spec_GPU_SPEC,
+};
 
 pub(super) const NAME: &str = "mtimes";
 

@@ -76,7 +76,11 @@ impl<'a> GraphBuilder<'a> {
                     info.category = AccelOpCategory::Reduction;
                     info.tags.push(AccelGraphTag::Reduction);
                 }
-                Some(crate::bytecode::FusionInstructionKind::Matmul) | None => {}
+                Some(crate::bytecode::FusionInstructionKind::Matmul) => {
+                    info.category = AccelOpCategory::MatMul;
+                    info.tags.push(AccelGraphTag::MatMul);
+                }
+                None => {}
             }
             builtin_cache.insert(entry.identity.name.to_ascii_lowercase(), info);
         }
@@ -1360,6 +1364,29 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn canonical_matrix_product_graph_preserves_exact_arity() {
+        for (arguments, outputs, expected) in [
+            (2, 1, AccelOpCategory::MatMul),
+            (1, 1, AccelOpCategory::Other),
+            (3, 1, AccelOpCategory::Other),
+            (2, 0, AccelOpCategory::Other),
+            (2, 2, AccelOpCategory::Other),
+        ] {
+            let mut instructions = (0..arguments).map(Instr::LoadVar).collect::<Vec<_>>();
+            instructions.push(Instr::CallBuiltinMulti("mtimes".into(), arguments, outputs));
+            let graph = build_accel_graph(&instructions, &vec![Type::Unknown; arguments]);
+            let node = graph.nodes.iter().find(|node| {
+                matches!(&node.label, AccelNodeLabel::Builtin { name } if name == "mtimes")
+            }).unwrap();
+            assert_eq!(node.category, expected, "{arguments}/{outputs}");
+            assert_eq!(
+                node.tags.contains(&AccelGraphTag::MatMul),
+                expected == AccelOpCategory::MatMul
+            );
         }
     }
 

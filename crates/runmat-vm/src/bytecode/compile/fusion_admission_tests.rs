@@ -85,3 +85,22 @@ fn unsupported_canonical_binding_and_effectful_declarations_fail_closed() {
     assert!(call_kind("syms", 1, 1).is_none());
     assert!(call_kind("__not_a_registered_builtin__", 1, 1).is_none());
 }
+
+#[test]
+fn canonical_matrix_product_has_exact_structural_call_contract() {
+    use crate::accel::fusion_declaration::{call_kind, canonical_kind};
+    use crate::bytecode::FusionInstructionKind;
+    assert!(matches!(
+        call_kind("mtimes", 2, 1),
+        Some(FusionInstructionKind::Matmul)
+    ));
+    for inputs in [0, 1, 3] {
+        assert!(call_kind("mtimes", inputs, 1).is_none());
+    }
+    for outputs in [0, 2, 3] {
+        assert!(call_kind("mtimes", 2, outputs).is_none());
+    }
+    let mut entry = *runmat_builtins::builtin_catalog_entry_by_name("mtimes").unwrap();
+    entry.contract.effects = &[runmat_types::EffectKind::HostCallback];
+    assert!(canonical_kind(&entry, Some(2)).is_none());
+}

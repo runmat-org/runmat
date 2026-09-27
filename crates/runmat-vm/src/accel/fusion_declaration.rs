@@ -10,6 +10,7 @@ use runmat_builtins::{
 };
 use runmat_runtime::builtins::common::spec::{
     canonical_fusion_declaration, FusionExprContext, FusionKernelTemplate,
+    FusionStructuralOperation,
 };
 use runmat_types::EffectKind;
 
@@ -36,6 +37,14 @@ pub(crate) fn canonical_kind(
         return None;
     };
     let declaration = canonical_fusion_declaration(entry.binding_identity(binding))?;
+    if let Some(operation) = declaration.structural {
+        if argument_count.is_some_and(|count| count != operation.input_arity()) {
+            return None;
+        }
+        return Some(match operation {
+            FusionStructuralOperation::MatrixMultiply => FusionInstructionKind::Matmul,
+        });
+    }
     if declaration
         .spec
         .elementwise
