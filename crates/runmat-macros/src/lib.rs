@@ -843,13 +843,19 @@ struct RegisterSpecAttrArgs {
     spec_expr: Option<Expr>,
     builtin_path: Option<LitStr>,
     semantics: Option<Expr>,
+    structural: Option<Expr>,
 }
+
+#[cfg(test)]
+#[path = "spec_registration_tests.rs"]
+mod spec_registration_tests;
 
 impl Parse for RegisterSpecAttrArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut spec_expr = None;
         let mut builtin_path = None;
         let mut semantics = None;
+        let mut structural = None;
         while !input.is_empty() {
             let ident: syn::Ident = input.parse()?;
             input.parse::<syn::Token![=]>()?;
@@ -857,6 +863,14 @@ impl Parse for RegisterSpecAttrArgs {
                 spec_expr = Some(input.parse()?);
             } else if ident == "semantics" {
                 semantics = Some(input.parse()?);
+            } else if ident == "structural" {
+                if structural.is_some() {
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "duplicate structural declaration",
+                    ));
+                }
+                structural = Some(input.parse()?);
             } else if ident == "builtin_path" {
                 let lit: LitStr = input.parse()?;
                 builtin_path = Some(lit);
@@ -871,6 +885,7 @@ impl Parse for RegisterSpecAttrArgs {
             spec_expr,
             builtin_path,
             semantics,
+            structural,
         })
     }
 }
@@ -882,11 +897,12 @@ pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
         spec_expr,
         builtin_path,
         semantics,
+        structural,
     } = args;
-    if semantics.is_some() {
+    if semantics.is_some() || structural.is_some() {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
-            "semantics belongs to a fusion registration",
+            "semantics and structural operations belong to a fusion registration",
         )
         .to_compile_error()
         .into();
@@ -962,7 +978,11 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
         spec_expr,
         builtin_path,
         semantics,
+        structural,
     } = args;
+    let structural = structural
+        .map(|value| quote! { Some(#value) })
+        .unwrap_or_else(|| quote! { None });
     let semantics = semantics
         .map(|value| quote! { Some(&#value) })
         .unwrap_or_else(|| quote! { None });
@@ -990,6 +1010,7 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
                 crate::builtins::common::spec::FusionSpecRegistration {
                     spec: &#spec_tokens_helper, builtin_path: #builtin_path_lit, declaration: #declaration,
                     semantics: #semantics,
+                    structural: #structural,
                     source_file: file!(), module_path: module_path!(),
                 }
             );
@@ -1016,6 +1037,7 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
             crate::builtins::common::spec::FusionSpecInventory {
                 spec: &#spec_for_native,
                 semantics: #semantics,
+                structural: #structural,
                 builtin_path: #builtin_path_lit,
                 declaration: #declaration,
                 source_file: file!(),

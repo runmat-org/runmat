@@ -1,4 +1,7 @@
-use super::{builtin_fusion_spec_registrations, BuiltinFusionSpec, FusionSemanticDeclaration};
+use super::{
+    builtin_fusion_spec_registrations, BuiltinFusionSpec, FusionSemanticDeclaration,
+    FusionStructuralOperation,
+};
 use runmat_builtins::{
     builtin_catalog_entry_by_name, builtin_implementation_provenance, BuiltinBindingIdentity,
     BuiltinImplementationAuthority,
@@ -17,6 +20,7 @@ pub struct CanonicalFusionDeclaration {
     pub binding: BuiltinBindingIdentity,
     pub spec: &'static BuiltinFusionSpec,
     pub semantics: Option<&'static FusionSemanticDeclaration>,
+    pub structural: Option<FusionStructuralOperation>,
 }
 
 impl std::fmt::Debug for CanonicalFusionDeclaration {
@@ -70,9 +74,19 @@ pub fn canonical_fusion_declaration(
     if candidates.next().is_some() || registration.spec.name != identity.builtin.name {
         return None;
     }
+    // A structural operation needs explicit binding authority and must not
+    // compete with an unrelated scalar/reduction execution declaration.
+    if registration.structural.is_some()
+        && (registration.semantics.is_none()
+            || registration.spec.elementwise.is_some()
+            || registration.spec.reduction.is_some())
+    {
+        return None;
+    }
     Some(CanonicalFusionDeclaration {
         binding: identity,
         spec: registration.spec,
         semantics: registration.semantics,
+        structural: registration.structural,
     })
 }

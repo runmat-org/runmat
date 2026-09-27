@@ -1,12 +1,13 @@
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy,
+    FusionSemanticDeclaration, FusionStructuralOperation, GpuOpKind, ProviderHook, ReductionNaN,
+    ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 
 use super::NAME;
 
 #[runmat_macros::register_gpu_spec(
-    builtin_path = "crate::builtins::math::linalg::ops::matrix_arithmetic::mtimes::spec"
+    builtin_path = "crate::builtins::math::linalg::ops::matrix_arithmetic::mtimes"
 )]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: NAME,
@@ -26,8 +27,20 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Calls the provider `matmul` hook for supported floating matrix products; integer scalar products gather through exact typed storage, apply saturating class-preserving multiplication, and restore GPU residency when an input was resident.",
 };
 
+const FUSION_SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
+    binding: runmat_builtins::BuiltinBindingIdentity {
+        builtin: runmat_builtins::MTIMES_CATALOG_ENTRY.identity,
+        variant: "default",
+    },
+    revision: 1,
+    admit: None,
+    helpers: &[],
+};
+
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::linalg::ops::matrix_arithmetic::mtimes::spec"
+    builtin_path = "crate::builtins::math::linalg::ops::matrix_arithmetic::mtimes",
+    semantics = FUSION_SEMANTICS,
+    structural = FusionStructuralOperation::MatrixMultiply
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
@@ -36,5 +49,5 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Fusion currently delegates to provider matmul kernels or the CPU fallback.",
+    notes: "Exact two-input, one-output calls declare a matrix-product graph operation. Existing matmul execution retains class, shape, layout and provider admission; unsupported operands use the ordinary runtime path.",
 };

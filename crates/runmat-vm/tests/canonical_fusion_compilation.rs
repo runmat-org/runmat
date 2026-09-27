@@ -73,3 +73,46 @@ fn valid_like_forms_do_not_enter_plain_unary_windows() {
         );
     }
 }
+
+#[test]
+fn named_and_operator_products_keep_real_matmul_epilogue_graphs() {
+    use runmat_accelerate::{graph::AccelOpCategory, FusionKind};
+    for expression in ["mtimes(A, B)", "A * B"] {
+        let bytecode = test_helpers::compile_source(&format!(
+            "A = rand(4, 3); B = rand(3, 2); y = {expression} .* 2;"
+        ))
+        .unwrap();
+        let windows = bytecode.runtime_fusion_groups();
+        assert!(!windows.is_empty(), "{expression}: compiler windows");
+        let graph = bytecode
+            .runtime_accel_graph_for_fusion(&windows)
+            .expect("compiler-authorized product graph");
+        assert!(graph
+            .nodes
+            .iter()
+            .any(|node| node.category == AccelOpCategory::MatMul));
+        assert!(
+            graph
+                .detect_fusion_groups()
+                .iter()
+                .any(|group| matches!(group.kind, FusionKind::MatmulEpilogue)),
+            "{expression}: real matmul epilogue detector"
+        );
+    }
+}
+
+#[test]
+fn named_products_restore_explained_variance_idiom_graph() {
+    use runmat_accelerate::FusionKind;
+    let bytecode = test_helpers::compile_source(
+        "G = rand(4, 4); Q = rand(4, 2); tmp = mtimes(Q.', G); prod = mtimes(tmp, Q); ev = diag(prod);"
+    ).unwrap();
+    let windows = bytecode.runtime_fusion_groups();
+    let graph = bytecode
+        .runtime_accel_graph_for_fusion(&windows)
+        .expect("named-product explained variance graph");
+    assert!(graph
+        .detect_fusion_groups()
+        .iter()
+        .any(|group| matches!(group.kind, FusionKind::ExplainedVariance)));
+}
