@@ -280,7 +280,6 @@ async fn execute_elementwise_outputs(
                     };
                     prepared.push(PreparedInput {
                         handle: prepared_handle,
-                        owned: None,
                     });
                 }
                 Value::Tensor(t) => {
@@ -296,10 +295,7 @@ async fn execute_elementwise_outputs(
                         started,
                         physical_upload_bytes(provider.precision(), data.len()),
                     );
-                    prepared.push(PreparedInput {
-                        handle: handle.clone(),
-                        owned: None,
-                    });
+                    prepared.push(PreparedInput { handle });
                 }
                 Value::Num(n) => {
                     if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
@@ -319,10 +315,7 @@ async fn execute_elementwise_outputs(
                         started,
                         physical_upload_bytes(provider.precision(), data.len()),
                     );
-                    prepared.push(PreparedInput {
-                        handle: handle.clone(),
-                        owned: None,
-                    });
+                    prepared.push(PreparedInput { handle });
                 }
                 Value::Int(_) => unreachable!("integer inputs rejected before fusion upload"),
                 _ => {

@@ -35,13 +35,14 @@ use provider_observation::FusionPlacementSelection;
 mod admission;
 use admission::AdmittedBindings;
 mod outputs;
+#[cfg(test)]
+mod ownership_tests;
 mod elementwise;
 pub use elementwise::{execute_elementwise, execute_elementwise_placed};
 pub use observation::{FusionCpuObservation, FusionExecutionOutcome};
 
 struct PreparedInput {
     handle: GpuTensorHandle,
-    owned: Option<GpuTensorHandle>,
 }
 
 fn mark_fusion_output(handle: &mut GpuTensorHandle, inputs: &[Value]) -> Result<()> {
@@ -148,10 +149,10 @@ fn ensure_gpu_tensor(
     provider: &dyn AccelProvider,
     value: &Value,
     observer: FusionPlacementObserver,
-) -> Result<(GpuTensorHandle, Option<GpuTensorHandle>)> {
+) -> Result<GpuTensorHandle> {
     reject_native_integer_fusion_values(std::slice::from_ref(value), &[])?;
     match value {
-        Value::GpuTensor(handle) => Ok((handle.clone(), None)),
+        Value::GpuTensor(handle) => Ok(handle.clone()),
         Value::Tensor(tensor) => {
             let data = tensor.materialize_f64();
             let view = HostTensorView {
@@ -159,10 +160,9 @@ fn ensure_gpu_tensor(
                 shape: &tensor.shape,
             };
             let started = Instant::now();
-            let mut handle = provider.upload(&view)?;
+            let handle = provider.upload(&view)?;
             observer.upload(started, host_f64_bytes(data.len()));
-            runmat_accelerate_api::mark_handle_automatic(&mut handle);
-            Ok((handle.clone(), Some(handle)))
+            Ok(handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)?)
         }
         _ => Err(anyhow!("fusion: expected tensor input")),
     }
@@ -177,7 +177,7 @@ fn fusion_input_elements(values: &[Value]) -> Option<usize> {
         .iter()
         .filter_map(|value| match value {
             Value::Tensor(tensor) => Some(tensor.len()),
-            Value::GpuTensor(handle) => Some(handle.shape.iter().copied().product::<usize>()),
+            Value::GpuTensor(handle) => Some(handle.shape().iter().copied().product::<usize>()),
             Value::Num(_) => Some(1),
             _ => None,
         })
@@ -530,7 +530,7 @@ fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
     let mut shapes: Vec<Vec<usize>> = Vec::new();
     for value in values {
         match value {
-            Value::GpuTensor(handle) => shapes.push(handle.shape.clone()),
+            Value::GpuTensor(handle) => shapes.push(handle.shape().to_vec()),
             Value::Tensor(tensor) => shapes.push(tensor.shape.clone()),
             Value::Num(_) | Value::Int(_) => shapes.push(Vec::new()),
             _ => return None,
@@ -656,7 +656,6 @@ pub fn execute_reduction_with_shape_placed(
         match value {
             Value::GpuTensor(handle) => prepared.push(PreparedInput {
                 handle: handle.clone(),
-                owned: None,
             }),
             Value::Tensor(t) => {
                 if let Err(msg) = ensure_provider_supports_dtype(provider, t.numeric_dtype()) {
@@ -672,10 +671,7 @@ pub fn execute_reduction_with_shape_placed(
                 let started = Instant::now();
                 let handle = provider.upload(&view)?;
                 observer.upload(started, host_f64_bytes(data.len()));
-                prepared.push(PreparedInput {
-                    handle: handle.clone(),
-                    owned: Some(handle),
-                });
+                prepared.push(PreparedInput { handle });
             }
             Value::Num(n) => {
                 if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
@@ -696,10 +692,7 @@ pub fn execute_reduction_with_shape_placed(
                 let started = Instant::now();
                 let handle = provider.upload(&view)?;
                 observer.upload(started, host_f64_bytes(data.len()));
-                prepared.push(PreparedInput {
-                    handle: handle.clone(),
-                    owned: Some(handle),
-                });
+                prepared.push(PreparedInput { handle });
             }
             Value::Int(_) => unreachable!("integer inputs rejected before fusion upload"),
             _ => return Err(anyhow!("fusion: unsupported value type")),
@@ -766,13 +759,10 @@ pub fn execute_reduction_with_shape_placed(
     observer.queue(started);
     observer.kernel_unmeasured();
     timer.mark("dispatch");
-    mark_fusion_output(&mut output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs)?;
 
-    for input in prepared {
-        if let Some(handle) = input.owned {
-            let _ = provider.free(&handle);
-        }
-    }
+    drop(handles);
+    drop(prepared);
     timer.mark("cleanup");
     timer.finish();
 
@@ -834,7 +824,7 @@ pub async fn execute_centered_gram_placed(
         .get(matrix_index)
         .ok_or_else(|| anyhow!("centered gram: matrix value missing"))?;
 
-    let (matrix_handle, owned_matrix) = ensure_gpu_tensor(provider, matrix_value, observer)?;
+    let matrix_handle = ensure_gpu_tensor(provider, matrix_value, observer)?;
 
     let options = CovarianceOptions {
         normalization,
@@ -848,11 +838,9 @@ pub async fn execute_centered_gram_placed(
         .await?;
     observer.kernel_unmeasured();
 
-    if let Some(temp) = owned_matrix {
-        let _ = provider.free(&temp);
-    }
+    drop(matrix_handle);
 
-    mark_fusion_output(&mut output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs)?;
     selection.submitted();
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
@@ -921,8 +909,8 @@ pub async fn execute_power_step_normalize_placed(
         .get(rhs_index)
         .ok_or_else(|| anyhow!("power-step normalization: rhs value missing"))?;
 
-    let (lhs_handle, lhs_owned) = ensure_gpu_tensor(provider, lhs_value, observer)?;
-    let (rhs_handle, rhs_owned) = ensure_gpu_tensor(provider, rhs_value, observer)?;
+    let lhs_handle = ensure_gpu_tensor(provider, lhs_value, observer)?;
+    let rhs_handle = ensure_gpu_tensor(provider, rhs_value, observer)?;
 
     let desc = PowerStepEpilogue { epsilon };
     observer.queue_unmeasured();
@@ -931,14 +919,9 @@ pub async fn execute_power_step_normalize_placed(
         .await?;
     observer.kernel_unmeasured();
 
-    if let Some(temp) = lhs_owned {
-        let _ = provider.free(&temp);
-    }
-    if let Some(temp) = rhs_owned {
-        let _ = provider.free(&temp);
-    }
+    drop((lhs_handle, rhs_handle));
 
-    mark_fusion_output(&mut output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs)?;
     selection.submitted();
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
@@ -999,14 +982,15 @@ pub async fn execute_explained_variance_placed(
     let q_value = find_value(q_vid)?;
     let g_value = find_value(g_vid)?;
 
-    let (mut q_handle, q_owned) = ensure_gpu_tensor(provider, q_value, observer)?;
-    let (g_handle, g_owned) = ensure_gpu_tensor(provider, g_value, observer)?;
+    let mut q_handle = ensure_gpu_tensor(provider, q_value, observer)?;
+    let g_handle = ensure_gpu_tensor(provider, g_value, observer)?;
 
     let debug_explained = std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok();
     if debug_explained {
         println!(
             "[explained] initial Q shape {:?}, G shape {:?}",
-            q_handle.shape, g_handle.shape
+            q_handle.shape(),
+            g_handle.shape()
         );
         let started = Instant::now();
         if let Ok(info) = provider.download(&q_handle).await {
@@ -1019,7 +1003,7 @@ pub async fn execute_explained_variance_placed(
         }
     }
 
-    let q_shape = q_handle.shape.clone();
+    let q_shape = q_handle.shape().to_vec();
     if q_shape.len() < 2 {
         return Err(anyhow!("explained variance: Q must be 2-D"));
     }
@@ -1029,7 +1013,7 @@ pub async fn execute_explained_variance_placed(
         return Err(anyhow!("explained variance: zero-sized Q"));
     }
 
-    let g_shape = g_handle.shape.clone();
+    let g_shape = g_handle.shape().to_vec();
     if g_shape.len() < 2 {
         return Err(anyhow!("explained variance: G must be 2-D"));
     }
@@ -1040,7 +1024,7 @@ pub async fn execute_explained_variance_placed(
     observer.queue_unmeasured();
     let mut tmp = provider.matmul(&q_handle, &g_handle).await?;
     observer.kernel_unmeasured();
-    let tmp_shape = tmp.shape.clone();
+    let tmp_shape = tmp.shape().to_vec();
     if tmp_shape.len() < 2 {
         return Err(anyhow!("explained variance: intermediate must be 2-D"));
     }
@@ -1053,7 +1037,7 @@ pub async fn execute_explained_variance_placed(
     }
 
     if debug_explained {
-        println!("[explained] after Q*G tmp shape {:?}", tmp.shape);
+        println!("[explained] after Q*G tmp shape {:?}", tmp.shape());
     }
 
     // Interpreter's transpose retains the original data layout. Mimic that by
@@ -1070,7 +1054,7 @@ pub async fn execute_explained_variance_placed(
     if debug_explained {
         println!(
             "[explained] after reshape(matmul) tmp shape {:?}",
-            tmp.shape
+            tmp.shape()
         );
     }
 
@@ -1082,14 +1066,14 @@ pub async fn execute_explained_variance_placed(
     observer.kernel_unmeasured();
 
     if debug_explained {
-        println!("[explained] product shape {:?}", product.shape);
+        println!("[explained] product shape {:?}", product.shape());
     }
 
     let started = Instant::now();
     let diag = provider.diag_extract(&product, 0)?;
     observer.queue(started);
     observer.kernel_unmeasured();
-    let mut diag = match diag.shape.as_slice() {
+    let mut diag = match diag.shape() {
         [len] => provider.reshape(&diag, &[*len, 1])?,
         [_len, 1] => diag,
         _ => diag,
@@ -1107,16 +1091,9 @@ pub async fn execute_explained_variance_placed(
         }
     }
 
-    let _ = provider.free(&tmp);
-    let _ = provider.free(&product);
-    if let Some(temp) = q_owned {
-        let _ = provider.free(&temp);
-    }
-    if let Some(temp) = g_owned {
-        let _ = provider.free(&temp);
-    }
+    drop((tmp, product, q_handle, g_handle, q_transposed_view));
 
-    mark_fusion_output(&mut diag, &request.inputs);
+    mark_fusion_output(&mut diag, &request.inputs)?;
     selection.submitted();
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(diag)))
 }
@@ -1182,8 +1159,8 @@ pub async fn execute_image_normalize_placed(
     };
 
     let input_value = find_value(pattern.input)?;
-    let (input_handle, input_owned) = ensure_gpu_tensor(provider, input_value, observer)?;
-    let shape = input_handle.shape.clone();
+    let input_handle = ensure_gpu_tensor(provider, input_value, observer)?;
+    let shape = input_handle.shape().to_vec();
     if shape.len() != 3 {
         return Err(anyhow!(
             "image normalize: expected 3-D input tensor, got shape {:?}",
@@ -1241,11 +1218,9 @@ pub async fn execute_image_normalize_placed(
     let mut output = provider.image_normalize(&input_handle, &desc).await?;
     observer.kernel_unmeasured();
 
-    if let Some(temp) = input_owned {
-        provider.free(&temp).ok();
-    }
+    drop(input_handle);
 
-    mark_fusion_output(&mut output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs)?;
     selection.submitted();
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
