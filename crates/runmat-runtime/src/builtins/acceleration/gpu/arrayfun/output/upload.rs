@@ -1,41 +1,66 @@
-use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::provider_restore;
 use crate::BuiltinResult;
-use runmat_accelerate_api::set_handle_logical;
-use runmat_value::{Tensor, Value};
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_value::Value;
 
 use super::super::error::arrayfun_flow;
 
 pub(in crate::builtins::acceleration::gpu::arrayfun) fn maybe_upload_uniform(
     value: Value,
-    has_gpu_input: bool,
+    resident_inputs: &[GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    if !has_gpu_input {
+    let Some(prototype) = resident_inputs.first() else {
         return Ok(value);
-    }
-    let provider = match runmat_accelerate_api::provider() {
-        Some(p) => p,
-        None => return Ok(value),
     };
+    let provider = runmat_accelerate_api::provider_for_handle(prototype)
+        .ok_or_else(|| arrayfun_flow("arrayfun: input allocation provider unavailable"))?;
 
     match value {
-        Value::Tensor(tensor) => {
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
-            Ok(Value::GpuTensor(handle))
-        }
-        Value::LogicalArray(logical) => {
-            let data: Vec<f64> = logical
-                .data
-                .iter()
-                .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
-                .collect();
-            let tensor = Tensor::new(data, logical.shape.clone())
-                .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
-            set_handle_logical(&handle, true);
-            Ok(Value::GpuTensor(handle))
+        value @ (Value::Tensor(_) | Value::LogicalArray(_) | Value::ComplexTensor(_)) => {
+            provider_restore::upload_value_like_protected(
+                provider,
+                value,
+                "arrayfun",
+                prototype,
+                resident_inputs,
+            )
         }
         other => Ok(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::common::{gpu_helpers, test_support};
+    use runmat_value::{LogicalArray, Tensor};
+
+    #[test]
+    fn logical_restoration_uses_a_logical_producer_and_preserves_input() {
+        test_support::with_test_provider(|provider| {
+            let source = gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap(),
+            )
+            .unwrap();
+            for (data, shape) in [(vec![1, 0], vec![2, 1]), (vec![], vec![0, 3])] {
+                let logical = LogicalArray::new(data, shape.clone()).unwrap();
+                let output = maybe_upload_uniform(
+                    Value::LogicalArray(logical),
+                    std::slice::from_ref(&source),
+                )
+                .unwrap();
+                let Value::GpuTensor(output) = output else {
+                    unreachable!()
+                };
+                assert!(runmat_accelerate_api::handle_is_logical(&output));
+                assert!(gpu_helpers::exact_provider_for_handle(&output)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider)));
+                assert_eq!(output.shape(), shape);
+                assert!(!output.shares_allocation_with(&source));
+                drop(output);
+                source.allocation_lease().validate_live().unwrap();
+            }
+        });
     }
 }

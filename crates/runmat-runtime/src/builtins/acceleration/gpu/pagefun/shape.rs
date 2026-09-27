@@ -48,7 +48,7 @@ pub(super) fn validate_operand_metadata(operands: &[Value]) -> BuiltinResult<()>
             Value::Tensor(t) => canonical_matrix_shape(&t.shape),
             Value::ComplexTensor(t) => canonical_matrix_shape(&t.shape),
             Value::LogicalArray(t) => canonical_matrix_shape(&t.shape),
-            Value::GpuTensor(handle) => canonical_matrix_shape(&handle.shape),
+            Value::GpuTensor(handle) => canonical_matrix_shape(handle.shape()),
             _ => return Err(pagefun_error(&PAGEFUN_ERROR_INVALID_INPUT)),
         };
         checked_volume(&shape)?;

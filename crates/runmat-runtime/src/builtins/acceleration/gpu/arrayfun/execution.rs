@@ -16,9 +16,14 @@ pub(super) async fn execute(func: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         uniform_output,
         error_handler,
     } = invocation;
-    let has_gpu_input = inputs
+    let resident_inputs: Vec<_> = inputs
         .iter()
-        .any(|value| matches!(value, Value::GpuTensor(_)));
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    let has_gpu_input = !resident_inputs.is_empty();
     if uniform_output {
         if let Some(gpu_result) =
             gpu::try_fast_path(&callable, &inputs, error_handler.as_ref()).await?
@@ -36,7 +41,7 @@ pub(super) async fn execute(func: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     if total_len == 0 {
         if uniform_output {
             let contract = OutputContract::infer(&callable, &prepared_inputs);
-            return empty_uniform(&base_shape, contract);
+            return maybe_upload_uniform(empty_uniform(&base_shape, contract)?, &resident_inputs);
         } else {
             return make_cell_with_shape(Vec::new(), base_shape)
                 .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")));
@@ -90,7 +95,7 @@ pub(super) async fn execute(func: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 
     if let Some(collector) = collector {
         let uniform = collector.finish(&base_shape)?;
-        maybe_upload_uniform(uniform, has_gpu_input)
+        maybe_upload_uniform(uniform, &resident_inputs)
     } else {
         make_cell_with_shape(cell_outputs, base_shape)
             .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))

@@ -42,11 +42,11 @@ pub(super) async fn try_fast_path(
     }
 
     if handles.len() >= 2 {
-        let base_shape = handles[0].shape.clone();
+        let base_shape = handles[0].shape();
         if handles
             .iter()
             .skip(1)
-            .any(|handle| handle.shape != base_shape)
+            .any(|handle| handle.shape() != base_shape)
         {
             return Ok(None);
         }
