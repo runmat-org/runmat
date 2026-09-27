@@ -112,6 +112,7 @@ impl<B: Borrow<wgpu::Buffer>> Drop for Readback<B> {
     }
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(super) fn read(
     access: WgpuDeviceAccess,
     buffer: wgpu::Buffer,

@@ -49,6 +49,7 @@ impl WgpuProvider {
             Ok(output)
         }
     }
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(super) fn map_readback_bytes<'a>(
         &'a self,
         staging: wgpu::Buffer,
