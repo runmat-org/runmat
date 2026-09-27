@@ -74,6 +74,104 @@ fn admitted_reshape_view_preserves_shape_without_changing_source() {
     assert_eq!(values, vec![0.0, 0.5f32.sin(), 1.0f32.sin(), 2.0f32.sin()]);
 }
 
+#[test]
+fn asymmetric_materialized_transpose_then_unary_preserves_logical_order() {
+    use runmat_accelerate_api::allocation::{GpuTensorLayout, GpuTensorView};
+    let provider = InProcessProvider::new();
+    for single in [true, false] {
+        for complex in [true, false] {
+            // Column-major 2x3, intentionally neither square nor symmetric.
+            let real = [0.25, -0.5, 1.0, -2.0, 3.0, -4.0];
+            let imaginary = [0.5, 0.75, -1.0, 1.25, -1.5, 1.75];
+            let words: Vec<f64> = (0..6)
+                .flat_map(|i| {
+                    if complex {
+                        vec![real[i], imaginary[i]]
+                    } else {
+                        vec![real[i]]
+                    }
+                })
+                .collect();
+            let data = if single {
+                InProcessNumericData::F32(words.iter().map(|&x| x as f32).collect())
+            } else {
+                InProcessNumericData::F64(words.clone())
+            };
+            let storage = if complex {
+                GpuTensorStorage::ComplexInterleaved
+            } else {
+                GpuTensorStorage::Real
+            };
+            let input = provider
+                .allocate_numeric_data(data, vec![2, 3], storage)
+                .unwrap();
+            assert!(input
+                .with_view(GpuTensorView::contiguous(vec![3, 2]).with_layout(
+                    GpuTensorLayout::Transpose(runmat_accelerate_api::TransposeInfo {
+                        base_rows: 2,
+                        base_cols: 3
+                    })
+                ))
+                .is_err());
+            assert!(input
+                .with_view(GpuTensorView::contiguous(vec![1, 3]))
+                .is_err());
+            let transposed = provider.transpose(&input).unwrap();
+            assert_eq!(transposed.shape(), &[3, 2]);
+            assert_eq!(transposed.view().layout(), GpuTensorLayout::Contiguous);
+            assert_eq!(
+                transposed.physical().element_type(),
+                input.physical().element_type()
+            );
+            assert!(!transposed.shares_allocation_with(&input));
+            for operation in [Unary::Sin, Unary::Abs] {
+                let output = execute(&provider, &transposed, operation).unwrap();
+                assert_eq!(output.shape(), &[3, 2]);
+                assert_eq!(
+                    output.physical().element_type(),
+                    input.physical().element_type()
+                );
+                let expected: Vec<f64> = [0usize, 2, 4, 1, 3, 5]
+                    .into_iter()
+                    .flat_map(|i| {
+                        let re: f64 = real[i];
+                        let im: f64 = imaginary[i];
+                        match (operation, complex, single) {
+                            (Unary::Sin, true, _) => {
+                                vec![re.sin() * im.cosh(), re.cos() * im.sinh()]
+                            }
+                            (Unary::Abs, true, true) => {
+                                vec![f64::from((re as f32).hypot(im as f32))]
+                            }
+                            (Unary::Abs, true, false) => vec![re.hypot(im)],
+                            (Unary::Sin, false, true) => vec![f64::from((re as f32).sin())],
+                            (Unary::Sin, false, false) => vec![re.sin()],
+                            (Unary::Abs, false, _) => vec![re.abs()],
+                            _ => unreachable!(),
+                        }
+                    })
+                    .collect();
+                match block_on(provider.download_numeric(&output)).unwrap().data {
+                    HostNumericDataOwned::F32(actual) => assert_eq!(
+                        actual,
+                        expected.iter().map(|&x| x as f32).collect::<Vec<_>>()
+                    ),
+                    HostNumericDataOwned::F64(actual) => assert_eq!(actual, expected),
+                    _ => panic!("unexpected class"),
+                }
+            }
+            // Neither the materializer nor its unary consumer mutates the source.
+            match block_on(provider.download_numeric(&input)).unwrap().data {
+                HostNumericDataOwned::F32(actual) => {
+                    assert_eq!(actual, words.iter().map(|&x| x as f32).collect::<Vec<_>>())
+                }
+                HostNumericDataOwned::F64(actual) => assert_eq!(actual, words),
+                _ => panic!("unexpected class"),
+            }
+        }
+    }
+}
+
 fn execute(
     provider: &InProcessProvider,
     input: &GpuTensorHandle,

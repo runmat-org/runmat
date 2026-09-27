@@ -7704,36 +7704,41 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn transpose(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if a.shape().len() != 2 {
-            return Err(anyhow::anyhow!("transpose: only 2D supported"));
-        }
-        let rows = a.shape()[0];
-        let cols = a.shape()[1];
-        let storage = runmat_accelerate_api::handle_storage(a);
-        let lane_factor = match storage {
-            GpuTensorStorage::Real => 1usize,
-            GpuTensorStorage::ComplexInterleaved => 2usize,
+        ensure!(a.shape().len() == 2, "transpose: only 2D supported");
+        let storage = a.physical().storage();
+        let lanes = if storage == GpuTensorStorage::ComplexInterleaved {
+            2
+        } else {
+            1
         };
-        let guard = registry(self.device_id).lock().unwrap();
-        let abuf = guard
-            .get(&a)
-            .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-        ensure!(
-            rows.checked_mul(cols)
-                .and_then(|logical| logical.checked_mul(lane_factor))
-                == Some(abuf.len()),
-            "transpose: shape/data length mismatch"
-        );
-        let mut out = vec![0.0; abuf.len()];
-        for i in 0..rows {
-            for j in 0..cols {
-                let src = (i + j * rows) * lane_factor;
-                let dst = (j + i * cols) * lane_factor;
-                out[dst..dst + lane_factor].copy_from_slice(&abuf[src..src + lane_factor]);
+        let (data, shape) = {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
+            let data = guard
+                .get(a)
+                .ok_or_else(|| anyhow!("transpose input is not a live owned allocation"))?;
+            match data {
+                InProcessNumericData::F32(values) => {
+                    let (values, shape) = permute_data(values, a.shape(), &[1, 0], lanes)?;
+                    (InProcessNumericData::F32(values), shape)
+                }
+                InProcessNumericData::F64(values) => {
+                    let (values, shape) = permute_data(values, a.shape(), &[1, 0], lanes)?;
+                    (InProcessNumericData::F64(values), shape)
+                }
+                InProcessNumericData::Integer(values) => {
+                    let (values, shape) = permute_integer_data(values, a.shape(), &[1, 0])?;
+                    (InProcessNumericData::Integer(values), shape)
+                }
             }
-        }
-        drop(guard);
-        self.allocate_tensor_with_storage(out, vec![cols, rows], storage)
+        };
+        self.allocate_produced(
+            data,
+            shape,
+            storage,
+            runmat_accelerate_api::handle_is_logical(a),
+        )
     }
     fn conv1d(
         &self,
