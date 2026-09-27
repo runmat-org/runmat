@@ -1883,23 +1883,37 @@ pub(crate) mod tests {
     #[test]
     fn jsonencode_resident_gate_precedes_provider_access() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let original = allocation.handle.wire_descriptor();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let handle = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit immutable view");
         let error = block_on(jsonencode_builtin(
             Value::GpuTensor(handle.clone()),
             Vec::new(),
         ))
         .expect_err("resident extension must gate before owner lookup");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop(handle);
         assert_eq!(
             error.identifier(),
             JSONENCODE_RESIDENT_INPUT_EXTENSION.error_identifier
         );
+
+        assert_eq!(allocation.handle.wire_descriptor(), original);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
