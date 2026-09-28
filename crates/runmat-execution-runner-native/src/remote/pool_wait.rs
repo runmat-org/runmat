@@ -13,6 +13,7 @@ pub(super) type ExecutionFuture<'a> =
 
 pub(super) enum RunningWait<T> {
     Operation(T, Option<NativeExecutionResult<RemotePoolExecutionOutcome>>),
+    Execution(NativeExecutionResult<RemotePoolExecutionOutcome>),
     Deadline(Option<NativeExecutionResult<RemotePoolExecutionOutcome>>),
 }
 
@@ -37,6 +38,14 @@ where
             cancellation_failure = pool.cancel(CancellationReason::User).err();
             *cancellation_requested = true;
         }
+        if *cancellation_requested {
+            if let Some(result) = execution_result.take() {
+                if let Some(error) = cancellation_failure.take() {
+                    return Err(error);
+                }
+                return Ok(RunningWait::Execution(result));
+            }
+        }
         tokio::select! {
             result = &mut operation => {
                 if let Some(error) = cancellation_failure.take() {
@@ -45,6 +54,12 @@ where
                 return Ok(RunningWait::Operation(result, execution_result));
             }
             result = execution.as_mut(), if execution_result.is_none() => {
+                if *cancellation_requested {
+                    if let Some(error) = cancellation_failure.take() {
+                        return Err(error);
+                    }
+                    return Ok(RunningWait::Execution(result));
+                }
                 execution_result = Some(result);
             }
             _ = driver_ticks.tick() => pool.tick()?,

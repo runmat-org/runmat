@@ -303,6 +303,7 @@ pub(super) async fn run_worker_loop(
                 let cancellation =
                     Arc::new(super::worker_execution::AttemptCancellation::default());
                 let cancellation_for_task = Arc::clone(&cancellation);
+                let cancellation_for_report = Arc::clone(&cancellation);
                 let (finished_sender, finished) = tokio::sync::watch::channel(false);
                 let meshing_host = meshing_host.clone();
                 let drain_complete_for_task = Arc::clone(&drain_complete);
@@ -372,13 +373,17 @@ pub(super) async fn run_worker_loop(
                             }
                         }
                     };
-                    let report = super::worker_execution::report(
-                        &scheduling,
-                        response,
-                        u64::try_from(started.elapsed().as_millis())
-                            .unwrap_or(u64::MAX)
-                            .max(1),
-                    );
+                    let report = if cancellation_for_report.was_cancelled() {
+                        runmat_execution_runner::AttemptReport::Cancelled
+                    } else {
+                        super::worker_execution::report(
+                            &scheduling,
+                            response,
+                            u64::try_from(started.elapsed().as_millis())
+                                .unwrap_or(u64::MAX)
+                                .max(1),
+                        )
+                    };
                     let _ = reply(
                         connection.as_ref(),
                         &sender,

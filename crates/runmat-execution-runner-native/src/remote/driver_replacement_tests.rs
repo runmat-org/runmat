@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::{SinkExt as _, StreamExt as _};
 use runmat_analysis_execution::StructuralStudyWorkloads;
-use runmat_analysis_fea::execution::{StructuralTransientBlockPlan, StructuralTransientWorkload};
+use runmat_analysis_fea::execution::{
+    AnalysisWorkKind, StructuralTransientBlockPlan, StructuralTransientWorkload,
+};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy;
 use runmat_analysis_fea::ComputeBackend;
@@ -65,6 +67,7 @@ struct DurableState {
     latest_checkpoint: Option<String>,
     next_artifact: u64,
     driver_interruption_triggered: bool,
+    cancellation_heartbeat_observed: bool,
     transitions: Vec<(u64, DriverRunTarget, Option<String>)>,
     worker_authorizations: Vec<(u64, String)>,
     bootstrap_checkpoints: Vec<(u64, Option<String>)>,
@@ -78,6 +81,7 @@ struct DurableControl {
     resources: ResourceRequest,
     workers: BTreeMap<u64, DriverWorkerAllocation>,
     interruption: ReplacementInterruption,
+    interrupted_work_kind: AnalysisWorkKind,
     state: Mutex<DurableState>,
     recovery_committed: tokio::sync::Notify,
 }
@@ -89,7 +93,8 @@ enum ReplacementInterruption {
     ThermalCommitted,
     ThermalCheckpointAckLost,
     ThermalCheckpointRejectedBeforeStore,
-    ThermalAttemptActive,
+    AnalysisAttemptActive,
+    AnalysisAttemptCancelledAfterRestore,
 }
 
 /// Inspect only authenticated, already-stored checkpoint objects. Never infer a
@@ -161,17 +166,23 @@ fn committed_thermal_task(
     state: &DurableState,
     checkpoint: &RemoteDriverCheckpoint,
 ) -> Option<runmat_execution::TaskId> {
-    thermal_task(control, state, checkpoint, false)
+    analysis_task(
+        control,
+        state,
+        checkpoint,
+        AnalysisWorkKind::SolveThermal,
+        false,
+    )
 }
 
-fn thermal_task(
+fn analysis_task(
     control: &DurableControl,
     state: &DurableState,
     checkpoint: &RemoteDriverCheckpoint,
+    kind: AnalysisWorkKind,
     active: bool,
 ) -> Option<runmat_execution::TaskId> {
     use runmat_analysis_execution::AnalysisHostWorkload;
-    use runmat_analysis_fea::execution::AnalysisWorkKind;
     use runmat_execution::value::{ValuePayload, ValueRefKind};
 
     let (pool, closure) = stored_pool_checkpoint(control, state, checkpoint)?;
@@ -222,7 +233,7 @@ fn thermal_task(
             encryption_context: descriptor.encryption_context,
         };
         if AnalysisHostWorkload::from_canonical_bytes(&bytes, access)
-            .is_ok_and(|host| host.workload.kind == AnalysisWorkKind::SolveThermal)
+            .is_ok_and(|host| host.workload.kind == kind)
         {
             return Some(*task_id);
         }
@@ -258,12 +269,36 @@ impl DriverControlPlane for DurableControl {
 
     async fn heartbeat(
         &self,
-        _authority: &DriverAuthority,
+        authority: &DriverAuthority,
         _ttl_seconds: u64,
     ) -> runmat_execution_transport_native::TransportResult<DriverHeartbeat> {
+        let mut state = self.state.lock().unwrap();
+        let cancellation_requested = authority.fencing_token == 2
+            && self.interruption == ReplacementInterruption::AnalysisAttemptCancelledAfterRestore
+            && state.latest_checkpoint.as_ref().is_some_and(|artifact_id| {
+                let checkpoint = stored_driver_checkpoint(self, &state, artifact_id);
+                let Some(task_id) =
+                    analysis_task(self, &state, &checkpoint, self.interrupted_work_kind, true)
+                else {
+                    return false;
+                };
+                let Some((pool, _)) = stored_pool_checkpoint(self, &state, &checkpoint) else {
+                    return false;
+                };
+                let snapshot = pool.test_snapshot();
+                let task = &snapshot.tasks[&task_id];
+                task.attempt_count == 2
+                    && task.active_attempt.is_some_and(|id| {
+                        snapshot
+                            .attempts
+                            .get(&id)
+                            .is_some_and(|attempt| attempt.request.driver_fence == 2)
+                    })
+            });
+        state.cancellation_heartbeat_observed |= cancellation_requested;
         Ok(DriverHeartbeat {
             run_state: "running".into(),
-            cancellation_requested: false,
+            cancellation_requested,
             expires_at_millis: i64::MAX,
         })
     }
@@ -338,9 +373,11 @@ impl DriverControlPlane for DurableControl {
                         let state = self.state.lock().unwrap();
                         committed_thermal_task(self, &state, &checkpoint).is_some()
                     }
-                    ReplacementInterruption::ThermalAttemptActive => {
+                    ReplacementInterruption::AnalysisAttemptActive
+                    | ReplacementInterruption::AnalysisAttemptCancelledAfterRestore => {
                         let state = self.state.lock().unwrap();
-                        thermal_task(self, &state, &checkpoint, true).is_some()
+                        analysis_task(self, &state, &checkpoint, self.interrupted_work_kind, true)
+                            .is_some()
                     }
                     ReplacementInterruption::ReplayableExecutionStart => false,
                 })
@@ -543,14 +580,38 @@ fn rejected_thermal_checkpoint_cannot_be_restored_as_a_committed_prefix() {
     }
 }
 
+fn analysis_replacement_families() -> impl Iterator<Item = ExactStudyFamily> {
+    [
+        ExactStudyFamily::ModalRandomResponse,
+        ExactStudyFamily::StructuralTransient,
+        ExactStudyFamily::ModalResponseSpectrum,
+    ]
+    .into_iter()
+    .chain(thermal::Case::matrix().map(ExactStudyFamily::ThermalPrestress))
+}
+
 #[test]
-fn active_thermal_attempt_retries_after_actual_driver_replacement() {
-    for case in thermal::Case::matrix() {
+fn active_analysis_attempt_retries_after_actual_driver_replacement() {
+    for family in analysis_replacement_families() {
         let result = run_actual_driver_replacement_with_interruption(
-            ExactStudyFamily::ThermalPrestress(case),
-            ReplacementInterruption::ThermalAttemptActive,
+            family,
+            ReplacementInterruption::AnalysisAttemptActive,
         );
-        assert!(result.is_some());
+        assert_eq!(
+            result.is_some(),
+            matches!(family, ExactStudyFamily::ThermalPrestress(_))
+        );
+    }
+}
+
+#[test]
+fn restored_analysis_retry_observes_cancellation_before_publication() {
+    for family in analysis_replacement_families() {
+        let result = run_actual_driver_replacement_with_interruption(
+            family,
+            ReplacementInterruption::AnalysisAttemptCancelledAfterRestore,
+        );
+        assert!(result.is_none());
     }
 }
 
@@ -600,7 +661,16 @@ async fn actual_driver_replacement_case(
         &fixture.inventory,
         fixture.run_key.clone(),
         1,
-        interruption == ReplacementInterruption::ThermalAttemptActive,
+        matches!(
+            interruption,
+            ReplacementInterruption::AnalysisAttemptActive
+                | ReplacementInterruption::AnalysisAttemptCancelledAfterRestore
+        )
+        .then_some(super::worker_execution::HeldAnalysisAttempt {
+            kind: control.interrupted_work_kind,
+            input_object_id: None,
+            until: super::worker_execution::HeldAttemptUntil::UntilWorkerLoss,
+        }),
     );
     let first_driver = super::driver::run_remote_driver(
         RemoteDriverConfig {
@@ -680,13 +750,32 @@ async fn actual_driver_replacement_case(
     } else {
         None
     };
-    let active_thermal_before = if interruption == ReplacementInterruption::ThermalAttemptActive {
+    let active_analysis_before = if matches!(
+        interruption,
+        ReplacementInterruption::AnalysisAttemptActive
+            | ReplacementInterruption::AnalysisAttemptCancelledAfterRestore
+    ) {
         let state = control.state.lock().unwrap();
         let checkpoint = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
-        let task_id = thermal_task(&control, &state, &checkpoint, true)
-            .expect("driver loss must follow an authenticated active thermal attempt");
+        let task_id = analysis_task(
+            &control,
+            &state,
+            &checkpoint,
+            control.interrupted_work_kind,
+            true,
+        )
+        .expect("driver loss must follow an authenticated active analysis attempt");
         let (pool, _) = stored_pool_checkpoint(&control, &state, &checkpoint).unwrap();
-        Some((task_id, pool.test_snapshot().clone()))
+        let input_object_id = match pool
+            .test_program(task_id)
+            .expect("active analysis program")
+            .arguments
+            .first()
+        {
+            Some(runmat_execution::value::ValuePayload::Object(reference)) => reference.id,
+            _ => panic!("active analysis input is not an object"),
+        };
+        Some((task_id, pool.test_snapshot().clone(), input_object_id))
     } else {
         None
     };
@@ -698,7 +787,15 @@ async fn actual_driver_replacement_case(
         &fixture.inventory,
         fixture.run_key.clone(),
         2,
-        false,
+        (interruption == ReplacementInterruption::AnalysisAttemptCancelledAfterRestore).then_some(
+            super::worker_execution::HeldAnalysisAttempt {
+                kind: control.interrupted_work_kind,
+                input_object_id: active_analysis_before
+                    .as_ref()
+                    .map(|(_, _, object_id)| *object_id),
+                until: super::worker_execution::HeldAttemptUntil::UntilCancellation,
+            },
+        ),
     );
     let second_driver = super::driver::run_remote_driver(
         RemoteDriverConfig {
@@ -709,7 +806,125 @@ async fn actual_driver_replacement_case(
     );
     let driver_result =
         drive_generation(second_relay.forward_pair(), second_worker, second_driver).await;
-    driver_result.unwrap();
+    if let Err(error) = driver_result {
+        let state = control.state.lock().unwrap();
+        let checkpoint = state.latest_checkpoint.as_ref().map(|id| {
+            let checkpoint = stored_driver_checkpoint(&control, &state, id);
+            let decoded_active = analysis_task(
+                &control,
+                &state,
+                &checkpoint,
+                control.interrupted_work_kind,
+                true,
+            );
+            let tasks = stored_pool_checkpoint(&control, &state, &checkpoint).map(|(pool, _)| {
+                let snapshot = pool.test_snapshot();
+                (
+                    snapshot
+                        .tasks
+                        .iter()
+                        .map(|(id, task)| {
+                            (
+                                *id,
+                                task.state,
+                                task.attempt_count,
+                                task.active_attempt,
+                                active_analysis_before
+                                    .as_ref()
+                                    .is_some_and(|(target, _, _)| id == target),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                    snapshot
+                        .attempts
+                        .iter()
+                        .map(|(id, attempt)| {
+                            (
+                                *id,
+                                attempt.request.task_id,
+                                attempt.state,
+                                attempt.request.driver_fence,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            });
+            (checkpoint.sequence, decoded_active, tasks)
+        });
+        panic!(
+            "replacement failed for {family:?} {interruption:?}: {error}; first checkpoint={checkpoint_after_loss}, cancellation heartbeat={}, worker authorizations={:?}, checkpoint={checkpoint:?}",
+            state.cancellation_heartbeat_observed,
+            state.worker_authorizations,
+        );
+    }
+
+    if interruption == ReplacementInterruption::AnalysisAttemptCancelledAfterRestore {
+        use runmat_execution::state::{AttemptState, TaskState};
+        let state = control.state.lock().unwrap();
+        assert!(state.cancellation_heartbeat_observed);
+        assert_eq!(
+            state.bootstrap_checkpoints,
+            vec![(1, None), (2, Some(checkpoint_after_loss.clone()))]
+        );
+        assert_eq!(
+            state
+                .transitions
+                .iter()
+                .filter(|(fence, target, result)| {
+                    *fence == 2 && *target == DriverRunTarget::Cancelled && result.is_none()
+                })
+                .count(),
+            1
+        );
+        assert!(state.transitions.iter().all(|(_, target, _)| {
+            !matches!(
+                target,
+                DriverRunTarget::Succeeded | DriverRunTarget::Indeterminate
+            )
+        }));
+        assert_eq!(state.worker_authorizations.len(), 2);
+        let final_id = state
+            .latest_checkpoint
+            .as_ref()
+            .expect("terminal checkpoint");
+        let checkpoint = stored_driver_checkpoint(&control, &state, final_id);
+        let before_checkpoint = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
+        assert!(checkpoint.sequence > before_checkpoint.sequence);
+        let (pool, _) = stored_pool_checkpoint(&control, &state, &checkpoint).unwrap();
+        let (task_id, before, _) = active_analysis_before.expect("active analysis checkpoint");
+        let original = &before.tasks[&task_id];
+        let after = pool.test_snapshot();
+        let cancelled = &after.tasks[&task_id];
+        let first_attempt = original.active_attempt.expect("first live attempt");
+        assert_eq!(cancelled.submission, original.submission);
+        assert_eq!(cancelled.attempt_count, 2);
+        assert_eq!(cancelled.state, TaskState::Cancelled);
+        assert!(cancelled.committed.is_none());
+        assert_eq!(after.attempts[&first_attempt].state, AttemptState::Lost);
+        assert_eq!(
+            after
+                .attempts
+                .values()
+                .filter(|attempt| attempt.request.task_id == task_id)
+                .count(),
+            2
+        );
+        assert!(
+            after.attempts.values().any(|attempt| {
+                attempt.request.task_id == task_id
+                    && attempt.request.driver_fence == 2
+                    && attempt.state == AttemptState::Cancelled
+            }),
+            "restored target attempt states: {:?}",
+            after
+                .attempts
+                .iter()
+                .filter(|(_, attempt)| attempt.request.task_id == task_id)
+                .map(|(id, attempt)| (id, attempt.state, attempt.cancellation_requested_at))
+                .collect::<Vec<_>>()
+        );
+        return None;
+    }
 
     let (result_artifact, transitions, authorizations, bootstraps) = {
         let state = control.state.lock().unwrap();
@@ -825,7 +1040,7 @@ async fn actual_driver_replacement_case(
             "replacement must complete downstream work, not replay an already completed study"
         );
     }
-    if let Some((task_id, before)) = active_thermal_before {
+    if let Some((task_id, before, _)) = active_analysis_before {
         use runmat_execution::state::AttemptState;
         let state = control.state.lock().unwrap();
         let final_id = state

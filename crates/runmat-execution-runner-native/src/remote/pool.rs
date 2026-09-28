@@ -1,5 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::state::PoolState;
@@ -60,6 +60,23 @@ struct ExistingTask {
     committed: Option<AttemptSuccess>,
 }
 
+// A terminal run checkpoint must not outrun a worker's cancellation acknowledgement.
+// Keep this guard even if the dispatch future is dropped or panics: in that case
+// ownership has not been proven quiescent and recovery must be indeterminate.
+struct CancellationDispatchGuard(Arc<RemotePoolDriver>, bool);
+
+impl Drop for CancellationDispatchGuard {
+    fn drop(&mut self) {
+        if !self.1 {
+            self.0
+                .cancellation_ownership_failed
+                .store(true, Ordering::Release);
+        }
+        self.0.cancellation_in_flight.fetch_sub(1, Ordering::AcqRel);
+        self.0.cancellation_settled.notify_waiters();
+    }
+}
+
 /// Portable scheduler composition over allocation-scoped remote worker routes.
 pub struct RemotePoolDriver {
     scope_id: ExecutionScopeId,
@@ -83,6 +100,9 @@ pub struct RemotePoolDriver {
     admission: Mutex<()>,
     restored_completions: Mutex<HashMap<TaskId, RemoteTaskCompletion>>,
     committed_task: tokio::sync::Notify,
+    cancellation_in_flight: AtomicUsize,
+    cancellation_settled: tokio::sync::Notify,
+    cancellation_ownership_failed: AtomicBool,
 }
 
 impl CacheImport for RemotePoolDriver {
@@ -152,6 +172,9 @@ impl RemotePoolDriver {
             admission: Mutex::new(()),
             restored_completions: Mutex::new(HashMap::new()),
             committed_task: tokio::sync::Notify::new(),
+            cancellation_in_flight: AtomicUsize::new(0),
+            cancellation_settled: tokio::sync::Notify::new(),
+            cancellation_ownership_failed: AtomicBool::new(false),
         }))
     }
 
@@ -912,8 +935,10 @@ impl RemotePoolDriver {
     }
 
     fn cancel_attempt(self: &Arc<Self>, request: AttemptRequest) {
+        self.cancellation_in_flight.fetch_add(1, Ordering::AcqRel);
         let this = Arc::clone(self);
         tokio::spawn(async move {
+            let mut guard = CancellationDispatchGuard(Arc::clone(&this), false);
             let channel = this
                 .channels
                 .read()
@@ -931,6 +956,8 @@ impl RemotePoolDriver {
                                         .into(),
                                 },
                             ));
+                        } else {
+                            guard.1 = true;
                         }
                         return;
                     }
@@ -944,6 +971,8 @@ impl RemotePoolDriver {
                                     .into(),
                             },
                         ));
+                    } else {
+                        guard.1 = true;
                     }
                     return;
                 }
@@ -952,7 +981,20 @@ impl RemotePoolDriver {
                 &request,
                 AttemptReport::Cancelled,
             ));
+            guard.1 = true;
         });
+    }
+
+    pub(super) async fn wait_for_cancellation_quiescence(&self) -> bool {
+        loop {
+            let notified = self.cancellation_settled.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.cancellation_in_flight.load(Ordering::Acquire) == 0 {
+                return !self.cancellation_ownership_failed.load(Ordering::Acquire);
+            }
+            notified.await;
+        }
     }
 }
 

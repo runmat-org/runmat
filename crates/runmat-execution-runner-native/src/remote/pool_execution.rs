@@ -436,8 +436,23 @@ async fn execute_with_allocated_workers(
         ))
     };
     let terminal_publisher = periodic_publisher.clone();
+    let terminal_pool = Arc::clone(&pool);
     let mut execution = Box::pin(async move {
         let outcome = execution.await;
+        // A task waiter can resolve as soon as cancellation is requested, while
+        // the worker is still executing. Do not publish a terminal checkpoint
+        // until every cancellation has been acknowledged or its route fenced.
+        let quiescent = tokio::time::timeout(
+            WORKER_READY_TIMEOUT,
+            terminal_pool.wait_for_cancellation_quiescence(),
+        )
+        .await
+        .unwrap_or(false);
+        if !quiescent {
+            return Ok(RemotePoolExecutionOutcome::Indeterminate(
+                "remote cancellation did not prove worker quiescence before its deadline".into(),
+            ));
+        }
         // Persist the final scheduler state before exposing any terminal outcome,
         // including when the last task and packaging finish in one executor turn.
         if let Some(publisher) = terminal_publisher {
@@ -497,6 +512,9 @@ async fn execute_with_allocated_workers(
                     &mut cancellation_requested,
                     tokio::time::Instant::now() + WORKER_READY_TIMEOUT,
                 ).await? {
+                    RunningWait::Execution(result) => {
+                        return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                    }
                     RunningWait::Operation(result, completed) => {
                         result?;
                         if let Some(result) = completed {
@@ -508,7 +526,9 @@ async fn execute_with_allocated_workers(
                             return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
                         }
                         if cancellation_requested {
-                            return Ok(RemotePoolExecutionOutcome::Cancelled);
+                            return Ok(RemotePoolExecutionOutcome::Indeterminate(
+                                "remote cancellation was not quiescent before recovery publication timed out".into(),
+                            ));
                         }
                         return Err(protocol("remote recovery publication exceeded its deadline"));
                     }
@@ -536,6 +556,9 @@ async fn execute_with_allocated_workers(
                     &mut cancellation_requested,
                     tokio::time::Instant::now() + WORKER_READY_TIMEOUT,
                 ).await? {
+                    RunningWait::Execution(result) => {
+                        return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                    }
                     RunningWait::Operation(resized, completed) => match resized {
                         Ok(resized) => (resized, completed),
                         Err(error) => {
@@ -567,7 +590,9 @@ async fn execute_with_allocated_workers(
                             return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
                         }
                         if cancellation_requested {
-                            return Ok(RemotePoolExecutionOutcome::Cancelled);
+                            return Ok(RemotePoolExecutionOutcome::Indeterminate(
+                                "remote cancellation was not quiescent before worker control timed out".into(),
+                            ));
                         }
                         return Err(protocol("remote worker control operation exceeded its deadline"));
                     }
@@ -599,6 +624,9 @@ async fn execute_with_allocated_workers(
                     &mut cancellation_requested,
                     tokio::time::Instant::now() + WORKER_READY_TIMEOUT,
                 ).await? {
+                    RunningWait::Execution(result) => {
+                        return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
+                    }
                     RunningWait::Operation(result, completed) => {
                         result?;
                         if let Some(result) = completed {
@@ -620,7 +648,9 @@ async fn execute_with_allocated_workers(
                             return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
                         }
                         if cancellation_requested {
-                            return Ok(RemotePoolExecutionOutcome::Cancelled);
+                            return Ok(RemotePoolExecutionOutcome::Indeterminate(
+                                "remote cancellation was not quiescent before worker reconciliation timed out".into(),
+                            ));
                         }
                         return Err(protocol("remote worker reconciliation exceeded its deadline"));
                     }

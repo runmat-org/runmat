@@ -21,6 +21,20 @@ pub(super) enum ExactStudyFamily {
 }
 
 impl ExactStudyFamily {
+    pub(super) const fn held_analysis_kind(
+        self,
+    ) -> runmat_analysis_fea::execution::AnalysisWorkKind {
+        use runmat_analysis_fea::execution::AnalysisWorkKind;
+        match self {
+            Self::StructuralTransient => AnalysisWorkKind::SolveStructuralTransientBlock,
+            Self::ModalResponseSpectrum => {
+                AnalysisWorkKind::SolveStructuralModalResponseSpectrumDirection
+            }
+            Self::ModalRandomResponse => AnalysisWorkKind::SolveStructuralRandomResponseIntervals,
+            Self::ThermalPrestress(_) => AnalysisWorkKind::SolveThermal,
+        }
+    }
+
     pub(super) const fn authored_digest_label(self) -> &'static [u8] {
         match self {
             Self::StructuralTransient => b"driver replacement direct transient",
@@ -234,12 +248,14 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
             resources,
             workers,
             interruption: family.interruption(),
+            interrupted_work_kind: family.held_analysis_kind(),
             state: Mutex::new(DurableState {
                 artifacts,
                 initial_artifacts,
                 latest_checkpoint: None,
                 next_artifact: 0,
                 driver_interruption_triggered: false,
+                cancellation_heartbeat_observed: false,
                 transitions: Vec::new(),
                 worker_authorizations: Vec::new(),
                 bootstrap_checkpoints: Vec::new(),
@@ -428,7 +444,7 @@ pub(super) async fn run_worker(
     inventory: &ResourceInventory,
     run_key: RunKeyMaterial,
     driver_fence: u64,
-    hold_thermal_attempt: bool,
+    held_analysis_attempt: Option<super::super::worker_execution::HeldAnalysisAttempt>,
 ) -> crate::NativeExecutionResult<()> {
     let allocation_id = allocation.allocation_lease_id.clone();
     let worker = WorkerSpec {
@@ -449,11 +465,12 @@ pub(super) async fn run_worker(
         run_key,
         limits: FrameLimits::default(),
     };
-    if hold_thermal_attempt {
-        super::super::worker_entry::run_remote_meshing_worker_relay_with_held_thermal_attempt(
+    if let Some(attempt) = held_analysis_attempt {
+        super::super::worker_entry::run_remote_meshing_worker_relay_with_held_analysis_attempt(
             request,
             Arc::new(native_meshing_kernel_dispatcher()),
             NativeMeshingHostLimits::default(),
+            attempt,
         )
         .await
     } else {

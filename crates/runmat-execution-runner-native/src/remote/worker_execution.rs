@@ -22,6 +22,10 @@ impl AttemptCancellation {
     pub(super) fn flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.0)
     }
+
+    pub(super) fn was_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 impl MeshingCancellationSignal for AttemptCancellation {
@@ -35,7 +39,22 @@ pub(super) struct RemoteMeshingHost {
     kernel: Arc<dyn MeshingStageKernel>,
     limits: crate::NativeMeshingHostLimits,
     #[cfg(test)]
-    hold_thermal_attempt: bool,
+    held_analysis_attempt: Option<HeldAnalysisAttempt>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(super) enum HeldAttemptUntil {
+    UntilWorkerLoss,
+    UntilCancellation,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(super) struct HeldAnalysisAttempt {
+    pub(super) kind: runmat_analysis_fea::execution::AnalysisWorkKind,
+    pub(super) input_object_id: Option<runmat_execution::identity::ValueId>,
+    pub(super) until: HeldAttemptUntil,
 }
 
 impl RemoteMeshingHost {
@@ -47,13 +66,13 @@ impl RemoteMeshingHost {
             kernel,
             limits,
             #[cfg(test)]
-            hold_thermal_attempt: false,
+            held_analysis_attempt: None,
         }
     }
 
     #[cfg(test)]
-    pub(super) fn hold_thermal_attempt(mut self) -> Self {
-        self.hold_thermal_attempt = true;
+    pub(super) fn hold_analysis_attempt(mut self, attempt: HeldAnalysisAttempt) -> Self {
+        self.held_analysis_attempt = Some(attempt);
         self
     }
 }
@@ -69,19 +88,34 @@ pub(super) async fn execute(
 ) -> ProgramExecutionResponse {
     if program.artifact.form == ExecutableForm::AnalysisWorkload {
         #[cfg(test)]
-        if meshing_host
+        if let Some(held) = meshing_host
             .as_ref()
-            .is_some_and(|host| host.hold_thermal_attempt)
-            && runmat_analysis_execution::AnalysisHostWorkload::from_program_request(
-                &program, &objects,
-            )
-            .is_ok_and(|host| {
-                host.workload.kind == runmat_analysis_fea::execution::AnalysisWorkKind::SolveThermal
+            .and_then(|host| host.held_analysis_attempt)
+            .filter(|held| {
+                held.input_object_id.is_none_or(|held_id| {
+                    matches!(
+                        program.arguments.first(),
+                        Some(runmat_execution::value::ValuePayload::Object(reference))
+                            if reference.id == held_id
+                    )
+                }) && runmat_analysis_execution::AnalysisHostWorkload::from_program_request(
+                    &program, &objects,
+                )
+                .is_ok_and(|host| host.workload.kind == held.kind)
             })
         {
-            // The relay stays live, but this attempt cannot finish before the
-            // first driver is replaced. Dropping that worker releases the task.
-            std::future::pending::<()>().await;
+            match held.until {
+                HeldAttemptUntil::UntilWorkerLoss => {
+                    // The relay stays live until the first driver is replaced.
+                    std::future::pending::<()>().await;
+                }
+                HeldAttemptUntil::UntilCancellation => {
+                    while !cancellation.is_cancelled() {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    return failure("held analysis attempt observed cancellation");
+                }
+            }
         }
         drop(progress_sender);
         return tokio::task::spawn_blocking(move || {
