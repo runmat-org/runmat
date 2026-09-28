@@ -191,6 +191,31 @@ mod tests {
     }
 
     #[test]
+    fn function_test_qualifications_produce_distinct_pass_and_fail_results() {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let run = futures::executor::block_on(session.run_test_snapshot(
+            &snapshot(
+                "sampleTest.m",
+                "function tests = sampleTest()\n    tests = functiontests(localfunctions);\nend\n\nfunction testPass(testCase)\n    testCase.verifyEqual(2 + 2, 4);\nend\n\nfunction testFail(testCase)\n    testCase.verifyEqual(2 + 2, 5);\nend\n",
+            ),
+            &TestSelector::default(),
+        ))
+        .unwrap();
+
+        assert_eq!(run.results.len(), 2, "{run:#?}");
+        assert_eq!(
+            run.results[0].state.disposition,
+            TerminalDisposition::Passed
+        );
+        assert_eq!(
+            run.results[1].state.disposition,
+            TerminalDisposition::Failed
+        );
+        assert!(run.results[1].state.failed);
+        assert!(!run.results[1].attempts[0].diagnostics.is_empty());
+    }
+
+    #[test]
     fn script_section_uses_the_frozen_span_and_reports_failure() {
         let mut session = RunMatSession::with_options(false, false).unwrap();
         let run = futures::executor::block_on(session.run_test_snapshot(
