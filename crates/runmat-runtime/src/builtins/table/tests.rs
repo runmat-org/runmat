@@ -3,7 +3,10 @@ use crate::{RuntimeError, OBJECT_INDEX_PAREN};
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
 use futures::executor::block_on;
-use runmat_builtins::{ARRAY2TIMETABLE_EXTENSIONS, ARRAY2TIMETABLE_INTEGER_CAPABILITIES};
+use runmat_builtins::{
+    ARRAY2TABLE_EXTENSIONS, ARRAY2TABLE_GPU_INPUT_EXTENSION, ARRAY2TABLE_INTEGER_CAPABILITIES,
+    ARRAY2TIMETABLE_EXTENSIONS, ARRAY2TIMETABLE_INTEGER_CAPABILITIES,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags, SandboxFsProvider,
