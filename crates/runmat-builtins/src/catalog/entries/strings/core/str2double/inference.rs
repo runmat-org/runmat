@@ -1,5 +1,5 @@
 use crate::{
-    catalog::inference::{argument_error, finish_fixed},
+    catalog::inference::{argument_error, finish_fixed, invalid_text_comparison_container},
     BuiltinCatalogEntry,
 };
 use runmat_types::{
@@ -23,6 +23,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 input.shape.known_dims().map_or(ShapeFact::Unknown, |dims| {
                     ShapeFact::from(vec![dims.first().copied().flatten(), Some(1)])
                 })
+            }
+            ValueKindFact::Cell(_) if invalid_text_comparison_container(input) => {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-STR2DOUBLE-CELL-ELEMENT",
+                    "str2double cell elements must be scalar strings or character rows",
+                    0,
+                ));
+                ShapeFact::Unknown
             }
             ValueKindFact::Cell(_) => input.shape.clone(),
             ValueKindFact::Unknown => ShapeFact::Unknown,
@@ -138,5 +146,23 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "RM-CATALOG-STR2DOUBLE-TEXT"));
+        let bad_cell = ValueFact::proven(
+            ValueKindFact::Cell(CellFact {
+                element: Box::new(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                }))),
+                elements: vec![],
+                elements_complete: false,
+            }),
+            ShapeFact::from(vec![Some(1), Some(2)]),
+            StorageFact::Dense,
+        );
+        let invalid_cell = call(bad_cell);
+        assert_eq!(invalid_cell.outputs[0].shape, ShapeFact::Unknown);
+        assert!(invalid_cell
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-STR2DOUBLE-CELL-ELEMENT"));
     }
 }
