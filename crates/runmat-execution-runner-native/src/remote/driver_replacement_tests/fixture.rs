@@ -23,20 +23,25 @@ pub(super) enum ExactStudyFamily {
 }
 
 impl ExactStudyFamily {
-    pub(super) const fn held_analysis_kind(
+    pub(super) const fn held_attempt_target(
         self,
-    ) -> Option<runmat_analysis_fea::execution::AnalysisWorkKind> {
+    ) -> super::super::worker_execution::HeldAttemptTarget {
+        use super::super::worker_execution::HeldAttemptTarget;
         use runmat_analysis_fea::execution::AnalysisWorkKind;
         match self {
-            Self::MeshingRoot => None,
-            Self::StructuralTransient => Some(AnalysisWorkKind::SolveStructuralTransientBlock),
-            Self::ModalResponseSpectrum => {
-                Some(AnalysisWorkKind::SolveStructuralModalResponseSpectrumDirection)
+            Self::MeshingRoot => HeldAttemptTarget::ExactMeshingAdmission,
+            Self::StructuralTransient => {
+                HeldAttemptTarget::Analysis(AnalysisWorkKind::SolveStructuralTransientBlock)
             }
-            Self::ModalRandomResponse => {
-                Some(AnalysisWorkKind::SolveStructuralRandomResponseIntervals)
+            Self::ModalResponseSpectrum => HeldAttemptTarget::Analysis(
+                AnalysisWorkKind::SolveStructuralModalResponseSpectrumDirection,
+            ),
+            Self::ModalRandomResponse => HeldAttemptTarget::Analysis(
+                AnalysisWorkKind::SolveStructuralRandomResponseIntervals,
+            ),
+            Self::ThermalPrestress(_) => {
+                HeldAttemptTarget::Analysis(AnalysisWorkKind::SolveThermal)
             }
-            Self::ThermalPrestress(_) => Some(AnalysisWorkKind::SolveThermal),
         }
     }
 
@@ -300,7 +305,7 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
             resources,
             workers,
             interruption: family.interruption(),
-            interrupted_work_kind: family.held_analysis_kind(),
+            interrupted_target: family.held_attempt_target(),
             state: Mutex::new(DurableState {
                 artifacts,
                 initial_artifacts,
@@ -497,7 +502,7 @@ pub(super) async fn run_worker(
     inventory: &ResourceInventory,
     run_key: RunKeyMaterial,
     driver_fence: u64,
-    held_analysis_attempt: Option<super::super::worker_execution::HeldAnalysisAttempt>,
+    held_attempt: Option<super::super::worker_execution::HeldWorkloadAttempt>,
 ) -> crate::NativeExecutionResult<()> {
     let allocation_id = allocation.allocation_lease_id.clone();
     let worker = WorkerSpec {
@@ -518,8 +523,8 @@ pub(super) async fn run_worker(
         run_key,
         limits: FrameLimits::default(),
     };
-    if let Some(attempt) = held_analysis_attempt {
-        super::super::worker_entry::run_remote_meshing_worker_relay_with_held_analysis_attempt(
+    if let Some(attempt) = held_attempt {
+        super::super::worker_entry::run_remote_meshing_worker_relay_with_held_attempt(
             request,
             Arc::new(native_meshing_kernel_dispatcher()),
             NativeMeshingHostLimits::default(),

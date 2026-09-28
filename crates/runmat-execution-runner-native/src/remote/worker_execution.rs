@@ -39,7 +39,7 @@ pub(super) struct RemoteMeshingHost {
     kernel: Arc<dyn MeshingStageKernel>,
     limits: crate::NativeMeshingHostLimits,
     #[cfg(test)]
-    held_analysis_attempt: Option<HeldAnalysisAttempt>,
+    held_attempt: Option<HeldWorkloadAttempt>,
 }
 
 #[cfg(test)]
@@ -51,8 +51,15 @@ pub(super) enum HeldAttemptUntil {
 
 #[cfg(test)]
 #[derive(Clone, Copy)]
-pub(super) struct HeldAnalysisAttempt {
-    pub(super) kind: runmat_analysis_fea::execution::AnalysisWorkKind,
+pub(super) enum HeldAttemptTarget {
+    Analysis(runmat_analysis_fea::execution::AnalysisWorkKind),
+    ExactMeshingAdmission,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(super) struct HeldWorkloadAttempt {
+    pub(super) target: HeldAttemptTarget,
     pub(super) input_object_id: Option<runmat_execution::identity::ValueId>,
     pub(super) until: HeldAttemptUntil,
 }
@@ -66,13 +73,13 @@ impl RemoteMeshingHost {
             kernel,
             limits,
             #[cfg(test)]
-            held_analysis_attempt: None,
+            held_attempt: None,
         }
     }
 
     #[cfg(test)]
-    pub(super) fn hold_analysis_attempt(mut self, attempt: HeldAnalysisAttempt) -> Self {
-        self.held_analysis_attempt = Some(attempt);
+    pub(super) fn hold_attempt(mut self, attempt: HeldWorkloadAttempt) -> Self {
+        self.held_attempt = Some(attempt);
         self
     }
 }
@@ -86,37 +93,42 @@ pub(super) async fn execute(
     cancellation: Arc<AttemptCancellation>,
     progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
 ) -> ProgramExecutionResponse {
-    if program.artifact.form == ExecutableForm::AnalysisWorkload {
-        #[cfg(test)]
-        if let Some(held) = meshing_host
-            .as_ref()
-            .and_then(|host| host.held_analysis_attempt)
-            .filter(|held| {
-                held.input_object_id.is_none_or(|held_id| {
-                    matches!(
-                        program.arguments.first(),
-                        Some(runmat_execution::value::ValuePayload::Object(reference))
-                            if reference.id == held_id
+    #[cfg(test)]
+    if let Some(held) = meshing_host.as_ref().and_then(|host| host.held_attempt) {
+        let matches_target = match held.target {
+            HeldAttemptTarget::Analysis(kind) => {
+                program.artifact.form == ExecutableForm::AnalysisWorkload
+                    && runmat_analysis_execution::AnalysisHostWorkload::from_program_request(
+                        &program, &objects,
                     )
-                }) && runmat_analysis_execution::AnalysisHostWorkload::from_program_request(
-                    &program, &objects,
+                    .is_ok_and(|host| host.workload.kind == kind)
+            }
+            HeldAttemptTarget::ExactMeshingAdmission => {
+                program.artifact.form == ExecutableForm::MeshingWorkload
+                    && program.recipe.execution_mode == crate::EXACT_MESHING_ROOT_EXECUTION_MODE
+            }
+        };
+        if matches_target
+            && held.input_object_id.is_none_or(|held_id| {
+                matches!(
+                    program.arguments.first(),
+                    Some(runmat_execution::value::ValuePayload::Object(reference))
+                        if reference.id == held_id
                 )
-                .is_ok_and(|host| host.workload.kind == held.kind)
             })
         {
             match held.until {
-                HeldAttemptUntil::UntilWorkerLoss => {
-                    // The relay stays live until the first driver is replaced.
-                    std::future::pending::<()>().await;
-                }
+                HeldAttemptUntil::UntilWorkerLoss => std::future::pending::<()>().await,
                 HeldAttemptUntil::UntilCancellation => {
                     while !cancellation.is_cancelled() {
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                     }
-                    return failure("held analysis attempt observed cancellation");
+                    return failure("held workload attempt observed cancellation");
                 }
             }
         }
+    }
+    if program.artifact.form == ExecutableForm::AnalysisWorkload {
         drop(progress_sender);
         return tokio::task::spawn_blocking(move || {
             let _guard = install_analysis_cancellation(attempt_id, &cancellation);
