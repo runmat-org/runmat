@@ -215,11 +215,8 @@ mod tests {
 
     #[test]
     fn ordinary_objects_remain_accepted() {
-        let object = ObjectInstance {
-            class_name: ClassIdentity::from("SequenceTestObject"),
-            properties: HashMap::from([("value".into(), Value::Num(1.0))]),
-            dynamic_properties: None,
-        };
+        let mut object = ObjectInstance::new(ClassIdentity::from("SequenceTestObject"));
+        object.properties = HashMap::from([("value".into(), Value::Num(1.0))]);
         assert!(ValueSequence::single(Value::Object(object)).is_ok());
     }
 }

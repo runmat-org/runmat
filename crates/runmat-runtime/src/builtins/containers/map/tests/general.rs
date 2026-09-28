@@ -375,22 +375,16 @@ fn length_delegates_to_map_count() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn map_id_rejects_corrupted_numeric_identifiers() {
-    for id_value in [
-        Value::Num(1.9),
-        Value::Num(f64::INFINITY),
-        Value::Num(u64::MAX as f64),
-    ] {
-        let mut storage = ObjectInstance::new(CLASS_IDENTITY);
-        storage.properties.insert("id".to_string(), id_value);
-        let target = runmat_gc::gc_allocate(Value::Object(storage)).expect("storage");
-        let handle = HandleRef {
-            class_name: CLASS_IDENTITY.owned(),
-            target,
-            valid: true,
-        };
-
-        let err = map_id(&handle, BUILTIN_CONSTRUCTOR).expect_err("corrupted map id should reject");
-        assert_eq!(err.identifier(), CONTAINERS_MAP_ERROR_INTERNAL.identifier);
-    }
+fn map_handle_rejects_missing_typed_payload() {
+    let target = runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(CLASS_IDENTITY)))
+        .expect("storage");
+    let handle = Value::HandleObject(HandleRef {
+        class_name: CLASS_IDENTITY.owned(),
+        target,
+        valid: true,
+    });
+    let error = with_store(&handle, BUILTIN_CONSTRUCTOR, |store| Ok(store.len()))
+        .expect_err("missing typed payload must reject");
+    assert_eq!(error.identifier(), CONTAINERS_MAP_ERROR_INTERNAL.identifier);
+    assert_eq!(map_length(&handle), None);
 }

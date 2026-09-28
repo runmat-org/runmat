@@ -50,5 +50,7 @@ pub(super) fn containers_map_subsasgn(
 mod general;
 #[path = "tests/integer.rs"]
 mod integer;
+#[path = "tests/lifecycle.rs"]
+mod lifecycle;
 #[path = "tests/resident.rs"]
 mod resident;

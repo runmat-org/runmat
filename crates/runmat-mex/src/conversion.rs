@@ -543,6 +543,11 @@ fn object_to_mx(
     interface: MxBoundaryInterface,
     context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
+    if objects.iter().any(|object| object.has_native_payload()) {
+        return Err(MxConversionError::new(
+            "GC-owned native object payloads cannot cross the C Matrix API by value",
+        ));
+    }
     if objects
         .iter()
         .any(|object| &object.class_name != class_name)
@@ -904,6 +909,19 @@ fn value_kind(value: &Value) -> &'static str {
 mod tests {
     use super::*;
     use runmat_value::{IntValue, IntegerStorage};
+
+    #[test]
+    fn native_object_payload_is_not_silently_projected_as_properties() {
+        let object = runmat_value::ObjectInstance::new("containers.Map")
+            .with_containers_map_payload(runmat_value::ContainersMapStorage::new(
+                runmat_value::ContainersMapKeyType::Char,
+                runmat_value::ContainersMapValueType::Any,
+                false,
+            ));
+        let error = value_to_mx(&Value::Object(object), MxApiMode::SeparateComplex)
+            .expect_err("native payload requires a typed boundary");
+        assert!(error.to_string().contains("native object payloads"));
+    }
 
     #[test]
     fn mex_conversion_rejects_nested_transient_sequences_before_recursion() {

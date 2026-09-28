@@ -210,7 +210,7 @@ fn key_type_from_dtype(dtype: NumericDType) -> Option<KeyType> {
     }
 }
 
-fn int_value_dtype(value: &IntValue) -> NumericDType {
+pub(super) fn int_value_dtype(value: &IntValue) -> NumericDType {
     IntegerStorage::from_scalar(value.clone()).numeric_dtype()
 }
 

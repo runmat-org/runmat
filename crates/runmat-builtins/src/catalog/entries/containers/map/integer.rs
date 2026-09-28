@@ -15,7 +15,7 @@ const MAP_KEY_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCa
 }];
 const MAP_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "valueSet",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    classes: &crate::ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
     notes: "Every integer class is a documented ValueType and retains its exact class and payload.",
@@ -30,7 +30,7 @@ const MAP_STORED_KEY_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinInteger
 const MAP_STORED_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "stored values",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &crate::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Integer values pass through the host Map store and output cells with exact class and value.",
@@ -45,7 +45,7 @@ const MAP_ASSIGN_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     },
     BuiltinIntegerInputCapability {
         name: "rhs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &crate::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "All integer rhs classes are exact for ValueType='any' and their matching declared integer ValueType.",
@@ -62,7 +62,7 @@ const MAP_RESIDENT_KEY_INPUT: [BuiltinIntegerInputCapability; 1] =
 const MAP_RESIDENT_VALUE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "resident valueSet or rhs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &crate::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Resident integer values are a gated RunMat extension and gather before exact host storage or declared ValueType conversion.",
@@ -77,7 +77,7 @@ const MAP_RESIDENT_ASSIGN_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     },
     BuiltinIntegerInputCapability {
         name: "resident rhs",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &crate::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes:
