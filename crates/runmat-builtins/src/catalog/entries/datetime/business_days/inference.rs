@@ -148,10 +148,20 @@ pub(super) fn busdays(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Cal
             })
         )
     });
+    // A datetime Holiday selects datetime output even when both date endpoints
+    // are serial numbers. Only prove double when the optional Holiday is known
+    // not to be a datetime object.
+    let numeric_output = numeric_inputs
+        && request.arguments.get(3).is_none_or(|holiday| {
+            matches!(
+                holiday.kind,
+                ValueKindFact::Numeric(_) | ValueKindFact::String | ValueKindFact::Character
+            )
+        });
     finish_fixed(
         entry,
         request,
-        if numeric_inputs {
+        if numeric_output {
             double(ShapeFact::Unknown)
         } else {
             dynamic_host(ShapeFact::Unknown)

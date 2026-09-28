@@ -154,7 +154,7 @@ pub(super) const FBUSDATE: BuiltinDocumentation = BuiltinDocumentation {
         verification: BuiltinExampleVerification::Assertions { source: "assert(d == datenum(2024,1,2));" },
     }],
     example_exemption: None,
-    faqs: &[BuiltinDocumentationFaq { question: "What class is returned?", answer: "A double serial date number, including when Year and Month are integer arrays." }],
+    faqs: &[BuiltinDocumentationFaq { question: "What class is returned?", answer: "By default, a double serial date number, including when Year and Month are integer arrays. A datetime Holiday or `outputType` of `datetime` selects datetime output." }],
     links: &[BuiltinDocumentationLink { label: "MATLAB fbusdate reference", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/finance/fbusdate.html") }, SOURCE],
     media: &[],
     evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: TESTS, notes: &["The historical market-calendar dataset remains incomplete."] },

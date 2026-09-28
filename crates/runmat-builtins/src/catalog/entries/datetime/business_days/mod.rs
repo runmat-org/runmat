@@ -14,7 +14,41 @@ pub const HOLIDAYS_LOCAL_YEAR_EXTENSION: BuiltinExtensionDescriptor =
         description: "The zero-argument local-year and single-year convenience forms are RunMat extensions until the complete historical holiday list is available",
         error_identifier: Some("RunMat:compatibility:HolidaysLocalYearExtension"),
     };
-pub const HOLIDAYS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [HOLIDAYS_LOCAL_YEAR_EXTENSION];
+pub const BUSINESS_DAY_TYPED_LEGACY_SERIAL_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "business-day-typed-legacy-serial-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "Single-precision and typed-integer legacy serial dates in business-day date positions are RunMat extensions",
+        error_identifier: Some("RunMat:compatibility:BusinessDayTypedLegacySerialExtension"),
+    };
+
+pub const BUSINESS_DAY_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "datetime-resident-numeric-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "Gathering resident numeric calendar input to the host is a RunMat extension",
+        error_identifier: Some("RunMat:compatibility:DatetimeGpuInputExtension"),
+    };
+
+pub const BUSINESS_DAY_LOGICAL_NUMERIC_INPUT_EXTENSION: BuiltinExtensionDescriptor =
+    BuiltinExtensionDescriptor {
+        id: "datetime-logical-numeric-input",
+        mode: BuiltinExtensionMode::RunMatOnly,
+        description: "Logical values in numeric date or calendar-control positions are RunMat extensions; logical Weekend masks remain supported",
+        error_identifier: Some("RunMat:compatibility:DatetimeLogicalInputExtension"),
+    };
+
+pub const BUSINESS_DAY_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    BUSINESS_DAY_TYPED_LEGACY_SERIAL_EXTENSION,
+    BUSINESS_DAY_RESIDENT_INPUT_EXTENSION,
+    BUSINESS_DAY_LOGICAL_NUMERIC_INPUT_EXTENSION,
+];
+pub const HOLIDAYS_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    HOLIDAYS_LOCAL_YEAR_EXTENSION,
+    BUSINESS_DAY_TYPED_LEGACY_SERIAL_EXTENSION,
+    BUSINESS_DAY_RESIDENT_INPUT_EXTENSION,
+    BUSINESS_DAY_LOGICAL_NUMERIC_INPUT_EXTENSION,
+];
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &BUSDAYS_CATALOG_ENTRY,
@@ -97,7 +131,7 @@ pub const BUSDAYS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     documentation::BUSDAYS,
     inference::busdays,
     false,
-    &[],
+    &BUSINESS_DAY_EXTENSIONS,
 );
 pub const DAYS252BUS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -106,7 +140,7 @@ pub const DAYS252BUS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     documentation::DAYS252BUS,
     inference::days252bus,
     false,
-    &[],
+    &BUSINESS_DAY_EXTENSIONS,
 );
 pub const DAYSDIF_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -115,7 +149,7 @@ pub const DAYSDIF_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     documentation::DAYSDIF,
     inference::daysdif,
     false,
-    &[],
+    &BUSINESS_DAY_EXTENSIONS,
 );
 pub const FBUSDATE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -124,7 +158,7 @@ pub const FBUSDATE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     documentation::FBUSDATE,
     inference::fbusdate,
     false,
-    &[],
+    &BUSINESS_DAY_EXTENSIONS,
 );
 pub const HOLIDAYS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -142,7 +176,7 @@ pub const ISBUSDAY_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     documentation::ISBUSDAY,
     inference::isbusday,
     false,
-    &[],
+    &BUSINESS_DAY_EXTENSIONS,
 );
 pub const LBUSDATE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -151,5 +185,5 @@ pub const LBUSDATE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     documentation::LBUSDATE,
     inference::lbusdate,
     false,
-    &[],
+    &BUSINESS_DAY_EXTENSIONS,
 );

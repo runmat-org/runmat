@@ -46,6 +46,27 @@ fn canonical_entries_have_one_binding_and_documentation() {
         .contract
         .effects
         .contains(&EffectKind::Clock));
+    for entry in ENTRIES {
+        for extension in [
+            BUSINESS_DAY_TYPED_LEGACY_SERIAL_EXTENSION,
+            BUSINESS_DAY_RESIDENT_INPUT_EXTENSION,
+            BUSINESS_DAY_LOGICAL_NUMERIC_INPUT_EXTENSION,
+        ] {
+            assert!(
+                entry
+                    .extensions
+                    .iter()
+                    .any(|actual| actual.id == extension.id),
+                "{} lacks {}",
+                entry.identity.name,
+                extension.id
+            );
+        }
+    }
+    assert!(HOLIDAYS_CATALOG_ENTRY
+        .extensions
+        .iter()
+        .any(|extension| extension.id == HOLIDAYS_LOCAL_YEAR_EXTENSION.id));
 }
 
 #[test]
@@ -133,4 +154,40 @@ fn invalid_options_are_diagnosed_without_inventing_dynamic_dates() {
         &BUSDAYS_CATALOG_ENTRY,
     );
     assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn busdays_does_not_prove_double_when_holiday_can_select_datetime_output() {
+    let date = numeric(ShapeFact::Scalar);
+    let mode = ValueFact::scalar(ValueKindFact::String);
+    let datetime_holiday = ValueFact::scalar(ValueKindFact::Object(runmat_types::ObjectFact {
+        class: None,
+        runtime_class: Some(runmat_types::standard::DATETIME.owned()),
+        properties: Default::default(),
+        properties_complete: false,
+        handle_semantics: None,
+    }));
+    for holiday in [
+        datetime_holiday,
+        ValueFact::unknown(DynamicReason::RuntimeValue),
+    ] {
+        let result = inference::busdays(
+            &call(
+                vec![date.clone(), date.clone(), mode.clone(), holiday],
+                vec![LiteralValue::Unknown; 4],
+            ),
+            &BUSDAYS_CATALOG_ENTRY,
+        );
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+
+    let serial_holiday = numeric(ShapeFact::Scalar);
+    let result = inference::busdays(
+        &call(
+            vec![date.clone(), date, mode, serial_holiday],
+            vec![LiteralValue::Unknown; 4],
+        ),
+        &BUSDAYS_CATALOG_ENTRY,
+    );
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Numeric(_)));
 }
