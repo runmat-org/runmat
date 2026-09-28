@@ -241,14 +241,14 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "value": array.to_string(),
         }),
         Value::GpuTensor(handle) => {
-            let (rows, cols) = rows_cols_from_shape(&handle.shape);
+            let (rows, cols) = rows_cols_from_shape(handle.shape());
             json!({
                 "kind": "gpu-tensor",
-                "shape": handle.shape,
+                "shape": handle.shape(),
                 "rows": rows,
                 "cols": cols,
-                "deviceId": handle.device_id,
-                "bufferId": handle.buffer_id,
+                "deviceId": handle.device_id(),
+                "bufferId": handle.buffer_id(),
             })
         }
         Value::Object(obj) => object_to_json(obj, depth + 1),
