@@ -1,158 +1,21 @@
 //! MATLAB-compatible `strncmp` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, STRNCMP_DESCRIPTOR, STRNCMP_ERROR_INTERNAL,
+    STRNCMP_ERROR_INVALID_INPUT, STRNCMP_ERROR_INVALID_PREFIX_LENGTH, STRNCMP_ERROR_SHAPE_MISMATCH,
+    STRNCMP_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strncmp";
-
-const STRNCMP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical prefix-comparison result.",
-}];
-
-const STRNCMP_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prefix length to compare.",
-    },
-];
-
-const STRNCMP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = strncmp(A, B, N)",
-    inputs: &STRNCMP_INPUTS,
-    outputs: &STRNCMP_OUTPUT,
-}];
-
-const STRNCMP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRNCMP.INVALID_INPUT",
-    identifier: Some("RunMat:strncmp:InvalidInput"),
-    when: "At least one text input is not a supported text container.",
-    message: "strncmp: text inputs must be string/char/cell/string-array values",
-};
-
-const STRNCMP_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRNCMP.SHAPE_MISMATCH",
-    identifier: Some("RunMat:strncmp:ShapeMismatch"),
-    when: "Text inputs are not broadcast-compatible.",
-    message: "strncmp: input sizes are not broadcast-compatible",
-};
-
-const STRNCMP_ERROR_INVALID_PREFIX_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRNCMP.INVALID_PREFIX_LENGTH",
-    identifier: Some("RunMat:strncmp:InvalidPrefixLength"),
-    when: "Prefix length argument is not a finite nonnegative integer scalar.",
-    message: "strncmp: prefix length must be a finite nonnegative integer scalar",
-};
-
-const STRNCMP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRNCMP.INTERNAL",
-    identifier: Some("RunMat:strncmp:InternalError"),
-    when: "Internal logical result assembly failed.",
-    message: "strncmp: internal error",
-};
-
-const STRNCMP_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    STRNCMP_ERROR_INVALID_INPUT,
-    STRNCMP_ERROR_SHAPE_MISMATCH,
-    STRNCMP_ERROR_INVALID_PREFIX_LENGTH,
-    STRNCMP_ERROR_INTERNAL,
-];
-
-pub const STRNCMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRNCMP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRNCMP_ERRORS,
-};
-
-const STRNCMP_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "N",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "N accepts double, single, and every built-in integer class. Negative values are treated as zero, while values beyond the host count domain reject without rounding.",
-    }];
-
-pub const STRNCMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "tf = strncmp(A, B, N)",
-        inputs: &STRNCMP_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "N limits a host text comparison and is parsed directly from authoritative integer storage. Unsupported numeric A or B inputs return scalar logical false before provider access.",
-    }];
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "strncmp",
-    op_kind: GpuOpKind::Custom("string-prefix-compare"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Performs host-side prefix comparisons; GPU inputs are gathered before evaluation.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "strncmp",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Produces logical host results and is not eligible for GPU fusion.",
-};
 
 fn strncmp_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strncmp_error_with_message(error.message, error)
@@ -175,16 +38,15 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strncmp",
-    category = "strings/core",
-    summary = "Compare text inputs case-sensitively up to N leading characters.",
-    keywords = "strncmp,string compare,prefix,text equality",
-    accel = "sink",
-    type_resolver(logical_text_match_type),
-    descriptor(crate::builtins::strings::core::strncmp::STRNCMP_DESCRIPTOR),
-    integer_capabilities(crate::builtins::strings::core::strncmp::STRNCMP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &STRNCMP_DESCRIPTOR,
+        &STRNCMP_ERROR_TOO_MANY_OUTPUTS,
+        FN_NAME,
+    )?;
     if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
         return Ok(Value::Bool(false));
     }
@@ -326,9 +188,10 @@ fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_value::{
         CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor,
     };
@@ -339,6 +202,22 @@ pub(crate) mod tests {
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strncmp_rejects_excess_outputs_before_gathering() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error = strncmp_builtin(
+            Value::String("text".into()),
+            Value::String("text".into()),
+            Value::Int(IntValue::U8(4)),
+        )
+        .expect_err("fixed output bound");
+        assert_eq!(
+            error.identifier(),
+            STRNCMP_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -387,6 +266,32 @@ pub(crate) mod tests {
         )
         .expect("strncmp");
         assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn strncmp_gathers_automatic_resident_integer_prefix_length() {
+        test_support::with_test_provider(|provider| {
+            let count = [3_u64];
+            let handle = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&count),
+                    shape: &[1, 1],
+                })
+                .expect("upload exact integer prefix length")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("automatic residency");
+            let result = strncmp_builtin(
+                Value::String("delta".into()),
+                Value::String("deluge".into()),
+                Value::GpuTensor(handle.clone()),
+            )
+            .expect("gather automatic N before comparison");
+            assert_eq!(result, Value::Bool(true));
+            handle
+                .allocation_lease()
+                .validate_live()
+                .expect("input owner remains live after borrowed gather");
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -661,17 +566,6 @@ pub(crate) mod tests {
         assert!(
             physical.acquire().is_none(),
             "physical lease must expire after final release"
-        );
-    }
-
-    #[test]
-    fn strncmp_type_is_logical_match() {
-        assert_eq!(
-            logical_text_match_type(
-                &[Type::String, Type::String],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Bool
         );
     }
 }
