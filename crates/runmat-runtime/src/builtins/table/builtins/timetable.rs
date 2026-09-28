@@ -1,9 +1,9 @@
 use super::*;
 pub(crate) use runmat_builtins::{
-    ARRAY2TIMETABLE_EXTENSIONS, ARRAY2TIMETABLE_GPU_INPUT_EXTENSION,
-    ARRAY2TIMETABLE_INTEGER_CAPABILITIES, READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION,
+    ARRAY2TIMETABLE_GPU_INPUT_EXTENSION, READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION,
     TABLE2TIMETABLE_GENERATED_TIMES_EXTENSION, TABLE2TIMETABLE_GPU_INPUT_EXTENSION,
-    TABLE2TIMETABLE_NUMERIC_ROW_TIMES_EXTENSION, TIMETABLE_EXPLICIT_GPU_EXTENSION,
+    TABLE2TIMETABLE_NUMERIC_ROW_TIMES_EXTENSION, TIMETABLE2TABLE_EXPLICIT_GPU_EXTENSION,
+    TIMETABLE2TABLE_INTEGER_OPTION_EXTENSION, TIMETABLE_EXPLICIT_GPU_EXTENSION,
     TIMETABLE_GENERATED_ROW_TIMES_EXTENSION, TIMETABLE_NUMERIC_ROW_TIMES_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
@@ -229,17 +229,17 @@ pub(crate) async fn table2timetable_builtin(
         }
     } else if let Some(generated) = table2timetable_generated_row_times(&options, height)? {
         (Some(generated), names)
-    } else if let Some(first) = names.first() {
-        let first_value = variables.fields.get(first).cloned();
-        if first_value
-            .as_ref()
-            .map(is_time_like_value)
-            .unwrap_or(false)
-        {
-            (first_value, names[1..].to_vec())
-        } else {
-            (None, names)
-        }
+    } else if let Some(first_time_name) = names
+        .iter()
+        .find(|name| variables.fields.get(*name).is_some_and(is_time_like_value))
+        .cloned()
+    {
+        let first_time_value = variables.fields.get(&first_time_name).cloned();
+        let out_names = names
+            .into_iter()
+            .filter(|name| name != &first_time_name)
+            .collect();
+        (first_time_value, out_names)
     } else {
         (None, names)
     };

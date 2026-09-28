@@ -95,3 +95,30 @@ fn file_import_is_an_effectful_host_boundary() {
     assert!(result.effects.0.contains(&EffectKind::MaySuspend));
     assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
 }
+
+#[test]
+fn array2timetable_named_timing_signatures_describe_each_argument() {
+    for (signature, option, value_type) in [
+        (
+            &ARRAY2TIMETABLE_DESCRIPTOR.signatures[0],
+            "RowTimes",
+            BuiltinParamType::Any,
+        ),
+        (
+            &ARRAY2TIMETABLE_DESCRIPTOR.signatures[1],
+            "SampleRate",
+            BuiltinParamType::NumericScalar,
+        ),
+        (
+            &ARRAY2TIMETABLE_DESCRIPTOR.signatures[2],
+            "TimeStep",
+            BuiltinParamType::Any,
+        ),
+    ] {
+        assert_eq!(signature.inputs.len(), 3, "{}", signature.label);
+        assert_eq!(signature.inputs[0].name, "X");
+        assert_eq!(signature.inputs[1].name, option);
+        assert_eq!(signature.inputs[1].ty, BuiltinParamType::StringScalar);
+        assert_eq!(signature.inputs[2].ty, value_type);
+    }
+}

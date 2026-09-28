@@ -1,3 +1,4 @@
+use super::super::shared::TABLE_ERRORS;
 use crate::*;
 const TIMETABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "TT",
@@ -118,13 +119,20 @@ const ARRAY2TIMETABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescrip
     default: None,
     description: "Timetable whose variables are the columns of X.",
 }];
-const ARRAY2TIMETABLE_INPUTS_ROW_TIMES: [BuiltinParamDescriptor; 2] = [
+const ARRAY2TIMETABLE_INPUTS_ROW_TIMES: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "X",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "RowTimes",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name of the row-time option.",
     },
     BuiltinParamDescriptor {
         name: "rowTimes",
@@ -134,13 +142,20 @@ const ARRAY2TIMETABLE_INPUTS_ROW_TIMES: [BuiltinParamDescriptor; 2] = [
         description: "Datetime or duration column vector labeling the rows.",
     },
 ];
-const ARRAY2TIMETABLE_INPUTS_SAMPLE_RATE: [BuiltinParamDescriptor; 2] = [
+const ARRAY2TIMETABLE_INPUTS_SAMPLE_RATE: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "X",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "SampleRate",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name of the sample-rate option.",
     },
     BuiltinParamDescriptor {
         name: "Fs",
@@ -150,13 +165,20 @@ const ARRAY2TIMETABLE_INPUTS_SAMPLE_RATE: [BuiltinParamDescriptor; 2] = [
         description: "Positive sample rate in samples per second.",
     },
 ];
-const ARRAY2TIMETABLE_INPUTS_TIME_STEP: [BuiltinParamDescriptor; 2] = [
+const ARRAY2TIMETABLE_INPUTS_TIME_STEP: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "X",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Homogeneous array to split into timetable variables by column.",
+    },
+    BuiltinParamDescriptor {
+        name: "TimeStep",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name of the time-step option.",
     },
     BuiltinParamDescriptor {
         name: "dt",
@@ -204,44 +226,6 @@ const ARRAY2TIMETABLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         outputs: &ARRAY2TIMETABLE_OUTPUT,
     },
 ];
-pub const TABLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TABLE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:table:InvalidArgument"),
-    when: "Arguments or table metadata are invalid.",
-    message: "table: invalid argument",
-};
-pub const TABLE_ERROR_INVALID_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TABLE.INVALID_INDEX",
-    identifier: Some("RunMat:table:InvalidIndex"),
-    when: "Table indexing is invalid.",
-    message: "table: invalid index",
-};
-pub const TABLE_ERROR_INVALID_VARIABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TABLE.INVALID_VARIABLE",
-    identifier: Some("RunMat:table:InvalidVariable"),
-    when: "A table variable name or value is invalid.",
-    message: "table: invalid variable",
-};
-pub const TABLE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READTABLE.IO",
-    identifier: Some("RunMat:readtable:IOError"),
-    when: "readtable cannot open or read the requested file.",
-    message: "readtable: file read failed",
-};
-pub const TABLE_ERROR_UNSUPPORTED_FILE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READTABLE.UNSUPPORTED_FILE",
-    identifier: Some("RunMat:readtable:UnsupportedFileType"),
-    when: "readtable receives a file type outside the text or spreadsheet import backends.",
-    message: "readtable: unsupported file type",
-};
-pub const TABLE_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    TABLE_ERROR_INVALID_ARGUMENT,
-    TABLE_ERROR_INVALID_INDEX,
-    TABLE_ERROR_INVALID_VARIABLE,
-    TABLE_ERROR_IO,
-    TABLE_ERROR_UNSUPPORTED_FILE,
-];
-
 pub const ARRAY2TIMETABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ARRAY2TIMETABLE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

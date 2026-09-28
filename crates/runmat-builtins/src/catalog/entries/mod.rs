@@ -17,9 +17,11 @@ mod plotting;
 mod stats;
 mod strings;
 pub(in crate::catalog) mod structs;
+mod table;
 mod value_distribution;
 
 pub use self::acceleration::*;
+use self::aggregation::extend_groups;
 pub use self::argument_validation::*;
 pub use self::array::*;
 pub use self::cells::*;
@@ -33,8 +35,8 @@ pub use self::plotting::*;
 pub use self::stats::*;
 pub use self::strings::*;
 pub use self::structs::*;
+pub use self::table::*;
 pub use self::value_distribution::*;
-use aggregation::extend_groups;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     acceleration::extend_entries(values);
@@ -51,6 +53,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     stats::extend_entries(values);
     strings::extend_entries(values);
     structs::extend_entries(values);
+    table::extend_entries(values);
     value_distribution::extend_entries(values);
 }
 

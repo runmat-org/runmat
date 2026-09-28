@@ -3,6 +3,7 @@ use crate::{RuntimeError, OBJECT_INDEX_PAREN};
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
 use futures::executor::block_on;
+use runmat_builtins::{ARRAY2TIMETABLE_EXTENSIONS, ARRAY2TIMETABLE_INTEGER_CAPABILITIES};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_filesystem::{
     DirEntry, FileHandle, FsMetadata, FsProvider, NativeFsProvider, OpenFlags, SandboxFsProvider,
@@ -14,6 +15,9 @@ use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io;
 use std::io::Write;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod timetable_detection;
 
 #[cfg(feature = "wgpu")]
 fn register_wgpu_provider_available() -> bool {

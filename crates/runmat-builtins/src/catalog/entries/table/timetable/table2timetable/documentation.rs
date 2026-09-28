@@ -8,7 +8,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     keywords: &["table2timetable", "table", "timetable", "RowTimes"],
     related: &["timetable2table"],
     sections: &[
-        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["Without timing options, the first datetime or duration table variable becomes row times and is removed from the data-variable list.", "`RowTimes` accepts a datetime or duration vector, a variable name, or a positive one-based numeric variable index. Typed-integer indices are decoded exactly in every supported integer class.", "RunMat extension mode also accepts a numeric row-time column and preserves native integer storage exactly; MATLAB-compatible mode requires datetime or duration row-time values.", "A positive numeric `SampleRate`, including any built-in integer class, generates duration row times through the documented floating timing boundary.", "Integer data variables retain their exact classes and values independently of row-time construction.", "When no time variable or timing option exists, generated sequential row times are available only in RunMat extension mode. Converting table row names into a timetable data variable remains an implementation gap."] },
+        BuiltinDocumentationSection {
+            heading: "Behavior",
+            paragraphs: &[
+                "Without timing options, the first datetime or duration table variable becomes row times and is removed from the data-variable list.",
+                "`RowTimes` accepts a datetime or duration vector, a variable name, or a positive one-based numeric variable index. Typed-integer indices are decoded exactly in every supported integer class.",
+                "RunMat extension mode also accepts a numeric row-time column and preserves native integer storage exactly; MATLAB-compatible mode requires datetime or duration row-time values.",
+                "A positive numeric `SampleRate`, including any built-in integer class, generates duration row times through the documented floating timing boundary.",
+                "Integer data variables retain their exact classes and values independently of row-time construction.",
+                "When no time variable or timing option exists, generated sequential row times are available only in RunMat extension mode. Converting table row names into a timetable data variable remains an implementation gap.",
+            ],
+        },
         BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &["Tabular containers are host values.", "This host container operation is a fusion boundary; interactive resident inputs are gathered only after compatibility admission."] },
     ],
     examples: &[BuiltinExample { id: "explicit-row-times", title: "Supply a duration row-time vector", program: "T = table(uint64([10;20]), 'VariableNames', {'Count'});\ntimes = seconds([1;2]);\nTT = table2timetable(T, 'RowTimes', times);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(istimetable(TT));\nassert(height(TT) == 2);\nassert(isequal(TT.Count, uint64([10;20])));" } },
