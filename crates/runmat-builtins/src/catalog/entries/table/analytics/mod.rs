@@ -1,7 +1,12 @@
 use crate::*;
 
+mod groupsummary;
 mod pivot;
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&pivot::ENTRY];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&groupsummary::ENTRY, &pivot::ENTRY];
 
+pub use groupsummary::{
+    GROUPSUMMARY_DESCRIPTOR, GROUPSUMMARY_EXTENSIONS, GROUPSUMMARY_INTEGER_CAPABILITIES,
+    GROUPSUMMARY_INTEGER_CONTROL_EXTENSION, GROUPSUMMARY_RESIDENT_INPUT_EXTENSION,
+};
 pub use pivot::{PIVOT_DESCRIPTOR, PIVOT_INTEGER_CAPABILITIES};
