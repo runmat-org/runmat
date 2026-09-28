@@ -22,9 +22,9 @@ pub const NUM2STR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            runmat_types::EffectKind::MayThrow,
-            runmat_types::EffectKind::MaySuspend,
             runmat_types::EffectKind::EnvironmentRead,
+            runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
         ],
         capabilities: &[],
     },

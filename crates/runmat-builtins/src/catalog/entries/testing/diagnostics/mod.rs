@@ -123,7 +123,7 @@ pub const STRING_DIAGNOSTIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: DIAGNOSTIC_ERRORS,
 };
-pub const LOG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+pub const TEST_CASE_LOG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: LOG_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::MethodOnly,
@@ -208,7 +208,7 @@ pub const TEST_CASE_LOG_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "matlab.unittest.TestCase.log",
     "testing/diagnostics",
     documentation::LOG,
-    &LOG_DESCRIPTOR,
+    &TEST_CASE_LOG_DESCRIPTOR,
     inference::log,
     &[EffectKind::EnvironmentWrite, EffectKind::MayThrow],
     BuiltinPurity::Impure,

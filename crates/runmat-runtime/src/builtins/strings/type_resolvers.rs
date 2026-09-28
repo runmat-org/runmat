@@ -8,14 +8,6 @@ pub fn string_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::String
 }
 
-pub fn numeric_text_scalar_or_tensor_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args.first() {
-        Some(Type::String) => Type::Num,
-        Some(Type::Unknown) | None => Type::Unknown,
-        _ => Type::tensor(),
-    }
-}
-
 pub fn logical_text_match_type(args: &[Type], _context: &ResolveContext) -> Type {
     if args.len() >= 2 && args[0] == Type::String && args[1] == Type::String {
         Type::Bool

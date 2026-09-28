@@ -5,7 +5,7 @@ use runmat_builtins::{BuiltinCompletionPolicy, BuiltinOutputMode, CELL2TABLE_DES
 mod cell2table_tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::{IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
     fn dedicated_descriptor_is_fixed_and_public() {

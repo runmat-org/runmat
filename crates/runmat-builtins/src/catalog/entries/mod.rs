@@ -18,6 +18,7 @@ mod stats;
 mod strings;
 pub(in crate::catalog) mod structs;
 mod table;
+mod testing;
 mod value_distribution;
 
 pub use self::acceleration::*;
@@ -36,6 +37,7 @@ pub use self::stats::*;
 pub use self::strings::*;
 pub use self::structs::*;
 pub use self::table::*;
+pub use self::testing::*;
 pub use self::value_distribution::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
@@ -54,6 +56,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     strings::extend_entries(values);
     structs::extend_entries(values);
     table::extend_entries(values);
+    testing::extend_entries(values);
     value_distribution::extend_entries(values);
 }
 

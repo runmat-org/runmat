@@ -8,8 +8,6 @@ use crate::BuiltinResult;
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase",
     binding_variant = "default",
-    category = "testing",
-    summary = "Construct a MATLAB-compatible test case object.",
     builtin_path = "crate::builtins::testing::qualifications::diagnostics"
 )]
 fn test_case_constructor(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -28,8 +26,6 @@ fn test_case_constructor(args: Vec<Value>) -> BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.diagnostics.StringDiagnostic",
     binding_variant = "default",
-    category = "testing/diagnostics",
-    summary = "Construct a string-backed test diagnostic.",
     builtin_path = "crate::builtins::testing::qualifications::diagnostics"
 )]
 fn string_diagnostic(value: Value) -> BuiltinResult<Value> {
@@ -62,8 +58,6 @@ fn string_diagnostic(value: Value) -> BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.log",
     binding_variant = "default",
-    category = "testing/diagnostics",
-    summary = "Record a diagnostic message in the active test result.",
     builtin_path = "crate::builtins::testing::qualifications::diagnostics"
 )]
 fn log(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -151,9 +145,9 @@ fn named_verbosity(level: &str) -> BuiltinResult<u8> {
     }
 }
 
-fn diagnostic_message(value: Value) -> BuiltinResult<String> {
+fn diagnostic_message(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(message) => Ok(message),
+        Value::String(message) => Ok(message.clone()),
         Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
         Value::Object(object)
             if crate::class_registry::is_class_or_subclass(
