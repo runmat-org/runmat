@@ -5835,12 +5835,11 @@ impl AccelProvider for InProcessProvider {
                     value.is_finite(),
                     "modulate_constellation: symbols must be finite integers"
                 );
-                let rounded = value.round();
                 ensure!(
-                    (value - rounded).abs() <= 1e-9 && rounded >= 0.0,
+                    value >= 0.0 && value.fract() == 0.0,
                     "modulate_constellation: symbols must be nonnegative integers"
                 );
-                let symbol = rounded as usize;
+                let symbol = value as usize;
                 ensure!(
                     symbol < order,
                     "modulate_constellation: symbols must be in range"
@@ -5942,12 +5941,11 @@ impl AccelProvider for InProcessProvider {
                             value.is_finite(),
                             "modulate_bits_constellation: bits must be finite"
                         );
-                        let rounded = value.round();
                         ensure!(
-                            (value - rounded).abs() <= 1.0e-9 && (rounded == 0.0 || rounded == 1.0),
+                            value == 0.0 || value == 1.0,
                             "modulate_bits_constellation: bits must be 0 or 1"
                         );
-                        symbol = (symbol << 1) | rounded as usize;
+                        symbol = (symbol << 1) | value as usize;
                     }
                     ensure!(
                         symbol < order,
@@ -9952,6 +9950,43 @@ mod tests {
         HostIntegerDataView, IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
     };
     use runmat_value::{IntValue, IntegerStorage};
+
+    #[test]
+    fn modulation_rejects_near_integer_symbols_and_bits() {
+        let provider = InProcessProvider::new();
+        let constellation = [1.0, 0.0, -1.0, 0.0];
+        let near_one = 1.0 + 1.0e-10;
+
+        let symbol_input = provider
+            .upload(&HostTensorView {
+                data: &[near_one],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        let symbol_error = block_on(provider.modulate_constellation(ProviderModulationRequest {
+            input: &symbol_input,
+            constellation: &constellation,
+        }))
+        .unwrap_err();
+        assert!(symbol_error.to_string().contains("nonnegative integers"));
+
+        let bit_input = provider
+            .upload(&HostTensorView {
+                data: &[near_one],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        let bit_error = block_on(provider.modulate_bits_constellation(
+            ProviderBitModulationRequest {
+                input: &bit_input,
+                input_rows: 1,
+                bits_per_symbol: 1,
+                constellation: &constellation,
+            },
+        ))
+        .unwrap_err();
+        assert!(bit_error.to_string().contains("bits must be 0 or 1"));
+    }
 
     #[test]
     fn logical_unsupported_class_does_not_hide_foreign_owner() {

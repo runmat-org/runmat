@@ -129,22 +129,17 @@ impl WgpuProvider {
                 host.data.len() == logical_len,
                 "modulate_constellation: input data length does not match shape"
             );
-            let tolerance = match self.precision {
-                NumericPrecision::F64 => 1.0e-9,
-                NumericPrecision::F32 => 1.0e-5,
-            };
             let mut out = Vec::with_capacity(out_len);
             for value in host.data {
                 ensure!(
                     value.is_finite(),
                     "modulate_constellation: symbols must be finite integers"
                 );
-                let rounded = value.round();
                 ensure!(
-                    (value - rounded).abs() <= tolerance && rounded >= 0.0,
+                    value >= 0.0 && value.fract() == 0.0,
                     "modulate_constellation: symbols must be nonnegative integers"
                 );
-                let symbol = rounded as usize;
+                let symbol = value as usize;
                 ensure!(
                     symbol < order,
                     "modulate_constellation: symbols must be in range"
@@ -431,10 +426,6 @@ impl WgpuProvider {
                 host.data.len() == logical_len,
                 "modulate_bits_constellation: input data length does not match shape"
             );
-            let tolerance = match self.precision {
-                NumericPrecision::F64 => 1.0e-9,
-                NumericPrecision::F32 => 1.0e-6,
-            };
             let mut out = Vec::with_capacity(out_len);
             for channel in 0..channels {
                 let channel_offset = channel * request.input_rows;
@@ -447,13 +438,11 @@ impl WgpuProvider {
                             value.is_finite(),
                             "modulate_bits_constellation: bits must be finite"
                         );
-                        let rounded = value.round();
                         ensure!(
-                            (value - rounded).abs() <= tolerance
-                                && (rounded == 0.0 || rounded == 1.0),
+                            value == 0.0 || value == 1.0,
                             "modulate_bits_constellation: bits must be 0 or 1"
                         );
-                        symbol = (symbol << 1) | rounded as usize;
+                        symbol = (symbol << 1) | value as usize;
                     }
                     ensure!(
                         symbol < order,
@@ -647,7 +636,7 @@ impl WgpuProvider {
 mod tests {
     use super::*;
     use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
-    use runmat_accelerate_api::{AccelProvider, ProviderModulationRequest};
+    use runmat_accelerate_api::{AccelProvider, ProviderModulationRequest, ProviderPrecision};
 
     #[test]
     fn modulate_constellation_provider_matches_table() {
@@ -703,6 +692,43 @@ mod tests {
         }))
         .expect_err("invalid symbol should fail");
         assert!(err.to_string().contains("nonnegative integers"), "{err}");
+        input.release().unwrap();
+    }
+
+    #[test]
+    fn modulation_provider_rejects_representable_near_integer_values() {
+        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
+            return;
+        };
+        let near_one = match provider.precision() {
+            ProviderPrecision::F32 => 1.0 + 2.0f64.powi(-20),
+            ProviderPrecision::F64 => 1.0 + 2.0f64.powi(-34),
+        };
+        let constellation = [1.0, 0.0, -1.0, 0.0];
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[near_one],
+                shape: &[1, 1],
+            })
+            .expect("upload near-integer input");
+        let symbol_error =
+            pollster::block_on(provider.modulate_constellation(ProviderModulationRequest {
+                input: &input,
+                constellation: &constellation,
+            }))
+            .expect_err("fractional symbol must not round to one");
+        assert!(symbol_error.to_string().contains("nonnegative integers"));
+
+        let bit_error = pollster::block_on(provider.modulate_bits_constellation(
+            runmat_accelerate_api::ProviderBitModulationRequest {
+                input: &input,
+                input_rows: 1,
+                bits_per_symbol: 1,
+                constellation: &constellation,
+            },
+        ))
+        .expect_err("fractional bit must not round to one");
+        assert!(bit_error.to_string().contains("bits must be 0 or 1"));
         input.release().unwrap();
     }
 
