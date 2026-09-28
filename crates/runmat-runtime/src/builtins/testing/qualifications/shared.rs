@@ -286,7 +286,11 @@ fn diagnostic_message(values: &[Value]) -> Option<String> {
             class_name,
             properties,
             ..
-        }) if class_name.is(runmat_types::standard::UNIT_TEST_DIAGNOSTIC) => {
+        }) if crate::class_registry::is_class_or_subclass(
+            class_name,
+            &runmat_types::standard::UNIT_TEST_DIAGNOSTIC.owned(),
+        ) =>
+        {
             properties.get("Message").and_then(|value| match value {
                 Value::String(message) => Some(message.clone()),
                 _ => None,
@@ -358,6 +362,20 @@ mod tests {
             },
             ProtocolLimits::default(),
         )
+    }
+
+    #[test]
+    fn concrete_string_diagnostic_is_accepted_as_custom_failure_message() {
+        crate::testing::ensure_testing_classes();
+        let mut diagnostic =
+            ObjectInstance::new(runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC);
+        diagnostic
+            .properties
+            .insert("Message".into(), Value::String("specific failure".into()));
+        assert_eq!(
+            diagnostic_message(&[Value::Object(diagnostic)]),
+            Some("specific failure".into())
+        );
     }
 
     #[test]

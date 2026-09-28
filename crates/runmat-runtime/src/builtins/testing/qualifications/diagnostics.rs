@@ -1,12 +1,13 @@
 use runmat_test::context::TestCommand;
 use runmat_test::lifecycle::ExecutionPhase;
-use runmat_test::result::{Diagnostic, DiagnosticSeverity};
+use runmat_test::result::{Diagnostic, DiagnosticDetail, DiagnosticSeverity};
 use runmat_value::{ObjectInstance, Value};
 
 use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase",
+    binding_variant = "default",
     category = "testing",
     summary = "Construct a MATLAB-compatible test case object.",
     builtin_path = "crate::builtins::testing::qualifications::diagnostics"
@@ -26,6 +27,7 @@ fn test_case_constructor(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.diagnostics.StringDiagnostic",
+    binding_variant = "default",
     category = "testing/diagnostics",
     summary = "Construct a string-backed test diagnostic.",
     builtin_path = "crate::builtins::testing::qualifications::diagnostics"
@@ -44,25 +46,37 @@ fn string_diagnostic(value: Value) -> BuiltinResult<Value> {
             )
         }
     };
-    let mut object = ObjectInstance::new("matlab.unittest.diagnostics.Diagnostic".to_string());
+    let mut object = ObjectInstance::new(runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC);
     object
         .properties
         .insert("Identifier".into(), Value::String(String::new()));
     object
         .properties
-        .insert("Message".into(), Value::String(message));
+        .insert("Message".into(), Value::String(message.clone()));
+    object
+        .properties
+        .insert("DiagnosticText".into(), Value::String(message));
     Ok(Value::Object(object))
 }
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.log",
+    binding_variant = "default",
     category = "testing/diagnostics",
     summary = "Record a diagnostic message in the active test result.",
     builtin_path = "crate::builtins::testing::qualifications::diagnostics"
 )]
-fn log(receiver: Value, level: Value, diagnostic: Value) -> BuiltinResult<Value> {
-    validate_test_case(&receiver)?;
-    let severity = log_severity(level)?;
+fn log(args: Vec<Value>) -> BuiltinResult<Value> {
+    let (receiver, level, diagnostic) = match args.as_slice() {
+        [receiver, diagnostic] => (receiver, 2, diagnostic),
+        [receiver, level, diagnostic] => (receiver, log_verbosity(level)?, diagnostic),
+        _ => {
+            return Err(testing_diagnostic_error(
+                "log: expected a TestCase, optional verbosity, and diagnostic",
+            ))
+        }
+    };
+    validate_test_case(receiver)?;
     let message = diagnostic_message(diagnostic)?;
     let phase = crate::testing::active_test_context()
         .map(|context| context.phase)
@@ -71,10 +85,13 @@ fn log(receiver: Value, level: Value, diagnostic: Value) -> BuiltinResult<Value>
         diagnostic: Diagnostic {
             identifier: "RunMat:Test:Log".into(),
             message,
-            severity,
+            severity: DiagnosticSeverity::Information,
             phase,
             source: None,
-            details: Vec::new(),
+            details: vec![DiagnosticDetail {
+                label: "Verbosity".into(),
+                value: level.to_string(),
+            }],
         },
     })
     .map_err(testing_diagnostic_error)?;
@@ -102,23 +119,36 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
     }
 }
 
-fn log_severity(level: Value) -> BuiltinResult<DiagnosticSeverity> {
+fn log_verbosity(level: &Value) -> BuiltinResult<u8> {
     let level = match level {
-        Value::Num(level) => level,
+        Value::Num(level) => *level,
         Value::Int(level) => level.to_f64(),
+        Value::String(level) => return named_verbosity(level),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            return named_verbosity(&chars.data.iter().collect::<String>());
+        }
         _ => {
             return Err(testing_diagnostic_error(
-                "log: verbosity level must be a numeric scalar",
+                "log: verbosity must be a level from 1 to 4 or its name",
             ))
         }
     };
-    Ok(if level <= 1.0 {
-        DiagnosticSeverity::Information
-    } else if level <= 3.0 {
-        DiagnosticSeverity::Warning
-    } else {
-        DiagnosticSeverity::Error
-    })
+    if !level.is_finite() || !(1.0..=4.0).contains(&level) || level.fract() != 0.0 {
+        return Err(testing_diagnostic_error(
+            "log: verbosity must be an integer from 1 to 4",
+        ));
+    }
+    Ok(level as u8)
+}
+
+fn named_verbosity(level: &str) -> BuiltinResult<u8> {
+    match level.to_ascii_lowercase().as_str() {
+        "terse" => Ok(1),
+        "concise" => Ok(2),
+        "detailed" => Ok(3),
+        "verbose" => Ok(4),
+        _ => Err(testing_diagnostic_error("log: unknown verbosity name")),
+    }
 }
 
 fn diagnostic_message(value: Value) -> BuiltinResult<String> {
@@ -157,4 +187,112 @@ fn testing_diagnostic_error(message: impl Into<String>) -> crate::RuntimeError {
         .with_identifier("RunMat:Testing:InvalidDiagnostic")
         .with_builtin("log")
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::ActiveTestContext;
+    use runmat_test::context::TestExecutionContext;
+    use runmat_test::descriptor::FixtureScope;
+    use runmat_test::identity::{RunId, TestId, TestIdentityInput};
+    use runmat_test::lifecycle::FixtureScopeKey;
+    use runmat_test::protocol::ProtocolLimits;
+
+    #[test]
+    fn string_diagnostic_retains_its_concrete_class_and_text() {
+        let Value::Object(object) = string_diagnostic(Value::String("ready".into())).unwrap()
+        else {
+            panic!("StringDiagnostic must return an object");
+        };
+        assert!(object
+            .class_name
+            .is(runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC));
+        assert_eq!(
+            object.properties.get("DiagnosticText"),
+            Some(&Value::String("ready".into()))
+        );
+        assert_eq!(
+            object.properties.get("Message"),
+            Some(&Value::String("ready".into()))
+        );
+        assert!(string_diagnostic(Value::Num(4.0)).is_err());
+    }
+
+    #[test]
+    fn log_accepts_default_and_explicit_verbosity_and_records_commands() {
+        let guard = crate::testing::install_test_context(
+            ActiveTestContext {
+                execution: TestExecutionContext {
+                    run_id: RunId::derive("diagnostics", "run"),
+                    test_id: TestId::derive(&TestIdentityInput {
+                        owner_identity: "diagnostics",
+                        relative_source_identity: "diagnostics.m",
+                        semantic_scheme: "function",
+                        semantic_item_path: "log",
+                        parameter_identity: "",
+                        fixture_identity: "",
+                    }),
+                    attempt: 1,
+                    random_seed: 1,
+                },
+                phase: ExecutionPhase::TestBody,
+                scope: FixtureScopeKey {
+                    scope: FixtureScope::Test,
+                    identity: "diagnostics".into(),
+                },
+            },
+            ProtocolLimits::default(),
+        );
+        let receiver = test_case_constructor(Vec::new()).unwrap();
+        log(vec![receiver.clone(), Value::String("default".into())]).unwrap();
+        log(vec![
+            receiver.clone(),
+            Value::String("Verbose".into()),
+            Value::String("explicit".into()),
+        ])
+        .unwrap();
+        log(vec![
+            receiver,
+            string_diagnostic(Value::String("object diagnostic".into())).unwrap(),
+        ])
+        .unwrap();
+        let commands = guard.handle().commands();
+        assert_eq!(commands.len(), 3);
+        let TestCommand::RecordDiagnostic {
+            diagnostic: default,
+        } = &commands[0]
+        else {
+            panic!("expected recorded diagnostic")
+        };
+        let TestCommand::RecordDiagnostic {
+            diagnostic: explicit,
+        } = &commands[1]
+        else {
+            panic!("expected recorded diagnostic")
+        };
+        assert_eq!(default.message, "default");
+        assert_eq!(default.details[0].value, "2");
+        assert_eq!(explicit.message, "explicit");
+        assert_eq!(explicit.details[0].value, "4");
+        assert_eq!(explicit.severity, DiagnosticSeverity::Information);
+        let TestCommand::RecordDiagnostic { diagnostic: object } = &commands[2] else {
+            panic!("expected recorded object diagnostic")
+        };
+        assert_eq!(object.message, "object diagnostic");
+    }
+
+    #[test]
+    fn invalid_log_calls_do_not_record_commands() {
+        assert!(log(vec![]).is_err());
+        assert!(log(vec![Value::Num(1.0), Value::String("x".into())]).is_err());
+        for level in [
+            Value::Num(0.0),
+            Value::Num(2.5),
+            Value::Num(f64::NAN),
+            Value::String("trace".into()),
+        ] {
+            assert!(log(vec![Value::Num(1.0), level, Value::String("x".into())]).is_err());
+        }
+    }
 }

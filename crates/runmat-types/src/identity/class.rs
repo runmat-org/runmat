@@ -244,6 +244,8 @@ pub mod standard {
         StaticClassIdentity::new("RunMat.PythonArguments");
     pub const UNIT_TEST_DIAGNOSTIC: StaticClassIdentity =
         StaticClassIdentity::new("matlab.unittest.diagnostics.Diagnostic");
+    pub const UNIT_TEST_STRING_DIAGNOSTIC: StaticClassIdentity =
+        StaticClassIdentity::new("matlab.unittest.diagnostics.StringDiagnostic");
     pub const UNIT_TEST_CONSTRAINT: StaticClassIdentity =
         StaticClassIdentity::new("matlab.unittest.constraints.Constraint");
     pub const UNIT_TEST_RUNNER_PLUGIN: StaticClassIdentity =

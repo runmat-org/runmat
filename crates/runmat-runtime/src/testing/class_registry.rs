@@ -59,6 +59,11 @@ pub fn ensure_testing_classes() {
             None,
             &["Identifier", "Message"],
         );
+        register_plain_class(
+            runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC.display_name(),
+            Some(runmat_types::standard::UNIT_TEST_DIAGNOSTIC.display_name()),
+            &["DiagnosticText"],
+        );
         register_plain_class("matlab.unittest.constraints.Constraint", None, &[]);
         for class_name in [
             "matlab.unittest.constraints.IsEqualTo",
