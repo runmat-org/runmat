@@ -13,7 +13,7 @@ use runmat_runtime::object::indexing::{
 };
 use runmat_runtime::RuntimeError;
 use runmat_types::{IndexKind, IndexResultContext};
-use runmat_value::{CharArray, LogicalArray, SymbolicArray, Value};
+use runmat_value::{LogicalArray, SymbolicArray, Value};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
@@ -639,7 +639,8 @@ fn read_with_plan(base: Value, plan: &IndexPlan) -> NativeExecutorResult<Value> 
             read_slice::gather_string_slice(&value, plan).map_err(NativeExecutorError::from)
         }
         Value::LogicalArray(value) => gather_logical(&value, plan),
-        Value::CharArray(value) => gather_char(&value, plan),
+        value @ Value::CharArray(_) => runmat_runtime::indexing::value::read_with_plan(value, plan)
+            .map_err(NativeExecutorError::from),
         Value::Cell(value) => {
             let indices = plan
                 .indices
@@ -673,13 +674,6 @@ fn gather_logical(value: &LogicalArray, plan: &IndexPlan) -> NativeExecutorResul
     }
     LogicalArray::new(values, plan.output_shape.clone())
         .map(Value::LogicalArray)
-        .map_err(|error| NativeExecutorError::from(shape_error(error)))
-}
-
-fn gather_char(value: &CharArray, plan: &IndexPlan) -> NativeExecutorResult<Value> {
-    let values = gather(&value.to_column_major(), plan, "character")?;
-    CharArray::from_column_major(values, plan.output_shape.clone())
-        .map(Value::CharArray)
         .map_err(|error| NativeExecutorError::from(shape_error(error)))
 }
 
@@ -782,7 +776,9 @@ fn shape_error(error: impl std::fmt::Display) -> RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::selector_dimension_length;
+    use super::{read_with_plan, selector_dimension_length};
+    use runmat_runtime::indexing::plan::IndexPlan;
+    use runmat_value::{CharArray, Value};
 
     #[test]
     fn native_end_extent_collapses_trailing_dimensions() {
@@ -791,5 +787,27 @@ mod tests {
         assert_eq!(selector_dimension_length(&shape, 2, 0).unwrap(), 2);
         assert_eq!(selector_dimension_length(&shape, 2, 1).unwrap(), 12);
         assert_eq!(selector_dimension_length(&shape, 3, 2).unwrap(), 4);
+    }
+
+    #[test]
+    fn native_character_slices_use_shared_column_major_index_plan() {
+        let chars = CharArray::new("abcdwxyz".chars().collect(), 2, 4).expect("character array");
+        let row = IndexPlan::new(vec![1, 3, 5, 7], vec![1, 4], vec![1, 4], 2, vec![2, 4]);
+        let column = IndexPlan::new(vec![4, 5], vec![2, 1], vec![2, 1], 2, vec![2, 4]);
+        let Value::CharArray(row) =
+            read_with_plan(Value::CharArray(chars.clone()), &row).expect("row slice")
+        else {
+            panic!("expected character row");
+        };
+        assert_eq!(row.shape(), &[1, 4]);
+        assert_eq!(row.row_string().as_deref(), Some("wxyz"));
+
+        let Value::CharArray(column) =
+            read_with_plan(Value::CharArray(chars), &column).expect("column slice")
+        else {
+            panic!("expected character column");
+        };
+        assert_eq!(column.shape(), &[2, 1]);
+        assert_eq!(column.data, vec!['c', 'y']);
     }
 }

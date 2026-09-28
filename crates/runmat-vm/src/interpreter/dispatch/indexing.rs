@@ -1298,6 +1298,21 @@ pub async fn dispatch_indexing(
                     idx_read_slice::read_string_slice(&sa, *dims, *colon_mask, *end_mask, &numeric)
                         .await?,
                 ),
+                Value::CharArray(chars) => {
+                    let selectors = build_slice_selectors(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        chars.shape(),
+                    )
+                    .await?;
+                    let plan = build_index_plan(&selectors, *dims, chars.shape())?;
+                    stack.push(runmat_runtime::indexing::value::read_with_plan(
+                        Value::CharArray(chars),
+                        &plan,
+                    )?);
+                }
                 Value::Cell(ca) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ca.shape)

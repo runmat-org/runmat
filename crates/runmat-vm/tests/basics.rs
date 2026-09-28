@@ -21,6 +21,25 @@ fn execute_source_result(source: &str) -> Result<Vec<Value>, Box<runmat_runtime:
     interpret(&bytecode).map_err(Box::new)
 }
 
+#[test]
+fn character_array_slices_preserve_rows_columns_and_linear_order() {
+    let input = "chars = ['abcd'; 'wxyz']; row = chars(2,:); column = chars(:,3); linear = chars([1 4]); last = chars(end,:)";
+    let bytecode = compile_source(input).expect("compile character indexing");
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::IndexSlice(2, ..))));
+    let vars = interpret(&bytecode).expect("execute character indexing");
+    let has_char = |shape: &[usize], data: &[char]| {
+        vars.iter().any(|value| {
+            matches!(value, Value::CharArray(chars) if chars.shape() == shape && chars.data == data)
+        })
+    };
+    assert!(has_char(&[1, 4], &['w', 'x', 'y', 'z']));
+    assert!(has_char(&[2, 1], &['c', 'y']));
+    assert!(has_char(&[1, 2], &['a', 'x']));
+}
+
 fn is_expand_all_cell_contents(
     spec: &runmat_runtime::call::arguments::ArgumentSpec,
     expected_num_indices: usize,
