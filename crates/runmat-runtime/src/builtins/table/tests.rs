@@ -4555,6 +4555,66 @@ fn pivot_builds_wide_summary_table() {
 }
 
 #[test]
+fn pivot_preserves_wide_integer_groups_and_rejects_lossy_integer_data() {
+    let base = 9_007_199_254_740_992_u64;
+    let groups = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![base + 1, base, base + 1]),
+            vec![3, 1],
+        )
+        .unwrap(),
+    );
+    let kinds = Value::StringArray(
+        StringArray::new(vec!["x".into(), "x".into(), "x".into()], vec![3, 1]).unwrap(),
+    );
+    let values = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+    let table = table_from_columns(
+        vec!["Group".into(), "Kind".into(), "Value".into()],
+        vec![groups.clone(), kinds.clone(), values],
+    )
+    .unwrap();
+    let output = object(
+        block_on(pivot_builtin(
+            table,
+            Value::from("Group"),
+            Value::from("Kind"),
+            Value::from("Value"),
+            Vec::new(),
+        ))
+        .unwrap(),
+    );
+    let Value::Tensor(group_output) = table_member_get(&output, &Value::from("Group")).unwrap()
+    else {
+        panic!("expected integer grouping column");
+    };
+    assert_eq!(
+        group_output.integer_storage(),
+        Some(&IntegerStorage::U64(vec![base + 1, base]))
+    );
+    let too_wide = Value::Tensor(
+        Tensor::new_integer(
+            IntegerStorage::U64(vec![base + 1, base, base + 2]),
+            vec![3, 1],
+        )
+        .unwrap(),
+    );
+    let table = table_from_columns(
+        vec!["Group".into(), "Kind".into(), "Value".into()],
+        vec![groups, kinds, too_wide],
+    )
+    .unwrap();
+    let error = block_on(pivot_builtin(
+        table,
+        Value::from("Group"),
+        Value::from("Kind"),
+        Value::from("Value"),
+        Vec::new(),
+    ))
+    .expect_err("wide integer data must not round through double");
+    assert!(error.to_string().contains("exactly representable"));
+}
+
+#[test]
 fn table2struct_defaults_to_row_structs_and_to_scalar_preserves_columns() {
     let t = table_from_columns(
         vec!["A".into(), "B".into()],

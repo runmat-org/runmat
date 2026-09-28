@@ -332,6 +332,20 @@ pub(in crate::builtins::table) fn pivot_impl(
             "pivot: data variable must be a numeric column vector",
         ));
     }
+    if let Value::Tensor(tensor) = data_value {
+        if let Some(storage) = tensor.integer_storage() {
+            for index in 0..tensor.len() {
+                let value = storage
+                    .value_at(index)
+                    .ok_or_else(|| invalid_variable("pivot: invalid integer data variable"))?;
+                if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
+                    return Err(invalid_argument(
+                        "pivot: integer data must be exactly representable as double for summary methods",
+                    ));
+                }
+            }
+        }
+    }
 
     let height = table_height(&object)?;
     let mut row_order = Vec::<Vec<GroupAtom>>::new();
