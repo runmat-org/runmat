@@ -23,6 +23,8 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
+// Match the existing bounded numeric-format field convention in dlmwrite.
+const MAX_FORMAT_FIELD: usize = 4096;
 
 const BUILTIN_NAME: &str = "num2str";
 
@@ -94,12 +96,26 @@ async fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             BUILTIN_NAME,
         )?;
     }
+    if !matches!(
+        &value,
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::GpuTensor(_)
+    ) {
+        return Err(num2str_error(&NUM2STR_ERROR_INVALID_INPUT));
+    }
+    // Parse and validate controls before downloading a resident data operand.
+    let options = parse_options(rest).await?;
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(remap_num2str_flow)?;
     let data = extract_numeric_data(gathered).await?;
 
-    let options = parse_options(rest).await?;
     let char_array = format_numeric_data(data, &options)?;
     Ok(Value::CharArray(char_array))
 }
@@ -157,6 +173,41 @@ enum NumericData {
 }
 
 async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
+    if args.len() > 2 {
+        return Err(num2str_error_with_message(
+            "num2str: too many input arguments",
+            &NUM2STR_ERROR_INVALID_OPTION,
+        ));
+    }
+    // An invalid final host option is knowable without gathering an earlier
+    // resident precision argument. Resident controls are resolved below.
+    if let Some(second) = args.get(1) {
+        if !matches!(second, Value::GpuTensor(_)) && !is_local_token(second)? {
+            return Err(num2str_error_with_message(
+                "num2str: expected 'local' as the third argument",
+                &NUM2STR_ERROR_INVALID_OPTION,
+            ));
+        }
+    }
+    if let Some(first) = args.first() {
+        if !matches!(
+            first,
+            Value::Num(_)
+                | Value::Int(_)
+                | Value::Bool(_)
+                | Value::Tensor(_)
+                | Value::LogicalArray(_)
+                | Value::String(_)
+                | Value::StringArray(_)
+                | Value::CharArray(_)
+                | Value::GpuTensor(_)
+        ) {
+            return Err(num2str_error_with_message(
+                "num2str: second argument must be a precision or format string",
+                &NUM2STR_ERROR_INVALID_OPTION,
+            ));
+        }
+    }
     if args.is_empty() {
         return Ok(FormatOptions {
             spec: FormatSpec::General {
@@ -166,22 +217,16 @@ async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
         });
     }
 
-    let mut gathered = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered.push(
-            gather_if_needed_async(&arg)
-                .await
-                .map_err(remap_num2str_flow)?,
-        );
-    }
-
-    let mut iter = gathered.into_iter();
+    let mut iter = args.into_iter();
     let mut spec = FormatSpec::General {
         digits: DEFAULT_PRECISION,
     };
     let mut decimal = '.';
 
     if let Some(first) = iter.next() {
+        let first = gather_if_needed_async(&first)
+            .await
+            .map_err(remap_num2str_flow)?;
         if is_local_token(&first)? {
             decimal = detect_decimal_separator(true);
             if iter.next().is_some() {
@@ -206,6 +251,9 @@ async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
     }
 
     if let Some(second) = iter.next() {
+        let second = gather_if_needed_async(&second)
+            .await
+            .map_err(remap_num2str_flow)?;
         if !is_local_token(&second)? {
             return Err(num2str_error_with_message(
                 "num2str: expected 'local' as the third argument",
@@ -213,13 +261,6 @@ async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
             ));
         }
         decimal = detect_decimal_separator(true);
-    }
-
-    if iter.next().is_some() {
-        return Err(num2str_error_with_message(
-            "num2str: too many input arguments",
-            &NUM2STR_ERROR_INVALID_OPTION,
-        ));
     }
 
     Ok(FormatOptions { spec, decimal })
@@ -326,16 +367,16 @@ fn detect_decimal_separator(local: bool) -> char {
         return '.';
     }
 
-    if let Ok(custom) = std::env::var("RUNMAT_DECIMAL_SEPARATOR") {
+    if let Ok(custom) = crate::builtins::common::env::var("RUNMAT_DECIMAL_SEPARATOR") {
         let trimmed = custom.trim();
         if let Some(ch) = trimmed.chars().next() {
             return ch;
         }
     }
 
-    let locale = std::env::var("LC_NUMERIC")
-        .or_else(|_| std::env::var("RUNMAT_LOCALE"))
-        .or_else(|_| std::env::var("LANG"))
+    let locale = crate::builtins::common::env::var("LC_NUMERIC")
+        .or_else(|_| crate::builtins::common::env::var("RUNMAT_LOCALE"))
+        .or_else(|_| crate::builtins::common::env::var("LANG"))
         .unwrap_or_default()
         .to_lowercase();
 
@@ -397,6 +438,12 @@ fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
             })
         })
         .transpose()?;
+    if width.is_some_and(|width| width > MAX_FORMAT_FIELD) {
+        return Err(num2str_error_with_message(
+            format!("num2str: format width exceeds {MAX_FORMAT_FIELD}"),
+            &NUM2STR_ERROR_INVALID_FORMAT,
+        ));
+    }
     let precision = captures
         .get(3)
         .map(|m| {
@@ -1422,10 +1469,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_local_decimal() {
-        std::env::set_var("RUNMAT_DECIMAL_SEPARATOR", ",");
+        let _guard = test_support::global_state_test_guard();
+        let previous = crate::builtins::common::env::var("RUNMAT_DECIMAL_SEPARATOR").ok();
+        crate::builtins::common::env::set_var("RUNMAT_DECIMAL_SEPARATOR", ",");
         let out =
             num2str_builtin(Value::Num(0.5), vec![Value::String("local".into())]).expect("num2str");
-        std::env::remove_var("RUNMAT_DECIMAL_SEPARATOR");
+        match previous {
+            Some(value) => {
+                crate::builtins::common::env::set_var("RUNMAT_DECIMAL_SEPARATOR", &value)
+            }
+            None => crate::builtins::common::env::remove_var("RUNMAT_DECIMAL_SEPARATOR"),
+        }
         match out {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
@@ -1510,5 +1564,42 @@ pub(crate) mod tests {
             .unwrap_err(),
         );
         assert!(precision.contains("format precision is too large"));
+
+        let bounded_width = error_message(
+            num2str_builtin(
+                Value::Num(1.0),
+                vec![Value::String(format!("%{}f", MAX_FORMAT_FIELD + 1))],
+            )
+            .unwrap_err(),
+        );
+        assert!(bounded_width.contains("format width exceeds"));
+        let at_limit = num2str_builtin(
+            Value::Num(1.0),
+            vec![Value::String(format!("%{}f", MAX_FORMAT_FIELD))],
+        )
+        .expect("supported format width");
+        let Value::CharArray(chars) = at_limit else {
+            panic!("expected character array");
+        };
+        assert_eq!(chars.cols, MAX_FORMAT_FIELD);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn invalid_controls_are_rejected_before_resident_data_gather() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
+            let data = tensor.materialize_f64();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let error = error_message(
+                num2str_builtin(Value::GpuTensor(handle), vec![Value::String("%q".into())])
+                    .unwrap_err(),
+            );
+            assert!(error.contains("unsupported format string"));
+        });
     }
 }

@@ -321,5 +321,4 @@ pub(crate) mod tests {
             other => panic!("expected tensor result, got {other:?}"),
         }
     }
-
 }

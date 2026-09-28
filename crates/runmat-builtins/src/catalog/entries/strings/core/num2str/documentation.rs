@@ -2,7 +2,7 @@ use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Formatting and options", paragraphs: &[
-        "`num2str(A)` formats real, complex, integer, or logical values as a character array. The default general format uses up to 15 significant digits. `num2str(A, p)` accepts precision 0 through 52; `num2str(A, formatSpec)` accepts one numeric `printf` conversion using f/F, e/E, or g/G with supported width, sign, left-alignment and zero-padding flags.",
+        "`num2str(A)` formats real, complex, integer, or logical values as a character array. The default general format uses up to 15 significant digits. `num2str(A, p)` accepts precision 0 through 52; `num2str(A, formatSpec)` accepts one numeric `printf` conversion using f/F, e/E, or g/G with supported width, sign, left-alignment and zero-padding flags. A format field width above 4096 is rejected before formatting.",
         "All eight integer classes, including wide values above flintmax, are read from native storage. Complex integer components also retain exact decimal text. A numeric precision value is decoded and range checked; it does not change the input's storage class.",
         "Vectors produce one text row. Matrices produce one text row per input row with aligned columns. An empty input with zero rows yields a 0-by-0 character array; zero columns and a nonzero row count retain that row count.",
     ] },
@@ -44,6 +44,13 @@ const EXAMPLES: &[BuiltinExample] = &[
         fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(z, '3 + 4i  5 - 6i'));" },
     },
+    BuiltinExample { id: "local", title: "Use a local decimal separator",
+        program: "oldSeparator = getenv('RUNMAT_DECIMAL_SEPARATOR');\nsetenv('RUNMAT_DECIMAL_SEPARATOR', ',');\ntext = num2str(0.125, 'local');\nif isempty(oldSeparator)\n    unsetenv('RUNMAT_DECIMAL_SEPARATOR');\nelse\n    setenv('RUNMAT_DECIMAL_SEPARATOR', oldSeparator);\nend",
+        display_output: Some("'0,125'"),
+        compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(text, '0,125'));" },
+    },
     BuiltinExample { id: "gpu-gather", title: "Format explicit resident input on the host",
         program: "G = gpuArray([10.5 20.5]); txt = num2str(G, '%.1f')",
         display_output: Some("'10.5  20.5'"),
@@ -66,6 +73,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Does the output have the same dimensions as the input?", answer: "No. It is a padded character array: the number of rows follows the input matrix, while text formatting determines its width." },
         BuiltinDocumentationFaq { question: "How are complex values rendered?", answer: "The real and imaginary components use the selected precision and produce signed i notation." },
         BuiltinDocumentationFaq { question: "What controls the 'local' decimal separator?", answer: "RUNMAT_DECIMAL_SEPARATOR takes precedence; otherwise RunMat checks LC_NUMERIC, RUNMAT_LOCALE, and LANG." },
+        BuiltinDocumentationFaq { question: "What happens with nonnumeric input?", answer: "Text, structs, objects, and handles are not numeric data and raise an input error. Use string(...) for general text conversion." },
         BuiltinDocumentationFaq { question: "Can I convert the result to a string scalar?", answer: "Yes. Use string(num2str(A)) when a string scalar is needed." },
     ],
     links: &[
@@ -74,6 +82,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "str2double", target: BuiltinDocumentationLinkTarget::Builtin("str2double") },
         BuiltinDocumentationLink { label: "char", target: BuiltinDocumentationLinkTarget::Builtin("char") },
         BuiltinDocumentationLink { label: "compose", target: BuiltinDocumentationLinkTarget::Builtin("compose") },
+        BuiltinDocumentationLink { label: "strcmp", target: BuiltinDocumentationLinkTarget::Builtin("strcmp") },
+        BuiltinDocumentationLink { label: "strcmpi", target: BuiltinDocumentationLinkTarget::Builtin("strcmpi") },
+        BuiltinDocumentationLink { label: "string.empty", target: BuiltinDocumentationLinkTarget::Builtin("string.empty") },
+        BuiltinDocumentationLink { label: "strings", target: BuiltinDocumentationLinkTarget::Builtin("strings") },
+        BuiltinDocumentationLink { label: "strlength", target: BuiltinDocumentationLinkTarget::Builtin("strlength") },
+        BuiltinDocumentationLink { label: "strncmp", target: BuiltinDocumentationLinkTarget::Builtin("strncmp") },
         BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/num2str.rs") },
     ], media: &[],
     evidence: BuiltinDocumentationEvidence {
