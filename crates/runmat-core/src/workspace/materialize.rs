@@ -82,8 +82,8 @@ fn visit_slice_coords<F: FnMut(&[usize])>(
 pub(crate) fn gpu_dtype_label(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Option<&'static str> {
-    let precision = runmat_accelerate_api::handle_precision(handle)
-        .unwrap_or(ProviderPrecision::F64);
+    let precision =
+        runmat_accelerate_api::handle_precision(handle).unwrap_or(ProviderPrecision::F64);
     match precision {
         ProviderPrecision::F32 => Some("single"),
         ProviderPrecision::F64 => Some("double"),

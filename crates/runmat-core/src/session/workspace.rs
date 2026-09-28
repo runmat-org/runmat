@@ -1,5 +1,17 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+fn workspace_runtime_error(error: RuntimeError) -> anyhow::Error {
+    anyhow::Error::new(error)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn workspace_runtime_error(error: RuntimeError) -> anyhow::Error {
+    // Browser-local error sources need not be Send + Sync, while anyhow's
+    // source chain does. Keep the diagnostic at this public workspace boundary.
+    anyhow::anyhow!(error.to_string())
+}
+
 impl RunMatSession {
     pub fn workspace_handle(&self) -> crate::abi::WorkspaceHandle {
         self.abi_workspace_handle
@@ -51,7 +63,9 @@ impl RunMatSession {
 
         let mut entries: Vec<(String, Value)> = Vec::with_capacity(self.workspace_values.len());
         for (name, value) in &self.workspace_values {
-            let gathered = gather_if_needed_async(value).await?;
+            let gathered = gather_if_needed_async(value)
+                .await
+                .map_err(workspace_runtime_error)?;
             entries.push((name.clone(), gathered));
         }
 
@@ -67,13 +81,14 @@ impl RunMatSession {
 
         runtime_export_workspace_state(&entries, replay_mode)
             .await
-            .map_err(Into::into)
+            .map_err(workspace_runtime_error)
     }
 
     pub fn import_workspace_state(&mut self, bytes: &[u8]) -> Result<()> {
-        let entries = runtime_import_workspace_state(bytes)?;
+        let entries = runtime_import_workspace_state(bytes).map_err(workspace_runtime_error)?;
         for (_, value) in &entries {
-            runmat_runtime::execution::validate_storable_value(value)?;
+            runmat_runtime::execution::validate_storable_value(value)
+                .map_err(workspace_runtime_error)?;
         }
         self.clear_variables();
 
