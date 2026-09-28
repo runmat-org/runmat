@@ -8,7 +8,7 @@ pub const LETTERS_PATTERN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEnt
     identity: BuiltinCatalogIdentity {
         name: "lettersPattern",
     },
-    category: "strings/core",
+    category: "strings/pattern",
     documentation: documentation::DOCUMENTATION,
     descriptor: &LETTERS_PATTERN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

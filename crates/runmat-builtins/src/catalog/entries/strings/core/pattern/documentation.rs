@@ -19,7 +19,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("pattern"), slug: Some("pattern"),
     summary: "Create a literal string pattern.", description: "Create a pattern that matches literal text after escaping regular-expression metacharacters.",
-    keywords: &["pattern", "strings", "core", "matlab", "compatibility"], related: &["string", "char", "regexpPattern"],
+    keywords: &["pattern", "literal", "strings", "matlab", "compatibility"], related: &["string", "char", "regexpPattern"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None, faqs: &[],
     links: &[BuiltinDocumentationLink { label: "string", target: BuiltinDocumentationLinkTarget::Builtin("string") }, BuiltinDocumentationLink { label: "char", target: BuiltinDocumentationLinkTarget::Builtin("char") }, BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/pattern.rs") }], media: &[],
     evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/pattern.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "literal pattern construction", location: "builtins::strings::core::compat::tests" }], notes: &["Legacy behaviors, example, links, GPU restriction, and source location reconciled; the constructor emits a typed pattern object, not a string."] },

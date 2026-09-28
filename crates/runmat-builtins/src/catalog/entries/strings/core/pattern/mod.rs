@@ -7,7 +7,7 @@ pub use contract::*;
 pub const PATTERN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "pattern" },
-    category: "strings/core",
+    category: "strings/pattern",
     documentation: documentation::DOCUMENTATION,
     descriptor: &PATTERN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

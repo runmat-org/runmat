@@ -34,7 +34,7 @@ const EXAMPLES: &[BuiltinExample] = &[
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("textBoundary"), slug: Some("textBoundary"),
     summary: "Create a pattern matching the start or end of text.", description: "Create a host pattern for either, start-only, or end-only text boundaries.",
-    keywords: &["textBoundary", "strings", "core", "matlab", "compatibility"], related: &["pattern", "regexpPattern", "lettersPattern"],
+    keywords: &["textBoundary", "strings", "pattern", "boundary", "matlab", "compatibility"], related: &["pattern", "regexpPattern", "lettersPattern"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Does textBoundary support pattern negation?", answer: "No. This constructor returns a boundary pattern object; full pattern-expression algebra remains separate work." },

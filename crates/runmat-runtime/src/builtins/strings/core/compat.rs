@@ -28,9 +28,6 @@ use crate::builtins::strings::core::numeric_length::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
-const PATTERN_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("pattern");
-
 const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
     ty: BuiltinParamType::Any,
@@ -639,7 +636,7 @@ pub(crate) fn scalar_text(value: &Value, fn_name: &str) -> BuiltinResult<String>
 
 pub(crate) fn pattern_regex(value: &Value, fn_name: &str) -> BuiltinResult<String> {
     match value {
-        Value::Object(object) if object.is_class(PATTERN_CLASS) => {
+        Value::Object(object) if object.is_class(runmat_types::standard::PATTERN) => {
             match object.properties.get("Regex") {
                 Some(Value::String(regex)) => Ok(regex.clone()),
                 _ => Err(compat_error(
@@ -659,7 +656,7 @@ pub(crate) fn pattern_regex(value: &Value, fn_name: &str) -> BuiltinResult<Strin
 }
 
 pub(crate) fn pattern_object(regex: &str) -> Value {
-    let mut object = ObjectInstance::new(PATTERN_CLASS.to_string());
+    let mut object = ObjectInstance::new(runmat_types::standard::PATTERN.to_string());
     object
         .properties
         .insert("Regex".to_string(), Value::String(regex.to_string()));
@@ -2542,6 +2539,10 @@ mod tests {
 
     #[test]
     fn pattern_constructors_store_regex() {
+        let Value::Object(pattern) = pattern_object("x") else {
+            panic!("pattern constructor must return an object");
+        };
+        assert!(pattern.is_class(runmat_types::standard::PATTERN));
         assert_eq!(
             pattern_regex(&block(digits_pattern_builtin(Vec::new())).unwrap(), "test").unwrap(),
             r"\d+"

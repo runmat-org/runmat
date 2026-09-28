@@ -8,7 +8,7 @@ pub const REGEXP_PATTERN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntr
     identity: BuiltinCatalogIdentity {
         name: "regexpPattern",
     },
-    category: "strings/core",
+    category: "strings/pattern",
     documentation: documentation::DOCUMENTATION,
     descriptor: &REGEXP_PATTERN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

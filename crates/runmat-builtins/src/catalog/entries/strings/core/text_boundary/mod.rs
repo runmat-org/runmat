@@ -8,7 +8,7 @@ pub const TEXT_BOUNDARY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry
     identity: BuiltinCatalogIdentity {
         name: "textBoundary",
     },
-    category: "strings/core",
+    category: "strings/pattern",
     documentation: documentation::DOCUMENTATION,
     descriptor: &TEXT_BOUNDARY_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

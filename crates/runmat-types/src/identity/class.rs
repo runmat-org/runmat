@@ -200,6 +200,7 @@ pub mod standard {
     pub const LOGICAL: StaticClassIdentity = StaticClassIdentity::new("logical");
     pub const CHAR: StaticClassIdentity = StaticClassIdentity::new("char");
     pub const STRING: StaticClassIdentity = StaticClassIdentity::new("string");
+    pub const PATTERN: StaticClassIdentity = StaticClassIdentity::new("pattern");
     pub const CELL: StaticClassIdentity = StaticClassIdentity::new("cell");
     pub const STRUCT: StaticClassIdentity = StaticClassIdentity::new("struct");
     pub const FUNCTION_HANDLE: StaticClassIdentity = StaticClassIdentity::new("function_handle");

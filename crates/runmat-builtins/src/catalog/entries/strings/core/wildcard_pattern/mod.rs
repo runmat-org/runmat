@@ -8,7 +8,7 @@ pub const WILDCARD_PATTERN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEn
     identity: BuiltinCatalogIdentity {
         name: "wildcardPattern",
     },
-    category: "strings/core",
+    category: "strings/pattern",
     documentation: documentation::DOCUMENTATION,
     descriptor: &WILDCARD_PATTERN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {

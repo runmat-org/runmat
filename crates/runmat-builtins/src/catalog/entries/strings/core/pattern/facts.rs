@@ -3,7 +3,7 @@
 use crate::catalog::inference::argument_error;
 use runmat_types::{
     CallRequest, InferenceDiagnostic, LiteralValue, NumericDomain, ObjectFact, ResidencyFact,
-    ShapeFact, StaticClassIdentity, StorageFact, ValueFact, ValueKindFact,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -12,7 +12,7 @@ pub(crate) fn pattern_fact() -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(StaticClassIdentity::new("pattern").owned()),
+            runtime_class: Some(runmat_types::standard::PATTERN.owned()),
             properties,
             properties_complete: true,
             handle_semantics: Some(false),
@@ -180,5 +180,17 @@ mod tests {
         assert!(bounded_count_diagnostics(&request, "digitsPattern", true)
             .iter()
             .any(|d| d.code == "RM-CATALOG-digitsPattern-COUNT"));
+    }
+
+    #[test]
+    fn pattern_fact_uses_shared_runtime_class_identity() {
+        let fact = pattern_fact();
+        let ValueKindFact::Object(object) = fact.kind else {
+            panic!("pattern fact must be an object");
+        };
+        assert_eq!(
+            object.runtime_class,
+            Some(runmat_types::standard::PATTERN.owned())
+        );
     }
 }

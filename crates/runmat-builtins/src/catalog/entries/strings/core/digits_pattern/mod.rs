@@ -8,7 +8,7 @@ pub const DIGITS_PATTERN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntr
     identity: BuiltinCatalogIdentity {
         name: "digitsPattern",
     },
-    category: "strings/core",
+    category: "strings/pattern",
     documentation: documentation::DOCUMENTATION,
     descriptor: &DIGITS_PATTERN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
