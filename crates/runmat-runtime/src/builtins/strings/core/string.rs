@@ -1,12 +1,8 @@
 //! MATLAB-compatible `string` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRING_DESCRIPTOR, STRING_ENCODING_EXTENSION,
+    STRING_ERROR_INVALID_INPUT, STRING_EXPLICIT_GPU_EXTENSION, STRING_FORMAT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -21,161 +17,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const STRING_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String scalar/array result.",
-}];
-
-const STRING_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to convert to string array.",
-}];
-
-const STRING_INPUTS_VALUE_ENCODING: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input value to convert to string array.",
-    },
-    BuiltinParamDescriptor {
-        name: "encoding",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"UTF-8\""),
-        description: "Character encoding (UTF-8 aliases supported).",
-    },
-];
-
-const STRING_INPUTS_FORMAT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "formatSpec",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Format specification text/cell/string array.",
-    },
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Formatting data arguments.",
-    },
-];
-
-const STRING_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "S = string(X)",
-        inputs: &STRING_INPUTS_VALUE,
-        outputs: &STRING_OUTPUT_S,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = string(X, encoding)",
-        inputs: &STRING_INPUTS_VALUE_ENCODING,
-        outputs: &STRING_OUTPUT_S,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = string(formatSpec, A...)",
-        inputs: &STRING_INPUTS_FORMAT,
-        outputs: &STRING_OUTPUT_S,
-    },
-];
-
-const STRING_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRING.INVALID_INPUT",
-    identifier: Some("RunMat:string:InvalidInput"),
-    when: "Input conversion/formatting/encoding constraints are violated.",
-    message: "string: invalid input",
-};
-
-const STRING_ERRORS: [BuiltinErrorDescriptor; 1] = [STRING_ERROR_INVALID_INPUT];
 const STRING_SPARSE_DENSE_ELEMENT_LIMIT: usize = 10_000_000;
-
-pub const STRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRING_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRING_ERRORS,
-};
-
-const STRING_FORMAT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "string-format-spec",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "string(formatSpec, A...) printf-style formatting is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StringFormatSpecExtension"),
-};
-
-const STRING_ENCODING_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "string-encoding",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "string(X, encoding) character-encoding selection is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StringEncodingExtension"),
-};
-
-const STRING_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "string-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "string with explicit gpuArray numeric input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StringExplicitGpuInputExtension"),
-};
-
-pub const STRING_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    STRING_FORMAT_EXTENSION,
-    STRING_ENCODING_EXTENSION,
-    STRING_EXPLICIT_GPU_EXTENSION,
-];
-
-const STRING_VALUE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Every built-in integer class converts element by element to decimal text from authoritative storage, preserving input shape and exact wide values.",
-    }];
-
-const STRING_FORMAT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat printf-style format arguments accept every integer class and retain exact typed scalars until the selected formatter consumes them.",
-    }];
-
-pub const STRING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "str = string(A)",
-        inputs: &STRING_VALUE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Host and automatically resident integer arrays convert exactly to host strings, including wide integer values. Explicit gpuArray input is independently mode-gated because the compatibility target does not document interactive GPU-array input for string.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "str = string(formatSpec, A...)",
-        inputs: &STRING_FORMAT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "This printf-style formatting form is a mode-gated RunMat extension and does not redefine the documented string(A) conversion surface.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -207,14 +51,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "string",
-    category = "strings/core",
-    summary = "Convert numeric, logical, and text inputs into string arrays.",
-    keywords = "string,convert,text,char,gpu",
-    accel = "sink",
-    type_resolver(string_array_type),
-    descriptor(crate::builtins::strings::core::string::STRING_DESCRIPTOR),
-    extensions(crate::builtins::strings::core::string::STRING_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::core::string::STRING_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::string"
 )]
 async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -1111,7 +948,6 @@ fn int_value_to_string(value: &IntValue) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{
         CellArray, IntValue, IntegerComplexStorage, IntegerStorage, StringArray, StructValue,
     };
@@ -1659,13 +1495,5 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected results {other:?}"),
         }
-    }
-
-    #[test]
-    fn string_type_is_string_array() {
-        assert_eq!(
-            string_array_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
     }
 }

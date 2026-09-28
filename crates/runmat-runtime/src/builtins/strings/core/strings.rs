@@ -1,12 +1,9 @@
 //! MATLAB-compatible `strings` builtin that preallocates string arrays filled with empty scalars.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRINGS_ERROR_INTERNAL, STRINGS_ERROR_INVALID_SIZE,
+    STRINGS_ERROR_LIKE_DUPLICATE, STRINGS_ERROR_LIKE_MISSING_PROTOTYPE,
+    STRINGS_ERROR_SIZE_OVERFLOW, STRINGS_FILL_EXTENSION, STRINGS_LIKE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Value};
@@ -18,223 +15,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strings";
 const SIZE_INTEGER_ERR: &str = "size inputs must be integers";
 const SIZE_FINITE_ERR: &str = "size inputs must be finite";
 const SIZE_SCALAR_ERR: &str = "size inputs must be scalar";
-
-const STRINGS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Preallocated string array.",
-}];
-
-const STRINGS_INPUT_SZ: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sz",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Size vector or scalar side length.",
-}];
-
-const STRINGS_INPUT_DIMS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "m",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First array dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "n...",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional array dimensions.",
-    },
-];
-
-const STRINGS_INPUT_LIKE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "dims...",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional explicit size dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "like",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"like\""),
-        description: "Literal option keyword \"like\".",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::LikePrototype,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Prototype value supplying output shape when dims are omitted.",
-    },
-];
-
-const STRINGS_INPUT_FILL: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "dims...",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional explicit size dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "fill",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"empty\""),
-        description: "Fill mode keyword: \"empty\" or \"missing\".",
-    },
-];
-
-const STRINGS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "S = strings()",
-        inputs: &[],
-        outputs: &STRINGS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = strings(sz)",
-        inputs: &STRINGS_INPUT_SZ,
-        outputs: &STRINGS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = strings(m, n...)",
-        inputs: &STRINGS_INPUT_DIMS,
-        outputs: &STRINGS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = strings(___, \"like\", p)",
-        inputs: &STRINGS_INPUT_LIKE,
-        outputs: &STRINGS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "S = strings(___, fill)",
-        inputs: &STRINGS_INPUT_FILL,
-        outputs: &STRINGS_OUTPUT,
-    },
-];
-
-const STRINGS_ERROR_INVALID_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.INVALID_SIZE",
-    identifier: Some("RunMat:strings:InvalidSize"),
-    when: "Size arguments are not valid numeric scalar/vector dimensions.",
-    message: "strings: size arguments must be numeric scalars or vectors",
-};
-
-const STRINGS_ERROR_LIKE_MISSING_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.LIKE_MISSING_PROTOTYPE",
-    identifier: Some("RunMat:strings:LikeMissingPrototype"),
-    when: "\"like\" is provided without a following prototype.",
-    message: "strings: expected prototype after 'like'",
-};
-
-const STRINGS_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.LIKE_DUPLICATE",
-    identifier: Some("RunMat:strings:LikeDuplicate"),
-    when: "Multiple \"like\" options are supplied in one call.",
-    message: "strings: multiple 'like' specifications are not supported",
-};
-
-const STRINGS_ERROR_SIZE_OVERFLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.SIZE_OVERFLOW",
-    identifier: Some("RunMat:strings:SizeOverflow"),
-    when: "Requested dimensions overflow platform limits.",
-    message: "strings: requested size exceeds platform limits",
-};
-
-const STRINGS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRINGS.INTERNAL",
-    identifier: Some("RunMat:strings:InternalError"),
-    when: "Internal string array construction failed.",
-    message: "strings: internal error",
-};
-
-const STRINGS_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    STRINGS_ERROR_INVALID_SIZE,
-    STRINGS_ERROR_LIKE_MISSING_PROTOTYPE,
-    STRINGS_ERROR_LIKE_DUPLICATE,
-    STRINGS_ERROR_SIZE_OVERFLOW,
-    STRINGS_ERROR_INTERNAL,
-];
-
-pub const STRINGS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRINGS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRINGS_ERRORS,
-};
-
-const STRINGS_LIKE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "strings-like-prototype",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "strings(..., 'like', prototype) is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StringsLikePrototypeExtension"),
-};
-
-const STRINGS_FILL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "strings-fill-mode",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "strings(..., 'empty'|'missing') fill selection is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StringsFillModeExtension"),
-};
-
-pub const STRINGS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [STRINGS_LIKE_EXTENSION, STRINGS_FILL_EXTENSION];
-
-const STRINGS_SIZE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "size",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Scalar, separate, and vector size forms accept every built-in integer class. Negative values become zero, and dimensions are checked exactly against the host allocation domain.",
-    }];
-
-const STRINGS_LIKE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "prototype",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The RunMat-only like form inspects only prototype shape; integer class and payload are not converted or read.",
-    }];
-
-pub const STRINGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "str = strings(n | sz | sz1,...,szN)",
-        inputs: &STRINGS_SIZE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The compatibility target documents GPU-array size input but host execution. RunMat gathers through the owning provider, parses native integer storage exactly, and always returns a host string array.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "str = strings(..., 'like', prototype)",
-        inputs: &STRINGS_LIKE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The like form is a mode-gated RunMat extension and is not presented as part of the compatibility target's strings contract.",
-    },
-];
 
 fn strings_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strings_error_with_message(error.message, error)
@@ -295,14 +81,7 @@ enum FillKind {
 
 #[runtime_builtin(
     name = "strings",
-    category = "strings/core",
-    summary = "Preallocate string arrays filled with empty string scalars (`\"\"`).",
-    keywords = "strings,string array,empty,preallocate",
-    accel = "array_construct",
-    type_resolver(string_array_type),
-    descriptor(crate::builtins::strings::core::strings::STRINGS_DESCRIPTOR),
-    extensions(crate::builtins::strings::core::strings::STRINGS_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::core::strings::STRINGS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::strings"
 )]
 async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -590,7 +369,6 @@ pub(crate) mod tests {
 
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerStorage, NumericStorage};
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -972,14 +750,6 @@ pub(crate) mod tests {
                 other => panic!("expected string array, got {other:?}"),
             }
         });
-    }
-
-    #[test]
-    fn strings_type_is_string_array() {
-        assert_eq!(
-            string_array_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
     }
 
     #[cfg(feature = "wgpu")]
