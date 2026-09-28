@@ -61,7 +61,7 @@ pub(super) const TEST_CASE: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Create a RunMat test-case object.",
     description: "`matlab.unittest.TestCase()` creates a lightweight test-case object in RunMat. Function-based tests receive their own case object from the test runner.",
     keywords: &["test", "TestCase", "testing", "constructor"],
-    related: &["functiontests", "matlab.unittest.TestCase.log"],
+    related: &["matlab.unittest.TestCase.log"],
     sections: &[BuiltinDocumentationSection {
         heading: "Usage",
         paragraphs: &["The direct zero-argument constructor is a RunMat convenience form. It creates an object with an empty `Name`; it does not start a test lifecycle. Qualification and logging methods that record results require an active test run.", "RunMat currently stores this object by value. Its registered class inherits from `handle` for class and method lookup, but the object does not yet preserve handle identity or shared mutation across copies. MATLAB test classes normally derive from `matlab.unittest.TestCase`, or obtain a case object through its test framework; the direct constructor is not a substitute for a test runner."],
@@ -95,7 +95,7 @@ pub(super) const LOG: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Record a diagnostic in the active test result.",
     description: "`log(testCase, diagnostic)` records at default verbosity 2; `log(testCase, verbosity, diagnostic)` selects verbosity 1 through 4 or a named level.",
     keywords: &["test", "log", "diagnostic", "verbosity"],
-    related: &["matlab.unittest.TestCase", "matlab.unittest.diagnostics.StringDiagnostic", "functiontests"],
+    related: &["matlab.unittest.TestCase", "matlab.unittest.diagnostics.StringDiagnostic"],
     sections: &[
         BuiltinDocumentationSection { heading: "Test context", paragraphs: &["The call records a structured diagnostic in the current test lifecycle. Calling it outside an active test returns `RunMat:Testing:InvalidDiagnostic`; it does not silently discard the message.", "A successful call returns an empty double matrix. It does not itself fail the test. RunMat stores the selected verbosity in the diagnostic details; the test-result renderer determines whether and where to display it."] },
         BuiltinDocumentationSection { heading: "Accepted values", paragraphs: &["Verbosity defaults to `Concise` (2). Accepted explicit values are numeric scalars 1 through 4, including one-element numeric arrays, or the names `Terse`, `Concise`, `Detailed`, and `Verbose` (case-insensitive). The `matlab.unittest.Verbosity` enumeration is not implemented. Diagnostics may be scalar text or a `Diagnostic` object. Function-handle and diagnostic-array inputs from MATLAB's wider API are not yet supported."] },
