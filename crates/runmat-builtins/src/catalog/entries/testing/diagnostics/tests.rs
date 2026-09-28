@@ -43,7 +43,7 @@ fn constructors_preserve_their_concrete_class_and_scalar_host_shape() {
             panic!("object result required")
         };
         assert_eq!(object.runtime_class, Some(class.owned()));
-        assert_eq!(object.handle_semantics, Some(false));
+        assert_eq!(object.handle_semantics, None);
     }
 }
 

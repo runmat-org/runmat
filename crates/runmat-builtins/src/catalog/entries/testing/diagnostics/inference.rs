@@ -13,8 +13,10 @@ fn object(class: StaticClassIdentity, properties: BTreeMap<String, ValueFact>) -
             runtime_class: Some(class.owned()),
             properties,
             properties_complete: true,
-            // These constructors currently return owned ObjectInstance values.
-            handle_semantics: Some(false),
+            // The current ObjectInstance representation is value-backed, but
+            // these MATLAB class contracts are not yet fully modeled as
+            // value or handle identities by RunMat's testing subsystem.
+            handle_semantics: None,
         }),
         ShapeFact::Scalar,
         StorageFact::Opaque,

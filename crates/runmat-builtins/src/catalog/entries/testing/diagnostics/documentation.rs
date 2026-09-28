@@ -64,7 +64,7 @@ pub(super) const TEST_CASE: BuiltinDocumentation = BuiltinDocumentation {
     related: &["functiontests", "matlab.unittest.TestCase.log"],
     sections: &[BuiltinDocumentationSection {
         heading: "Usage",
-        paragraphs: &["The direct zero-argument constructor is a RunMat convenience form. It creates an object with an empty `Name`; it does not start a test lifecycle. Qualification and logging methods that record results require an active test run.", "MATLAB test classes normally derive from `matlab.unittest.TestCase`, or obtain a case object through its test framework. The direct constructor is not a substitute for a test runner."],
+        paragraphs: &["The direct zero-argument constructor is a RunMat convenience form. It creates an object with an empty `Name`; it does not start a test lifecycle. Qualification and logging methods that record results require an active test run.", "RunMat currently stores this object by value. Its registered class inherits from `handle` for class and method lookup, but the object does not yet preserve handle identity or shared mutation across copies. MATLAB test classes normally derive from `matlab.unittest.TestCase`, or obtain a case object through its test framework; the direct constructor is not a substitute for a test runner."],
     }],
     examples: TEST_CASE_EXAMPLES, example_exemption: None, faqs: &[],
     links: &[BuiltinDocumentationLink { label: "MATLAB TestCase class", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.testcase-class.html") }],
@@ -81,7 +81,7 @@ pub(super) const STRING_DIAGNOSTIC: BuiltinDocumentation = BuiltinDocumentation 
     related: &["matlab.unittest.TestCase.log", "matlab.unittest.TestCase"],
     sections: &[BuiltinDocumentationSection {
         heading: "Input and class",
-        paragraphs: &["RunMat currently accepts one host string scalar or character row. Numeric values, text arrays and GPU-resident text are rejected.", "The result retains the concrete `matlab.unittest.diagnostics.StringDiagnostic` class and is a subclass of RunMat's `Diagnostic` class. MATLAB has also exposed this class under `matlab.automation.diagnostics` since R2023a; that newer constructor name is not yet registered in RunMat."],
+        paragraphs: &["RunMat currently accepts one host string scalar or character row. Numeric values, text arrays and GPU-resident text are rejected.", "The result retains the concrete `matlab.unittest.diagnostics.StringDiagnostic` class and is a subclass of RunMat's `Diagnostic` class. It is currently stored as a value-backed object; handle identity and shared mutation are not provided. MATLAB has also exposed this class under `matlab.automation.diagnostics` since R2023a; that newer constructor name is not yet registered in RunMat."],
     }],
     examples: STRING_DIAGNOSTIC_EXAMPLES, example_exemption: None, faqs: &[],
     links: &[BuiltinDocumentationLink { label: "MATLAB StringDiagnostic class", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.automation.diagnostics.stringdiagnostic-class.html") }],
@@ -98,7 +98,7 @@ pub(super) const LOG: BuiltinDocumentation = BuiltinDocumentation {
     related: &["matlab.unittest.TestCase", "matlab.unittest.diagnostics.StringDiagnostic", "functiontests"],
     sections: &[
         BuiltinDocumentationSection { heading: "Test context", paragraphs: &["The call records a structured diagnostic in the current test lifecycle. Calling it outside an active test returns `RunMat:Testing:InvalidDiagnostic`; it does not silently discard the message.", "A successful call returns an empty double matrix. It does not itself fail the test. RunMat stores the selected verbosity in the diagnostic details; the test-result renderer determines whether and where to display it."] },
-        BuiltinDocumentationSection { heading: "Accepted values", paragraphs: &["Verbosity defaults to `Concise` (2). Accepted explicit values are integers 1 through 4 or `Terse`, `Concise`, `Detailed`, and `Verbose` (case-insensitive). Diagnostics may be scalar text or a `Diagnostic` object. Function-handle and diagnostic-array inputs from MATLAB's wider API are not yet supported."] },
+        BuiltinDocumentationSection { heading: "Accepted values", paragraphs: &["Verbosity defaults to `Concise` (2). Accepted explicit values are numeric scalars 1 through 4, including one-element numeric arrays, or the names `Terse`, `Concise`, `Detailed`, and `Verbose` (case-insensitive). The `matlab.unittest.Verbosity` enumeration is not implemented. Diagnostics may be scalar text or a `Diagnostic` object. Function-handle and diagnostic-array inputs from MATLAB's wider API are not yet supported."] },
     ],
     examples: LOG_EXAMPLES,
     example_exemption: None,

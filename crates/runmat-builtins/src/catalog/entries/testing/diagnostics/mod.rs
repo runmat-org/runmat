@@ -45,7 +45,7 @@ const LOG_VERBOSE_INPUTS: &[BuiltinParamDescriptor] = &[
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Integer level 1 to 4, or Terse, Concise, Detailed, or Verbose.",
+        description: "Numeric scalar level 1 to 4, or Terse, Concise, Detailed, or Verbose; Verbosity enum values are not yet supported.",
     },
     BuiltinParamDescriptor {
         name: "diagnostic",

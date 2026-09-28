@@ -1,7 +1,7 @@
 use runmat_test::context::TestCommand;
 use runmat_test::lifecycle::ExecutionPhase;
 use runmat_test::result::{Diagnostic, DiagnosticDetail, DiagnosticSeverity};
-use runmat_value::{ObjectInstance, Value};
+use runmat_value::{NumericScalar, ObjectInstance, Value};
 
 use crate::BuiltinResult;
 
@@ -114,9 +114,12 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
 }
 
 fn log_verbosity(level: &Value) -> BuiltinResult<u8> {
-    let level = match level {
-        Value::Num(level) => *level,
-        Value::Int(level) => level.to_f64(),
+    let scalar = match level {
+        Value::Num(level) => NumericScalar::F64(*level),
+        Value::Int(level) => NumericScalar::from(level.clone()),
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor
+            .numeric_value_at(0)
+            .expect("a one-element numeric tensor has a scalar value"),
         Value::String(level) => return named_verbosity(level),
         Value::CharArray(chars) if chars.rows <= 1 => {
             return named_verbosity(&chars.data.iter().collect::<String>());
@@ -127,12 +130,19 @@ fn log_verbosity(level: &Value) -> BuiltinResult<u8> {
             ))
         }
     };
-    if !level.is_finite() || !(1.0..=4.0).contains(&level) || level.fract() != 0.0 {
+    let valid = match scalar.into_int_value() {
+        Some(integer) => (1..=4).contains(&integer.to_i128()),
+        None => {
+            let number = scalar.materialize_f64();
+            number.is_finite() && (1.0..=4.0).contains(&number) && number.fract() == 0.0
+        }
+    };
+    if !valid {
         return Err(testing_diagnostic_error(
             "log: verbosity must be an integer from 1 to 4",
         ));
     }
-    Ok(level as u8)
+    Ok(scalar.materialize_f64() as u8)
 }
 
 fn named_verbosity(level: &str) -> BuiltinResult<u8> {
@@ -274,6 +284,28 @@ mod tests {
             panic!("expected recorded object diagnostic")
         };
         assert_eq!(object.message, "object diagnostic");
+    }
+
+    #[test]
+    fn log_verbosity_accepts_scalar_tensors_without_rounding_wide_integers() {
+        let double = runmat_value::Tensor::new(vec![3.0], vec![1, 1]).unwrap();
+        assert_eq!(log_verbosity(&Value::Tensor(double)).unwrap(), 3);
+        let integer = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U16(vec![4]),
+            vec![1, 1],
+        )
+        .unwrap();
+        assert_eq!(log_verbosity(&Value::Tensor(integer)).unwrap(), 4);
+        let wide = runmat_value::Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![(1_u64 << 53) + 1]),
+            vec![1, 1],
+        )
+        .unwrap();
+        assert!(log_verbosity(&Value::Tensor(wide)).is_err());
+        assert!(log_verbosity(&Value::Tensor(
+            runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()
+        ))
+        .is_err());
     }
 
     #[test]

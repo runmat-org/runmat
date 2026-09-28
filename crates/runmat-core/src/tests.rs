@@ -15486,6 +15486,26 @@ fn loose_source_parallel_submissions_keep_the_core_program_environment() {
 }
 
 #[test]
+fn testing_diagnostic_log_resolves_function_and_instance_method_calls() {
+    for invocation in ["log(testCase, diagnostic)", "testCase.log(diagnostic)"] {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let source = format!(
+            "testCase = matlab.unittest.TestCase(); diagnostic = matlab.unittest.diagnostics.StringDiagnostic('ready'); {invocation};"
+        );
+        let error = execute_text_request(&mut session, &source)
+            .expect_err("logging without an active test lifecycle must fail");
+        let RunError::Runtime(error) = error else {
+            panic!("{invocation} should reach the runtime method implementation: {error}");
+        };
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:Testing:InvalidDiagnostic"),
+            "{invocation} must dispatch to the testing log method"
+        );
+    }
+}
+
+#[test]
 fn fetch_outputs_preserves_multiple_requested_outputs() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
