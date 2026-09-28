@@ -187,7 +187,6 @@ pub(super) fn easter_sunday(year: i32) -> BuiltinResult<NaiveDate> {
 
 pub(super) fn market_holiday_keys_for_year(year: i32) -> BuiltinResult<Vec<i64>> {
     let mut keys = vec![
-        observed_fixed_holiday(year, 1, 1)?,
         nth_weekday(year, 1, Weekday::Mon, 3)?,
         nth_weekday(year, 2, Weekday::Mon, 3)?,
         key_from_date(easter_sunday(year)? - Duration::days(2)),
@@ -197,6 +196,11 @@ pub(super) fn market_holiday_keys_for_year(year: i32) -> BuiltinResult<Vec<i64>>
         nth_weekday(year, 11, Weekday::Thu, 4)?,
         observed_fixed_holiday(year, 12, 25)?,
     ];
+    let new_year = NaiveDate::from_ymd_opt(year, 1, 1)
+        .ok_or_else(|| datetime_error("holidays: invalid New Year's Day"))?;
+    if new_year.weekday() != Weekday::Sat {
+        keys.push(observed_fixed_holiday(year, 1, 1)?);
+    }
     // NYSE began observing Juneteenth in 2022. Applying it to older years
     // creates false historical closures even in the computed-calendar subset.
     if year >= 2022 {

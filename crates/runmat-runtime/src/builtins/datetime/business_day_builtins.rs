@@ -443,8 +443,22 @@ pub(super) async fn daysdif_builtin(
             if basis == 1 {
                 let s = date_from_key(start_key)?;
                 let e = date_from_key(end_key)?;
-                let sd = s.day().min(30) as i32;
-                let ed = if sd == 30 { e.day().min(30) } else { e.day() } as i32;
+                let start_last_february =
+                    s.month() == 2 && s.day() == days_in_month(s.year(), 2)?;
+                let end_last_february =
+                    e.month() == 2 && e.day() == days_in_month(e.year(), 2)?;
+                let sd = if s.day() == 31 || start_last_february {
+                    30
+                } else {
+                    s.day()
+                } as i32;
+                let ed = if (start_last_february && end_last_february)
+                    || (sd == 30 && e.day() == 31)
+                {
+                    30
+                } else {
+                    e.day()
+                } as i32;
                 Ok(f64::from(
                     (e.year() - s.year()) * 360
                         + (e.month() as i32 - s.month() as i32) * 30
@@ -540,7 +554,7 @@ async fn month_business_date_builtin(
     let (year_data, month_data, shape) =
         tensor::binary_numeric_tensors(&years, &months, name, BUILTIN_NAME)?;
     let weekend = weekend_mask(rest.get(1).cloned(), name)?;
-    let mut bounds = None;
+    let mut bounds: Option<(i64, i64)> = None;
     for (year, month) in year_data.iter().zip(month_data.iter()) {
         let year = round_component(*year, "year", -262_000, 262_000)? as i32;
         let month = round_component(*month, "month", 1, 12)? as u32;

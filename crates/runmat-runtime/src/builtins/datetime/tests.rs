@@ -1109,6 +1109,25 @@ fn business_day_helpers_use_weekends_and_holidays() {
         .expect("daysdif typed basis"),
         Value::Num(29.0)
     );
+    let sia_basis = || vec![Value::Num(1.0)];
+    assert_eq!(
+        futures::executor::block_on(daysdif_builtin(
+            Value::Num(serial_for_date(2023, 2, 28)),
+            Value::Num(serial_for_date(2023, 3, 1)),
+            sia_basis(),
+        ))
+        .expect("SIA last-February start"),
+        Value::Num(1.0)
+    );
+    assert_eq!(
+        futures::executor::block_on(daysdif_builtin(
+            Value::Num(serial_for_date(2023, 2, 28)),
+            Value::Num(serial_for_date(2024, 2, 29)),
+            sia_basis(),
+        ))
+        .expect("SIA both dates last February"),
+        Value::Num(360.0)
+    );
     assert!(futures::executor::block_on(daysdif_builtin(
         Value::Num(friday),
         Value::Num(friday + 3.0),
@@ -1138,6 +1157,23 @@ fn business_day_helpers_use_weekends_and_holidays() {
         ))
         .expect("lbusdate"),
         Value::Num(serial_for_date(2024, 6, 28))
+    );
+    assert_eq!(
+        futures::executor::block_on(isbusday_builtin(
+            Value::Num(serial_for_date(2021, 12, 31)),
+            Vec::new(),
+        ))
+        .expect("NYSE did not observe Saturday New Year's Day on Friday"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        futures::executor::block_on(lbusdate_builtin(
+            Value::Num(2021.0),
+            Value::Num(12.0),
+            Vec::new(),
+        ))
+        .expect("2021 December last business day"),
+        Value::Num(serial_for_date(2021, 12, 31))
     );
     let weekend =
         Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vec![1, 7]).unwrap());
