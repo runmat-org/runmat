@@ -1,10 +1,14 @@
 //! Core string builtins.
 
 pub mod char;
+pub(crate) mod classification;
 pub mod compat;
 pub mod compose;
 pub mod genvarname;
 pub mod int2str;
+pub mod isletter;
+pub mod isspace;
+pub mod isstrprop;
 pub mod num2str;
 pub mod patterns;
 pub mod sprintf;
@@ -17,4 +21,5 @@ pub mod string_empty;
 pub mod strings;
 pub mod strlength;
 pub mod strncmp;
+pub mod strncmpi;
 pub mod unicode2native;

@@ -1,0 +1,82 @@
+//! Character-property classification, including exact numeric character codes.
+
+use runmat_builtins::{
+    CharacterPropertyCategory, ISSTRPROP_DESCRIPTOR, ISSTRPROP_ERROR_TOO_MANY_OUTPUTS,
+    ISSTRPROP_RESIDENT_INPUT_EXTENSION,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::Value;
+
+use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::strings::core::classification::{
+    char_matches_prop, classify_text_or_numeric_value, parse_force_cell_output,
+};
+use crate::builtins::strings::core::compat::{compat_error, scalar_text};
+use crate::{gather_if_needed_async, make_cell_with_shape, BuiltinResult};
+
+#[runtime_builtin(
+    name = "isstrprop",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::core::isstrprop"
+)]
+pub(crate) async fn isstrprop_builtin(
+    text: Value,
+    prop: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &ISSTRPROP_DESCRIPTOR,
+        &ISSTRPROP_ERROR_TOO_MANY_OUTPUTS,
+        "isstrprop",
+    )?;
+    if !matches!(
+        prop,
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
+    ) {
+        return Err(compat_error(
+            "isstrprop",
+            "isstrprop: category must be a character vector or string scalar",
+        ));
+    }
+    if matches!(&text, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ISSTRPROP_RESIDENT_INPUT_EXTENSION,
+            "isstrprop",
+        )?;
+    }
+    let text = match &text {
+        Value::GpuTensor(handle) => {
+            let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+                .ok_or_else(|| {
+                    compat_error(
+                        "isstrprop",
+                        "isstrprop: no provider owns the resident input",
+                    )
+                })?;
+            crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
+                owner, handle,
+            )
+            .await?
+        }
+        _ => text,
+    };
+    let prop = gather_if_needed_async(&prop)
+        .await
+        .map_err(|err| map_control_flow_with_builtin(err, "isstrprop"))?;
+    let prop = scalar_text(&prop, "isstrprop")?.to_ascii_lowercase();
+    let category = CharacterPropertyCategory::parse(&prop).ok_or_else(|| {
+        compat_error(
+            "isstrprop",
+            format!("isstrprop: unknown character category '{prop}'"),
+        )
+    })?;
+    let force_cell_output = parse_force_cell_output(&rest)?;
+    let result =
+        classify_text_or_numeric_value(text, "isstrprop", |ch| char_matches_prop(ch, category))?;
+    if force_cell_output && !matches!(result, Value::Cell(_)) {
+        make_cell_with_shape(vec![result], vec![1, 1]).map_err(|e| compat_error("isstrprop", e))
+    } else {
+        Ok(result)
+    }
+}
