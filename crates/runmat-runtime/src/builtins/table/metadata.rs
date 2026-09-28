@@ -159,36 +159,6 @@ const TABLE_INPUTS_PREALLOCATE: [BuiltinParamDescriptor; 4] = [
         description: "Optional names for the preallocated rows.",
     },
 ];
-const GRPSTATS_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix or table.",
-    },
-    BuiltinParamDescriptor {
-        name: "group",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Grouping variables, variable selectors, or empty grouping.",
-    },
-    BuiltinParamDescriptor {
-        name: "whichstats",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"mean\""),
-        description: "Summary statistic name or names.",
-    },
-    BuiltinParamDescriptor {
-        name: "nameValuePairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Alpha, DataVars, and VarNames options.",
-    },
-];
 const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
@@ -370,23 +340,6 @@ const ARRAY_DATASTORE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &ARRAY_DATASTORE_OUTPUT,
     },
 ];
-const GRPSTATS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "tblstats = grpstats(tbl, groupvars)",
-        inputs: &GRPSTATS_INPUTS,
-        outputs: &ANY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "stats = grpstats(X, group)",
-        inputs: &GRPSTATS_INPUTS,
-        outputs: &ANY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[stats1, ..., statsN] = grpstats(X, group, whichstats)",
-        inputs: &GRPSTATS_INPUTS,
-        outputs: &ANY_OUTPUT,
-    },
-];
 const COMPAT_VALUE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "B = tabularBuiltin(A, ...)",
     inputs: &VALUE_AND_ARGS_INPUTS,
@@ -448,12 +401,6 @@ pub const TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 pub const ARRAY_DATASTORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ARRAY_DATASTORE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const GRPSTATS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GRPSTATS_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
 };
