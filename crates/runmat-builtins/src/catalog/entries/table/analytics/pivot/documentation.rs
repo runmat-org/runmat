@@ -37,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Runtime implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/object/analytics.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Pivot wide-summary table", location: "crates/runmat-runtime/src/builtins/table/tests.rs" }],
-        notes: &["The legacy display-only example now has content and shape assertions.", "The legacy JSON's max_inputs=5/inline fusion claim was inconsistent with host grouping; typed placement records a fusion boundary.", "The legacy integer metadata advertised newer binning and totals forms that the implementation rejects; those unsupported forms are documented but not capability claims.", "Legacy requires_feature was null; gpu_support maps to host placement and tested maps to unit-test evidence."],
+        notes: &["Example assertions check output contents and shape.", "Pivot grouping runs on the host and forms a fusion boundary.", "Binning and totals forms that the current implementation rejects are documented as limitations rather than supported capabilities.", "The linked tests cover the supported host forms."],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

@@ -8,12 +8,10 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type, APPEND_DESCRIPTOR, APPEND_INTEGER_AUDIT,
-    DEBLANK_DESCRIPTOR, DEBLANK_INTEGER_AUDIT, ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
-    ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION, ERASE_PUNCTUATION_DESCRIPTOR,
-    ERASE_PUNCTUATION_ERROR_INVALID_INPUT, ERASE_PUNCTUATION_ERROR_INVALID_OPTION,
-    ERASE_URLS_BROAD_CELL_EXTENSION, ERASE_URLS_CHAR_MATRIX_EXTENSION, ERASE_URLS_DESCRIPTOR,
-    ERASE_URLS_ERROR_INVALID_INPUT,
+    BuiltinSignatureDescriptor, ResolveContext, Type, ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
+    ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION, ERASE_PUNCTUATION_ERROR_INVALID_INPUT,
+    ERASE_PUNCTUATION_ERROR_INVALID_OPTION, ERASE_URLS_BROAD_CELL_EXTENSION,
+    ERASE_URLS_CHAR_MATRIX_EXTENSION, ERASE_URLS_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntValue, NumericScalar, StringArray, Value};
@@ -2145,7 +2143,10 @@ fn justify(text: &str, side: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::BuiltinIntegerAuditKind;
+    use runmat_builtins::{
+        BuiltinIntegerAuditKind, APPEND_INTEGER_AUDIT, ERASE_PUNCTUATION_DESCRIPTOR,
+        ERASE_URLS_DESCRIPTOR,
+    };
     use runmat_value::{CellArray, IntValue, IntegerStorage, StructValue, Tensor};
 
     fn block(

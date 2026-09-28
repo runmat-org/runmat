@@ -2,11 +2,9 @@ use super::*;
 #[cfg(test)]
 use runmat_builtins::BuiltinIntegerInputAvailability;
 use runmat_builtins::{
-    GROUPSUMMARY_EXTENSIONS, GROUPSUMMARY_INTEGER_CAPABILITIES,
     GROUPSUMMARY_INTEGER_CONTROL_EXTENSION, GROUPSUMMARY_RESIDENT_INPUT_EXTENSION,
-    GRPSTATS_EXTENSIONS, GRPSTATS_INTEGER_ALPHA_EXTENSION, GRPSTATS_INTEGER_CAPABILITIES,
-    GRPSTATS_INTEGER_DATA_EXTENSION, GRPSTATS_INTEGER_SELECTOR_EXTENSION,
-    GRPSTATS_RESIDENT_INPUT_EXTENSION,
+    GRPSTATS_INTEGER_ALPHA_EXTENSION, GRPSTATS_INTEGER_DATA_EXTENSION,
+    GRPSTATS_INTEGER_SELECTOR_EXTENSION, GRPSTATS_RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericScalar};
@@ -940,6 +938,10 @@ fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> B
 #[cfg(test)]
 mod integer_compatibility_tests {
     use super::*;
+    use runmat_builtins::{
+        GROUPSUMMARY_EXTENSIONS, GROUPSUMMARY_INTEGER_CAPABILITIES, GRPSTATS_EXTENSIONS,
+        GRPSTATS_INTEGER_CAPABILITIES,
+    };
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]

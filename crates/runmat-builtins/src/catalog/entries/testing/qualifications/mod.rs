@@ -189,7 +189,16 @@ const fn entry(
             semantic_kind: BuiltinSemanticKind::General,
             workspace_effect: None,
             environment_effect: None,
-            effects: &[EffectKind::EnvironmentWrite, EffectKind::MayThrow],
+            effects: match async_behavior {
+                BuiltinAsyncBehavior::NeverSuspends => {
+                    &[EffectKind::EnvironmentWrite, EffectKind::MayThrow]
+                }
+                BuiltinAsyncBehavior::MaySuspend | BuiltinAsyncBehavior::RequiresAsyncRuntime => &[
+                    EffectKind::EnvironmentWrite,
+                    EffectKind::MaySuspend,
+                    EffectKind::MayThrow,
+                ],
+            },
             capabilities: &[],
         },
         placement: PLACEMENT,
