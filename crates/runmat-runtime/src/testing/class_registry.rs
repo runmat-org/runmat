@@ -65,14 +65,18 @@ pub fn ensure_testing_classes() {
             &["DiagnosticText"],
         );
         register_plain_class("matlab.unittest.constraints.Constraint", None, &[]);
+        register_plain_class(
+            runmat_types::standard::UNIT_TEST_IS_EQUAL_TO.display_name(),
+            Some(runmat_types::standard::UNIT_TEST_CONSTRAINT.display_name()),
+            &["Expected"],
+        );
         for class_name in [
-            "matlab.unittest.constraints.IsEqualTo",
-            "matlab.unittest.constraints.IsTrue",
-            "matlab.unittest.constraints.IsFalse",
+            runmat_types::standard::UNIT_TEST_IS_TRUE,
+            runmat_types::standard::UNIT_TEST_IS_FALSE,
         ] {
             register_plain_class(
-                class_name,
-                Some("matlab.unittest.constraints.Constraint"),
+                class_name.display_name(),
+                Some(runmat_types::standard::UNIT_TEST_CONSTRAINT.display_name()),
                 &[],
             );
         }

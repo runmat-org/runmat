@@ -138,7 +138,7 @@ pub fn qualify_that(
     {
         constraint
             .properties
-            .get("__runmat_expected")
+            .get("Expected")
             .is_some_and(|expected| values_equal(&actual, expected))
     } else if constraint
         .class_name
@@ -417,6 +417,59 @@ mod tests {
             error.identifier.as_deref(),
             Some("RunMat:Test:AssertionFailed")
         );
+        assert_eq!(guard.handle().commands().len(), 1);
+    }
+
+    #[test]
+    fn equality_constraint_reads_its_public_expected_property() {
+        let mut constraint = ObjectInstance::new(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO);
+        constraint
+            .properties
+            .insert("Expected".into(), Value::Num(42.0));
+        let outcome = qualify_that(
+            "verifyThat",
+            QualificationKind::VerificationFailed,
+            crate::testing::test_case_object("test", false),
+            Value::Num(42.0),
+            Value::Object(constraint),
+            vec![],
+        )
+        .unwrap();
+        assert!(matches!(outcome, Value::Tensor(tensor) if tensor.is_empty()));
+    }
+
+    #[test]
+    fn boolean_constraints_require_logical_scalars() {
+        for (class, actual) in [
+            (runmat_types::standard::UNIT_TEST_IS_TRUE, Value::Bool(true)),
+            (
+                runmat_types::standard::UNIT_TEST_IS_FALSE,
+                Value::Bool(false),
+            ),
+        ] {
+            let outcome = qualify_that(
+                "verifyThat",
+                QualificationKind::VerificationFailed,
+                crate::testing::test_case_object("test", false),
+                actual,
+                Value::Object(ObjectInstance::new(class)),
+                vec![],
+            )
+            .unwrap();
+            assert!(matches!(outcome, Value::Tensor(tensor) if tensor.is_empty()));
+        }
+        let guard = context();
+        qualify_that(
+            "verifyThat",
+            QualificationKind::VerificationFailed,
+            crate::testing::test_case_object("test", false),
+            Value::Num(1.0),
+            Value::Object(ObjectInstance::new(
+                runmat_types::standard::UNIT_TEST_IS_TRUE,
+            )),
+            vec![],
+        )
+        .unwrap();
         assert_eq!(guard.handle().commands().len(), 1);
     }
 }

@@ -4,11 +4,16 @@ use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.constraints.IsEqualTo",
-    category = "testing/constraints",
-    summary = "Construct an equality constraint.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::constraints"
 )]
-fn is_equal_to(expected: Value) -> BuiltinResult<Value> {
+fn is_equal_to(args: Vec<Value>) -> BuiltinResult<Value> {
+    let [expected] = <[Value; 1]>::try_from(args).map_err(|_| {
+        crate::build_runtime_error("IsEqualTo: expected exactly one input")
+            .with_identifier("RunMat:Testing:InvalidConstraint")
+            .with_builtin("IsEqualTo")
+            .build()
+    })?;
     constraint(
         runmat_types::standard::UNIT_TEST_IS_EQUAL_TO,
         Some(expected),
@@ -17,8 +22,7 @@ fn is_equal_to(expected: Value) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.constraints.IsTrue",
-    category = "testing/constraints",
-    summary = "Construct a logical-true constraint.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::constraints"
 )]
 fn is_true(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -28,8 +32,7 @@ fn is_true(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.constraints.IsFalse",
-    category = "testing/constraints",
-    summary = "Construct a logical-false constraint.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::constraints"
 )]
 fn is_false(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -44,11 +47,44 @@ fn constraint(
     crate::testing::ensure_testing_classes();
     let mut object = ObjectInstance::new(class_name);
     if let Some(expected) = expected {
-        object
-            .properties
-            .insert("__runmat_expected".into(), expected);
+        object.properties.insert("Expected".into(), expected);
     }
     Ok(Value::Object(object))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expected_value_is_retained_as_the_public_property() {
+        let expected = Value::Int(runmat_value::IntValue::U64(u64::MAX));
+        let Value::Object(object) = is_equal_to(vec![expected.clone()]).unwrap() else {
+            panic!("IsEqualTo must construct an object");
+        };
+        assert!(object
+            .class_name
+            .is(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO));
+        assert_eq!(object.properties.get("Expected"), Some(&expected));
+        assert_eq!(object.properties.len(), 1);
+    }
+
+    #[test]
+    fn boolean_constraints_reject_inputs_before_constructing_an_object() {
+        for constructor in [is_true, is_false] {
+            assert!(constructor(vec![]).is_ok());
+            let error = constructor(vec![Value::Bool(true)]).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidConstraint"));
+        }
+    }
+
+    #[test]
+    fn equality_constraint_rejects_missing_and_extra_inputs() {
+        for args in [vec![], vec![Value::Bool(true), Value::Bool(false)]] {
+            let error = is_equal_to(args).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidConstraint"));
+        }
+    }
 }
 
 fn no_args(name: &'static str, args: Vec<Value>) -> BuiltinResult<()> {
