@@ -47,18 +47,24 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             i += 1;
         }
     }
-    let shape = if sizes.is_empty() {
-        prototype.and_then(|p| p.shape.known_dims()).map_or_else(
-            || ShapeFact::from(vec![Some(0), Some(0)]),
-            |dims| {
+    let no_explicit_dimensions = sizes.is_empty()
+        || match sizes.as_slice() {
+            [Some(LiteralValue::Empty)] => true,
+            [Some(LiteralValue::Vector(values))] => values.is_empty(),
+            _ => false,
+        };
+    let shape = if no_explicit_dimensions {
+        match prototype {
+            None => ShapeFact::from(vec![Some(0), Some(0)]),
+            Some(p) => p.shape.known_dims().map_or(ShapeFact::Unknown, |dims| {
                 let mut dims = dims.to_vec();
                 if dims.len() < 2 {
                     dims.resize(2, Some(0));
                 }
                 dims[0] = Some(0);
                 ShapeFact::from(dims)
-            },
-        )
+            }),
+        }
     } else {
         inferred_empty_shape(&sizes)
     };
@@ -175,6 +181,35 @@ mod tests {
         assert_eq!(
             call(vec![vector], vec![]).outputs[0].shape,
             ShapeFact::Unknown
+        );
+    }
+    #[test]
+    fn like_prototype_does_not_invent_unknown_shape() {
+        let keyword = ValueFact::scalar(ValueKindFact::String);
+        let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
+        assert_eq!(
+            call(
+                vec![keyword.clone(), unknown],
+                vec![LiteralValue::String("like".into()), LiteralValue::Unknown],
+            )
+            .outputs[0]
+                .shape,
+            ShapeFact::Unknown
+        );
+        let empty_size = numeric(ShapeFact::from(vec![Some(0), Some(0)]));
+        let prototype = numeric(ShapeFact::from(vec![Some(3), Some(2)]));
+        assert_eq!(
+            call(
+                vec![empty_size, keyword, prototype],
+                vec![
+                    LiteralValue::Vector(vec![]),
+                    LiteralValue::String("like".into()),
+                    LiteralValue::Unknown,
+                ],
+            )
+            .outputs[0]
+                .shape,
+            ShapeFact::from(vec![Some(0), Some(2)])
         );
     }
 }
