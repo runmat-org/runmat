@@ -8,7 +8,12 @@ use runmat_builtins::{
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
+    BuiltinSignatureDescriptor, ResolveContext, Type, APPEND_DESCRIPTOR, APPEND_INTEGER_AUDIT,
+    DEBLANK_DESCRIPTOR, DEBLANK_INTEGER_AUDIT, ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
+    ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION, ERASE_PUNCTUATION_DESCRIPTOR,
+    ERASE_PUNCTUATION_ERROR_INVALID_INPUT, ERASE_PUNCTUATION_ERROR_INVALID_OPTION,
+    ERASE_URLS_BROAD_CELL_EXTENSION, ERASE_URLS_CHAR_MATRIX_EXTENSION, ERASE_URLS_DESCRIPTOR,
+    ERASE_URLS_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntValue, NumericScalar, StringArray, Value};
@@ -31,22 +36,6 @@ const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Output value.",
-}];
-
-const OUT_NEW_STR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newStr",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text with matching content erased.",
-}];
-
-const OUT_NEW_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated tokenized documents.",
 }];
 
 const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -100,14 +89,6 @@ const IN_TEXT_BOUNDARY: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const REST: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "arg",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Values to append.",
-}];
-
 const NO_ERRORS: [BuiltinErrorDescriptor; 0] = [];
 
 macro_rules! descriptor {
@@ -125,24 +106,11 @@ macro_rules! descriptor {
     };
 }
 
-descriptor!(APPEND_DESCRIPTOR, "s = append(arg1, ...)", &REST, &OUT_ANY);
-
-pub const APPEND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "append combines string arrays, character vectors, or cell arrays of character vectors. Numeric and integer values are not text inputs; all eight integer classes and resident numeric handles reject without implicit string conversion or provider gather.",
-};
 descriptor!(REVERSE_DESCRIPTOR, "s = reverse(text)", &IN_TEXT, &OUT_ANY);
 pub const REVERSE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
     notes: "reverse accepts string arrays, character vectors, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
-};
-descriptor!(DEBLANK_DESCRIPTOR, "s = deblank(text)", &IN_TEXT, &OUT_ANY);
-pub const DEBLANK_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "deblank accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider gather.",
 };
 descriptor!(
     STRJUST_DESCRIPTOR,
@@ -530,116 +498,6 @@ pub const REPLACE_BETWEEN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescrip
         notes: "Integer data is outside the public text roles and is never converted to decimal text.",
     },
 ];
-const ERASE_URLS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "newStr = eraseURLs(str)",
-        inputs: &IN_TEXT,
-        outputs: &OUT_NEW_STR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newDocuments = eraseURLs(documents)",
-        inputs: &IN_TEXT,
-        outputs: &OUT_NEW_DOCUMENTS,
-    },
-];
-const ERASE_PUNCTUATION_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "newStr = erasePunctuation(str)",
-        inputs: &IN_TEXT,
-        outputs: &OUT_NEW_STR,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newDocuments = erasePunctuation(documents)",
-        inputs: &IN_TEXT,
-        outputs: &OUT_NEW_DOCUMENTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newDocuments = erasePunctuation(documents, 'TokenTypes', types)",
-        inputs: &IN_TEXT_REST,
-        outputs: &OUT_NEW_DOCUMENTS,
-    },
-];
-const ERASE_URLS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_URLS.INVALID_INPUT",
-    identifier: Some("RunMat:eraseURLs:InvalidInput"),
-    when: "Input is not documented host text or a tokenizedDocument object.",
-    message: "eraseURLs: input must be text or tokenizedDocument",
-};
-const ERASE_PUNCTUATION_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_PUNCTUATION.INVALID_INPUT",
-    identifier: Some("RunMat:erasePunctuation:InvalidInput"),
-    when: "Input is not documented host text or a tokenizedDocument object.",
-    message: "erasePunctuation: input must be text or tokenizedDocument",
-};
-const ERASE_PUNCTUATION_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_PUNCTUATION.INVALID_OPTION",
-    identifier: Some("RunMat:erasePunctuation:InvalidOption"),
-    when: "TokenTypes is malformed, empty, or used with non-document text.",
-    message: "erasePunctuation: invalid TokenTypes option",
-};
-const ERASE_URLS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERASE_URLS_ERROR_INVALID_INPUT];
-const ERASE_PUNCTUATION_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    ERASE_PUNCTUATION_ERROR_INVALID_INPUT,
-    ERASE_PUNCTUATION_ERROR_INVALID_OPTION,
-];
-pub const ERASE_URLS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ERASE_URLS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERASE_URLS_ERRORS,
-};
-pub const ERASE_PUNCTUATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ERASE_PUNCTUATION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERASE_PUNCTUATION_ERRORS,
-};
-pub const ERASE_URLS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "eraseURLs accepts host text or tokenizedDocument input only. All eight integer classes, logical values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
-    };
-pub const ERASE_PUNCTUATION_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "erasePunctuation accepts host text, tokenizedDocument, and textual TokenTypes values only. All eight integer classes, logical values, and resident numeric handles reject without numeric-to-text conversion or provider access.",
-    };
-const ERASE_URLS_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "erase-urls-char-matrix-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eraseURLs with a multirow character matrix is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EraseURLsCharMatrixExtension"),
-};
-const ERASE_URLS_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "erase-urls-broad-cell-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eraseURLs with nested cells or non-character cell elements is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EraseURLsBroadCellExtension"),
-};
-const ERASE_URLS_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    ERASE_URLS_CHAR_MATRIX_EXTENSION,
-    ERASE_URLS_BROAD_CELL_EXTENSION,
-];
-const ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "erase-punctuation-char-matrix-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "erasePunctuation with a multirow character matrix is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ErasePunctuationCharMatrixExtension"),
-    };
-const ERASE_PUNCTUATION_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "erase-punctuation-broad-cell-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "erasePunctuation with nested cells or non-character cell elements is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:ErasePunctuationBroadCellExtension"),
-    };
-const ERASE_PUNCTUATION_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    ERASE_PUNCTUATION_CHAR_MATRIX_EXTENSION,
-    ERASE_PUNCTUATION_BROAD_CELL_EXTENSION,
-];
 descriptor!(
     MATCHES_DESCRIPTOR,
     "tf = matches(text, pattern)",
@@ -698,13 +556,7 @@ fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::Runtim
 
 #[runtime_builtin(
     name = "append",
-    category = "strings/transform",
-    summary = "Append text inputs elementwise.",
-    keywords = "append,string,char,text,concatenate",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::APPEND_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::compat::APPEND_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn append_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -863,13 +715,7 @@ async fn reverse_builtin(text: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "deblank",
-    category = "strings/transform",
-    summary = "Remove trailing whitespace from text.",
-    keywords = "deblank,trailing whitespace,string,char,text",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::DEBLANK_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::compat::DEBLANK_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn deblank_builtin(text: Value) -> BuiltinResult<Value> {
@@ -1118,14 +964,7 @@ async fn replace_between_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult
 
 #[runtime_builtin(
     name = "eraseURLs",
-    category = "strings/transform",
-    summary = "Remove URL substrings from text.",
-    keywords = "eraseURLs,url,text analytics,string",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::ERASE_URLS_DESCRIPTOR),
-    extensions(ERASE_URLS_EXTENSIONS),
-    integer_audit(crate::builtins::strings::transform::compat::ERASE_URLS_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
@@ -1152,14 +991,7 @@ async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "erasePunctuation",
-    category = "strings/transform",
-    summary = "Remove Unicode punctuation and symbol characters from text.",
-    keywords = "erasePunctuation,punctuation,symbol,text analytics,string",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::transform::compat::ERASE_PUNCTUATION_DESCRIPTOR),
-    extensions(ERASE_PUNCTUATION_EXTENSIONS),
-    integer_audit(crate::builtins::strings::transform::compat::ERASE_PUNCTUATION_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
 async fn erase_punctuation_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
