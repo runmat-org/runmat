@@ -197,8 +197,33 @@ impl TfModel {
     }
 
     pub async fn from_value_async(value: Value, builtin: &'static str) -> BuiltinResult<Self> {
-        let gathered = dispatcher::gather_if_needed_async(&value).await?;
-        Self::from_value(gathered, builtin)
+        let Value::Object(mut object) = value else {
+            return Self::from_value(value, builtin);
+        };
+        if !object.is_class(TF_CLASS) {
+            return Self::from_value(Value::Object(object), builtin);
+        }
+
+        // Check the complete required shape of the model before provider access.
+        // Other object properties are not part of a transfer function's numeric
+        // representation and must not trigger downloads or provider failures.
+        const REQUIRED: [&str; 5] = [
+            "Numerator",
+            "Denominator",
+            "Ts",
+            "InputDelay",
+            "OutputDelay",
+        ];
+        for name in REQUIRED.iter().copied() {
+            property(&object, name, builtin)?;
+        }
+        for name in REQUIRED.iter().copied().chain(["Variable"]) {
+            if let Some(value) = object.properties.get(name) {
+                let gathered = dispatcher::gather_if_needed_async(value).await?;
+                object.properties.insert(name.to_string(), gathered);
+            }
+        }
+        Self::from_value(Value::Object(object), builtin)
     }
 
     pub fn from_value(value: Value, builtin: &'static str) -> BuiltinResult<Self> {
@@ -222,6 +247,8 @@ impl TfModel {
 
         let numerator = coefficients_from_property(&object, "Numerator", builtin)?;
         let denominator = coefficients_from_property(&object, "Denominator", builtin)?;
+        validate_coefficients("numerator", &numerator, builtin)?;
+        validate_coefficients("denominator", &denominator, builtin)?;
         let sample_time = scalar_property(&object, "Ts", builtin)?;
         let input_delay = scalar_property(&object, "InputDelay", builtin)?;
         let output_delay = scalar_property(&object, "OutputDelay", builtin)?;

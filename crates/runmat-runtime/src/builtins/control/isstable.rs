@@ -87,6 +87,20 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage};
     use runmat_value::{ObjectInstance, Tensor};
 
+    fn raw_tf(numerator: Value, denominator: Value) -> ObjectInstance {
+        let mut object = ObjectInstance::new(TF_CLASS.to_string());
+        object.properties.insert("Numerator".into(), numerator);
+        object.properties.insert("Denominator".into(), denominator);
+        object.properties.insert("Ts".into(), Value::Num(0.0));
+        object
+            .properties
+            .insert("InputDelay".into(), Value::Num(0.0));
+        object
+            .properties
+            .insert("OutputDelay".into(), Value::Num(0.0));
+        object
+    }
+
     #[test]
     fn stable_continuous_model_returns_true() {
         let sys = block_on(crate::call_builtin_async(
@@ -227,7 +241,7 @@ mod tests {
             let mut unsupported = ObjectInstance::new("ss");
             unsupported
                 .properties
-                .insert("Denominator".into(), Value::GpuTensor(resident));
+                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
             provider.reset_telemetry();
             let error = block_on(isstable_builtin(Value::Object(unsupported)))
                 .expect_err("unsupported object class");
@@ -236,6 +250,115 @@ mod tests {
                 Some("RunMat:isstable:UnsupportedModel")
             );
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            // Exercise the shared parser directly: other callers need the
+            // same class-before-gather behavior as isstable's entrypoint.
+            let mut unsupported = ObjectInstance::new("ss");
+            unsupported
+                .properties
+                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+            provider.reset_telemetry();
+            let error = block_on(TfModel::from_value_async(
+                Value::Object(unsupported),
+                "isstable",
+            ))
+            .expect_err("shared parser rejects unsupported class");
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:isstable:UnsupportedModel")
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
+    }
+
+    #[test]
+    fn unrelated_resident_property_is_not_gathered() {
+        let tensor = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            let mut model = raw_tf(Value::Num(1.0), Value::Num(1.0));
+            model
+                .properties
+                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            assert_eq!(
+                block_on(isstable_builtin(Value::Object(model))).unwrap(),
+                Value::Bool(true)
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn missing_model_property_rejects_before_required_resident_gather() {
+        let tensor = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            let mut model = raw_tf(Value::Num(1.0), Value::GpuTensor(resident));
+            model.properties.remove("Ts");
+            provider.reset_telemetry();
+            let error = block_on(isstable_builtin(Value::Object(model)))
+                .expect_err("missing required model property");
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:isstable:InvalidModel")
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn forged_nonfinite_coefficients_are_invalid_models() {
+        for (numerator, denominator) in [
+            (Value::Num(f64::NAN), Value::Num(1.0)),
+            (Value::Num(1.0), Value::Num(f64::NAN)),
+            (Value::Num(1.0), Value::Num(f64::INFINITY)),
+            (Value::Num(1.0), Value::Num(f64::NEG_INFINITY)),
+        ] {
+            let error = block_on(isstable_builtin(Value::Object(raw_tf(
+                numerator,
+                denominator,
+            ))))
+            .expect_err("nonfinite coefficient is not a valid tf model");
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:isstable:InvalidModel")
+            );
+        }
+    }
+
+    #[test]
+    fn shared_parser_errors_remain_declared_for_malformed_models() {
+        let mut bad_scalar = raw_tf(Value::Num(1.0), Value::Num(1.0));
+        bad_scalar
+            .properties
+            .insert("Ts".into(), Value::String("invalid".into()));
+        let error = block_on(isstable_builtin(Value::Object(bad_scalar))).unwrap_err();
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some("RunMat:isstable:InvalidArgument")
+        );
+
+        let mut bad_variable = raw_tf(Value::Num(1.0), Value::Num(1.0));
+        bad_variable
+            .properties
+            .insert("Variable".into(), Value::String("invalid".into()));
+        let error = block_on(isstable_builtin(Value::Object(bad_variable))).unwrap_err();
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some("RunMat:tf:InvalidVariable")
+        );
+
+        let mut bad_pairing = raw_tf(Value::Num(1.0), Value::Num(1.0));
+        bad_pairing
+            .properties
+            .insert("Variable".into(), Value::String("z".into()));
+        let error = block_on(isstable_builtin(Value::Object(bad_pairing))).unwrap_err();
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some("RunMat:tf:InvalidSampleTime")
+        );
     }
 }

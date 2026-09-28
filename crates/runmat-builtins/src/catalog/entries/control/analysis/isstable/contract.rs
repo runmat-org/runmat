@@ -32,9 +32,27 @@ pub const ISSTABLE_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErro
     when: "Model form is unsupported.",
     message: "isstable: unsupported model",
 };
-const ERRORS: [BuiltinErrorDescriptor; 3] = [
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
     ISSTABLE_ERROR_INVALID_MODEL,
     ISSTABLE_ERROR_UNSUPPORTED_MODEL,
+    BuiltinErrorDescriptor {
+        code: "RM.ISSTABLE.INVALID_ARGUMENT",
+        identifier: Some("RunMat:isstable:InvalidArgument"),
+        when: "A transfer-function scalar property or Variable property has the wrong value type.",
+        message: "isstable: invalid transfer-function property",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.ISSTABLE.INVALID_VARIABLE",
+        identifier: Some("RunMat:tf:InvalidVariable"),
+        when: "The shared transfer-function parser rejects a Variable value or its time-domain pairing.",
+        message: "tf: invalid Variable option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.ISSTABLE.INVALID_SAMPLE_TIME",
+        identifier: Some("RunMat:tf:InvalidSampleTime"),
+        when: "The shared transfer-function parser rejects the Variable and sample-time pairing.",
+        message: "isstable: invalid transfer-function sample time",
+    },
     BuiltinErrorDescriptor {
         code: "RM.ISSTABLE.INTERNAL",
         identifier: Some("RunMat:isstable:Internal"),
