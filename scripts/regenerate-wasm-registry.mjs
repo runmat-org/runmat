@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -148,10 +148,13 @@ try {
     }
   }
 
-  writeFileSync(tmpRegistry, contents);
-  renameSync(tmpRegistry, registryPath);
+  const unchanged = existsSync(registryPath) && readFileSync(registryPath, "utf8") === contents;
+  if (!unchanged) {
+    writeFileSync(tmpRegistry, contents);
+    renameSync(tmpRegistry, registryPath);
+  }
   console.log(
-    `==> wrote ${registryPath} (${entryCount} registry entries, ${builtinCount} builtins)`,
+    `==> ${unchanged ? "unchanged" : "wrote"} ${registryPath} (${entryCount} registry entries, ${builtinCount} builtins)`,
   );
 } catch (error) {
   if (error instanceof GenerationFailure) {
