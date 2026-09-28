@@ -90,10 +90,6 @@ pub fn rlocus_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
-pub fn isstable_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
 pub fn ss_type(args: &[Type], context: &ResolveContext) -> Type {
     let rest = match args {
         [a, b, c, d, rest @ ..] if valid_state_space_matrix_types(a, b, c, d) => rest,

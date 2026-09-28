@@ -1,10 +1,6 @@
 //! Stability test for SISO transfer-function models.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+use runmat_builtins::{ISSTABLE_ERROR_INVALID_MODEL, ISSTABLE_ERROR_UNSUPPORTED_MODEL};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -12,60 +8,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::control::tf_model::TfModel;
-use crate::builtins::control::type_resolvers::isstable_type;
+use crate::builtins::control::tf_model::{TfModel, TF_CLASS};
 use crate::BuiltinResult;
-
-const ISSTABLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when all continuous poles are in the open left-half plane or all discrete poles are inside the unit circle.",
-}];
-const ISSTABLE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf model.",
-}];
-const ISSTABLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isstable(sys)",
-    inputs: &ISSTABLE_INPUTS,
-    outputs: &ISSTABLE_OUTPUT,
-}];
-const ISSTABLE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BuiltinErrorDescriptor {
-        code: "RM.ISSTABLE.INVALID_MODEL",
-        identifier: Some("RunMat:isstable:InvalidModel"),
-        when: "Input system is not a valid SISO tf object.",
-        message: "isstable: invalid model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ISSTABLE.UNSUPPORTED_MODEL",
-        identifier: Some("RunMat:isstable:UnsupportedModel"),
-        when: "Model form is unsupported.",
-        message: "isstable: unsupported model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ISSTABLE.INTERNAL",
-        identifier: Some("RunMat:isstable:Internal"),
-        when: "Pole calculation failed.",
-        message: "isstable: internal error",
-    },
-];
-pub const ISSTABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISSTABLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISSTABLE_ERRORS,
-};
-pub const ISSTABLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "isstable requires a dynamic-system model; fundamental integer host or resident values are invalid-domain inputs and reject before payload or provider access.",
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::isstable")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -99,43 +43,52 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "control",
     summary = "Test stability of SISO transfer-function models.",
     keywords = "isstable,control system,stability,poles,tf",
-    type_resolver(isstable_type),
-    descriptor(crate::builtins::control::isstable::ISSTABLE_DESCRIPTOR),
-    integer_audit(crate::builtins::control::isstable::ISSTABLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::isstable"
 )]
 async fn isstable_builtin(sys: Value) -> BuiltinResult<Value> {
-    if value_has_integer_storage(&sys) {
-        return Err(crate::build_runtime_error(
-            "isstable: input must be a dynamic-system model, not an integer value",
-        )
-        .with_builtin("isstable")
-        .with_identifier(
-            ISSTABLE_ERRORS[0]
-                .identifier
-                .expect("isstable invalid-model descriptor identifier"),
-        )
-        .build()
-        .into());
+    // Reject invalid top-level model classes before recursively gathering any
+    // provider-resident values from an object's properties.
+    match &sys {
+        Value::Object(object) if object.is_class(TF_CLASS) => {}
+        Value::Object(object) => {
+            return Err(crate::build_runtime_error(format!(
+                "isstable: unsupported model class '{}'; only SISO tf objects are supported",
+                object.class_name
+            ))
+            .with_builtin("isstable")
+            .with_identifier(
+                ISSTABLE_ERROR_UNSUPPORTED_MODEL
+                    .identifier
+                    .expect("isstable unsupported-model descriptor identifier"),
+            )
+            .build()
+            .into());
+        }
+        _ => {
+            return Err(
+                crate::build_runtime_error("isstable: input must be a SISO tf object")
+                    .with_builtin("isstable")
+                    .with_identifier(
+                        ISSTABLE_ERROR_INVALID_MODEL
+                            .identifier
+                            .expect("isstable invalid-model descriptor identifier"),
+                    )
+                    .build()
+                    .into(),
+            );
+        }
     }
     let model = TfModel::from_value_async(sys, "isstable").await?;
     Ok(Value::Bool(model.is_stable()?))
-}
-
-fn value_has_integer_storage(value: &Value) -> bool {
-    matches!(value, Value::Int(_))
-        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
-        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
-        || matches!(value, Value::SparseTensor(tensor) if tensor.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::Tensor;
     use runmat_value::{IntValue, IntegerStorage};
+    use runmat_value::{ObjectInstance, Tensor};
 
     #[test]
     fn stable_continuous_model_returns_true() {
@@ -151,6 +104,48 @@ mod tests {
             block_on(isstable_builtin(sys)).expect("isstable"),
             Value::Bool(true)
         );
+    }
+
+    #[test]
+    fn unstable_marginal_discrete_and_static_models_follow_pole_region() {
+        fn model(denominator: Vec<f64>, sample_time: Option<f64>) -> Value {
+            let mut arguments = vec![
+                Value::Num(1.0),
+                Value::Tensor(
+                    Tensor::new(denominator.clone(), vec![1, denominator.len()]).unwrap(),
+                ),
+            ];
+            if let Some(sample_time) = sample_time {
+                arguments.push(Value::Num(sample_time));
+            }
+            block_on(crate::call_builtin_async("tf", &arguments)).expect("tf")
+        }
+
+        for (sys, expected) in [
+            (model(vec![1.0, -1.0], None), false),
+            (model(vec![1.0, 0.0], None), false),
+            (model(vec![1.0, -0.5], Some(1.0)), true),
+            (model(vec![1.0, -1.0], Some(1.0)), false),
+            (model(vec![1.0], None), true),
+        ] {
+            assert_eq!(
+                block_on(isstable_builtin(sys)).unwrap(),
+                Value::Bool(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn near_boundary_pole_obeys_current_control_model_tolerance() {
+        let sys = block_on(crate::call_builtin_async(
+            "tf",
+            &[
+                Value::Num(1.0),
+                Value::Tensor(Tensor::new(vec![1.0, 1.0e-13], vec![1, 2]).unwrap()),
+            ],
+        ))
+        .expect("tf");
+        assert_eq!(block_on(isstable_builtin(sys)).unwrap(), Value::Bool(false));
     }
 
     #[test]
@@ -187,6 +182,63 @@ mod tests {
                 error.identifier.as_deref(),
                 Some("RunMat:isstable:InvalidModel")
             );
+        });
+    }
+
+    #[test]
+    fn resident_float_rejects_as_invalid_model_before_gather() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload float");
+            let error = block_on(isstable_builtin(Value::GpuTensor(handle)))
+                .expect_err("resident numeric input is not a system model");
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:isstable:InvalidModel")
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn nested_resident_coefficients_gather_only_for_valid_tf_model() {
+        let denominator = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &denominator)
+                    .expect("upload denominator");
+            let mut valid = ObjectInstance::new(TF_CLASS.to_string());
+            valid.properties.insert("Numerator".into(), Value::Num(1.0));
+            valid
+                .properties
+                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+            valid.properties.insert("Ts".into(), Value::Num(0.0));
+            valid
+                .properties
+                .insert("InputDelay".into(), Value::Num(0.0));
+            valid
+                .properties
+                .insert("OutputDelay".into(), Value::Num(0.0));
+            provider.reset_telemetry();
+            assert_eq!(
+                block_on(isstable_builtin(Value::Object(valid))).unwrap(),
+                Value::Bool(true)
+            );
+            assert!(provider.telemetry_snapshot().download_bytes > 0);
+
+            let mut unsupported = ObjectInstance::new("ss");
+            unsupported
+                .properties
+                .insert("Denominator".into(), Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            let error = block_on(isstable_builtin(Value::Object(unsupported)))
+                .expect_err("unsupported object class");
+            assert_eq!(
+                error.identifier.as_deref(),
+                Some("RunMat:isstable:UnsupportedModel")
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
     }
 }
