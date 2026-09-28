@@ -160,7 +160,7 @@ const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
     implementation: &[BuiltinDocumentationLink { label: "Shape scalar-query runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/introspection/shape_scalar_query.rs") }],
     verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Scalar, array, empty, text, container, table, and resident behavior", location: "crates/runmat-runtime/src/builtins/array/introspection/length/tests.rs" },
-        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "containers.Map entry-count semantics", location: "crates/runmat-runtime/src/builtins/containers/map/containers.map.rs::tests::length_delegates_to_map_count" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "containers.Map entry-count semantics", location: "crates/runmat-runtime/src/builtins/containers/map/tests/general.rs::length_delegates_to_map_count" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Validated distributed global-shape and exact-result behavior", location: "crates/runmat-runtime/src/builtins/array/introspection/shape_scalar_query.rs" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::WgpuTest, label: "Actual WGPU metadata-only length", location: "crates/runmat-runtime/src/builtins/array/introspection/length/tests.rs::wgpu_reads_shape_without_payload_transfer" },
     ],
