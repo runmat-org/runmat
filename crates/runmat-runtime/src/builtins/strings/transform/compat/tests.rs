@@ -1,9 +1,77 @@
 use super::*;
+use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::{
     BuiltinIntegerAuditKind, APPEND_INTEGER_AUDIT, ERASE_PUNCTUATION_DESCRIPTOR,
     ERASE_URLS_DESCRIPTOR,
 };
-use runmat_value::{CellArray, IntValue, IntegerStorage, StructValue, Tensor};
+use runmat_value::{CellArray, IntValue, IntegerStorage, ObjectInstance, StructValue, Tensor};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct CountingBoundaryProvider {
+    inner: runmat_accelerate::simple_provider::InProcessProvider,
+    downloads: AtomicUsize,
+}
+
+impl CountingBoundaryProvider {
+    fn new() -> Self {
+        Self {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            downloads: AtomicUsize::new(0),
+        }
+    }
+
+    fn downloads(&self) -> usize {
+        self.downloads.load(Ordering::SeqCst)
+    }
+}
+
+impl runmat_accelerate_api::AccelProvider for CountingBoundaryProvider {
+    fn device_info(&self) -> String {
+        self.inner.device_info()
+    }
+
+    fn device_id(&self) -> u32 {
+        self.inner.device_id()
+    }
+
+    fn upload(
+        &self,
+        host: &runmat_accelerate_api::HostTensorView,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        self.inner.upload(host)
+    }
+
+    fn download<'a>(
+        &'a self,
+        handle: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.inner.download(handle)
+    }
+
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.inner.download_numeric(handle)
+    }
+}
+
+fn counted_boundary_provider() -> &'static CountingBoundaryProvider {
+    Box::leak(Box::new(CountingBoundaryProvider::new()))
+}
+
+fn resident_position(provider: &CountingBoundaryProvider) -> Value {
+    Value::GpuTensor(
+        provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[2.0],
+                shape: &[1, 1],
+            })
+            .expect("resident position"),
+    )
+}
 
 fn block(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> BuiltinResult<Value> {
     futures::executor::block_on(value)
@@ -935,6 +1003,110 @@ fn malformed_text_precedes_resident_position_access() {
         insert_replacement.identifier(),
         Some("RunMat:insert:InvalidInput")
     );
+}
+
+#[test]
+fn malformed_resident_boundary_forms_never_reach_provider() {
+    let _provider_lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider = counted_boundary_provider();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = resident_position(provider);
+    let nested = Value::Cell(CellArray::new(vec![resident.clone()], 1, 1).unwrap());
+    let mut malformed_pattern = ObjectInstance::new(runmat_types::standard::PATTERN);
+    malformed_pattern
+        .properties
+        .insert("Regex".into(), Value::String("b".into()));
+    malformed_pattern
+        .properties
+        .insert("Unexpected".into(), resident.clone());
+
+    for extensions_enabled in [false, true] {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
+        for boundary in [nested.clone(), Value::Object(malformed_pattern.clone())] {
+            let before = block(extract_before_builtin(
+                Value::String("abc".into()),
+                vec![boundary.clone()],
+            ))
+            .expect_err("malformed extractBefore boundary");
+            assert_eq!(
+                before.identifier(),
+                Some("RunMat:extractBefore:InvalidBoundary")
+            );
+            let after = block(extract_after_builtin(
+                Value::String("abc".into()),
+                vec![boundary.clone()],
+            ))
+            .expect_err("malformed extractAfter boundary");
+            assert_eq!(
+                after.identifier(),
+                Some("RunMat:extractAfter:InvalidBoundary")
+            );
+            let insert_before = block(insert_before_builtin(
+                Value::String("abc".into()),
+                vec![boundary.clone(), Value::String("x".into())],
+            ))
+            .expect_err("malformed insertBefore boundary");
+            assert_eq!(insert_before.identifier(), INSERT_ERRORS[1].identifier);
+            let insert_after = block(insert_after_builtin(
+                Value::String("abc".into()),
+                vec![boundary, Value::String("x".into())],
+            ))
+            .expect_err("malformed insertAfter boundary");
+            assert_eq!(insert_after.identifier(), INSERT_ERRORS[1].identifier);
+            assert_eq!(provider.downloads(), 0);
+        }
+    }
+}
+
+#[test]
+fn top_level_resident_position_obeys_compatibility_gate_and_gathers_once() {
+    let _provider_lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider = counted_boundary_provider();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = resident_position(provider);
+
+    {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let before = block(extract_before_builtin(
+            Value::String("abc".into()),
+            vec![resident.clone()],
+        ))
+        .expect_err("strict extractBefore resident gate");
+        assert_eq!(
+            before.identifier(),
+            EXTRACT_BEFORE_RESIDENT_POSITION_EXTENSION.error_identifier
+        );
+        let inserted = block(insert_before_builtin(
+            Value::String("abc".into()),
+            vec![resident.clone(), Value::String("x".into())],
+        ))
+        .expect_err("strict insertBefore resident gate");
+        assert_eq!(
+            inserted.identifier(),
+            INSERT_BEFORE_RESIDENT_POSITION_EXTENSION.error_identifier
+        );
+        assert_eq!(provider.downloads(), 0);
+    }
+
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    assert_eq!(
+        block(extract_before_builtin(
+            Value::String("abc".into()),
+            vec![resident.clone()],
+        ))
+        .expect("resident extractBefore"),
+        Value::String("a".into())
+    );
+    assert_eq!(provider.downloads(), 1);
+    assert_eq!(
+        block(insert_before_builtin(
+            Value::String("abc".into()),
+            vec![resident, Value::String("x".into())],
+        ))
+        .expect("resident insertBefore"),
+        Value::String("axbc".into())
+    );
+    assert_eq!(provider.downloads(), 2);
 }
 
 #[test]

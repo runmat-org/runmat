@@ -748,7 +748,14 @@ pub(super) async fn boundary_transform(
             format!("{fn_name}: expected text input"),
         ));
     }
-    if contains_resident_value(&rest[0]) {
+    if !valid_raw_boundary_form(&rest[0]) {
+        return Err(extract_error(
+            fn_name,
+            ExtractErrorKind::InvalidBoundary,
+            format!("{fn_name}: expected a text, pattern, or numeric boundary"),
+        ));
+    }
+    if matches!(rest[0], Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(resident_extension, fn_name)?;
     }
     if is_multirow_char(&text) || is_multirow_char(&rest[0]) {
@@ -831,7 +838,14 @@ pub(super) async fn insert_transform(
             format!("{fn_name}: source and inserted values must be host text"),
         ));
     }
-    if crate::dispatcher::value_contains_gpu(&rest[0]) {
+    if !valid_raw_boundary_form(&rest[0]) {
+        return Err(insert_error(
+            fn_name,
+            1,
+            format!("{fn_name}: expected a text, pattern, or numeric boundary"),
+        ));
+    }
+    if matches!(rest[0], Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(resident_extension, fn_name)?;
     }
     if [&text, &rest[0], &rest[1]]
@@ -1104,12 +1118,28 @@ pub(super) fn locate_boundary(text: &str, boundary: &Boundary) -> BuiltinResult<
     }
 }
 
-fn contains_resident_value(value: &Value) -> bool {
+/// Validate the boundary's container before recursive gather. Only a top-level
+/// real numeric resident handle is a position control; a resident value inside
+/// a cell or pattern object cannot become a valid boundary after download.
+fn valid_raw_boundary_form(value: &Value) -> bool {
     match value {
-        Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_resident_value),
-        Value::Struct(value) => value.fields.values().any(contains_resident_value),
-        Value::StructArray(array) => array.any_value(contains_resident_value),
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) => true,
+        Value::GpuTensor(handle) => {
+            !runmat_accelerate_api::handle_is_logical(handle)
+                && handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
+        }
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
+        Value::Cell(cell) => cell.data.iter().all(|item| match item {
+            Value::String(_) => true,
+            Value::StringArray(array) => array.data.len() == 1,
+            Value::CharArray(array) => array.rows <= 1,
+            _ => false,
+        }),
+        Value::Object(object) => {
+            object.is_class(runmat_types::standard::PATTERN)
+                && matches!(object.properties.get("Regex"), Some(Value::String(_)))
+                && !crate::dispatcher::value_contains_gpu(value)
+        }
         _ => false,
     }
 }
