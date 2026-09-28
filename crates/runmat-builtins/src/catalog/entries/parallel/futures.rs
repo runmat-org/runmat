@@ -5,6 +5,7 @@ use super::documentation::{
 use super::*;
 
 mod inference;
+mod fetch_inference;
 
 const FUTURE_INPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
@@ -196,6 +197,52 @@ const LOWERING_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
     when: "The call bypasses the executor's semantic async lowering path.",
     message: "parallel call requires executor-aware lowering",
 }];
+const FETCH_OUTPUTS_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.FETCH_OUTPUTS_INVALID_FUTURE",
+        identifier: Some("InvalidFuture"),
+        when: "The first argument is not a parallel future scalar or array.",
+        message: "fetchOutputs expects a parallel future scalar or array",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.FETCH_OUTPUTS_OUTPUT_COUNT",
+        identifier: Some("OutputCountMismatch"),
+        when: "A future provides fewer outputs than the caller requested.",
+        message: "each future must provide at least the requested number of outputs",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.FETCH_OUTPUTS_OPTION",
+        identifier: Some("InvalidOption"),
+        when: "A name-value option is unknown or its value is invalid.",
+        message: "fetchOutputs option is invalid",
+    },
+];
+const FETCH_NEXT_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.FETCH_NEXT_INVALID_FUTURE",
+        identifier: Some("InvalidFutureArray"),
+        when: "The first argument is not a parallel future scalar or array.",
+        message: "fetchNext expects a parallel.FevalFuture scalar or array",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.FETCH_NEXT_EXHAUSTED",
+        identifier: Some("NoUnreadFutures"),
+        when: "The future array has no unread results.",
+        message: "fetchNext found no unread futures",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.FETCH_NEXT_OUTPUT_COUNT",
+        identifier: Some("OutputCountMismatch"),
+        when: "The caller's requested output count does not match the selected future.",
+        message: "fetchNext output count must match the selected future",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.FETCH_NEXT_TIMEOUT",
+        identifier: Some("InvalidTimeout"),
+        when: "The timeout is not a finite nonnegative real scalar.",
+        message: "fetchNext timeout must be a finite nonnegative real scalar",
+    },
+];
 pub const PARFEVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PARFEVAL_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -212,13 +259,13 @@ pub const FETCH_OUTPUTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FETCH_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOWERING_ERRORS,
+    errors: &FETCH_OUTPUTS_ERRORS,
 };
 pub const FETCH_NEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FETCH_NEXT_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &LOWERING_ERRORS,
+    errors: &FETCH_NEXT_ERRORS,
 };
 parallel_entry!(
     PARFEVAL_CATALOG_ENTRY,
@@ -247,7 +294,9 @@ parallel_entry!(
 parallel_entry!(
     FETCH_OUTPUTS_CATALOG_ENTRY,
     "fetchOutputs",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::FetchOutputs),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(
+        fetch_inference::infer_outputs
+    )),
     FETCH_OUTPUTS_DOCUMENTATION,
     FETCH_OUTPUTS_DESCRIPTOR,
     BuiltinContractMaturity::Complete,
@@ -258,7 +307,9 @@ parallel_entry!(
 parallel_entry!(
     FETCH_NEXT_CATALOG_ENTRY,
     "fetchNext",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::FetchNext),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(
+        fetch_inference::infer_next
+    )),
     FETCH_NEXT_DOCUMENTATION,
     FETCH_NEXT_DESCRIPTOR,
     BuiltinContractMaturity::Complete,

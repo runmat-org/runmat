@@ -7,12 +7,6 @@ pub(in crate::catalog::inference) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
-        ParallelInferenceRule::FetchOutputs => {
-            super::super::parallel_semantics::infer_parallel_fetch(request, entry, false)
-        }
-        ParallelInferenceRule::FetchNext => {
-            super::super::parallel_semantics::infer_parallel_fetch(request, entry, true)
-        }
         ParallelInferenceRule::GetCurrentJob
         | ParallelInferenceRule::GetCurrentTask
         | ParallelInferenceRule::GetCurrentWorker => super::super::unavailable_rule(entry, request),
