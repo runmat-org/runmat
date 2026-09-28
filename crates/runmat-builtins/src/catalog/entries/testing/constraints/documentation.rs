@@ -85,7 +85,7 @@ pub(super) const IS_EQUAL_TO: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationSection {
             heading: "Current comparison limits",
-            paragraphs: &["MATLAB supports `IgnoringCase`, `IgnoringWhitespace`, `Using`, and `Within` options; these constructor forms are not implemented in RunMat and return `RunMat:Testing:InvalidConstraint`. RunMat's current `verifyThat`/`assertThat` equality path is a subset of MATLAB's comparator behavior: it does not invoke user-defined comparators or tolerance objects, and scalar numeric comparison can differ in class handling. Use `verifyEqual` for the separate qualification contract. The constraint is currently value-backed; no shared handle identity is promised."],
+            paragraphs: &["MATLAB supports `IgnoringCase`, `IgnoringWhitespace`, `Using`, and `Within` options; these constructor forms are not implemented in RunMat and return `RunMat:Testing:InvalidConstraint`. RunMat's current `verifyThat`/`assertThat` equality path compares real numeric values with their class, shape, and exact integer payload intact, including NaNs. It remains a subset of MATLAB's comparator behavior for other value kinds: it does not invoke user-defined comparators or tolerance objects. Use `verifyEqual` for the separate qualification contract. The constraint is currently value-backed; no shared handle identity is promised."],
         },
     ],
     examples: IS_EQUAL_TO_EXAMPLES,

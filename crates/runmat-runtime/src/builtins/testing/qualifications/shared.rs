@@ -139,7 +139,7 @@ pub fn qualify_that(
         constraint
             .properties
             .get("Expected")
-            .is_some_and(|expected| values_equal(&actual, expected))
+            .is_some_and(|expected| crate::testing::constraint_values_equal(&actual, expected))
     } else if constraint
         .class_name
         .is(runmat_types::standard::UNIT_TEST_IS_TRUE)
@@ -436,6 +436,31 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(outcome, Value::Tensor(tensor) if tensor.is_empty()));
+    }
+
+    #[test]
+    fn equality_qualification_records_wide_integer_and_class_mismatches() {
+        let guard = context();
+        for (actual, expected) in [
+            (
+                Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_992)),
+                Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+            ),
+            (Value::Num(1.0), Value::Int(runmat_value::IntValue::U64(1))),
+        ] {
+            let mut constraint = ObjectInstance::new(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO);
+            constraint.properties.insert("Expected".into(), expected);
+            qualify_that(
+                "verifyThat",
+                QualificationKind::VerificationFailed,
+                crate::testing::test_case_object("test", false),
+                actual,
+                Value::Object(constraint),
+                vec![],
+            )
+            .unwrap();
+        }
+        assert_eq!(guard.handle().commands().len(), 2);
     }
 
     #[test]
