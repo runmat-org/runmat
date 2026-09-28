@@ -9,7 +9,10 @@ use runmat_types::{
 enum Predicate {
     Equal,
     LogicalTrue,
+    LogicalFalse,
     Constraint,
+    Empty,
+    GreaterThan,
 }
 
 fn infer(
@@ -18,8 +21,8 @@ fn infer(
     predicate: Predicate,
 ) -> CallInference {
     let required = match predicate {
-        Predicate::LogicalTrue => 2,
-        Predicate::Equal | Predicate::Constraint => 3,
+        Predicate::LogicalTrue | Predicate::LogicalFalse | Predicate::Empty => 2,
+        Predicate::Equal | Predicate::Constraint | Predicate::GreaterThan => 3,
     };
     let mut diagnostics = Vec::new();
     if request.arguments.len() < required {
@@ -91,4 +94,30 @@ pub(super) fn assume_equal(request: &CallRequest, entry: &BuiltinCatalogEntry) -
 
 pub(super) fn assume_true(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer(request, entry, Predicate::LogicalTrue)
+}
+
+pub(super) fn fatal_assert_true(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
+    infer(request, entry, Predicate::LogicalTrue)
+}
+
+pub(super) fn verify_empty(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer(request, entry, Predicate::Empty)
+}
+
+pub(super) fn verify_equal(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer(request, entry, Predicate::Equal)
+}
+
+pub(super) fn verify_false(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer(request, entry, Predicate::LogicalFalse)
+}
+
+pub(super) fn verify_greater_than(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
+    infer(request, entry, Predicate::GreaterThan)
 }

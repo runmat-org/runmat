@@ -78,7 +78,9 @@ fn five_qualifications_return_host_empty_double_when_used_as_expressions() {
         assert!(
             matches!(&output.kind, ValueKindFact::Numeric(numeric) if numeric.class == NumericClass::Double)
         );
-        assert!(infer(&call(arguments.to_vec(), 0), entry).outputs.is_empty());
+        assert!(infer(&call(arguments.to_vec(), 0), entry)
+            .outputs
+            .is_empty());
     }
 }
 

@@ -4,9 +4,14 @@ use crate::*;
 use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequirement};
 
 mod documentation;
+mod fatal;
 mod inference;
+mod verification;
 #[cfg(test)]
 mod tests;
+
+pub use self::fatal::*;
+pub use self::verification::*;
 
 const RECEIVER: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "testCase",
@@ -167,6 +172,7 @@ const fn entry(
     docs: BuiltinDocumentation,
     descriptor: &'static BuiltinDescriptor,
     infer: fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+    async_behavior: BuiltinAsyncBehavior,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -178,7 +184,7 @@ const fn entry(
             maturity: BuiltinContractMaturity::Incomplete,
             inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(infer)),
             compatibility: BuiltinCompatibility::Matlab,
-            async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+            async_behavior,
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::General,
             workspace_effect: None,
@@ -201,30 +207,35 @@ pub const ASSERT_EQUAL_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     documentation::ASSERT_EQUAL,
     &ASSERT_EQUAL_DESCRIPTOR,
     inference::assert_equal,
+    BuiltinAsyncBehavior::NeverSuspends,
 );
 pub const ASSERT_THAT_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "matlab.unittest.TestCase.assertThat",
     documentation::ASSERT_THAT,
     &ASSERT_THAT_DESCRIPTOR,
     inference::assert_that,
+    BuiltinAsyncBehavior::NeverSuspends,
 );
 pub const ASSERT_TRUE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "matlab.unittest.TestCase.assertTrue",
     documentation::ASSERT_TRUE,
     &ASSERT_TRUE_DESCRIPTOR,
     inference::assert_true,
+    BuiltinAsyncBehavior::NeverSuspends,
 );
 pub const ASSUME_EQUAL_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "matlab.unittest.TestCase.assumeEqual",
     documentation::ASSUME_EQUAL,
     &ASSUME_EQUAL_DESCRIPTOR,
     inference::assume_equal,
+    BuiltinAsyncBehavior::NeverSuspends,
 );
 pub const ASSUME_TRUE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "matlab.unittest.TestCase.assumeTrue",
     documentation::ASSUME_TRUE,
     &ASSUME_TRUE_DESCRIPTOR,
     inference::assume_true,
+    BuiltinAsyncBehavior::NeverSuspends,
 );
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
@@ -233,4 +244,9 @@ pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &ASSERT_TRUE_CATALOG_ENTRY,
     &ASSUME_EQUAL_CATALOG_ENTRY,
     &ASSUME_TRUE_CATALOG_ENTRY,
+    &FATAL_ASSERT_TRUE_CATALOG_ENTRY,
+    &VERIFY_EMPTY_CATALOG_ENTRY,
+    &VERIFY_EQUAL_CATALOG_ENTRY,
+    &VERIFY_FALSE_CATALOG_ENTRY,
+    &VERIFY_GREATER_THAN_CATALOG_ENTRY,
 ];
