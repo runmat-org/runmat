@@ -1,59 +1,178 @@
 use super::capabilities::{BUILTIN_NAME, DEFAULT_DATE_FORMAT, MAX_BUSDAYS_OUTPUT_LEN};
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BusinessDayPeriod {
+    Daily,
+    Weekly,
+    Monthly,
+    Quarterly,
+    Semiannual,
+    Annual,
+}
+
+impl BusinessDayPeriod {
+    fn period_start(self, date: NaiveDate) -> BuiltinResult<NaiveDate> {
+        let (year, month, day) = match self {
+            Self::Daily => return Ok(date),
+            Self::Weekly => {
+                return date
+                    .checked_sub_signed(Duration::days(i64::from(
+                        (date.weekday().num_days_from_monday() + 2) % 7,
+                    )))
+                    .ok_or_else(|| datetime_error("busdays: date is outside supported range"));
+            }
+            Self::Monthly => (date.year(), date.month(), 1),
+            Self::Quarterly => (date.year(), ((date.month() - 1) / 3) * 3 + 1, 1),
+            Self::Semiannual => (date.year(), ((date.month() - 1) / 6) * 6 + 1, 1),
+            Self::Annual => (date.year(), 1, 1),
+        };
+        NaiveDate::from_ymd_opt(year, month, day)
+            .ok_or_else(|| datetime_error("busdays: date is outside supported range"))
+    }
+
+    fn period_end(self, date: NaiveDate) -> BuiltinResult<NaiveDate> {
+        let (year, month, day) = match self {
+            Self::Daily => return Ok(date),
+            Self::Weekly => {
+                let until_friday = (4 + 7 - date.weekday().num_days_from_monday()) % 7;
+                return date
+                    .checked_add_signed(Duration::days(i64::from(until_friday)))
+                    .ok_or_else(|| datetime_error("busdays: date is outside supported range"));
+            }
+            Self::Monthly => (
+                date.year(),
+                date.month(),
+                days_in_month(date.year(), date.month())?,
+            ),
+            Self::Quarterly => {
+                let month = ((date.month() - 1) / 3 + 1) * 3;
+                (date.year(), month, days_in_month(date.year(), month)?)
+            }
+            Self::Semiannual => {
+                let month = ((date.month() - 1) / 6 + 1) * 6;
+                (date.year(), month, days_in_month(date.year(), month)?)
+            }
+            Self::Annual => (date.year(), 12, 31),
+        };
+        NaiveDate::from_ymd_opt(year, month, day)
+            .ok_or_else(|| datetime_error("busdays: date is outside supported range"))
+    }
+
+    fn previous_period_start(self, date: NaiveDate) -> BuiltinResult<Option<NaiveDate>> {
+        Ok(self.period_start(date)?.pred_opt())
+    }
+}
+
+fn business_day_period(value: Option<&Value>, context: &str) -> BuiltinResult<BusinessDayPeriod> {
+    let Some(value) = value else {
+        return Ok(BusinessDayPeriod::Daily);
+    };
+    if matches!(
+        value,
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
+    ) {
+        return match scalar_text(value, "business-day frequency")?
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "daily" | "d" => Ok(BusinessDayPeriod::Daily),
+            "weekly" | "w" => Ok(BusinessDayPeriod::Weekly),
+            "monthly" | "m" => Ok(BusinessDayPeriod::Monthly),
+            "quarterly" | "q" => Ok(BusinessDayPeriod::Quarterly),
+            "semiannual" | "s" => Ok(BusinessDayPeriod::Semiannual),
+            "annual" | "a" => Ok(BusinessDayPeriod::Annual),
+            _ => Err(datetime_error(format!(
+                "{context}: unsupported business-day frequency"
+            ))),
+        };
+    }
+    let number = tensor_from_numeric(value.clone(), context)?;
+    if !tensor::is_scalar_tensor(&number) {
+        return Err(datetime_error(format!(
+            "{context}: frequency must be scalar"
+        )));
+    }
+    match tensor::tensor_value_f64(&number, 0) {
+        1.0 => Ok(BusinessDayPeriod::Daily),
+        2.0 => Ok(BusinessDayPeriod::Weekly),
+        3.0 => Ok(BusinessDayPeriod::Monthly),
+        4.0 => Ok(BusinessDayPeriod::Quarterly),
+        5.0 => Ok(BusinessDayPeriod::Semiannual),
+        6.0 => Ok(BusinessDayPeriod::Annual),
+        _ => Err(datetime_error(format!(
+            "{context}: unsupported business-day frequency"
+        ))),
+    }
+}
+
 #[runmat_macros::runtime_builtin(
     name = "isbusday",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return true where date values are business days.",
-    keywords = "isbusday,business day,datetime,financial"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn isbusday_builtin(
     value: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if rest.len() > 2 {
+        return Err(datetime_error(
+            "isbusday: expected a date, optional holidays, and optional weekend mask",
+        ));
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| datetime_error(format!("isbusday: {}", err.message())))?;
     let rest = gather_args(&rest).await?;
-    if rest.len() > 1 {
-        return Err(datetime_error(
-            "isbusday: expected at most one holiday list",
-        ));
-    }
     let serials = numeric_or_datetime_serial_tensor(value, "isbusday")?;
     let (start_key, end_key) = date_key_range(&[&serials])?;
     let holidays = holiday_set_from_optional_or_default(
-        rest.into_iter().next(),
+        rest.first().cloned(),
         "isbusday",
         start_key,
         end_key,
     )?;
+    let weekend = weekend_mask(rest.get(1).cloned(), "isbusday")?;
     let serial_values = tensor::tensor_values_f64_cow(&serials);
     let mut out = Vec::with_capacity(serial_values.len());
     for serial in serial_values.iter() {
-        out.push(
-            if is_business_day_key(serial_date_key(*serial)?, &holidays)? {
-                1.0
-            } else {
-                0.0
-            },
-        );
+        out.push(u8::from(is_business_day_with_weekend(
+            serial_date_key(*serial)?,
+            &holidays,
+            &weekend,
+        )?));
     }
-    tensor_or_scalar(
-        out,
-        tensor::default_shape_for(&serials.shape, serial_values.len()),
-    )
+    if out.len() == 1 {
+        Ok(Value::Bool(out[0] != 0))
+    } else {
+        runmat_value::LogicalArray::new(
+            out,
+            tensor::default_shape_for(&serials.shape, serial_values.len()),
+        )
+        .map(Value::LogicalArray)
+        .map_err(|err| datetime_error(format!("isbusday: {err}")))
+    }
 }
 
 #[runmat_macros::runtime_builtin(
     name = "holidays",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return exchange-style market holidays for a year or date range.",
-    keywords = "holidays,business day,datetime,financial"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if args.len() > 3 {
+        return Err(datetime_error(
+            "holidays: expected zero, one, two, or three inputs",
+        ));
+    }
+    if args.len() < 2 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::HOLIDAYS_LOCAL_YEAR_EXTENSION,
+            "holidays",
+        )?;
+    }
+    let output_datetime = args.len() < 2 || args.iter().any(is_datetime_object);
     let args = gather_args(&args).await?;
     let keys = match args.len() {
         0 => {
@@ -63,28 +182,22 @@ pub(super) async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             holiday_keys_between(start, end)?
         }
         1 => {
-            let tensor = tensor_from_numeric(args[0].clone(), "holidays");
-            if let Ok(tensor) = tensor {
-                let year =
-                    tensor::is_scalar_tensor(&tensor).then(|| tensor::tensor_value_f64(&tensor, 0));
-                if let Some(year) = year.filter(|year| (1000.0..=9999.0).contains(year)) {
-                    let keys = market_holiday_keys_for_year(year.round() as i32)?;
-                    let len = keys.len();
-                    return datetime_object_from_serials(
-                        keys.into_iter().map(|key| key as f64).collect(),
-                        vec![len, 1],
-                        DEFAULT_DATE_FORMAT,
-                    );
-                }
+            let tensor = tensor_from_numeric(args[0].clone(), "holidays")?;
+            if !tensor::is_scalar_tensor(&tensor) {
+                return Err(datetime_error("holidays: Year must be a scalar integer"));
             }
-            let serials = numeric_or_datetime_serial_tensor(args[0].clone(), "holidays")?;
-            let year =
-                date_from_key(serial_date_key(tensor::tensor_value_f64(&serials, 0))?)?.year();
+            let year = tensor::tensor_value_f64(&tensor, 0);
+            if !year.is_finite() || year.fract() != 0.0 || !(1000.0..=9999.0).contains(&year) {
+                return Err(datetime_error(
+                    "holidays: Year must be an integer from 1000 through 9999",
+                ));
+            }
+            let year = year as i32;
             let start = key_from_date(NaiveDate::from_ymd_opt(year, 1, 1).unwrap());
             let end = key_from_date(NaiveDate::from_ymd_opt(year, 12, 31).unwrap());
             holiday_keys_between(start, end)?
         }
-        2 => {
+        2 | 3 => {
             let start = numeric_or_datetime_serial_tensor(args[0].clone(), "holidays")?;
             let end = numeric_or_datetime_serial_tensor(args[1].clone(), "holidays")?;
             if tensor::tensor_element_len(&start) != 1 || tensor::tensor_element_len(&end) != 1 {
@@ -92,37 +205,54 @@ pub(super) async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
                     "holidays: start and end dates must be scalar",
                 ));
             }
-            holiday_keys_between(
-                serial_date_key(tensor::tensor_value_f64(&start, 0))?,
-                serial_date_key(tensor::tensor_value_f64(&end, 0))?,
-            )?
+            let start_key = serial_date_key(tensor::tensor_value_f64(&start, 0))?;
+            let end_key = serial_date_key(tensor::tensor_value_f64(&end, 0))?;
+            if let Some(alternate) = args.get(2) {
+                let alternate = numeric_or_datetime_serial_tensor(alternate.clone(), "holidays")?;
+                let mut keys = tensor::tensor_values_f64_cow(&alternate)
+                    .iter()
+                    .map(|serial| serial_date_key(*serial))
+                    .collect::<BuiltinResult<Vec<_>>>()?;
+                keys.retain(|key| *key >= start_key.min(end_key) && *key <= start_key.max(end_key));
+                keys.sort_unstable();
+                keys.dedup();
+                keys
+            } else {
+                holiday_keys_between(start_key, end_key)?
+            }
         }
         _ => {
             return Err(datetime_error(
-                "holidays: expected zero, one, or two inputs",
+                "holidays: expected zero, one, two, or three inputs",
             ))
         }
     };
     let len = keys.len();
-    datetime_object_from_serials(
-        keys.into_iter().map(|key| key as f64).collect(),
-        vec![len, 1],
-        DEFAULT_DATE_FORMAT,
-    )
+    let serials: Vec<f64> = keys.into_iter().map(|key| key as f64).collect();
+    if output_datetime {
+        datetime_object_from_serials(serials, vec![len, 1], DEFAULT_DATE_FORMAT)
+    } else {
+        Tensor::new(serials, vec![len, 1])
+            .map(Value::Tensor)
+            .map_err(|err| datetime_error(format!("holidays: {err}")))
+    }
 }
 
 #[runmat_macros::runtime_builtin(
     name = "busdays",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return serial date numbers for business days in a scalar date range.",
-    keywords = "busdays,business day,datetime,financial"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn busdays_builtin(
     start: Value,
     end: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if rest.len() > 2 {
+        return Err(datetime_error(
+            "busdays: expected a period and optional holiday list",
+        ));
+    }
     let start = gather_if_needed_async(&start)
         .await
         .map_err(|err| datetime_error(format!("busdays: {}", err.message())))?;
@@ -130,9 +260,10 @@ pub(super) async fn busdays_builtin(
         .await
         .map_err(|err| datetime_error(format!("busdays: {}", err.message())))?;
     let rest = gather_args(&rest).await?;
-    if rest.len() > 1 {
-        return Err(datetime_error("busdays: expected at most one holiday list"));
-    }
+    let period = business_day_period(rest.first(), "busdays")?;
+    let output_datetime = is_datetime_object(&start)
+        || is_datetime_object(&end)
+        || rest.get(1).is_some_and(is_datetime_object);
     let start = numeric_or_datetime_serial_tensor(start, "busdays")?;
     let end = numeric_or_datetime_serial_tensor(end, "busdays")?;
     if tensor::tensor_element_len(&start) != 1 || tensor::tensor_element_len(&end) != 1 {
@@ -152,22 +283,64 @@ pub(super) async fn busdays_builtin(
             "busdays: output would exceed {MAX_BUSDAYS_OUTPUT_LEN} dates"
         )));
     }
-    let holidays =
-        holiday_set_from_optional_or_default(rest.into_iter().next(), "busdays", key, end_key)?;
+    let calendar_start = if period == BusinessDayPeriod::Daily {
+        key.min(end_key)
+    } else {
+        key_from_date(period.period_start(date_from_key(key.min(end_key))?)?)
+    };
+    let calendar_end = if period == BusinessDayPeriod::Daily {
+        key.max(end_key)
+    } else {
+        key_from_date(period.period_end(date_from_key(key.max(end_key))?)?)
+    };
+    let holidays = holiday_set_from_optional_or_default(
+        rest.get(1).cloned(),
+        "busdays",
+        calendar_start,
+        calendar_end,
+    )?;
     let step = if key <= end_key { 1 } else { -1 };
     let mut out = Vec::new();
-    loop {
-        if is_business_day_key(key, &holidays)? {
-            out.push(key as f64);
+    if period == BusinessDayPeriod::Daily {
+        loop {
+            if is_business_day_key(key, &holidays)? {
+                out.push(key as f64);
+            }
+            if key == end_key {
+                break;
+            }
+            key = key
+                .checked_add(step)
+                .ok_or_else(|| datetime_error("busdays: date range is outside supported range"))?;
         }
-        if key == end_key {
-            break;
-        }
-        key = key
-            .checked_add(step)
+    } else {
+        let first_period = period.period_end(date_from_key(key)?)?;
+        let last_period = period.period_end(date_from_key(end_key)?)?;
+        let mut period_end = first_period;
+        loop {
+            let mut candidate = key_from_date(period_end);
+            while !is_business_day_key(candidate, &holidays)? {
+                candidate = candidate.checked_sub(1).ok_or_else(|| {
+                    datetime_error("busdays: date range is outside supported range")
+                })?;
+            }
+            out.push(candidate as f64);
+            if period_end == last_period {
+                break;
+            }
+            let next = if step > 0 {
+                period_end.succ_opt()
+            } else {
+                period.previous_period_start(period_end)?
+            }
             .ok_or_else(|| datetime_error("busdays: date range is outside supported range"))?;
+            period_end = period.period_end(next)?;
+        }
     }
     let len = out.len();
+    if output_datetime {
+        return datetime_object_from_serials(out, vec![len, 1], DEFAULT_DATE_FORMAT);
+    }
     Tensor::new(out, vec![len, 1])
         .map(Value::Tensor)
         .map_err(|err| datetime_error(format!("busdays: {err}")))
@@ -175,16 +348,19 @@ pub(super) async fn busdays_builtin(
 
 #[runmat_macros::runtime_builtin(
     name = "days252bus",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Count business days between date values using a 252-business-day calendar.",
-    keywords = "days252bus,business day,datetime,financial"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn days252bus_builtin(
     start: Value,
     end: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(datetime_error(
+            "days252bus: expected at most one holiday list",
+        ));
+    }
     let start = gather_if_needed_async(&start)
         .await
         .map_err(|err| datetime_error(format!("days252bus: {}", err.message())))?;
@@ -192,11 +368,6 @@ pub(super) async fn days252bus_builtin(
         .await
         .map_err(|err| datetime_error(format!("days252bus: {}", err.message())))?;
     let rest = gather_args(&rest).await?;
-    if rest.len() > 1 {
-        return Err(datetime_error(
-            "days252bus: expected at most one holiday list",
-        ));
-    }
     let starts = numeric_or_datetime_serial_tensor(start, "days252bus")?;
     let ends = numeric_or_datetime_serial_tensor(end, "days252bus")?;
     let (start_key, end_key) = date_key_range(&[&starts, &ends])?;
@@ -223,16 +394,19 @@ pub(super) async fn days252bus_builtin(
 
 #[runmat_macros::runtime_builtin(
     name = "daysdif",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return date differences using actual or 30/360 day-count bases.",
-    keywords = "daysdif,date difference,datetime,financial"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn daysdif_builtin(
     start: Value,
     end: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if rest.len() > 1 {
+        return Err(datetime_error(
+            "daysdif: expected at most one basis argument",
+        ));
+    }
     let start = gather_if_needed_async(&start)
         .await
         .map_err(|err| datetime_error(format!("daysdif: {}", err.message())))?;
@@ -240,20 +414,22 @@ pub(super) async fn daysdif_builtin(
         .await
         .map_err(|err| datetime_error(format!("daysdif: {}", err.message())))?;
     let rest = gather_args(&rest).await?;
-    if rest.len() > 1 {
-        return Err(datetime_error(
-            "daysdif: expected at most one basis argument",
-        ));
-    }
-    let basis = rest
-        .first()
-        .map(|value| tensor_from_numeric(value.clone(), "daysdif"))
-        .transpose()?
-        .and_then(|tensor| {
-            tensor::is_scalar_tensor(&tensor).then(|| tensor::tensor_value_f64(&tensor, 0))
-        })
-        .unwrap_or(0.0)
-        .round() as i64;
+    let basis = match rest.first() {
+        None => 0,
+        Some(value) => {
+            let tensor = tensor_from_numeric(value.clone(), "daysdif")?;
+            if !tensor::is_scalar_tensor(&tensor) {
+                return Err(datetime_error("daysdif: Basis must be a scalar integer"));
+            }
+            let value = tensor::tensor_value_f64(&tensor, 0);
+            if !value.is_finite() || value.fract() != 0.0 || !matches!(value as i64, 0 | 1) {
+                return Err(datetime_error(
+                    "daysdif: only Basis 0 (actual) and 1 (30/360 SIA) are supported",
+                ));
+            }
+            value as i64
+        }
+    };
     let starts = numeric_or_datetime_serial_tensor(start, "daysdif")?;
     let ends = numeric_or_datetime_serial_tensor(end, "daysdif")?;
     let (start_data, end_data, shape) =
@@ -284,124 +460,120 @@ pub(super) async fn daysdif_builtin(
 
 #[runmat_macros::runtime_builtin(
     name = "fbusdate",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return first business day serial date numbers for month/year pairs.",
-    keywords = "fbusdate,business day,datetime,financial"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn fbusdate_builtin(
     year: Value,
     month: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let year = gather_if_needed_async(&year)
-        .await
-        .map_err(|err| datetime_error(format!("fbusdate: {}", err.message())))?;
-    let month = gather_if_needed_async(&month)
-        .await
-        .map_err(|err| datetime_error(format!("fbusdate: {}", err.message())))?;
-    let rest = gather_args(&rest).await?;
-    if rest.len() > 1 {
-        return Err(datetime_error(
-            "fbusdate: expected at most one holiday list",
-        ));
-    }
-    let years = component_tensor(year, "fbusdate year")?;
-    let months = component_tensor(month, "fbusdate month")?;
-    let (year_data, month_data, shape) =
-        tensor::binary_numeric_tensors(&years, &months, "fbusdate", BUILTIN_NAME)?;
-    let mut min_key = i64::MAX;
-    let mut max_key = i64::MIN;
-    for (year, month) in year_data.iter().zip(month_data.iter()) {
-        let year = round_component(*year, "year", -262_000, 262_000)? as i32;
-        let month = round_component(*month, "month", 1, 12)? as u32;
-        min_key = min_key.min(key_from_date(
-            NaiveDate::from_ymd_opt(year, month, 1)
-                .ok_or_else(|| datetime_error("fbusdate: invalid year/month"))?,
-        ));
-        max_key = max_key.max(key_from_date(
-            NaiveDate::from_ymd_opt(year, month, days_in_month(year, month)?)
-                .ok_or_else(|| datetime_error("fbusdate: invalid year/month"))?,
-        ));
-    }
-    let holidays = holiday_set_from_optional_or_default(
-        rest.into_iter().next(),
+    month_business_date_builtin(
+        year,
+        month,
+        rest,
         "fbusdate",
-        min_key,
-        max_key,
-    )?;
-    let out = year_data
-        .iter()
-        .zip(month_data.iter())
-        .map(|(year, month)| {
-            Ok(first_business_day_key(
-                round_component(*year, "year", -262_000, 262_000)? as i32,
-                round_component(*month, "month", 1, 12)? as u32,
-                &holidays,
-            )? as f64)
-        })
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    tensor_or_scalar(out, shape)
+        first_business_day_with_weekend,
+    )
+    .await
 }
 
 #[runmat_macros::runtime_builtin(
     name = "lbusdate",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return last business day serial date numbers for month/year pairs.",
-    keywords = "lbusdate,business day,datetime,financial"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn lbusdate_builtin(
     year: Value,
     month: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    month_business_date_builtin(
+        year,
+        month,
+        rest,
+        "lbusdate",
+        last_business_day_with_weekend,
+    )
+    .await
+}
+
+type MonthBusinessDate = fn(i32, u32, &HashSet<i64>, &[bool; 7]) -> BuiltinResult<i64>;
+
+async fn month_business_date_builtin(
+    year: Value,
+    month: Value,
+    rest: Vec<Value>,
+    name: &'static str,
+    find: MonthBusinessDate,
+) -> BuiltinResult<Value> {
+    if rest.len() > 3 {
+        return Err(datetime_error(format!(
+            "{name}: expected optional Holiday, Weekend, and outputType"
+        )));
+    }
+    let output_datetime = match rest.get(2) {
+        Some(value) => match scalar_text(value, "outputType")?
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "datenum" => false,
+            "datetime" => true,
+            _ => {
+                return Err(datetime_error(format!(
+                    "{name}: outputType must be datenum or datetime"
+                )))
+            }
+        },
+        None => rest.first().is_some_and(is_datetime_object),
+    };
     let year = gather_if_needed_async(&year)
         .await
-        .map_err(|err| datetime_error(format!("lbusdate: {}", err.message())))?;
+        .map_err(|err| datetime_error(format!("{name}: {}", err.message())))?;
     let month = gather_if_needed_async(&month)
         .await
-        .map_err(|err| datetime_error(format!("lbusdate: {}", err.message())))?;
+        .map_err(|err| datetime_error(format!("{name}: {}", err.message())))?;
     let rest = gather_args(&rest).await?;
-    if rest.len() > 1 {
-        return Err(datetime_error(
-            "lbusdate: expected at most one holiday list",
-        ));
-    }
-    let years = component_tensor(year, "lbusdate year")?;
-    let months = component_tensor(month, "lbusdate month")?;
+    let years = component_tensor(year, name)?;
+    let months = component_tensor(month, name)?;
     let (year_data, month_data, shape) =
-        tensor::binary_numeric_tensors(&years, &months, "lbusdate", BUILTIN_NAME)?;
-    let mut min_key = i64::MAX;
-    let mut max_key = i64::MIN;
+        tensor::binary_numeric_tensors(&years, &months, name, BUILTIN_NAME)?;
+    let weekend = weekend_mask(rest.get(1).cloned(), name)?;
+    let mut bounds = None;
     for (year, month) in year_data.iter().zip(month_data.iter()) {
         let year = round_component(*year, "year", -262_000, 262_000)? as i32;
         let month = round_component(*month, "month", 1, 12)? as u32;
-        min_key = min_key.min(key_from_date(
+        let first = key_from_date(
             NaiveDate::from_ymd_opt(year, month, 1)
-                .ok_or_else(|| datetime_error("lbusdate: invalid year/month"))?,
-        ));
-        max_key = max_key.max(key_from_date(
+                .ok_or_else(|| datetime_error(format!("{name}: invalid year/month")))?,
+        );
+        let last = key_from_date(
             NaiveDate::from_ymd_opt(year, month, days_in_month(year, month)?)
-                .ok_or_else(|| datetime_error("lbusdate: invalid year/month"))?,
-        ));
+                .ok_or_else(|| datetime_error(format!("{name}: invalid year/month")))?,
+        );
+        bounds = Some(match bounds {
+            Some((min, max)) => (min.min(first), max.max(last)),
+            None => (first, last),
+        });
     }
-    let holidays = holiday_set_from_optional_or_default(
-        rest.into_iter().next(),
-        "lbusdate",
-        min_key,
-        max_key,
-    )?;
+    let (min, max) = bounds.unwrap_or((0, 0));
+    let holidays = holiday_set_from_optional_or_default(rest.first().cloned(), name, min, max)?;
     let out = year_data
         .iter()
         .zip(month_data.iter())
         .map(|(year, month)| {
-            Ok(last_business_day_key(
+            Ok(find(
                 round_component(*year, "year", -262_000, 262_000)? as i32,
                 round_component(*month, "month", 1, 12)? as u32,
                 &holidays,
+                &weekend,
             )? as f64)
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    tensor_or_scalar(out, shape)
+    if output_datetime {
+        datetime_object_from_serials(out, shape, DEFAULT_DATE_FORMAT)
+    } else {
+        tensor_or_scalar(out, shape)
+    }
 }

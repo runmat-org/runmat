@@ -192,12 +192,16 @@ pub(super) fn market_holiday_keys_for_year(year: i32) -> BuiltinResult<Vec<i64>>
         nth_weekday(year, 2, Weekday::Mon, 3)?,
         key_from_date(easter_sunday(year)? - Duration::days(2)),
         last_weekday(year, 5, Weekday::Mon)?,
-        observed_fixed_holiday(year, 6, 19)?,
         observed_fixed_holiday(year, 7, 4)?,
         nth_weekday(year, 9, Weekday::Mon, 1)?,
         nth_weekday(year, 11, Weekday::Thu, 4)?,
         observed_fixed_holiday(year, 12, 25)?,
     ];
+    // NYSE began observing Juneteenth in 2022. Applying it to older years
+    // creates false historical closures even in the computed-calendar subset.
+    if year >= 2022 {
+        keys.push(observed_fixed_holiday(year, 6, 19)?);
+    }
     keys.sort_unstable();
     keys.dedup();
     Ok(keys)
@@ -244,12 +248,55 @@ pub(super) fn holiday_set_from_optional_or_default(
     if let Some(value) = value {
         let serials = numeric_or_datetime_serial_tensor(value, context)?;
         let values = tensor::tensor_values_f64_cow(&serials);
+        if values.is_empty() {
+            return holiday_set_for_range(start_key, end_key);
+        }
+        if values.len() == 1 && values[0].is_nan() {
+            return Ok(HashSet::new());
+        }
         return values
             .iter()
             .map(|serial| serial_date_key(*serial))
             .collect::<BuiltinResult<HashSet<_>>>();
     }
     holiday_set_for_range(start_key, end_key)
+}
+
+/// Sunday is the first element, as in the public financial-calendar API.
+pub(super) fn weekend_mask(value: Option<Value>, context: &str) -> BuiltinResult<[bool; 7]> {
+    let Some(value) = value else {
+        return Ok([true, false, false, false, false, false, true]);
+    };
+    let values = tensor::value_into_tensor_for(context, value)
+        .map_err(|message| datetime_error(format!("{context}: {message}")))?;
+    let values = tensor::tensor_values_f64_cow(&values);
+    if values.is_empty() {
+        return Ok([true, false, false, false, false, false, true]);
+    }
+    if values.len() != 7 || values.iter().any(|item| !matches!(*item, 0.0 | 1.0)) {
+        return Err(datetime_error(format!(
+            "{context}: Weekend must contain seven logical 0/1 values beginning with Sunday"
+        )));
+    }
+    let mut mask = [false; 7];
+    for (slot, value) in mask.iter_mut().zip(values.iter()) {
+        *slot = *value == 1.0;
+    }
+    if mask.iter().all(|day| *day) {
+        return Err(datetime_error(format!(
+            "{context}: at least one weekday must be available for trading"
+        )));
+    }
+    Ok(mask)
+}
+
+pub(super) fn is_business_day_with_weekend(
+    key: i64,
+    holidays: &HashSet<i64>,
+    weekend: &[bool; 7],
+) -> BuiltinResult<bool> {
+    let day = date_from_key(key)?.weekday().num_days_from_sunday() as usize;
+    Ok(!weekend[day] && !holidays.contains(&key))
 }
 
 pub(super) fn date_key_range(tensors: &[&Tensor]) -> BuiltinResult<(i64, i64)> {
@@ -273,8 +320,11 @@ pub(super) fn date_key_range(tensors: &[&Tensor]) -> BuiltinResult<(i64, i64)> {
 }
 
 pub(super) fn is_business_day_key(key: i64, holidays: &HashSet<i64>) -> BuiltinResult<bool> {
-    let date = date_from_key(key)?;
-    Ok(!matches!(date.weekday(), Weekday::Sat | Weekday::Sun) && !holidays.contains(&key))
+    is_business_day_with_weekend(
+        key,
+        holidays,
+        &[true, false, false, false, false, false, true],
+    )
 }
 
 pub(super) fn count_weekdays_forward(start_key: i64, end_key: i64) -> BuiltinResult<i64> {
@@ -319,34 +369,49 @@ pub(super) fn count_business_days(
     Ok(count)
 }
 
-pub(super) fn first_business_day_key(
+pub(super) fn first_business_day_with_weekend(
     year: i32,
     month: u32,
     holidays: &HashSet<i64>,
+    weekend: &[bool; 7],
 ) -> BuiltinResult<i64> {
     let mut date = NaiveDate::from_ymd_opt(year, month, 1)
         .ok_or_else(|| datetime_error("fbusdate: invalid year/month"))?;
-    loop {
+    let last_day = days_in_month(year, month)?;
+    while date.day() <= last_day && date.month() == month {
         let key = key_from_date(date);
-        if is_business_day_key(key, holidays)? {
+        if is_business_day_with_weekend(key, holidays, weekend)? {
             return Ok(key);
         }
-        date += Duration::days(1);
+        date = date
+            .succ_opt()
+            .ok_or_else(|| datetime_error("fbusdate: date is outside supported range"))?;
     }
+    Err(datetime_error(
+        "fbusdate: month has no business date under the selected calendar",
+    ))
 }
 
-pub(super) fn last_business_day_key(
+pub(super) fn last_business_day_with_weekend(
     year: i32,
     month: u32,
     holidays: &HashSet<i64>,
+    weekend: &[bool; 7],
 ) -> BuiltinResult<i64> {
     let mut date = NaiveDate::from_ymd_opt(year, month, days_in_month(year, month)?)
         .ok_or_else(|| datetime_error("lbusdate: invalid year/month"))?;
     loop {
         let key = key_from_date(date);
-        if is_business_day_key(key, holidays)? {
+        if is_business_day_with_weekend(key, holidays, weekend)? {
             return Ok(key);
         }
-        date -= Duration::days(1);
+        date = date
+            .pred_opt()
+            .ok_or_else(|| datetime_error("lbusdate: date is outside supported range"))?;
+        if date.month() != month {
+            return Err(datetime_error(
+                "lbusdate: month has no business date under the selected calendar",
+            ));
+        }
     }
 }

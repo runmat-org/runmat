@@ -1022,10 +1022,10 @@ fn business_day_helpers_use_weekends_and_holidays() {
         Vec::new(),
     ))
     .expect("isbusday");
-    let Value::Tensor(mask) = mask else {
-        panic!("expected isbusday tensor");
+    let Value::LogicalArray(mask) = mask else {
+        panic!("expected isbusday logical array");
     };
-    assert_eq!(mask.materialize_f64(), vec![0.0, 1.0, 0.0]);
+    assert_eq!(mask.data, vec![0, 1, 0]);
 
     assert_eq!(
         futures::executor::block_on(isbusday_builtin(
@@ -1033,7 +1033,21 @@ fn business_day_helpers_use_weekends_and_holidays() {
             vec![Value::Num(friday)],
         ))
         .expect("custom holiday"),
-        Value::Num(0.0)
+        Value::Bool(false)
+    );
+
+    assert_eq!(
+        futures::executor::block_on(isbusday_builtin(
+            Value::Num(saturday),
+            vec![
+                Value::Num(f64::NAN),
+                Value::Tensor(
+                    Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vec![1, 7]).unwrap()
+                )
+            ],
+        ))
+        .expect("Saturday trading with custom weekend"),
+        Value::Bool(true)
     );
 
     let business_days = futures::executor::block_on(busdays_builtin(
@@ -1046,6 +1060,25 @@ fn business_day_helpers_use_weekends_and_holidays() {
         panic!("expected busdays tensor");
     };
     assert_eq!(business_days.materialize_f64(), vec![friday, friday + 3.0]);
+
+    let monthly = futures::executor::block_on(busdays_builtin(
+        Value::Num(serial_for_date(2024, 1, 5)),
+        Value::Num(serial_for_date(2024, 3, 8)),
+        vec![Value::String("monthly".into())],
+    ))
+    .expect("monthly business dates");
+    let Value::Tensor(monthly) = monthly else {
+        panic!("expected monthly serial dates");
+    };
+    assert_eq!(monthly.shape, vec![3, 1]);
+    assert_eq!(
+        monthly.materialize_f64(),
+        vec![
+            serial_for_date(2024, 1, 31),
+            serial_for_date(2024, 2, 29),
+            serial_for_date(2024, 3, 28)
+        ]
+    );
 
     assert_eq!(
         futures::executor::block_on(days252bus_builtin(
@@ -1076,6 +1109,18 @@ fn business_day_helpers_use_weekends_and_holidays() {
         .expect("daysdif typed basis"),
         Value::Num(29.0)
     );
+    assert!(futures::executor::block_on(daysdif_builtin(
+        Value::Num(friday),
+        Value::Num(friday + 3.0),
+        vec![Value::Num(13.0)],
+    ))
+    .is_err());
+    assert!(futures::executor::block_on(daysdif_builtin(
+        Value::Num(friday),
+        Value::Num(friday + 3.0),
+        vec![Value::Num(0.5)],
+    ))
+    .is_err());
     assert_eq!(
         futures::executor::block_on(fbusdate_builtin(
             Value::Num(2024.0),
@@ -1094,6 +1139,37 @@ fn business_day_helpers_use_weekends_and_holidays() {
         .expect("lbusdate"),
         Value::Num(serial_for_date(2024, 6, 28))
     );
+    let weekend =
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vec![1, 7]).unwrap());
+    assert_eq!(
+        futures::executor::block_on(fbusdate_builtin(
+            Value::Num(2003.0),
+            Value::Num(3.0),
+            vec![
+                Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+                weekend
+            ],
+        ))
+        .expect("Saturday trading"),
+        Value::Num(serial_for_date(2003, 3, 1))
+    );
+    let datetime_output = futures::executor::block_on(lbusdate_builtin(
+        Value::Num(2024.0),
+        Value::Num(6.0),
+        vec![
+            Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+            Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+            Value::String("datetime".into()),
+        ],
+    ))
+    .expect("datetime output type");
+    assert!(is_datetime_object(&datetime_output));
+    assert_eq!(
+        serials_from_datetime_value(&datetime_output)
+            .unwrap()
+            .materialize_f64(),
+        vec![serial_for_date(2024, 6, 28)]
+    );
 
     let holidays =
         futures::executor::block_on(holidays_builtin(vec![Value::Num(2024.0)])).expect("holidays");
@@ -1101,6 +1177,57 @@ fn business_day_helpers_use_weekends_and_holidays() {
     assert!(serials
         .materialize_f64()
         .contains(&serial_for_date(2024, 1, 1)));
+
+    let serial_holidays = futures::executor::block_on(holidays_builtin(vec![
+        Value::Num(serial_for_date(2024, 1, 1)),
+        Value::Num(serial_for_date(2024, 1, 3)),
+    ]))
+    .expect("serial holiday range");
+    let Value::Tensor(serial_holidays) = serial_holidays else {
+        panic!("numeric date range should return serial dates");
+    };
+    assert_eq!(
+        serial_holidays.materialize_f64(),
+        vec![serial_for_date(2024, 1, 1)]
+    );
+
+    let alternate = futures::executor::block_on(holidays_builtin(vec![
+        Value::Num(serial_for_date(2024, 1, 1)),
+        Value::Num(serial_for_date(2024, 1, 31)),
+        Value::Tensor(
+            Tensor::new(
+                vec![
+                    serial_for_date(2023, 12, 31),
+                    serial_for_date(2024, 1, 15),
+                    serial_for_date(2024, 1, 15),
+                    serial_for_date(2024, 2, 1),
+                ],
+                vec![1, 4],
+            )
+            .unwrap(),
+        ),
+    ]))
+    .expect("alternate holiday list");
+    let Value::Tensor(alternate) = alternate else {
+        panic!("numeric alternate holidays should remain serial dates");
+    };
+    assert_eq!(
+        alternate.materialize_f64(),
+        vec![serial_for_date(2024, 1, 15)]
+    );
+
+    assert!(futures::executor::block_on(fbusdate_builtin(
+        Value::Num(2024.0),
+        Value::Num(2.0),
+        vec![Value::Tensor(
+            Tensor::new(
+                (1..=29).map(|day| serial_for_date(2024, 2, day)).collect(),
+                vec![1, 29],
+            )
+            .unwrap()
+        )],
+    ))
+    .is_err());
 
     let typed_year =
         Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2024]), vec![1, 1]).unwrap();
@@ -1110,4 +1237,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     assert!(serials
         .materialize_f64()
         .contains(&serial_for_date(2024, 1, 1)));
+
+    let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+    assert!(futures::executor::block_on(holidays_builtin(vec![Value::Num(2024.0)])).is_err());
 }
