@@ -58,9 +58,7 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
             };
             if expected.is_nan() {
                 assert!(actual.is_nan());
-            } else if expected.is_infinite() {
-                assert_eq!(*actual, expected);
-            } else if expected == 0.0 {
+            } else if expected.is_infinite() || expected == 0.0 {
                 assert_eq!(*actual, expected);
             } else {
                 assert!(
