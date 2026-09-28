@@ -61,7 +61,7 @@ fn integer_tensor(storage: runmat_value::IntegerStorage, shape: Vec<usize>) -> V
 
 #[test]
 fn datetime_descriptor_signatures_cover_constructor_and_methods() {
-    let labels: Vec<&str> = DATETIME_DESCRIPTOR
+    let labels: Vec<&str> = runmat_builtins::DATETIME_DESCRIPTOR
         .signatures
         .iter()
         .map(|sig| sig.label)
@@ -414,6 +414,50 @@ fn datetime_date_vectors_cover_all_integer_classes_and_preaccess_gates() {
         Some("RunMat:compatibility:DatetimeGpuInputExtension")
     );
     assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn datetime_invalid_options_precede_resident_provider_access() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let allocation = unregistered_resident(vec![1, 3]);
+    let resident = Value::GpuTensor(allocation.handle.clone());
+    for (arguments, expected) in [
+        (
+            vec![
+                resident.clone(),
+                Value::from("ConvertFrom"),
+                Value::from("posixtime"),
+            ],
+            "unsupported ConvertFrom",
+        ),
+        (
+            vec![
+                resident.clone(),
+                Value::from("TimeZone"),
+                Value::from("UTC"),
+            ],
+            "unsupported option",
+        ),
+        (
+            vec![
+                resident.clone(),
+                Value::from("InputFormat"),
+                Value::from("yyyy-MM-dd"),
+            ],
+            "InputFormat requires exactly one text input",
+        ),
+        (
+            vec![resident.clone(), Value::Num(1.0)],
+            "unsupported argument pattern",
+        ),
+    ] {
+        let error = futures::executor::block_on(datetime_builtin(arguments))
+            .expect_err("invalid constructor must reject before provider access");
+        assert!(error.message().contains(expected), "{error:?}");
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
     allocation.handle.release().unwrap();
     assert_eq!(allocation.probe.retirements(), 1);
 }

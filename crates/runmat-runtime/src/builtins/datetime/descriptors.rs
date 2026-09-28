@@ -69,12 +69,6 @@ pub(super) const DATESHIFT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
 pub const DATESHIFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor { form: "dateshift(t, ..., integer_weekday_or_rule)", inputs: &DATESHIFT_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "The documented contract is the integer-valued numeric control form, not an explicit per-class matrix. RunMat's settled all-eight-class coverage is exact, scalar-expands against datetime arrays, and produces host datetime objects." }];
 
-pub const DATETIME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DATETIME_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DATETIME_ERRORS,
-};
 pub const DATETIME_YEAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DATETIME_YEAR_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

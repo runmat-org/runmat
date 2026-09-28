@@ -7,19 +7,51 @@ use super::*;
 
 #[runmat_macros::runtime_builtin(
     name = "datetime",
-    descriptor(crate::builtins::datetime::DATETIME_DESCRIPTOR),
-    extensions(crate::builtins::datetime::DATETIME_EXTENSIONS),
-    integer_capabilities(crate::builtins::datetime::DATETIME_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Create datetime arrays from text, components, or serial date numbers.",
-    keywords = "datetime,date,time,datenum,Format",
-    related = "year,month,day,hour,minute,second,string,char,disp",
-    examples = "t = datetime(2024, 4, 9, 13, 30, 0);"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     ensure_datetime_class_registered();
-    if args
+    let (positional_end, options) = parse_trailing_options(&args)?;
+    let positional_inputs = &args[..positional_end];
+
+    // Reject malformed call structure and host-only options before a resident
+    // operand can trigger provider lookup or an upload/gather failure.
+    if let Some(convert_from) = options.convert_from.as_deref() {
+        if !convert_from.eq_ignore_ascii_case("datenum") {
+            return Err(datetime_error(format!(
+                "datetime: unsupported ConvertFrom value '{convert_from}'"
+            )));
+        }
+        if positional_inputs.len() != 1 {
+            return Err(datetime_error(
+                "datetime: ConvertFrom='datenum' expects exactly one numeric input",
+            ));
+        }
+    } else if !matches!(positional_inputs.len(), 0 | 1 | 3..=7) {
+        return Err(datetime_error(
+            "datetime: unsupported argument pattern; use text, serial dates, or Y/M/D component inputs",
+        ));
+    }
+    if options.input_format.is_some() {
+        if options.convert_from.is_some()
+            || !matches!(
+                positional_inputs,
+                [Value::String(_) | Value::StringArray(_) | Value::CharArray(_)]
+            )
+        {
+            return Err(datetime_error(
+                "datetime: InputFormat requires exactly one text input",
+            ));
+        }
+    }
+    if options.convert_from.is_none() && matches!(positional_inputs.len(), 4 | 5) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DATETIME_LEGACY_COMPONENT_ARITY_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if positional_inputs
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)))
     {
@@ -28,7 +60,7 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    if args
+    if positional_inputs
         .iter()
         .any(|value| matches!(value, Value::Bool(_) | Value::LogicalArray(_)))
     {
@@ -37,21 +69,9 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    let args = gather_args(&args).await?;
-    let (positional_end, options) = parse_trailing_options(&args)?;
-    let positional = args[..positional_end].to_vec();
+    let positional = gather_args(positional_inputs).await?;
 
-    if let Some(convert_from) = options.convert_from {
-        if !convert_from.eq_ignore_ascii_case("datenum") {
-            return Err(datetime_error(format!(
-                "datetime: unsupported ConvertFrom value '{convert_from}'"
-            )));
-        }
-        if positional.len() != 1 {
-            return Err(datetime_error(
-                "datetime: ConvertFrom='datenum' expects exactly one numeric input",
-            ));
-        }
+    if options.convert_from.is_some() {
         return numeric_value_to_datetime(positional[0].clone(), options.format);
     }
 
@@ -97,15 +117,7 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             }
         },
         3 | 6 | 7 => build_from_components(positional, options.format),
-        4 | 5 => {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &DATETIME_LEGACY_COMPONENT_ARITY_EXTENSION,
-                BUILTIN_NAME,
-            )?;
-            build_from_components(positional, options.format)
-        }
-        _ => Err(datetime_error(
-            "datetime: unsupported argument pattern; use text, serial dates, or Y/M/D component inputs",
-        )),
+        4 | 5 => build_from_components(positional, options.format),
+        _ => unreachable!("constructor arity validated before resident access"),
     }
 }

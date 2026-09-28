@@ -157,11 +157,20 @@ pub(super) fn parse_trailing_options(args: &[Value]) -> BuiltinResult<(usize, Da
         };
         let lowered = name.trim().to_ascii_lowercase();
         let value = scalar_text(&args[positional_end - 1], &format!("{name} option"))?;
-        match lowered.as_str() {
-            "format" => options.format = Some(value),
-            "convertfrom" => options.convert_from = Some(value),
-            "inputformat" => options.input_format = Some(value),
-            _ => break,
+        let slot = match lowered.as_str() {
+            "format" => &mut options.format,
+            "convertfrom" => &mut options.convert_from,
+            "inputformat" => &mut options.input_format,
+            _ => {
+                return Err(datetime_error(format!(
+                    "datetime: unsupported option '{name}'"
+                )));
+            }
+        };
+        if slot.replace(value).is_some() {
+            return Err(datetime_error(format!(
+                "datetime: option '{name}' cannot be specified more than once"
+            )));
         }
         positional_end -= 2;
     }
