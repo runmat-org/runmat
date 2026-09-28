@@ -45,9 +45,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "damp",
-    category = "control",
-    summary = "Return natural frequencies, damping ratios, and poles for control models.",
-    keywords = "damp,damping ratio,natural frequency,poles,control system,tf,ss",
     binding_variant = "default",
     builtin_path = "crate::builtins::control::damp"
 )]

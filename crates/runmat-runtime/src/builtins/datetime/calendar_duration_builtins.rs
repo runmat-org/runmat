@@ -16,10 +16,7 @@ async fn prepare_calendar_unit_input(name: &'static str, value: Value) -> Builti
 #[runmat_macros::runtime_builtin(
     name = "calendarDuration",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Create calendar duration values from calendar components.",
-    keywords = "calendarDuration,caldays,calmonths,calyears,datetime"
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !matches!(args.len(), 0 | 1 | 3..=6) {
@@ -158,10 +155,7 @@ fn validate_calendar_component(value: f64, component: usize) -> BuiltinResult<()
 #[runmat_macros::runtime_builtin(
     name = "caldays",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Create calendar durations from days or convert calendar durations to day counts.",
-    keywords = "caldays,calendarDuration,datetime"
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn caldays_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let value = prepare_calendar_unit_input("caldays", value).await?;
@@ -171,10 +165,7 @@ pub(super) async fn caldays_builtin(value: Value) -> crate::BuiltinResult<Value>
 #[runmat_macros::runtime_builtin(
     name = "calweeks",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Create calendar durations from weeks or convert calendar durations to week counts.",
-    keywords = "calweeks,calendarDuration,datetime"
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn calweeks_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let value = prepare_calendar_unit_input("calweeks", value).await?;
@@ -184,10 +175,7 @@ pub(super) async fn calweeks_builtin(value: Value) -> crate::BuiltinResult<Value
 #[runmat_macros::runtime_builtin(
     name = "calmonths",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Create calendar durations from months or convert calendar durations to month counts.",
-    keywords = "calmonths,calendarDuration,datetime"
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn calmonths_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let value = prepare_calendar_unit_input("calmonths", value).await?;
@@ -197,10 +185,7 @@ pub(super) async fn calmonths_builtin(value: Value) -> crate::BuiltinResult<Valu
 #[runmat_macros::runtime_builtin(
     name = "calquarters",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Create calendar durations from quarters or convert calendar durations to quarter counts.",
-    keywords = "calquarters,calendarDuration,datetime"
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn calquarters_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let value = prepare_calendar_unit_input("calquarters", value).await?;
@@ -210,10 +195,7 @@ pub(super) async fn calquarters_builtin(value: Value) -> crate::BuiltinResult<Va
 #[runmat_macros::runtime_builtin(
     name = "calyears",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Create calendar durations from years or convert calendar durations to year counts.",
-    keywords = "calyears,calendarDuration,datetime"
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn calyears_builtin(value: Value) -> crate::BuiltinResult<Value> {
     let value = prepare_calendar_unit_input("calyears", value).await?;
@@ -223,10 +205,7 @@ pub(super) async fn calyears_builtin(value: Value) -> crate::BuiltinResult<Value
 #[runmat_macros::runtime_builtin(
     name = "iscalendarduration",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return true for calendarDuration values.",
-    keywords = "iscalendarduration,calendarDuration,predicate"
+    builtin_path = "crate::builtins::datetime"
 )]
 pub(super) fn iscalendarduration_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(is_calendar_duration_object(&value)))

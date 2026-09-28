@@ -2,9 +2,12 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod business_days;
+mod calendar_duration;
 
 pub use self::business_days::*;
+pub use self::calendar_duration::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(business_days::ENTRIES.iter().copied());
+    values.extend(calendar_duration::ENTRIES.iter().copied());
 }
