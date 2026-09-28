@@ -1,13 +1,5 @@
 //! DC gain for SISO transfer-function models.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -16,80 +8,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::control::tf_model::{output_complex_scalar, TfModel};
-use crate::builtins::control::type_resolvers::dcgain_type;
 use crate::BuiltinResult;
-
-const DCGAIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "gain",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Steady-state gain evaluated at s=0 for continuous-time or z=1 for discrete-time.",
-}];
-const DCGAIN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf model.",
-}];
-const DCGAIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "gain = dcgain(sys)",
-    inputs: &DCGAIN_INPUTS,
-    outputs: &DCGAIN_OUTPUT,
-}];
-const DCGAIN_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    BuiltinErrorDescriptor {
-        code: "RM.DCGAIN.INVALID_ARGUMENT",
-        identifier: Some("RunMat:dcgain:InvalidArgument"),
-        when: "Input does not match supported invocation forms.",
-        message: "dcgain: invalid argument",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DCGAIN.INVALID_MODEL",
-        identifier: Some("RunMat:dcgain:InvalidModel"),
-        when: "Input system is not a valid SISO tf object.",
-        message: "dcgain: invalid model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DCGAIN.UNSUPPORTED_MODEL",
-        identifier: Some("RunMat:dcgain:UnsupportedModel"),
-        when: "Model form is not supported by the current implementation.",
-        message: "dcgain: unsupported model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DCGAIN.INTERNAL",
-        identifier: Some("RunMat:dcgain:Internal"),
-        when: "Gain evaluation failed internally.",
-        message: "dcgain: internal error",
-    },
-];
-pub const DCGAIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DCGAIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DCGAIN_ERRORS,
-};
-
-const DCGAIN_INTEGER_SYS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "sys",
-    classes: &[],
-    availability: BuiltinIntegerInputAvailability::Rejected,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "dcgain accepts an LTI model object. Integer coefficient support belongs to model constructors and does not make an integer array a valid sys input.",
-}];
-
-pub const DCGAIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "k = dcgain(integer_sys)",
-        inputs: &DCGAIN_INTEGER_SYS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer input is inapplicable at the dynamic-system object boundary and rejects before provider access. Coefficients have already crossed the constructor's model-numeric boundary.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::dcgain")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -120,24 +39,92 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "dcgain",
-    category = "control",
-    summary = "Evaluate steady-state gain of SISO transfer-function models.",
-    keywords = "dcgain,control system,steady state,transfer function,tf",
-    type_resolver(dcgain_type),
-    descriptor(crate::builtins::control::dcgain::DCGAIN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::control::dcgain::DCGAIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::dcgain"
 )]
 async fn dcgain_builtin(sys: Value) -> BuiltinResult<Value> {
-    let model = TfModel::from_value(sys, "dcgain")?;
+    let model = TfModel::from_value_async(sys, "dcgain").await?;
     Ok(output_complex_scalar(model.dc_gain()?))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::control::tf_model::{SS_CLASS, TF_CLASS};
     use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerStorage, Tensor};
+    use runmat_builtins::{BuiltinIntegerInputAvailability, DCGAIN_INTEGER_CAPABILITIES};
+    use runmat_value::{IntValue, IntegerStorage, ObjectInstance, Tensor};
+
+    fn raw_tf(numerator: Value, denominator: Value) -> ObjectInstance {
+        let mut model = ObjectInstance::new(TF_CLASS.to_string());
+        model.properties.insert("Numerator".into(), numerator);
+        model.properties.insert("Denominator".into(), denominator);
+        model.properties.insert("Ts".into(), Value::Num(0.0));
+        model
+            .properties
+            .insert("InputDelay".into(), Value::Num(0.0));
+        model
+            .properties
+            .insert("OutputDelay".into(), Value::Num(0.0));
+        model
+    }
+
+    #[test]
+    fn nested_resident_coefficients_gather_through_owner_after_preflight() {
+        let denominator = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &denominator)
+                    .expect("upload denominator");
+            let valid = raw_tf(Value::Num(2.0), Value::GpuTensor(resident.clone()));
+            provider.reset_telemetry();
+            let Value::Num(gain) =
+                block_on(dcgain_builtin(Value::Object(valid))).expect("resident tf")
+            else {
+                panic!("real scalar gain");
+            };
+            assert!((gain - 2.0 / 3.0).abs() < 1e-12);
+            assert!(provider.telemetry_snapshot().download_bytes > 0);
+
+            let mut unsupported = ObjectInstance::new(SS_CLASS.to_string());
+            unsupported
+                .properties
+                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+            provider.reset_telemetry();
+            let error = block_on(dcgain_builtin(Value::Object(unsupported)))
+                .expect_err("unsupported model");
+            assert_eq!(error.identifier(), Some("RunMat:dcgain:UnsupportedModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let mut incomplete = raw_tf(Value::Num(2.0), Value::GpuTensor(resident));
+            incomplete.properties.remove("Ts");
+            provider.reset_telemetry();
+            let error =
+                block_on(dcgain_builtin(Value::Object(incomplete))).expect_err("missing property");
+            assert_eq!(error.identifier(), Some("RunMat:dcgain:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn unrelated_resident_property_is_not_gathered() {
+        let tensor = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload");
+            let mut model = raw_tf(Value::Num(2.0), Value::Num(3.0));
+            model
+                .properties
+                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            let Value::Num(gain) = block_on(dcgain_builtin(Value::Object(model))).expect("gain")
+            else {
+                panic!("real scalar gain");
+            };
+            assert!((gain - 2.0 / 3.0).abs() < 1e-12);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
 
     #[test]
     fn continuous_dcgain_evaluates_at_zero() {
