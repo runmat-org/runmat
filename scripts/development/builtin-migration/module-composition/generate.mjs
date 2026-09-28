@@ -35,7 +35,7 @@ function renderAggregationExports(exports) {
   return exports.map((entry) => {
     const attributes = conditionLines(entry.condition);
     if (entry.doc_hidden) attributes.push("#[doc(hidden)]");
-    attributes.push(`${visibility(entry.visibility)}use ${entry.module}::${aggregationFunction(entry.role)};`);
+    attributes.push(`${visibility(entry.visibility)}use self::${entry.module}::${aggregationFunction(entry.role)};`);
     return attributes.join("\n");
   }).join("\n");
 }
@@ -57,12 +57,12 @@ function reexports(children) {
   return children.flatMap((child) => child.reexports.map((entry) => {
     const attributes = conditionLines(entry.condition);
     if (entry.doc_hidden) attributes.push("#[doc(hidden)]");
-    if (entry.kind === "glob") attributes.push(`${visibility(entry.visibility)}use ${child.module}::*;`);
+    if (entry.kind === "glob") attributes.push(`${visibility(entry.visibility)}use self::${child.module}::*;`);
     else if (entry.kind === "module") attributes.push(
-      `${visibility(entry.visibility)}use ${child.module}${entry.alias === null ? "" : ` as ${entry.alias}`};`,
+      `${visibility(entry.visibility)}use self::${child.module}${entry.alias === null ? "" : ` as ${entry.alias}`};`,
     );
     else attributes.push(
-      `${visibility(entry.visibility)}use ${child.module}::{`,
+      `${visibility(entry.visibility)}use self::${child.module}::{`,
       ...entry.items.map((item) => `    ${item.name}${item.alias === null ? "" : ` as ${item.alias}`},`),
       "};",
     );

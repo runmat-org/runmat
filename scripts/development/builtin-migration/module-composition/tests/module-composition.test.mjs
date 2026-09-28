@@ -17,7 +17,7 @@ test("renders and independently verifies the closed catalog and runtime grammar"
   ]);
   const catalog = generated[0].content;
   assert.match(catalog, /pub\(in crate::catalog\) mod arithmetic;/);
-  assert.match(catalog, /pub use arithmetic::\{ADD_CATALOG_ENTRY, SUB_CATALOG_ENTRY\};/);
+  assert.match(catalog, /pub use self::arithmetic::\{ADD_CATALOG_ENTRY, SUB_CATALOG_ENTRY\};/);
   assert.match(catalog, /values\.extend\(arithmetic::ENTRIES\.iter\(\)\.copied\(\)\);/);
   assert.match(catalog, /#\[cfg\(feature = "plot-core"\)\][\s\S]*values\.extend\(plotting::ALIASES\.iter\(\)\.copied\(\)\);/);
   assert.match(catalog, /values\.extend\(arithmetic::CONSTANTS\.iter\(\)\.copied\(\)\);/);
@@ -141,7 +141,7 @@ test("catalog aggregation implementations may be exact typed child exports", () 
     sourceKind: "file", role: "support", visibility: "private", declarationOrder: 0,
   })];
   const source = renderModuleCompositionProduct(product);
-  assert.match(source, /pub\(super\) use registry::extend_entries;/);
+  assert.match(source, /pub\(super\) use self::registry::extend_entries;/);
   assert.doesNotMatch(source, /fn extend_entries/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 
@@ -217,7 +217,7 @@ test("parent-scoped declarations and reexports remain closed and verifiable", ()
   })];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /pub\(super\) mod inference;/);
-  assert.match(source, /pub\(super\) use inference::infer;/);
+  assert.match(source, /pub\(super\) use self::inference::infer;/);
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });
 
@@ -287,7 +287,7 @@ test("module reexports retain their reviewed public alias", () => {
     products: [product],
   });
   assert.equal(parsed.products[0].children[0].reexports[0].alias, "fft");
-  assert.match(renderModuleCompositionProduct(parsed.products[0]), /pub use forward as fft;/);
+  assert.match(renderModuleCompositionProduct(parsed.products[0]), /pub use self::forward as fft;/);
 });
 
 test("conditions, hidden reexports, aliases, and independent reexport conditions round-trip", () => {
@@ -309,7 +309,7 @@ test("conditions, hidden reexports, aliases, and independent reexport conditions
   ];
   const source = renderModuleCompositionProduct(product);
   assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web"\)\)\]\npub mod plotting;/);
-  assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web", test\)\)\]\n#\[doc\(hidden\)\]\npub use plotting::evaluate as evaluate_plot;/);
+  assert.match(source, /#\[cfg\(all\(target_arch = "wasm32", feature = "plot-web", test\)\)\]\n#\[doc\(hidden\)\]\npub use self::plotting::evaluate as evaluate_plot;/);
   assert.deepEqual(parseGeneratedModuleComposition(source), parseGeneratedModuleComposition(renderModuleCompositionProduct(product)));
   assert.doesNotThrow(() => verifyModuleCompositionProduct(product, source));
 });

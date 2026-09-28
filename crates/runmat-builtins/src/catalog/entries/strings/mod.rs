@@ -4,8 +4,8 @@
 mod core;
 mod transform;
 
-pub use core::*;
-pub use transform::*;
+pub use self::core::*;
+pub use self::transform::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     core::extend_entries(values);

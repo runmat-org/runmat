@@ -3,7 +3,7 @@
 
 pub(in crate::catalog) mod core;
 
-pub use core::*;
+pub use self::core::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     core::extend_entries(values);

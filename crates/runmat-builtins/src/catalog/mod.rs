@@ -38,13 +38,13 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use self::entries::*;
 pub use alias::*;
 pub use callable::*;
 pub use constant::*;
 pub use contract::*;
 pub use descriptor::*;
 pub use documentation::*;
-pub use entries::*;
 pub use entry::*;
 pub use extension::*;
 pub use fingerprint::*;

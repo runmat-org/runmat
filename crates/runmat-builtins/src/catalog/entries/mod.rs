@@ -19,22 +19,22 @@ mod strings;
 pub(in crate::catalog) mod structs;
 mod value_distribution;
 
-pub use acceleration::*;
+pub use self::acceleration::*;
+pub use self::argument_validation::*;
+pub use self::array::*;
+pub use self::cells::*;
+pub use self::containers::*;
+pub use self::introspection::*;
+pub use self::io::*;
+pub use self::logical::*;
+pub use self::math::*;
+pub use self::parallel::*;
+pub use self::plotting::*;
+pub use self::stats::*;
+pub use self::strings::*;
+pub use self::structs::*;
+pub use self::value_distribution::*;
 use aggregation::extend_groups;
-pub use argument_validation::*;
-pub use array::*;
-pub use cells::*;
-pub use containers::*;
-pub use introspection::*;
-pub use io::*;
-pub use logical::*;
-pub use math::*;
-pub use parallel::*;
-pub use plotting::*;
-pub use stats::*;
-pub use strings::*;
-pub use structs::*;
-pub use value_distribution::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     acceleration::extend_entries(values);

@@ -4,7 +4,7 @@ mod legacy_index;
 pub use class_declarations::{standard_class_declaration, standard_class_is_subclass};
 pub use legacy_index::with_builtin_functions_by_exact_name;
 pub mod catalog;
-pub use catalog::*;
+pub use self::catalog::*;
 mod catalog_fingerprint;
 pub use catalog_fingerprint::{builtin_catalog_fingerprint, BUILTIN_CATALOG_SCHEMA};
 pub use runmat_types::ExecutionStackRequirement;
