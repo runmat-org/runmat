@@ -4,7 +4,9 @@ use std::cmp::min;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    cell_contains_string, char_row_to_string_slice, is_missing_string, is_multirow_char_array,
+};
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
@@ -353,7 +355,10 @@ async fn extract_between_builtin(
             BUILTIN_NAME,
         )?;
     }
-    if is_char_matrix(&text) || is_char_matrix(&start) || is_char_matrix(&stop) {
+    if is_multirow_char_array(&text)
+        || is_multirow_char_array(&start)
+        || is_multirow_char_array(&stop)
+    {
         crate::compatibility::ensure_builtin_extension_enabled(
             &CHAR_MATRIX_EXTENSION,
             BUILTIN_NAME,
@@ -498,19 +503,6 @@ fn is_resident_or_contains_resident(value: &Value) -> bool {
         Value::Cell(cell) => cell.data.iter().any(is_resident_or_contains_resident),
         Value::Struct(value) => value.fields.values().any(is_resident_or_contains_resident),
         Value::StructArray(array) => array.any_value(is_resident_or_contains_resident),
-        _ => false,
-    }
-}
-
-fn is_char_matrix(value: &Value) -> bool {
-    matches!(value, Value::CharArray(array) if array.rows > 1)
-}
-
-fn cell_contains_string(value: &Value) -> bool {
-    match value {
-        Value::Cell(cell) => cell.data.iter().any(|value| {
-            matches!(value, Value::String(_) | Value::StringArray(_)) || cell_contains_string(value)
-        }),
         _ => false,
     }
 }

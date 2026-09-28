@@ -27,7 +27,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("eraseBetween"), slug: Some("erasebetween"),
     summary: "Delete text between boundary markers in MATLAB and RunMat.",
     description: "eraseBetween(text, start, stop) removes text between two boundary markers. Text or numeric positions, expansion rules, and the Boundaries option determine the result.",
-    keywords: &["eraseBetween", "delete", "boundaries", "strings"],
+    keywords: &["eraseBetween", "delete", "delete substring", "boundaries", "inclusive", "exclusive", "string array", "strings"],
     related: &["extractBetween", "erase", "replace", "split", "join", "lower", "pad", "strcat", "strip", "strrep", "strtrim", "upper"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
     faqs: &[
@@ -53,6 +53,6 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "upper", target: BuiltinDocumentationLinkTarget::Builtin("upper") },
         SOURCE,
     ], media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "text, pattern, exact integer and compatibility behavior", location: "builtins::strings::transform::erasebetween::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "identity inference", location: "crates/runmat-builtins/src/catalog/entries/strings/transform/erasebetween/inference.rs" }], notes: &["All substantive sidecar behavior, seven examples, six FAQs, twelve links, and GPU/host constraints are retained. The former missing-string example had an incorrect second output: exclusive text boundaries retain angle brackets, so the result is Planner<>; the assertion and displayed result are corrected. The older GPU FAQ was too broad: only admitted numeric controls gather, never invalid numeric/resident text. Broader pattern-array representation remains an explicit partial gap."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "text, pattern, exact integer and compatibility behavior", location: "builtins::strings::transform::erasebetween::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "identity inference", location: "crates/runmat-builtins/src/catalog/entries/strings/transform/erasebetween/inference.rs" }], notes: &["Exclusive text boundaries retain their markers, as checked by the missing-string example. Only admitted numeric position controls may gather; invalid numeric or resident text does not. Broader pattern-array representation remains an explicit partial gap."] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };

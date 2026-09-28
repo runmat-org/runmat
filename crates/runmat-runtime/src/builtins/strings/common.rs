@@ -2,6 +2,20 @@
 use runmat_value::CharArray;
 
 use runmat_value::Value;
+
+pub(crate) fn is_multirow_char_array(value: &Value) -> bool {
+    matches!(value, Value::CharArray(array) if array.rows > 1)
+}
+
+pub(crate) fn cell_contains_string(value: &Value) -> bool {
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|value| {
+            matches!(value, Value::String(_) | Value::StringArray(_)) || cell_contains_string(value)
+        }),
+        _ => false,
+    }
+}
+
 /// Canonical display for missing string scalars in MATLAB-compatible output.
 const MISSING_SENTINEL: &str = "<missing>";
 

@@ -1,8 +1,9 @@
 //! MATLAB-compatible `erase` builtin with GPU-aware semantics for RunMat.
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, ERASE_ERROR_CELL_ELEMENT, ERASE_ERROR_INTERNAL,
-    ERASE_ERROR_INVALID_INPUT, ERASE_ERROR_PATTERN_TYPE,
+    BuiltinErrorDescriptor, ERASE_CHAR_MATRIX_EXTENSION, ERASE_ERROR_CELL_ELEMENT,
+    ERASE_ERROR_INTERNAL, ERASE_ERROR_INVALID_INPUT, ERASE_ERROR_PATTERN_TYPE,
+    ERASE_STRING_CELL_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
@@ -12,7 +13,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
+use crate::builtins::strings::common::{
+    cell_contains_string, char_row_to_string_slice, is_missing_string, is_multirow_char_array,
+};
 use crate::builtins::strings::core::compat::pattern_regex;
 #[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
@@ -79,6 +82,18 @@ async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
     }
     if contains_numeric_or_resident(&pattern) {
         return Err(erase_error(&ERASE_ERROR_PATTERN_TYPE));
+    }
+    if is_multirow_char_array(&text) || is_multirow_char_array(&pattern) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ERASE_CHAR_MATRIX_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if cell_contains_string(&text) || cell_contains_string(&pattern) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ERASE_STRING_CELL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
     }
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let pattern = gather_if_needed_async(&pattern).await.map_err(map_flow)?;
@@ -312,6 +327,42 @@ pub(crate) mod tests {
         futures::executor::block_on(super::erase_builtin(text, pattern))
     }
 
+    #[test]
+    fn erase_char_matrix_requires_runmat_mode() {
+        let matrix = Value::CharArray(
+            CharArray::new("abcdwxyz".chars().collect(), 2, 4).expect("character matrix"),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (text, pattern) in [
+            (matrix.clone(), Value::String("a".into())),
+            (Value::String("abcd".into()), matrix),
+        ] {
+            let error = erase_builtin(text, pattern).expect_err("char matrix is an extension");
+            assert_eq!(
+                error.identifier(),
+                ERASE_CHAR_MATRIX_EXTENSION.error_identifier
+            );
+        }
+    }
+
+    #[test]
+    fn erase_string_cell_requires_runmat_mode() {
+        let cell = Value::Cell(
+            CellArray::new(vec![Value::String("abcd".into())], 1, 1).expect("string cell"),
+        );
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (text, pattern) in [
+            (cell.clone(), Value::String("a".into())),
+            (Value::String("abcd".into()), cell),
+        ] {
+            let error = erase_builtin(text, pattern).expect_err("string cell is an extension");
+            assert_eq!(
+                error.identifier(),
+                ERASE_STRING_CELL_EXTENSION.error_identifier
+            );
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_string_scalar_single_pattern() {
@@ -408,6 +459,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_multiple_rows_sequential_patterns() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new(
             vec![
                 'G', 'P', 'U', ' ', 'p', 'i', 'p', 'e', 'l', 'i', 'n', 'e', 'C', 'P', 'U', ' ',
@@ -436,6 +488,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_cell_array_mixed_content() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("Kernel Planner")),
@@ -474,6 +527,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_cell_array_preserves_shape() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::String("alpha".into()),

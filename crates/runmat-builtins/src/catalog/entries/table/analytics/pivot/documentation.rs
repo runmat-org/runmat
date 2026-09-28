@@ -22,7 +22,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     examples: &[BuiltinExample {
         id: "grouped-sum", title: "Expand groups into summary columns",
-        program: "Group = [\"A\";\"A\";\"B\"]; Kind = [\"x\";\"y\";\"x\"]; Value = [1;2;3]; T = table(Group,Kind,Value); P = pivot(T, 'Group', 'Kind', 'Value');",
+        program: "Group = [\"A\";\"A\";\"B\"]; Kind = [\"x\";\"y\";\"x\"]; Value = [1;2;3]; T = table(Group,Kind,Value,'VariableNames',{'Group','Kind','Value'}); P = pivot(T, 'Group', 'Kind', 'Value');",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,

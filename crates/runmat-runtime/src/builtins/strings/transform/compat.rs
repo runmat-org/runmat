@@ -2734,9 +2734,10 @@ mod tests {
         assert_eq!(ERASE_URLS_DESCRIPTOR.signatures.len(), 2);
         assert_eq!(ERASE_PUNCTUATION_DESCRIPTOR.signatures.len(), 3);
         for name in ["eraseURLs", "erasePunctuation"] {
-            let builtin = runmat_builtins::builtin_function_by_name(name).expect("registered");
+            let builtin = runmat_builtins::builtin_integer_metadata_by_name(name)
+                .expect("integer metadata registered");
             assert_eq!(
-                builtin.integer_audit.expect("integer audit").kind,
+                builtin.audit.expect("integer audit").kind,
                 BuiltinIntegerAuditKind::NotApplicable
             );
         }

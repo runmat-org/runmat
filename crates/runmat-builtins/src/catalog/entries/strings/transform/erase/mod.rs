@@ -42,7 +42,7 @@ pub const ERASE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &ERASE_EXTENSIONS,
     integer_capabilities: &ERASE_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,

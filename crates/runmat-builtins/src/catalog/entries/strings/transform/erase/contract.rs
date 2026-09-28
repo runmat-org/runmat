@@ -1,5 +1,20 @@
 use crate::*;
 
+pub const ERASE_CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "erase-char-matrix",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "erase row-wise character-matrix input is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EraseCharMatrixExtension"),
+};
+pub const ERASE_STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "erase-string-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "erase cells containing string scalars are a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:EraseStringCellExtension"),
+};
+pub const ERASE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
+    [ERASE_CHAR_MATRIX_EXTENSION, ERASE_STRING_CELL_EXTENSION];
+
 const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "str", classes: &ALL_INTEGER_CLASSES,

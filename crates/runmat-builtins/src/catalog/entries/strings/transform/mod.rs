@@ -3,20 +3,26 @@
 
 mod append;
 mod deblank;
+mod erase;
 mod erase_punctuation;
 mod erase_urls;
+mod erasebetween;
 mod strjoin;
 
 pub use self::append::*;
 pub use self::deblank::*;
+pub use self::erase::*;
 pub use self::erase_punctuation::*;
 pub use self::erase_urls::*;
+pub use self::erasebetween::*;
 pub use self::strjoin::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(append::ENTRIES.iter().copied());
     values.extend(deblank::ENTRIES.iter().copied());
+    values.extend(erase::ENTRIES.iter().copied());
     values.extend(erase_punctuation::ENTRIES.iter().copied());
     values.extend(erase_urls::ENTRIES.iter().copied());
+    values.extend(erasebetween::ENTRIES.iter().copied());
     values.extend(strjoin::ENTRIES.iter().copied());
 }
