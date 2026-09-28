@@ -637,6 +637,16 @@ impl PlotOverlay {
         let Some((position, units)) = plot_renderer.overlay_position_for_axes(axes_index) else {
             return outer;
         };
+        Self::positioned_axes_rect(outer, position, &units)
+    }
+
+    fn positioned_axes_rect(outer: Rect, position: [f64; 4], units: &str) -> Rect {
+        // A newly created browser surface can be smaller than the overlay's
+        // margins. Keep the placement rectangle nonempty before clamping.
+        let outer = Rect::from_min_size(
+            outer.min,
+            egui::vec2(outer.width().max(1.0), outer.height().max(1.0)),
+        );
         let (left, bottom, width, height) = if units.eq_ignore_ascii_case("normalized") {
             (
                 position[0] as f32 * outer.width(),
@@ -3237,4 +3247,28 @@ fn truncate_label(label: &str, max_len: usize) -> String {
     }
     out.push('…');
     out
+}
+
+#[cfg(test)]
+mod positioned_axes_tests {
+    use super::PlotOverlay;
+    use egui::{pos2, vec2, Rect};
+
+    #[test]
+    fn positioned_axes_accepts_a_surface_smaller_than_overlay_margins() {
+        let outer = Rect::from_min_size(pos2(8.0, 8.0), vec2(0.0, 0.0));
+        let rect = PlotOverlay::positioned_axes_rect(outer, [0.2, 0.2, 0.6, 0.6], "normalized");
+        assert!(rect.min.x.is_finite() && rect.min.y.is_finite());
+        assert!(rect.width() >= 1.0 && rect.height() >= 1.0);
+    }
+
+    #[test]
+    fn positioned_axes_keeps_normalized_placement_on_a_regular_surface() {
+        let outer = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 100.0));
+        let rect = PlotOverlay::positioned_axes_rect(outer, [0.2, 0.2, 0.6, 0.6], "normalized");
+        assert!((rect.min.x - 20.0).abs() < 1.0e-4);
+        assert!((rect.min.y - 20.0).abs() < 1.0e-4);
+        assert!((rect.width() - 60.0).abs() < 1.0e-4);
+        assert!((rect.height() - 60.0).abs() < 1.0e-4);
+    }
 }

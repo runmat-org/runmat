@@ -141,10 +141,7 @@ fn view_supports_query_forms_and_presets() {
     reset_hold_state_for_run();
     let _ = clear_figure(None);
 
-    let ax = Value::Num(crate::builtins::plotting::state::encode_axes_handle(
-        current_figure_handle(),
-        0,
-    ));
+    let ax = Value::Num(crate::builtins::plotting::axes::axes_builtin(vec![]).unwrap());
     let _ = view_builtin(vec![ax.clone(), Value::Num(2.0)]).unwrap();
     let v = view_builtin(vec![ax.clone()]).unwrap();
     let t = Tensor::try_from(&v).unwrap();
@@ -163,10 +160,10 @@ fn view_handles_large_angles_and_property_roundtrip() {
     reset_hold_state_for_run();
     let _ = clear_figure(None);
 
-    let ax = Value::Num(crate::builtins::plotting::state::encode_axes_handle(
-        current_figure_handle(),
-        0,
-    ));
+    let ax_handle = crate::builtins::plotting::axes::axes_builtin(vec![]).unwrap();
+    let (figure_handle, axes_index) =
+        crate::builtins::plotting::state::decode_axes_handle(ax_handle).unwrap();
+    let ax = Value::Num(ax_handle);
     let _ = view_builtin(vec![ax.clone(), Value::Num(405.0), Value::Num(89.0)]).unwrap();
     let queried = get_builtin(vec![ax.clone(), Value::String("View".into())]).unwrap();
     let t = Tensor::try_from(&queried).unwrap();
@@ -178,10 +175,13 @@ fn view_handles_large_angles_and_property_roundtrip() {
         Value::Tensor(Tensor::new(vec![180.0, -30.0], vec![1, 2]).expect("view vector")),
     ])
     .unwrap();
-    let fig = clone_figure(current_figure_handle()).unwrap();
-    assert_eq!(fig.axes_metadata(0).unwrap().view_azimuth_deg, Some(180.0));
+    let fig = clone_figure(figure_handle).unwrap();
     assert_eq!(
-        fig.axes_metadata(0).unwrap().view_elevation_deg,
+        fig.axes_metadata(axes_index).unwrap().view_azimuth_deg,
+        Some(180.0)
+    );
+    assert_eq!(
+        fig.axes_metadata(axes_index).unwrap().view_elevation_deg,
         Some(-30.0)
     );
 }

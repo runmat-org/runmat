@@ -227,6 +227,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: REQUIRED_PATH_WORDS,
     },
     CommandVerb {
+        name: "opentoline",
+        arg_kind: REQUIRED_PATH_WORDS,
+    },
+    CommandVerb {
         name: "path",
         arg_kind: OPTIONAL_PATH_WORDS,
     },

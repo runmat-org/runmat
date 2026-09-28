@@ -19,6 +19,7 @@ fn explicit_file_preserves_order_and_escapes_source_text() {
     .expect("savepath");
     assert_eq!(super::support::status(&value), 0.0);
     let contents = std::fs::read_to_string(target).expect("pathdef");
+    assert!(contents.starts_with("function p = pathdef()\n"));
     assert!(contents.contains("%   alpha"));
     assert!(contents.contains("%   o'neil"));
     assert!(contents.contains("o''neil"));

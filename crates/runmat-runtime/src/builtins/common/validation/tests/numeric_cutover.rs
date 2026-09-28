@@ -27,7 +27,7 @@ fn every_numeric_guard_checks_outputs_before_data_or_provider_access() {
     ] {
         let error = block_on(crate::call_builtin_async_with_outputs(
             name,
-            &[resident.clone()],
+            std::slice::from_ref(&resident),
             1,
         ))
         .unwrap_err();

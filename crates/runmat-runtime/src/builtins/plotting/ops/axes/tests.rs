@@ -100,6 +100,51 @@ fn axes_selects_existing_axes() {
 }
 
 #[test]
+fn axes_creation_and_selection_publish_figure_changes() {
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    reset_plot_state();
+
+    let first = axes_builtin(Vec::new()).expect("first axes");
+    let handle = current_figure_handle();
+    assert_eq!(
+        crate::builtins::plotting::state::take_recent_figures(),
+        vec![handle]
+    );
+
+    axes_builtin(Vec::new()).expect("second axes");
+    assert_eq!(
+        crate::builtins::plotting::state::take_recent_figures(),
+        vec![handle]
+    );
+
+    axes_builtin(vec![Value::Num(first)]).expect("select first axes");
+    assert_eq!(
+        crate::builtins::plotting::state::take_recent_figures(),
+        vec![handle]
+    );
+}
+
+#[test]
+fn positioned_axes_can_render_without_a_plot() {
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    reset_plot_state();
+
+    axes_builtin(vec![
+        Value::from("Position"),
+        Value::Tensor(Tensor::new(vec![0.2, 0.2, 0.6, 0.6], vec![1, 4]).expect("position")),
+    ])
+    .expect("positioned axes");
+    let figure = current_figure_handle();
+    let image = futures::executor::block_on(crate::builtins::plotting::render_figure_snapshot(
+        figure, 640, 360, None,
+    ))
+    .expect("render positioned axes");
+    assert!(image.starts_with(b"\x89PNG\r\n\x1a\n"));
+}
+
+#[test]
 fn axes_parent_figure_selects_target_figure() {
     let _guard = lock_plot_registry();
     ensure_plot_test_env();

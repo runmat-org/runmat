@@ -207,11 +207,15 @@ function validatePortablePairs(inventory, results, plannedLanes) {
         const laneResults = units.map((unit) => resultById.get(unit.executionIdentity));
         if (laneResults.some((result) => !result)) throw new Error(`Portable example is missing a lane result: ${example.identity}`);
         const expectedIdentifier = example.verification?.ExpectedError?.identifier;
+        const assertionContract = example.verification && typeof example.verification === "object" && "Assertions" in example.verification;
         if (typeof expectedIdentifier === "string") {
             for (const result of laneResults) {
                 if (result.errorIdentifier !== expectedIdentifier) throw new Error(`Portable expected-error identifiers disagree: ${example.identity}`);
             }
-        } else if (laneResults.every((result) => result.status === "passed")) {
+        } else if (laneResults.every((result) => result.status === "passed") && !assertionContract) {
+            // Assertions establish the portable contract for host-dependent observations,
+            // such as the working or temporary directory. Their display text is not an
+            // exact output contract; each lane has already executed the assertions.
             const actual = new Set(laneResults.map((result) => result.normalizedActual));
             if (actual.size !== 1) throw new Error(`Portable lane outputs disagree: ${example.identity}`);
         }

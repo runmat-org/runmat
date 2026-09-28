@@ -184,6 +184,8 @@ fn exist_detects_files_and_mex() {
 
     File::create("script.m").expect("create m-file");
     File::create("fastfft.mexw64").expect("create mex");
+    File::create("data.txt").expect("create text file");
+    File::create("packed.p").expect("create p-code file");
 
     let script = exist_builtin(Value::from("script"), vec![Value::from("file")]).expect("exist");
     assert_eq!(script, Value::Num(2.0));
@@ -194,6 +196,14 @@ fn exist_detects_files_and_mex() {
     let mex_specific =
         exist_builtin(Value::from("fastfft"), vec![Value::from("mex")]).expect("exist");
     assert_eq!(mex_specific, Value::Num(3.0));
+
+    let text =
+        exist_builtin(Value::from("data.txt"), vec![Value::from("file")]).expect("exist text file");
+    assert_eq!(text, Value::Num(2.0));
+
+    let pcode = exist_builtin(Value::from("packed.p"), vec![Value::from("file")])
+        .expect("exist p-code file");
+    assert_eq!(pcode, Value::Num(6.0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
