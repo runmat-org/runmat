@@ -101,7 +101,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         if request
             .literals
             .literal_string_at(index)
-            .is_some_and(|name| name != "boundaries")
+            .is_some_and(|name| !name.eq_ignore_ascii_case("boundaries"))
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-EXTRACT-BETWEEN-OPTION",
@@ -127,7 +127,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         if request
             .literals
             .literal_string_at(index + 1)
-            .is_some_and(|value| !matches!(value.as_str(), "inclusive" | "exclusive"))
+            .is_some_and(|value| {
+                !value.eq_ignore_ascii_case("inclusive") && !value.eq_ignore_ascii_case("exclusive")
+            })
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-EXTRACT-BETWEEN-OPTION",
@@ -393,5 +395,24 @@ mod tests {
             matrix_result.outputs[0].shape,
             ShapeFact::from(vec![Some(2), None])
         );
+    }
+
+    #[test]
+    fn boundaries_option_accepts_runtime_case_insensitive_spellings() {
+        let text = ValueFact::scalar(ValueKindFact::String);
+        let result = infer(
+            &request(
+                vec![text.clone(), text.clone(), text.clone(), text.clone(), text],
+                vec![
+                    LiteralValue::Unknown,
+                    LiteralValue::Unknown,
+                    LiteralValue::Unknown,
+                    LiteralValue::String("Boundaries".into()),
+                    LiteralValue::String("Inclusive".into()),
+                ],
+            ),
+            &super::super::EXTRACT_BETWEEN_CATALOG_ENTRY,
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 }

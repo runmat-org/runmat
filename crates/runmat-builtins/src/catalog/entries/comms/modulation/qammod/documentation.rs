@@ -18,7 +18,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Constellation and controls", paragraphs: &[
             "X must contain finite whole symbols from 0 through M-1. M must be a power of two greater than one. Square orders use symmetric odd in-phase and quadrature amplitudes; non-square powers of two use a rectangular grid with the longer in-phase axis.",
-            "Gray order is the default and applies to each grid axis. 'bin' uses binary order; a custom permutation labels constellation points. InputType='bit' groups rows in log2(M) chunks per channel, first bit most significant. Logical arrays require bit input; scalar logical values are accepted as symbol zero or one. UnitAveragePower=true scales the constellation to average unit power.",
+            "Gray order is the default and applies to each grid axis. 'bin' uses binary order; a custom permutation labels constellation points. InputType='bit' groups rows in log2(M) chunks per channel, first bit most significant. Logical inputs, including scalars, require bit input. UnitAveragePower=true scales the constellation to average unit power.",
             "PlotConstellation=true is recognized but explicitly unsupported. The output precision defaults to single only when X has single storage, otherwise double; OutputDataType selects 'single' or 'double'.",
         ] },
         BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[

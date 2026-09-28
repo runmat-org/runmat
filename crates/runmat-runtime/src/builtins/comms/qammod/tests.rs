@@ -627,3 +627,12 @@ fn qammod_typed_integer_tensors_preserve_exact_symbol_values() {
         assert_eq!(parse_modulation_order(&Value::Tensor(order)).unwrap(), 4);
     }
 }
+
+#[test]
+fn qammod_rejects_near_integer_controls_and_matrix_symbol_order() {
+    assert!(number_to_symbol_with_name(1.0 + 5e-10, "X").is_err());
+    assert!(number_to_symbol_with_name(4.0 + 5e-10, "M").is_err());
+    assert!(value_as_bool(&Value::Num(1.0 - 5e-10), "InputType").is_err());
+    let matrix = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
+    assert!(parse_symbol_mapping(&Value::Tensor(matrix), 4).is_err());
+}

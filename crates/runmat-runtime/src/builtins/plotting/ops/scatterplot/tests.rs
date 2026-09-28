@@ -4,6 +4,7 @@ use crate::builtins::plotting::{
     clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
 };
 use futures::executor::block_on;
+use runmat_builtins::SCATTERPLOT_DESCRIPTOR;
 use runmat_plot::plots::{scatter::MarkerStyle, PlotElement};
 use runmat_value::ComplexTensor;
 use runmat_value::{IntegerStorage, NumericStorage};
@@ -211,8 +212,12 @@ fn scatterplot_descriptor_lists_matlab_call_forms() {
 
 #[test]
 fn scatterplot_is_registered_with_descriptor() {
-    let builtin =
-        runmat_builtins::builtin_function_by_name("scatterplot").expect("scatterplot registered");
-    assert_eq!(builtin.category, "communications/plotting");
-    assert!(builtin.descriptor.is_some());
+    let entry = runmat_builtins::builtin_catalog_entry_by_name("scatterplot")
+        .expect("scatterplot registered in the typed catalog");
+    assert_eq!(entry.category, "communications/plotting");
+    assert!(entry
+        .descriptor
+        .signatures
+        .iter()
+        .any(|signature| signature.label == "h = scatterplot(x, n, offset, marker, scatfig)"));
 }

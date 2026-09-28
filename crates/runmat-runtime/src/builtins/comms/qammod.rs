@@ -18,7 +18,6 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "qammod";
-const INTEGER_TOL: f64 = 1e-9;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::comms::qammod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -694,6 +693,11 @@ fn invert_mapping(mapping: &[usize], order: usize) -> BuiltinResult<Vec<usize>> 
 fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(tensor) => {
+            if tensor.shape.len() > 2
+                || (tensor.shape.len() == 2 && tensor.shape[0] > 1 && tensor.shape[1] > 1)
+            {
+                return Err(qammod_error(format!("qammod: {name} must be a vector")));
+            }
             if let Some(storage) = tensor.integer_storage() {
                 integer_storage_to_symbols(storage, name)
             } else {
@@ -703,7 +707,14 @@ fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
                     .collect()
             }
         }
-        Value::LogicalArray(logical) => Ok(logical.data.iter().map(|&v| usize::from(v)).collect()),
+        Value::LogicalArray(logical) => {
+            if logical.shape.len() > 2
+                || (logical.shape.len() == 2 && logical.shape[0] > 1 && logical.shape[1] > 1)
+            {
+                return Err(qammod_error(format!("qammod: {name} must be a vector")));
+            }
+            Ok(logical.data.iter().map(|&v| usize::from(v)).collect())
+        }
         Value::Num(n) => Ok(vec![number_to_symbol_with_name(*n, name)?]),
         Value::Int(i) => Ok(vec![integer_to_symbol_with_name(i, name)?]),
         Value::Bool(b) => Ok(vec![usize::from(*b)]),
@@ -747,19 +758,18 @@ fn number_to_symbol_with_name(value: f64, name: &str) -> BuiltinResult<usize> {
             "qammod: {name} values must be finite integers"
         )));
     }
-    let rounded = value.round();
-    if (value - rounded).abs() > INTEGER_TOL || rounded < 0.0 {
+    if value.fract() != 0.0 || value < 0.0 {
         return Err(qammod_error(format!(
             "qammod: {name} values must be nonnegative integers"
         )));
     }
-    if rounded > usize::MAX.saturating_sub(1) as f64 {
+    if value > usize::MAX.saturating_sub(1) as f64 {
         return Err(qammod_error(format!(
             "qammod: {name} value is too large for this platform"
         )));
     }
-    let parsed = rounded as usize;
-    if parsed as f64 != rounded || parsed == usize::MAX {
+    let parsed = value as usize;
+    if parsed as f64 != value || parsed == usize::MAX {
         return Err(qammod_error(format!(
             "qammod: {name} value is too large for this platform"
         )));
@@ -806,9 +816,9 @@ fn symbols_to_bits(symbols: Vec<usize>, name: &str) -> BuiltinResult<Vec<u8>> {
 
 fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
     let n = scalar_number(value, name)?;
-    if (n - 0.0).abs() <= INTEGER_TOL {
+    if n == 0.0 {
         Ok(false)
-    } else if (n - 1.0).abs() <= INTEGER_TOL {
+    } else if n == 1.0 {
         Ok(true)
     } else {
         Err(qammod_error(format!(

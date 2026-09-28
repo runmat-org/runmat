@@ -2,7 +2,7 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    SCATTERPLOT_DESCRIPTOR, SCATTERPLOT_ERROR_INVALID_ARGUMENT, SCATTERPLOT_ERROR_PLOT_FAILED,
+    BuiltinErrorDescriptor, SCATTERPLOT_ERROR_INVALID_ARGUMENT, SCATTERPLOT_ERROR_PLOT_FAILED,
     SCATTERPLOT_INTEGER_CONTROL_EXTENSION, SCATTERPLOT_INTEGER_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
@@ -38,7 +38,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "scatterplot forwards GPU-resident real/imag buffers to scatter for zero-copy plotting when no decimation is requested; decimated or unsupported inputs gather once.",
+    notes: "scatterplot extracts GPU-resident real/imag components into provider buffers and forwards them to scatter without host readback when no decimation is requested; decimated or unsupported inputs gather once.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::scatterplot")]
@@ -407,4 +407,5 @@ fn scatterplot_map_plot_error(err: RuntimeError) -> RuntimeError {
 }
 
 #[cfg(test)]
+#[path = "scatterplot/tests.rs"]
 mod tests;

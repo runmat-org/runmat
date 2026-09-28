@@ -84,6 +84,25 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, scheme: Scheme) -> 
         ));
     }
 
+    let mapping_index = if matches!(scheme, Scheme::Psk) { 3 } else { 2 };
+    if request.arguments.get(mapping_index).is_some_and(|fact| {
+        matches!(
+            fact.kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical
+        ) && fact.shape.known_dims().is_some_and(|dims| {
+            dims.len() > 2
+                || (dims.len() == 2
+                    && dims[0].is_some_and(|rows| rows > 1)
+                    && dims[1].is_some_and(|cols| cols > 1))
+        })
+    }) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-MODULATION-MAPPING-SHAPE",
+            "custom symbol order must be a vector",
+            mapping_index,
+        ));
+    }
+
     let mut bit_input = false;
     let mut output_class = match scheme {
         Scheme::Psk => NumericClass::Double,
@@ -154,9 +173,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, scheme: Scheme) -> 
     }
     if !bit_input
         && bit_input_known
-        && input.is_some_and(|fact| {
-            fact.kind == ValueKindFact::Logical && fact.storage != StorageFact::Scalar
-        })
+        && input.is_some_and(|fact| fact.kind == ValueKindFact::Logical)
     {
         diagnostics.push(argument_error(
             "RM-CATALOG-MODULATION-LOGICAL",

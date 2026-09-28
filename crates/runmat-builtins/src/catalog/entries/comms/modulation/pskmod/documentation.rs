@@ -18,7 +18,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Symbols and mapping", paragraphs: &[
             "Integer-symbol input must contain finite whole values from 0 through M-1. M must be an integer greater than one. The default phase offset is zero and default symbol order is Gray; 'bin' maps symbol k to phaseoffset + 2*pi*k/M.",
-            "A custom symbol-order vector has M distinct whole values from 0 through M-1 and labels constellation points counter-clockwise from the phase offset. InputType='bit' groups rows by log2(M) with the first bit as most significant; it requires a power-of-two M and preserves the remaining channel dimensions. Logical arrays require bit input; scalar logical values are accepted as symbol zero or one.",
+            "A custom symbol-order vector has M distinct whole values from 0 through M-1 and labels constellation points counter-clockwise from the phase offset. InputType='bit' groups rows by log2(M) with the first bit as most significant; it requires a power-of-two M and preserves the remaining channel dimensions. Logical inputs, including scalars, require bit input.",
             "Typed-integer M, phase offset, and custom symbol-order controls are independently gated RunMat extensions. In strict MATLAB mode those extension forms fail before modulation. PlotConstellation=true is recognized but reports an explicit unsupported-operation error.",
         ] },
         BuiltinDocumentationSection { heading: "Precision and execution", paragraphs: &[

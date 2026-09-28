@@ -90,3 +90,47 @@ fn psk_rejects_known_invalid_order_and_unsupported_wide_class() {
         .iter()
         .any(|d| d.code == "RM-CATALOG-MODULATION-CLASS"));
 }
+
+#[test]
+fn psk_rejects_logical_scalar_without_bit_input() {
+    let result = infer(
+        ValueFact::scalar(ValueKindFact::Logical),
+        vec![LiteralValue::Unknown, LiteralValue::Number(4.0)],
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-MODULATION-LOGICAL"));
+}
+
+#[test]
+fn psk_rejects_known_matrix_custom_symbol_order() {
+    let result = crate::infer_catalog_call(
+        &PSKMOD_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![
+                signal(NumericClass::Double, 1, 4),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                signal(NumericClass::Double, 2, 2),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(4.0),
+                LiteralValue::Number(0.0),
+                LiteralValue::Unknown,
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-MODULATION-MAPPING-SHAPE"));
+}
