@@ -1,5 +1,13 @@
 use crate::*;
 
+pub const UPPER_STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "upper-string-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "upper with string scalars inside a cell array is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:UpperStringCellExtension"),
+};
+pub const UPPER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [UPPER_STRING_CELL_EXTENSION];
+
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
     ty: BuiltinParamType::Any,

@@ -1,5 +1,13 @@
 use crate::*;
 
+pub const LOWER_STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "lower-string-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "lower with string scalars inside a cell array is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:LowerStringCellExtension"),
+};
+pub const LOWER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [LOWER_STRING_CELL_EXTENSION];
+
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
     ty: BuiltinParamType::Any,

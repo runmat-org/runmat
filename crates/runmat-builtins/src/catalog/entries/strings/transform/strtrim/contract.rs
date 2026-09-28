@@ -1,5 +1,13 @@
 use crate::*;
 
+pub const STRTRIM_STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "strtrim-string-cell",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "strtrim with string scalars inside a cell array is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:StrtrimStringCellExtension"),
+};
+pub const STRTRIM_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [STRTRIM_STRING_CELL_EXTENSION];
+
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
     ty: BuiltinParamType::Any,

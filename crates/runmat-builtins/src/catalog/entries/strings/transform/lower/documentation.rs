@@ -3,8 +3,8 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Text containers", paragraphs: &[
         "lower(text) converts alphabetic code points to lowercase. Non-alphabetic characters pass through unchanged; string arrays preserve shape, orientation and missing values.",
-        "Character arrays are processed row by row. A lowercase mapping can expand a character (for example İ); output width can grow and shorter rows are padded to keep the array rectangular.",
-        "Cell arrays retain their dimensions and must contain string scalars or character row vectors. Numeric, logical, struct and resident numeric inputs are not text and raise an input error.",
+        "Character arrays are processed row by row. MATLAB documents Latin-1 character-array case conversion and Unicode string-array conversion. RunMat currently applies Unicode lowercase mappings to character arrays as well; mappings outside the documented MATLAB character set, such as İ, can expand output width and are not claimed as verified MATLAB parity.",
+        "Cell arrays retain their dimensions. Character-vector cells are supported in both compatibility modes; cells containing string scalars are a RunMat-only extension. Numeric, logical, struct and resident numeric inputs are not text.",
     ] },
     BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
         "lower runs on host text with no provider kernel or fusion path. It does not implicitly convert or gather a numeric GPU handle; convert code points to host text explicitly first.",
@@ -31,7 +31,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Does lower change non-alphabetic characters?", answer: "No. Digits, punctuation, whitespace and symbols remain untouched; alphabetic code points with lowercase mappings change." },
         BuiltinDocumentationFaq { question: "What happens to character-array dimensions?", answer: "Rows stay rectangular. A lowercase mapping may expand a character, in which case the output gains columns and shorter rows are padded with spaces." },
         BuiltinDocumentationFaq { question: "Can numeric arrays be passed to lower?", answer: "No. Numeric, logical and struct inputs raise a type error. Convert them to strings or character arrays explicitly first." },
-        BuiltinDocumentationFaq { question: "How are missing strings handled?", answer: "A missing string remains missing; it is not the literal text <missing>." },
+        BuiltinDocumentationFaq { question: "How are missing strings handled?", answer: "The current string storage uses a sentinel for missing values. lower leaves that sentinel unchanged; it cannot yet distinguish it from an identical literal spelling." },
         BuiltinDocumentationFaq { question: "Does lower execute on the GPU?", answer: "No. There is no resident-text representation or provider string kernel. Numeric GPU handles reject without implicit gathering; gather code points and convert them to text explicitly first." },
     ],
     links: &[
@@ -51,11 +51,12 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "strip", target: BuiltinDocumentationLinkTarget::Builtin("strip") },
         BuiltinDocumentationLink { label: "strrep", target: BuiltinDocumentationLinkTarget::Builtin("strrep") },
         BuiltinDocumentationLink { label: "strtrim", target: BuiltinDocumentationLinkTarget::Builtin("strtrim") },
+        BuiltinDocumentationLink { label: "MATLAB lower character-set support", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/string.lower.html") },
         SOURCE,
     ], media: &[],
     evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "text containers and errors", location: "builtins::strings::transform::lower::tests" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "static facts", location: "crates/runmat-builtins/src/catalog/entries/strings/transform/lower/inference.rs" },
-    ], notes: &["All six legacy examples, five FAQs, 16 related links and text/GPU behavior fields are represented. The old missing example used a literal <missing> string; this version constructs a missing value. The old GPU FAQ incorrectly claimed implicit gathering, contradicting runtime admission and the sidecar residency section."], },
-    introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+    ], notes: &["Character-array mappings outside MATLAB's documented Latin-1 support remain unverified; RunMat currently uses Unicode case mapping. Missing strings and the literal sentinel spelling share a storage representation. Cells containing string scalars require RunMat compatibility mode."], },
+    introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };

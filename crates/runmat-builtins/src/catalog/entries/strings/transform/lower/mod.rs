@@ -11,7 +11,7 @@ pub const LOWER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     documentation: documentation::DOCUMENTATION,
     descriptor: &LOWER_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
-        maturity: BuiltinContractMaturity::Complete,
+        maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             inference::infer,
         )),
@@ -42,7 +42,7 @@ pub const LOWER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &LOWER_EXTENSIONS,
     integer_capabilities: &[],
     integer_audit: Some(&LOWER_INTEGER_AUDIT),
     suppress_auto_output: false,

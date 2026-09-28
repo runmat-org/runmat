@@ -2,7 +2,7 @@
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, LOWER_ERROR_CELL_ELEMENT, LOWER_ERROR_INTERNAL,
-    LOWER_ERROR_INVALID_INPUT,
+    LOWER_ERROR_INVALID_INPUT, LOWER_STRING_CELL_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
@@ -75,6 +75,12 @@ async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
     if crate::dispatcher::value_contains_gpu(&value) {
         return Err(lower_error(&LOWER_ERROR_INVALID_INPUT));
     }
+    if cell_has_valid_string_scalar(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOWER_STRING_CELL_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
         Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),
@@ -83,6 +89,22 @@ async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Cell(cell) => lower_cell_array(cell),
         _ => Err(lower_error(&LOWER_ERROR_INVALID_INPUT)),
     }
+}
+
+fn cell_has_valid_string_scalar(value: &Value) -> bool {
+    let Value::Cell(cell) = value else {
+        return false;
+    };
+    let mut has_string = false;
+    for element in &cell.data {
+        match element {
+            Value::String(_) => has_string = true,
+            Value::StringArray(array) if array.data.len() == 1 => has_string = true,
+            Value::CharArray(chars) if chars.rows <= 1 => {}
+            _ => return false,
+        }
+    }
+    has_string
 }
 
 fn lower_string_array(array: StringArray) -> BuiltinResult<Value> {
@@ -249,6 +271,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn lower_char_array_unicode_expansion_extends_width() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let data: Vec<char> = vec!['İ', 'A'];
         let array = CharArray::new(data, 1, 2).unwrap();
         let result = run_lower(Value::CharArray(array)).expect("lower");
@@ -265,7 +288,16 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn lower_strict_latin1_character_mapping() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let result = run_lower(Value::CharArray(CharArray::new_row("ÉCOLE"))).unwrap();
+        assert_eq!(result, Value::CharArray(CharArray::new_row("école")));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn lower_cell_array_mixed_content() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("RUN")),
@@ -285,6 +317,42 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell array, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn lower_string_cell_is_mode_gated_before_gather() {
+        let cell = CellArray::new(vec![Value::String("DATA".into())], 1, 1).unwrap();
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+            let error = run_lower(Value::Cell(cell.clone())).expect_err("strict cellstr contract");
+            assert_eq!(
+                error.identifier(),
+                LOWER_STRING_CELL_EXTENSION.error_identifier
+            );
+            let scalar = StringArray::new(vec!["DATA".into()], vec![1, 1]).unwrap();
+            let wrapped = CellArray::new(vec![Value::StringArray(scalar)], 1, 1).unwrap();
+            let error = run_lower(Value::Cell(wrapped)).expect_err("scalar string-array cell");
+            assert_eq!(
+                error.identifier(),
+                LOWER_STRING_CELL_EXTENSION.error_identifier
+            );
+        }
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = run_lower(Value::Cell(cell)).expect("RunMat text cell extension");
+        let Value::Cell(result) = result else {
+            panic!("cell output")
+        };
+        assert_eq!(result.get(0, 0).unwrap(), Value::String("data".into()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn lower_invalid_mixed_cell_keeps_element_error() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let cell = CellArray::new(vec![Value::String("A".into()), Value::Num(1.0)], 1, 2).unwrap();
+        let error = run_lower(Value::Cell(cell)).expect_err("invalid cell element");
+        assert_eq!(error.identifier(), LOWER_ERROR_CELL_ELEMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
