@@ -1,14 +1,6 @@
 //! Damping ratio and natural-frequency analysis for control models.
 
 use num_complex::Complex64;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
@@ -20,111 +12,9 @@ use crate::builtins::control::tf_model::{
     control_error, output_complex_column, polynomial_roots, ss_poles_from_object, TfModel, EPS,
     SS_CLASS, TF_CLASS,
 };
-use crate::builtins::control::type_resolvers::damp_type;
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "damp";
-const DAMP_PARAM_WN: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "wn",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Natural frequencies as an N-by-1 column vector.",
-};
-const DAMP_PARAM_ZETA: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "zeta",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Damping ratios as an N-by-1 column vector.",
-};
-const DAMP_PARAM_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Model poles as an N-by-1 real or complex column vector.",
-};
-const DAMP_OUTPUT_WN: [BuiltinParamDescriptor; 1] = [DAMP_PARAM_WN];
-const DAMP_OUTPUT_WNZETA: [BuiltinParamDescriptor; 2] = [DAMP_PARAM_WN, DAMP_PARAM_ZETA];
-const DAMP_OUTPUT_WNZETAP: [BuiltinParamDescriptor; 3] =
-    [DAMP_PARAM_WN, DAMP_PARAM_ZETA, DAMP_PARAM_P];
-const DAMP_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf model or ss state-space model.",
-}];
-const DAMP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "wn = damp(sys)",
-        inputs: &DAMP_INPUTS,
-        outputs: &DAMP_OUTPUT_WN,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[wn, zeta] = damp(sys)",
-        inputs: &DAMP_INPUTS,
-        outputs: &DAMP_OUTPUT_WNZETA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[wn, zeta, p] = damp(sys)",
-        inputs: &DAMP_INPUTS,
-        outputs: &DAMP_OUTPUT_WNZETAP,
-    },
-];
-const DAMP_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.INVALID_MODEL",
-        identifier: Some("RunMat:damp:InvalidModel"),
-        when: "Input system is malformed or missing model metadata.",
-        message: "damp: invalid model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.UNSUPPORTED_MODEL",
-        identifier: Some("RunMat:damp:UnsupportedModel"),
-        when: "Model class is unsupported.",
-        message: "damp: unsupported model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.OUTPUT_COUNT",
-        identifier: Some("RunMat:damp:OutputCount"),
-        when: "More than three outputs are requested.",
-        message: "damp: too many output arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.INTERNAL",
-        identifier: Some("RunMat:damp:Internal"),
-        when: "Pole extraction or output construction failed.",
-        message: "damp: internal error",
-    },
-];
-pub const DAMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DAMP_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DAMP_ERRORS,
-};
-
-const DAMP_INTEGER_SYS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "sys",
-    classes: &[],
-    availability: BuiltinIntegerInputAvailability::Rejected,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "damp accepts a dynamic-system object. Integer coefficient support belongs to the tf/ss constructors and does not make an integer array a valid sys input.",
-}];
-
-pub const DAMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[wn, zeta, p] = damp(integer_sys)",
-        inputs: &DAMP_INTEGER_SYS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer input is inapplicable at the object boundary and rejects without provider dispatch. Model coefficients have already crossed their constructor's documented numeric boundary.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::damp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -158,9 +48,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     category = "control",
     summary = "Return natural frequencies, damping ratios, and poles for control models.",
     keywords = "damp,damping ratio,natural frequency,poles,control system,tf,ss",
-    type_resolver(damp_type),
-    descriptor(crate::builtins::control::damp::DAMP_DESCRIPTOR),
-    integer_capabilities(crate::builtins::control::damp::DAMP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::damp"
 )]
 async fn damp_builtin(sys: Value) -> BuiltinResult<Value> {
@@ -327,6 +215,9 @@ fn damp_error(identifier: &'static str, message: impl Into<String>) -> crate::Ru
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{
+        BuiltinIntegerInputAvailability, DAMP_DESCRIPTOR, DAMP_INTEGER_CAPABILITIES,
+    };
     use runmat_value::ComplexTensor;
 
     fn tf(numerator: Value, denominator: Value, rest: &[Value]) -> Value {
