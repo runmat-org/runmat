@@ -1,8 +1,8 @@
-use super::{default_double_scalar, finish_fixed};
+use super::finish_fixed;
 use crate::{BuiltinCatalogEntry, BuiltinInferenceRule, ParallelInferenceRule};
 use runmat_types::{
-    codistributor_fact, infer_call, CallContract, CallInference, CallRequest, CodistributorClass,
-    DynamicReason, ExecutionFact, ShapeFact, ValueFact, ValueKindFact,
+    codistributor_fact, CallInference, CallRequest, CodistributorClass, DynamicReason, ShapeFact,
+    ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer_parallel_data(
@@ -78,33 +78,11 @@ pub(super) fn infer_parallel_data(
         | ParallelInferenceRule::Codistributed
         | ParallelInferenceRule::CodistributedBuild
         | ParallelInferenceRule::Receive => ValueFact::unknown(DynamicReason::RuntimeValue),
-        ParallelInferenceRule::FetchNext
-        | ParallelInferenceRule::FetchOutputs
-        | ParallelInferenceRule::GetCurrentJob
+        ParallelInferenceRule::GetCurrentJob
         | ParallelInferenceRule::GetCurrentTask
         | ParallelInferenceRule::GetCurrentWorker => {
             unreachable!("parallel rule was routed to its dedicated inference handler")
         }
     };
     finish_fixed(entry, request, output, Vec::new())
-}
-
-pub(super) fn infer_parallel_fetch(
-    request: &CallRequest,
-    entry: &BuiltinCatalogEntry,
-    include_index: bool,
-) -> CallInference {
-    let payload = match request.arguments.first().map(|fact| &fact.kind) {
-        Some(ValueKindFact::Execution(ExecutionFact::Future { output, .. })) => output.clone(),
-        _ => runmat_types::ValueSequenceFact::dynamic(),
-    };
-    let mut outputs = Vec::new();
-    if include_index {
-        outputs.push(default_double_scalar());
-    }
-    outputs.extend(payload.outputs);
-    let mut contract = CallContract::fixed(outputs);
-    contract.effects = entry.contract.effect_set();
-    contract.capabilities = entry.contract.capability_set();
-    infer_call(&contract, request)
 }

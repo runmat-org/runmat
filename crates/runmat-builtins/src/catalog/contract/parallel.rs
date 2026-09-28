@@ -12,8 +12,6 @@ pub enum ParallelInferenceRule {
     Codistributor2dbc,
     CodistributorIsComplete,
     Distributed,
-    FetchNext,
-    FetchOutputs,
     FunctionalReduce,
     GetCodistributor,
     GetCurrentJob,

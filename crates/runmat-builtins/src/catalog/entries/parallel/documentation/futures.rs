@@ -26,8 +26,8 @@ const SCHEDULING_SECTIONS: &[BuiltinDocumentationSection] = &[
 ];
 const FETCH_SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Fetching waits through the session's async execution service and preserves the scheduled callable's output count, classes, shapes, and structured errors. Reading a future does not redefine its result contract.",
-        "Future arrays retain one-based source indices. `fetchNext` marks one completed result as read; `fetchOutputs(..., \"UniformOutput\", false)` returns cell arrays when outputs should not be concatenated.",
+        "Fetching waits through the session's async execution service. A single future returns the scheduled callable's requested outputs and structured errors; fetching several worker results assembles each output by vertical concatenation by default.",
+        "Future arrays retain one-based source indices. `fetchNext` marks one completed result as read; a timeout can return `[]` in every requested output slot. `fetchOutputs(..., \"UniformOutput\", false)` returns cell arrays instead of concatenating multiple results.",
     ] },
     BuiltinDocumentationSection { heading: "Execution placement", paragraphs: &[
         "Fetch operations cross the worker-to-client result boundary. Numeric placement after transfer follows the scheduled callable and result-assembly contract rather than a provider rule owned by the fetch builtin.",
@@ -56,7 +56,7 @@ const SCHEDULE_FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "How are worker failures reported?", answer: "Structured identifiers, messages, call stacks, and source locations cross the execution boundary." },
 ];
 const FETCH_FAQS: &[BuiltinDocumentationFaq] = &[
-    BuiltinDocumentationFaq { question: "Does fetching change output classes?", answer: "No. Output facts come from the scheduled callable and its result contract." },
+    BuiltinDocumentationFaq { question: "Does fetching change output classes?", answer: "A single future returns its callable's output. Fetching multiple results concatenates them by default; `UniformOutput`, false instead returns cells." },
     BuiltinDocumentationFaq { question: "Can fetching suspend?", answer: "Yes. It waits through the session async runtime until a matching result, timeout, cancellation, or failure is available." },
     BuiltinDocumentationFaq { question: "What does `UniformOutput` control?", answer: "For future arrays, false preserves each result in a cell instead of concatenating compatible values." },
     BuiltinDocumentationFaq { question: "Can the same result be returned twice by `fetchNext`?", answer: "No. A selected future is marked read before the next completion-order selection." },
@@ -101,5 +101,5 @@ macro_rules! future_documentation {
 
 future_documentation!(PARFEVAL_DOCUMENTATION, "parfeval", "Schedule one asynchronous function invocation on a pool.", "`parfeval` freezes a callable, output count, and arguments into a typed work request and returns its future.", &["parallel", "future", "async", "parfeval", "scheduler"], &["fetchNext", "fetchOutputs", "gcp", "parfevalOnAll", "parpool"], SCHEDULING_SECTIONS, PARFEVAL_EXAMPLES, SCHEDULE_FAQS);
 future_documentation!(PARFEVAL_ON_ALL_DOCUMENTATION, "parfevalOnAll", "Schedule one function invocation on every worker in a pool.", "`parfevalOnAll` creates one aggregate future for a callable scheduled once on each admitted worker.", &["parallel", "future", "async", "workers", "broadcast"], &["fetchOutputs", "gcp", "parfeval", "parpool"], SCHEDULING_SECTIONS, PARFEVAL_ON_ALL_EXAMPLES, SCHEDULE_FAQS);
-future_documentation!(FETCH_OUTPUTS_DOCUMENTATION, "fetchOutputs", "Wait for futures and return their requested outputs.", "`fetchOutputs` retrieves completed outputs without changing the scheduled callable's type, shape, error, or residency contract.", &["parallel", "future", "wait", "outputs", "UniformOutput"], &["fetchNext", "parfeval", "parfevalOnAll", "parpool"], FETCH_SECTIONS, FETCH_OUTPUTS_EXAMPLES, FETCH_FAQS);
+future_documentation!(FETCH_OUTPUTS_DOCUMENTATION, "fetchOutputs", "Wait for futures and return their requested outputs.", "`fetchOutputs` returns one task's outputs directly or assembles multiple task results by vertical concatenation or as cells.", &["parallel", "future", "wait", "outputs", "UniformOutput"], &["fetchNext", "parfeval", "parfevalOnAll", "parpool"], FETCH_SECTIONS, FETCH_OUTPUTS_EXAMPLES, FETCH_FAQS);
 future_documentation!(FETCH_NEXT_DOCUMENTATION, "fetchNext", "Return the next completed unread future result.", "`fetchNext` selects a completed unread future by completion order and returns its one-based index followed by requested outputs.", &["parallel", "future", "wait", "completion order", "timeout"], &["fetchOutputs", "parfeval", "parpool"], FETCH_SECTIONS, FETCH_NEXT_EXAMPLES, FETCH_FAQS);
