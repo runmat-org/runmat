@@ -36,7 +36,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(values), [1 3])); assert(strcmp(values(1), \"3.14159\")); assert(strcmp(values(2), \"2.71828\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(values), [1 3])); assert(strcmp(values(1), \"3.14159\")); assert(strcmp(values(2), \"2.71828\")); assert(strcmp(values(3), \"1.41421\"));" },
     },
     BuiltinExample {
         id: "example-3",
@@ -47,7 +47,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(regions), [4 1])); assert(strcmp(regions(1), \"North \")); assert(strcmp(regions(3), \"East  \"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(regions), [4 1])); assert(strcmp(regions(1), \"North \")); assert(strcmp(regions(2), \"South \")); assert(strcmp(regions(3), \"East  \")); assert(strcmp(regions(4), \"West  \"));" },
     },
     BuiltinExample {
         id: "example-4",
@@ -58,7 +58,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(flags), [1 4])); assert(strcmp(flags(1), \"true\")); assert(strcmp(flags(2), \"false\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(flags), [1 4])); assert(strcmp(flags(1), \"true\")); assert(strcmp(flags(2), \"false\")); assert(strcmp(flags(3), \"true\")); assert(strcmp(flags(4), \"false\"));" },
     },
     BuiltinExample {
         id: "example-5",
@@ -69,7 +69,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(S), [1 3])); assert(strcmp(S(1), \"true\")); assert(strcmp(S(2), \"17\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(S), [1 3])); assert(strcmp(S(1), \"true\")); assert(strcmp(S(2), \"17\")); assert(strcmp(S(3), \"runmat\"));" },
     },
     BuiltinExample {
         id: "example-6",
@@ -80,7 +80,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(labels), [1 4])); assert(strcmp(labels(1), \"Trial 1\")); assert(strcmp(labels(4), \"Trial 4\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(labels), [1 4])); assert(strcmp(labels(1), \"Trial 1\")); assert(strcmp(labels(2), \"Trial 2\")); assert(strcmp(labels(3), \"Trial 3\")); assert(strcmp(labels(4), \"Trial 4\"));" },
     },
     BuiltinExample {
         id: "example-7",
@@ -91,7 +91,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Wgpu,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(labels), [1 3])); assert(strcmp(labels(1), \"10\")); assert(strcmp(labels(3), \"30\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(labels), [1 3])); assert(strcmp(labels(1), \"10\")); assert(strcmp(labels(2), \"20\")); assert(strcmp(labels(3), \"30\"));" },
     },
 ];
 
@@ -112,7 +112,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Can I use format specifiers like `%0.2f`?", answer: "In `runmat` mode, yes. RunMat provides the mode-gated extension `string(formatSpec, A1, ..., An)`; for example, `string(\"Value %0.2f\", A)`. MATLAB-compatible mode accepts the documented `string(A)` conversion forms instead." },
         BuiltinDocumentationFaq { question: "What happens if I pass a GPU tensor?", answer: "An automatically resident intermediate is downloaded through the provider that owns it and converted on the CPU. Explicit `gpuArray` input is a RunMat extension and is rejected in MATLAB-compatible mode. The result is always host-resident text." },
         BuiltinDocumentationFaq { question: "Can I request a specific character encoding?", answer: "In `runmat` mode, the mode-gated encoding extension accepts `'UTF-8'`, `'utf8'`, or `'system'`; each selects RunMat's UTF-8 conversion. MATLAB-compatible mode does not expose this extra `string(X, encoding)` form." },
-        BuiltinDocumentationFaq { question: "Can I convert complex numbers or complex arrays?", answer: "Yes. Complex scalars and arrays use MATLAB's `a + bi` formatting, with imaginary values rendered using the `i` suffix." },
+        BuiltinDocumentationFaq { question: "Can I convert complex numbers or complex arrays?", answer: "Yes. RunMat renders complex values using the `i` suffix, such as `1+2i` or `1-2i`; this does not assert exact parity with MATLAB's numeric display formatting." },
         BuiltinDocumentationFaq { question: "What happens with empty inputs?", answer: "Empty inputs return empty string arrays following MATLAB's dimension rules—for example, `string([])` yields a `0×0` string array, and `string(char.empty(0,5))` yields a `0×1` string array." },
         BuiltinDocumentationFaq { question: "Why does `string` error on structs or handle objects?", answer: "RunMat converts supported text, logical, and numeric scalars or arrays element by element. Structs, unsupported objects, listeners, and function values do not have an implicit text conversion and therefore raise an error." },
         BuiltinDocumentationFaq { question: "How can I keep trailing spaces from character arrays?", answer: "`string` preserves every character, including trailing spaces. Use `strtrim` afterwards if you want to remove padding." },

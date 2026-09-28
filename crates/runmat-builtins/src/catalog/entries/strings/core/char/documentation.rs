@@ -2,7 +2,7 @@ use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "`char(x)` with no arguments returns a `0×0` character array.",
+        "`char()` with no arguments returns a `0×0` character array.",
         "Real numeric values are truncated toward zero and clamped to the UTF-16 code-unit range 0 through 65535. All eight integer classes are read from exact native storage.",
         "RunMat's character storage cannot yet represent isolated UTF-16 surrogate code units; those inputs produce an explicit error instead of silently changing the value.",
         "Logical inputs and interactive resident numeric inputs are separately mode-gated RunMat extensions.",
@@ -55,7 +55,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         id: "example-4",
         title: "Padding a string array into a character matrix",
         program: "animals = [\"cat\"; \"giraffe\"];\nC = char(animals)",
-        display_output: Some("C =\n    'cat   '\n    'giraffe'"),
+        display_output: Some("C =\n    'cat    '\n    'giraffe'"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
@@ -71,7 +71,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(chart), [3 5])); assert(strcmp(chart(1,:), 'north')); assert(strcmp(chart(2,:), 'east '));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(chart), [3 5])); assert(strcmp(chart(1,:), 'north')); assert(strcmp(chart(2,:), 'east ')); assert(strcmp(chart(3,:), 'west '));" },
     },
     BuiltinExample {
         id: "example-6",
@@ -91,14 +91,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("char"),
     slug: Some("char"),
     summary: "Convert numeric codes and text values into character arrays in MATLAB and RunMat.",
-    description: "`char` converts inputs into a character array. Numeric inputs are interpreted as code points, and text inputs are padded as needed so output rows share width, following MATLAB and RunMat conversion semantics.",
+    description: "`char` converts inputs into a character array. Numeric inputs are interpreted as UTF-16 code units, and text inputs are padded as needed so output rows share width. Isolated surrogate code units are not yet representable by RunMat's character storage.",
     keywords: &["char", "character array", "string conversion", "padding", "gpu"],
     related: &["string", "gpuarray", "gather", "compose", "num2str", "sprintf", "str2double", "strcmp", "strcmpi", "string.empty", "strings", "strlength", "strncmp"],
     sections: SECTIONS,
     examples: EXAMPLES,
     example_exemption: None,
     faqs: &[
-        BuiltinDocumentationFaq { question: "Does `char` accept numeric arrays with more than two dimensions?", answer: "No. Numeric inputs must be scalars, vectors, or two-dimensional matrices. Higher-dimensional arrays raise an error so MATLAB's behaviour is preserved." },
+        BuiltinDocumentationFaq { question: "Does `char` accept numeric arrays with more than two dimensions?", answer: "Trailing singleton dimensions are accepted as an equivalent two-dimensional shape. A non-singleton dimension beyond the second raises an error." },
         BuiltinDocumentationFaq { question: "How are rows padded when lengths differ?", answer: "Each row is right-padded with space characters so every row in the result has the same width as the longest row that was produced." },
         BuiltinDocumentationFaq { question: "Can I convert cell arrays that contain empty text?", answer: "Yes. Empty strings or character vectors become rows with zero columns; they still participate in padding when combined with longer rows." },
         BuiltinDocumentationFaq { question: "What happens if a numeric value is not an integer?", answer: "Finite real numeric values are truncated toward zero, then clamped to 0 through 65535. Isolated UTF-16 surrogate code units raise an error because RunMat's character storage represents Unicode scalar values." },

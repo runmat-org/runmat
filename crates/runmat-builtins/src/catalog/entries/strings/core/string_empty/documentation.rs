@@ -132,7 +132,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "How do I obtain a 0x0 string array quickly?", answer: "Call `string.empty` with no arguments. It is equivalent to `strings(0)` but makes the intention explicit." },
         BuiltinDocumentationFaq { question: "Can I use `size` output directly?", answer: "Yes. Expressions like `string.empty(size(existingArray))` are supported. The first element of the size vector is ignored when constructing the new array so that the first dimension is zero." },
         BuiltinDocumentationFaq { question: "What happens if I pass an empty array as the size vector?", answer: "`string.empty([])` returns the canonical `0×0` string array, just like calling `string.empty` with no arguments." },
-        BuiltinDocumentationFaq { question: "Does `string.empty` ever throw away extra arguments?", answer: "Only when they cannot be interpreted as dimensions. In that case RunMat throws an error rather than guessing." },
+        BuiltinDocumentationFaq { question: "What if I provide both explicit dimensions and a `'like'` prototype?", answer: "Explicit dimensions set the output shape; the prototype is still validated but does not override them. Unsupported extra arguments raise an error." },
     ],
     links: &[
         BuiltinDocumentationLink { label: "string", target: BuiltinDocumentationLinkTarget::Builtin("string") },

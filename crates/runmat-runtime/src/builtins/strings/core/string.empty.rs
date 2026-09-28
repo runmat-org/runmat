@@ -50,7 +50,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Host-only constructor that returns a new empty string array without contacting GPU providers.",
+    notes: "Host-only constructor; resident size arguments or prototypes gather through their owning provider before constructing the empty string array.",
 };
 
 #[runmat_macros::register_fusion_spec(

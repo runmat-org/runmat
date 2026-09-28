@@ -26,7 +26,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(S), [4 4])); assert(strcmp(S(1,1), \"\")); assert(strcmp(S(4,4), \"\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(S), [4 4])); assert(all(strcmp(S(:), \"\")));" },
     },
     BuiltinExample {
         id: "example-2",
@@ -37,7 +37,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(grid), [2 3 4])); assert(strcmp(grid(1,1,1), \"\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(grid), [2 3 4])); assert(all(strcmp(grid(:), \"\")));" },
     },
     BuiltinExample {
         id: "example-3",
@@ -48,7 +48,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(placeholders), [3 3])); assert(strcmp(placeholders(1,1), \"\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(placeholders), [3 3])); assert(all(strcmp(placeholders(:), \"\")));" },
     },
     BuiltinExample {
         id: "example-4",
@@ -70,7 +70,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(sz, [3 1])); assert(strcmp(column(1), \"\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(sz, [3 1])); assert(all(strcmp(column(:), \"\")));" },
     },
     BuiltinExample {
         id: "example-6",
@@ -81,7 +81,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(placeholders), [2 3])); assert(ismissing(placeholders(1,1)));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(placeholders), [2 3])); assert(all(ismissing(placeholders(:))));" },
     },
     BuiltinExample {
         id: "example-7",
@@ -92,7 +92,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(labels), [3 2])); assert(strcmp(labels(1,1), \"\"));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(labels), [3 2])); assert(all(strcmp(labels(:), \"\")));" },
     },
     BuiltinExample {
         id: "example-8",
