@@ -1,5 +1,5 @@
 use super::*;
-use runmat_builtins::SQRT_DESCRIPTOR;
+use runmat_builtins::{SQRT_DESCRIPTOR, SQRT_ERROR_INVALID_INPUT};
 use runmat_value::{
     CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor,
 };
