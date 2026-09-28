@@ -1,12 +1,8 @@
 //! MATLAB-compatible `erase` builtin with GPU-aware semantics for RunMat.
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ERASE_ERROR_CELL_ELEMENT, ERASE_ERROR_INTERNAL,
+    ERASE_ERROR_INVALID_INPUT, ERASE_ERROR_PATTERN_TYPE,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
@@ -18,6 +14,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::core::compat::pattern_regex;
+#[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
@@ -52,109 +49,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "erase";
 
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "str",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "The public input text accepts string arrays, a character vector, or a cell array of character vectors; numeric values are rejected before provider access.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "match",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "The public match argument accepts text or pattern values; numeric values are rejected before provider access.",
-    },
-];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "newStr = erase(str, match)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "erase is text-only; integer values in either role, including nested resident values, are rejected without gathering.",
-    }];
-
-const ERASE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newStr",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text with substring occurrences removed, preserving input container kind.",
-}];
-
-const ERASE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text list (scalar or array/cell).",
-    },
-];
-
-const ERASE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "newStr = erase(str, pattern)",
-    inputs: &ERASE_INPUTS,
-    outputs: &ERASE_OUTPUT,
-}];
-
-const ERASE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE.INVALID_INPUT",
-    identifier: Some("RunMat:erase:InvalidInput"),
-    when: "First argument is not a string array, char array, or cell array of text scalars.",
-    message:
-        "erase: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const ERASE_ERROR_PATTERN_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE.PATTERN_TYPE",
-    identifier: Some("RunMat:erase:PatternType"),
-    when: "Second argument is not a text scalar/array/cell of text scalars.",
-    message:
-        "erase: second argument must be a string array, character array, or cell array of character vectors",
-};
-
-const ERASE_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE.CELL_ELEMENT",
-    identifier: Some("RunMat:erase:CellElement"),
-    when: "Cell arrays contain non-text elements or non-row char arrays.",
-    message: "erase: cell array elements must be string scalars or character vectors",
-};
-
-const ERASE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE.INTERNAL",
-    identifier: Some("RunMat:erase:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "erase: internal error",
-};
-
-const ERASE_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    ERASE_ERROR_INVALID_INPUT,
-    ERASE_ERROR_PATTERN_TYPE,
-    ERASE_ERROR_CELL_ELEMENT,
-    ERASE_ERROR_INTERNAL,
-];
-
-pub const ERASE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ERASE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERASE_ERRORS,
-};
-
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -176,13 +70,7 @@ fn erase_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "erase",
-    category = "strings/transform",
-    summary = "Remove substring occurrences from text inputs.",
-    keywords = "erase,remove substring,strings,character array,text",
-    accel = "sink",
-    integer_capabilities(INTEGER_CAPABILITIES),
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::erase::ERASE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::erase"
 )]
 async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {

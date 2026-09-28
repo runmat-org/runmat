@@ -27,16 +27,17 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 input.shape.clone()
             }
             ValueKindFact::Cell(cell) => {
-                if !cell
-                    .elements
-                    .iter()
-                    .chain(std::iter::once(cell.element.as_ref()))
-                    .all(|value| {
-                        matches!(
-                            value.kind,
-                            ValueKindFact::Unknown | ValueKindFact::Character
-                        )
-                    })
+                if input.shape.element_count() != Some(0)
+                    && !cell
+                        .elements
+                        .iter()
+                        .chain(std::iter::once(cell.element.as_ref()))
+                        .all(|value| {
+                            matches!(
+                                value.kind,
+                                ValueKindFact::Unknown | ValueKindFact::Character
+                            )
+                        })
                 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-APPEND-CELLSTR",
@@ -120,7 +121,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_types::{LiteralContext, OutputSelection};
+    use runmat_types::{CellFact, LiteralContext, OutputSelection};
 
     fn call(arguments: Vec<ValueFact>) -> CallInference {
         infer(
@@ -164,5 +165,19 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "RM-CATALOG-APPEND-TEXT"));
+    }
+
+    #[test]
+    fn empty_cell_does_not_invent_an_invalid_element() {
+        let empty = ValueFact::proven(
+            ValueKindFact::Cell(CellFact {
+                element: Box::new(ValueFact::never()),
+                elements: Vec::new(),
+                elements_complete: true,
+            }),
+            ShapeFact::from(vec![Some(0), Some(0)]),
+            StorageFact::Dense,
+        );
+        assert!(call(vec![empty]).diagnostics.is_empty());
     }
 }

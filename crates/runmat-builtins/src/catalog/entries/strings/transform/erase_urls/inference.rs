@@ -32,19 +32,20 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 StorageFact::Dense,
             ),
             ValueKindFact::Cell(cell) => {
-                if cell
-                    .elements
-                    .iter()
-                    .chain(std::iter::once(cell.element.as_ref()))
-                    .any(|value| {
-                        !matches!(
-                            value.kind,
-                            ValueKindFact::Unknown
-                                | ValueKindFact::String
-                                | ValueKindFact::Character
-                                | ValueKindFact::Cell(_)
-                        )
-                    })
+                if input.shape.element_count() != Some(0)
+                    && cell
+                        .elements
+                        .iter()
+                        .chain(std::iter::once(cell.element.as_ref()))
+                        .any(|value| {
+                            !matches!(
+                                value.kind,
+                                ValueKindFact::Unknown
+                                    | ValueKindFact::String
+                                    | ValueKindFact::Character
+                                    | ValueKindFact::Cell(_)
+                            )
+                        })
                 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-ERASE-URLS-CELL",

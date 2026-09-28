@@ -8,17 +8,19 @@ use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, comp
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
 use crate::builtins::strings::core::compat::pattern_regex;
+#[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, ERASE_BETWEEN_CHAR_MATRIX_EXTENSION, ERASE_BETWEEN_ERROR_BOUNDARY_TYPE,
+    ERASE_BETWEEN_ERROR_CELL_ELEMENT, ERASE_BETWEEN_ERROR_INTERNAL,
+    ERASE_BETWEEN_ERROR_INVALID_INPUT, ERASE_BETWEEN_ERROR_NAME_VALUE_PAIR,
+    ERASE_BETWEEN_ERROR_OPTION_NAME, ERASE_BETWEEN_ERROR_OPTION_VALUE,
+    ERASE_BETWEEN_ERROR_POSITION_TYPE, ERASE_BETWEEN_ERROR_SIZE_MISMATCH,
+    ERASE_BETWEEN_FULL_BROADCAST_EXTENSION, ERASE_BETWEEN_RESIDENT_POSITION_EXTENSION,
+    ERASE_BETWEEN_STRING_CELL_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntValue, NumericScalar, StringArray, Value};
@@ -61,249 +63,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "eraseBetween";
 
-const FULL_BROADCAST_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "erasebetween-full-broadcast",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eraseBetween with non-scalar boundary expansion is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EraseBetweenFullBroadcastExtension"),
-};
-const RESIDENT_POSITION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "erasebetween-resident-position",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eraseBetween with GPU-resident position arrays is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EraseBetweenResidentPositionExtension"),
-};
-const CHAR_MATRIX_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "erasebetween-char-matrix",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eraseBetween row-wise character-matrix input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EraseBetweenCharMatrixExtension"),
-};
-const STRING_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "erasebetween-string-cell",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "eraseBetween cells containing string scalars are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:EraseBetweenStringCellExtension"),
-};
-const EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
-    FULL_BROADCAST_EXTENSION,
-    RESIDENT_POSITION_EXTENSION,
-    CHAR_MATRIX_EXTENSION,
-    STRING_CELL_EXTENSION,
-];
-const INTEGER_POSITION_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "startPos",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public numeric position array accepts positive integer values; typed storage is parsed exactly with one-based indexing.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "endPos",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public numeric position array accepts positive integer values; typed storage is parsed exactly with one-based indexing.",
-    },
-];
-const INTEGER_TEXT_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "str",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Rejected,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-    notes:
-        "The public first argument is text; integer data is rejected before any provider access.",
-}];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "newStr = eraseBetween(str, integer_startPos, integer_endPos)",
-        inputs: &INTEGER_POSITION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::SameSizeOrScalar,
-        notes: "Positions are exact structural controls; strict compatibility accepts scalar positions or arrays the same size as str and preserves the str container class.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "newStr = eraseBetween(integer_str, start, end)",
-        inputs: &INTEGER_TEXT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer text input is outside the public text domain and is rejected without gathering.",
-    },
-];
-
-const ERASE_BETWEEN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newText",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text with between-boundary content erased, preserving text container semantics.",
-}];
-
-const ERASE_BETWEEN_INPUTS_BASE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text scalar/array/cell.",
-    },
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Start boundary marker text or positive integer position(s).",
-    },
-    BuiltinParamDescriptor {
-        name: "end",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "End boundary marker text or positive integer position(s).",
-    },
-];
-
-const ERASE_BETWEEN_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 5] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text scalar/array/cell.",
-    },
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Start boundary marker text or positive integer position(s).",
-    },
-    BuiltinParamDescriptor {
-        name: "end",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "End boundary marker text or positive integer position(s).",
-    },
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option name (`Boundaries`).",
-    },
-    BuiltinParamDescriptor {
-        name: "Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option value and additional Name/Value pairs.",
-    },
-];
-
-const ERASE_BETWEEN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "newText = eraseBetween(str, start, end)",
-        inputs: &ERASE_BETWEEN_INPUTS_BASE,
-        outputs: &ERASE_BETWEEN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newText = eraseBetween(str, start, end, Name, Value, ...)",
-        inputs: &ERASE_BETWEEN_INPUTS_NAME_VALUE,
-        outputs: &ERASE_BETWEEN_OUTPUT,
-    },
-];
-
-const ERASE_BETWEEN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.INVALID_INPUT",
-    identifier: Some("RunMat:eraseBetween:InvalidInput"),
-    when: "First argument is not a string array, character array, or cell array of text scalars.",
-    message:
-        "eraseBetween: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const ERASE_BETWEEN_ERROR_BOUNDARY_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.BOUNDARY_TYPE",
-    identifier: Some("RunMat:eraseBetween:BoundaryType"),
-    when: "Start/end boundaries are mixed text/numeric domains or use unsupported boundary types.",
-    message: "eraseBetween: start and end arguments must both be text or both be numeric positions",
-};
-
-const ERASE_BETWEEN_ERROR_POSITION_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.POSITION_TYPE",
-    identifier: Some("RunMat:eraseBetween:PositionType"),
-    when: "Numeric boundary positions are not positive finite integers.",
-    message: "eraseBetween: position arguments must be positive integers",
-};
-
-const ERASE_BETWEEN_ERROR_NAME_VALUE_PAIR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.NAME_VALUE_PAIR",
-    identifier: Some("RunMat:eraseBetween:NameValuePair"),
-    when: "Name/value options are not supplied in complete pairs.",
-    message: "eraseBetween: name-value arguments must appear in pairs",
-};
-
-const ERASE_BETWEEN_ERROR_OPTION_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.OPTION_NAME",
-    identifier: Some("RunMat:eraseBetween:OptionName"),
-    when: "An option name other than `Boundaries` was supplied.",
-    message: "eraseBetween: unrecognized parameter name",
-};
-
-const ERASE_BETWEEN_ERROR_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.OPTION_VALUE",
-    identifier: Some("RunMat:eraseBetween:OptionValue"),
-    when: "`Boundaries` option value is not `inclusive` or `exclusive`.",
-    message: "eraseBetween: 'Boundaries' must be either 'inclusive' or 'exclusive'",
-};
-
-const ERASE_BETWEEN_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.CELL_ELEMENT",
-    identifier: Some("RunMat:eraseBetween:CellElement"),
-    when: "Cell text input/boundary contains non-text values or non-row char arrays.",
-    message: "eraseBetween: cell array elements must be string scalars or character vectors",
-};
-
-const ERASE_BETWEEN_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.SIZE_MISMATCH",
-    identifier: Some("RunMat:eraseBetween:SizeMismatch"),
-    when: "Text/boundary inputs are not broadcast-compatible for erase semantics.",
-    message: "eraseBetween: boundary sizes must be compatible with the text input",
-};
-
-const ERASE_BETWEEN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ERASE_BETWEEN.INTERNAL",
-    identifier: Some("RunMat:eraseBetween:InternalError"),
-    when: "Internal output construction failed.",
-    message: "eraseBetween: internal error",
-};
-
-const ERASE_BETWEEN_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    ERASE_BETWEEN_ERROR_INVALID_INPUT,
-    ERASE_BETWEEN_ERROR_BOUNDARY_TYPE,
-    ERASE_BETWEEN_ERROR_POSITION_TYPE,
-    ERASE_BETWEEN_ERROR_NAME_VALUE_PAIR,
-    ERASE_BETWEEN_ERROR_OPTION_NAME,
-    ERASE_BETWEEN_ERROR_OPTION_VALUE,
-    ERASE_BETWEEN_ERROR_CELL_ELEMENT,
-    ERASE_BETWEEN_ERROR_SIZE_MISMATCH,
-    ERASE_BETWEEN_ERROR_INTERNAL,
-];
-
-pub const ERASE_BETWEEN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ERASE_BETWEEN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERASE_BETWEEN_ERRORS,
-};
-
 fn erase_between_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     erase_between_error_with_message(error.message, error)
 }
@@ -331,14 +90,7 @@ enum BoundariesMode {
 
 #[runtime_builtin(
     name = "eraseBetween",
-    category = "strings/transform",
-    summary = "Delete text between boundary markers.",
-    keywords = "eraseBetween,delete,boundaries,strings",
-    accel = "sink",
-    extensions(EXTENSIONS),
-    integer_capabilities(INTEGER_CAPABILITIES),
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::erasebetween::ERASE_BETWEEN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::erasebetween"
 )]
 async fn erase_between_builtin(
@@ -352,19 +104,19 @@ async fn erase_between_builtin(
     }
     if is_resident_or_contains_resident(&start) || is_resident_or_contains_resident(&stop) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &RESIDENT_POSITION_EXTENSION,
+            &ERASE_BETWEEN_RESIDENT_POSITION_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
     if is_char_matrix(&text) || is_char_matrix(&start) || is_char_matrix(&stop) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &CHAR_MATRIX_EXTENSION,
+            &ERASE_BETWEEN_CHAR_MATRIX_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
     if cell_contains_string(&text) || cell_contains_string(&start) || cell_contains_string(&stop) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &STRING_CELL_EXTENSION,
+            &ERASE_BETWEEN_STRING_CELL_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
@@ -372,7 +124,7 @@ async fn erase_between_builtin(
         || raw_boundary_uses_full_broadcast(&text, &stop)
     {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &FULL_BROADCAST_EXTENSION,
+            &ERASE_BETWEEN_FULL_BROADCAST_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
@@ -403,7 +155,7 @@ async fn erase_between_builtin(
         || !shape_is_scalar_or_same(stop_shape, text_shape)
     {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &FULL_BROADCAST_EXTENSION,
+            &ERASE_BETWEEN_FULL_BROADCAST_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
@@ -1308,7 +1060,7 @@ pub(crate) mod tests {
         .expect_err("general broadcasting is an extension");
         assert_eq!(
             error.identifier(),
-            FULL_BROADCAST_EXTENSION.error_identifier
+            ERASE_BETWEEN_FULL_BROADCAST_EXTENSION.error_identifier
         );
     }
 
@@ -1330,7 +1082,7 @@ pub(crate) mod tests {
             .expect_err("resident positions are an extension");
             assert_eq!(
                 error.identifier(),
-                RESIDENT_POSITION_EXTENSION.error_identifier
+                ERASE_BETWEEN_RESIDENT_POSITION_EXTENSION.error_identifier
             );
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             handle.release().expect("release fixture handle");
