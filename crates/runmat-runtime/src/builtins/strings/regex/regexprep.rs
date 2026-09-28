@@ -6,22 +6,15 @@ use runmat_value::{IntValue, IntegerStorage, Tensor};
 use std::sync::Arc;
 
 use regex::{Captures, Regex, RegexBuilder};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+#[cfg(test)]
+use runmat_builtins::REGEXPREP_DESCRIPTOR;
+use runmat_builtins::REGEXPREP_EXPLICIT_GPU_EXTENSION;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StringArray, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
-use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexprep")]
@@ -32,183 +25,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Runs on the CPU; GPU inputs are gathered before processing and results remain on the host.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::regex::regexprep")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "regexprep",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Regex replacements are control-flow heavy and are excluded from fusion.",
+    notes: "Runtime admission and compatibility gates inspect original operands before supported host fallback gathers.",
 };
 
 const BUILTIN_NAME: &str = "regexprep";
-
-const REGEXPREP_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "regexprep-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "regexprep host fallback for explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RegexprepExplicitGpuInputExtension"),
-};
-const REGEXPREP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [REGEXPREP_EXPLICIT_GPU_EXTENSION];
-const REGEXPREP_INTEGER_OCCURRENCE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "N",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented Nth-occurrence option accepts every integer class and is validated exactly as a positive scalar before regex execution.",
-    }];
-const REGEXPREP_INTEGER_TEXT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "str/expression/replace",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Regex text roles reject integer host and resident values before gather or numeric-to-text conversion.",
-    }];
-pub const REGEXPREP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "out = regexprep(subject, pattern, replacement, integer_N)",
-        inputs: &REGEXPREP_INTEGER_OCCURRENCE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "N selects exactly one eligible match without entering the floating domain. Automatic residency gathers transparently; explicit gpuArray fallback is separately gated.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "out = regexprep(integer_subject_or_pattern_or_replacement, ...)",
-        inputs: &REGEXPREP_INTEGER_TEXT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer data is not text and never triggers provider access or implicit decimal formatting in these roles.",
-    },
-];
-
-const REGEXPREP_OUTPUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text with replacements applied (preserves scalar/array shape semantics).",
-}];
-
-const REGEXPREP_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (scalar, sequence, or elementwise list).",
-    },
-    BuiltinParamDescriptor {
-        name: "replacement",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Replacement text (scalar, sequence, or elementwise list).",
-    },
-];
-
-const REGEXPREP_INPUTS_OPTIONS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (scalar, sequence, or elementwise list).",
-    },
-    BuiltinParamDescriptor {
-        name: "replacement",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Replacement text (scalar, sequence, or elementwise list).",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Regex replacement options (case/lineanchors/dotall/once/emptymatch/...).",
-    },
-];
-
-const REGEXPREP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "out = regexprep(subject, pattern, replacement)",
-        inputs: &REGEXPREP_INPUTS_CORE,
-        outputs: &REGEXPREP_OUTPUT_TEXT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = regexprep(subject, pattern, replacement, options...)",
-        inputs: &REGEXPREP_INPUTS_OPTIONS,
-        outputs: &REGEXPREP_OUTPUT_TEXT,
-    },
-];
-
-const REGEXPREP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPREP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:regexprep:InvalidArgument"),
-    when: "Input/options are malformed, unsupported, or shape-incompatible.",
-    message: "regexprep: invalid argument",
-};
-
-const REGEXPREP_ERROR_PATTERN_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPREP.PATTERN_INVALID",
-    identifier: Some("RunMat:regexprep:PatternInvalid"),
-    when: "Pattern cannot be compiled as a regular expression.",
-    message: "regexprep: invalid regular expression pattern",
-};
-
-const REGEXPREP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPREP.INTERNAL",
-    identifier: Some("RunMat:regexprep:Internal"),
-    when: "Internal regex replacement or output reconstruction fails.",
-    message: "regexprep: internal operation failed",
-};
-
-const REGEXPREP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    REGEXPREP_ERROR_INVALID_ARGUMENT,
-    REGEXPREP_ERROR_PATTERN_INVALID,
-    REGEXPREP_ERROR_INTERNAL,
-];
-
-pub const REGEXPREP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGEXPREP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REGEXPREP_ERRORS,
-};
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -225,14 +50,7 @@ fn with_builtin_context(mut err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "regexprep",
-    category = "strings/regex",
-    summary = "Regular expression replacement with MATLAB-compatible semantics.",
-    keywords = "regexprep,regex,replace,substitute",
-    accel = "sink",
-    extensions(REGEXPREP_EXTENSIONS),
-    integer_capabilities(REGEXPREP_INTEGER_CAPABILITIES),
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::regex::regexprep::REGEXPREP_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::regex::regexprep"
 )]
 async fn regexprep_builtin(

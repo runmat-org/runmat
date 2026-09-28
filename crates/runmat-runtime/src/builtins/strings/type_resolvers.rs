@@ -8,16 +8,6 @@ pub fn string_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::String
 }
 
-pub fn logical_text_match_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.len() >= 2 && args[0] == Type::String && args[1] == Type::String {
-        Type::Bool
-    } else if args.iter().any(|ty| matches!(ty, Type::Unknown)) {
-        Type::Unknown
-    } else {
-        Type::logical()
-    }
-}
-
 pub fn text_preserve_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::String) => Type::String,

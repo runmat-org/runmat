@@ -1,19 +1,14 @@
 //! MATLAB-compatible `regexpi` builtin for RunMat.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+#[cfg(test)]
+use runmat_builtins::REGEXPI_DESCRIPTOR;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
 use crate::builtins::strings::regex::regexp::{self, RegexpEvaluation};
-use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexpi")]
@@ -24,178 +19,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Executes on the CPU; GPU inputs are gathered before evaluation and results stay on the host.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::regex::regexpi")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "regexpi",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Control-flow-heavy regex evaluation is not eligible for fusion.",
+    notes: "The runtime rejects numeric and resident text roles before provider access; matching remains on the host.",
 };
 
 const BUILTIN_NAME: &str = "regexpi";
-
-const REGEXPI_OUTPUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Primary regexpi output (depends on options and requested output count).",
-}];
-
-const REGEXPI_OUTPUT_MULTI: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "1-based match start indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "end_idx",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "1-based inclusive match end indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "match",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Matched substrings.",
-    },
-    BuiltinParamDescriptor {
-        name: "tokens",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Capture-group token outputs.",
-    },
-    BuiltinParamDescriptor {
-        name: "names",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Named capture-group outputs.",
-    },
-    BuiltinParamDescriptor {
-        name: "split",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Split output around regex matches.",
-    },
-];
-
-const REGEXPI_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Regular-expression pattern.",
-    },
-];
-
-const REGEXPI_INPUTS_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Regular-expression pattern.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Output selectors and regexp options.",
-    },
-];
-
-const REGEXPI_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "out = regexpi(subject, pattern)",
-        inputs: &REGEXPI_INPUTS_CORE,
-        outputs: &REGEXPI_OUTPUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = regexpi(subject, pattern, options...)",
-        inputs: &REGEXPI_INPUTS_OPTIONS,
-        outputs: &REGEXPI_OUTPUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[start,end_idx,match,tokens,names,split] = regexpi(subject, pattern, options...)",
-        inputs: &REGEXPI_INPUTS_OPTIONS,
-        outputs: &REGEXPI_OUTPUT_MULTI,
-    },
-];
-
-const REGEXPI_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPI.INVALID_ARGUMENT",
-    identifier: Some("RunMat:regexpi:InvalidArgument"),
-    when: "Input/options are malformed or unsupported.",
-    message: "regexpi: invalid argument",
-};
-
-const REGEXPI_ERROR_PATTERN_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPI.PATTERN_INVALID",
-    identifier: Some("RunMat:regexpi:PatternInvalid"),
-    when: "Pattern cannot be compiled as a regular expression.",
-    message: "regexpi: invalid regular expression pattern",
-};
-
-const REGEXPI_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXPI.INTERNAL",
-    identifier: Some("RunMat:regexpi:Internal"),
-    when: "Internal regexpi output assembly fails.",
-    message: "regexpi: internal operation failed",
-};
-
-const REGEXPI_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    REGEXPI_ERROR_INVALID_ARGUMENT,
-    REGEXPI_ERROR_PATTERN_INVALID,
-    REGEXPI_ERROR_INTERNAL,
-];
-
-pub const REGEXPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGEXPI_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REGEXPI_ERRORS,
-};
-
-pub const REGEXPI_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "regexpi accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject through the shared regexp admission boundary before gather or provider access.",
-};
 
 fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -215,13 +47,7 @@ pub async fn evaluate(
 
 #[runtime_builtin(
     name = "regexpi",
-    category = "strings/regex",
-    summary = "Case-insensitive regular expression matching with MATLAB-compatible outputs.",
-    keywords = "regexpi,regex,pattern,ignorecase,match",
-    accel = "sink",
-    type_resolver(unknown_type),
-    descriptor(crate::builtins::strings::regex::regexpi::REGEXPI_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::regex::regexpi::REGEXPI_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::regex::regexpi"
 )]
 async fn regexpi_builtin(
@@ -274,7 +100,6 @@ fn option_name(value: &Value) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CellArray, StringArray};
 
     #[test]
@@ -559,14 +384,6 @@ pub(crate) mod tests {
         assert!(
             message.contains("cell array elements"),
             "unexpected error message: {message}"
-        );
-    }
-
-    #[test]
-    fn regexpi_type_is_unknown() {
-        assert_eq!(
-            unknown_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::Unknown
         );
     }
 }

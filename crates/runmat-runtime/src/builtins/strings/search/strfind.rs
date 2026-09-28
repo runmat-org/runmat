@@ -1,20 +1,17 @@
 //! MATLAB-compatible `strfind` builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRFIND_ERROR_INTERNAL, STRFIND_ERROR_INVALID_INPUT,
+    STRFIND_ERROR_INVALID_OPTION, STRFIND_ERROR_SHAPE_MISMATCH,
+    STRFIND_NONBINARY_FORCE_CELL_OUTPUT_EXTENSION, STRFIND_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
+    STRFIND_TYPED_FORCE_CELL_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, Tensor, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -22,7 +19,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
 use super::text_utils::{value_to_owned_string, TextCollection, TextElement};
-use crate::builtins::strings::type_resolvers::text_search_indices_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::search::strfind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,218 +28,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes:
-        "Executes entirely on the host; GPU-resident inputs are gathered before substring matching.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::search::strfind")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "strfind",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Text operation; not eligible for fusion and materialises host-side numeric or cell outputs.",
+    notes: "Runtime admission inspects resident controls and rejects resident text roles before provider access.",
 };
 
 const BUILTIN_NAME: &str = "strfind";
-
-const STRFIND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "idx",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Match start indices as a numeric row vector or cell array of row vectors.",
-}];
-
-const STRFIND_INPUTS_BASE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-];
-
-const STRFIND_INPUTS_FORCE_CELL_PAIR: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"ForceCellOutput\""),
-        description: "Option name (`\"ForceCellOutput\"`).",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Logical-ish option value controlling forced cell output.",
-    },
-];
-
-const STRFIND_INPUTS_OPTION_PAIRS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "pat",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pattern text (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "nameValuePairs...",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value option pairs (`\"ForceCellOutput\"`, value).",
-    },
-];
-
-const STRFIND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "idx = strfind(str, pat)",
-        inputs: &STRFIND_INPUTS_BASE,
-        outputs: &STRFIND_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "idx = strfind(str, pat, \"ForceCellOutput\", value)",
-        inputs: &STRFIND_INPUTS_FORCE_CELL_PAIR,
-        outputs: &STRFIND_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "idx = strfind(str, pat, nameValuePairs...)",
-        inputs: &STRFIND_INPUTS_OPTION_PAIRS,
-        outputs: &STRFIND_OUTPUT,
-    },
-];
-
-const STRFIND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRFIND.INVALID_INPUT",
-    identifier: Some("RunMat:strfind:InvalidInput"),
-    when: "Text or pattern input is not a supported text container.",
-    message: "strfind: text and pattern inputs must be text values",
-};
-
-const STRFIND_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRFIND.INVALID_OPTION",
-    identifier: Some("RunMat:strfind:InvalidOption"),
-    when: "ForceCellOutput option arguments are invalid or malformed.",
-    message: "strfind: invalid option arguments",
-};
-
-const STRFIND_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRFIND.SHAPE_MISMATCH",
-    identifier: Some("RunMat:strfind:ShapeMismatch"),
-    when: "Text and pattern inputs are not broadcast-compatible.",
-    message: "strfind: input sizes are not broadcast-compatible",
-};
-
-const STRFIND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRFIND.INTERNAL",
-    identifier: Some("RunMat:strfind:InternalError"),
-    when: "Internal output assembly failed.",
-    message: "strfind: internal error",
-};
-
-const STRFIND_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    STRFIND_ERROR_INVALID_INPUT,
-    STRFIND_ERROR_INVALID_OPTION,
-    STRFIND_ERROR_SHAPE_MISMATCH,
-    STRFIND_ERROR_INTERNAL,
-];
-
-pub const STRFIND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRFIND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRFIND_ERRORS,
-};
-
-const STRFIND_TYPED_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "strfind-typed-force-cell-output",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "strfind with a typed-integer ForceCellOutput value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:StrfindTypedForceCellOutputExtension"),
-    };
-
-const STRFIND_NONBINARY_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "strfind-nonbinary-force-cell-output",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "strfind with a numeric ForceCellOutput value other than zero or one is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:StrfindNonbinaryForceCellOutputExtension"),
-    };
-
-const STRFIND_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "strfind-resident-force-cell-output",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "strfind with a resident ForceCellOutput value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:StrfindResidentForceCellOutputExtension"),
-    };
-
-pub const STRFIND_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    STRFIND_TYPED_FORCE_CELL_OUTPUT_EXTENSION,
-    STRFIND_NONBINARY_FORCE_CELL_OUTPUT_EXTENSION,
-    STRFIND_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
-];
-
-const STRFIND_INTEGER_FORCE_CELL_OUTPUT_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "cellOutput",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly documents false, true, 0, and 1 but does not enumerate typed integer storage classes. RunMat mode accepts every exact scalar integer class; MATLAB-compatible mode retains only logical and double zero/one.",
-    }];
-
-pub const STRFIND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "k = strfind(str, pat, 'ForceCellOutput', integer_cellOutput)",
-        inputs: &STRFIND_INTEGER_FORCE_CELL_OUTPUT_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The typed integer flag controls only whether double index vectors are wrapped in cells. Typed storage acceptance is mode-gated because the public page lists numeric literals but no storage classes; values other than zero and one remain a separately gated convenience.",
-    }];
 
 fn strfind_error_with_message(
     message: impl Into<String>,
@@ -262,14 +55,7 @@ fn remap_strfind_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strfind",
-    category = "strings/search",
-    summary = "Return starting indices of substring matches within text inputs.",
-    keywords = "strfind,substring,index,positions,string search",
-    accel = "sink",
-    type_resolver(text_search_indices_type),
-    descriptor(crate::builtins::strings::search::strfind::STRFIND_DESCRIPTOR),
-    extensions(crate::builtins::strings::search::strfind::STRFIND_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::search::strfind::STRFIND_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::search::strfind"
 )]
 async fn strfind_builtin(
@@ -649,7 +435,6 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CellArray, CharArray, IntegerStorage, StringArray, Tensor};
 
     fn run_strfind(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1054,17 +839,6 @@ pub(crate) mod tests {
         assert!(
             err.to_string().contains("unknown option"),
             "unexpected error message: {err}"
-        );
-    }
-
-    #[test]
-    fn strfind_type_for_scalar_text_is_tensor() {
-        assert_eq!(
-            text_search_indices_type(
-                &[Type::String, Type::String],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::tensor()
         );
     }
 }

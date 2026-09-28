@@ -3,21 +3,16 @@
 use std::collections::HashMap;
 
 use regex::RegexBuilder;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+#[cfg(test)]
+use runmat_builtins::REGEXP_DESCRIPTOR;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StringArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
-use crate::builtins::strings::type_resolvers::unknown_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
@@ -28,178 +23,15 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Runs on the CPU; when inputs live on the GPU, the runtime gathers them before matching and re-uploads numeric tensors afterwards.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "regexp",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Regex evaluation is control-flow heavy and not eligible for fusion today.",
+    notes: "The runtime rejects numeric and resident text roles before provider access; matching remains on the host.",
 };
 
 const BUILTIN_NAME: &str = "regexp";
-
-const REGEXP_OUTPUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Primary regexp output (depends on options and requested output count).",
-}];
-
-const REGEXP_OUTPUT_MULTI: [BuiltinParamDescriptor; 6] = [
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "1-based match start indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "end_idx",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "1-based inclusive match end indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "match",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Matched substrings.",
-    },
-    BuiltinParamDescriptor {
-        name: "tokens",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Capture-group token outputs.",
-    },
-    BuiltinParamDescriptor {
-        name: "names",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Named capture-group outputs.",
-    },
-    BuiltinParamDescriptor {
-        name: "split",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Split output around regex matches.",
-    },
-];
-
-const REGEXP_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Regular-expression pattern.",
-    },
-];
-
-const REGEXP_INPUTS_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "subject",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (char/string/string-array/cellstr).",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Regular-expression pattern.",
-    },
-    BuiltinParamDescriptor {
-        name: "options",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Output selectors and regexp options.",
-    },
-];
-
-const REGEXP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "out = regexp(subject, pattern)",
-        inputs: &REGEXP_INPUTS_CORE,
-        outputs: &REGEXP_OUTPUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = regexp(subject, pattern, options...)",
-        inputs: &REGEXP_INPUTS_OPTIONS,
-        outputs: &REGEXP_OUTPUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[start,end_idx,match,tokens,names,split] = regexp(subject, pattern, options...)",
-        inputs: &REGEXP_INPUTS_OPTIONS,
-        outputs: &REGEXP_OUTPUT_MULTI,
-    },
-];
-
-const REGEXP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:regexp:InvalidArgument"),
-    when: "Input/options are malformed or unsupported.",
-    message: "regexp: invalid argument",
-};
-
-const REGEXP_ERROR_PATTERN_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.PATTERN_INVALID",
-    identifier: Some("RunMat:regexp:PatternInvalid"),
-    when: "Pattern cannot be compiled as a regular expression.",
-    message: "regexp: invalid regular expression pattern",
-};
-
-const REGEXP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REGEXP.INTERNAL",
-    identifier: Some("RunMat:regexp:Internal"),
-    when: "Internal regexp output assembly fails.",
-    message: "regexp: internal operation failed",
-};
-
-const REGEXP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    REGEXP_ERROR_INVALID_ARGUMENT,
-    REGEXP_ERROR_PATTERN_INVALID,
-    REGEXP_ERROR_INTERNAL,
-];
-
-pub const REGEXP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGEXP_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REGEXP_ERRORS,
-};
-
-pub const REGEXP_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "regexp accepts host string, character, and cell text for subjects, expressions, output keys, and options. Numeric match indices are outputs only; numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access.",
-};
 
 fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
@@ -249,13 +81,7 @@ pub async fn evaluate_with(
 
 #[runtime_builtin(
     name = "regexp",
-    category = "strings/regex",
-    summary = "Regular expression matching with MATLAB-compatible outputs.",
-    keywords = "regexp,regex,pattern,match,tokens,split",
-    accel = "sink",
-    type_resolver(unknown_type),
-    descriptor(crate::builtins::strings::regex::regexp::REGEXP_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::regex::regexp::REGEXP_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::regex::regexp"
 )]
 async fn regexp_builtin(
@@ -1128,7 +954,6 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     #[test]
     fn regexp_descriptor_signatures_cover_core_forms() {
@@ -1687,13 +1512,5 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected output {other:?}"),
         }
-    }
-
-    #[test]
-    fn regexp_type_is_unknown() {
-        assert_eq!(
-            unknown_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::Unknown
-        );
     }
 }
