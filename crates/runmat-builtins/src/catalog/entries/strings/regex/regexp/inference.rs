@@ -80,7 +80,10 @@ fn index_output(subject: Option<&ValueFact>, force_cell: bool) -> ValueFact {
     let Some(subject) = subject else {
         return ValueFact::unknown(DynamicReason::RuntimeValue);
     };
-    if matches!(&subject.kind, ValueKindFact::Unknown) {
+    if !matches!(
+        &subject.kind,
+        ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Cell(_)
+    ) {
         return ValueFact::unknown(DynamicReason::RuntimeValue);
     }
     let scalar = match &subject.kind {
@@ -103,7 +106,12 @@ fn index_output(subject: Option<&ValueFact>, force_cell: bool) -> ValueFact {
     output
 }
 fn cell_output(subject: Option<&ValueFact>) -> ValueFact {
-    if subject.is_none_or(|value| matches!(&value.kind, ValueKindFact::Unknown)) {
+    if subject.is_none_or(|value| {
+        !matches!(
+            &value.kind,
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Cell(_)
+        )
+    }) {
         return ValueFact::unknown(DynamicReason::RuntimeValue);
     }
     let mut output = ValueFact::unknown(DynamicReason::RuntimeValue);
@@ -172,5 +180,10 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "RM-CATALOG-REGEXP-TEXT"));
+        request.arguments[0] = ValueFact::scalar(ValueKindFact::Logical);
+        assert_eq!(
+            infer(&request, &super::super::REGEXP_CATALOG_ENTRY).outputs[0].kind,
+            ValueKindFact::Unknown
+        );
     }
 }
