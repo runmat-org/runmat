@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use runmat_execution::state::{AttemptState, TaskState};
@@ -11,7 +12,7 @@ use super::RemotePoolDriver;
 impl RemotePoolDriver {
     pub(super) fn apply_report(self: &Arc<Self>, report: BackendReport) {
         let task_id = report.task_id;
-        let (actions, outcome, newly_committed) = {
+        let (actions, outcome, committed_watermark) = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
             let previous_events = driver.events().len();
             let actions = match driver.handle(DriverCommand::BackendReport(report)) {
@@ -52,15 +53,17 @@ impl RemotePoolDriver {
                     action => Some(action),
                 })
                 .collect();
-            let newly_committed = matches!(&outcome, Some(Ok(_)))
-                && driver.events()[previous_events..].iter().any(|event| {
-                    matches!(&event.kind, DriverEventKind::ResultCommitted { task_id: committed, .. }
-                        if *committed == task_id)
-                });
-            (actions, outcome, newly_committed)
+            let committed_watermark = driver.events()[previous_events..].iter().find_map(|event| {
+                matches!(&event.kind, DriverEventKind::ResultCommitted { task_id: committed, .. }
+                    if *committed == task_id)
+                .then_some(event.sequence + 1)
+            });
+            (actions, outcome, committed_watermark)
         };
         self.dispatch(actions);
-        if newly_committed {
+        if let Some(watermark) = committed_watermark {
+            self.committed_event_watermark
+                .fetch_max(watermark, Ordering::AcqRel);
             self.committed_task.notify_one();
         }
         if let Some(outcome) = outcome {

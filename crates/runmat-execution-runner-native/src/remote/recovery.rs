@@ -183,15 +183,25 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             locations.clone(),
         )
         .await?;
-        self.commit(&mut state, Some((catalog, locations))).await
+        self.commit(&mut state, Some((catalog, locations)), 0)
+            .await
+            .map(|_| ())
     }
 
-    pub(super) async fn publish_pool(&self) -> NativeExecutionResult<()> {
+    pub(super) async fn publish_pool(&self) -> NativeExecutionResult<u64> {
+        self.publish_pool_through(0).await
+    }
+
+    pub(super) async fn publish_pool_through(
+        &self,
+        required_event_watermark: u64,
+    ) -> NativeExecutionResult<u64> {
         if self.pool.is_none() {
             return Err(protocol("periodic recovery has no bound pool"));
         }
         let mut state = self.state.lock().await;
-        self.commit(&mut state, None).await
+        self.commit(&mut state, None, required_event_watermark)
+            .await
     }
 
     async fn commit(
@@ -201,7 +211,8 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             ProgramExecutionObjectLocation,
             Vec<ProgramExecutionObjectLocation>,
         )>,
-    ) -> NativeExecutionResult<()> {
+        required_event_watermark: u64,
+    ) -> NativeExecutionResult<u64> {
         state.ensure_writable()?;
         let sequence = state
             .sequence
@@ -216,6 +227,7 @@ impl<'a> RemoteRecoveryPublisher<'a> {
                     pool,
                     sequence,
                     &state.pool_locations,
+                    required_event_watermark,
                 )
                 .await?,
             ),
@@ -260,10 +272,13 @@ impl<'a> RemoteRecoveryPublisher<'a> {
                 .map(|location| (location.reference.id, location))
                 .collect();
         }
-        if let Some(pool) = pool {
+        let event_watermark = if let Some(pool) = pool {
             state.pool_locations = pool.locations;
-        }
-        Ok(())
+            pool.event_watermark
+        } else {
+            0
+        };
+        Ok(event_watermark)
     }
 
     #[cfg(test)]

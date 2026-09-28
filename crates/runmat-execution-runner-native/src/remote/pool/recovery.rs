@@ -44,6 +44,10 @@ pub struct RemotePoolRestoreAuthority {
 }
 
 impl RemotePoolCheckpoint {
+    pub(crate) fn scheduler_event_watermark(&self) -> u64 {
+        self.scheduler.snapshot.next_event_sequence
+    }
+
     #[cfg(all(test, feature = "occt-native"))]
     pub(crate) fn test_snapshot(&self) -> &runmat_execution_runner::DriverSnapshot {
         &self.scheduler.snapshot

@@ -476,15 +476,17 @@ async fn execute_with_allocated_workers(
     checkpoint_ticks.tick().await;
     let mut cancellation_requested = false;
     let mut cancellation_open = true;
+    let mut checkpointed_event_watermark = 0;
     loop {
         if *cancellation.borrow() && !cancellation_requested {
             pool.cancel(CancellationReason::User)?;
             cancellation_requested = true;
         }
+        let observed_watermark = checkpointed_event_watermark;
         let checkpoint_due = async {
             tokio::select! {
-                _ = checkpoint_ticks.tick() => {},
-                _ = pool.committed_task() => {},
+                _ = checkpoint_ticks.tick() => None,
+                watermark = pool.committed_task_after(observed_watermark) => Some(watermark),
             }
         };
         tokio::select! {
@@ -506,10 +508,10 @@ async fn execute_with_allocated_workers(
             _ = driver_ticks.tick() => {
                 pool.tick()?;
             }
-            _ = checkpoint_due, if periodic_publisher.is_some() && !cancellation_requested => {
+            requested_watermark = checkpoint_due, if periodic_publisher.is_some() && !cancellation_requested => {
                 let publisher = periodic_publisher.as_ref().expect("checkpoint branch is enabled");
                 match await_running_operation(
-                    publisher.publish_pool(),
+                    publisher.publish_pool_through(requested_watermark.unwrap_or(0)),
                     &mut execution,
                     &mut driver_ticks,
                     &pool,
@@ -521,7 +523,7 @@ async fn execute_with_allocated_workers(
                         return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
                     }
                     RunningWait::Operation(result, completed) => {
-                        result?;
+                        checkpointed_event_watermark = result?;
                         if let Some(result) = completed {
                             return super::pool_tasks::observed_execution(&pool, result, cancellation_requested);
                         }

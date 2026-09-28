@@ -230,7 +230,25 @@ async fn scheduler_and_physical_roots_survive_one_serialized_publication_sequenc
         .publish_objects(physical.reference.clone(), vec![physical])
         .await
         .unwrap();
-    publisher.publish_pool().await.unwrap();
+    let current_watermark = pool
+        .capture_checkpoint(5)
+        .unwrap()
+        .scheduler_event_watermark();
+    let stored_before_rejection = control.state.lock().unwrap().stored.len();
+    let unavailable_event = publisher
+        .publish_pool_through(current_watermark + 1)
+        .await
+        .expect_err("a checkpoint cannot claim an event absent from its scheduler snapshot");
+    assert!(unavailable_event
+        .to_string()
+        .contains("did not include its committed scheduler event"));
+    assert_eq!(publisher.checkpoint_sequence(), 4);
+    assert_eq!(
+        control.state.lock().unwrap().stored.len(),
+        stored_before_rejection
+    );
+    let published_watermark = publisher.publish_pool().await.unwrap();
+    assert_eq!(published_watermark, current_watermark);
     assert_eq!(publisher.checkpoint_sequence(), 5);
     let checkpoint = {
         let state = control.state.lock().unwrap();

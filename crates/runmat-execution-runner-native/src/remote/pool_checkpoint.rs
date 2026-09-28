@@ -22,6 +22,7 @@ const VALUE_SCHEMA: &str = "runmat.remote-pool-checkpoint.v1";
 pub(super) struct PublishedPoolCheckpoint {
     pub(super) catalog: ProgramExecutionObjectLocation,
     pub(super) locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
+    pub(super) event_watermark: u64,
 }
 
 pub(super) async fn publish(
@@ -31,6 +32,7 @@ pub(super) async fn publish(
     pool: &RemotePoolDriver,
     generation: u64,
     retained: &BTreeMap<ValueId, ProgramExecutionObjectLocation>,
+    required_event_watermark: u64,
 ) -> NativeExecutionResult<PublishedPoolCheckpoint> {
     if pool.value_scope() != authority.run_id {
         return Err(invalid(
@@ -38,6 +40,12 @@ pub(super) async fn publish(
         ));
     }
     let checkpoint = pool.capture_checkpoint(generation)?;
+    let event_watermark = checkpoint.scheduler_event_watermark();
+    if event_watermark < required_event_watermark {
+        return Err(invalid(
+            "remote checkpoint did not include its committed scheduler event",
+        ));
+    }
     let references = checkpoint.object_references()?;
     let root_object = LogicalObject::new(
         ObjectNamespace::ResultValue,
@@ -91,7 +99,11 @@ pub(super) async fn publish(
         locations.values().cloned().collect(),
     )
     .await?;
-    Ok(PublishedPoolCheckpoint { catalog, locations })
+    Ok(PublishedPoolCheckpoint {
+        catalog,
+        locations,
+        event_watermark,
+    })
 }
 
 pub(super) struct RestoredPoolCheckpoint {

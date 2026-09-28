@@ -121,6 +121,45 @@ async fn committed_download_survives_cold_restore_and_gc_but_pending_download_is
     ));
     drop(lease);
     let checkpoint = pool.capture_checkpoint(2).unwrap();
+    let committed_watermark = checkpoint
+        .scheduler
+        .snapshot
+        .events
+        .iter()
+        .find_map(|event| {
+            matches!(
+                &event.kind,
+                runmat_execution_runner::driver::DriverEventKind::ResultCommitted { .. }
+            )
+            .then_some(event.sequence + 1)
+        })
+        .expect("the accepted result has a scheduler commit event");
+    assert_eq!(
+        pool.committed_event_watermark
+            .load(std::sync::atomic::Ordering::Acquire),
+        committed_watermark
+    );
+    // Consume the ephemeral wake first. The event watermark must still let a
+    // restarted publication waiter discover the accepted commit immediately.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        pool.committed_task.notified(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            pool.committed_task_after(0),
+        )
+        .await
+        .unwrap(),
+        committed_watermark
+    );
+    assert_eq!(
+        checkpoint.scheduler_event_watermark(),
+        checkpoint.scheduler.snapshot.next_event_sequence
+    );
     assert!(checkpoint.execution_inputs.is_empty());
     assert_eq!(
         checkpoint.object_references().unwrap(),

@@ -100,6 +100,7 @@ pub struct RemotePoolDriver {
     admission: Mutex<()>,
     restored_completions: Mutex<HashMap<TaskId, RemoteTaskCompletion>>,
     committed_task: tokio::sync::Notify,
+    committed_event_watermark: AtomicU64,
     cancellation_in_flight: AtomicUsize,
     cancellation_settled: tokio::sync::Notify,
     cancellation_ownership_failed: AtomicBool,
@@ -172,6 +173,7 @@ impl RemotePoolDriver {
             admission: Mutex::new(()),
             restored_completions: Mutex::new(HashMap::new()),
             committed_task: tokio::sync::Notify::new(),
+            committed_event_watermark: AtomicU64::new(0),
             cancellation_in_flight: AtomicUsize::new(0),
             cancellation_settled: tokio::sync::Notify::new(),
             cancellation_ownership_failed: AtomicBool::new(false),
@@ -206,9 +208,18 @@ impl RemotePoolDriver {
         &self.value_scope
     }
 
-    /// Wake the checkpoint publisher after scheduler authority accepts a new result.
-    pub(super) async fn committed_task(&self) {
-        self.committed_task.notified().await;
+    /// Return an accepted commit event even if its notification was already consumed.
+    pub(super) async fn committed_task_after(&self, published_watermark: u64) -> u64 {
+        loop {
+            let notified = self.committed_task.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let watermark = self.committed_event_watermark.load(Ordering::Acquire);
+            if watermark > published_watermark {
+                return watermark;
+            }
+            notified.await;
+        }
     }
 
     pub async fn add_worker(
