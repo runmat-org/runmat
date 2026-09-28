@@ -1,6 +1,6 @@
 //! `double` runtime binding and conversion orchestration.
 
-use runmat_builtins::{BuiltinErrorDescriptor, DOUBLE_ERROR_INVALID_INPUT, DOUBLE_LIKE_EXTENSION};
+use runmat_builtins::{BuiltinErrorDescriptor, DOUBLE_ERROR_INVALID_INPUT};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -32,46 +32,10 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     builtin_path = "crate::builtins::math::elementwise::floating_conversions::double"
 )]
 async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    crate::output_count::validate_fixed_outputs(
-        runmat_builtins::DOUBLE_CATALOG_ENTRY.descriptor,
-        &runmat_builtins::DOUBLE_ERROR_INVALID_ARGUMENT,
-        CONVERSION.name(),
-    )?;
-    let template = parse_output_template(&rest)?;
-    if matches!(template, OutputTemplate::Like(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &DOUBLE_LIKE_EXTENSION,
-            CONVERSION.name(),
-        )?;
-    }
-    template.validate()?;
-    let borrowed: Vec<_> = std::iter::once(&value)
-        .chain(rest.iter())
-        .filter_map(|value| {
-            if let Value::GpuTensor(handle) = value {
-                Some(handle.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
-    let signature = usize::from(!rest.is_empty());
-    let input_count = 1 + rest.len();
-    super::preparation::execute(
-        runmat_builtins::DOUBLE_CATALOG_ENTRY.identity,
-        value,
-        signature,
-        input_count,
-        runmat_builtins::BuiltinPreparationFormId(if matches!(template, OutputTemplate::Default) {
-            1
-        } else {
-            0
-        }),
-        |value| execution::convert(value, template, borrowed),
-    )
-    .await
+    dispatch::execute(value, rest).await
 }
 
+mod dispatch;
 mod host;
 mod execution;
 mod provider;

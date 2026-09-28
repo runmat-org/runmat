@@ -1,4 +1,5 @@
 mod complex;
+mod evaluation;
 mod errors;
 mod host;
 mod provider;
@@ -11,7 +12,7 @@ pub(crate) use specs::{
     __runmat_wasm_register_fusion_spec_FUSION_SPEC, __runmat_wasm_register_gpu_spec_GPU_SPEC,
 };
 
-use runmat_builtins::{SQRT_ERROR_INVALID_INPUT, SQRT_INTEGER_INPUT_EXTENSION};
+use runmat_builtins::SQRT_INTEGER_INPUT_EXTENSION;
 use runmat_macros::runtime_builtin;
 use runmat_value::{SymbolicFunction, Value};
 
@@ -45,29 +46,9 @@ async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
         &runmat_builtins::SQRT_CATALOG_ENTRY,
         runmat_types::RealUnaryPredicate::Nonnegative,
         value,
-        evaluate_admitted,
+        evaluation::evaluate_admitted,
     )
     .await
-}
-
-async fn evaluate_admitted(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => provider::evaluate(handle).await,
-        Value::Complex(real, imag) => Ok(complex::evaluate_scalar(real, imag)),
-        Value::ComplexTensor(tensor) => {
-            crate::builtins::common::validation::reject_typed_complex_integer_tensor(
-                &tensor,
-                BUILTIN_NAME,
-            )?;
-            complex::evaluate_tensor(tensor)
-        }
-        Value::CharArray(chars) => host::evaluate_characters(chars),
-        Value::String(_) | Value::StringArray(_) => Err(errors::with_detail(
-            &SQRT_ERROR_INVALID_INPUT,
-            "expected numeric input",
-        )),
-        other => host::evaluate(other),
-    }
 }
 
 #[cfg(test)]
