@@ -1,7 +1,7 @@
 //! MATLAB-compatible `upper` builtin with GPU-aware semantics for RunMat.
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, UPPER_ERROR_CELL_ELEMENT, UPPER_ERROR_INTERNAL,
+    UPPER_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
@@ -12,9 +12,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{char_row_to_string_slice, uppercase_preserving_missing};
+#[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::upper")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -30,7 +30,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Executes on the CPU; GPU-resident inputs are gathered to host memory before conversion.",
+        "Executes on host text; resident numeric inputs reject before provider access or gathering.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::transform::upper")]
@@ -41,73 +41,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
+    notes: "Host text transformation; not eligible for fusion. Resident numeric inputs reject.",
 };
 
 const BUILTIN_NAME: &str = "upper";
-
-const UPPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Uppercased text preserving input container kind and shape.",
-}];
-
-const UPPER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String/char/cell text input to transform.",
-}];
-
-const UPPER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = upper(str)",
-    inputs: &UPPER_INPUTS,
-    outputs: &UPPER_OUTPUT,
-}];
-
-const UPPER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UPPER.INVALID_INPUT",
-    identifier: Some("RunMat:upper:InvalidInput"),
-    when: "Input is not a string array, character array, or cell array of text scalars.",
-    message:
-        "upper: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const UPPER_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UPPER.CELL_ELEMENT",
-    identifier: Some("RunMat:upper:CellElement"),
-    when: "Cell array contains a non-text element or non-row char array element.",
-    message: "upper: cell array elements must be string scalars or character vectors",
-};
-
-const UPPER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UPPER.INTERNAL",
-    identifier: Some("RunMat:upper:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "upper: internal error",
-};
-
-const UPPER_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    UPPER_ERROR_INVALID_INPUT,
-    UPPER_ERROR_CELL_ELEMENT,
-    UPPER_ERROR_INTERNAL,
-];
-
-pub const UPPER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UPPER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &UPPER_ERRORS,
-};
-
-pub const UPPER_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "upper accepts string arrays, character arrays, or cell arrays of character vectors. Numeric and integer inputs reject without implicit text conversion or provider access.",
-};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
@@ -130,13 +67,7 @@ fn upper_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "upper",
-    category = "strings/transform",
-    summary = "Convert text inputs to uppercase character forms.",
-    keywords = "upper,uppercase,strings,character array,text",
-    accel = "sink",
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::upper::UPPER_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::upper::UPPER_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::upper"
 )]
 async fn upper_builtin(value: Value) -> BuiltinResult<Value> {
@@ -395,7 +326,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
-    fn upper_gpu_tensor_input_gathers_then_errors() {
+    fn upper_gpu_tensor_input_rejects_without_gathering() {
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
