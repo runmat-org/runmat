@@ -24,6 +24,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{
     char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
 };
+use crate::builtins::strings::core::numeric_length::nonnegative_platform_usize;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 const PATTERN_CLASS: runmat_types::StaticClassIdentity =
@@ -43,30 +44,6 @@ const OUT_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Variadic,
     default: None,
     description: "One converted output for each corresponding input.",
-}];
-
-const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical result.",
-}];
-
-const IN_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value.",
-}];
-
-const IN_INTEGER_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Number of elements.",
 }];
 
 const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -102,7 +79,6 @@ const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
 const NO_ERRORS: [BuiltinErrorDescriptor; 0] = [];
 
 macro_rules! descriptor {
@@ -135,55 +111,6 @@ macro_rules! descriptor_by_outputs {
     };
 }
 
-descriptor!(NEWLINE_DESCRIPTOR, "s = newline", &NO_INPUTS, &OUT_ANY);
-descriptor!(
-    BLANKS_DESCRIPTOR,
-    "s = blanks(n)",
-    &IN_INTEGER_SCALAR,
-    &OUT_ANY
-);
-pub const IS_STRING_SCALAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "isStringScalar is a universal type predicate; integer host or resident values return scalar false without reading numeric payload data.",
-    };
-
-const BLANKS_GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "blanks-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "blanks with a GPU-resident length is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BlanksGpuInputExtension"),
-};
-
-const BLANKS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [BLANKS_GPU_INPUT_EXTENSION];
-
-const BLANKS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "n accepts single, double, and every built-in integer class as an integer-valued scalar; negative values are treated as zero.",
-    }];
-
-pub const BLANKS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "chr = blanks(n)",
-        inputs: &BLANKS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "n determines only the length of the returned 1-by-n character row. Values too large for the host allocation domain reject; interactive GPU input is not documented.",
-    }];
-descriptor!(
-    IS_STRING_SCALAR_DESCRIPTOR,
-    "tf = isStringScalar(value)",
-    &IN_VALUE,
-    &OUT_BOOL
-);
 descriptor_by_outputs!(
     CONVERT_STRINGS_TO_CHARS_DESCRIPTOR,
     "[out1, ...] = convertStringsToChars(value1, ...)",
@@ -638,10 +565,6 @@ fn string_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::String
 }
 
-fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
 fn tensor_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
@@ -652,73 +575,6 @@ pub(crate) fn compat_error(name: &str, message: impl Into<String>) -> crate::Run
 
 fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::RuntimeError {
     move |err| map_control_flow_with_builtin(err, name)
-}
-
-#[runtime_builtin(
-    name = "newline",
-    category = "strings/core",
-    summary = "Return a newline string scalar.",
-    keywords = "newline,string,text,line break",
-    accel = "metadata",
-    type_resolver(string_type),
-    descriptor(crate::builtins::strings::core::compat::NEWLINE_DESCRIPTOR),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-fn newline_builtin() -> BuiltinResult<Value> {
-    Ok(Value::String("\n".to_string()))
-}
-
-#[runtime_builtin(
-    name = "blanks",
-    category = "strings/core",
-    summary = "Return a character row vector of spaces.",
-    keywords = "blanks,char,space,text",
-    accel = "metadata",
-    type_resolver(string_type),
-    descriptor(crate::builtins::strings::core::compat::BLANKS_DESCRIPTOR),
-    extensions(BLANKS_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::core::compat::BLANKS_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-async fn blanks_builtin(n: Value) -> BuiltinResult<Value> {
-    if matches!(n, Value::GpuTensor(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &BLANKS_GPU_INPUT_EXTENSION,
-            "blanks",
-        )?;
-    }
-    let n = gather_if_needed_async(&n)
-        .await
-        .map_err(map_flow("blanks"))?;
-    let n = parse_blanks_length(&n)?;
-    let mut spaces = String::new();
-    spaces.try_reserve_exact(n).map_err(|_| {
-        compat_error(
-            "blanks",
-            "blanks: requested character array is too large".to_string(),
-        )
-    })?;
-    spaces.extend(std::iter::repeat_n(' ', n));
-    Ok(Value::CharArray(CharArray::new_row(&spaces)))
-}
-
-#[runtime_builtin(
-    name = "isStringScalar",
-    category = "strings/core",
-    summary = "Return true for a scalar MATLAB string.",
-    keywords = "isStringScalar,string scalar,type predicate",
-    accel = "metadata",
-    type_resolver(bool_type),
-    descriptor(crate::builtins::strings::core::compat::IS_STRING_SCALAR_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::compat::IS_STRING_SCALAR_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-fn is_string_scalar_builtin(value: Value) -> BuiltinResult<Value> {
-    Ok(Value::Bool(match value {
-        Value::String(_) => true,
-        Value::StringArray(array) => array.data.len() == 1,
-        _ => false,
-    }))
 }
 
 #[runtime_builtin(
@@ -1449,70 +1305,6 @@ fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize>
             format!("{fn_name}: expected a nonnegative integer scalar"),
         )
     })
-}
-
-fn parse_blanks_length(value: &Value) -> BuiltinResult<usize> {
-    let parsed = match value {
-        Value::Num(n) if n.is_finite() && n.fract() == 0.0 && *n <= 0.0 => Some(0),
-        Value::Num(n) => nonnegative_platform_usize(*n),
-        Value::Int(value) => zero_clamped_integer_usize(value),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                storage
-                    .value_at(0)
-                    .and_then(|value| zero_clamped_integer_usize(&value))
-            } else {
-                let value = tensor_utils::tensor_value_f64(tensor, 0);
-                if value.is_finite() && value.fract() == 0.0 && value <= 0.0 {
-                    Some(0)
-                } else {
-                    nonnegative_platform_usize(value)
-                }
-            }
-        }
-        _ => None,
-    };
-    parsed.ok_or_else(|| {
-        compat_error(
-            "blanks",
-            "blanks: expected an integer-valued numeric scalar".to_string(),
-        )
-    })
-}
-
-fn zero_clamped_integer_usize(value: &IntValue) -> Option<usize> {
-    match value {
-        IntValue::I8(value) => Some(if *value <= 0 { 0 } else { *value as usize }),
-        IntValue::I16(value) => Some(if *value <= 0 { 0 } else { *value as usize }),
-        IntValue::I32(value) => {
-            if *value <= 0 {
-                Some(0)
-            } else {
-                usize::try_from(*value).ok()
-            }
-        }
-        IntValue::I64(value) => {
-            if *value <= 0 {
-                Some(0)
-            } else {
-                usize::try_from(*value).ok()
-            }
-        }
-        IntValue::U8(value) => Some(*value as usize),
-        IntValue::U16(value) => Some(*value as usize),
-        IntValue::U32(value) => usize::try_from(*value).ok(),
-        IntValue::U64(value) => usize::try_from(*value).ok(),
-    }
-}
-
-fn nonnegative_platform_usize(value: f64) -> Option<usize> {
-    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
-        return None;
-    }
-    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
-        return None;
-    }
-    Some(value as usize)
 }
 
 fn convert_strings_to_chars(value: Value) -> BuiltinResult<Value> {
@@ -2534,13 +2326,14 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use crate::builtins::strings::core::{
+        blanks::blanks_builtin, is_string_scalar::is_string_scalar_builtin,
         isletter::isletter_builtin, isspace::isspace_builtin, isstrprop::isstrprop_builtin,
-        strncmpi::strncmpi_builtin,
+        newline::newline_builtin, strncmpi::strncmpi_builtin,
     };
     use runmat_builtins::{
-        ISLETTER_ERROR_TOO_MANY_OUTPUTS, ISSPACE_ERROR_TOO_MANY_OUTPUTS,
-        ISSTRPROP_ERROR_TOO_MANY_OUTPUTS, ISSTRPROP_RESIDENT_INPUT_EXTENSION,
-        STRNCMPI_ERROR_TOO_MANY_OUTPUTS,
+        BLANKS_GPU_INPUT_EXTENSION, ISLETTER_ERROR_TOO_MANY_OUTPUTS,
+        ISSPACE_ERROR_TOO_MANY_OUTPUTS, ISSTRPROP_ERROR_TOO_MANY_OUTPUTS,
+        ISSTRPROP_RESIDENT_INPUT_EXTENSION, STRNCMPI_ERROR_TOO_MANY_OUTPUTS,
     };
     use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType};
 

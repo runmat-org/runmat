@@ -1,15 +1,19 @@
 //! Core string builtins.
 
 pub mod char;
+pub mod blanks;
 pub(crate) mod classification;
 pub mod compat;
 pub mod compose;
 pub mod genvarname;
 pub mod int2str;
 pub mod isletter;
+pub mod is_string_scalar;
 pub mod isspace;
 pub mod isstrprop;
 pub mod num2str;
+pub mod newline;
+pub(crate) mod numeric_length;
 pub mod patterns;
 pub mod sprintf;
 pub mod str2double;
