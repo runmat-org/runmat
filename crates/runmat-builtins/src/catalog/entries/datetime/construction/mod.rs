@@ -7,7 +7,10 @@ mod inference;
 #[cfg(test)]
 mod tests;
 
-pub use contracts::{DATETIME_DESCRIPTOR, DATETIME_INTEGER_CAPABILITIES};
+pub use contracts::{
+    DATETIME_DESCRIPTOR, DATETIME_ERRORS, DATETIME_ERROR_INVALID_ARGUMENT,
+    DATETIME_ERROR_INVALID_INPUT, DATETIME_INTEGER_CAPABILITIES,
+};
 
 pub const DATETIME_RAW_DATENUM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "datetime-implicit-datenum",

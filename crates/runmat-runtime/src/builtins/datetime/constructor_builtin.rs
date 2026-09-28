@@ -19,17 +19,17 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
     // operand can trigger provider lookup or an upload/gather failure.
     if let Some(convert_from) = options.convert_from.as_deref() {
         if !convert_from.eq_ignore_ascii_case("datenum") {
-            return Err(datetime_error(format!(
+            return Err(datetime_argument_error(format!(
                 "datetime: unsupported ConvertFrom value '{convert_from}'"
             )));
         }
         if positional_inputs.len() != 1 {
-            return Err(datetime_error(
+            return Err(datetime_argument_error(
                 "datetime: ConvertFrom='datenum' expects exactly one numeric input",
             ));
         }
     } else if !matches!(positional_inputs.len(), 0 | 1 | 3..=7) {
-        return Err(datetime_error(
+        return Err(datetime_argument_error(
             "datetime: unsupported argument pattern; use text, serial dates, or Y/M/D component inputs",
         ));
     }
@@ -40,7 +40,7 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
                 [Value::String(_) | Value::StringArray(_) | Value::CharArray(_)]
             )
         {
-            return Err(datetime_error(
+            return Err(datetime_argument_error(
                 "datetime: InputFormat requires exactly one text input",
             ));
         }

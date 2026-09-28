@@ -54,6 +54,16 @@ fn datetime_is_one_canonical_identity_with_clock_and_host_contract() {
         BuiltinResidencyPolicy::GatherToHost
     );
     assert_eq!(DATETIME_DESCRIPTOR.signatures.len(), 10);
+    assert_eq!(DATETIME_CATALOG_ENTRY.documentation.examples.len(), 9);
+    assert!(DATETIME_CATALOG_ENTRY
+        .documentation
+        .examples
+        .iter()
+        .any(|example| example.id == "extract-components"
+            && matches!(
+                &example.verification,
+                BuiltinExampleVerification::Assertions { .. }
+            )));
     assert_eq!(DATETIME_EXTENSIONS.len(), 4);
     assert_eq!(DATETIME_INTEGER_CAPABILITIES.len(), 3);
 }
@@ -247,4 +257,52 @@ fn datetime_copy_and_discarded_outputs_retain_type() {
     assert!(matches!(copy.outputs[0].kind, ValueKindFact::Object(_)));
     let discarded = inference::infer(&request(vec![original], vec![], 0), &DATETIME_CATALOG_ENTRY);
     assert!(discarded.outputs.is_empty());
+}
+
+#[test]
+fn datetime_rejects_statically_known_other_object_classes() {
+    for object in [
+        ObjectFact {
+            class: Some(runmat_types::ClassId(7)),
+            runtime_class: None,
+            properties: BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: None,
+        },
+        ObjectFact {
+            class: None,
+            runtime_class: Some(runmat_types::standard::CALENDAR_DURATION.owned()),
+            properties: BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: Some(false),
+        },
+    ] {
+        let value = ValueFact::proven(
+            ValueKindFact::Object(object),
+            ShapeFact::Scalar,
+            runmat_types::StorageFact::Opaque,
+        );
+        let inferred = inference::infer(&request(vec![value], vec![], 1), &DATETIME_CATALOG_ENTRY);
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-DATETIME-INPUT"));
+    }
+
+    let unknown_class = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: None,
+            properties: BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: None,
+        }),
+        ShapeFact::Scalar,
+        runmat_types::StorageFact::Opaque,
+    );
+    let inferred = inference::infer(
+        &request(vec![unknown_class], vec![], 1),
+        &DATETIME_CATALOG_ENTRY,
+    );
+    assert!(inferred.diagnostics.is_empty());
 }

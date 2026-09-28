@@ -253,9 +253,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     ValueKindFact::Numeric(numeric)
                         if numeric.domain == runmat_types::NumericDomain::Real => {}
                     ValueKindFact::Object(object)
-                        if object.runtime_class.is_none()
-                            || object.runtime_class.as_ref()
-                                == Some(&runmat_types::standard::DATETIME.owned()) => {}
+                        if object.runtime_class.as_ref()
+                            == Some(&runmat_types::standard::DATETIME.owned())
+                            || (object.runtime_class.is_none() && object.class.is_none()) => {}
                     _ => diagnostics.push(argument_error(
                         "RM-DATETIME-INPUT",
                         "expected date text, a datetime object, or real numeric date values",

@@ -47,7 +47,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Representation and execution",
             paragraphs: &[
                 "A datetime is a host object backed by a serial-date tensor and a `Format` property. There is no resident datetime class or GPU calendar kernel. RunMat mode may gather admitted resident numeric input through its provider owner; the result is still a host object. Construction is a fusion boundary and may suspend for a gather or throw for invalid input.",
-                "The no-argument and relative-text forms depend on the local clock. The other supported forms have no filesystem, network, callback, workspace, randomness, or user-interface effect. Native and WebAssembly runtimes use the same host representation; timezone and locale services are not implemented.",
+                "The no-argument and relative-text forms read the local clock and are nondeterministic. The other supported forms have no filesystem, network, callback, workspace, randomness, or user-interface effect. Native and WebAssembly runtimes use the same host representation; shared injectable clock, timezone, and locale services are not implemented.",
             ],
         },
         BuiltinDocumentationSection {
@@ -74,6 +74,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(year(t),[2024;2024])); assert(isequal(day(t),[9;10])); assert(isequal(hour(t),[13;8]));" },
+        },
+        BuiltinExample {
+            id: "extract-components", title: "Extract calendar and clock components",
+            program: "t = datetime(2024,4,9,13,30,5); y = year(t); m = month(t); d = day(t); h = hour(t);",
+            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(y==2024); assert(m==4); assert(d==9); assert(h==13); assert(minute(t)==30); assert(second(t)==5);" },
         },
         BuiltinExample {
             id: "serial-datenum", title: "Convert explicit serial date numbers",
@@ -143,7 +151,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[SOURCE], verification: TESTS,
-        notes: &["Locale, timezone, pivot-year, non-datenum epochs, and general nanosecond fidelity remain unsupported. Native/browser example execution, provider-owner behavior, and clock-service determinism need integrated qualification."],
+        notes: &["Locale, timezone, pivot-year, non-datenum epochs, and general nanosecond fidelity remain unsupported. A shared injectable clock and timezone service is not implemented; clock-dependent forms remain nondeterministic. Native/browser example execution and provider-owner behavior still need integrated qualification."],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

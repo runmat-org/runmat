@@ -105,6 +105,30 @@ const WITH_OPTIONS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Constructor arguments followed by Format, InputFormat, or ConvertFrom pairs.",
 }];
 
+pub const DATETIME_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATETIME.INVALID_ARGUMENT",
+    identifier: Some("RunMat:datetime:InvalidArgument"),
+    when: "Arguments or option grammar do not match supported datetime forms.",
+    message: "datetime: invalid argument",
+};
+pub const DATETIME_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATETIME.INVALID_INPUT",
+    identifier: Some("RunMat:datetime:InvalidInput"),
+    when: "Input values cannot be parsed, converted, or broadcast to a valid datetime result.",
+    message: "datetime: invalid input",
+};
+pub const DATETIME_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATETIME.INTERNAL",
+    identifier: Some("RunMat:datetime:Internal"),
+    when: "Internal datetime state is invalid.",
+    message: "datetime: internal operation failed",
+};
+pub const DATETIME_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DATETIME_ERROR_INVALID_ARGUMENT,
+    DATETIME_ERROR_INVALID_INPUT,
+    DATETIME_ERROR_INTERNAL,
+];
+
 pub const DATETIME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
         BuiltinSignatureDescriptor {
@@ -160,27 +184,7 @@ pub const DATETIME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     ],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[
-        BuiltinErrorDescriptor {
-            code: "RM.DATETIME.INVALID_ARGUMENT",
-            identifier: Some("RunMat:datetime:InvalidArgument"),
-            when: "Arguments or option grammar do not match supported datetime forms.",
-            message: "datetime: invalid argument",
-        },
-        BuiltinErrorDescriptor {
-            code: "RM.DATETIME.INVALID_INPUT",
-            identifier: Some("RunMat:datetime:InvalidInput"),
-            when:
-                "Input values cannot be parsed, converted, or broadcast to a valid datetime result.",
-            message: "datetime: invalid input",
-        },
-        BuiltinErrorDescriptor {
-            code: "RM.DATETIME.INTERNAL",
-            identifier: Some("RunMat:datetime:Internal"),
-            when: "Internal datetime state is invalid.",
-            message: "datetime: internal operation failed",
-        },
-    ],
+    errors: &DATETIME_ERRORS,
 };
 
 const INTEGER_COMPONENT_INPUT: [BuiltinIntegerInputCapability; 1] =

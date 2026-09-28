@@ -16,6 +16,17 @@ pub(super) fn datetime_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+pub(super) fn datetime_argument_error(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(
+            DATETIME_ERROR_INVALID_ARGUMENT
+                .identifier
+                .expect("datetime invalid-argument descriptor identifier"),
+        )
+        .build()
+}
+
 pub(super) fn ensure_datetime_class_registered() {
     DATETIME_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
@@ -156,19 +167,20 @@ pub(super) fn parse_trailing_options(args: &[Value]) -> BuiltinResult<(usize, Da
             Err(_) => break,
         };
         let lowered = name.trim().to_ascii_lowercase();
-        let value = scalar_text(&args[positional_end - 1], &format!("{name} option"))?;
+        let value = scalar_text(&args[positional_end - 1], &format!("{name} option"))
+            .map_err(|error| datetime_argument_error(error.message().to_owned()))?;
         let slot = match lowered.as_str() {
             "format" => &mut options.format,
             "convertfrom" => &mut options.convert_from,
             "inputformat" => &mut options.input_format,
             _ => {
-                return Err(datetime_error(format!(
+                return Err(datetime_argument_error(format!(
                     "datetime: unsupported option '{name}'"
                 )));
             }
         };
         if slot.replace(value).is_some() {
-            return Err(datetime_error(format!(
+            return Err(datetime_argument_error(format!(
                 "datetime: option '{name}' cannot be specified more than once"
             )));
         }

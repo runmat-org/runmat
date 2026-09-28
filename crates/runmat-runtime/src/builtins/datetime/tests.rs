@@ -456,10 +456,28 @@ fn datetime_invalid_options_precede_resident_provider_access() {
         let error = futures::executor::block_on(datetime_builtin(arguments))
             .expect_err("invalid constructor must reject before provider access");
         assert!(error.message().contains(expected), "{error:?}");
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::DATETIME_ERROR_INVALID_ARGUMENT.identifier
+        );
         assert_eq!(allocation.probe.retirements(), 0);
     }
     allocation.handle.release().unwrap();
     assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn datetime_constructor_value_errors_use_catalog_invalid_input_identifier() {
+    let error = futures::executor::block_on(datetime_builtin(vec![
+        Value::Num(2024.0),
+        Value::Num(2.0),
+        Value::Num(30.0),
+    ]))
+    .expect_err("invalid calendar date must fail");
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::DATETIME_ERROR_INVALID_INPUT.identifier
+    );
 }
 
 #[test]

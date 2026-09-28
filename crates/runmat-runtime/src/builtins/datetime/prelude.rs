@@ -2,7 +2,7 @@ pub(super) use chrono::{
     DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike, Weekday,
 };
 pub(super) use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinExtensionDescriptor,
     BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
     BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,

@@ -8,29 +8,11 @@ pub(super) static DATETIME_CLASS_REGISTERED: crate::class_registry::ClassRegistr
 pub(super) static CALENDAR_DURATION_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(CALENDAR_DURATION_CLASS);
 
-pub(super) const DATETIME_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DATETIME.INVALID_ARGUMENT",
-    identifier: Some("RunMat:datetime:InvalidArgument"),
-    when: "Arguments or option grammar do not match supported datetime forms.",
-    message: "datetime: invalid argument",
+// Legacy datetime-family method descriptors share the constructor's canonical
+// error declarations until their own catalog entries are migrated.
+pub(super) use runmat_builtins::{
+    DATETIME_ERRORS, DATETIME_ERROR_INVALID_ARGUMENT, DATETIME_ERROR_INVALID_INPUT,
 };
-pub(super) const DATETIME_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DATETIME.INVALID_INPUT",
-    identifier: Some("RunMat:datetime:InvalidInput"),
-    when: "Input values cannot be parsed/converted/broadcast to a valid datetime result.",
-    message: "datetime: invalid input",
-};
-pub(super) const DATETIME_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DATETIME.INTERNAL",
-    identifier: Some("RunMat:datetime:Internal"),
-    when: "Internal datetime state or indexing/evaluation failed unexpectedly.",
-    message: "datetime: internal operation failed",
-};
-pub(super) const DATETIME_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    DATETIME_ERROR_INVALID_ARGUMENT,
-    DATETIME_ERROR_INVALID_INPUT,
-    DATETIME_ERROR_INTERNAL,
-];
 
 pub(super) const OUT_DATETIME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "t",
