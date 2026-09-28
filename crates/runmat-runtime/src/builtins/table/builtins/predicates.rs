@@ -27,10 +27,7 @@ pub const ISORDINAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntege
 
 #[runtime_builtin(
     name = "istable",
-    category = "table",
-    summary = "Return true for table arrays.",
-    keywords = "istable,table,predicate",
-    descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    binding_variant = "default",
     integer_audit(crate::builtins::table::builtins::predicates::ISTABLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
@@ -43,10 +40,7 @@ pub(crate) async fn istable_builtin(value: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "istimetable",
-    category = "table",
-    summary = "Return true for timetable arrays.",
-    keywords = "istimetable,timetable,predicate",
-    descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    binding_variant = "default",
     integer_audit(crate::builtins::table::builtins::predicates::ISTIMETABLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
@@ -59,10 +53,7 @@ pub(crate) async fn istimetable_builtin(value: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "iscategorical",
-    category = "table",
-    summary = "Return true for categorical arrays.",
-    keywords = "iscategorical,categorical,predicate",
-    descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    binding_variant = "default",
     integer_audit(crate::builtins::table::builtins::predicates::ISCATEGORICAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
@@ -75,10 +66,7 @@ pub(crate) async fn iscategorical_builtin(value: Value) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "isordinal",
-    category = "table",
-    summary = "Return true for ordinal categorical arrays.",
-    keywords = "isordinal,ordinal,categorical,predicate",
-    descriptor(crate::builtins::table::TABLE_PREDICATE_DESCRIPTOR),
+    binding_variant = "default",
     integer_audit(crate::builtins::table::builtins::predicates::ISORDINAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
@@ -120,6 +108,10 @@ mod tests {
                 Value::Bool(false)
             );
             assert_eq!(
+                block_on(iscategorical_builtin(value.clone())).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(
                 block_on(isordinal_builtin(value)).unwrap(),
                 Value::Bool(false)
             );
@@ -140,6 +132,10 @@ mod tests {
             );
             assert_eq!(
                 block_on(istimetable_builtin(value.clone())).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(
+                block_on(iscategorical_builtin(value.clone())).unwrap(),
                 Value::Bool(false)
             );
             assert_eq!(

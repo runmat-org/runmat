@@ -23,29 +23,6 @@ const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Result value.",
 }];
-const HEAD_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Table, timetable, or array input.",
-}];
-const HEAD_INPUTS_COUNT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Table, timetable, or array input.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive number of leading rows to select.",
-    },
-];
 const READTABLE_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "filename",
     ty: BuiltinParamType::StringScalar,
@@ -401,13 +378,6 @@ const OBJECT_ASSIGN_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Assigned value.",
     },
 ];
-const VALUE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value.",
-}];
 const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
@@ -460,13 +430,6 @@ const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Variadic,
     default: None,
     description: "Input values and name-value options.",
-}];
-const PREDICATE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "TF",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Predicate result.",
 }];
 const WRITE_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 
@@ -635,18 +598,6 @@ const GRPSTATS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         outputs: &ANY_OUTPUT,
     },
 ];
-const HEAD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = head(A)",
-        inputs: &HEAD_INPUT,
-        outputs: &ANY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = head(A, n)",
-        inputs: &HEAD_INPUTS_COUNT,
-        outputs: &ANY_OUTPUT,
-    },
-];
 const COMPAT_VALUE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "B = tabularBuiltin(A, ...)",
     inputs: &VALUE_AND_ARGS_INPUTS,
@@ -656,11 +607,6 @@ const COMPAT_VARIADIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     label: "B = tabularBuiltin(args...)",
     inputs: &VARIADIC_INPUTS,
     outputs: &ANY_OUTPUT,
-}];
-const PREDICATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "TF = tabularPredicate(A)",
-    inputs: &VALUE_INPUT,
-    outputs: &PREDICATE_OUTPUT,
 }];
 const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "writeTabular(T, filename, ...)",
@@ -738,12 +684,6 @@ pub const GRPSTATS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
 };
-pub const HEAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HEAD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
 pub const TABLE_COMPAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &COMPAT_VALUE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -752,12 +692,6 @@ pub const TABLE_COMPAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const TABLE_VARIADIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &COMPAT_VARIADIC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const TABLE_PREDICATE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PREDICATE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,

@@ -2754,7 +2754,7 @@ fn timetable_conversion_predicates_and_head_work() {
 
 #[test]
 fn head_preserves_exact_integer_rows_and_requires_positive_count() {
-    assert_eq!(HEAD_INTEGER_CAPABILITIES.len(), 2);
+    assert_eq!(runmat_builtins::HEAD_INTEGER_CAPABILITIES.len(), 2);
     let source = Value::Tensor(
         Tensor::new_integer(
             IntegerStorage::U64(vec![9_007_199_254_740_993, 5, 7, 9]),
@@ -2926,7 +2926,7 @@ fn head_strict_gpu_row_count_extension_rejects_before_provider_access() {
         .expect_err("resident row count must be gated");
     assert_eq!(
         count_error.identifier(),
-        HEAD_EXTENSIONS[0].error_identifier
+        runmat_builtins::HEAD_EXTENSIONS[0].error_identifier
     );
     assert_eq!(allocation.probe.retirements(), 0);
     drop(allocation.handle);
