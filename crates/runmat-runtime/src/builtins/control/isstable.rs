@@ -40,9 +40,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "isstable",
-    category = "control",
-    summary = "Test stability of SISO transfer-function models.",
-    keywords = "isstable,control system,stability,poles,tf",
     binding_variant = "default",
     builtin_path = "crate::builtins::control::isstable"
 )]
