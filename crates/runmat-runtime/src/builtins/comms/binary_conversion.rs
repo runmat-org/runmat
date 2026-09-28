@@ -1,13 +1,21 @@
 //! MATLAB-compatible binary and hexadecimal conversion helpers.
 
-use runmat_builtins::{ResolveContext, Type};
+use runmat_builtins::{
+    ResolveContext, Type, BI2DE_GPU_INPUT_EXTENSION, BI2DE_INTEGER_BASE_EXTENSION,
+    DE2BI_GPU_INPUT_EXTENSION, DE2BI_INTEGER_CONTROL_EXTENSION, DE2BI_LOGICAL_INPUT_EXTENSION,
+    DE2BI_ND_INPUT_EXTENSION, DE2BI_WIDE_INTEGER_EXTENSION,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor, Value,
+    CellArray, CharArray, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage,
+    Tensor, Value,
 };
 
 use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+mod typed_output;
+use typed_output::{digit_decimal_result, digit_output_storage};
 
 const BI2DE_NAME: &str = "bi2de";
 const DE2BI_NAME: &str = "de2bi";
@@ -33,6 +41,7 @@ struct DigitMatrix {
     data: Vec<usize>,
     rows: usize,
     cols: usize,
+    dtype: Option<NumericDType>,
 }
 
 fn bi2de_error(message: impl Into<String>) -> RuntimeError {
@@ -51,28 +60,29 @@ fn conversion_error(builtin: &'static str, message: impl Into<String>) -> Runtim
     build_runtime_error(message).with_builtin(builtin).build()
 }
 
-fn vector_or_scalar_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
-fn matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
 fn char_matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::String
 }
 
 #[runtime_builtin(
     name = "bi2de",
-    category = "comms/conversion",
-    summary = "Convert rows of base-p digits to decimal integers.",
-    keywords = "bi2de,binary,decimal,base,communications,right-msb,left-msb",
-    type_resolver(vector_or_scalar_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
 async fn bi2de_builtin(b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let opts = Bi2deOptions::parse(&rest)?;
+    if rest.first().is_some_and(is_fixed_width_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BI2DE_INTEGER_BASE_EXTENSION,
+            BI2DE_NAME,
+        )?;
+    }
+    if matches!(b, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &BI2DE_GPU_INPUT_EXTENSION,
+            BI2DE_NAME,
+        )?;
+    }
     let digits = digit_matrix_from_value(b, BI2DE_NAME).await?;
     validate_digit_matrix(&digits, opts.base, BI2DE_NAME)?;
 
@@ -82,27 +92,49 @@ async fn bi2de_builtin(b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         out.push(value as f64);
     }
 
-    if out.len() == 1 {
-        Ok(Value::Num(out[0]))
-    } else {
-        let rows = out.len();
-        Ok(Value::Tensor(
-            Tensor::new(out, vec![rows, 1]).map_err(|err| bi2de_error(format!("bi2de: {err}")))?,
-        ))
-    }
+    digit_decimal_result(out, digits.dtype)
 }
 
 #[runtime_builtin(
     name = "de2bi",
-    category = "comms/conversion",
-    summary = "Convert nonnegative decimal integers to rows of base-p digits.",
-    keywords = "de2bi,decimal,binary,base,communications,right-msb,left-msb",
-    type_resolver(matrix_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
 async fn de2bi_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let opts = De2biOptions::parse(&rest)?;
-    let decimals = decimal_vector_from_value(d).await?;
+    if rest.iter().any(is_fixed_width_integer) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DE2BI_INTEGER_CONTROL_EXTENSION,
+            DE2BI_NAME,
+        )?;
+    }
+    if matches!(&d, Value::Tensor(tensor) if tensor.shape.len() > 2)
+        || matches!(&d, Value::GpuTensor(handle) if handle.shape().len() > 2)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DE2BI_ND_INPUT_EXTENSION,
+            DE2BI_NAME,
+        )?;
+    }
+    if matches!(d, Value::Bool(_) | Value::LogicalArray(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DE2BI_LOGICAL_INPUT_EXTENSION,
+            DE2BI_NAME,
+        )?;
+    }
+    if matches!(d, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DE2BI_GPU_INPUT_EXTENSION,
+            DE2BI_NAME,
+        )?;
+    }
+    let (decimals, dtype) = decimal_vector_from_value(d).await?;
+    if decimals.iter().any(|&value| value > MAX_EXACT_INTEGER) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &DE2BI_WIDE_INTEGER_EXTENSION,
+            DE2BI_NAME,
+        )?;
+    }
     let needed_width = decimals
         .iter()
         .copied()
@@ -124,9 +156,19 @@ async fn de2bi_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         write_digits(value, opts.base, width, opts.order, &mut out, row, rows);
     }
 
+    let storage = digit_output_storage(dtype, out);
     Ok(Value::Tensor(
-        Tensor::new(out, vec![rows, width]).map_err(|err| de2bi_error(format!("de2bi: {err}")))?,
+        Tensor::from_numeric_storage(storage, vec![rows, width])
+            .map_err(|err| de2bi_error(format!("de2bi: {err}")))?,
     ))
+}
+
+fn is_fixed_width_integer(value: &Value) -> bool {
+    match value {
+        Value::Int(_) => true,
+        Value::Tensor(tensor) => tensor.numeric_dtype().integer_class().is_some(),
+        _ => false,
+    }
 }
 
 #[runtime_builtin(
@@ -797,16 +839,22 @@ async fn digit_matrix_from_value(
             data: vec![number_to_digit(n, builtin, "B")?],
             rows: 1,
             cols: 1,
+            dtype: Some(NumericDType::F64),
         }),
-        Value::Int(i) => Ok(DigitMatrix {
-            data: vec![integer_to_digit(&i, builtin, "B")?],
-            rows: 1,
-            cols: 1,
-        }),
+        Value::Int(i) => {
+            let dtype = i.numeric_dtype();
+            Ok(DigitMatrix {
+                data: vec![integer_to_digit(&i, builtin, "B")?],
+                rows: 1,
+                cols: 1,
+                dtype: Some(dtype),
+            })
+        }
         Value::Bool(b) => Ok(DigitMatrix {
             data: vec![usize::from(b)],
             rows: 1,
             cols: 1,
+            dtype: None,
         }),
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(bi2de_error("bi2de: B must contain real digits"))
@@ -822,6 +870,7 @@ async fn digit_matrix_from_value(
 fn digit_matrix_from_tensor(tensor: Tensor, builtin: &'static str) -> BuiltinResult<DigitMatrix> {
     ensure_matrix_shape(&tensor.shape, builtin, "B")?;
     let (rows, cols) = matrix_extents(&tensor.shape);
+    let dtype = tensor.numeric_dtype();
     let data = match tensor
         .into_numeric_storage()
         .map_err(|err| conversion_error(builtin, format!("{builtin}: {err}")))?
@@ -842,7 +891,12 @@ fn digit_matrix_from_tensor(tensor: Tensor, builtin: &'static str) -> BuiltinRes
             "B",
         )?,
     };
-    Ok(DigitMatrix { data, rows, cols })
+    Ok(DigitMatrix {
+        data,
+        rows,
+        cols,
+        dtype: Some(dtype),
+    })
 }
 
 fn matrix_extents(shape: &[usize]) -> (usize, usize) {
@@ -864,20 +918,31 @@ fn digit_matrix_from_logical(
         data: logical.data.into_iter().map(usize::from).collect(),
         rows,
         cols,
+        dtype: None,
     })
 }
 
-async fn decimal_vector_from_value(value: Value) -> BuiltinResult<Vec<u128>> {
+async fn decimal_vector_from_value(value: Value) -> BuiltinResult<(Vec<u128>, NumericDType)> {
     match value {
-        Value::Tensor(tensor) => decimal_vector_from_tensor(tensor),
-        Value::LogicalArray(logical) => Ok(logical.data.into_iter().map(u128::from).collect()),
+        Value::Tensor(tensor) => {
+            let dtype = tensor.numeric_dtype();
+            Ok((decimal_vector_from_tensor(tensor)?, dtype))
+        }
+        Value::LogicalArray(logical) => Ok((
+            logical.data.into_iter().map(u128::from).collect(),
+            NumericDType::F64,
+        )),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            decimal_vector_from_tensor(tensor)
+            let dtype = tensor.numeric_dtype();
+            Ok((decimal_vector_from_tensor(tensor)?, dtype))
         }
-        Value::Num(n) => Ok(vec![number_to_decimal(n, "D")?]),
-        Value::Int(i) => Ok(vec![integer_to_nonnegative(&i, DE2BI_NAME, "D")?]),
-        Value::Bool(b) => Ok(vec![if b { 1 } else { 0 }]),
+        Value::Num(n) => Ok((vec![number_to_decimal(n, "D")?], NumericDType::F64)),
+        Value::Int(i) => Ok((
+            vec![integer_to_nonnegative(&i, DE2BI_NAME, "D")?],
+            i.numeric_dtype(),
+        )),
+        Value::Bool(b) => Ok((vec![u128::from(b)], NumericDType::F64)),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(de2bi_error(
             "de2bi: D must contain real nonnegative integers",
         )),
@@ -1296,9 +1361,156 @@ mod tests {
     fn value_data(value: Value) -> Vec<f64> {
         match value {
             Value::Num(n) => vec![n],
+            Value::Int(integer) => vec![integer.to_f64()],
             Value::Tensor(tensor) => tensor.materialize_f64(),
             other => panic!("expected numeric output, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn paired_digit_conversions_preserve_numeric_input_classes() {
+        let single = single_tensor(vec![1.0, 0.0, 1.0], vec![1, 3]);
+        let Value::Tensor(single_result) = bi2de(single, vec![]) else {
+            panic!("single result must retain single storage");
+        };
+        assert_eq!(single_result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single_result.materialize_f64(), vec![5.0]);
+
+        assert_eq!(
+            bi2de(
+                integer_tensor(IntegerStorage::U8(vec![1, 0, 1]), vec![1, 3]),
+                vec![]
+            ),
+            Value::Int(IntValue::U8(5))
+        );
+        assert_eq!(
+            bi2de(
+                integer_tensor(IntegerStorage::U8(vec![1; 9]), vec![1, 9]),
+                vec![]
+            ),
+            Value::Int(IntValue::U16(511))
+        );
+        let digits = de2bi(
+            integer_tensor(IntegerStorage::I16(vec![2, 3]), vec![2, 1]),
+            vec![Value::Num(3.0)],
+        );
+        assert_eq!(digits.numeric_dtype(), NumericDType::I16);
+        assert_eq!(digits.materialize_f64(), vec![0.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
+
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let unsigned = de2bi(Value::Int(IntValue::U64(u64::MAX)), vec![]);
+        assert_eq!(unsigned.numeric_dtype(), NumericDType::U64);
+        assert_eq!(unsigned.shape, vec![1, 64]);
+        assert_eq!(unsigned.materialize_f64().iter().sum::<f64>(), 64.0);
+        let nd = de2bi(tensor(vec![1.0, 2.0], vec![1, 1, 2]), vec![]);
+        assert_eq!(nd.shape, vec![2, 2]);
+        assert_eq!(nd.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn empty_and_nd_digit_shapes_are_explicit() {
+        let empty_digits = bi2de(tensor(vec![], vec![0, 3]), vec![]);
+        let Value::Tensor(empty_decimals) = empty_digits else {
+            panic!("empty digit matrix should return an empty column");
+        };
+        assert_eq!(empty_decimals.shape, vec![0, 1]);
+        let empty_expansion = de2bi(tensor(vec![], vec![0, 3]), vec![]);
+        assert_eq!(empty_expansion.shape, vec![0, 0]);
+        let err = block_on(super::bi2de_builtin(
+            tensor(vec![1.0, 0.0], vec![1, 1, 2]),
+            vec![],
+        ))
+        .expect_err("bi2de rejects N-D digit arrays");
+        assert!(err.to_string().contains("vector or 2-D matrix"));
+    }
+
+    #[test]
+    fn extension_forms_reject_in_matlab_mode_before_conversion() {
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(super::bi2de_builtin(
+            tensor(vec![1.0, 0.0, 1.0], vec![1, 3]),
+            vec![Value::Int(IntValue::U8(2))],
+        ))
+        .expect_err("typed base should be mode gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:Bi2deIntegerBaseExtension")
+        );
+
+        let err = block_on(super::de2bi_builtin(
+            Value::Int(IntValue::U64(u64::MAX)),
+            vec![],
+        ))
+        .expect_err("wide integer should be mode gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:De2biWideIntegerExtension")
+        );
+
+        let err = block_on(super::de2bi_builtin(Value::Bool(true), vec![]))
+            .expect_err("logical data should be mode gated");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:De2biLogicalInputExtension")
+        );
+
+        let err = block_on(super::de2bi_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 1, 2]),
+            vec![],
+        ))
+        .expect_err("N-D input should be mode gated");
+        assert_eq!(err.identifier(), DE2BI_ND_INPUT_EXTENSION.error_identifier);
+    }
+
+    #[test]
+    fn resident_conversion_extension_rejects_before_provider_download() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        test_support::with_test_provider(|provider| {
+            let digits = Tensor::new(vec![1.0, 0.0, 1.0], vec![1, 3]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &digits).expect("upload");
+            provider.reset_telemetry();
+            let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+            let bi_error = block_on(super::bi2de_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![],
+            ))
+            .expect_err("resident input must reject");
+            assert_eq!(
+                bi_error.identifier(),
+                BI2DE_GPU_INPUT_EXTENSION.error_identifier
+            );
+            let de_error = block_on(super::de2bi_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![],
+            ))
+            .expect_err("resident input must reject");
+            assert_eq!(
+                de_error.identifier(),
+                DE2BI_GPU_INPUT_EXTENSION.error_identifier
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            drop(_matlab);
+            let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+            assert_eq!(
+                value_data(
+                    block_on(super::bi2de_builtin(
+                        Value::GpuTensor(handle.clone()),
+                        vec![],
+                    ))
+                    .expect("RunMat resident digit conversion")
+                ),
+                vec![5.0]
+            );
+            let expanded = block_on(super::de2bi_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![],
+            ))
+            .expect("RunMat resident decimal conversion");
+            assert_eq!(value_data(expanded), vec![1.0, 0.0, 1.0]);
+            assert!(provider.telemetry_snapshot().download_bytes > 0);
+            handle.release().expect("release fixture handle");
+        });
     }
 
     fn char_rows(chars: &CharArray) -> Vec<String> {
@@ -1704,7 +1916,7 @@ mod tests {
                 u64::MAX
             ))))
             .unwrap(),
-            vec![u128::from(u64::MAX)]
+            (vec![u128::from(u64::MAX)], NumericDType::U64)
         );
         let digits = block_on(digit_matrix_from_value(
             Value::Int(IntValue::U8(1)),
@@ -1773,7 +1985,7 @@ mod tests {
                 vec![1, 1],
             )))
             .unwrap(),
-            vec![u128::from(u64::MAX)]
+            (vec![u128::from(u64::MAX)], NumericDType::U64)
         );
 
         let err = block_on(super::de2bi_builtin(
