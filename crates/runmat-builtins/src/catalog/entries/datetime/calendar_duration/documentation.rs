@@ -124,7 +124,7 @@ pub(super) const CALENDARDURATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample { id: "components", title: "Construct from three calendar components", program: "c = calendarDuration(1,2,3); m = calmonths(c); d = caldays(c);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(iscalendarduration(c)); assert(m == 14); assert(d == 3);" } },
         BuiltinExample { id: "matrix", title: "Construct one duration per matrix row", program: "c = calendarDuration([1 2 3; 0 4 5]); m = calmonths(c); d = caldays(c);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(m,[14;4])); assert(isequal(d,[3;5]));" } },
-        BuiltinExample { id: "month-end", title: "Add a calendar month at the end of January", program: "t = datetime(2024,1,31,'Format','yyyy-MM-dd'); shifted = t + calmonths(1);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(year(shifted)==2024); assert(month(shifted)==2); assert(day(shifted)==29);" } },
+        BuiltinExample { id: "month-end", title: "Add a calendar month at the end of January", program: "t = datetime(2024,1,31); shifted = t + calmonths(1);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(year(shifted)==2024); assert(month(shifted)==2); assert(day(shifted)==29);" } },
     ],
     example_exemption: None,
     faqs: &[
@@ -144,7 +144,7 @@ pub(super) const ISCALENDARDURATION: BuiltinDocumentation = BuiltinDocumentation
     summary: "Test whether a value is a calendarDuration array.",
     description: "`iscalendarduration(X)` returns a host logical scalar. It checks the exact class identity of the value, not its internal numeric components; a numeric array or another object returns false.",
     keywords: &["iscalendarduration", "calendarDuration", "predicate"],
-    related: &["calendarDuration", "isdatetime"],
+    related: &["calendarDuration", "caldays"],
     sections: &[EXECUTION],
     examples: &[BuiltinExample { id: "class-check", title: "Distinguish a calendar duration from a number", program: "c = caldays(2); a = iscalendarduration(c); b = iscalendarduration(2);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(a); assert(~b);" } }],
     example_exemption: None,
