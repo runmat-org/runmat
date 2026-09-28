@@ -141,15 +141,9 @@ pub fn record_runtime_teardown(
     arguments: Vec<runmat_value::Value>,
 ) -> Result<(), &'static str> {
     {
-        let state = current_test_context_state()
-            .ok_or("addTeardown requires an active test lifecycle context")?;
+        let state = runtime_teardown_context()?;
         let mut state = state.borrow_mut();
-        if state.active.phase.is_teardown() {
-            return Err("addTeardown cannot be registered from a teardown phase");
-        }
-        if state.commands.len() >= state.limits.max_commands_per_invocation as usize {
-            return Err("testing command limit exceeded");
-        }
+        validate_runtime_teardown_state(&state)?;
         let callback_name = match &callback {
             runmat_value::Value::FunctionHandle(name)
             | runmat_value::Value::ExternalFunctionHandle(name)
@@ -206,6 +200,27 @@ pub fn record_runtime_teardown(
     }
 }
 
+/// Check lifecycle admission before a fixture mutates the path or filesystem.
+/// The final registration still checks again after any suspension.
+pub fn ensure_runtime_teardown_available() -> Result<(), &'static str> {
+    let state = runtime_teardown_context()?;
+    validate_runtime_teardown_state(&state.borrow())
+}
+
+fn runtime_teardown_context() -> Result<Rc<RefCell<ContextState>>, &'static str> {
+    current_test_context_state().ok_or("addTeardown requires an active test lifecycle context")
+}
+
+fn validate_runtime_teardown_state(state: &ContextState) -> Result<(), &'static str> {
+    if state.active.phase.is_teardown() {
+        return Err("addTeardown cannot be registered from a teardown phase");
+    }
+    if state.commands.len() >= state.limits.max_commands_per_invocation as usize {
+        return Err("testing command limit exceeded");
+    }
+    Ok(())
+}
+
 pub fn active_test_context() -> Option<ActiveTestContext> {
     current_test_context_state().map(|state| state.borrow().active.clone())
 }
@@ -231,6 +246,50 @@ mod tests {
     use runmat_test::result::{Diagnostic, DiagnosticSeverity};
 
     use super::*;
+
+    fn active(phase: ExecutionPhase) -> ActiveTestContext {
+        ActiveTestContext {
+            execution: TestExecutionContext {
+                run_id: RunId::derive("revision", "run"),
+                test_id: TestId::derive(&runmat_test::identity::TestIdentityInput {
+                    owner_identity: "owner",
+                    relative_source_identity: "test.m",
+                    semantic_scheme: "function",
+                    semantic_item_path: "test",
+                    parameter_identity: "",
+                    fixture_identity: "",
+                }),
+                attempt: 1,
+                random_seed: 7,
+            },
+            phase,
+            scope: FixtureScopeKey {
+                scope: FixtureScope::Test,
+                identity: "test".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn fixture_preflight_rejects_absent_and_teardown_lifecycles() {
+        assert_eq!(
+            ensure_runtime_teardown_available(),
+            Err("addTeardown requires an active test lifecycle context")
+        );
+        let teardown = install_test_context(
+            active(ExecutionPhase::TestTeardown),
+            ProtocolLimits::default(),
+        );
+        assert_eq!(
+            ensure_runtime_teardown_available(),
+            Err("addTeardown cannot be registered from a teardown phase")
+        );
+        drop(teardown);
+        let test =
+            install_test_context(active(ExecutionPhase::TestBody), ProtocolLimits::default());
+        assert_eq!(ensure_runtime_teardown_available(), Ok(()));
+        drop(test);
+    }
 
     #[test]
     fn scoped_context_records_bounded_domain_commands() {

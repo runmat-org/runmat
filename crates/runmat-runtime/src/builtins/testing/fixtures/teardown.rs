@@ -4,8 +4,7 @@ use crate::{build_runtime_error, BuiltinResult};
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.addTeardown",
-    category = "testing/fixtures",
-    summary = "Register a callback that runs when the active test scope is torn down.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::fixtures::teardown"
 )]
 fn add_teardown(receiver: Value, callback: Value, arguments: Vec<Value>) -> BuiltinResult<Value> {
