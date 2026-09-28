@@ -2,8 +2,8 @@ use super::{default_double_scalar, finish_fixed, literal_text};
 use crate::{BuiltinCatalogEntry, BuiltinInferenceRule, ParallelInferenceRule};
 use runmat_types::{
     codistributor_fact, infer_call, CallContract, CallInference, CallRequest, CodistributorClass,
-    DynamicReason, ExecutionFact, FutureStateFact, LiteralValue, NumericClass, NumericDomain,
-    NumericFact, ShapeFact, ValueFact, ValueKindFact,
+    DynamicReason, ExecutionFact, FutureStateFact, LiteralValue, ShapeFact, ValueFact,
+    ValueKindFact,
 };
 
 pub(super) fn infer_parallel_data(
@@ -18,12 +18,6 @@ pub(super) fn infer_parallel_data(
             ValueFact::scalar(ValueKindFact::Void)
         }
         ParallelInferenceRule::Probe => ValueFact::scalar(ValueKindFact::Logical),
-        ParallelInferenceRule::SpmdIndex | ParallelInferenceRule::SpmdSize => {
-            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            }))
-        }
         ParallelInferenceRule::LocalPart => {
             match request.arguments.first().map(|fact| &fact.kind) {
                 Some(ValueKindFact::Distributed(distributed)) => distributed.value.as_ref().clone(),

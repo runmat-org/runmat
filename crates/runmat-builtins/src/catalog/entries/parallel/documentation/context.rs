@@ -39,6 +39,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "Each admitted worker in an `spmd` region has a stable one-based rank and observes the same gang size. `spmdIndex` and its `labindex` alias return the rank; `spmdSize` and its `numlabs` alias return the size.",
             "The values are ordinary scalar doubles inside the worker. When assigned in an `spmd` region, the driver receives one value per worker in a `Composite`, like other worker-local outputs.",
             "Outside an active `spmd` gang, the serial context is rank 1 of size 1. This makes helper functions that inspect the context usable in both serial and SPMD execution.",
+            "Each name accepts no inputs and produces one scalar double. An unrequested result may be discarded; requesting more than one output is an error.",
         ],
     },
     BuiltinDocumentationSection {

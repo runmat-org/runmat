@@ -1,11 +1,11 @@
 use crate::{
     BuiltinAcceleratorPolicy, BuiltinAsyncBehavior, BuiltinCatalogEntry, BuiltinCatalogIdentity,
     BuiltinCompatibility, BuiltinCompletionPolicy, BuiltinContractDeclaration,
-    BuiltinContractMaturity, BuiltinDescriptor, BuiltinFusionPolicy, BuiltinInferenceRule,
-    BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
-    BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, ParallelInferenceRule,
+    BuiltinContractMaturity, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinFusionPolicy,
+    BuiltinInferenceRule, BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract,
+    BuiltinPortability, BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy,
+    BuiltinSemanticKind, BuiltinSignatureDescriptor, IdentityInferenceRule,
 };
 use runmat_types::ExecutionStackRequirement;
 
@@ -13,6 +13,8 @@ use super::documentation::{
     LABINDEX_DOCUMENTATION, NUMLABS_DOCUMENTATION, SPMD_INDEX_DOCUMENTATION,
     SPMD_SIZE_DOCUMENTATION,
 };
+
+mod inference;
 
 const INDEX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "index",
@@ -28,28 +30,68 @@ const SIZE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Number of workers in the current SPMD group.",
 }];
-const INDEX_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "index = spmdIndex",
-    inputs: &[],
-    outputs: &INDEX_OUTPUT,
-}];
-const SIZE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "size = spmdSize",
-    inputs: &[],
-    outputs: &SIZE_OUTPUT,
-}];
-const INDEX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INDEX_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-const SIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIZE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
+macro_rules! context_descriptor {
+    ($descriptor:ident, $signatures:ident, $error:ident, $label:literal, $output:ident, $code:literal, $identifier:literal, $message:literal) => {
+        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: $label,
+            inputs: &[],
+            outputs: &$output,
+        }];
+        pub const $error: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+            code: $code,
+            identifier: Some($identifier),
+            when: "More than one output is requested.",
+            message: $message,
+        };
+        pub const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$signatures,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &[$error],
+        };
+    };
+}
+
+context_descriptor!(
+    SPMD_INDEX_DESCRIPTOR,
+    SPMD_INDEX_SIGNATURES,
+    SPMD_INDEX_TOO_MANY_OUTPUTS,
+    "index = spmdIndex()",
+    INDEX_OUTPUT,
+    "RM.SPMD_INDEX.TOO_MANY_OUTPUTS",
+    "RunMat:spmdIndex:TooManyOutputs",
+    "spmdIndex: too many output arguments"
+);
+context_descriptor!(
+    SPMD_SIZE_DESCRIPTOR,
+    SPMD_SIZE_SIGNATURES,
+    SPMD_SIZE_TOO_MANY_OUTPUTS,
+    "size = spmdSize()",
+    SIZE_OUTPUT,
+    "RM.SPMD_SIZE.TOO_MANY_OUTPUTS",
+    "RunMat:spmdSize:TooManyOutputs",
+    "spmdSize: too many output arguments"
+);
+context_descriptor!(
+    LABINDEX_DESCRIPTOR,
+    LABINDEX_SIGNATURES,
+    LABINDEX_TOO_MANY_OUTPUTS,
+    "index = labindex",
+    INDEX_OUTPUT,
+    "RM.LABINDEX.TOO_MANY_OUTPUTS",
+    "RunMat:labindex:TooManyOutputs",
+    "labindex: too many output arguments"
+);
+context_descriptor!(
+    NUMLABS_DESCRIPTOR,
+    NUMLABS_SIGNATURES,
+    NUMLABS_TOO_MANY_OUTPUTS,
+    "size = numlabs",
+    SIZE_OUTPUT,
+    "RM.NUMLABS.TOO_MANY_OUTPUTS",
+    "RunMat:numlabs:TooManyOutputs",
+    "numlabs: too many output arguments"
+);
 const PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
     preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
     portability: BuiltinPortability::NativeAndWasm,
@@ -99,30 +141,30 @@ macro_rules! context_entry {
 context_entry!(
     SPMD_INDEX_CATALOG_ENTRY,
     "spmdIndex",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::SpmdIndex),
+    BuiltinInferenceRule::Identity(IdentityInferenceRule::new(inference::infer)),
     SPMD_INDEX_DOCUMENTATION,
-    INDEX_DESCRIPTOR
+    SPMD_INDEX_DESCRIPTOR
 );
 context_entry!(
     SPMD_SIZE_CATALOG_ENTRY,
     "spmdSize",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::SpmdSize),
+    BuiltinInferenceRule::Identity(IdentityInferenceRule::new(inference::infer)),
     SPMD_SIZE_DOCUMENTATION,
-    SIZE_DESCRIPTOR
+    SPMD_SIZE_DESCRIPTOR
 );
 context_entry!(
     LABINDEX_CATALOG_ENTRY,
     "labindex",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::SpmdIndex),
+    BuiltinInferenceRule::Identity(IdentityInferenceRule::new(inference::infer)),
     LABINDEX_DOCUMENTATION,
-    INDEX_DESCRIPTOR
+    LABINDEX_DESCRIPTOR
 );
 context_entry!(
     NUMLABS_CATALOG_ENTRY,
     "numlabs",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::SpmdSize),
+    BuiltinInferenceRule::Identity(IdentityInferenceRule::new(inference::infer)),
     NUMLABS_DOCUMENTATION,
-    SIZE_DESCRIPTOR
+    NUMLABS_DESCRIPTOR
 );
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[

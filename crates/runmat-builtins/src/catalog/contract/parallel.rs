@@ -32,6 +32,4 @@ pub enum ParallelInferenceRule {
     Redistribute,
     Send,
     SendReceive,
-    SpmdIndex,
-    SpmdSize,
 }
