@@ -84,6 +84,23 @@ fn duplicate_multi_key_remove_is_atomic() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn assignment_rejects_transient_value_without_changing_map() {
+    let map = containers_map_builtin(Vec::new()).unwrap();
+    let result = containers_map_subsasgn(
+        map.clone(),
+        "()".into(),
+        key("invalid"),
+        Value::OutputList(vec![Value::Num(1.0)]),
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        containers_map_is_key(map, key("invalid")).unwrap(),
+        Value::Bool(false)
+    );
+}
+
 #[test]
 fn collecting_map_releases_nested_provider_value() {
     runmat_gc::gc_test_context(|| {

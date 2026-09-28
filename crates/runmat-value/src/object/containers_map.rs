@@ -152,13 +152,17 @@ impl ContainersMapStorage {
         });
         entries
     }
+
+    pub fn for_each_value(&self, mut visitor: impl FnMut(&Value)) {
+        for entry in &self.entries {
+            visitor(&entry.key_value);
+            visitor(&entry.value);
+        }
+    }
 }
 
 impl Trace for ContainersMapStorage {
     fn trace(&self, tracer: &mut dyn Tracer) {
-        for entry in &self.entries {
-            entry.key_value.trace(tracer);
-            entry.value.trace(tracer);
-        }
+        self.for_each_value(|value| value.trace(tracer));
     }
 }

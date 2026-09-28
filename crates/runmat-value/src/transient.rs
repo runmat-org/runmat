@@ -39,7 +39,16 @@ pub fn validate_no_transient_sequence(value: &Value) -> Result<(), TransientValu
             });
             result
         }
-        Value::Object(object) => validate_values(object.properties.values()),
+        Value::Object(object) => {
+            validate_values(object.properties.values())?;
+            let mut result = Ok(());
+            object.for_each_native_value(|value| {
+                if result.is_ok() {
+                    result = validate_no_transient_sequence(value);
+                }
+            });
+            result
+        }
         Value::ObjectArray(array) => validate_values(array.data()),
         Value::Closure(closure) => validate_values(&closure.captures),
         _ => Ok(()),
@@ -53,4 +62,34 @@ fn validate_values<'a>(
         validate_no_transient_sequence(value)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ContainersMapEntry, ContainersMapKey, ContainersMapKeyType, ContainersMapStorage,
+        ContainersMapValueType, ObjectInstance,
+    };
+
+    #[test]
+    fn native_object_payload_cannot_hide_transient_sequence() {
+        let mut storage = ContainersMapStorage::new(
+            ContainersMapKeyType::Char,
+            ContainersMapValueType::Any,
+            false,
+        );
+        storage.insert_unique(ContainersMapEntry {
+            normalized: ContainersMapKey::String("nested".into()),
+            key_value: Value::from("nested"),
+            value: Value::OutputList(vec![Value::Num(1.0)]),
+        });
+        let object = Value::Object(
+            ObjectInstance::new("containers.Map").with_containers_map_payload(storage),
+        );
+        assert_eq!(
+            validate_no_transient_sequence(&object),
+            Err(TransientValueError::LegacyOutputList)
+        );
+    }
 }

@@ -60,6 +60,12 @@ impl ObjectInstance {
         self.native_payload.is_some()
     }
 
+    pub fn for_each_native_value(&self, mut visitor: impl FnMut(&Value)) {
+        if let Some(NativeObjectPayload::ContainersMap(storage)) = self.native_payload.as_deref() {
+            storage.for_each_value(&mut visitor);
+        }
+    }
+
     pub(crate) fn trace_native_payload(&self, tracer: &mut dyn Tracer) {
         if let Some(payload) = &self.native_payload {
             payload.trace(tracer);

@@ -133,6 +133,8 @@ impl MapStoreRules for MapStore {
     }
 
     fn insert_new(&mut self, mut entry: MapEntry, builtin: &'static str) -> BuiltinResult<()> {
+        runmat_value::validate_no_transient_sequence(&entry.value)
+            .map_err(|error| map_error(format!("containers.Map: {error}"), builtin))?;
         if self.contains(&entry.normalized) {
             return Err(map_error(
                 "containers.Map: Duplicate key name was provided.",

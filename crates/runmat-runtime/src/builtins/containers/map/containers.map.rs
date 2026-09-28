@@ -465,8 +465,10 @@ async fn containers_map_write_step(
                 key_type,
                 BUILTIN_SUBSASGN,
             )?;
-            let value =
-                value_type.normalize(values.into_iter().next().unwrap(), BUILTIN_SUBSASGN)?;
+            let value = values.into_iter().next().unwrap();
+            runmat_value::validate_no_transient_sequence(&value)
+                .map_err(|error| map_error(format!("containers.Map: {error}"), BUILTIN_SUBSASGN))?;
+            let value = value_type.normalize(value, BUILTIN_SUBSASGN)?;
             if uniform_values {
                 let class = value_class_from_value(&value);
                 if uniform_class
