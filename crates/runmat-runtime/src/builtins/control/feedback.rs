@@ -185,6 +185,7 @@ mod tests {
 
     #[test]
     fn ordered_model_parser_gathers_only_valid_required_resident_coefficients() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let denominator = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let resident =
@@ -213,14 +214,14 @@ mod tests {
             assert_eq!(error.identifier(), Some("RunMat:feedback:UnsupportedModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
-            let mut incomplete = raw_tf(Value::Num(2.0), Value::GpuTensor(resident));
+            let mut incomplete = raw_tf(Value::Num(2.0), Value::GpuTensor(resident.clone()));
             incomplete.properties.remove("Ts");
             provider.reset_telemetry();
             let error = block_on(feedback_builtin(
                 Value::Object(incomplete),
-                vec![Value::Num(1.0)],
+                vec![Value::GpuTensor(resident)],
             ))
-            .expect_err("missing property");
+            .expect_err("missing property before second operand gather");
             assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });

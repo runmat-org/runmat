@@ -3,14 +3,17 @@
 
 mod business_days;
 mod calendar_duration;
+mod construction;
 mod legacy;
 
 pub use self::business_days::*;
 pub use self::calendar_duration::*;
+pub use self::construction::*;
 pub use self::legacy::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(business_days::ENTRIES.iter().copied());
     values.extend(calendar_duration::ENTRIES.iter().copied());
+    values.extend(construction::ENTRIES.iter().copied());
     values.extend(legacy::ENTRIES.iter().copied());
 }

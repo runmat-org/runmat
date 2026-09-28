@@ -630,10 +630,10 @@ pub async fn value_to_model_with_reference(
     reference: &TfModel,
     builtin: &'static str,
 ) -> BuiltinResult<TfModel> {
-    let gathered = dispatcher::gather_if_needed_async(&value).await?;
-    if matches!(gathered, Value::Object(_)) {
-        return TfModel::from_value(gathered, builtin);
+    if matches!(value, Value::Object(_)) {
+        return TfModel::from_value_async(value, builtin).await;
     }
+    let gathered = gather_direct_resident(value).await?;
     let scalar = scalar_complex(&gathered, builtin)?;
     TfModel::scalar(
         scalar,
@@ -644,13 +644,22 @@ pub async fn value_to_model_with_reference(
     )
 }
 
+async fn gather_direct_resident(value: Value) -> BuiltinResult<Value> {
+    if matches!(value, Value::GpuTensor(_)) {
+        dispatcher::gather_if_needed_async(&value).await
+    } else {
+        Ok(value)
+    }
+}
+
 pub async fn two_models_ordered(
     lhs: Value,
     rhs: Value,
     builtin: &'static str,
 ) -> BuiltinResult<(TfModel, TfModel)> {
-    let lhs = dispatcher::gather_if_needed_async(&lhs).await?;
-    let rhs = dispatcher::gather_if_needed_async(&rhs).await?;
+    // Parse object operands before preparing the other operand. Gathering the
+    // pair here would recursively download unrelated model properties, and
+    // could touch the second provider before the first model is validated.
     match (lhs, rhs) {
         (left @ Value::Object(_), right @ Value::Object(_)) => Ok((
             TfModel::from_value_async(left, builtin).await?,
@@ -667,6 +676,8 @@ pub async fn two_models_ordered(
             Ok((left_model, right_model))
         }
         (left, right) => {
+            let left = gather_direct_resident(left).await?;
+            let right = gather_direct_resident(right).await?;
             let options = TfOptions::default();
             Ok((
                 TfModel::scalar(scalar_complex(&left, builtin)?, options.clone())?,

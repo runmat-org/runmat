@@ -7,13 +7,6 @@ const DATE: BuiltinParamDescriptor = BuiltinParamDescriptor {
     default: None,
     description: "Datetime, serial date number, or supported date text.",
 };
-const NUMBER: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "DateNumber",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Real double MATLAB serial date number or array.",
-};
 const VECTOR: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "DateVector",
     ty: BuiltinParamType::NumericArray,
@@ -195,7 +188,6 @@ const COMPONENTS_SIX: [BuiltinParamDescriptor; 6] = [
 const DATE_FORMAT: [BuiltinParamDescriptor; 2] = [DATE, FORMAT];
 const DATE_FORM: [BuiltinParamDescriptor; 2] = [DATE, DAY_FORM];
 const DATE_ONLY: [BuiltinParamDescriptor; 1] = [DATE];
-const NUMBER_ONLY: [BuiltinParamDescriptor; 1] = [NUMBER];
 const VECTOR_ONLY: [BuiltinParamDescriptor; 1] = [VECTOR];
 const TEXT_ONLY: [BuiltinParamDescriptor; 1] = [TEXT];
 const EOM_INPUTS: [BuiltinParamDescriptor; 2] = [YEAR, MONTH];
