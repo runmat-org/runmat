@@ -1,6 +1,7 @@
 //! Runtime class metadata for the GC-owned Map handle.
 
 use super::*;
+use crate::{OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD};
 use runmat_types::MemberAccess;
 use std::collections::HashMap;
 

@@ -172,6 +172,7 @@ async fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value>
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
+    let _root = root_map_receiver(&map, BUILTIN_KEYS)?;
     with_store(&map, BUILTIN_KEYS, |store| {
         let values = store.keys();
         make_row_cell(values, BUILTIN_KEYS)
@@ -184,6 +185,7 @@ async fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_values(map: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let _root = root_map_receiver(&map, BUILTIN_VALUES)?;
     if rest.iter().any(contains_resident_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &MAP_RESIDENT_VALUES_EXTENSION,
@@ -234,6 +236,7 @@ async fn containers_map_values(map: Value, rest: Vec<Value>) -> crate::BuiltinRe
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
+    let _root = root_map_receiver(&map, BUILTIN_IS_KEY)?;
     ensure_resident_extension(&key_spec, &MAP_RESIDENT_ISKEY_EXTENSION, BUILTIN_IS_KEY)?;
     let key_type = with_store(&map, BUILTIN_IS_KEY, |store| Ok(store.key_type))?;
     let collection = collect_key_spec(&key_spec, key_type, BUILTIN_IS_KEY).await?;
@@ -260,6 +263,7 @@ async fn containers_map_is_key(map: Value, key_spec: Value) -> crate::BuiltinRes
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinResult<Value> {
+    let _root = root_map_receiver(&map, BUILTIN_REMOVE)?;
     ensure_resident_extension(&key_spec, &MAP_RESIDENT_REMOVE_EXTENSION, BUILTIN_REMOVE)?;
     let key_type = with_store(&map, BUILTIN_REMOVE, |store| Ok(store.key_type))?;
     let collection = collect_key_spec(&key_spec, key_type, BUILTIN_REMOVE).await?;
@@ -301,6 +305,7 @@ async fn containers_map_remove(map: Value, key_spec: Value) -> crate::BuiltinRes
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
 async fn containers_map_subsref(map: Value, subscript: Value) -> crate::BuiltinResult<Value> {
+    let _root = root_map_receiver(&map, BUILTIN_SUBSREF)?;
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsref(map, path, containers_map_read_step, None).await
 }
@@ -386,6 +391,7 @@ async fn containers_map_subsasgn(
     subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
+    let _root = root_map_receiver(&map, BUILTIN_SUBSASGN)?;
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     crate::object::protocol::execute_owned_subsasgn(
         map,
@@ -602,6 +608,13 @@ fn extract_handle<'a>(value: &'a Value, builtin: &'static str) -> BuiltinResult<
             builtin,
         )),
     }
+}
+
+fn root_map_receiver(map: &Value, builtin: &'static str) -> BuiltinResult<runmat_gc::ExplicitRoot> {
+    let handle = extract_handle(map, builtin)?;
+    ensure_handle(handle, builtin)?;
+    runmat_gc::gc_root(handle.target)
+        .map_err(|error| map_internal(format!("containers.Map: {error}"), builtin))
 }
 
 fn ensure_handle(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<()> {
