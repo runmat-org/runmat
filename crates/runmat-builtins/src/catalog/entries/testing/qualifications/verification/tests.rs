@@ -43,6 +43,31 @@ fn verification_entries_infer_empty_double_and_method_only_host_execution() {
             vec![unknown(), unknown(), unknown()],
             inference::verify_greater_than,
         ),
+        (
+            &VERIFY_LESS_THAN_CATALOG_ENTRY,
+            vec![unknown(), unknown(), unknown()],
+            inference::verify_less_than,
+        ),
+        (
+            &VERIFY_NOT_EMPTY_CATALOG_ENTRY,
+            vec![unknown(), unknown()],
+            inference::verify_not_empty,
+        ),
+        (
+            &VERIFY_NOT_EQUAL_CATALOG_ENTRY,
+            vec![unknown(), unknown(), unknown()],
+            inference::verify_not_equal,
+        ),
+        (
+            &VERIFY_THAT_CATALOG_ENTRY,
+            vec![unknown(), unknown(), unknown()],
+            inference::verify_that,
+        ),
+        (
+            &VERIFY_TRUE_CATALOG_ENTRY,
+            vec![unknown(), unknown()],
+            inference::verify_true,
+        ),
     ];
     for (entry, arguments, infer) in cases {
         assert_eq!(
@@ -85,6 +110,14 @@ fn verification_entries_infer_empty_double_and_method_only_host_execution() {
         VERIFY_EQUAL_CATALOG_ENTRY.contract.async_behavior,
         BuiltinAsyncBehavior::NeverSuspends
     );
+    assert_eq!(
+        VERIFY_NOT_EMPTY_CATALOG_ENTRY.contract.async_behavior,
+        BuiltinAsyncBehavior::MaySuspend
+    );
+    assert_eq!(
+        VERIFY_THAT_CATALOG_ENTRY.contract.async_behavior,
+        BuiltinAsyncBehavior::NeverSuspends
+    );
 }
 
 #[test]
@@ -118,4 +151,27 @@ fn verification_arity_and_receiver_diagnostics_do_not_confuse_failed_predicates_
         &VERIFY_GREATER_THAN_CATALOG_ENTRY,
     );
     assert!(result.diagnostics.is_empty());
+
+    let non_constraint = ValueFact::scalar(ValueKindFact::Logical);
+    let invalid_constraint = inference::verify_that(
+        &call(vec![unknown(), unknown(), non_constraint], 1),
+        &VERIFY_THAT_CATALOG_ENTRY,
+    );
+    assert!(invalid_constraint
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TESTING-QUALIFICATION-CONSTRAINT"));
+
+    let nonnumeric_comparison = inference::verify_less_than(
+        &call(
+            vec![
+                unknown(),
+                ValueFact::scalar(ValueKindFact::String),
+                unknown(),
+            ],
+            1,
+        ),
+        &VERIFY_LESS_THAN_CATALOG_ENTRY,
+    );
+    assert!(nonnumeric_comparison.diagnostics.is_empty());
 }

@@ -6,7 +6,7 @@ const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
         BuiltinDocumentationLink { label: "Shared qualification predicates and recording", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/testing/qualifications/shared.rs") },
     ],
     verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Verification recording, continuation, and comparison tests", location: "crates/runmat-runtime/src/builtins/testing/qualifications/shared.rs tests" }],
-    notes: &["No editable legacy JSON sidecar exists for these four identities. The current comparison and diagnostic implementations cover a subset of MATLAB behavior; RunMat's direct TestCase constructor is used only in RunMat-compatible examples."],
+    notes: &["No editable legacy JSON sidecar exists for these verification identities. The current comparison and diagnostic implementations cover a subset of MATLAB behavior; RunMat's direct TestCase constructor is used only in RunMat-compatible examples."],
 };
 
 const LIFECYCLE: BuiltinDocumentationSection = BuiltinDocumentationSection {
@@ -71,6 +71,74 @@ const GREATER_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "verify-greater-than-scalars",
     title: "Verify a scalar exceeds a threshold",
     program: "testCase = matlab.unittest.TestCase();\nresult = verifyGreaterThan(testCase, 5, 3);",
+    display_output: None,
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::Portable,
+    fixture: BuiltinExampleFixture::None,
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Assertions {
+        source: "assert(isempty(result));",
+    },
+}];
+
+const LESS_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
+    id: "verify-less-than-scalars",
+    title: "Verify a scalar is below a ceiling",
+    program: "testCase = matlab.unittest.TestCase();\nresult = verifyLessThan(testCase, 3, 5);",
+    display_output: None,
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::Portable,
+    fixture: BuiltinExampleFixture::None,
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Assertions {
+        source: "assert(isempty(result));",
+    },
+}];
+
+const NOT_EMPTY_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
+    id: "verify-nonempty-array",
+    title: "Verify an array contains an element",
+    program: "testCase = matlab.unittest.TestCase();\nresult = verifyNotEmpty(testCase, [1]);",
+    display_output: None,
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::Portable,
+    fixture: BuiltinExampleFixture::None,
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Assertions {
+        source: "assert(isempty(result));",
+    },
+}];
+
+const NOT_EQUAL_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
+    id: "verify-distinct-values",
+    title: "Verify two values differ",
+    program: "testCase = matlab.unittest.TestCase();\nresult = verifyNotEqual(testCase, 5, 6);",
+    display_output: None,
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::Portable,
+    fixture: BuiltinExampleFixture::None,
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Assertions {
+        source: "assert(isempty(result));",
+    },
+}];
+
+const THAT_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
+    id: "verify-that-is-false",
+    title: "Verify a built-in constraint",
+    program: "testCase = matlab.unittest.TestCase();\nconstraint = matlab.unittest.constraints.IsFalse();\nresult = verifyThat(testCase, false, constraint);",
+    display_output: None,
+    compatibility: BuiltinExampleCompatibility::RunMat,
+    harness: BuiltinExampleHarness::Portable,
+    fixture: BuiltinExampleFixture::None,
+    requirements: BuiltinExampleRequirements::NONE,
+    verification: BuiltinExampleVerification::Assertions { source: "assert(isempty(result));" },
+}];
+
+const TRUE_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
+    id: "verify-true-logical",
+    title: "Verify logical true",
+    program: "testCase = matlab.unittest.TestCase();\nresult = verifyTrue(testCase, true);",
     display_output: None,
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::Portable,
@@ -157,6 +225,106 @@ pub(super) const VERIFY_GREATER_THAN: BuiltinDocumentation = BuiltinDocumentatio
     example_exemption: None,
     faqs: &[],
     links: &[BuiltinDocumentationLink { label: "MATLAB verifyGreaterThan", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.qualifications.verifiable.verifygreaterthan.html") }],
+    media: &[], evidence: EVIDENCE, introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};
+
+pub(super) const VERIFY_LESS_THAN: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("matlab.unittest.TestCase.verifyLessThan"),
+    slug: Some("matlab.unittest.TestCase.verifyLessThan"),
+    summary: "Verify that a numeric scalar is below a ceiling.",
+    description: "`verifyLessThan(testCase, actual, ceiling)` compares two numeric scalar values in the current RunMat implementation.",
+    keywords: &["test", "verification", "comparison", "diagnostic"],
+    related: &["matlab.unittest.TestCase.verifyGreaterThan", "matlab.unittest.TestCase.verifyEqual"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Current comparison limits", paragraphs: &["RunMat currently compares numeric scalars after conversion to double. This does not preserve ordering for every wide integer and does not implement MATLAB's all-elements array comparison. Other kinds fail the qualification rather than being accepted as comparable numeric scalars."] },
+        LIFECYCLE,
+    ],
+    examples: LESS_EXAMPLES,
+    example_exemption: None,
+    faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "MATLAB verifyLessThan", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.qualifications.verifiable.verifylessthan.html") }],
+    media: &[], evidence: EVIDENCE, introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};
+
+pub(super) const VERIFY_NOT_EMPTY: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("matlab.unittest.TestCase.verifyNotEmpty"),
+    slug: Some("matlab.unittest.TestCase.verifyNotEmpty"),
+    summary: "Verify that a value has at least one element.",
+    description: "`verifyNotEmpty(testCase, actual)` checks whether the runtime value has a nonzero element count.",
+    keywords: &["test", "verification", "nonempty", "diagnostic"],
+    related: &["matlab.unittest.TestCase.verifyEmpty", "isempty"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Element-count check", paragraphs: &["The current implementation checks the value's element count and may request runtime shape information. It does not make a class-specific assertion about the value."] },
+        LIFECYCLE,
+    ],
+    examples: NOT_EMPTY_EXAMPLES,
+    example_exemption: None,
+    faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "MATLAB verifyNotEmpty", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.qualifications.verifiable.verifynotempty.html") }],
+    media: &[], evidence: EVIDENCE, introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};
+
+pub(super) const VERIFY_NOT_EQUAL: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("matlab.unittest.TestCase.verifyNotEqual"),
+    slug: Some("matlab.unittest.TestCase.verifyNotEqual"),
+    summary: "Verify that a value differs from a prohibited value.",
+    description: "`verifyNotEqual(testCase, actual, prohibited)` records a soft failure when the current RunMat equality predicate considers the values equal.",
+    keywords: &["test", "verification", "inequality", "diagnostic"],
+    related: &["matlab.unittest.TestCase.verifyEqual"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Current comparison limits", paragraphs: &["RunMat negates its current equality predicate. Scalar numeric comparisons currently pass through double, so distinct wide integer values can appear equal. Full MATLAB custom-object comparison and diagnostic behavior are not implemented."] },
+        LIFECYCLE,
+    ],
+    examples: NOT_EQUAL_EXAMPLES,
+    example_exemption: None,
+    faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "MATLAB verifyNotEqual", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.qualifications.verifiable.verifynotequal.html") }],
+    media: &[], evidence: EVIDENCE, introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};
+
+pub(super) const VERIFY_THAT: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("matlab.unittest.TestCase.verifyThat"),
+    slug: Some("matlab.unittest.TestCase.verifyThat"),
+    summary: "Verify that a value satisfies a supported constraint.",
+    description: "`verifyThat(testCase, actual, constraint)` evaluates a supported Constraint object without aborting the active test on a failed verification.",
+    keywords: &["test", "verification", "constraint", "diagnostic"],
+    related: &["matlab.unittest.TestCase.assertThat", "matlab.unittest.constraints.IsEqualTo", "matlab.unittest.constraints.IsTrue"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Supported constraints", paragraphs: &["RunMat currently evaluates `IsEqualTo`, `IsTrue`, and `IsFalse`. A non-Constraint input returns `RunMat:Testing:InvalidConstraint`; a compatible custom Constraint subclass without a supported satisfaction hook returns `RunMat:Testing:UnsupportedConstraint`. Full custom Constraint dispatch and diagnostic composition are not implemented. The `IsEqualTo` path uses the current exact typed comparison for supported numeric values, but not every MATLAB comparator feature."] },
+        LIFECYCLE,
+    ],
+    examples: THAT_EXAMPLES,
+    example_exemption: None,
+    faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "MATLAB verifyThat", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.qualifications.verifiable.verifythat.html") }],
+    media: &[], evidence: EVIDENCE, introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};
+
+pub(super) const VERIFY_TRUE: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("matlab.unittest.TestCase.verifyTrue"),
+    slug: Some("matlab.unittest.TestCase.verifyTrue"),
+    summary: "Verify that a value is logical true.",
+    description: "`verifyTrue(testCase, actual)` passes only for a scalar logical true value in the current runtime.",
+    keywords: &["test", "verification", "logical", "diagnostic"],
+    related: &["matlab.unittest.TestCase.verifyFalse", "matlab.unittest.constraints.IsTrue"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Logical predicate", paragraphs: &["Nonlogical values and nonscalar logical arrays fail the qualification rather than being implicitly converted to logical true."] },
+        LIFECYCLE,
+    ],
+    examples: TRUE_EXAMPLES,
+    example_exemption: None,
+    faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "MATLAB verifyTrue", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.qualifications.verifiable.verifytrue.html") }],
     media: &[], evidence: EVIDENCE, introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),
 };

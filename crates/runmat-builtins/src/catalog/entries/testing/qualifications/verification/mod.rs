@@ -13,7 +13,23 @@ const FLOOR: BuiltinParamDescriptor = BuiltinParamDescriptor {
     default: None,
     description: "Comparison threshold; the current runtime compares numeric scalar values only.",
 };
+const CEILING: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "ceiling",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Comparison threshold; the current runtime compares numeric scalar values only.",
+};
+const PROHIBITED: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "prohibited",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Value that must differ from actual.",
+};
 const GREATER_INPUTS: &[BuiltinParamDescriptor] = &[RECEIVER, ACTUAL, FLOOR, DIAGNOSTIC];
+const LESS_INPUTS: &[BuiltinParamDescriptor] = &[RECEIVER, ACTUAL, CEILING, DIAGNOSTIC];
+const NOT_EQUAL_INPUTS: &[BuiltinParamDescriptor] = &[RECEIVER, ACTUAL, PROHIBITED, DIAGNOSTIC];
 const EMPTY_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
     label: "verifyEmpty(testCase, actual, diagnostic...)",
     inputs: TRUE_INPUTS,
@@ -32,6 +48,31 @@ const FALSE_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescri
 const GREATER_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
     label: "verifyGreaterThan(testCase, actual, floor, diagnostic...)",
     inputs: GREATER_INPUTS,
+    outputs: EMPTY_OUTPUT,
+}];
+const LESS_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
+    label: "verifyLessThan(testCase, actual, ceiling, diagnostic...)",
+    inputs: LESS_INPUTS,
+    outputs: EMPTY_OUTPUT,
+}];
+const NOT_EMPTY_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
+    label: "verifyNotEmpty(testCase, actual, diagnostic...)",
+    inputs: TRUE_INPUTS,
+    outputs: EMPTY_OUTPUT,
+}];
+const NOT_EQUAL_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
+    label: "verifyNotEqual(testCase, actual, prohibited, diagnostic...)",
+    inputs: NOT_EQUAL_INPUTS,
+    outputs: EMPTY_OUTPUT,
+}];
+const THAT_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
+    label: "verifyThat(testCase, actual, constraint, diagnostic...)",
+    inputs: THAT_INPUTS,
+    outputs: EMPTY_OUTPUT,
+}];
+const TRUE_SIGNATURES: &[BuiltinSignatureDescriptor] = &[BuiltinSignatureDescriptor {
+    label: "verifyTrue(testCase, actual, diagnostic...)",
+    inputs: TRUE_INPUTS,
     outputs: EMPTY_OUTPUT,
 }];
 const VERIFICATION_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -65,6 +106,41 @@ pub const VERIFY_GREATER_THAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor 
     completion_policy: BuiltinCompletionPolicy::MethodOnly,
     errors: &[RECEIVER_ERROR, VERIFICATION_ERROR],
 };
+pub const VERIFY_LESS_THAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: LESS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[RECEIVER_ERROR, VERIFICATION_ERROR],
+};
+pub const VERIFY_NOT_EMPTY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: NOT_EMPTY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[RECEIVER_ERROR, VERIFICATION_ERROR],
+};
+pub const VERIFY_NOT_EQUAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: NOT_EQUAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[RECEIVER_ERROR, VERIFICATION_ERROR],
+};
+pub const VERIFY_THAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: THAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[
+        RECEIVER_ERROR,
+        CONSTRAINT_ERROR,
+        UNSUPPORTED_CONSTRAINT_ERROR,
+        VERIFICATION_ERROR,
+    ],
+};
+pub const VERIFY_TRUE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: TRUE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &[RECEIVER_ERROR, VERIFICATION_ERROR],
+};
 
 pub const VERIFY_EMPTY_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "matlab.unittest.TestCase.verifyEmpty",
@@ -92,5 +168,40 @@ pub const VERIFY_GREATER_THAN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     documentation::VERIFY_GREATER_THAN,
     &VERIFY_GREATER_THAN_DESCRIPTOR,
     inference::verify_greater_than,
+    BuiltinAsyncBehavior::NeverSuspends,
+);
+pub const VERIFY_LESS_THAN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
+    "matlab.unittest.TestCase.verifyLessThan",
+    documentation::VERIFY_LESS_THAN,
+    &VERIFY_LESS_THAN_DESCRIPTOR,
+    inference::verify_less_than,
+    BuiltinAsyncBehavior::NeverSuspends,
+);
+pub const VERIFY_NOT_EMPTY_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
+    "matlab.unittest.TestCase.verifyNotEmpty",
+    documentation::VERIFY_NOT_EMPTY,
+    &VERIFY_NOT_EMPTY_DESCRIPTOR,
+    inference::verify_not_empty,
+    BuiltinAsyncBehavior::MaySuspend,
+);
+pub const VERIFY_NOT_EQUAL_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
+    "matlab.unittest.TestCase.verifyNotEqual",
+    documentation::VERIFY_NOT_EQUAL,
+    &VERIFY_NOT_EQUAL_DESCRIPTOR,
+    inference::verify_not_equal,
+    BuiltinAsyncBehavior::NeverSuspends,
+);
+pub const VERIFY_THAT_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
+    "matlab.unittest.TestCase.verifyThat",
+    documentation::VERIFY_THAT,
+    &VERIFY_THAT_DESCRIPTOR,
+    inference::verify_that,
+    BuiltinAsyncBehavior::NeverSuspends,
+);
+pub const VERIFY_TRUE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
+    "matlab.unittest.TestCase.verifyTrue",
+    documentation::VERIFY_TRUE,
+    &VERIFY_TRUE_DESCRIPTOR,
+    inference::verify_true,
     BuiltinAsyncBehavior::NeverSuspends,
 );
