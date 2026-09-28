@@ -2,12 +2,18 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod core;
+mod regex;
+mod search;
 mod transform;
 
 pub use self::core::*;
+pub use self::regex::*;
+pub use self::search::*;
 pub use self::transform::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     core::extend_entries(values);
+    regex::extend_entries(values);
+    search::extend_entries(values);
     transform::extend_entries(values);
 }

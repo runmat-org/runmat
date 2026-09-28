@@ -4,6 +4,7 @@ use runmat_types::{CallInference, CallRequest};
 mod descriptor;
 mod documentation;
 mod inference;
+mod integer;
 #[cfg(test)]
 mod tests;
 
@@ -21,6 +22,7 @@ const fn entry(
     documentation: BuiltinDocumentation,
     descriptor: &'static BuiltinDescriptor,
     inference: fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+    integer_audit: &'static BuiltinIntegerAuditDescriptor,
 ) -> BuiltinCatalogEntry {
     BuiltinCatalogEntry {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -57,7 +59,7 @@ const fn entry(
         bindings: &REQUIRED_DEFAULT_BINDING,
         extensions: &[],
         integer_capabilities: &[],
-        integer_audit: None,
+        integer_audit: Some(integer_audit),
         suppress_auto_output: false,
     }
 }
@@ -67,22 +69,26 @@ pub const ISCATEGORICAL_ENTRY: BuiltinCatalogEntry = entry(
     documentation::ISCATEGORICAL_DOCUMENTATION,
     &ISCATEGORICAL_DESCRIPTOR,
     inference::iscategorical,
+    &integer::ISCATEGORICAL,
 );
 pub const ISORDINAL_ENTRY: BuiltinCatalogEntry = entry(
     "isordinal",
     documentation::ISORDINAL_DOCUMENTATION,
     &ISORDINAL_DESCRIPTOR,
     inference::isordinal,
+    &integer::ISORDINAL,
 );
 pub const ISTABLE_ENTRY: BuiltinCatalogEntry = entry(
     "istable",
     documentation::ISTABLE_DOCUMENTATION,
     &ISTABLE_DESCRIPTOR,
     inference::istable,
+    &integer::ISTABLE,
 );
 pub const ISTIMETABLE_ENTRY: BuiltinCatalogEntry = entry(
     "istimetable",
     documentation::ISTIMETABLE_DOCUMENTATION,
     &ISTIMETABLE_DESCRIPTOR,
     inference::istimetable,
+    &integer::ISTIMETABLE,
 );

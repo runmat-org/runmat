@@ -2,14 +2,23 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod conversion;
+mod indexing;
+mod predicates;
+mod selectors;
 mod shared;
 mod timetable;
 
 pub use self::conversion::*;
+pub use self::indexing::*;
+pub use self::predicates::*;
+pub use self::selectors::*;
 pub use self::shared::*;
 pub use self::timetable::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(conversion::ENTRIES.iter().copied());
+    values.extend(indexing::ENTRIES.iter().copied());
+    values.extend(predicates::ENTRIES.iter().copied());
+    values.extend(selectors::ENTRIES.iter().copied());
     values.extend(timetable::ENTRIES.iter().copied());
 }

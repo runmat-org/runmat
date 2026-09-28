@@ -1,8 +1,8 @@
 //! MATLAB-compatible `string` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, STRING_DESCRIPTOR, STRING_ENCODING_EXTENSION,
-    STRING_ERROR_INVALID_INPUT, STRING_EXPLICIT_GPU_EXTENSION, STRING_FORMAT_EXTENSION,
+    BuiltinErrorDescriptor, STRING_ENCODING_EXTENSION, STRING_ERROR_INVALID_INPUT,
+    STRING_EXPLICIT_GPU_EXTENSION, STRING_FORMAT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -948,6 +948,7 @@ fn int_value_to_string(value: &IntValue) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::STRING_DESCRIPTOR;
     use runmat_value::{
         CellArray, IntValue, IntegerComplexStorage, IntegerStorage, StringArray, StructValue,
     };

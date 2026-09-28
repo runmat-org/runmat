@@ -11,7 +11,7 @@ pub const REGEXP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     documentation: documentation::DOCUMENTATION,
     descriptor: &REGEXP_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
-        maturity: BuiltinContractMaturity::Partial,
+        maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             inference::infer,
         )),

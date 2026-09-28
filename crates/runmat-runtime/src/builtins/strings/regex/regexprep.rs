@@ -1005,7 +1005,6 @@ fn parse_toggle(value: Option<&Value>) -> Option<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     #[test]
     fn regexprep_descriptor_signatures_cover_core_forms() {
@@ -1356,14 +1355,6 @@ pub(crate) mod tests {
         assert!(
             message.contains("replacement sequence is incompatible with element-wise patterns"),
             "unexpected error message: {message}"
-        );
-    }
-
-    #[test]
-    fn regexprep_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
         );
     }
 }

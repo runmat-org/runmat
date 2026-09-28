@@ -2,6 +2,7 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod blanks;
+mod char;
 mod convert_chars_to_strings;
 mod convert_contained_strings_to_chars;
 mod convert_strings_to_chars;
@@ -20,6 +21,9 @@ mod regexp_pattern;
 mod str2double;
 mod strcmp;
 mod strcmpi;
+mod string;
+mod string_empty;
+mod strings;
 mod strlength;
 mod strncmp;
 mod strncmpi;
@@ -27,6 +31,7 @@ mod text_boundary;
 mod wildcard_pattern;
 
 pub use self::blanks::*;
+pub use self::char::*;
 pub use self::convert_chars_to_strings::*;
 pub use self::convert_contained_strings_to_chars::*;
 pub use self::convert_strings_to_chars::*;
@@ -45,6 +50,9 @@ pub use self::regexp_pattern::*;
 pub use self::str2double::*;
 pub use self::strcmp::*;
 pub use self::strcmpi::*;
+pub use self::string::*;
+pub use self::string_empty::*;
+pub use self::strings::*;
 pub use self::strlength::*;
 pub use self::strncmp::*;
 pub use self::strncmpi::*;
@@ -53,6 +61,7 @@ pub use self::wildcard_pattern::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(blanks::ENTRIES.iter().copied());
+    values.extend(char::ENTRIES.iter().copied());
     values.extend(convert_chars_to_strings::ENTRIES.iter().copied());
     values.extend(convert_contained_strings_to_chars::ENTRIES.iter().copied());
     values.extend(convert_strings_to_chars::ENTRIES.iter().copied());
@@ -71,6 +80,9 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(str2double::ENTRIES.iter().copied());
     values.extend(strcmp::ENTRIES.iter().copied());
     values.extend(strcmpi::ENTRIES.iter().copied());
+    values.extend(string::ENTRIES.iter().copied());
+    values.extend(string_empty::ENTRIES.iter().copied());
+    values.extend(strings::ENTRIES.iter().copied());
     values.extend(strlength::ENTRIES.iter().copied());
     values.extend(strncmp::ENTRIES.iter().copied());
     values.extend(strncmpi::ENTRIES.iter().copied());

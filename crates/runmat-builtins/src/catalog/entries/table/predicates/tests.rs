@@ -26,7 +26,10 @@ fn all_predicates_bind_exactly_once_and_document_asserted_examples() {
             BuiltinExampleVerification::Assertions { .. }
         )));
         assert_eq!(entry.placement.residency, BuiltinResidencyPolicy::Host);
-        assert_eq!(entry.placement.distributed, BuiltinDistributedPolicy::InspectHandles);
+        assert_eq!(
+            entry.placement.distributed,
+            BuiltinDistributedPolicy::InspectHandles
+        );
         assert_eq!(
             entry.contract.async_behavior,
             BuiltinAsyncBehavior::NeverSuspends

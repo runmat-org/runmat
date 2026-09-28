@@ -1,9 +1,9 @@
 //! MATLAB-compatible `char` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, CHAR_DESCRIPTOR, CHAR_ERROR_DIMENSION, CHAR_ERROR_INTERNAL,
-    CHAR_ERROR_INVALID_CODEPOINT, CHAR_ERROR_INVALID_INPUT, CHAR_EXTENSIONS,
-    CHAR_LOGICAL_INPUT_EXTENSION, CHAR_RESIDENT_NUMERIC_EXTENSION,
+    BuiltinErrorDescriptor, CHAR_ERROR_DIMENSION, CHAR_ERROR_INTERNAL,
+    CHAR_ERROR_INVALID_CODEPOINT, CHAR_ERROR_INVALID_INPUT, CHAR_LOGICAL_INPUT_EXTENSION,
+    CHAR_RESIDENT_NUMERIC_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -431,6 +431,7 @@ fn infer_rows_cols(shape: &[usize], len: usize) -> (usize, usize) {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use runmat_builtins::CHAR_EXTENSIONS;
     use runmat_value::{IntegerStorage, NumericStorage, SymbolicArray, SymbolicExpr};
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {

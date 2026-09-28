@@ -204,7 +204,8 @@ pub fn record_runtime_teardown(
 /// The final registration still checks again after any suspension.
 pub fn ensure_runtime_teardown_available() -> Result<(), &'static str> {
     let state = runtime_teardown_context()?;
-    validate_runtime_teardown_state(&state.borrow())
+    let result = validate_runtime_teardown_state(&state.borrow());
+    result
 }
 
 fn runtime_teardown_context() -> Result<Rc<RefCell<ContextState>>, &'static str> {

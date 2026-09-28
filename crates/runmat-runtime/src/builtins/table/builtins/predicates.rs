@@ -1,34 +1,9 @@
 use super::*;
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
-
-pub const ISCATEGORICAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "iscategorical is a universal object-type predicate; integer host or resident values return scalar false without gathering or converting numeric payload data.",
-    };
-pub const ISTABLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "istable is a universal object-type predicate; integer host or resident values return scalar false without gathering payload data.",
-};
-pub const ISTIMETABLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "istimetable is a universal object-type predicate; integer host or resident values return scalar false without gathering payload data.",
-    };
-pub const ISORDINAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "isordinal accepts any data type and returns true only for ordinal categorical arrays; integer host or resident values return scalar false without payload access.",
-};
 
 #[runtime_builtin(
     name = "istable",
     binding_variant = "default",
-    integer_audit(crate::builtins::table::builtins::predicates::ISTABLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn istable_builtin(value: Value) -> BuiltinResult<Value> {
@@ -41,7 +16,6 @@ pub(crate) async fn istable_builtin(value: Value) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "istimetable",
     binding_variant = "default",
-    integer_audit(crate::builtins::table::builtins::predicates::ISTIMETABLE_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn istimetable_builtin(value: Value) -> BuiltinResult<Value> {
@@ -54,7 +28,6 @@ pub(crate) async fn istimetable_builtin(value: Value) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "iscategorical",
     binding_variant = "default",
-    integer_audit(crate::builtins::table::builtins::predicates::ISCATEGORICAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn iscategorical_builtin(value: Value) -> BuiltinResult<Value> {
@@ -67,7 +40,6 @@ pub(crate) async fn iscategorical_builtin(value: Value) -> BuiltinResult<Value> 
 #[runtime_builtin(
     name = "isordinal",
     binding_variant = "default",
-    integer_audit(crate::builtins::table::builtins::predicates::ISORDINAL_INTEGER_AUDIT),
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn isordinal_builtin(value: Value) -> BuiltinResult<Value> {

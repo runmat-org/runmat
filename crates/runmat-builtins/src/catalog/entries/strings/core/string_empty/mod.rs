@@ -15,7 +15,7 @@ pub const STRING_EMPTY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry 
     documentation: documentation::DOCUMENTATION,
     descriptor: &STRING_EMPTY_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
-        maturity: BuiltinContractMaturity::Partial,
+        maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             inference::infer,
         )),
