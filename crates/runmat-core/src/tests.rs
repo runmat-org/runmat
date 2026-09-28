@@ -29,6 +29,7 @@ struct InProcessMultiLabExecutionService {
     serial: runmat_runtime::execution::RuntimeExecutionService,
     maximum_labs: u32,
     pool: std::sync::Mutex<Option<runmat_execution::PoolSnapshot>>,
+    submitted_revisions: std::sync::Mutex<Vec<Option<runmat_execution::ProgramRevision>>>,
 }
 
 impl InProcessMultiLabExecutionService {
@@ -37,7 +38,15 @@ impl InProcessMultiLabExecutionService {
             serial: runmat_runtime::execution::RuntimeExecutionService::new(),
             maximum_labs,
             pool: std::sync::Mutex::new(None),
+            submitted_revisions: std::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    fn submitted_revisions(&self) -> Vec<Option<runmat_execution::ProgramRevision>> {
+        self.submitted_revisions
+            .lock()
+            .expect("test submission revisions poisoned")
+            .clone()
     }
 }
 
@@ -116,6 +125,10 @@ impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabEx
         call: runmat_runtime::execution::DeferredCall,
     ) -> Result<runmat_execution::FutureHandle, runmat_runtime::execution::ExecutionServiceError>
     {
+        self.submitted_revisions
+            .lock()
+            .expect("test submission revisions poisoned")
+            .push(call.program_revision.clone());
         runmat_runtime::execution::RuntimeExecutionServices::create_future(&self.serial, call)
     }
 
@@ -15427,6 +15440,46 @@ fn parallel_pool_and_future_surface_uses_the_session_execution_service() {
         variables.get("afterClose"),
         Some(runmat_value::Value::Tensor(value)) if value.is_empty()
     ));
+}
+
+#[test]
+fn loose_source_parallel_submissions_keep_the_core_program_environment() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    assert!(session.runtime_context().program_revision().is_none());
+    let service = std::rc::Rc::new(InProcessMultiLabExecutionService::new(2));
+    session.install_execution_services(service.clone());
+
+    execute_text_request(
+        &mut session,
+        "pool = parpool(2); future = parfeval(pool, @(x) x + 1, 1, 4); answer = fetchOutputs(future);",
+    )
+    .expect("submit a loose-source asynchronous call");
+    assert_eq!(
+        session.get_variables().get("answer"),
+        Some(&runmat_value::Value::Num(5.0))
+    );
+    let asynchronous = service.submitted_revisions();
+    assert_eq!(
+        asynchronous.len(),
+        1,
+        "parfeval must submit one deferred call"
+    );
+
+    execute_text_request(
+        &mut session,
+        "values = zeros(1, 2); parfor (index = 1:2, 2); values(index) = index; end;",
+    )
+    .expect("submit loose-source parallel iterations");
+    let submissions = service.submitted_revisions();
+    assert!(
+        submissions.len() > asynchronous.len(),
+        "parfor must submit deferred calls"
+    );
+    let expected_environment = program_environment(session.compat_mode());
+    for revision in submissions {
+        let revision = revision.expect("Core must attach a program revision to each deferred call");
+        assert_eq!(revision.environment(), expected_environment);
+    }
 }
 
 #[test]
