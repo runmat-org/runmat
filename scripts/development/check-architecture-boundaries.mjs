@@ -682,7 +682,6 @@ for (const [sourcePath, ceiling] of [
 for (const [sourcePath, ceiling] of [
   ["crates/runmat-builtins/src/catalog/contract.rs", 96],
   ["crates/runmat-builtins/src/catalog/contract/acceleration.rs", 192],
-  ["crates/runmat-builtins/src/catalog/contract/aggregate.rs", 192],
   ["crates/runmat-builtins/src/catalog/contract/array.rs", 192],
   ["crates/runmat-builtins/src/catalog/contract/introspection.rs", 192],
   ["crates/runmat-builtins/src/catalog/contract/io.rs", 192],
