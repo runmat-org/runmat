@@ -23,7 +23,9 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{
     char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
 };
-use crate::builtins::strings::core::numeric_length::nonnegative_platform_usize;
+use crate::builtins::strings::core::numeric_length::{
+    nonnegative_platform_usize, parse_nonnegative_usize,
+};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 const PATTERN_CLASS: runmat_types::StaticClassIdentity =
@@ -43,14 +45,6 @@ const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Input text.",
-}];
-
-const IN_BOUNDARY_TYPE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "type",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: Some("\"either\""),
-    description: "Boundary type: \"either\", \"start\", or \"end\".",
 }];
 
 const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
@@ -339,151 +333,6 @@ pub const SSCANF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
         notes: "sizeA controls output shape only. Pure %ld/%li scans return int64, pure %lu/%lo/%lx scans return uint64, and other numeric scan formats return double.",
     }];
-descriptor!(
-    PATTERN_DESCRIPTOR,
-    "pat = pattern(text)",
-    &IN_TEXT,
-    &OUT_ANY
-);
-descriptor!(
-    REGEXP_PATTERN_DESCRIPTOR,
-    "pat = regexpPattern(expr)",
-    &IN_TEXT,
-    &OUT_ANY
-);
-const DIGITS_PATTERN_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "N",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Exact nonnegative number of Unicode digit characters to match.",
-}];
-const DIGITS_PATTERN_RANGE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "minCharacters",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minimum nonnegative number of Unicode digit characters to match.",
-    },
-    BuiltinParamDescriptor {
-        name: "maxCharacters",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Maximum nonnegative count, or positive infinity for no upper bound.",
-    },
-];
-const DIGITS_PATTERN_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "pat = digitsPattern",
-        inputs: &[],
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pat = digitsPattern(N)",
-        inputs: &DIGITS_PATTERN_N_INPUTS,
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pat = digitsPattern(minCharacters, maxCharacters)",
-        inputs: &DIGITS_PATTERN_RANGE_INPUTS,
-        outputs: &OUT_ANY,
-    },
-];
-const DIGITS_PATTERN_ERROR_ARGUMENT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DIGITS_PATTERN.ARGUMENT_COUNT",
-    identifier: Some("RunMat:digitsPattern:ArgumentCount"),
-    when: "More than two count arguments are supplied.",
-    message: "digitsPattern: expected zero, one, or two input arguments",
-};
-const DIGITS_PATTERN_ERROR_INVALID_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DIGITS_PATTERN.INVALID_COUNT",
-    identifier: Some("RunMat:digitsPattern:InvalidCount"),
-    when: "A count is not a host nonnegative numeric integer scalar or positive infinity in the maximum position.",
-    message: "digitsPattern: invalid character count",
-};
-const DIGITS_PATTERN_ERROR_INVALID_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DIGITS_PATTERN.INVALID_RANGE",
-    identifier: Some("RunMat:digitsPattern:InvalidRange"),
-    when: "minCharacters exceeds maxCharacters.",
-    message: "digitsPattern: minCharacters must not exceed maxCharacters",
-};
-const DIGITS_PATTERN_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    DIGITS_PATTERN_ERROR_ARGUMENT_COUNT,
-    DIGITS_PATTERN_ERROR_INVALID_COUNT,
-    DIGITS_PATTERN_ERROR_INVALID_RANGE,
-];
-pub const DIGITS_PATTERN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DIGITS_PATTERN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DIGITS_PATTERN_ERRORS,
-};
-const DIGITS_PATTERN_INTEGER_N_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "N",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Every built-in integer class plus integer-valued host single or double can specify the exact nonnegative digit count.",
-    }];
-const DIGITS_PATTERN_INTEGER_RANGE_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "minCharacters",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The inclusive lower bound is read exactly from every integer class.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "maxCharacters",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The inclusive upper bound is read exactly from every integer class; positive host floating infinity separately denotes an unbounded maximum.",
-    },
-];
-pub const DIGITS_PATTERN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "pat = digitsPattern(integer_N)",
-        inputs: &DIGITS_PATTERN_INTEGER_N_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "N controls only the exact Unicode-digit repetition bound of the returned host pattern object.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "pat = digitsPattern(integer_minCharacters, integer_maxCharacters)",
-        inputs: &DIGITS_PATTERN_INTEGER_RANGE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The inclusive bounds are structural controls, min must not exceed max, and the returned pattern greedily matches toward max.",
-    },
-];
-const TEXT_BOUNDARY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "pat = textBoundary",
-        inputs: &[],
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "pat = textBoundary(type)",
-        inputs: &IN_BOUNDARY_TYPE,
-        outputs: &OUT_ANY,
-    },
-];
-pub const TEXT_BOUNDARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TEXT_BOUNDARY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NO_ERRORS,
-};
 
 fn any_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
@@ -773,228 +622,6 @@ async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-#[runtime_builtin(
-    name = "pattern",
-    category = "strings/pattern",
-    summary = "Create a literal string pattern.",
-    keywords = "pattern,string pattern,text",
-    accel = "metadata",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::compat::PATTERN_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::patterns::PATTERN_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-async fn pattern_builtin(text: Value) -> BuiltinResult<Value> {
-    if crate::dispatcher::value_contains_gpu(&text) {
-        return Err(compat_error(
-            "pattern",
-            "pattern: expected a host text scalar",
-        ));
-    }
-    let text = gather_if_needed_async(&text)
-        .await
-        .map_err(map_flow("pattern"))?;
-    Ok(pattern_object(&regex::escape(&scalar_text(
-        &text, "pattern",
-    )?)))
-}
-
-#[runtime_builtin(
-    name = "regexpPattern",
-    category = "strings/pattern",
-    summary = "Create a regular expression string pattern.",
-    keywords = "regexpPattern,pattern,regular expression,text",
-    accel = "metadata",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::compat::REGEXP_PATTERN_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::patterns::REGEXP_PATTERN_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-async fn regexp_pattern_builtin(text: Value) -> BuiltinResult<Value> {
-    if crate::dispatcher::value_contains_gpu(&text) {
-        return Err(compat_error(
-            "regexpPattern",
-            "regexpPattern: expected a host text scalar",
-        ));
-    }
-    let text = gather_if_needed_async(&text)
-        .await
-        .map_err(map_flow("regexpPattern"))?;
-    Ok(pattern_object(&scalar_text(&text, "regexpPattern")?))
-}
-
-#[runtime_builtin(
-    name = "digitsPattern",
-    category = "strings/pattern",
-    summary = "Create a pattern matching digit characters.",
-    keywords = "digitsPattern,pattern,digits,text",
-    accel = "metadata",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::compat::DIGITS_PATTERN_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::strings::core::compat::DIGITS_PATTERN_INTEGER_CAPABILITIES
-    ),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-async fn digits_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    if rest.len() > 2 {
-        return Err(digits_pattern_error(
-            &DIGITS_PATTERN_ERROR_ARGUMENT_COUNT,
-            DIGITS_PATTERN_ERROR_ARGUMENT_COUNT.message,
-        ));
-    }
-    if rest.iter().any(|value| {
-        matches!(
-            value,
-            Value::Bool(_) | Value::LogicalArray(_) | Value::GpuTensor(_)
-        )
-    }) {
-        return Err(digits_pattern_error(
-            &DIGITS_PATTERN_ERROR_INVALID_COUNT,
-            "digitsPattern: counts must be host nonnegative numeric integer scalars",
-        ));
-    }
-    let regex = match rest.as_slice() {
-        [] => "\\d+".to_string(),
-        [count] => {
-            let count = parse_digits_pattern_count(count)?;
-            format!("\\d{{{count}}}")
-        }
-        [minimum, maximum] => {
-            let minimum = parse_digits_pattern_count(minimum)?;
-            if is_positive_infinity_scalar(maximum) {
-                format!("\\d{{{minimum},}}")
-            } else {
-                let maximum = parse_digits_pattern_count(maximum)?;
-                if minimum > maximum {
-                    return Err(digits_pattern_error(
-                        &DIGITS_PATTERN_ERROR_INVALID_RANGE,
-                        DIGITS_PATTERN_ERROR_INVALID_RANGE.message,
-                    ));
-                }
-                format!("\\d{{{minimum},{maximum}}}")
-            }
-        }
-        _ => unreachable!("argument count was validated"),
-    };
-    Ok(pattern_object(&regex))
-}
-
-fn parse_digits_pattern_count(value: &Value) -> BuiltinResult<usize> {
-    parse_nonnegative_usize(value, "digitsPattern").map_err(|error| {
-        digits_pattern_error(
-            &DIGITS_PATTERN_ERROR_INVALID_COUNT,
-            error.message().to_owned(),
-        )
-    })
-}
-
-fn digits_pattern_error(
-    descriptor: &'static BuiltinErrorDescriptor,
-    message: impl Into<String>,
-) -> crate::RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin("digitsPattern");
-    if let Some(identifier) = descriptor.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn is_positive_infinity_scalar(value: &Value) -> bool {
-    match value {
-        Value::Num(value) => value.is_infinite() && value.is_sign_positive(),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            matches!(tensor.numeric_value_at(0), Some(NumericScalar::F64(value)) if value.is_infinite() && value.is_sign_positive())
-                || matches!(tensor.numeric_value_at(0), Some(NumericScalar::F32(value)) if value.is_infinite() && value.is_sign_positive())
-        }
-        _ => false,
-    }
-}
-
-#[runtime_builtin(
-    name = "lettersPattern",
-    category = "strings/pattern",
-    summary = "Create a pattern matching letter characters.",
-    keywords = "lettersPattern,pattern,letters,text",
-    accel = "metadata",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::patterns::LETTERS_PATTERN_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::strings::core::patterns::LETTERS_PATTERN_INTEGER_CAPABILITIES
-    ),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-async fn letters_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let regex = crate::builtins::strings::core::patterns::bounded_regex(
-        rest,
-        r"\p{Alphabetic}",
-        "lettersPattern",
-        false,
-    )
-    .await?;
-    Ok(pattern_object(&regex))
-}
-
-#[runtime_builtin(
-    name = "wildcardPattern",
-    category = "strings/pattern",
-    summary = "Create a pattern matching arbitrary text.",
-    keywords = "wildcardPattern,pattern,wildcard,text",
-    accel = "metadata",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::patterns::WILDCARD_PATTERN_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::strings::core::patterns::WILDCARD_PATTERN_INTEGER_CAPABILITIES
-    ),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-async fn wildcard_pattern_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let regex =
-        crate::builtins::strings::core::patterns::bounded_regex(rest, ".", "wildcardPattern", true)
-            .await?;
-    Ok(pattern_object(&regex))
-}
-
-#[runtime_builtin(
-    name = "textBoundary",
-    category = "strings/pattern",
-    summary = "Create a pattern matching the start or end of text.",
-    keywords = "textBoundary,pattern,boundary,start,end,text",
-    accel = "metadata",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::compat::TEXT_BOUNDARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::strings::core::compat"
-)]
-async fn text_boundary_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let boundary_type = match rest.as_slice() {
-        [] => "either".to_string(),
-        [value] => {
-            let value = gather_if_needed_async(value)
-                .await
-                .map_err(map_flow("textBoundary"))?;
-            scalar_text(&value, "textBoundary")?
-        }
-        _ => {
-            return Err(compat_error(
-                "textBoundary",
-                "textBoundary: expected zero inputs or one boundary type",
-            ))
-        }
-    };
-    let regex = match boundary_type.to_ascii_lowercase().as_str() {
-        "either" => r"(?:^|$)",
-        "start" => r"^",
-        "end" => r"$",
-        other => {
-            return Err(compat_error(
-                "textBoundary",
-                format!("textBoundary: unsupported boundary type '{other}'"),
-            ))
-        }
-    };
-    Ok(pattern_object(regex))
-}
-
 pub(crate) fn scalar_text(value: &Value, fn_name: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
@@ -1134,32 +761,6 @@ fn missing_to_none(text: String) -> Option<String> {
     } else {
         Some(text)
     }
-}
-
-fn parse_nonnegative_usize(value: &Value, fn_name: &str) -> BuiltinResult<usize> {
-    let index = match value {
-        Value::Num(n) => nonnegative_platform_usize(*n),
-        Value::Int(i) => i.try_to_usize(),
-        Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => {
-            if let Some(storage) = tensor.integer_storage() {
-                storage.value_at(0).and_then(|value| value.try_to_usize())
-            } else {
-                nonnegative_platform_usize(tensor_utils::tensor_value_f64(tensor, 0))
-            }
-        }
-        _ => {
-            return Err(compat_error(
-                fn_name,
-                format!("{fn_name}: expected a nonnegative integer scalar"),
-            ))
-        }
-    };
-    index.ok_or_else(|| {
-        compat_error(
-            fn_name,
-            format!("{fn_name}: expected a nonnegative integer scalar"),
-        )
-    })
 }
 
 fn map_text_pair_preserve(
@@ -2077,14 +1678,22 @@ mod tests {
         blanks::blanks_builtin, convert_chars_to_strings::convert_chars_to_strings_builtin,
         convert_contained_strings_to_chars::convert_contained_strings_to_chars_builtin,
         convert_strings_to_chars::convert_strings_to_chars_builtin,
-        is_string_scalar::is_string_scalar_builtin, isletter::isletter_builtin,
-        isspace::isspace_builtin, isstrprop::isstrprop_builtin, newline::newline_builtin,
-        strncmpi::strncmpi_builtin,
+        digits_pattern::digits_pattern_builtin, is_string_scalar::is_string_scalar_builtin,
+        isletter::isletter_builtin, isspace::isspace_builtin, isstrprop::isstrprop_builtin,
+        letters_pattern::letters_pattern_builtin, newline::newline_builtin,
+        pattern::pattern_builtin, regexp_pattern::regexp_pattern_builtin,
+        strncmpi::strncmpi_builtin, text_boundary::text_boundary_builtin,
+        wildcard_pattern::wildcard_pattern_builtin,
     };
     use runmat_builtins::{
-        BLANKS_GPU_INPUT_EXTENSION, ISLETTER_ERROR_TOO_MANY_OUTPUTS,
-        ISSPACE_ERROR_TOO_MANY_OUTPUTS, ISSTRPROP_ERROR_TOO_MANY_OUTPUTS,
-        ISSTRPROP_RESIDENT_INPUT_EXTENSION, STRNCMPI_ERROR_TOO_MANY_OUTPUTS,
+        BLANKS_GPU_INPUT_EXTENSION, DIGITS_PATTERN_DESCRIPTOR, DIGITS_PATTERN_ERROR_ARGUMENT_COUNT,
+        DIGITS_PATTERN_ERROR_INVALID_COUNT, DIGITS_PATTERN_ERROR_INVALID_RANGE,
+        DIGITS_PATTERN_ERROR_TOO_MANY_OUTPUTS, DIGITS_PATTERN_INTEGER_CAPABILITIES,
+        ISLETTER_ERROR_TOO_MANY_OUTPUTS, ISSPACE_ERROR_TOO_MANY_OUTPUTS,
+        ISSTRPROP_ERROR_TOO_MANY_OUTPUTS, ISSTRPROP_RESIDENT_INPUT_EXTENSION,
+        LETTERS_PATTERN_ERROR_TOO_MANY_OUTPUTS, PATTERN_ERROR_TOO_MANY_OUTPUTS,
+        REGEXP_PATTERN_ERROR_TOO_MANY_OUTPUTS, STRNCMPI_ERROR_TOO_MANY_OUTPUTS,
+        TEXT_BOUNDARY_ERROR_TOO_MANY_OUTPUTS, WILDCARD_PATTERN_ERROR_TOO_MANY_OUTPUTS,
     };
     use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType, StructValue};
 
@@ -2986,6 +2595,39 @@ mod tests {
     }
 
     #[test]
+    fn pattern_constructors_reject_extra_outputs_before_reading_inputs() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        for (result, identifier) in [
+            (
+                block(pattern_builtin(Value::Num(7.0))),
+                PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
+            ),
+            (
+                block(regexp_pattern_builtin(Value::Num(7.0))),
+                REGEXP_PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
+            ),
+            (
+                block(digits_pattern_builtin(vec![Value::Num(-1.0)])),
+                DIGITS_PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
+            ),
+            (
+                block(letters_pattern_builtin(vec![Value::Num(-1.0)])),
+                LETTERS_PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
+            ),
+            (
+                block(wildcard_pattern_builtin(vec![Value::Num(-1.0)])),
+                WILDCARD_PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
+            ),
+            (
+                block(text_boundary_builtin(vec![Value::Num(7.0)])),
+                TEXT_BOUNDARY_ERROR_TOO_MANY_OUTPUTS.identifier,
+            ),
+        ] {
+            assert_eq!(result.expect_err("excess outputs").identifier(), identifier);
+        }
+    }
+
+    #[test]
     fn digits_pattern_validates_range_controls_and_argument_count() {
         let zero = block(digits_pattern_builtin(vec![Value::Int(IntValue::U64(0))])).unwrap();
         assert_eq!(pattern_regex(&zero, "test").unwrap(), r"\d{0}");
@@ -3061,7 +2703,7 @@ mod tests {
     #[test]
     fn digits_pattern_descriptor_declares_all_public_forms() {
         assert_eq!(DIGITS_PATTERN_DESCRIPTOR.signatures.len(), 3);
-        assert_eq!(DIGITS_PATTERN_DESCRIPTOR.errors.len(), 3);
+        assert_eq!(DIGITS_PATTERN_DESCRIPTOR.errors.len(), 4);
         assert_eq!(DIGITS_PATTERN_INTEGER_CAPABILITIES.len(), 2);
     }
 
