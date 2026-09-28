@@ -140,7 +140,7 @@ mod store;
 use store::*;
 
 mod constructor_args;
-use constructor_args::{int_value_dtype, parse_constructor_args, ConstructorArgs, KeyCandidate};
+use constructor_args::{parse_constructor_args, ConstructorArgs, KeyCandidate};
 #[runtime_builtin(
     name = "containers.Map",
     binding_variant = "default",

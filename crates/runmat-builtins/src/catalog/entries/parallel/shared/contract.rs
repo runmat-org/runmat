@@ -7,11 +7,6 @@ use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement}
 
 pub(in crate::catalog::entries::parallel) const CURRENT_EFFECTS: [EffectKind; 1] =
     [EffectKind::MayThrow];
-pub(in crate::catalog::entries::parallel) const POOL_READ_EFFECTS: [EffectKind; 3] = [
-    EffectKind::EnvironmentRead,
-    EffectKind::MaySuspend,
-    EffectKind::MayThrow,
-];
 pub(in crate::catalog::entries::parallel) const POOL_WRITE_EFFECTS: [EffectKind; 4] = [
     EffectKind::EnvironmentRead,
     EffectKind::EnvironmentWrite,

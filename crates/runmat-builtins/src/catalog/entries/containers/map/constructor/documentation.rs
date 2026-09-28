@@ -12,7 +12,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "MATLAB documents thread-based execution but no gpuArray capability for this class. RunMat resident input gathering is therefore compatibility-gated and always produces host Map state and host outputs."] },
     BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
         "Map storage and outputs are host-resident. Resident constructor, key-query, removal, lookup, selected-values, and assignment inputs are gated RunMat extensions that gather before host Map processing.",
-        "Map handles are local mutable identities backed by a runtime registry. Copying a handle is not a distributed transfer of the map.",
+        "Map handles are local mutable identities whose entries are owned and traced by the runtime's garbage collector. Copying a handle aliases the same map; it does not transfer the map to another worker.",
         "The map is a host-side fusion boundary. No GPU elementwise or reduction kernel is used.",
     ] },
 ];
@@ -56,7 +56,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "How does `length(map)` behave?", answer: "`length(map)` returns the number of stored keys (identical to the `Count` property). `size(map)` remains `[1 1]`, matching MATLAB's handle semantics." },
         BuiltinDocumentationFaq { question: "What error is raised when a key is missing?", answer: "Indexing a missing key produces the MATLAB-compatible error message *\"The specified key is not present in this container.\"*" },
         BuiltinDocumentationFaq { question: "Does the map preserve insertion order?", answer: "No insertion-order guarantee should be assumed. RunMat returns keys in key order and aligns `values(map)` to that order, matching the ordering shown by MATLAB's public examples." },
-        BuiltinDocumentationFaq { question: "How do I remove every entry?", answer: "Call `remove(map, keys(map))` or reassign a new empty map. RunMat currently keeps the internal storage until the handle is cleared, matching MATLAB's lifetime semantics." },
+        BuiltinDocumentationFaq { question: "How do I remove every entry?", answer: "Call `remove(map, keys(map))` to empty the existing map, including any aliases to it. Assigning a new empty map changes only that variable's handle. Unreachable map storage is reclaimed by the runtime's garbage collector." },
         BuiltinDocumentationFaq { question: "What happens if I pass a non-scalar key?", answer: "Keys must be scalar. Passing vectors, matrices, or nested cell arrays of keys raises a descriptive error pointing to the offending argument." },
         BuiltinDocumentationFaq { question: "How do I create an empty `containers.Map`?", answer: "— Call the constructor with no arguments: `m = containers.Map()`. This yields an empty map with the default `'char'` KeyType and `'any'` ValueType. To pin the types up front (so the first insertion can't change them), supply them explicitly: `m = containers.Map('KeyType', 'char', 'ValueType', 'double')`. Either form gives you a map you can populate via `m(key) = value`." },
         BuiltinDocumentationFaq { question: "What is the default KeyType and ValueType?", answer: "— The default `KeyType` is `'char'` and the default `ValueType` is `'any'`. That is why `containers.Map()` with no arguments accepts character-vector keys and arbitrary values. To use numeric keys (for example `double` or `int32`) or to restrict values to a specific class, set `'KeyType'`/`'ValueType'` at construction time — they become read-only properties afterwards." },
@@ -75,7 +75,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         notes: &[
             "The ten legacy behavior paragraphs, thirteen FAQs, six links, implementation link, and five example scenarios are preserved here. Presentation-only output strings were replaced by executable value assertions.",
             "The legacy GPU and fusion fields are represented by typed placement plus the execution-and-placement section. requires_feature was null; no feature gate was introduced. The legacy unit-test field maps to verification evidence.",
-            "The editable JSON sidecar remains until standalone example execution and generated-reference parity are verified.",
+            "The catalog is the sole editable documentation authority; generated reference parity and standalone examples are verified as part of the migration.",
         ],
     },
     introduced: None,

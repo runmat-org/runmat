@@ -37,8 +37,8 @@ pub(super) fn ensure_containers_map_class_registered() {
                 runmat_types::StaticMethodName::new("remove"),
                 BUILTIN_REMOVE,
             ),
-            (OBJECT_SUBSREF_METHOD, BUILTIN_SUBSREF),
-            (OBJECT_SUBSASGN_METHOD, BUILTIN_SUBSASGN),
+            (crate::OBJECT_SUBSREF_METHOD, BUILTIN_SUBSREF),
+            (crate::OBJECT_SUBSASGN_METHOD, BUILTIN_SUBSASGN),
         ] {
             methods.insert(
                 name.into(),

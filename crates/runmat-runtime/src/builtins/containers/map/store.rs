@@ -193,7 +193,7 @@ impl MapStoreRules for MapStore {
     }
 }
 
-fn value_class_from_value(value: &Value) -> ValueClass {
+pub(super) fn value_class_from_value(value: &Value) -> ValueClass {
     match value {
         Value::CharArray(_) => ValueClass::Char,
         Value::String(_) | Value::StringArray(_) => ValueClass::String,

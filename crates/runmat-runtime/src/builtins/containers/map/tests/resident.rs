@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn nested_resident_inputs_are_gated_before_provider_access() {
-    use runmat_value::{Closure, ObjectArray, StructArray};
+    use runmat_value::{Closure, ObjectArray, StructArray, StructValue};
 
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
