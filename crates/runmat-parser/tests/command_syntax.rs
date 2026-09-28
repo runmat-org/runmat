@@ -530,6 +530,11 @@ fn filesystem_path_command_forms_stringify_path_words() {
             "movefile",
             &["./src/file.m", "../dst/file.m"],
         ),
+        (
+            "opentoline setup.m 12 4",
+            "opentoline",
+            &["setup.m", "12", "4"],
+        ),
         ("delete ./tmp/*.mat", "delete", &["./tmp/*.mat"]),
         (
             "run ./SourceCode/path_worker.m",
