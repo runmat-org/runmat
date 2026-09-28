@@ -265,9 +265,22 @@ fn animatedline_gathers_all_integer_coordinate_and_maximum_classes() {
 #[test]
 #[cfg(feature = "wgpu")]
 fn animatedline_wgpu_gathers_all_integer_coordinate_and_maximum_classes() {
+    check_animatedline_wgpu_integer_gathers(false);
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+#[ignore = "requires a compatible WGPU device; run explicitly for hardware qualification"]
+fn animatedline_required_wgpu_gathers_all_integer_coordinate_and_maximum_classes() {
+    check_animatedline_wgpu_integer_gathers(true);
+}
+
+#[cfg(feature = "wgpu")]
+fn check_animatedline_wgpu_integer_gathers(require_device: bool) {
     let _plot_guard = setup();
     let _accel_guard = test_support::accel_test_lock();
     if !register_wgpu_provider_available() {
+        assert!(!require_device, "required WGPU device is unavailable");
         return;
     }
     let provider = runmat_accelerate_api::provider().expect("wgpu provider");

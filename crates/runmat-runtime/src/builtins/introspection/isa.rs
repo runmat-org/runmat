@@ -674,7 +674,6 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     fn isa_automatic_wgpu_value_matches_underlying_numeric_class() {
         use runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider;
-        use runmat_accelerate_api::AccelProvider;
 
         let provider = match ensure_wgpu_provider() {
             Ok(Some(p)) => p,
