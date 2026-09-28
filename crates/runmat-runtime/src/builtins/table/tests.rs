@@ -21,6 +21,7 @@ use std::io::Write;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod timetable_detection;
+mod indexing_methods;
 
 #[cfg(feature = "wgpu")]
 fn register_wgpu_provider_available() -> bool {

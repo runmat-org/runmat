@@ -3,7 +3,7 @@ use runmat_macros::runtime_builtin;
 
 #[runtime_builtin(
     name = "table.subsref",
-    descriptor(crate::builtins::table::TABLE_SUBSREF_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn table_subsref(obj: Value, subscript: Value) -> BuiltinResult<Value> {
@@ -26,7 +26,7 @@ async fn table_read_step(
 
 #[runtime_builtin(
     name = "table.subsasgn",
-    descriptor(crate::builtins::table::TABLE_SUBSASGN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn table_subsasgn(
@@ -75,7 +75,7 @@ async fn table_write_step(
 
 #[runtime_builtin(
     name = "dictionary.subsref",
-    descriptor(crate::builtins::table::TABLE_SUBSREF_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn dictionary_subsref(obj: Value, subscript: Value) -> BuiltinResult<Value> {
@@ -105,7 +105,7 @@ async fn dictionary_read_step(
 
 #[runtime_builtin(
     name = "dictionary.subsasgn",
-    descriptor(crate::builtins::table::TABLE_SUBSASGN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn dictionary_subsasgn(

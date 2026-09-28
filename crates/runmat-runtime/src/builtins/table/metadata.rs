@@ -339,45 +339,6 @@ const GRPSTATS_INPUTS: [BuiltinParamDescriptor; 4] = [
         description: "Alpha, DataVars, and VarNames options.",
     },
 ];
-const OBJECT_INDEX_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Table object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-];
-const OBJECT_ASSIGN_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Table object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible indexing path.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Assigned value.",
-    },
-];
 const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
@@ -613,16 +574,6 @@ const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     inputs: &VALUE_AND_ARGS_INPUTS,
     outputs: &WRITE_NO_OUTPUT,
 }];
-const OBJECT_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = table.subsref(obj, S)",
-    inputs: &OBJECT_INDEX_INPUTS,
-    outputs: &ANY_OUTPUT,
-}];
-const OBJECT_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = table.subsasgn(obj, S, rhs)",
-    inputs: &OBJECT_ASSIGN_INPUTS,
-    outputs: &ANY_OUTPUT,
-}];
 
 pub const READTABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &READTABLE_SIGNATURES,
@@ -700,18 +651,6 @@ pub const TABLE_WRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &WRITE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const TABLE_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OBJECT_SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &TABLE_ERRORS,
-};
-pub const TABLE_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OBJECT_SUBSASGN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
     errors: &TABLE_ERRORS,
 };
 
