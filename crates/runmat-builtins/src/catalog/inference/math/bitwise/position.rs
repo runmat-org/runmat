@@ -5,39 +5,16 @@ use runmat_types::{
     ValueKindFact,
 };
 
+mod operation;
+
+use operation::PositionOperation;
+
 pub(super) fn infer_get(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer(request, entry, PositionOperation::Get)
 }
 
 pub(super) fn infer_set(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer(request, entry, PositionOperation::Set)
-}
-
-#[derive(Clone, Copy)]
-enum PositionOperation {
-    Get,
-    Set,
-}
-
-impl PositionOperation {
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Get => "bitget",
-            Self::Set => "bitset",
-        }
-    }
-    const fn maximum_arity(self) -> usize {
-        match self {
-            Self::Get => 3,
-            Self::Set => 4,
-        }
-    }
-    const fn value_argument_count(self) -> usize {
-        match self {
-            Self::Get => 2,
-            Self::Set => 3,
-        }
-    }
 }
 
 fn infer(
