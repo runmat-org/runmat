@@ -80,6 +80,13 @@ impl ExactStudyFamily {
 }
 
 pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture {
+    exact_study_fixture_with_wall_time(family, resources().maximum_wall_millis)
+}
+
+pub(super) fn exact_study_fixture_with_wall_time(
+    family: ExactStudyFamily,
+    maximum_wall_millis: u64,
+) -> ExactStudyFixture {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
     if let ExactStudyFamily::ThermalPrestress(case) = family {
@@ -275,11 +282,13 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
         initial_artifacts.push(artifact_download(&artifact_id, &stored));
         artifacts.insert(artifact_id, stored);
     }
-    let resources = resources();
+    let mut resources = resources();
+    resources.maximum_wall_millis = maximum_wall_millis;
     let inventory = super::super::pool_resources::inventory(&resources).unwrap();
     let workers = [
-        (1, worker_allocation("worker-a", 11)),
-        (2, worker_allocation("worker-b", 12)),
+        (1, worker_allocation("worker-a", 11, &resources)),
+        (2, worker_allocation("worker-b", 12, &resources)),
+        (3, worker_allocation("worker-c", 13, &resources)),
     ]
     .into_iter()
     .collect();
@@ -312,6 +321,7 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
                 latest_checkpoint: None,
                 next_artifact: 0,
                 driver_interruption_triggered: false,
+                second_driver_interruption_triggered: false,
                 interrupted_committed_task: None,
                 cancellation_heartbeat_observed: false,
                 transitions: Vec::new(),
@@ -397,7 +407,11 @@ fn resources() -> ResourceRequest {
     }
 }
 
-fn worker_allocation(allocation_id: &str, entropy: u8) -> DriverWorkerAllocation {
+fn worker_allocation(
+    allocation_id: &str,
+    entropy: u8,
+    resources: &ResourceRequest,
+) -> DriverWorkerAllocation {
     let now = now_millis();
     let (recipient, _) = PortableExecutionEncryption
         .recipient_from_entropy_with_derived_fingerprint(
@@ -437,7 +451,7 @@ fn worker_allocation(allocation_id: &str, entropy: u8) -> DriverWorkerAllocation
         allocation_lease_id: allocation_id.into(),
         fencing_token: 1,
         state: "active".into(),
-        resources: resources(),
+        resources: resources.clone(),
         endpoint_identity: Some(evidence),
         run_key_envelope_authorized: false,
     }

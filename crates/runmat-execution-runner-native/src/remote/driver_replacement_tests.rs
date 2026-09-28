@@ -67,6 +67,7 @@ struct DurableState {
     latest_checkpoint: Option<String>,
     next_artifact: u64,
     driver_interruption_triggered: bool,
+    second_driver_interruption_triggered: bool,
     interrupted_committed_task: Option<runmat_execution::TaskId>,
     cancellation_heartbeat_observed: bool,
     transitions: Vec<(u64, DriverRunTarget, Option<String>)>,
@@ -97,6 +98,8 @@ enum ReplacementInterruption {
     AnalysisCheckpointRejectedBeforeStore,
     WorkloadAttemptActive,
     WorkloadAttemptCancelledAfterRestore,
+    WorkloadDeadlineExpiredAfterRestore,
+    WorkloadRetryBudgetExhaustedAfterRestore,
 }
 
 impl DurableControl {
@@ -469,12 +472,23 @@ impl DriverControlPlane for DurableControl {
                     (newly_committed.is_some(), newly_committed)
                 }
                 ReplacementInterruption::WorkloadAttemptActive
-                | ReplacementInterruption::WorkloadAttemptCancelledAfterRestore => {
+                | ReplacementInterruption::WorkloadAttemptCancelledAfterRestore
+                | ReplacementInterruption::WorkloadDeadlineExpiredAfterRestore
+                | ReplacementInterruption::WorkloadRetryBudgetExhaustedAfterRestore => {
                     let state = self.state.lock().unwrap();
-                    (
-                        self.active_interrupted_task(&state, &checkpoint).is_some(),
-                        None,
-                    )
+                    let current_attempt = self
+                        .active_interrupted_task(&state, &checkpoint)
+                        .and_then(|task_id| {
+                            let (pool, _) = stored_pool_checkpoint(self, &state, &checkpoint)?;
+                            let snapshot = pool.test_snapshot();
+                            let attempt_id = snapshot.tasks[&task_id].active_attempt?;
+                            Some(
+                                snapshot.attempts[&attempt_id].request.driver_fence
+                                    == authority.fencing_token,
+                            )
+                        })
+                        .unwrap_or(false);
+                    (current_attempt, None)
                 }
                 ReplacementInterruption::ReplayableExecutionStart => (false, None),
             })
@@ -505,12 +519,19 @@ impl DriverControlPlane for DurableControl {
             if artifact.checkpoint.is_some() {
                 state.latest_checkpoint = Some(artifact_id.clone());
             }
-            let interrupt_driver = authority.fencing_token == 1
-                && committed_replacement_checkpoint
-                && !state.driver_interruption_triggered;
+            let interrupt_driver = committed_replacement_checkpoint
+                && ((authority.fencing_token == 1 && !state.driver_interruption_triggered)
+                    || (authority.fencing_token == 2
+                        && self.interruption
+                            == ReplacementInterruption::WorkloadRetryBudgetExhaustedAfterRestore
+                        && !state.second_driver_interruption_triggered));
             if interrupt_driver {
-                state.driver_interruption_triggered = true;
-                state.interrupted_committed_task = interrupted_committed_task;
+                if authority.fencing_token == 1 {
+                    state.driver_interruption_triggered = true;
+                    state.interrupted_committed_task = interrupted_committed_task;
+                } else {
+                    state.second_driver_interruption_triggered = true;
+                }
             }
             (
                 StoredDriverArtifact {
@@ -632,6 +653,24 @@ fn exact_meshing_admission_retries_and_cancels_after_encrypted_driver_replacemen
     assert!(run_actual_driver_replacement_with_interruption(
         ExactStudyFamily::MeshingRoot,
         ReplacementInterruption::WorkloadAttemptCancelledAfterRestore,
+    )
+    .is_none());
+}
+
+#[test]
+fn exact_meshing_admission_deadline_expires_before_replacement_dispatch() {
+    assert!(run_actual_driver_replacement_with_interruption(
+        ExactStudyFamily::MeshingRoot,
+        ReplacementInterruption::WorkloadDeadlineExpiredAfterRestore,
+    )
+    .is_none());
+}
+
+#[test]
+fn exact_meshing_admission_exhausts_retry_budget_after_two_driver_losses() {
+    assert!(run_actual_driver_replacement_with_interruption(
+        ExactStudyFamily::MeshingRoot,
+        ReplacementInterruption::WorkloadRetryBudgetExhaustedAfterRestore,
     )
     .is_none());
 }
@@ -780,11 +819,115 @@ fn run_actual_driver_replacement_with_interruption(
         .expect("actual-driver replacement test thread panicked")
 }
 
+fn assert_exhausted_replacement(
+    control: &DurableControl,
+    first_checkpoint_id: &str,
+    second_checkpoint_id: &str,
+    active_before: (
+        runmat_execution::TaskId,
+        runmat_execution_runner::DriverSnapshot,
+        runmat_execution::identity::ValueId,
+    ),
+) {
+    use runmat_execution::state::{AttemptState, TaskState};
+    use runmat_execution::task::RetryPolicy;
+    use runmat_execution_runner::driver::DriverEventKind;
+
+    let (task_id, before, _) = active_before;
+    let state = control.state.lock().unwrap();
+    let first = stored_driver_checkpoint(control, &state, first_checkpoint_id);
+    let second = stored_driver_checkpoint(control, &state, second_checkpoint_id);
+    let final_id = state
+        .latest_checkpoint
+        .as_ref()
+        .expect("terminal checkpoint");
+    let terminal = stored_driver_checkpoint(control, &state, final_id);
+    assert!(first.sequence < second.sequence && second.sequence < terminal.sequence);
+    let (second_pool, _) = stored_pool_checkpoint(control, &state, &second)
+        .expect("second active scheduler authority");
+    let second_snapshot = second_pool.test_snapshot();
+    let second_task = &second_snapshot.tasks[&task_id];
+    assert_eq!(second_task.submission, before.tasks[&task_id].submission);
+    assert_eq!(second_task.attempt_count, 2);
+    let second_attempt = second_task.active_attempt.expect("second active attempt");
+    assert_eq!(
+        second_snapshot.attempts[&second_attempt]
+            .request
+            .driver_fence,
+        2
+    );
+    let first_attempt = before.tasks[&task_id]
+        .active_attempt
+        .expect("first active attempt");
+    assert_eq!(
+        second_snapshot.attempts[&first_attempt].state,
+        AttemptState::Lost
+    );
+
+    let (final_pool, _) =
+        stored_pool_checkpoint(control, &state, &terminal).expect("terminal scheduler authority");
+    let after = final_pool.test_snapshot();
+    let exhausted = &after.tasks[&task_id];
+    assert_eq!(exhausted.submission, before.tasks[&task_id].submission);
+    assert_eq!(
+        exhausted.submission.request.retry,
+        RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 }
+    );
+    assert_eq!(exhausted.state, TaskState::Failed);
+    assert_eq!(exhausted.attempt_count, 2);
+    assert!(exhausted.active_attempt.is_none() && exhausted.committed.is_none());
+    assert_eq!(after.tasks.len(), before.tasks.len());
+    assert_eq!(after.attempts.len(), 2);
+    for attempt_id in [first_attempt, second_attempt] {
+        assert_eq!(after.attempts[&attempt_id].state, AttemptState::Lost);
+    }
+    assert!(after.events.iter().any(|event| {
+        event.driver_fence == 3
+            && matches!(
+                &event.kind,
+                DriverEventKind::TaskStateChanged {
+                    task_id: changed,
+                    state: TaskState::Failed
+                } if *changed == task_id
+            )
+    }));
+    assert_eq!(
+        state.bootstrap_checkpoints,
+        vec![
+            (1, None),
+            (2, Some(first_checkpoint_id.into())),
+            (3, Some(second_checkpoint_id.into()))
+        ]
+    );
+    assert_eq!(state.worker_authorizations.len(), 3);
+    assert_eq!(
+        state
+            .transitions
+            .iter()
+            .filter(|(fence, target, _)| *fence == 3 && *target == DriverRunTarget::Failed)
+            .count(),
+        1
+    );
+    assert!(state.transitions.iter().all(|(_, target, _)| {
+        !matches!(
+            target,
+            DriverRunTarget::Succeeded | DriverRunTarget::Indeterminate
+        )
+    }));
+}
+
 async fn actual_driver_replacement_case(
     family: ExactStudyFamily,
     interruption: ReplacementInterruption,
 ) -> Option<thermal::ColdReplay> {
-    let mut fixture = exact_study_fixture(family);
+    let mut fixture =
+        if interruption == ReplacementInterruption::WorkloadDeadlineExpiredAfterRestore {
+            // Long enough for the first authenticated active-attempt checkpoint;
+            // short enough to expire during the deliberate driver outage below.
+            exact_study_fixture_with_wall_time(family, 15_000)
+        } else {
+            exact_study_fixture(family)
+        };
     fixture.control.interruption = interruption;
     let driver_material = driver_identity_material();
     let directory = tempfile::tempdir().unwrap();
@@ -807,6 +950,8 @@ async fn actual_driver_replacement_case(
             interruption,
             ReplacementInterruption::WorkloadAttemptActive
                 | ReplacementInterruption::WorkloadAttemptCancelledAfterRestore
+                | ReplacementInterruption::WorkloadDeadlineExpiredAfterRestore
+                | ReplacementInterruption::WorkloadRetryBudgetExhaustedAfterRestore
         )
         .then(|| super::worker_execution::HeldWorkloadAttempt {
             target: control.interrupted_target(),
@@ -927,6 +1072,8 @@ async fn actual_driver_replacement_case(
         interruption,
         ReplacementInterruption::WorkloadAttemptActive
             | ReplacementInterruption::WorkloadAttemptCancelledAfterRestore
+            | ReplacementInterruption::WorkloadDeadlineExpiredAfterRestore
+            | ReplacementInterruption::WorkloadRetryBudgetExhaustedAfterRestore
     ) {
         let state = control.state.lock().unwrap();
         let checkpoint = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
@@ -947,6 +1094,21 @@ async fn actual_driver_replacement_case(
     } else {
         None
     };
+    if interruption == ReplacementInterruption::WorkloadDeadlineExpiredAfterRestore {
+        let (task_id, before, _) = active_task_before
+            .as_ref()
+            .expect("active workload checkpoint");
+        let task = &before.tasks[task_id];
+        let deadline = task
+            .submission
+            .request
+            .deadline_unix_millis
+            .expect("admitted absolute deadline");
+        tokio::time::sleep(std::time::Duration::from_millis(
+            deadline.saturating_sub(now_millis()).saturating_add(100),
+        ))
+        .await;
+    }
     let second_relay = RelayServer::bind().await;
     let second_authority = driver_authority(2, second_relay.http_base());
     let second_worker = run_worker(
@@ -955,23 +1117,80 @@ async fn actual_driver_replacement_case(
         &fixture.inventory,
         fixture.run_key.clone(),
         2,
-        (interruption == ReplacementInterruption::WorkloadAttemptCancelledAfterRestore).then(
-            || super::worker_execution::HeldWorkloadAttempt {
-                target: control.interrupted_target(),
-                input_object_id: active_task_before
-                    .as_ref()
-                    .map(|(_, _, object_id)| *object_id),
-                until: super::worker_execution::HeldAttemptUntil::UntilCancellation,
+        matches!(
+            interruption,
+            ReplacementInterruption::WorkloadAttemptCancelledAfterRestore
+                | ReplacementInterruption::WorkloadRetryBudgetExhaustedAfterRestore
+        )
+        .then(|| super::worker_execution::HeldWorkloadAttempt {
+            target: control.interrupted_target(),
+            input_object_id: active_task_before
+                .as_ref()
+                .map(|(_, _, object_id)| *object_id),
+            until: if interruption == ReplacementInterruption::WorkloadAttemptCancelledAfterRestore
+            {
+                super::worker_execution::HeldAttemptUntil::UntilCancellation
+            } else {
+                super::worker_execution::HeldAttemptUntil::UntilWorkerLoss
             },
-        ),
+        }),
     );
     let second_driver = super::driver::run_remote_driver(
         RemoteDriverConfig {
             authority: second_authority,
-            endpoint_identity_file: identity_path,
+            endpoint_identity_file: identity_path.clone(),
         },
         control.clone(),
     );
+    if interruption == ReplacementInterruption::WorkloadRetryBudgetExhaustedAfterRestore {
+        interrupt_generation_after_commit(
+            second_relay.forward_pair(),
+            second_worker,
+            second_driver,
+            control.recovery_committed.notified(),
+        )
+        .await;
+        assert!(
+            control
+                .state
+                .lock()
+                .unwrap()
+                .second_driver_interruption_triggered
+        );
+        let second_checkpoint_id = control
+            .state
+            .lock()
+            .unwrap()
+            .latest_checkpoint
+            .clone()
+            .expect("second active-attempt checkpoint");
+        let third_relay = RelayServer::bind().await;
+        let third_worker = run_worker(
+            third_relay.ws_url("worker"),
+            control.workers.get(&3).unwrap(),
+            &fixture.inventory,
+            fixture.run_key.clone(),
+            3,
+            None,
+        );
+        let third_driver = super::driver::run_remote_driver(
+            RemoteDriverConfig {
+                authority: driver_authority(3, third_relay.http_base()),
+                endpoint_identity_file: identity_path,
+            },
+            control.clone(),
+        );
+        drive_generation(third_relay.forward_pair(), third_worker, third_driver)
+            .await
+            .expect("exhausted third driver must publish a terminal failure");
+        assert_exhausted_replacement(
+            &control,
+            &checkpoint_after_loss,
+            &second_checkpoint_id,
+            active_task_before.expect("first active-attempt checkpoint"),
+        );
+        return None;
+    }
     let driver_result =
         drive_generation(second_relay.forward_pair(), second_worker, second_driver).await;
     if let Err(error) = driver_result {
@@ -1085,6 +1304,49 @@ async fn actual_driver_replacement_case(
                 .map(|(id, attempt)| (id, attempt.state, attempt.cancellation_requested_at))
                 .collect::<Vec<_>>()
         );
+        return None;
+    }
+
+    if interruption == ReplacementInterruption::WorkloadDeadlineExpiredAfterRestore {
+        use runmat_execution::state::{AttemptState, TaskState};
+        use runmat_execution_runner::driver::DriverEventKind;
+
+        let state = control.state.lock().unwrap();
+        let (task_id, before, _) = active_task_before.expect("active workload checkpoint");
+        let prior_id = &checkpoint_after_loss;
+        let final_id = state
+            .latest_checkpoint
+            .as_ref()
+            .expect("terminal checkpoint");
+        let prior = stored_driver_checkpoint(&control, &state, prior_id);
+        let final_checkpoint = stored_driver_checkpoint(&control, &state, final_id);
+        assert!(final_checkpoint.sequence > prior.sequence);
+        let (pool, _) = stored_pool_checkpoint(&control, &state, &final_checkpoint)
+            .expect("terminal scheduler authority");
+        let after = pool.test_snapshot();
+        let original = &before.tasks[&task_id];
+        let expired = &after.tasks[&task_id];
+        assert_eq!(expired.submission, original.submission);
+        assert_eq!(expired.state, TaskState::Cancelled);
+        assert_eq!(expired.attempt_count, 1);
+        assert!(expired.committed.is_none());
+        let first_attempt = original.active_attempt.expect("original active attempt");
+        assert_eq!(after.attempts[&first_attempt].state, AttemptState::Lost);
+        assert_eq!(after.attempts.len(), before.attempts.len());
+        assert!(after.events.iter().any(|event| {
+            matches!(&event.kind, DriverEventKind::DeadlineExpired { task_id: expired_id }
+                if *expired_id == task_id)
+        }));
+        assert!(state
+            .transitions
+            .iter()
+            .any(|(fence, target, _)| { *fence == 2 && *target == DriverRunTarget::Failed }));
+        assert!(state.transitions.iter().all(|(_, target, _)| {
+            !matches!(
+                target,
+                DriverRunTarget::Succeeded | DriverRunTarget::Indeterminate
+            )
+        }));
         return None;
     }
 
