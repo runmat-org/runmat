@@ -5168,6 +5168,10 @@ pub fn select_axes_for_figure(handle: FigureHandle, axes_index: usize) -> Result
     let state = get_state_mut(&mut reg, handle);
     state.active_axes = axes_index;
     state.figure.set_active_axes_index(axes_index);
+    state.revision = state.revision.wrapping_add(1);
+    let figure_clone = state.figure.clone();
+    drop(reg);
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
 }
 
@@ -5176,16 +5180,28 @@ pub fn create_axes_for_figure(
 ) -> Result<(FigureHandle, usize), FigureError> {
     let mut reg = registry();
     let handle = target.unwrap_or(reg.current);
-    let axes_index = {
+    let existed = reg.figures.contains_key(&handle);
+    let (axes_index, figure_clone) = {
         let state = get_state_mut(&mut reg, handle);
         let axes_index = axes_count(state);
         state.figure.ensure_axes(axes_index);
         state.figure.set_active_axes_index(axes_index);
         state.active_axes = axes_index;
         state.reset_cycle(axes_index);
-        axes_index
+        state.revision = state.revision.wrapping_add(1);
+        (axes_index, state.figure.clone())
     };
     reg.current = handle;
+    drop(reg);
+    notify_with_figure(
+        handle,
+        &figure_clone,
+        if existed {
+            FigureEventKind::Updated
+        } else {
+            FigureEventKind::Created
+        },
+    );
     Ok((handle, axes_index))
 }
 
