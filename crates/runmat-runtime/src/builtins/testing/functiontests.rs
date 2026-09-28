@@ -1,23 +1,12 @@
 use std::collections::HashMap;
 
-use runmat_builtins::{ResolveContext, Type};
 use runmat_value::{CellArray, ObjectInstance, Value};
 
 use crate::{build_runtime_error, BuiltinResult};
 
-fn functiontests_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Object {
-        class_name: Some(crate::testing::TEST_SUITE_CLASS.into()),
-        shape: None,
-    }
-}
-
 #[runmat_macros::runtime_builtin(
     name = "functiontests",
-    category = "testing",
-    summary = "Create a TestSuite from local function handles.",
-    keywords = "functiontests,localfunctions,testing,suite",
-    type_resolver(functiontests_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::functiontests"
 )]
 fn functiontests_builtin(handles: Value) -> BuiltinResult<Value> {

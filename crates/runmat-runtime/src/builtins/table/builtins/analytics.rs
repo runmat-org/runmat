@@ -9,7 +9,11 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, NumericScalar};
 
-#[runtime_builtin(name = "grpstats", builtin_path = "crate::builtins::table::builtins")]
+#[runtime_builtin(
+    name = "grpstats",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::table::builtins"
+)]
 pub(crate) async fn grpstats_builtin(
     value: Value,
     group: Value,
@@ -26,7 +30,11 @@ pub(crate) async fn grpstats_builtin(
     grpstats_impl(value, group, rest)
 }
 
-#[runtime_builtin(name = "pivot", builtin_path = "crate::builtins::table::builtins")]
+#[runtime_builtin(
+    name = "pivot",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::table::builtins"
+)]
 pub(crate) async fn pivot_builtin(
     table: Value,
     rowvars: Value,
@@ -53,6 +61,7 @@ pub(crate) async fn pivot_builtin(
 
 #[runtime_builtin(
     name = "groupsummary",
+    binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn groupsummary_builtin(

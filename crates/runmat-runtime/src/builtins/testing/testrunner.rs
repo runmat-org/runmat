@@ -1,4 +1,3 @@
-use runmat_builtins::{ResolveContext, Type};
 use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
@@ -6,18 +5,9 @@ use crate::{build_runtime_error, BuiltinResult};
 const TEST_RUNNER_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("matlab.unittest.TestRunner");
 
-fn runner_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Object {
-        class_name: Some(TEST_RUNNER_CLASS.into()),
-        shape: Some(vec![Some(1), Some(1)]),
-    }
-}
-
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestRunner.withTextOutput",
-    category = "testing",
-    summary = "Construct a test runner for the active Core test executor.",
-    type_resolver(runner_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::testrunner"
 )]
 async fn with_text_output(options: Vec<Value>) -> BuiltinResult<Value> {
@@ -42,8 +32,7 @@ async fn with_text_output(options: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestRunner.addPlugin",
-    category = "testing/plugins",
-    summary = "Attach a compatible TestRunnerPlugin to a runner.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::testrunner"
 )]
 fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
@@ -97,8 +86,7 @@ fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestRunner.run",
-    category = "testing",
-    summary = "Run a suite through the active Core test executor.",
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::testrunner"
 )]
 async fn run(runner: Value, suite: Value) -> BuiltinResult<Value> {

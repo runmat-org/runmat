@@ -1,13 +1,10 @@
-use runmat_builtins::{ResolveContext, Type};
 use runmat_value::{ObjectInstance, Value};
 
 use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.plugins.CodeCoveragePlugin.forFolder",
-    category = "testing/plugins",
-    summary = "Construct a source-folder coverage plugin for a TestRunner.",
-    type_resolver(code_coverage_plugin_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::testing::plugins"
 )]
 fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -130,13 +127,6 @@ impl CoverageOption {
             Self::MetricLevel => "MetricLevel",
             Self::Filter => "Filter",
         }
-    }
-}
-
-fn code_coverage_plugin_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Object {
-        class_name: Some(runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN.into()),
-        shape: Some(vec![Some(1), Some(1)]),
     }
 }
 
