@@ -7,7 +7,10 @@ mod inference;
 #[cfg(test)]
 mod tests;
 
-pub use contract::{DAMP_DESCRIPTOR, DAMP_INTEGER_CAPABILITIES};
+pub use contract::{
+    DAMP_DESCRIPTOR, DAMP_ERROR_INTERNAL, DAMP_ERROR_INVALID_MODEL, DAMP_ERROR_OUTPUT_COUNT,
+    DAMP_ERROR_UNSUPPORTED_MODEL, DAMP_INTEGER_CAPABILITIES,
+};
 
 pub const DAMP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -21,19 +24,19 @@ pub const DAMP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             inference::infer as fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &[EffectKind::MayThrow],
+        effects: &[EffectKind::MaySuspend, EffectKind::MayThrow],
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        residency: BuiltinResidencyPolicy::Host,
+        residency: BuiltinResidencyPolicy::GatherToHost,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::Unsupported,
     },

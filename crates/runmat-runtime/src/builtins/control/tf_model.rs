@@ -844,6 +844,48 @@ pub fn ss_poles_from_object(
     Ok((eigenvalues.iter().copied().collect(), sample_time))
 }
 
+/// Gather only the state matrix and sample time used by pole analysis. Other
+/// state-space properties may contain resident values but are not read here.
+pub async fn ss_poles_from_object_async(
+    object: &ObjectInstance,
+    builtin: &'static str,
+) -> BuiltinResult<(Vec<Complex64>, f64)> {
+    for name in ["A", "Ts"] {
+        if !object.properties.contains_key(name) {
+            return Err(control_error(
+                builtin,
+                invalid_model_identifier(builtin),
+                format!("{builtin}: ss object is missing {name}"),
+            ));
+        }
+    }
+    let a_resident = matches!(object.properties.get("A"), Some(Value::GpuTensor(_)));
+    let ts_resident = matches!(object.properties.get("Ts"), Some(Value::GpuTensor(_)));
+    if !a_resident && !ts_resident {
+        return ss_poles_from_object(object, builtin);
+    }
+    // Validate host values before reading a resident peer, so malformed
+    // local metadata keeps its model error and does not download.
+    if ts_resident && !a_resident {
+        ss_state_matrix_property(object, "A", builtin)?;
+    }
+    if a_resident && !ts_resident {
+        validate_sample_time(scalar_property(object, "Ts", builtin)?, builtin)?;
+    }
+    let mut consumed = ObjectInstance::new(object.class_name.clone());
+    for name in ["A", "Ts"] {
+        let value = object
+            .properties
+            .get(name)
+            .expect("prevalidated ss property");
+        consumed.properties.insert(
+            name.to_string(),
+            dispatcher::gather_if_needed_async(value).await?,
+        );
+    }
+    ss_poles_from_object(&consumed, builtin)
+}
+
 fn ss_state_matrix_property(
     object: &ObjectInstance,
     name: &'static str,

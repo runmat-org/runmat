@@ -68,7 +68,7 @@ fn state_space_matrix_size_sets_all_column_lengths_without_guessing_pole_domain(
         CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
     ));
     assert!(inferred.effects.0.contains(&EffectKind::MayThrow));
-    assert!(!inferred.effects.0.contains(&EffectKind::MaySuspend));
+    assert!(inferred.effects.0.contains(&EffectKind::MaySuspend));
 }
 
 #[test]

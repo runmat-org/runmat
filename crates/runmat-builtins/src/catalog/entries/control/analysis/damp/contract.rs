@@ -48,31 +48,35 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         outputs: &THREE_OUTPUTS,
     },
 ];
+pub const DAMP_ERROR_INVALID_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DAMP.INVALID_MODEL",
+    identifier: Some("RunMat:damp:InvalidModel"),
+    when: "Input system is malformed or missing model metadata.",
+    message: "damp: invalid model",
+};
+pub const DAMP_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DAMP.UNSUPPORTED_MODEL",
+    identifier: Some("RunMat:damp:UnsupportedModel"),
+    when: "Model class is unsupported.",
+    message: "damp: unsupported model",
+};
+pub const DAMP_ERROR_OUTPUT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DAMP.OUTPUT_COUNT",
+    identifier: Some("RunMat:damp:OutputCount"),
+    when: "More than three outputs are requested.",
+    message: "damp: too many output arguments",
+};
+pub const DAMP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DAMP.INTERNAL",
+    identifier: Some("RunMat:damp:Internal"),
+    when: "Pole extraction or output construction failed.",
+    message: "damp: internal error",
+};
 const ERRORS: [BuiltinErrorDescriptor; 4] = [
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.INVALID_MODEL",
-        identifier: Some("RunMat:damp:InvalidModel"),
-        when: "Input system is malformed or missing model metadata.",
-        message: "damp: invalid model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.UNSUPPORTED_MODEL",
-        identifier: Some("RunMat:damp:UnsupportedModel"),
-        when: "Model class is unsupported.",
-        message: "damp: unsupported model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.OUTPUT_COUNT",
-        identifier: Some("RunMat:damp:OutputCount"),
-        when: "More than three outputs are requested.",
-        message: "damp: too many output arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DAMP.INTERNAL",
-        identifier: Some("RunMat:damp:Internal"),
-        when: "Pole extraction or output construction failed.",
-        message: "damp: internal error",
-    },
+    DAMP_ERROR_INVALID_MODEL,
+    DAMP_ERROR_UNSUPPORTED_MODEL,
+    DAMP_ERROR_OUTPUT_COUNT,
+    DAMP_ERROR_INTERNAL,
 ];
 
 pub const DAMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
