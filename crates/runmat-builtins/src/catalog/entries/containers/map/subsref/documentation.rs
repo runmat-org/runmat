@@ -9,7 +9,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "basic",
     title: "Exercise containers.Map.subsref",
-    program: "m = containers.Map({'a'},{2});\ns = substruct('()',{'a'});\nv = subsref(m,s);",
+    program:
+        "m = containers.Map({'a'},{2});\ns = struct('type','()','subs',{{'a'}});\nv = subsref(m,s);",
     display_output: None,
     compatibility: BuiltinExampleCompatibility::Matlab,
     harness: BuiltinExampleHarness::Portable,
@@ -36,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/containers/map/containers.map.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Map semantic tests", location: "crates/runmat-runtime/src/builtins/containers/map/tests/general.rs::constructor_with_cells_lookup" }],
-        notes: &["The legacy reference JSON remains until its examples, prose, links and source-field dispositions have been audited against these typed declarations."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

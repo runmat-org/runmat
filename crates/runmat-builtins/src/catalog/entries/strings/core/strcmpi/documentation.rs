@@ -69,11 +69,11 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
     BuiltinExample {
         id: "example-5",
-        title: "Expand across a character matrix",
+        title: "Compare a character matrix with a string row",
         program:
-            "patterns = char(\"alpha\", \"BETA\"); tf = strcmpi(patterns, [\"ALPHA\" \"beta\"])",
+            "patterns = char(\"alpha\", \"DELTA\"); tf = strcmpi(patterns, [\"ALPHA\" \"delta\"])",
         display_output: Some("tf = [true false; false true]"),
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

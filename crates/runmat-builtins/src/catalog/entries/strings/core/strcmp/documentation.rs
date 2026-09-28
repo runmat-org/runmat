@@ -86,7 +86,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         program:
             "patterns = char(\"north\", \"south\"); tf = strcmp(patterns, [\"north\" \"east\"])",
         display_output: Some("tf = [true false; false false]"),
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
