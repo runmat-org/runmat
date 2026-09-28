@@ -1084,7 +1084,17 @@ impl RunMatSession {
                 }
             }
 
-            match self.interpret_with_context(&execution_bytecode).await {
+            #[cfg(not(target_arch = "wasm32"))]
+            let execution_runtime = self
+                .runtime_context
+                .clone()
+                .with_program_revision(Some(interactive_unit.revision().program_revision.clone()));
+            #[cfg(target_arch = "wasm32")]
+            let execution_runtime = self.runtime_context.clone();
+            match self
+                .interpret_with_context(&execution_bytecode, execution_runtime)
+                .await
+            {
                 Ok(runmat_vm::InterpreterOutcome::Completed(completion)) => {
                     let results = completion.values;
                     self.stats.interpreter_fallback += 1;
@@ -1589,13 +1599,14 @@ impl RunMatSession {
     async fn interpret_with_context(
         &mut self,
         bytecode: &runmat_vm::Bytecode,
+        runtime: runmat_runtime::context::RuntimeContext,
     ) -> Result<runmat_vm::InterpreterOutcome, RuntimeError> {
         let source_name = self.current_source_name().to_string();
         runmat_vm::interpret_with_vars_in_context(
             bytecode,
             &mut self.variable_array,
             Some(source_name.as_str()),
-            self.runtime_context.clone(),
+            runtime,
         )
         .await
     }

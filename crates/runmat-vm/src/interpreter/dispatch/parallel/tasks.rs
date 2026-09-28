@@ -114,7 +114,7 @@ pub(super) fn create_future(
         .execution()
         .requires_program_capture()
         .then(|| {
-            serde_json::to_vec(function_registry).map_err(|error| {
+            crate::encode_interpreter_program_v2(function_registry).map_err(|error| {
                 crate::interpreter::errors::mex(
                     "ExecutionProgram",
                     &format!("failed to capture the exact async program: {error}"),
