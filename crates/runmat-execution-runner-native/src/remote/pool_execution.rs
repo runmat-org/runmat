@@ -365,19 +365,24 @@ async fn execute_with_allocated_workers(
         request.recipe.execution_mode == EXACT_STRUCTURAL_SWEEP_ROOT_EXECUTION_MODE;
     let pool_for_execution = Arc::clone(&pool);
     let resources_for_execution = resources.clone();
-    let mut recovery_publisher = (exact_structural_study || structural_study)
-        .then(|| {
-            super::recovery::RemoteRecoveryPublisher::new(
-                control,
-                run_key,
-                authority,
-                &project_revision,
-                &request,
-                checkpoint_sequence,
-                recovered.as_ref(),
-            )
-        })
-        .transpose()?;
+    // Scheduler recovery belongs to every replay-safe pool root. Study roots
+    // additionally publish physical state through the same transaction owner.
+    let mut recovery_publisher = matches!(
+        super::checkpoint::execution_start_phase(&request),
+        super::checkpoint::RemoteDriverCheckpointPhase::ReplayableExecutionStarted
+    )
+    .then(|| {
+        super::recovery::RemoteRecoveryPublisher::new(
+            control,
+            run_key,
+            authority,
+            &project_revision,
+            &request,
+            checkpoint_sequence,
+            recovered.as_ref(),
+        )
+    })
+    .transpose()?;
     if let Some(publisher) = recovery_publisher.as_mut() {
         publisher.bind_pool(Arc::clone(&pool), pool_catalog, pool_locations)?;
     }

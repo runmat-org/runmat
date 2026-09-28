@@ -10,10 +10,12 @@ pub(super) struct ExactStudyFixture {
 pub(super) enum StudyExpectation {
     Exact(Box<crate::ExactStructuralStudyResultExpectation>),
     Typed(Box<crate::StructuralStudyResultExpectation>),
+    Meshing(ArtifactAccess),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ExactStudyFamily {
+    MeshingRoot,
     StructuralTransient,
     ModalResponseSpectrum,
     ModalRandomResponse,
@@ -23,20 +25,24 @@ pub(super) enum ExactStudyFamily {
 impl ExactStudyFamily {
     pub(super) const fn held_analysis_kind(
         self,
-    ) -> runmat_analysis_fea::execution::AnalysisWorkKind {
+    ) -> Option<runmat_analysis_fea::execution::AnalysisWorkKind> {
         use runmat_analysis_fea::execution::AnalysisWorkKind;
         match self {
-            Self::StructuralTransient => AnalysisWorkKind::SolveStructuralTransientBlock,
+            Self::MeshingRoot => None,
+            Self::StructuralTransient => Some(AnalysisWorkKind::SolveStructuralTransientBlock),
             Self::ModalResponseSpectrum => {
-                AnalysisWorkKind::SolveStructuralModalResponseSpectrumDirection
+                Some(AnalysisWorkKind::SolveStructuralModalResponseSpectrumDirection)
             }
-            Self::ModalRandomResponse => AnalysisWorkKind::SolveStructuralRandomResponseIntervals,
-            Self::ThermalPrestress(_) => AnalysisWorkKind::SolveThermal,
+            Self::ModalRandomResponse => {
+                Some(AnalysisWorkKind::SolveStructuralRandomResponseIntervals)
+            }
+            Self::ThermalPrestress(_) => Some(AnalysisWorkKind::SolveThermal),
         }
     }
 
     pub(super) const fn authored_digest_label(self) -> &'static [u8] {
         match self {
+            Self::MeshingRoot => b"driver replacement exact meshing root",
             Self::StructuralTransient => b"driver replacement direct transient",
             Self::ModalResponseSpectrum => b"driver replacement modal response spectrum",
             Self::ModalRandomResponse => b"driver replacement modal random response",
@@ -46,6 +52,7 @@ impl ExactStudyFamily {
 
     pub(super) const fn interruption(self) -> ReplacementInterruption {
         match self {
+            Self::MeshingRoot => ReplacementInterruption::PoolTaskCommitted,
             Self::StructuralTransient => ReplacementInterruption::RecoveryClosure,
             Self::ModalResponseSpectrum | Self::ModalRandomResponse | Self::ThermalPrestress(_) => {
                 ReplacementInterruption::ReplayableExecutionStart
@@ -55,6 +62,7 @@ impl ExactStudyFamily {
 
     fn workloads(self) -> StructuralStudyWorkloads {
         match self {
+            Self::MeshingRoot => unreachable!("meshing root does not carry structural workloads"),
             Self::StructuralTransient => StructuralStudyWorkloads::StructuralTransient {
                 workload: Box::new(box_direct_transient_workload()),
                 block_plan: StructuralTransientBlockPlan::new(1).unwrap(),
@@ -110,6 +118,50 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
                     .map(|program| (program.recipe.clone(), program.artifact.clone()))
                     .collect::<Vec<_>>(),
                 StudyExpectation::Typed(Box::new(prepared.result_expectation())),
+            )
+        } else if family == ExactStudyFamily::MeshingRoot {
+            let prepared = prepare_exact_meshing_root(ExactMeshingRootPreparation {
+                program_revision: revision.clone(),
+                artifact_access: access.clone(),
+                source_name: "box.brep",
+                source_bytes: BOX,
+                import_options: ExactCadImportOptions::default(),
+                contact_definitions: Vec::new(),
+                meshing_request: coarse_box_request(),
+                preferred_edges_per_partition: 64,
+                preferred_faces_per_partition: 64,
+                maximum_chunk_bytes: 1024,
+            })
+            .unwrap();
+            let objects = prepared
+                .request()
+                .arguments
+                .iter()
+                .map(|argument| {
+                    let runmat_execution::value::ValuePayload::Object(reference) = argument else {
+                        panic!("meshing root inputs must be portable objects")
+                    };
+                    let source = prepared
+                        .objects()
+                        .iter()
+                        .find(|object| object.descriptor.digest == reference.logical_digest)
+                        .expect("meshing source object");
+                    ProgramExecutionObject {
+                        reference: reference.as_ref().clone(),
+                        bytes: source.bytes.clone(),
+                    }
+                })
+                .collect();
+            (
+                prepared.request().clone(),
+                objects,
+                prepared
+                    .required_programs()
+                    .unwrap()
+                    .into_iter()
+                    .map(|program| (program.recipe, program.artifact))
+                    .collect::<Vec<_>>(),
+                StudyExpectation::Meshing(access.clone()),
             )
         } else {
             let meshing_request = coarse_box_request();

@@ -71,6 +71,14 @@ impl<'a> RemoteRecoveryPublisher<'a> {
         checkpoint_sequence: u64,
         restored: Option<&RestoredObjectClosure>,
     ) -> NativeExecutionResult<Self> {
+        if !matches!(
+            super::checkpoint::execution_start_phase(request),
+            RemoteDriverCheckpointPhase::ReplayableExecutionStarted
+        ) {
+            return Err(protocol(
+                "non-replayable execution cannot publish a resume-safe pool checkpoint",
+            ));
+        }
         let physical_locations: BTreeMap<_, _> = restored
             .into_iter()
             .flat_map(|closure| closure.locations.iter().cloned())

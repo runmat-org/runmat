@@ -156,9 +156,13 @@ impl RemoteDriverCheckpoint {
 pub(super) const fn execution_start_phase(
     request: &ProgramExecutionRequest,
 ) -> RemoteDriverCheckpointPhase {
+    // These closed host forms orchestrate deterministic worker tasks. Arbitrary
+    // bytecode/native host programs may have effects and cannot claim replay.
     if matches!(
         request.artifact.form,
-        ExecutableForm::AnalysisWorkload | ExecutableForm::GeometryWorkload
+        ExecutableForm::AnalysisWorkload
+            | ExecutableForm::GeometryWorkload
+            | ExecutableForm::MeshingWorkload
     ) {
         RemoteDriverCheckpointPhase::ReplayableExecutionStarted
     } else {
@@ -290,13 +294,17 @@ mod tests {
     }
 
     #[test]
-    fn execution_start_is_resume_safe_for_closed_analysis_and_geometry_hosts() {
+    fn execution_start_is_resume_safe_for_closed_analysis_geometry_and_meshing_hosts() {
         assert_eq!(
             execution_start_phase(&request(ExecutableForm::AnalysisWorkload)).disposition(),
             CheckpointDisposition::ResumeSafe
         );
         assert_eq!(
             execution_start_phase(&request(ExecutableForm::GeometryWorkload)).disposition(),
+            CheckpointDisposition::ResumeSafe
+        );
+        assert_eq!(
+            execution_start_phase(&request(ExecutableForm::MeshingWorkload)).disposition(),
             CheckpointDisposition::ResumeSafe
         );
         assert_eq!(

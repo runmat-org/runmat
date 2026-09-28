@@ -82,7 +82,7 @@ struct DurableControl {
     resources: ResourceRequest,
     workers: BTreeMap<u64, DriverWorkerAllocation>,
     interruption: ReplacementInterruption,
-    interrupted_work_kind: AnalysisWorkKind,
+    interrupted_work_kind: Option<AnalysisWorkKind>,
     state: Mutex<DurableState>,
     recovery_committed: tokio::sync::Notify,
 }
@@ -90,12 +90,20 @@ struct DurableControl {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReplacementInterruption {
     RecoveryClosure,
+    PoolTaskCommitted,
     ReplayableExecutionStart,
     AnalysisCommitted,
     AnalysisCheckpointAckLost,
     AnalysisCheckpointRejectedBeforeStore,
     AnalysisAttemptActive,
     AnalysisAttemptCancelledAfterRestore,
+}
+
+impl DurableControl {
+    fn interrupted_analysis_kind(&self) -> AnalysisWorkKind {
+        self.interrupted_work_kind
+            .expect("analysis interruption requires an analysis work kind")
+    }
 }
 
 /// Inspect only authenticated, already-stored checkpoint objects. Never infer a
@@ -172,6 +180,22 @@ fn analysis_task(
     analysis_tasks(control, state, checkpoint, kind, active)
         .into_iter()
         .next()
+}
+
+fn committed_pool_tasks(
+    control: &DurableControl,
+    state: &DurableState,
+    checkpoint: &RemoteDriverCheckpoint,
+) -> BTreeSet<runmat_execution::TaskId> {
+    stored_pool_checkpoint(control, state, checkpoint)
+        .map(|(pool, _)| {
+            pool.test_snapshot()
+                .tasks
+                .iter()
+                .filter_map(|(id, task)| task.committed.as_ref().map(|_| *id))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn analysis_tasks(
@@ -279,9 +303,13 @@ impl DriverControlPlane for DurableControl {
             && self.interruption == ReplacementInterruption::AnalysisAttemptCancelledAfterRestore
             && state.latest_checkpoint.as_ref().is_some_and(|artifact_id| {
                 let checkpoint = stored_driver_checkpoint(self, &state, artifact_id);
-                let Some(task_id) =
-                    analysis_task(self, &state, &checkpoint, self.interrupted_work_kind, true)
-                else {
+                let Some(task_id) = analysis_task(
+                    self,
+                    &state,
+                    &checkpoint,
+                    self.interrupted_analysis_kind(),
+                    true,
+                ) else {
                     return false;
                 };
                 let Some((pool, _)) = stored_pool_checkpoint(self, &state, &checkpoint) else {
@@ -369,6 +397,20 @@ impl DriverControlPlane for DurableControl {
                 ReplacementInterruption::RecoveryClosure => {
                     (checkpoint.closure_catalog.is_some(), None)
                 }
+                ReplacementInterruption::PoolTaskCommitted => {
+                    let state = self.state.lock().unwrap();
+                    let previous = state
+                        .latest_checkpoint
+                        .as_ref()
+                        .map(|id| stored_driver_checkpoint(self, &state, id))
+                        .map(|prior| committed_pool_tasks(self, &state, &prior))
+                        .unwrap_or_default();
+                    let newly_committed = committed_pool_tasks(self, &state, &checkpoint)
+                        .difference(&previous)
+                        .next()
+                        .copied();
+                    (newly_committed.is_some(), newly_committed)
+                }
                 ReplacementInterruption::AnalysisCommitted
                 | ReplacementInterruption::AnalysisCheckpointAckLost
                 | ReplacementInterruption::AnalysisCheckpointRejectedBeforeStore => {
@@ -378,14 +420,20 @@ impl DriverControlPlane for DurableControl {
                         .as_ref()
                         .map(|id| stored_driver_checkpoint(self, &state, id))
                         .map(|prior| {
-                            analysis_tasks(self, &state, &prior, self.interrupted_work_kind, false)
+                            analysis_tasks(
+                                self,
+                                &state,
+                                &prior,
+                                self.interrupted_analysis_kind(),
+                                false,
+                            )
                         })
                         .unwrap_or_default();
                     let newly_committed = analysis_tasks(
                         self,
                         &state,
                         &checkpoint,
-                        self.interrupted_work_kind,
+                        self.interrupted_analysis_kind(),
                         false,
                     )
                     .into_iter()
@@ -396,8 +444,14 @@ impl DriverControlPlane for DurableControl {
                 | ReplacementInterruption::AnalysisAttemptCancelledAfterRestore => {
                     let state = self.state.lock().unwrap();
                     (
-                        analysis_task(self, &state, &checkpoint, self.interrupted_work_kind, true)
-                            .is_some(),
+                        analysis_task(
+                            self,
+                            &state,
+                            &checkpoint,
+                            self.interrupted_analysis_kind(),
+                            true,
+                        )
+                        .is_some(),
                         None,
                     )
                 }
@@ -540,6 +594,11 @@ impl DriverControlPlane for DurableControl {
         }
         Ok(())
     }
+}
+
+#[test]
+fn exact_meshing_root_preserves_committed_pool_task_after_encrypted_driver_replacement() {
+    assert!(run_actual_driver_replacement(ExactStudyFamily::MeshingRoot).is_none());
 }
 
 #[test]
@@ -714,8 +773,8 @@ async fn actual_driver_replacement_case(
             ReplacementInterruption::AnalysisAttemptActive
                 | ReplacementInterruption::AnalysisAttemptCancelledAfterRestore
         )
-        .then_some(super::worker_execution::HeldAnalysisAttempt {
-            kind: control.interrupted_work_kind,
+        .then(|| super::worker_execution::HeldAnalysisAttempt {
+            kind: control.interrupted_analysis_kind(),
             input_object_id: None,
             until: super::worker_execution::HeldAttemptUntil::UntilWorkerLoss,
         }),
@@ -801,24 +860,18 @@ async fn actual_driver_replacement_case(
     }
     let committed_before = if matches!(
         interruption,
-        ReplacementInterruption::AnalysisCommitted
+        ReplacementInterruption::PoolTaskCommitted
+            | ReplacementInterruption::AnalysisCommitted
             | ReplacementInterruption::AnalysisCheckpointAckLost
     ) {
         let state = control.state.lock().unwrap();
         let checkpoint = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
         let task_id = state
             .interrupted_committed_task
-            .expect("driver loss must follow an authenticated new analysis task commit");
-        assert!(analysis_tasks(
-            &control,
-            &state,
-            &checkpoint,
-            control.interrupted_work_kind,
-            false,
-        )
-        .contains(&task_id));
+            .expect("driver loss must follow an authenticated new pool task commit");
+        assert!(committed_pool_tasks(&control, &state, &checkpoint).contains(&task_id));
         let (pool, _) = stored_pool_checkpoint(&control, &state, &checkpoint)
-            .expect("committed analysis pool checkpoint");
+            .expect("committed pool checkpoint");
         let programs = pool
             .test_snapshot()
             .tasks
@@ -846,7 +899,7 @@ async fn actual_driver_replacement_case(
             &control,
             &state,
             &checkpoint,
-            control.interrupted_work_kind,
+            control.interrupted_analysis_kind(),
             true,
         )
         .expect("driver loss must follow an authenticated active analysis attempt");
@@ -872,9 +925,9 @@ async fn actual_driver_replacement_case(
         &fixture.inventory,
         fixture.run_key.clone(),
         2,
-        (interruption == ReplacementInterruption::AnalysisAttemptCancelledAfterRestore).then_some(
-            super::worker_execution::HeldAnalysisAttempt {
-                kind: control.interrupted_work_kind,
+        (interruption == ReplacementInterruption::AnalysisAttemptCancelledAfterRestore).then(
+            || super::worker_execution::HeldAnalysisAttempt {
+                kind: control.interrupted_analysis_kind(),
                 input_object_id: active_analysis_before
                     .as_ref()
                     .map(|(_, _, object_id)| *object_id),
@@ -895,13 +948,9 @@ async fn actual_driver_replacement_case(
         let state = control.state.lock().unwrap();
         let checkpoint = state.latest_checkpoint.as_ref().map(|id| {
             let checkpoint = stored_driver_checkpoint(&control, &state, id);
-            let decoded_active = analysis_task(
-                &control,
-                &state,
-                &checkpoint,
-                control.interrupted_work_kind,
-                true,
-            );
+            let decoded_active = control
+                .interrupted_work_kind
+                .and_then(|kind| analysis_task(&control, &state, &checkpoint, kind, true));
             let tasks = stored_pool_checkpoint(&control, &state, &checkpoint).map(|(pool, _)| {
                 let snapshot = pool.test_snapshot();
                 (
@@ -1181,7 +1230,7 @@ async fn actual_driver_replacement_case(
                 &control,
                 &state,
                 &checkpoint,
-                control.interrupted_work_kind,
+                control.interrupted_analysis_kind(),
                 false
             )
             .is_some(),
@@ -1232,6 +1281,29 @@ async fn actual_driver_replacement_case(
             })
             .unwrap();
     }
+    if let StudyExpectation::Meshing(access) = &fixture.expectation {
+        let runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
+            outputs: result_values,
+            result_objects,
+        } = outputs.response
+        else {
+            panic!("replaced meshing root did not return an externalized result")
+        };
+        let [runmat_execution::value::ValuePayload::Object(root)] = result_values.as_slice() else {
+            panic!("replaced meshing root returned an invalid result root")
+        };
+        assert!(result_objects.contains(root));
+        let terminal = runmat_meshing_execution::import_exact_meshing_result(
+            &store,
+            root.as_ref().clone(),
+            result_objects,
+            access.clone(),
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        assert!(!terminal.artifact.topology.volume_elements.is_empty());
+        return None;
+    }
     let imported = match &fixture.expectation {
         StudyExpectation::Exact(expectation) => import_exact_structural_study_result(
             &store,
@@ -1246,6 +1318,7 @@ async fn actual_driver_replacement_case(
             };
             thermal::import_cold(case, &store, outputs.response.clone(), expectation)
         }
+        StudyExpectation::Meshing(_) => unreachable!("handled above"),
     };
     assert_replacement_result(family, imported.analysis);
     match &fixture.expectation {
@@ -1256,6 +1329,7 @@ async fn actual_driver_replacement_case(
             thermal: imported.thermal.expect("typed fixture retains heat result"),
         }),
         StudyExpectation::Exact(_) => None,
+        StudyExpectation::Meshing(_) => unreachable!("handled above"),
     }
 }
 

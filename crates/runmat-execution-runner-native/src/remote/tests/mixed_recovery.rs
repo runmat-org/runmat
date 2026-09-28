@@ -47,6 +47,21 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
         runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap();
+    let effectful_recipe = recipe(revision.clone());
+    let effectful_request = ProgramExecutionRequest {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        artifact: ProgramArtifact::materialize(
+            &effectful_recipe,
+            ExecutableForm::InterpreterBytecodeV1,
+            vec![1],
+        )
+        .unwrap(),
+        recipe: effectful_recipe,
+        function: 0,
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    effectful_request.validate().unwrap();
     let mut recipe = recipe(revision);
     recipe.entrypoint = "analysis_workload".into();
     recipe.execution_mode = "recovery-publication-test".into();
@@ -63,6 +78,16 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
         bootstrap: unused_bootstrap(),
         state: Mutex::new(FakeState::default()),
     };
+    assert!(recovery::RemoteRecoveryPublisher::new(
+        &control,
+        &key,
+        &authority,
+        "revision",
+        &effectful_request,
+        3,
+        None,
+    )
+    .is_err());
     let root = result_object(run, b"manifest");
     let mut input = result_object(run, b"input bytes");
     input.reference.kind = ValueRefKind::DriverObject;
