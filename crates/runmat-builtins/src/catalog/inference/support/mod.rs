@@ -1,8 +1,7 @@
-use super::super::{BuiltinCatalogEntry, BuiltinContractMaturity};
+use super::super::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact, ValueFact,
-    ValueKindFact,
+    infer_call, CallContract, CallInference, CallRequest, InferenceDiagnostic, LiteralValue,
+    NumericClass, NumericDomain, NumericFact, ResidencyFact, ValueFact, ValueKindFact,
 };
 
 pub(super) mod facts;
@@ -44,26 +43,6 @@ pub(crate) fn preserved_binary_residency(
 
 pub(crate) fn default_double_scalar() -> ValueFact {
     ValueFact::scalar(numeric_kind(NumericClass::Double, NumericDomain::Real))
-}
-
-pub(crate) fn unavailable_rule(
-    entry: &BuiltinCatalogEntry,
-    request: &CallRequest,
-) -> CallInference {
-    let mut contract = CallContract::dynamic(DynamicReason::UnsupportedRepresentation);
-    contract.effects = entry.contract.effect_set();
-    contract.capabilities = entry.contract.capability_set();
-    let mut inference = infer_call(&contract, request);
-    if matches!(entry.contract.maturity, BuiltinContractMaturity::Complete) {
-        inference.diagnostics.push(InferenceDiagnostic::error(
-            "RM-CATALOG-INFERENCE-RULE",
-            format!(
-                "complete builtin contract `{:?}` has no registered inference rule",
-                entry.contract.inference_rule
-            ),
-        ));
-    }
-    inference
 }
 
 pub(crate) fn finish_fixed(

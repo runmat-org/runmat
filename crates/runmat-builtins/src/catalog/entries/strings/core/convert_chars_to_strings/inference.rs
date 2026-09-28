@@ -1,7 +1,7 @@
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, NumericClass,
-    NumericDomain, NumericFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    NumericDomain, NumericFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -85,7 +85,9 @@ fn padded_zero() -> ValueFact {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_types::{CellFact, LiteralContext, OutputSelection, RequestedOutputCount};
+    use runmat_types::{
+        CellFact, LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact,
+    };
 
     fn call(value: ValueFact) -> CallInference {
         infer(

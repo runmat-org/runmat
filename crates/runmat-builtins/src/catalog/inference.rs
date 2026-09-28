@@ -29,7 +29,7 @@ pub(crate) use support::text::possible_character_row;
 pub(crate) use support::text::{invalid_text_comparison_container, text_comparison_result};
 pub(super) use support::{
     argument_error, default_double_scalar, finish_fixed, finish_fixed_outputs, literal_text,
-    numeric_kind, preserved_binary_residency, unavailable_rule,
+    numeric_kind, preserved_binary_residency,
 };
 
 pub fn infer_catalog_call(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallInference {

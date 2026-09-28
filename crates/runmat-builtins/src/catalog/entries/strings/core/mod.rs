@@ -2,6 +2,9 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod blanks;
+mod convert_chars_to_strings;
+mod convert_contained_strings_to_chars;
+mod convert_strings_to_chars;
 mod genvarname;
 mod is_string_scalar;
 mod isletter;
@@ -14,21 +17,27 @@ mod strlength;
 mod strncmp;
 mod strncmpi;
 
-pub use blanks::*;
-pub use genvarname::*;
-pub use is_string_scalar::*;
-pub use isletter::*;
-pub use isspace::*;
-pub use isstrprop::*;
-pub use newline::*;
-pub use strcmp::*;
-pub use strcmpi::*;
-pub use strlength::*;
-pub use strncmp::*;
-pub use strncmpi::*;
+pub use self::blanks::*;
+pub use self::convert_chars_to_strings::*;
+pub use self::convert_contained_strings_to_chars::*;
+pub use self::convert_strings_to_chars::*;
+pub use self::genvarname::*;
+pub use self::is_string_scalar::*;
+pub use self::isletter::*;
+pub use self::isspace::*;
+pub use self::isstrprop::*;
+pub use self::newline::*;
+pub use self::strcmp::*;
+pub use self::strcmpi::*;
+pub use self::strlength::*;
+pub use self::strncmp::*;
+pub use self::strncmpi::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(blanks::ENTRIES.iter().copied());
+    values.extend(convert_chars_to_strings::ENTRIES.iter().copied());
+    values.extend(convert_contained_strings_to_chars::ENTRIES.iter().copied());
+    values.extend(convert_strings_to_chars::ENTRIES.iter().copied());
     values.extend(genvarname::ENTRIES.iter().copied());
     values.extend(is_string_scalar::ENTRIES.iter().copied());
     values.extend(isletter::ENTRIES.iter().copied());
