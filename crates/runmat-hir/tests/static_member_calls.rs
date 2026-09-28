@@ -46,6 +46,15 @@ fn all_integer_empty_methods_allow_omitted_parentheses() {
 }
 
 #[test]
+fn string_empty_allows_omitted_parentheses() {
+    let bare = first_call("S = string.empty;", &LoweringContext::empty());
+    let explicit = first_call("S = string.empty();", &LoweringContext::empty());
+    assert_eq!(bare.callee, explicit.callee);
+    assert!(matches!(bare.callee, HirCallableRef::Builtin(ref id) if id.0 == "string.empty"));
+    assert!(bare.args.is_empty());
+}
+
+#[test]
 fn implicit_class_arguments_are_preserved_for_bare_methods() {
     let bare = first_call("A = uint8.zeros;", &LoweringContext::empty());
     let explicit = first_call("A = uint8.zeros();", &LoweringContext::empty());

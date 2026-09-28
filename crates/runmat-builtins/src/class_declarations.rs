@@ -8,6 +8,26 @@ use runmat_types::{
 /// Mutable runtime registrations and static property values are intentionally
 /// not visible through this interface.
 pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalClassDeclaration> {
+    if identity.is(standard::STRING) {
+        return Some(ExternalClassDeclaration {
+            name: identity.qualified_name(),
+            parent: None,
+            kind: ClassKind::Value,
+            is_sealed: false,
+            is_abstract: false,
+            properties: Vec::new(),
+            methods: vec![ExternalMethodDeclaration {
+                name: StaticMethodName::new("empty").owned(),
+                attributes: MethodAttributes {
+                    access: MemberAccess::Public,
+                    ..MethodAttributes::default()
+                },
+                is_static: true,
+                callable: CallableIdentity::Builtin(BuiltinId("string.empty".into())),
+                implicit_class_argument: None,
+            }],
+        });
+    }
     if identity.is(standard::GPU_ARRAY) {
         return Some(ExternalClassDeclaration {
             name: identity.qualified_name(),
