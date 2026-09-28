@@ -87,6 +87,7 @@ enum ReplacementInterruption {
     RecoveryClosure,
     ReplayableExecutionStart,
     ThermalCommitted,
+    ThermalCheckpointAckLost,
 }
 
 /// Inspect only authenticated, already-stored checkpoint objects. Never infer a
@@ -315,7 +316,8 @@ impl DriverControlPlane for DurableControl {
                     ReplacementInterruption::RecoveryClosure => {
                         checkpoint.closure_catalog.is_some()
                     }
-                    ReplacementInterruption::ThermalCommitted => {
+                    ReplacementInterruption::ThermalCommitted
+                    | ReplacementInterruption::ThermalCheckpointAckLost => {
                         let state = self.state.lock().unwrap();
                         committed_thermal_task(self, &state, &checkpoint).is_some()
                     }
@@ -353,6 +355,9 @@ impl DriverControlPlane for DurableControl {
         };
         if interrupt_driver {
             self.recovery_committed.notify_waiters();
+            if self.interruption == ReplacementInterruption::ThermalCheckpointAckLost {
+                return Err(unavailable("injected checkpoint acknowledgement loss"));
+            }
             return std::future::pending().await;
         }
         Ok(stored)
@@ -484,6 +489,17 @@ fn authored_thermal_prefix_survives_driver_loss_after_its_commit() {
     }
 }
 
+#[test]
+fn authored_thermal_prefix_survives_lost_checkpoint_acknowledgement() {
+    for case in thermal::Case::matrix() {
+        let result = run_actual_driver_replacement_with_interruption(
+            ExactStudyFamily::ThermalPrestress(case),
+            ReplacementInterruption::ThermalCheckpointAckLost,
+        );
+        assert!(result.is_some());
+    }
+}
+
 fn run_actual_driver_replacement(family: ExactStudyFamily) -> Option<thermal::ColdReplay> {
     run_actual_driver_replacement_with_interruption(family, family.interruption())
 }
@@ -538,20 +554,36 @@ async fn actual_driver_replacement_case(
         },
         control.clone(),
     );
-    interrupt_generation_after_commit(
-        first_relay.forward_pair(),
-        first_worker,
-        first_driver,
-        control.recovery_committed.notified(),
-    )
-    .await;
+    if interruption == ReplacementInterruption::ThermalCheckpointAckLost {
+        let error = drive_generation(first_relay.forward_pair(), first_worker, first_driver)
+            .await
+            .expect_err("lost checkpoint acknowledgement must fail the first driver");
+        assert!(
+            error
+                .to_string()
+                .contains("injected checkpoint acknowledgement loss"),
+            "unexpected first-driver failure: {error}"
+        );
+    } else {
+        interrupt_generation_after_commit(
+            first_relay.forward_pair(),
+            first_worker,
+            first_driver,
+            control.recovery_committed.notified(),
+        )
+        .await;
+    }
 
     let checkpoint_after_loss = {
         let state = control.state.lock().unwrap();
         assert!(state.driver_interrupted_at_commit);
         state.latest_checkpoint.clone().unwrap()
     };
-    let thermal_before = if interruption == ReplacementInterruption::ThermalCommitted {
+    let thermal_before = if matches!(
+        interruption,
+        ReplacementInterruption::ThermalCommitted
+            | ReplacementInterruption::ThermalCheckpointAckLost
+    ) {
         let state = control.state.lock().unwrap();
         let checkpoint = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
         let task_id = committed_thermal_task(&control, &state, &checkpoint)
@@ -641,6 +673,23 @@ async fn actual_driver_replacement_case(
         let checkpoint = stored_driver_checkpoint(&control, &state, final_id);
         let (pool, _) = stored_pool_checkpoint(&control, &state, &checkpoint)
             .expect("final scheduler authority is published");
+        let checkpoint_at_loss = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
+        assert!(
+            checkpoint.sequence > checkpoint_at_loss.sequence,
+            "replacement must advance beyond the thermal checkpoint"
+        );
+        if interruption == ReplacementInterruption::ThermalCheckpointAckLost {
+            let mut sequences = BTreeSet::new();
+            for (artifact_id, artifact) in &state.artifacts {
+                if artifact.kind == artifact_kind(DriverArtifactKind::Checkpoint) {
+                    let stored = stored_driver_checkpoint(&control, &state, artifact_id);
+                    assert!(
+                        sequences.insert(stored.sequence),
+                        "a checkpoint sequence was reused after an ambiguous acknowledgement"
+                    );
+                }
+            }
+        }
         let after = pool.test_snapshot();
         assert!(before
             .tasks
