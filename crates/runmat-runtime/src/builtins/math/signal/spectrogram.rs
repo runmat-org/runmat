@@ -1154,7 +1154,7 @@ mod tests {
         let Value::GpuTensor(s) = &values[0] else {
             panic!("expected resident stft");
         };
-        assert_eq!(s.shape, vec![17, 3]);
+        assert_eq!(s.shape(), [17, 3]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(s),
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved

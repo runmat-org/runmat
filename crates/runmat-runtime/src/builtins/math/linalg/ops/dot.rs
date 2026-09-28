@@ -871,7 +871,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
     use runmat_builtins::{LiteralValue, ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, LogicalArray};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {

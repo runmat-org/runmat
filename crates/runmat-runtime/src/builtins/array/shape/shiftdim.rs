@@ -625,8 +625,6 @@ fn reshape_gpu(handle: GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    #[cfg(feature = "wgpu")]
-    use runmat_accelerate_api::AccelProvider;
     use runmat_value::{
         ComplexStorage, IntValue, IntegerComplexStorage, IntegerStorage, NumericDType, Tensor,
     };

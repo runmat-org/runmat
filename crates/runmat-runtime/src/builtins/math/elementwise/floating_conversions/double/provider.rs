@@ -12,9 +12,6 @@ use runmat_value::Value;
 use double_from_gpu as cast_from_gpu;
 #[cfg(test)]
 const CAST_PRECISION: ProviderPrecision = ProviderPrecision::F64;
-#[cfg(test)]
-#[path = "../cast_owner_tests.rs"]
-mod owner_tests;
 
 pub(super) async fn double_from_gpu(
     handle: GpuTensorHandle,
@@ -176,4 +173,25 @@ fn contextual_upload_error(error: runmat_async::RuntimeError) -> runmat_async::R
     let mut contextual = double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error.message());
     contextual.source = Some(Box::new(error));
     contextual
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+
+    #[test]
+    fn immutable_cast_adopts_exact_input_alias_without_retiring_caller() {
+        super::super::super::cast_owner_tests::immutable_cast_adopts_exact_input_alias_without_retiring_caller(
+            CAST_PRECISION,
+            |handle, borrowed| futures::executor::block_on(cast_from_gpu(handle, borrowed)),
+        );
+    }
+
+    #[test]
+    fn immutable_cast_rejects_unrelated_borrowed_prototype_alias() {
+        super::super::super::cast_owner_tests::immutable_cast_rejects_unrelated_borrowed_prototype_alias(
+            CAST_PRECISION,
+            |handle, borrowed| futures::executor::block_on(cast_from_gpu(handle, borrowed)),
+        );
+    }
 }

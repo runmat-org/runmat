@@ -231,8 +231,8 @@ fn dependent_handle_setter_receives_original_receiver_and_keeps_reentrant_change
             let payload_target = payload.target;
             let calls = Arc::new(AtomicUsize::new(0));
             let observed = calls.clone();
-            let _invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
-                Arc::new(move |function, args, requested| {
+            let _invoker = runmat_runtime::user_functions::install_local_semantic_function_invoker(
+                Rc::new(move |function, args, requested| {
                     assert_eq!(function, 41);
                     assert_eq!(requested, 0, "handle setter has no replacement result");
                     observed.fetch_add(1, Ordering::SeqCst);
@@ -261,7 +261,7 @@ fn dependent_handle_setter_receives_original_receiver_and_keeps_reentrant_change
                         Ok(ValueSequence::empty())
                     })
                 }),
-            ));
+            );
             let result = store_member(
                 Value::HandleObject(handle.clone()),
                 "Dependent".into(),
@@ -528,8 +528,8 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
             let expected = handle.target;
             let calls = Arc::new(AtomicUsize::new(0));
             let observed = calls.clone();
-            let _invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
-                Arc::new(move |function, args, requested| {
+            let _invoker = runmat_runtime::user_functions::install_local_semantic_function_invoker(
+                Rc::new(move |function, args, requested| {
                     assert_eq!((function, requested), (44, 1));
                     observed.fetch_add(1, Ordering::SeqCst);
                     let Value::HandleObject(receiver) = &args[0] else {
@@ -540,7 +540,7 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
                     let result = args[0].clone();
                     Box::pin(async move { runmat_runtime::sequence::single_value_sequence(result) })
                 }),
-            ));
+            );
             let result = store_member(
                 Value::HandleObject(handle.clone()),
                 "NotAProperty".into(),

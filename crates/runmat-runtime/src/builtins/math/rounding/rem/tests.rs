@@ -401,9 +401,5 @@ fn rem_wgpu_matches_cpu() {
             .data,
         runmat_accelerate_api::HostIntegerDataOwned::I64(vec![-3, 3, 0, 0])
     );
-    for handle in [&numer, &denom, &output] {
-        provider
-            .free(handle)
-            .expect("free integer remainder handle");
-    }
+    drop((numer, denom, output));
 }

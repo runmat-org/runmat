@@ -23,9 +23,7 @@ pub async fn accel_promote_binary(
         AutoBinaryOp::Elementwise => BinaryOp::Elementwise,
         AutoBinaryOp::MatMul => BinaryOp::MatMul,
     };
-    Ok(promote_binary(mapped, a, b)
-        .await
-        .map_err(promotion_error)?)
+    promote_binary(mapped, a, b).await.map_err(promotion_error)
 }
 
 #[cfg(not(feature = "native-accel"))]
@@ -43,9 +41,7 @@ pub async fn accel_promote_unary(op: AutoUnaryOp, value: &Value) -> Result<Value
     let mapped = match op {
         AutoUnaryOp::Transpose => UnaryOp::Transpose,
     };
-    Ok(promote_unary(mapped, value)
-        .await
-        .map_err(promotion_error)?)
+    promote_unary(mapped, value).await.map_err(promotion_error)
 }
 
 #[cfg(not(feature = "native-accel"))]

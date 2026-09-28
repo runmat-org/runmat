@@ -128,7 +128,7 @@ fn plus_wgpu_complex_scalar_implicit_expansion_stays_resident() {
         Value::GpuTensor(handle) => handle,
         other => panic!("expected resident GPU result, got {other:?}"),
     };
-    assert_eq!(handle.shape, vec![3, 1]);
+    assert_eq!(handle.shape(), &[3, 1]);
     assert_eq!(
         runmat_accelerate_api::handle_storage(&handle),
         runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved

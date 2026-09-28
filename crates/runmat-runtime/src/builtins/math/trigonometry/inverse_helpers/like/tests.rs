@@ -1,8 +1,7 @@
 use super::*;
 use crate::builtins::common::test_support;
+use crate::builtins::math::trigonometry::test_owner;
 use futures::{executor::block_on, task::noop_waker};
-#[path = "../../test_owner.rs"]
-mod test_owner;
 use runmat_accelerate_api::{allocation::WeakGpuTensorHandle, test_support::RetirementProbe};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, HostTensorView, ThreadProviderGuard,

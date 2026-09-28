@@ -17,12 +17,13 @@ fn args(name: &str, source: &GpuTensorHandle) -> Vec<Value> {
     }
 }
 
-fn call(name: &str, args: &[Value]) -> runmat_runtime::BuiltinResult<Value> {
+fn call(name: &str, args: &[Value]) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
     block_on(runmat_runtime::call_builtin_async_with_outputs(
         name,
         args,
         if name == "periodogram" { 2 } else { 4 },
     ))
+    .map_err(Box::new)
 }
 
 #[test]

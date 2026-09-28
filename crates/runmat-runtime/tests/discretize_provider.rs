@@ -13,7 +13,6 @@ use std::{
 #[derive(Default)]
 struct State {
     downloads: usize,
-    frees: usize,
     pending: bool,
     success: bool,
 }
@@ -35,7 +34,7 @@ impl AccelProvider for Provider {
                 state.downloads += 1;
                 (state.pending, state.success)
             };
-            runmat_accelerate_api::set_handle_logical(handle, true);
+            runmat_accelerate_api::clear_residency(handle).unwrap();
             if pending {
                 std::future::pending().await
             } else if success {
@@ -44,10 +43,6 @@ impl AccelProvider for Provider {
                 anyhow::bail!("injected download failure")
             }
         })
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.state.lock().unwrap().frees += 1;
-        self.inner.free(handle)
     }
     fn device_id(&self) -> u32 {
         self.inner.device_id()
@@ -61,19 +56,23 @@ impl AccelProvider for Provider {
 }
 
 #[test]
-fn failed_and_cancelled_downloads_restore_borrowed_metadata_without_free_or_retry() {
+fn failed_and_cancelled_downloads_restore_borrowed_residency_without_free_or_retry() {
     static PROVIDER: OnceLock<Provider> = OnceLock::new();
     let provider = PROVIDER.get_or_init(|| Provider {
         inner: InProcessProvider::new(),
         state: Mutex::new(State::default()),
     });
     let _provider = ThreadProviderGuard::set(Some(provider));
+    runmat_accelerate::ensure_residency_hooks();
     let handle = provider
         .upload(&HostTensorView {
             data: &[0.5],
             shape: &[1, 1],
         })
         .unwrap();
+    runmat_accelerate_api::mark_residency(&handle);
+    let descriptor = handle.wire_descriptor();
+    let physical = handle.allocation_lease().downgrade();
     let args = [
         Value::GpuTensor(handle.clone()),
         Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
@@ -97,8 +96,9 @@ fn failed_and_cancelled_downloads_restore_borrowed_metadata_without_free_or_retr
         Poll::Pending
     ));
     drop(future);
-    assert!(!runmat_accelerate_api::handle_is_logical(&handle));
-    assert_eq!(provider.state.lock().unwrap().frees, 0);
+    assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+    assert_eq!(handle.wire_descriptor(), descriptor);
+    assert!(physical.acquire().is_some());
     provider.state.lock().unwrap().pending = false;
     let error = block_on(runmat_runtime::call_builtin_async_with_outputs(
         "discretize",
@@ -108,13 +108,16 @@ fn failed_and_cancelled_downloads_restore_borrowed_metadata_without_free_or_retr
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:discretize:Internal"));
     assert_eq!(provider.state.lock().unwrap().downloads, 2);
-    assert!(!runmat_accelerate_api::handle_is_logical(&handle));
-    assert_eq!(provider.state.lock().unwrap().frees, 0);
+    assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+    assert_eq!(handle.wire_descriptor(), descriptor);
+    assert!(physical.acquire().is_some());
     assert_eq!(
         block_on(provider.inner.download(&handle)).unwrap().data,
         vec![0.5]
     );
-    provider.free(&handle).unwrap();
+    drop(args);
+    drop(handle);
+    assert!(physical.acquire().is_none());
     provider.state.lock().unwrap().success = true;
     let handle = provider
         .upload(&HostTensorView {
@@ -122,6 +125,9 @@ fn failed_and_cancelled_downloads_restore_borrowed_metadata_without_free_or_retr
             shape: &[1, 3],
         })
         .unwrap();
+    runmat_accelerate_api::mark_residency(&handle);
+    let descriptor = handle.wire_descriptor();
+    let physical = handle.allocation_lease().downgrade();
     let args = [
         Value::GpuTensor(handle.clone()),
         Value::Tensor(Tensor::new(vec![0.0, 1.0, 3.0, 5.0], vec![1, 4]).unwrap()),
@@ -140,8 +146,11 @@ fn failed_and_cancelled_downloads_restore_borrowed_metadata_without_free_or_retr
         panic!("numeric bins")
     };
     assert_eq!(output.materialize_f64(), vec![1.0, 2.0, 3.0]);
-    assert!(!runmat_accelerate_api::handle_is_logical(&handle));
+    assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+    assert_eq!(handle.wire_descriptor(), descriptor);
     assert_eq!(provider.state.lock().unwrap().downloads, 3);
-    assert_eq!(provider.state.lock().unwrap().frees, 1);
-    provider.free(&handle).unwrap();
+    assert!(physical.acquire().is_some());
+    drop(args);
+    drop(handle);
+    assert!(physical.acquire().is_none());
 }

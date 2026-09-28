@@ -24,3 +24,6 @@ pub(crate) mod sinpi;
 pub(crate) mod tan;
 pub(crate) mod tand;
 pub(crate) mod tanh;
+
+#[cfg(test)]
+mod test_owner;

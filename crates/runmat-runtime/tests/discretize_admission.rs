@@ -1,5 +1,7 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, NumericElementType};
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+};
 use runmat_runtime::call_builtin_async_with_outputs;
 use runmat_value::{CharArray, NumericStorage, Tensor, Value};
 
@@ -7,21 +9,23 @@ fn array(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).unwrap())
 }
 
-fn invoke(args: &[Value], outputs: usize) -> Result<Vec<Value>, runmat_runtime::RuntimeError> {
-    block_on(call_builtin_async_with_outputs("discretize", args, outputs)).map(
-        |value| match value {
+fn invoke(args: &[Value], outputs: usize) -> Result<Vec<Value>, Box<runmat_runtime::RuntimeError>> {
+    block_on(call_builtin_async_with_outputs("discretize", args, outputs))
+        .map(|value| match value {
             Value::OutputList(values) => values,
             value => vec![value],
-        },
-    )
+        })
+        .map_err(Box::new)
 }
 
 #[test]
 fn numeric_bin_admission_precedes_any_resident_download() {
-    let poisoned = Value::GpuTensor(
-        GpuTensorHandle::new(vec![1, 2], u32::MAX, u64::MAX)
-            .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real),
-    );
+    let allocation = TestAllocationOwner::new()
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let physical = allocation.handle.allocation_lease().downgrade();
+    let probe = allocation.probe.clone();
+    let poisoned = Value::GpuTensor(allocation.handle);
     let edges = array(vec![0.0, 1.0, 2.0], vec![1, 3]);
     let cases = [
         (vec![poisoned.clone(), edges.clone()], 3),
@@ -51,7 +55,10 @@ fn numeric_bin_admission_precedes_any_resident_download() {
     for (args, outputs) in cases {
         let error = invoke(&args, outputs).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:discretize:InvalidInput"));
+        assert!(physical.acquire().is_some());
     }
+    assert!(physical.acquire().is_none());
+    assert_eq!(probe.retirements(), 1);
 }
 
 #[test]

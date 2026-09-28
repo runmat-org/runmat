@@ -40,13 +40,17 @@ fn inverse_real_domain_admission_precedes_service_and_preserves_exact_values() {
         let value = Value::Tensor(Tensor::from_f32(vec![inside], vec![1, 1]).unwrap());
         let expected = block_on(crate::dispatcher::call_builtin_async_with_outputs(
             name,
-            &[value.clone()],
+            std::slice::from_ref(&value),
             1,
         ))
         .unwrap();
         for outputs in [0, 1] {
             let output = block_on(context.scope(
-                crate::dispatcher::call_builtin_async_with_outputs(name, &[value.clone()], outputs),
+                crate::dispatcher::call_builtin_async_with_outputs(
+                    name,
+                    std::slice::from_ref(&value),
+                    outputs,
+                ),
             ))
             .unwrap();
             if outputs == 1 {

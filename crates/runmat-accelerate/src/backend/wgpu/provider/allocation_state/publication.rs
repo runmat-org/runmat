@@ -19,7 +19,7 @@ impl AllocationState {
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => 2,
         };
         anyhow::ensure!(
-            entry.len % lanes == 0,
+            entry.len.is_multiple_of(lanes),
             "WGPU allocation has incomplete complex lanes"
         );
         let capacity = (entry.len / lanes) as u64;

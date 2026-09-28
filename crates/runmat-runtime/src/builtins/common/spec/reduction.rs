@@ -153,6 +153,15 @@ pub struct FusionReductionContract {
     pub ties: FusionReductionTies,
 }
 
+pub fn checked_reduction_elements(shape: &[usize]) -> Option<usize> {
+    if shape.contains(&0) {
+        return Some(0);
+    }
+    shape
+        .iter()
+        .try_fold(1usize, |size, &extent| size.checked_mul(extent))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,13 +206,4 @@ mod tests {
             .is_none());
         }
     }
-}
-
-pub fn checked_reduction_elements(shape: &[usize]) -> Option<usize> {
-    if shape.contains(&0) {
-        return Some(0);
-    }
-    shape
-        .iter()
-        .try_fold(1usize, |size, &extent| size.checked_mul(extent))
 }

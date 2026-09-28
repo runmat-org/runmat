@@ -1214,8 +1214,7 @@ mod tests {
             runmat_accelerate_api::handle_integer_type(&handle),
             Some(runmat_accelerate_api::IntegerElementType::U64)
         );
-        handle.release().ok();
-        runmat_accelerate_api::clear_residency(&handle);
+        handle.release().expect("release exact CData input");
     }
 
     #[test]

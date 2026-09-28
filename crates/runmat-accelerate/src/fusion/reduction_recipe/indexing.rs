@@ -105,29 +105,6 @@ fn validate_binding_extents(
     Ok(())
 }
 
-#[cfg(test)]
-mod binding_extent_tests {
-    use super::*;
-    use runmat_accelerate_api::{
-        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
-    };
-
-    #[test]
-    fn native_f64_cast_source_must_fit_even_when_f32_destination_fits() {
-        let owner = TestAllocationOwner::new();
-        let input = owner
-            .allocate_zeroed(vec![16, 1], NumericElementType::F64, GpuTensorStorage::Real)
-            .unwrap();
-        let physical = *input.handle.physical();
-        assert_eq!(physical.requested_bytes(), 128);
-        assert!(validate_binding_extents(Some(physical), 16 * 4, 64).is_err());
-        assert!(validate_binding_extents(Some(physical), 16 * 4, 128).is_ok());
-        assert!(validate_binding_extents(None, 16 * 4, 64).is_ok());
-        drop(input.handle);
-        assert_eq!(input.probe.retirements(), 1);
-    }
-}
-
 pub(super) fn geometry(
     contract: &FusionReductionContract,
     config: ReductionRecipeConfig,
@@ -252,4 +229,27 @@ pub(super) fn source(
         ));
     }
     Ok(code)
+}
+
+#[cfg(test)]
+mod binding_extent_tests {
+    use super::*;
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
+
+    #[test]
+    fn native_f64_cast_source_must_fit_even_when_f32_destination_fits() {
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![16, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let physical = *input.handle.physical();
+        assert_eq!(physical.requested_bytes(), 128);
+        assert!(validate_binding_extents(Some(physical), 16 * 4, 64).is_err());
+        assert!(validate_binding_extents(Some(physical), 16 * 4, 128).is_ok());
+        assert!(validate_binding_extents(None, 16 * 4, 64).is_ok());
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
+    }
 }

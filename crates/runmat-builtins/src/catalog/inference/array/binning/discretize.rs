@@ -121,7 +121,9 @@ fn validate_tail(request: &CallRequest, diagnostics: &mut Vec<runmat_types::Infe
         return;
     };
     let text = request.literals.literal_args.get(2).and_then(literal_text);
-    let option = text.is_some_and(|text| text.eq_ignore_ascii_case("IncludedEdge"));
+    let option = text
+        .as_deref()
+        .is_some_and(|text| text.eq_ignore_ascii_case("IncludedEdge"));
     let ambiguous = text.is_none()
         && matches!(
             first.kind,
@@ -157,7 +159,7 @@ fn validate_tail(request: &CallRequest, diagnostics: &mut Vec<runmat_types::Infe
             ));
         }
     }
-    if (request.arguments.len() - start) % 2 != 0 {
+    if !(request.arguments.len() - start).is_multiple_of(2) {
         diagnostics.push(argument_error(
             "RM-CATALOG-DISCRETIZE-OPTIONS",
             "name-value options must occur in pairs",

@@ -9,7 +9,7 @@ use runmat_runtime::{
     call_builtin_async_with_outputs,
     context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts},
     value_fact::value_fact,
-    BuiltinResult,
+    RuntimeError,
 };
 use runmat_types::NumericClass;
 use runmat_value::{IntValue, Tensor, Value};
@@ -31,18 +31,19 @@ fn receipt(
     input: &Value,
     controls: &[Value],
     outputs: usize,
-) -> BuiltinResult<Option<FusionReductionContract>> {
+) -> Result<Option<FusionReductionContract>, Box<RuntimeError>> {
     let fact = value_fact(input);
     block_on(declaration(name).resolve(FusionReductionContext {
         input: &fact,
         controls,
         requested_outputs: outputs,
     }))
+    .map_err(Box::new)
 }
-fn host(name: &str, input: &Value, controls: &[Value]) -> BuiltinResult<Value> {
+fn host(name: &str, input: &Value, controls: &[Value]) -> Result<Value, Box<RuntimeError>> {
     let mut args = vec![input.clone()];
     args.extend_from_slice(controls);
-    let result = block_on(call_builtin_async_with_outputs(name, &args, 1))?;
+    let result = block_on(call_builtin_async_with_outputs(name, &args, 1)).map_err(Box::new)?;
     Ok(match result {
         Value::OutputList(mut outputs) => {
             assert_eq!(outputs.len(), 1, "{name}: exactly one requested result");

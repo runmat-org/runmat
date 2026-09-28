@@ -37,12 +37,12 @@ async fn gather_one(value: &Value, protected: &[&Value]) -> BuiltinResult<Value>
     let Value::GpuTensor(handle) = value else {
         return Ok(value.clone());
     };
-    // Restore every borrowed operand after each download, before the next
-    // operand's metadata is decoded, and on failure or cancellation.
-    let _metadata = protected
+    // Restore every borrowed operand's residency after each download, before
+    // the next operand is decoded, and on failure or cancellation.
+    let _residency = protected
         .iter()
         .filter_map(|value| match value {
-            Value::GpuTensor(handle) => Some(gpu_helpers::HandleMetadataRestoreGuard::new(handle)),
+            Value::GpuTensor(handle) => Some(gpu_helpers::ResidencyRestoreGuard::new(handle)),
             _ => None,
         })
         .collect::<Vec<_>>();

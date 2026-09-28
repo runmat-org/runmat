@@ -841,7 +841,6 @@ mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn refline_least_squares_reads_gpu_scatter_source_data() {
-        use runmat_accelerate_api::AccelProvider;
         use runmat_plot::core::{BoundingBox, GpuVertexBuffer};
         use runmat_plot::gpu::scatter2::Scatter2GpuInputs;
         use runmat_plot::gpu::ScalarType;
@@ -868,12 +867,17 @@ mod tests {
         let y = Value::GpuTensor(y_handle.clone());
         let x_ref = runmat_accelerate_api::export_wgpu_buffer(&x_handle).expect("export x");
         let y_ref = runmat_accelerate_api::export_wgpu_buffer(&y_handle).expect("export y");
-        let dummy_vertices = context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("refline-lsline-gpu-scatter-test-dummy-vertices"),
-            size: 16,
-            usage: wgpu::BufferUsages::VERTEX,
-            mapped_at_creation: false,
-        });
+        let dummy_vertices = context
+            .access
+            .with_shared(|emission| {
+                emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("refline-lsline-gpu-scatter-test-dummy-vertices"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::VERTEX,
+                    mapped_at_creation: false,
+                })
+            })
+            .expect("shared WGPU device access");
         let scatter = ScatterPlot::from_gpu_buffer(
             GpuVertexBuffer::new(std::sync::Arc::new(dummy_vertices), 0),
             0,

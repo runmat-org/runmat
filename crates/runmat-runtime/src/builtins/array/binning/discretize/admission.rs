@@ -24,7 +24,7 @@ pub(super) fn validate(x: &Value, edge_input: &Value, rest: &[Value]) -> Builtin
                 }
                 Some(
                     handle
-                        .shape
+                        .shape()
                         .iter()
                         .try_fold(1usize, |count, extent| count.checked_mul(*extent))
                         .ok_or_else(|| error::invalid("discretize: replacement shape overflows"))?,
@@ -71,7 +71,7 @@ fn real_numeric(value: &Value, role: &str) -> BuiltinResult<()> {
         | Value::Tensor(_)
         | Value::LogicalArray(_) => true,
         Value::SparseTensor(value) => !value.is_complex(),
-        Value::GpuTensor(handle) => handle.descriptor.storage.is_some_and(|storage| {
+        Value::GpuTensor(handle) => handle.descriptor().storage.is_some_and(|storage| {
             matches!(storage, runmat_accelerate_api::GpuTensorStorage::Real)
         }),
         _ => false,
@@ -90,7 +90,7 @@ pub(super) fn shape(value: &Value) -> Vec<usize> {
         Value::Tensor(value) => value.shape.clone(),
         Value::LogicalArray(value) => value.shape.clone(),
         Value::SparseTensor(value) => vec![value.rows, value.cols],
-        Value::GpuTensor(value) => value.shape.clone(),
+        Value::GpuTensor(value) => value.shape().to_vec(),
         Value::StringArray(value) => value.shape.clone(),
         Value::CharArray(value) => value.shape.clone(),
         Value::Cell(value) => value.shape.clone(),

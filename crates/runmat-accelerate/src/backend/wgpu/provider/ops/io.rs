@@ -635,7 +635,7 @@ impl WgpuProvider {
                 let base_rows = info.base_rows;
                 let base_cols = info.base_cols;
                 let logical_len = out.len() / lane_factor;
-                if out.len() % lane_factor != 0
+                if !out.len().is_multiple_of(lane_factor)
                     || base_rows.checked_mul(base_cols) != Some(logical_len)
                 {
                     return Err(anyhow!(

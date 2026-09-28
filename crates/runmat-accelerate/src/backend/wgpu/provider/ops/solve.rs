@@ -4,6 +4,13 @@ use super::*;
 #[path = "solve/ownership_tests.rs"]
 mod ownership_tests;
 
+struct TriangularSolveOperands<'a> {
+    lhs: &'a GpuTensorHandle,
+    rhs: &'a GpuTensorHandle,
+    previous: &'a GpuTensorHandle,
+    output: &'a GpuTensorHandle,
+}
+
 impl WgpuProvider {
     pub(crate) async fn linsolve_exec(
         &self,
@@ -388,16 +395,13 @@ impl WgpuProvider {
         &self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
         bind_group_layout: &wgpu::BindGroupLayout,
-        lhs: &GpuTensorHandle,
-        rhs: &GpuTensorHandle,
-        previous: &GpuTensorHandle,
-        output: &GpuTensorHandle,
+        operands: TriangularSolveOperands<'_>,
         params_buffer: &wgpu::Buffer,
     ) -> Result<Arc<wgpu::BindGroup>> {
-        let lhs_entry = self.get_entry(lhs)?;
-        let rhs_entry = self.get_entry(rhs)?;
-        let prev_entry = self.get_entry(previous)?;
-        let out_entry = self.get_entry(output)?;
+        let lhs_entry = self.get_entry(operands.lhs)?;
+        let rhs_entry = self.get_entry(operands.rhs)?;
+        let prev_entry = self.get_entry(operands.previous)?;
+        let out_entry = self.get_entry(operands.output)?;
         let bind_entries = vec![
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -495,10 +499,12 @@ impl WgpuProvider {
                 let bind_group = self.triangular_solve_bind_group(
                     emission,
                     bind_group_layout.as_ref(),
-                    lhs,
-                    rhs,
-                    &current,
-                    &scratch,
+                    TriangularSolveOperands {
+                        lhs,
+                        rhs,
+                        previous: &current,
+                        output: &scratch,
+                    },
                     &params_buffer,
                 )?;
                 crate::backend::wgpu::dispatch::solve::run(

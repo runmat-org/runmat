@@ -2685,7 +2685,7 @@ mod tests {
         };
 
         assert_eq!(output.device_id(), input.device_id());
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), [1, 3]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&output),
             Some(IntegerElementType::U64)

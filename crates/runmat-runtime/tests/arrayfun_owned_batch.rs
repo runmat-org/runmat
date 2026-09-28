@@ -34,10 +34,10 @@ fn upload(value: &Value) -> GpuTensorHandle {
     }
 }
 
-fn mapped(name: &str, inputs: Vec<Value>) -> runmat_runtime::BuiltinResult<Value> {
+fn mapped(name: &str, inputs: Vec<Value>) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
     let mut args = vec![Value::FunctionHandle(name.into())];
     args.extend(inputs);
-    block_on(call_builtin_async_with_outputs("arrayfun", &args, 1))
+    block_on(call_builtin_async_with_outputs("arrayfun", &args, 1)).map_err(Box::new)
 }
 
 fn host(value: Value) -> Value {

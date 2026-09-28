@@ -581,11 +581,15 @@ pub(crate) mod tests {
         for input in inputs {
             let expected = input.clone();
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
-            let buffer_id = handle.buffer_id;
+            let buffer_id = handle.buffer_id();
             let Value::GpuTensor(output) = block_on(super::ceil_gpu(handle)).unwrap() else {
                 panic!("expected resident integer output");
             };
-            assert_eq!(output.buffer_id, buffer_id, "integer ceil must be identity");
+            assert_eq!(
+                output.buffer_id(),
+                buffer_id,
+                "integer ceil must be identity"
+            );
             let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather");
             assert_eq!(gathered, expected);
         }

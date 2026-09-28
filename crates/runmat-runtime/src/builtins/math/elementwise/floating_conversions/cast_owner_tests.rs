@@ -1,20 +1,23 @@
 //! Same-type immutable casts may share input ownership, never an unrelated prototype.
-use super::*;
-use futures::executor::block_on;
+use crate::BuiltinResult;
 use runmat_accelerate_api::{
     test_support::{TestAllocation, TestAllocationOwner},
-    AccelProvider, AccelProviderFuture, ThreadProviderGuard,
+    AccelProvider, AccelProviderFuture, GpuTensorHandle, GpuTensorStorage, NumericElementType,
+    ProviderPrecision, ThreadProviderGuard,
 };
+use runmat_value::Value;
 use std::sync::Mutex;
 
 struct Provider {
     owner: TestAllocationOwner,
+    precision: ProviderPrecision,
     response: Mutex<Option<GpuTensorHandle>>,
 }
 impl Provider {
-    fn new() -> &'static Self {
+    fn new(precision: ProviderPrecision) -> &'static Self {
         Box::leak(Box::new(Self {
             owner: TestAllocationOwner::new(),
+            precision,
             response: Mutex::new(None),
         }))
     }
@@ -22,7 +25,7 @@ impl Provider {
         self.owner
             .allocate_zeroed(
                 vec![1, 2],
-                match CAST_PRECISION {
+                match self.precision {
                     ProviderPrecision::F32 => NumericElementType::F32,
                     ProviderPrecision::F64 => NumericElementType::F64,
                 },
@@ -55,7 +58,7 @@ impl AccelProvider for Provider {
         "immutable cast owner".into()
     }
     fn precision(&self) -> ProviderPrecision {
-        CAST_PRECISION
+        self.precision
     }
     fn unary_single<'a>(
         &'a self,
@@ -71,14 +74,16 @@ impl AccelProvider for Provider {
     }
 }
 
-#[test]
-fn immutable_cast_adopts_exact_input_alias_without_retiring_caller() {
+pub(super) fn immutable_cast_adopts_exact_input_alias_without_retiring_caller(
+    precision: ProviderPrecision,
+    cast: impl Fn(GpuTensorHandle, &[&GpuTensorHandle]) -> BuiltinResult<Value>,
+) {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
-    let provider = Provider::new();
+    let provider = Provider::new(precision);
     let _selected = ThreadProviderGuard::set(Some(provider));
     let input = provider.allocation();
     let input_view = input.handle.view_identity();
-    let output = block_on(cast_from_gpu(input.handle.clone(), &[&input.handle])).unwrap();
+    let output = cast(input.handle.clone(), &[&input.handle]).unwrap();
     let Value::GpuTensor(output) = output else {
         panic!("cast must stay resident")
     };
@@ -87,7 +92,7 @@ fn immutable_cast_adopts_exact_input_alias_without_retiring_caller() {
     assert_eq!(output.shape(), &[1, 2]);
     assert_eq!(
         runmat_accelerate_api::handle_precision(&output),
-        Some(CAST_PRECISION)
+        Some(precision)
     );
     drop(output);
     assert_eq!(input.probe.retirements(), 0);
@@ -95,15 +100,17 @@ fn immutable_cast_adopts_exact_input_alias_without_retiring_caller() {
     assert_eq!(input.probe.retirements(), 1);
 }
 
-#[test]
-fn immutable_cast_rejects_unrelated_borrowed_prototype_alias() {
+pub(super) fn immutable_cast_rejects_unrelated_borrowed_prototype_alias(
+    precision: ProviderPrecision,
+    cast: impl Fn(GpuTensorHandle, &[&GpuTensorHandle]) -> BuiltinResult<Value>,
+) {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
-    let provider = Provider::new();
+    let provider = Provider::new(precision);
     let _selected = ThreadProviderGuard::set(Some(provider));
     let input = provider.allocation();
     let prototype = provider.allocation();
     *provider.response.lock().unwrap() = Some(prototype.handle.clone());
-    assert!(block_on(cast_from_gpu(input.handle.clone(), &[&prototype.handle])).is_err());
+    assert!(cast(input.handle.clone(), &[&prototype.handle]).is_err());
     assert_eq!(input.probe.retirements(), 0);
     assert_eq!(prototype.probe.retirements(), 0);
     drop(input.handle);

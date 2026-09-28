@@ -43,11 +43,11 @@ fn conj_wgpu_preserves_wide_uint64_identity_handle() {
     )
     .unwrap();
     let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-    let buffer_id = handle.buffer_id;
+    let buffer_id = handle.buffer_id();
     let Value::GpuTensor(output) = block_on(conj_gpu(handle)).expect("conj") else {
         panic!("expected resident integer");
     };
-    assert_eq!(output.buffer_id, buffer_id);
+    assert_eq!(output.buffer_id(), buffer_id);
     assert_eq!(
         runmat_accelerate_api::handle_integer_type(&output),
         Some(runmat_accelerate_api::IntegerElementType::U64)

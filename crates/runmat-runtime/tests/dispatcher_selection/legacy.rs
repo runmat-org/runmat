@@ -6,6 +6,10 @@ use runmat_macros::runtime_builtin;
     category = "fixture-library",
     builtin_path = "tests::category_failure_fallback"
 )]
+#[expect(
+    clippy::result_large_err,
+    reason = "runtime_builtin callback ABI returns RuntimeError"
+)]
 fn category_failure_fallback(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     record("categorized-fallback");
     Ok(Value::Num(1.0))
@@ -15,6 +19,10 @@ fn category_failure_fallback(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     name = "__dispatcher_category_failure",
     category = "",
     builtin_path = "tests::category_failure_override"
+)]
+#[expect(
+    clippy::result_large_err,
+    reason = "runtime_builtin callback ABI returns RuntimeError"
 )]
 fn category_failure_override(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     record("uncategorized-error");
@@ -28,6 +36,10 @@ fn category_failure_override(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     category = "fixture-library",
     builtin_path = "tests::category_success_fallback"
 )]
+#[expect(
+    clippy::result_large_err,
+    reason = "runtime_builtin callback ABI returns RuntimeError"
+)]
 fn category_success_fallback(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     record("categorized-fallback");
     Ok(Value::Num(1.0))
@@ -37,6 +49,10 @@ fn category_success_fallback(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     name = "__dispatcher_category_success",
     category = "",
     builtin_path = "tests::category_success_override"
+)]
+#[expect(
+    clippy::result_large_err,
+    reason = "runtime_builtin callback ABI returns RuntimeError"
 )]
 fn category_success_override(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     record("uncategorized-success");

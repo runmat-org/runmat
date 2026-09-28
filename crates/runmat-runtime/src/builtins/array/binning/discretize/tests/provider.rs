@@ -35,5 +35,5 @@ fn actual_wgpu_input_is_gathered_to_the_documented_host_result() {
     let edges = Value::Tensor(Tensor::new(vec![-2.0, 0.0, 2.0], vec![1, 3]).unwrap());
     let output = tensor(call(Value::GpuTensor(handle.clone()), edges, Vec::new()).unwrap());
     assert_eq!(output.materialize_f64(), vec![1.0, 2.0]);
-    provider.free(&handle).unwrap();
+    handle.release().expect("release WGPU input");
 }

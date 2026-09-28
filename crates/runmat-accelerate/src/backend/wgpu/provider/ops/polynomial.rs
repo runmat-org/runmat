@@ -73,7 +73,7 @@ impl WgpuProvider {
         options: &ProviderPolyvalOptions,
     ) -> Result<GpuTensorHandle> {
         // Authenticate every borrowed operand before storage eligibility or work.
-        let entries = vec![coeffs, points]
+        let entries = [coeffs, points]
             .iter()
             .map(|input| self.get_entry_raw(input))
             .collect::<Result<Vec<_>>>()?;
@@ -235,7 +235,7 @@ impl WgpuProvider {
         constant: f64,
     ) -> Result<GpuTensorHandle> {
         // Authenticate every borrowed operand before storage eligibility or work.
-        let entries = vec![polynomial]
+        let entries = [polynomial]
             .iter()
             .map(|input| self.get_entry_raw(input))
             .collect::<Result<Vec<_>>>()?;
@@ -406,7 +406,7 @@ impl WgpuProvider {
         polynomial: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         // Authenticate every borrowed operand before storage eligibility or work.
-        let entries = vec![polynomial]
+        let entries = [polynomial]
             .iter()
             .map(|input| self.get_entry_raw(input))
             .collect::<Result<Vec<_>>>()?;
@@ -526,7 +526,7 @@ impl WgpuProvider {
         q: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         // Authenticate every borrowed operand before storage eligibility or work.
-        let entries = vec![p, q]
+        let entries = [p, q]
             .iter()
             .map(|input| self.get_entry_raw(input))
             .collect::<Result<Vec<_>>>()?;
@@ -570,7 +570,7 @@ impl WgpuProvider {
         v: &GpuTensorHandle,
     ) -> Result<ProviderPolyderQuotient> {
         // Authenticate every borrowed operand before storage eligibility or work.
-        let entries = vec![u, v]
+        let entries = [u, v]
             .iter()
             .map(|input| self.get_entry_raw(input))
             .collect::<Result<Vec<_>>>()?;

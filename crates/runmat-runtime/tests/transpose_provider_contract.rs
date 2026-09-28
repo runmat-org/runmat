@@ -12,8 +12,8 @@ use std::sync::{
 mod fixture;
 use fixture::{Mode, Provider};
 
-fn invoke(name: &str, input: &GpuTensorHandle) -> runmat_runtime::BuiltinResult<Value> {
-    block_on(call_builtin_async(name, &[Value::GpuTensor(input.clone())]))
+fn invoke(name: &str, input: &GpuTensorHandle) -> Result<Value, Box<runmat_runtime::RuntimeError>> {
+    block_on(call_builtin_async(name, &[Value::GpuTensor(input.clone())])).map_err(Box::new)
 }
 
 fn real(provider: &Provider) -> GpuTensorHandle {

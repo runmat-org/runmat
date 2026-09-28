@@ -1961,12 +1961,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn gpu_array_wgpu_native_integer_roundtrip() {
-        use runmat_accelerate_api::AccelProvider;
-
         match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) {
-            Ok(provider) => {
+            Ok(_) => {
                 for storage in [
                     IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
                     IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
@@ -2063,12 +2061,10 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn gpu_array_wgpu_complex_and_integer_roundtrip() {
-        use runmat_accelerate_api::AccelProvider;
-
         match runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         ) {
-            Ok(provider) => {
+            Ok(_) => {
                 let complex =
                     ComplexTensor::new(vec![(1.25, -0.5), (-3.0, 4.0)], vec![1, 2]).unwrap();
                 let result = call(Value::ComplexTensor(complex.clone()), Vec::new())
