@@ -1,12 +1,21 @@
 use super::documentation::{GCP_DOCUMENTATION, PARPOOL_DOCUMENTATION};
 use super::*;
 
+mod inference;
+
 const POOL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "pool",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Execution pool owned by the current RunMat session.",
+}];
+const GCP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "pool",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Current session pool, or an empty double matrix for 'nocreate' without a pool.",
 }];
 const PARPOOL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "options",
@@ -30,30 +39,36 @@ const PARPOOL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDes
 const GCP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "pool = gcp(option)",
     inputs: &GCP_INPUTS,
-    outputs: &POOL_OUTPUT,
+    outputs: &GCP_OUTPUT,
 }];
-const POOL_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+const PARPOOL_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
     code: "RM.PARALLEL.POOL_INVALID_INPUT",
     identifier: Some("RunMat:parpool:InvalidInput"),
     when: "The requested pool kind, worker count, or option is invalid for the active host.",
     message: "parpool: invalid pool request",
 }];
+const GCP_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+    code: "RM.PARALLEL.GCP_INVALID_INPUT",
+    identifier: Some("RunMat:gcp:InvalidInput"),
+    when: "An argument other than 'nocreate' is supplied, or more than one argument is supplied.",
+    message: "gcp accepts no arguments or the option 'nocreate'",
+}];
 pub const PARPOOL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &PARPOOL_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POOL_ERRORS,
+    errors: &PARPOOL_ERRORS,
 };
 pub const GCP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &GCP_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POOL_ERRORS,
+    errors: &GCP_ERRORS,
 };
 parallel_entry!(
     PARPOOL_CATALOG_ENTRY,
     "parpool",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parpool),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(inference::infer_parpool)),
     PARPOOL_DOCUMENTATION,
     PARPOOL_DESCRIPTOR,
     BuiltinContractMaturity::Complete,
@@ -64,13 +79,13 @@ parallel_entry!(
 parallel_entry!(
     GCP_CATALOG_ENTRY,
     "gcp",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Gcp),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(inference::infer_gcp)),
     GCP_DOCUMENTATION,
     GCP_DESCRIPTOR,
     BuiltinContractMaturity::DynamicByDesign,
     BuiltinAsyncBehavior::MaySuspend,
-    BuiltinPurity::DeterministicReadOnly,
-    &POOL_READ_EFFECTS
+    BuiltinPurity::Impure,
+    &POOL_WRITE_EFFECTS
 );
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GCP_CATALOG_ENTRY, &PARPOOL_CATALOG_ENTRY];

@@ -7,15 +7,6 @@ pub(in crate::catalog::inference) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     match rule {
-        ParallelInferenceRule::Parpool => {
-            super::super::parallel_semantics::infer_parallel_pool(request, entry, false)
-        }
-        ParallelInferenceRule::Gcp => {
-            super::super::parallel_semantics::infer_parallel_pool(request, entry, true)
-        }
-        ParallelInferenceRule::Parfeval | ParallelInferenceRule::ParfevalOnAll => {
-            super::super::parallel_semantics::infer_parallel_future(request, entry)
-        }
         ParallelInferenceRule::FetchOutputs => {
             super::super::parallel_semantics::infer_parallel_fetch(request, entry, false)
         }
