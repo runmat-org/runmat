@@ -1,12 +1,10 @@
 //! MATLAB-compatible SISO `feedback` interconnection for transfer functions.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, FEEDBACK_ERRORS, INTEGER_GAIN_EXTENSION,
+    INTEGER_SIGN_EXTENSION, LOGICAL_NUMERIC_EXTENSION, RESIDENT_NUMERIC_EXTENSION,
+    SCALAR_FORWARD_EXTENSION, SCALAR_SYSTEMS_EXTENSION, SINGLE_NUMERIC_EXTENSION,
+    SINGLE_SYSTEM_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -16,210 +14,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::control::tf_model::{scalar_f64, two_models_ordered};
-use crate::builtins::control::type_resolvers::feedback_type;
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "feedback";
-
-const SINGLE_SYSTEM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feedback-single-system",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "feedback(sys1) with an implicit unity feedback path is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeedbackSingleSystemExtension"),
-};
-const SCALAR_FORWARD_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feedback-scalar-forward-system",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "feedback with a scalar forward-path system is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeedbackScalarForwardSystemExtension"),
-};
-const SCALAR_SYSTEMS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feedback-scalar-scalar-systems",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "feedback with scalar forward and feedback-path systems is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeedbackScalarScalarSystemsExtension"),
-};
-const INTEGER_GAIN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feedback-integer-scalar-gain",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "feedback with a typed-integer scalar system gain is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeedbackIntegerScalarGainExtension"),
-};
-const INTEGER_SIGN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feedback-integer-sign",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "feedback with a typed-integer sign is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeedbackIntegerSignExtension"),
-};
-const LOGICAL_NUMERIC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feedback-logical-numeric-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "feedback with a logical numeric system or sign is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeedbackLogicalNumericInputExtension"),
-};
-const RESIDENT_NUMERIC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feedback-resident-numeric-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "feedback with a resident numeric system or sign is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeedbackResidentNumericInputExtension"),
-};
-const SINGLE_NUMERIC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "feedback-single-numeric-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "feedback with a native-single numeric system or sign is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FeedbackSingleNumericInputExtension"),
-};
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
-    SINGLE_SYSTEM_EXTENSION,
-    SCALAR_FORWARD_EXTENSION,
-    SCALAR_SYSTEMS_EXTENSION,
-    INTEGER_GAIN_EXTENSION,
-    INTEGER_SIGN_EXTENSION,
-    LOGICAL_NUMERIC_EXTENSION,
-    RESIDENT_NUMERIC_EXTENSION,
-    SINGLE_NUMERIC_EXTENSION,
-];
-
-const INTEGER_GAIN_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "sys1",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A typed-integer forward gain is independently gated, then converted once to the floating/complex tf coefficient domain.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "sys2",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A typed-integer feedback-path gain is independently gated, then converted once to the floating/complex tf coefficient domain.",
-    },
-];
-const INTEGER_SIGN_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "sign",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The typed-integer sign is independently gated and must be exactly -1 or +1; unsigned classes can express only +1.",
-    }];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "sys = feedback(integer_gain, sys2) or feedback(sys1, integer_gain)",
-        inputs: &INTEGER_GAIN_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "All eight typed integer classes are RunMat-only scalar gains. The result is a host tf object; int64 and uint64 values outside binary64's exact integer range can round at the explicit floating boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "sys = feedback(sys1, sys2, integer_sign)",
-        inputs: &INTEGER_SIGN_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "All eight typed integer classes are admitted as a RunMat-only sign control, but the exact valid set remains -1 or +1. The result is a host tf object.",
-    },
-];
-
-const FEEDBACK_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Closed-loop SISO transfer-function object.",
-}];
-const FEEDBACK_PARAM_SYS1: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sys1",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Forward-path SISO transfer-function model.",
-};
-const FEEDBACK_PARAM_SYS2: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sys2",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: Some("1"),
-    description: "Feedback-path SISO transfer function or scalar gain.",
-};
-const FEEDBACK_PARAM_SIGN: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sign",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("-1"),
-    description: "-1 for negative feedback or +1 for positive feedback.",
-};
-const FEEDBACK_INPUT_SYS: [BuiltinParamDescriptor; 1] = [FEEDBACK_PARAM_SYS1];
-const FEEDBACK_INPUT_SYS_OTHER: [BuiltinParamDescriptor; 2] =
-    [FEEDBACK_PARAM_SYS1, FEEDBACK_PARAM_SYS2];
-const FEEDBACK_INPUT_SYS_OTHER_SIGN: [BuiltinParamDescriptor; 3] = [
-    FEEDBACK_PARAM_SYS1,
-    FEEDBACK_PARAM_SYS2,
-    FEEDBACK_PARAM_SIGN,
-];
-const FEEDBACK_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "sys = feedback(sys1)",
-        inputs: &FEEDBACK_INPUT_SYS,
-        outputs: &FEEDBACK_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "sys = feedback(sys1, sys2)",
-        inputs: &FEEDBACK_INPUT_SYS_OTHER,
-        outputs: &FEEDBACK_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "sys = feedback(sys1, sys2, sign)",
-        inputs: &FEEDBACK_INPUT_SYS_OTHER_SIGN,
-        outputs: &FEEDBACK_OUTPUT,
-    },
-];
-const FEEDBACK_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    BuiltinErrorDescriptor {
-        code: "RM.FEEDBACK.INVALID_ARGUMENT",
-        identifier: Some("RunMat:feedback:InvalidArgument"),
-        when: "Inputs do not match supported feedback invocation forms.",
-        message: "feedback: invalid argument",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.FEEDBACK.INVALID_MODEL",
-        identifier: Some("RunMat:feedback:InvalidModel"),
-        when: "Input systems are not supported SISO transfer-function models.",
-        message: "feedback: invalid model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.FEEDBACK.INVALID_SIGN",
-        identifier: Some("RunMat:feedback:InvalidSign"),
-        when: "Feedback sign is not -1 or +1.",
-        message: "feedback: sign must be -1 or +1",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.FEEDBACK.UNSUPPORTED_MODEL",
-        identifier: Some("RunMat:feedback:UnsupportedModel"),
-        when: "A supported-looking model uses unsupported delays or incompatible sample times.",
-        message: "feedback: unsupported model",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.FEEDBACK.INTERNAL",
-        identifier: Some("RunMat:feedback:Internal"),
-        when: "Closed-loop transfer-function assembly failed.",
-        message: "feedback: internal error",
-    },
-];
-pub const FEEDBACK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FEEDBACK_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FEEDBACK_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::feedback")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -261,13 +58,7 @@ fn feedback_error(
 
 #[runtime_builtin(
     name = "feedback",
-    category = "control",
-    summary = "Form SISO feedback interconnections for transfer-function models.",
-    keywords = "feedback,control system,closed loop,transfer function,tf",
-    type_resolver(feedback_type),
-    descriptor(crate::builtins::control::feedback::FEEDBACK_DESCRIPTOR),
-    extensions(crate::builtins::control::feedback::EXTENSIONS),
-    integer_capabilities(crate::builtins::control::feedback::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::feedback"
 )]
 async fn feedback_builtin(sys1: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -370,11 +161,95 @@ fn is_resident_value(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::control::tf_model::{SS_CLASS, TF_CLASS};
     use futures::executor::block_on;
+    use runmat_builtins::{BuiltinIntegerComputationDomain, FEEDBACK_INTEGER_CAPABILITIES};
     use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
-        Tensor,
+        ObjectInstance, Tensor,
     };
+
+    fn raw_tf(numerator: Value, denominator: Value) -> ObjectInstance {
+        let mut model = ObjectInstance::new(TF_CLASS.to_string());
+        model.properties.insert("Numerator".into(), numerator);
+        model.properties.insert("Denominator".into(), denominator);
+        model.properties.insert("Ts".into(), Value::Num(0.0));
+        model
+            .properties
+            .insert("InputDelay".into(), Value::Num(0.0));
+        model
+            .properties
+            .insert("OutputDelay".into(), Value::Num(0.0));
+        model
+    }
+
+    #[test]
+    fn ordered_model_parser_gathers_only_valid_required_resident_coefficients() {
+        let denominator = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &denominator)
+                    .expect("upload denominator");
+            let valid = raw_tf(Value::Num(2.0), Value::GpuTensor(resident.clone()));
+            provider.reset_telemetry();
+            let result = block_on(feedback_builtin(
+                Value::Object(valid),
+                vec![Value::Num(1.0)],
+            ))
+            .expect("resident tf");
+            assert_eq!(coeff(&result, "Denominator"), vec![1.0, 5.0]);
+            assert!(provider.telemetry_snapshot().download_bytes > 0);
+
+            let mut unsupported = ObjectInstance::new(SS_CLASS.to_string());
+            unsupported
+                .properties
+                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+            provider.reset_telemetry();
+            let error = block_on(feedback_builtin(
+                Value::Object(unsupported),
+                vec![Value::Num(1.0)],
+            ))
+            .expect_err("unsupported object");
+            assert_eq!(error.identifier(), Some("RunMat:feedback:UnsupportedModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let mut incomplete = raw_tf(Value::Num(2.0), Value::GpuTensor(resident));
+            incomplete.properties.remove("Ts");
+            provider.reset_telemetry();
+            let error = block_on(feedback_builtin(
+                Value::Object(incomplete),
+                vec![Value::Num(1.0)],
+            ))
+            .expect_err("missing property");
+            assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn unrelated_resident_model_property_is_not_gathered() {
+        let unrelated = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &unrelated)
+                    .expect("upload unrelated");
+            let mut model = raw_tf(
+                Value::Num(2.0),
+                Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap()),
+            );
+            model
+                .properties
+                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            let result = block_on(feedback_builtin(
+                Value::Object(model),
+                vec![Value::Num(1.0)],
+            ))
+            .expect("feedback");
+            assert_eq!(coeff(&result, "Denominator"), vec![1.0, 5.0]);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
 
     fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
         block_on(crate::call_builtin_async(
@@ -416,17 +291,17 @@ mod tests {
 
     #[test]
     fn integer_metadata_covers_gain_and_sign_for_all_classes() {
-        assert_eq!(INTEGER_CAPABILITIES.len(), 2);
-        assert_eq!(INTEGER_CAPABILITIES[0].inputs.len(), 2);
-        assert_eq!(INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
-        assert_eq!(INTEGER_CAPABILITIES[0].inputs[1].classes.len(), 8);
-        assert_eq!(INTEGER_CAPABILITIES[1].inputs[0].classes.len(), 8);
+        assert_eq!(FEEDBACK_INTEGER_CAPABILITIES.len(), 2);
+        assert_eq!(FEEDBACK_INTEGER_CAPABILITIES[0].inputs.len(), 2);
+        assert_eq!(FEEDBACK_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
+        assert_eq!(FEEDBACK_INTEGER_CAPABILITIES[0].inputs[1].classes.len(), 8);
+        assert_eq!(FEEDBACK_INTEGER_CAPABILITIES[1].inputs[0].classes.len(), 8);
         assert_eq!(
-            INTEGER_CAPABILITIES[0].computation_domain,
+            FEEDBACK_INTEGER_CAPABILITIES[0].computation_domain,
             BuiltinIntegerComputationDomain::FloatingPoint
         );
         assert_eq!(
-            INTEGER_CAPABILITIES[1].computation_domain,
+            FEEDBACK_INTEGER_CAPABILITIES[1].computation_domain,
             BuiltinIntegerComputationDomain::Structural
         );
     }

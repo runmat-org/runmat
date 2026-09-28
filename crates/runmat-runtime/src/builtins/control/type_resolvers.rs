@@ -32,28 +32,7 @@ pub fn stepinfo_type(_args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-pub fn feedback_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args {
-        [sys] if is_tf_or_scalar_type(sys) => tf_object_type(),
-        [sys1, sys2] if is_tf_or_scalar_type(sys1) && is_tf_or_scalar_type(sys2) => {
-            tf_object_type()
-        }
-        [sys1, sys2, sign]
-            if is_tf_or_scalar_type(sys1)
-                && is_tf_or_scalar_type(sys2)
-                && is_sample_time_type(sign) =>
-        {
-            tf_object_type()
-        }
-        _ => Type::Unknown,
-    }
-}
-
 pub fn pole_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
-pub fn lqr_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
@@ -167,21 +146,6 @@ fn is_tf_coefficient_type(ty: &Type) -> bool {
             | Type::Tensor { .. }
             | Type::Logical { .. }
             | Type::Unknown
-    )
-}
-
-fn is_tf_or_scalar_type(ty: &Type) -> bool {
-    is_tf_struct_type(ty) || matches!(ty, Type::Unknown) || is_tf_coefficient_type(ty)
-}
-
-fn is_tf_struct_type(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Struct {
-            known_fields: Some(fields),
-        } if fields.iter().any(|field| field == "Numerator")
-            && fields.iter().any(|field| field == "Denominator")
-            && fields.iter().any(|field| field == "Variable")
     )
 }
 

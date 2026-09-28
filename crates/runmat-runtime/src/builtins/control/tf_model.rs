@@ -653,16 +653,16 @@ pub async fn two_models_ordered(
     let rhs = dispatcher::gather_if_needed_async(&rhs).await?;
     match (lhs, rhs) {
         (left @ Value::Object(_), right @ Value::Object(_)) => Ok((
-            TfModel::from_value(left, builtin)?,
-            TfModel::from_value(right, builtin)?,
+            TfModel::from_value_async(left, builtin).await?,
+            TfModel::from_value_async(right, builtin).await?,
         )),
         (left @ Value::Object(_), right) => {
-            let left_model = TfModel::from_value(left, builtin)?;
+            let left_model = TfModel::from_value_async(left, builtin).await?;
             let right_model = value_to_model_with_reference(right, &left_model, builtin).await?;
             Ok((left_model, right_model))
         }
         (left, right @ Value::Object(_)) => {
-            let right_model = TfModel::from_value(right, builtin)?;
+            let right_model = TfModel::from_value_async(right, builtin).await?;
             let left_model = value_to_model_with_reference(left, &right_model, builtin).await?;
             Ok((left_model, right_model))
         }
@@ -787,7 +787,9 @@ pub fn validate_sample_time(sample_time: f64, builtin: &'static str) -> BuiltinR
 }
 
 pub fn output_complex_scalar(value: Complex64) -> Value {
-    if value.im.abs() <= EPS {
+    // Scalar gains are data, not a numerical pole classification: a small but
+    // nonzero imaginary component must survive the output boundary exactly.
+    if value.im == 0.0 {
         Value::Num(value.re)
     } else {
         Value::Complex(value.re, value.im)

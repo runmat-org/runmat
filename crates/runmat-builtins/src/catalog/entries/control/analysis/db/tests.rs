@@ -96,6 +96,23 @@ fn invalid_power_resistance_shape_and_mode_are_diagnosed() {
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-DB-POWER"));
+    let uppercase_power = infer(
+        vec![
+            numeric(
+                NumericClass::Double,
+                NumericDomain::Real,
+                vec![Some(1), Some(1)],
+            ),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        vec![LiteralValue::Unknown, LiteralValue::String("POWER".into())],
+        1,
+    );
+    assert!(
+        uppercase_power.diagnostics.is_empty(),
+        "{:?}",
+        uppercase_power.diagnostics
+    );
     let invalid_mode = infer(
         vec![complex.clone(), text],
         vec![LiteralValue::Unknown, LiteralValue::String("bad".into())],

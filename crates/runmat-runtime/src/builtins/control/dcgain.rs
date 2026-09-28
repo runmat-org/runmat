@@ -53,7 +53,7 @@ mod tests {
     use crate::builtins::control::tf_model::{SS_CLASS, TF_CLASS};
     use futures::executor::block_on;
     use runmat_builtins::{BuiltinIntegerInputAvailability, DCGAIN_INTEGER_CAPABILITIES};
-    use runmat_value::{IntValue, IntegerStorage, ObjectInstance, Tensor};
+    use runmat_value::{ComplexTensor, IntValue, IntegerStorage, ObjectInstance, Tensor};
 
     fn raw_tf(numerator: Value, denominator: Value) -> ObjectInstance {
         let mut model = ObjectInstance::new(TF_CLASS.to_string());
@@ -124,6 +124,20 @@ mod tests {
             assert!((gain - 2.0 / 3.0).abs() < 1e-12);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
+    }
+
+    #[test]
+    fn tiny_nonzero_imaginary_gain_is_preserved() {
+        let numerator =
+            ComplexTensor::new(vec![(1.0, 1.0e-13)], vec![1, 1]).expect("complex coefficient");
+        let model = raw_tf(Value::ComplexTensor(numerator), Value::Num(1.0));
+        let Value::Complex(real, imaginary) =
+            block_on(dcgain_builtin(Value::Object(model))).expect("complex gain")
+        else {
+            panic!("complex scalar gain");
+        };
+        assert_eq!(real, 1.0);
+        assert_eq!(imaginary, 1.0e-13);
     }
 
     #[test]
