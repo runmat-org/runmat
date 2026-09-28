@@ -5,7 +5,7 @@ use crate::{
 use runmat_types::*;
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
-    if request.arguments.len() < 2 || request.arguments.len().saturating_sub(2) % 2 != 0 {
+    if request.arguments.len() < 2 || !request.arguments.len().saturating_sub(2).is_multiple_of(2) {
         reject(
             &mut diagnostics,
             0,

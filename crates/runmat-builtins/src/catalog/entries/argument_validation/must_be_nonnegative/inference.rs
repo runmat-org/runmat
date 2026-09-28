@@ -4,7 +4,10 @@ use runmat_types::*;
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if let Some(LiteralValue::Number(value)) = request.literals.literal_args.first() {
-        if !(*value >= 0.0) {
+        if !matches!(
+            value.partial_cmp(&0.0),
+            Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+        ) {
             reject(&mut diagnostics, 0, "literal value fails the validator");
         }
     }
