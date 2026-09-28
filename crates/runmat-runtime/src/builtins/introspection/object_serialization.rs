@@ -279,6 +279,13 @@ async fn call_loadobj_if_available(
 fn object_properties_payload(value: &Value) -> crate::BuiltinResult<StructValue> {
     match value {
         Value::Object(object) => {
+            if object.has_native_payload() {
+                return Err(serialization_error(
+                    SAVEOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_ARGUMENT,
+                    "GC-owned native object payloads require a typed serializer",
+                ));
+            }
             let mut payload = StructValue::new();
             for (name, property) in &object.properties {
                 payload.insert(name.clone(), property.clone());
@@ -287,6 +294,13 @@ fn object_properties_payload(value: &Value) -> crate::BuiltinResult<StructValue>
         }
         Value::HandleObject(handle) => runmat_gc::gc_with_value(&handle.target, |target| {
             if let Value::Object(object) = target {
+                if object.has_native_payload() {
+                    return Err(serialization_error(
+                        SAVEOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_ARGUMENT,
+                        "GC-owned native object payloads require a typed serializer",
+                    ));
+                }
                 let mut payload = StructValue::new();
                 for (name, property) in &object.properties {
                     payload.insert(name.clone(), property.clone());
@@ -312,6 +326,33 @@ fn object_properties_payload(value: &Value) -> crate::BuiltinResult<StructValue>
             &SERIALIZATION_ERROR_ARGUMENT,
             format!("expected object, got {other:?}"),
         )),
+    }
+}
+
+fn ensure_no_native_payload(value: &Value) -> crate::BuiltinResult<()> {
+    let native = match value {
+        Value::Object(object) => object.has_native_payload(),
+        Value::HandleObject(handle) => runmat_gc::gc_with_value(
+            &handle.target,
+            |target| matches!(target, Value::Object(object) if object.has_native_payload()),
+        )
+        .map_err(|error| {
+            serialization_error(
+                SAVEOBJ_METHOD.display_name(),
+                &SERIALIZATION_ERROR_ARGUMENT,
+                format!("failed to read handle target: {error}"),
+            )
+        })?,
+        _ => false,
+    };
+    if native {
+        Err(serialization_error(
+            SAVEOBJ_METHOD.display_name(),
+            &SERIALIZATION_ERROR_ARGUMENT,
+            "GC-owned native object payloads require a typed serializer",
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -369,6 +410,10 @@ async fn prepare_value_for_save_depth(value: Value, depth: usize) -> crate::Buil
 
     match value {
         receiver @ (Value::Object(_) | Value::HandleObject(_)) => {
+            // The generic properties-only envelope cannot represent a native
+            // payload. Reject it before any optional saveobj dispatch can
+            // accidentally erase the authoritative map storage.
+            ensure_no_native_payload(&receiver)?;
             let class_name = object_class_name(&receiver).ok_or_else(|| {
                 serialization_error(
                     SAVEOBJ_METHOD.display_name(),
@@ -455,11 +500,9 @@ async fn restore_value_after_load_depth(value: Value, depth: usize) -> crate::Bu
             }
         }
         if let Value::Struct(fields) = restored_payload {
-            let object = Value::Object(ObjectInstance {
-                class_name: class_name.into(),
-                properties: fields.fields.into_iter().collect(),
-                dynamic_properties: None,
-            });
+            let mut object = ObjectInstance::new(class_name);
+            object.properties = fields.fields.into_iter().collect();
+            let object = Value::Object(object);
             return match kind.as_str() {
                 SERIALIZED_KIND_VALUE => Ok(object),
                 SERIALIZED_KIND_HANDLE => {
@@ -589,6 +632,20 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage, StructArray, Tensor};
 
     use tempfile::tempdir;
+
+    #[test]
+    fn mat_save_rejects_native_object_payload_instead_of_erasing_it() {
+        let object = ObjectInstance::new("containers.Map").with_containers_map_payload(
+            runmat_value::ContainersMapStorage::new(
+                runmat_value::ContainersMapKeyType::Char,
+                runmat_value::ContainersMapValueType::Any,
+                false,
+            ),
+        );
+        let error = block_on(prepare_value_for_mat_save(Value::Object(object)))
+            .expect_err("native payload needs an explicit serializer");
+        assert!(error.message.contains("native object payloads"));
+    }
 
     fn structure(field: &str, value: Value) -> StructValue {
         let mut structure = StructValue::new();

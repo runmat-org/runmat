@@ -30,7 +30,11 @@ pub use numeric::{
     IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage, NumericStorageView,
     NumericStorageViewMut,
 };
-pub use object::{DynamicPropertyDef, HandleRef, Listener, ObjectArray, ObjectInstance};
+pub use object::{
+    ContainersMapEntry, ContainersMapKey, ContainersMapKeyType, ContainersMapStorage,
+    ContainersMapValueClass, ContainersMapValueType, DynamicPropertyDef, HandleRef, Listener,
+    ObjectArray, ObjectInstance,
+};
 pub use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 pub use sequence::{
     validate_output_count, ValueSequence, ValueSequenceError, ValueSequenceKind,

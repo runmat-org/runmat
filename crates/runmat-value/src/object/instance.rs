@@ -1,13 +1,30 @@
-use super::DynamicPropertyDef;
+use super::{ContainersMapStorage, DynamicPropertyDef};
 use crate::Value;
+use runmat_gc_api::{Trace, Tracer};
 use runmat_types::ClassIdentity;
 use std::collections::HashMap;
 
+// Clone and structural equality include native payloads. Public handle
+// equality remains identity-based through HandleRef, not this comparison.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectInstance {
     pub class_name: ClassIdentity,
     pub properties: HashMap<String, Value>,
     pub dynamic_properties: Option<Box<HashMap<String, DynamicPropertyDef>>>,
+    native_payload: Option<Box<NativeObjectPayload>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum NativeObjectPayload {
+    ContainersMap(ContainersMapStorage),
+}
+
+impl Trace for NativeObjectPayload {
+    fn trace(&self, tracer: &mut dyn Tracer) {
+        match self {
+            Self::ContainersMap(storage) => storage.trace(tracer),
+        }
+    }
 }
 
 impl ObjectInstance {
@@ -16,6 +33,42 @@ impl ObjectInstance {
             class_name: class_name.into(),
             properties: HashMap::new(),
             dynamic_properties: None,
+            native_payload: None,
+        }
+    }
+
+    pub fn with_containers_map_payload(mut self, storage: ContainersMapStorage) -> Self {
+        self.native_payload = Some(Box::new(NativeObjectPayload::ContainersMap(storage)));
+        self
+    }
+
+    pub fn containers_map_payload(&self) -> Option<&ContainersMapStorage> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
+            None => None,
+        }
+    }
+
+    pub fn containers_map_payload_mut(&mut self) -> Option<&mut ContainersMapStorage> {
+        match self.native_payload.as_deref_mut() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => Some(storage),
+            None => None,
+        }
+    }
+
+    pub fn has_native_payload(&self) -> bool {
+        self.native_payload.is_some()
+    }
+
+    pub fn for_each_native_value(&self, mut visitor: impl FnMut(&Value)) {
+        if let Some(NativeObjectPayload::ContainersMap(storage)) = self.native_payload.as_deref() {
+            storage.for_each_value(&mut visitor);
+        }
+    }
+
+    pub(crate) fn trace_native_payload(&self, tracer: &mut dyn Tracer) {
+        if let Some(payload) = &self.native_payload {
+            payload.trace(tracer);
         }
     }
 

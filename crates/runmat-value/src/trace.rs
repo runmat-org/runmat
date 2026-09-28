@@ -33,6 +33,7 @@ impl Trace for Closure {
 
 impl Trace for ObjectInstance {
     fn trace(&self, tracer: &mut dyn Tracer) {
+        self.trace_native_payload(tracer);
         for value in self.properties.values() {
             value.trace(tracer);
         }

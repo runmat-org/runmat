@@ -272,7 +272,8 @@ pub fn validate_definition(object: &ObjectInstance) -> Result<(), RuntimeError> 
         Some(CodistributorClass::TwoDimensionalBlockCyclic) => TWO_DIMENSIONAL_PROPERTIES,
         _ => return Err(error("unsupported codistributor class")),
     };
-    if object.dynamic_properties.is_some()
+    if object.has_native_payload()
+        || object.dynamic_properties.is_some()
         || object.properties.len() != expected.len()
         || expected
             .iter()
@@ -547,11 +548,9 @@ fn object(
     class_name: runmat_types::StaticClassIdentity,
     properties: HashMap<String, Value>,
 ) -> Value {
-    Value::Object(ObjectInstance {
-        class_name: class_name.into(),
-        properties,
-        dynamic_properties: None,
-    })
+    let mut object = ObjectInstance::new(class_name);
+    object.properties = properties;
+    Value::Object(object)
 }
 
 fn empty_vector() -> Value {
