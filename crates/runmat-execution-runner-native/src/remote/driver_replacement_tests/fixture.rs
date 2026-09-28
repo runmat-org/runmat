@@ -239,7 +239,7 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
                 initial_artifacts,
                 latest_checkpoint: None,
                 next_artifact: 0,
-                driver_interrupted_at_commit: false,
+                driver_interruption_triggered: false,
                 transitions: Vec::new(),
                 worker_authorizations: Vec::new(),
                 bootstrap_checkpoints: Vec::new(),

@@ -64,7 +64,7 @@ struct DurableState {
     initial_artifacts: Vec<DriverArtifactDownload>,
     latest_checkpoint: Option<String>,
     next_artifact: u64,
-    driver_interrupted_at_commit: bool,
+    driver_interruption_triggered: bool,
     transitions: Vec<(u64, DriverRunTarget, Option<String>)>,
     worker_authorizations: Vec<(u64, String)>,
     bootstrap_checkpoints: Vec<(u64, Option<String>)>,
@@ -88,6 +88,7 @@ enum ReplacementInterruption {
     ReplayableExecutionStart,
     ThermalCommitted,
     ThermalCheckpointAckLost,
+    ThermalCheckpointRejectedBeforeStore,
 }
 
 /// Inspect only authenticated, already-stored checkpoint objects. Never infer a
@@ -317,7 +318,8 @@ impl DriverControlPlane for DurableControl {
                         checkpoint.closure_catalog.is_some()
                     }
                     ReplacementInterruption::ThermalCommitted
-                    | ReplacementInterruption::ThermalCheckpointAckLost => {
+                    | ReplacementInterruption::ThermalCheckpointAckLost
+                    | ReplacementInterruption::ThermalCheckpointRejectedBeforeStore => {
                         let state = self.state.lock().unwrap();
                         committed_thermal_task(self, &state, &checkpoint).is_some()
                     }
@@ -326,6 +328,17 @@ impl DriverControlPlane for DurableControl {
             });
         let (stored, interrupt_driver) = {
             let mut state = self.state.lock().unwrap();
+            if authority.fencing_token == 1
+                && committed_replacement_checkpoint
+                && self.interruption
+                    == ReplacementInterruption::ThermalCheckpointRejectedBeforeStore
+                && !state.driver_interruption_triggered
+            {
+                state.driver_interruption_triggered = true;
+                return Err(unavailable(
+                    "injected checkpoint rejection before persistence",
+                ));
+            }
             state.next_artifact += 1;
             let artifact_id = format!("result-{}", state.next_artifact);
             state.artifacts.insert(
@@ -340,9 +353,9 @@ impl DriverControlPlane for DurableControl {
             }
             let interrupt_driver = authority.fencing_token == 1
                 && committed_replacement_checkpoint
-                && !state.driver_interrupted_at_commit;
+                && !state.driver_interruption_triggered;
             if interrupt_driver {
-                state.driver_interrupted_at_commit = true;
+                state.driver_interruption_triggered = true;
             }
             (
                 StoredDriverArtifact {
@@ -435,9 +448,9 @@ impl DriverControlPlane for DurableControl {
             let interrupt_driver = self.interruption
                 == ReplacementInterruption::ReplayableExecutionStart
                 && authority.fencing_token == 1
-                && !state.driver_interrupted_at_commit;
+                && !state.driver_interruption_triggered;
             if interrupt_driver {
-                state.driver_interrupted_at_commit = true;
+                state.driver_interruption_triggered = true;
             }
             interrupt_driver
         };
@@ -500,6 +513,17 @@ fn authored_thermal_prefix_survives_lost_checkpoint_acknowledgement() {
     }
 }
 
+#[test]
+fn rejected_thermal_checkpoint_cannot_be_restored_as_a_committed_prefix() {
+    for case in thermal::Case::matrix() {
+        let result = run_actual_driver_replacement_with_interruption(
+            ExactStudyFamily::ThermalPrestress(case),
+            ReplacementInterruption::ThermalCheckpointRejectedBeforeStore,
+        );
+        assert!(result.is_some());
+    }
+}
+
 fn run_actual_driver_replacement(family: ExactStudyFamily) -> Option<thermal::ColdReplay> {
     run_actual_driver_replacement_with_interruption(family, family.interruption())
 }
@@ -554,14 +578,25 @@ async fn actual_driver_replacement_case(
         },
         control.clone(),
     );
-    if interruption == ReplacementInterruption::ThermalCheckpointAckLost {
+    if matches!(
+        interruption,
+        ReplacementInterruption::ThermalCheckpointAckLost
+            | ReplacementInterruption::ThermalCheckpointRejectedBeforeStore
+    ) {
         let error = drive_generation(first_relay.forward_pair(), first_worker, first_driver)
             .await
-            .expect_err("lost checkpoint acknowledgement must fail the first driver");
+            .expect_err("failed checkpoint publication must fail the first driver");
+        let expected = match interruption {
+            ReplacementInterruption::ThermalCheckpointAckLost => {
+                "injected checkpoint acknowledgement loss"
+            }
+            ReplacementInterruption::ThermalCheckpointRejectedBeforeStore => {
+                "injected checkpoint rejection before persistence"
+            }
+            _ => unreachable!(),
+        };
         assert!(
-            error
-                .to_string()
-                .contains("injected checkpoint acknowledgement loss"),
+            error.to_string().contains(expected),
             "unexpected first-driver failure: {error}"
         );
     } else {
@@ -576,9 +611,17 @@ async fn actual_driver_replacement_case(
 
     let checkpoint_after_loss = {
         let state = control.state.lock().unwrap();
-        assert!(state.driver_interrupted_at_commit);
+        assert!(state.driver_interruption_triggered);
         state.latest_checkpoint.clone().unwrap()
     };
+    if interruption == ReplacementInterruption::ThermalCheckpointRejectedBeforeStore {
+        let state = control.state.lock().unwrap();
+        let checkpoint = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
+        assert!(
+            committed_thermal_task(&control, &state, &checkpoint).is_none(),
+            "an unrecorded thermal checkpoint cannot grant committed-prefix authority"
+        );
+    }
     let thermal_before = if matches!(
         interruption,
         ReplacementInterruption::ThermalCommitted
@@ -738,6 +781,18 @@ async fn actual_driver_replacement_case(
                         .is_none_or(|previous| previous.committed.is_none())
             }),
             "replacement must complete downstream work, not replay an already completed study"
+        );
+    }
+    if interruption == ReplacementInterruption::ThermalCheckpointRejectedBeforeStore {
+        let state = control.state.lock().unwrap();
+        let final_id = state
+            .latest_checkpoint
+            .as_ref()
+            .expect("final pool checkpoint");
+        let checkpoint = stored_driver_checkpoint(&control, &state, final_id);
+        assert!(
+            committed_thermal_task(&control, &state, &checkpoint).is_some(),
+            "replacement must actually complete the thermal task"
         );
     }
     assert_eq!(
