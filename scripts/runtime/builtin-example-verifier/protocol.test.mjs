@@ -333,6 +333,28 @@ test("reconciliation rejects missing, duplicate, stale, extra, and inconsistent 
     }
 });
 
+test("portable assertion contracts allow host-specific display paths without weakening exact output parity", () => {
+    const fixture = { schema_version: 1, builtins: [exportFixture().builtins[0]] };
+    const exactInventory = buildInventory(fixture, inventoryOptions());
+    const exactPlan = buildPlan(exactInventory);
+    const exactResults = completeResults(exactInventory, exactPlan);
+    const browser = exactResults.find((manifest) => manifest.lane === "browser-host");
+    browser.results[0].normalizedActual = "/";
+    refreshResult(browser);
+    assert.throws(() => reconcileShardResults(exactInventory, exactPlan, exactResults), /Portable lane outputs disagree/);
+
+    const assertedFixture = structuredClone(fixture);
+    assertedFixture.builtins[0].examples[0].verification = { Assertions: { source: "assert(ischar(folder))" } };
+    const assertedInventory = buildInventory(assertedFixture, inventoryOptions());
+    const assertedPlan = buildPlan(assertedInventory);
+    const assertedResults = completeResults(assertedInventory, assertedPlan);
+    const assertedBrowser = assertedResults.find((manifest) => manifest.lane === "browser-host");
+    assertedBrowser.results[0].normalizedActual = "/";
+    refreshResult(assertedBrowser);
+    const report = reconcileShardResults(assertedInventory, assertedPlan, assertedResults);
+    assert.equal(report.status, "passed");
+});
+
 test("closure requires exact verified products and rejects unavailable or infrastructure evidence", () => {
     const inventory = buildInventory(exportFixture(), inventoryOptions());
     const plan = buildPlan(inventory);

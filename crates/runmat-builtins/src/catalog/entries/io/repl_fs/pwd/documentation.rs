@@ -60,13 +60,15 @@ const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
         id: "script-location",
         title: "Print the folder where a script starts",
-        program: "fprintf('Script started in %s\\n', pwd)",
+        program: "folder = pwd;\nfprintf('Script started in %s\\n', folder)",
         display_output: Some("Script started in <current folder>"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
         fixture: crate::BuiltinExampleFixture::None,
         requirements: crate::BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Succeeds,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(ischar(folder)); assert(size(folder, 1) == 1);",
+        },
     },
     BuiltinExample {
         id: "write-location-log",
