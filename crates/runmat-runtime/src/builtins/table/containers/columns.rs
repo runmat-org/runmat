@@ -71,11 +71,39 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                     )
                     .map_err(invalid_variable)?
                 } else {
-                    let mut data = Vec::with_capacity(tensor.rows);
-                    for row in 0..tensor.rows {
-                        data.push(tensor.materialize_f64()[row + col * tensor.rows]);
+                    let start = col * tensor.rows;
+                    let end = start + tensor.rows;
+                    match tensor.complex_storage() {
+                        runmat_value::ComplexStorage::F64(values) => ComplexTensor::new(
+                            values
+                                .get(start..end)
+                                .ok_or_else(|| {
+                                    invalid_index("array2table: complex column out of bounds")
+                                })?
+                                .iter()
+                                .copied()
+                                .map(Into::into)
+                                .collect(),
+                            vec![tensor.rows, 1],
+                        )
+                        .map_err(invalid_variable)?,
+                        runmat_value::ComplexStorage::F32(values) => ComplexTensor::from_f32(
+                            values
+                                .get(start..end)
+                                .ok_or_else(|| {
+                                    invalid_index("array2table: complex column out of bounds")
+                                })?
+                                .iter()
+                                .copied()
+                                .map(Into::into)
+                                .collect(),
+                            vec![tensor.rows, 1],
+                        )
+                        .map_err(invalid_variable)?,
+                        runmat_value::ComplexStorage::Integer(_) => {
+                            unreachable!("integer complex storage handled above")
+                        }
                     }
-                    ComplexTensor::new(data, vec![tensor.rows, 1]).map_err(invalid_variable)?
                 };
                 out.push(Value::ComplexTensor(value));
             }

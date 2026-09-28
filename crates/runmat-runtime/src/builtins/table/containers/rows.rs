@@ -32,7 +32,13 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
             Ok(Value::Num(tensor.get2(row, 0).map_err(invalid_index)?))
         }
         Value::Tensor(_) => select_rows(value, &[row]),
-        Value::ComplexTensor(tensor) if tensor.cols == 1 => {
+        Value::ComplexTensor(tensor)
+            if tensor.cols == 1
+                && matches!(
+                    tensor.complex_storage(),
+                    runmat_value::ComplexStorage::F64(_)
+                ) =>
+        {
             let value = tensor
                 .materialize_f64()
                 .get(row)

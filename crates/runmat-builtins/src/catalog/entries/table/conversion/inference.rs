@@ -67,17 +67,9 @@ fn table_output(
 }
 
 pub(super) fn array2table(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    let mut diagnostics = Vec::new();
-    if let Some(input) = request.arguments.first() {
-        if matches!(input.kind, ValueKindFact::Object(_)) {
-            diagnostics.push(argument_error(
-                "RM-ARRAY2TABLE-INPUT",
-                "expected an array input",
-                0,
-            ));
-        }
-    }
-    table_output(request, entry, diagnostics)
+    // Runtime accepts typed array-like objects (including datetime and duration) as
+    // table variables. Their class alone cannot prove an invalid conversion.
+    table_output(request, entry, Vec::new())
 }
 
 pub(super) fn cell2table(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

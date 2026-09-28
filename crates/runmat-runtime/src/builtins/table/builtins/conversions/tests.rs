@@ -1,6 +1,121 @@
 use super::*;
 use runmat_builtins::{BuiltinCompletionPolicy, BuiltinOutputMode, CELL2TABLE_DESCRIPTOR};
 
+#[test]
+fn table2array_of_cell_variables_matches_element_cells_in_row_major_layout() {
+    let table = table_from_columns(
+        vec!["A".into(), "B".into()],
+        vec![
+            Value::Cell(CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 2, 1).unwrap()),
+            Value::Cell(CellArray::new(vec![Value::Num(3.0), Value::Num(4.0)], 2, 1).unwrap()),
+        ],
+    )
+    .unwrap();
+    let expected = futures::executor::block_on(table2cell_builtin(table.clone())).unwrap();
+    let result = futures::executor::block_on(table2array_builtin(table)).unwrap();
+    assert_eq!(result, expected);
+    let Value::Cell(cells) = result else {
+        panic!("expected element cells")
+    };
+    assert_eq!((cells.rows, cells.cols), (2, 2));
+    assert_eq!(cells.get(0, 0).unwrap(), Value::Num(1.0));
+    assert_eq!(cells.get(1, 0).unwrap(), Value::Num(2.0));
+    assert_eq!(cells.get(0, 1).unwrap(), Value::Num(3.0));
+    assert_eq!(cells.get(1, 1).unwrap(), Value::Num(4.0));
+}
+
+#[test]
+fn complex_single_columns_and_row_elements_keep_single_storage() {
+    let input = runmat_value::ComplexTensor::from_f32(
+        vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0), (4.0, -4.0)],
+        vec![2, 2],
+    )
+    .unwrap();
+    let table =
+        futures::executor::block_on(array2table_builtin(Value::ComplexTensor(input), Vec::new()))
+            .unwrap();
+    let variables = table_variables(&into_table_object(table.clone(), "test").unwrap()).unwrap();
+    for column in variables.fields.values() {
+        let Value::ComplexTensor(column) = column else {
+            panic!("expected complex column")
+        };
+        assert_eq!(column.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(column.shape, vec![2, 1]);
+    }
+    let Value::Cell(cells) =
+        futures::executor::block_on(table2cell_builtin(table.clone())).unwrap()
+    else {
+        panic!("expected element cells")
+    };
+    let Value::ComplexTensor(element) = cells.get(0, 1).unwrap() else {
+        panic!("expected single complex element")
+    };
+    assert_eq!(element.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(element.materialize_f64(), vec![(3.0, -3.0)]);
+    let Value::StructArray(rows) =
+        futures::executor::block_on(table2struct_builtin(table, Vec::new())).unwrap()
+    else {
+        panic!("expected row structures")
+    };
+    let Value::ComplexTensor(element) = rows.get_linear(1).unwrap().fields.get("Var1").unwrap()
+    else {
+        panic!("expected single complex field")
+    };
+    assert_eq!(element.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(element.materialize_f64(), vec![(2.0, -2.0)]);
+}
+
+#[test]
+fn complex_wide_integer_row_elements_remain_exact() {
+    let input = runmat_value::ComplexTensor::new_integer(
+        runmat_value::IntegerComplexStorage::new(
+            runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+            runmat_value::IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+        )
+        .unwrap(),
+        vec![2, 1],
+    )
+    .unwrap();
+    let table =
+        futures::executor::block_on(array2table_builtin(Value::ComplexTensor(input), Vec::new()))
+            .unwrap();
+    let Value::Cell(cells) =
+        futures::executor::block_on(table2cell_builtin(table.clone())).unwrap()
+    else {
+        panic!("expected element cells")
+    };
+    let Value::ComplexTensor(first) = cells.get(0, 0).unwrap() else {
+        panic!("expected integer complex element")
+    };
+    let storage = first.integer_storage().unwrap();
+    assert_eq!(
+        storage.real,
+        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993])
+    );
+    assert_eq!(
+        storage.imag,
+        runmat_value::IntegerStorage::U64(vec![u64::MAX])
+    );
+    let Value::StructArray(rows) =
+        futures::executor::block_on(table2struct_builtin(table, Vec::new())).unwrap()
+    else {
+        panic!("expected row structures")
+    };
+    let Value::ComplexTensor(second) = rows.get_linear(1).unwrap().fields.get("Var1").unwrap()
+    else {
+        panic!("expected integer complex field")
+    };
+    let storage = second.integer_storage().unwrap();
+    assert_eq!(
+        storage.real,
+        runmat_value::IntegerStorage::U64(vec![u64::MAX])
+    );
+    assert_eq!(
+        storage.imag,
+        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993])
+    );
+}
+
 #[cfg(test)]
 mod cell2table_tests {
     use super::*;

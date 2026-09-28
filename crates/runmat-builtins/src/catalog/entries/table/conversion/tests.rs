@@ -60,6 +60,24 @@ fn constructors_infer_scalar_table_identity_without_invented_schema() {
 }
 
 #[test]
+fn array2table_does_not_reject_admitted_object_valued_columns() {
+    let datetime = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(runmat_types::standard::DATETIME.owned()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(false),
+        }),
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Opaque,
+    );
+    let result = infer_catalog_call(&array2table::ENTRY, &call(vec![datetime], 1));
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].shape, ShapeFact::Scalar);
+}
+
+#[test]
 fn conversion_outputs_are_sound_when_table_schema_is_unknown() {
     let table = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {

@@ -54,6 +54,15 @@ pub(crate) async fn table2array_builtin(value: Value) -> BuiltinResult<Value> {
         .await
         .map_err(map_control_flow)?;
     let object = into_table_object(host, "table2array")?;
+    let variables = table_variables(&object)?;
+    if !variables.fields.is_empty()
+        && variables
+            .fields
+            .values()
+            .all(|value| matches!(value, Value::Cell(_)))
+    {
+        return table_to_cell_array(&object);
+    }
     table_brace_get(&object, &colon_colon_payload())
 }
 
