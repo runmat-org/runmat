@@ -51,7 +51,7 @@ const PARAM_N: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::NumericScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Output digit columns; [] chooses the minimum.",
+    description: "Positive output digit column count; [] chooses the minimum.",
 };
 const PARAM_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "P",

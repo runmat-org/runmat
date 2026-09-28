@@ -61,6 +61,35 @@ fn input_class_and_known_row_count_survive_unknown_width() {
 
 #[test]
 fn invalid_controls_and_data_are_diagnosed_without_guessing_values() {
+    let zero_width = super::super::inference::infer_de2bi(
+        &call(
+            numeric(NumericClass::Double, 1, 1),
+            LiteralValue::Number(0.0),
+        ),
+        &DE2BI_CATALOG_ENTRY,
+    );
+    assert!(zero_width
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL"));
+    assert_eq!(
+        zero_width.outputs[0].shape.known_dims(),
+        Some(vec![Some(1), None])
+    );
+    let zero_integer_width = super::super::inference::infer_de2bi(
+        &call(
+            numeric(NumericClass::Double, 1, 1),
+            LiteralValue::Integer {
+                text: "0".to_string(),
+                class: NumericClass::UInt8,
+            },
+        ),
+        &DE2BI_CATALOG_ENTRY,
+    );
+    assert!(zero_integer_width
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DE2BI-CONTROL"));
     let bad_width = super::super::inference::infer_de2bi(
         &call(
             numeric(NumericClass::Double, 1, 1),

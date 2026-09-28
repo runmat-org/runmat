@@ -16,7 +16,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["bi2de"],
     sections: &[
         BuiltinDocumentationSection { heading: "Width, base, order, and class", paragraphs: &[
-            "Output has one row per input element. If `N` is omitted or `[]`, width is the minimum needed for the largest value; zero needs one digit. An explicit width too small for any value raises an error. `P` is at least two.",
+            "Output has one row per input element. If `N` is omitted or `[]`, width is the minimum needed for the largest value; zero needs one digit. Explicit `N` must be positive and wide enough for every value. `P` is at least two.",
             "`'right-msb'` puts the least significant digit in column one. `'left-msb'` puts the most significant digit there. The digit matrix retains the numeric class of `D` for double, single, and fixed-width integers.",
             "The documented input bound is 2^52. RunMat mode additionally expands larger exact native integers and flattens N-D numeric arrays in column-major order; those forms are rejected in MATLAB-compatible mode. A fixed-width integer width or base and logical input are also separately gated RunMat forms.",
         ] },
@@ -50,7 +50,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Digit expansion, base, width, order, class, and invalid inputs", location: "crates/runmat-runtime/src/builtins/comms/binary_conversion.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM conversion calls", location: "crates/runmat-vm/tests/comms.rs" },
         ],
-        notes: &["All three former examples and both FAQs are preserved with executable assertions; the class-preservation example covers the documented output rule. GPU, logical, N-D, integer controls, and exact wide inputs are separately classified RunMat forms."],
+        notes: &["GPU, logical, N-D, integer controls, and exact wide inputs are separately classified RunMat forms."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };

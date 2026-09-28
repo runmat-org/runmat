@@ -139,15 +139,15 @@ fn invalid_order_literal(value: &LiteralValue) -> bool {
 
 fn literal_width(value: &LiteralValue) -> Option<usize> {
     match value {
-        LiteralValue::Integer { text, .. } => text.parse().ok(),
+        LiteralValue::Integer { text, .. } => text.parse::<usize>().ok().filter(|width| *width > 0),
         LiteralValue::Number(number) => (number.is_finite()
-            && *number >= 0.0
+            && *number >= 1.0
             && number.fract() == 0.0
             && *number < usize::MAX as f64)
             .then_some(*number as usize),
         LiteralValue::Real { text, .. } => text.parse::<f64>().ok().and_then(|number| {
             (number.is_finite()
-                && number >= 0.0
+                && number >= 1.0
                 && number.fract() == 0.0
                 && number < usize::MAX as f64)
                 .then_some(number as usize)
@@ -262,11 +262,11 @@ pub(super) fn infer_de2bi(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
         .and_then(|input| input.shape.element_count());
     let width = request.literals.literal_args.get(1).and_then(literal_width);
     for (index, value) in request.literals.literal_args.iter().enumerate().skip(1) {
-        let min = if index == 1 { 0.0 } else { 2.0 };
+        let min = if index == 1 { 1.0 } else { 2.0 };
         if index < 3 && invalid_control_literal(value, min) {
             diagnostics.push(argument_error(
                 "RM-DE2BI-CONTROL",
-                "width must be nonnegative and base at least two",
+                "width must be positive and base at least two",
                 index,
             ));
         }

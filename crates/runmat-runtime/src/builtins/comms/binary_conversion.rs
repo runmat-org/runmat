@@ -23,7 +23,6 @@ const DEC2BIN_NAME: &str = "dec2bin";
 const DEC2HEX_NAME: &str = "dec2hex";
 const BIN2DEC_NAME: &str = "bin2dec";
 const HEX2DEC_NAME: &str = "hex2dec";
-const INTEGER_TOL: f64 = 1e-9;
 const MAX_EXACT_INTEGER: u128 = 1u128 << 52;
 const MAX_DE2BI_OUTPUT_ELEMENTS: usize = 10_000_000;
 const MAX_DECIMAL_TEXT_OUTPUT_CHARS: usize = 10_000_000;
@@ -502,14 +501,13 @@ fn decimal_item_from_f64(
     let converted = if floor_fractional {
         value.floor()
     } else {
-        let rounded = value.round();
-        if (value - rounded).abs() > INTEGER_TOL {
+        if value.fract() != 0.0 {
             return Err(conversion_error(
                 builtin,
                 format!("{builtin}: D must contain integer values"),
             ));
         }
-        rounded
+        value
     };
     if converted < i64::MIN as f64 || converted >= MAX_FLOAT_DECIMAL_INPUT {
         return Err(conversion_error(
@@ -1029,22 +1027,15 @@ fn row_digits_to_decimal(
             }
         }
         DigitOrder::RightMsb => {
-            let mut place = 1u128;
-            for col in 0..digits.cols {
+            // Read most-significant columns first. Horner evaluation ignores
+            // leading zero columns without overflowing a positional multiplier.
+            for col in (0..digits.cols).rev() {
                 let digit = digits.data[row + col * digits.rows] as u128;
-                let term = digit
-                    .checked_mul(place)
-                    .ok_or_else(|| bi2de_error("bi2de: decimal value overflow"))?;
                 acc = acc
-                    .checked_add(term)
+                    .checked_mul(base_u)
+                    .and_then(|value| value.checked_add(digit))
                     .ok_or_else(|| bi2de_error("bi2de: decimal value overflow"))?;
                 ensure_exact_range(acc, BI2DE_NAME)?;
-                if col + 1 < digits.cols {
-                    place = place
-                        .checked_mul(base_u)
-                        .ok_or_else(|| bi2de_error("bi2de: decimal value overflow"))?;
-                    ensure_exact_range(place, BI2DE_NAME)?;
-                }
             }
         }
     }
@@ -1102,6 +1093,9 @@ fn parse_width(value: &Value) -> BuiltinResult<Option<usize>> {
         return Ok(None);
     }
     let width = parse_nonnegative_integer(value, DE2BI_NAME, "N")?;
+    if width == 0 {
+        return Err(de2bi_error("de2bi: N must be a positive integer"));
+    }
     if width > usize::MAX as u128 {
         return Err(de2bi_error("de2bi: N is too large for this platform"));
     }
@@ -1155,22 +1149,21 @@ fn parse_nonnegative_integer(
                 .build(),
         );
     }
-    let rounded = n.round();
-    if (n - rounded).abs() > INTEGER_TOL || rounded < 0.0 {
+    if n.fract() != 0.0 || n < 0.0 {
         return Err(build_runtime_error(format!(
             "{builtin}: {name} must be a nonnegative integer"
         ))
         .with_builtin(builtin)
         .build());
     }
-    if rounded > MAX_EXACT_INTEGER as f64 {
+    if n > MAX_EXACT_INTEGER as f64 {
         return Err(build_runtime_error(format!(
             "{builtin}: {name} exceeds the maximum exact integer supported by RunMat"
         ))
         .with_builtin(builtin)
         .build());
     }
-    Ok(rounded as u128)
+    Ok(n as u128)
 }
 
 fn scalar_number(value: &Value, builtin: &'static str, name: &str) -> BuiltinResult<f64> {
@@ -1536,6 +1529,26 @@ mod tests {
     }
 
     #[test]
+    fn bi2de_long_zero_padding_does_not_overflow() {
+        let mut right_msb = vec![0.0; 140];
+        right_msb[0] = 1.0;
+        assert_eq!(
+            value_data(bi2de(tensor(right_msb, vec![1, 140]), vec![])),
+            vec![1.0]
+        );
+
+        let mut left_msb = vec![0.0; 140];
+        left_msb[139] = 1.0;
+        assert_eq!(
+            value_data(bi2de(
+                tensor(left_msb, vec![1, 140]),
+                vec![Value::String("left-msb".to_string())],
+            )),
+            vec![1.0]
+        );
+    }
+
+    #[test]
     fn bi2de_left_msb_flag() {
         assert_eq!(
             value_data(bi2de(
@@ -1666,6 +1679,32 @@ mod tests {
         let err = block_on(super::de2bi_builtin(Value::Num(8.0), vec![Value::Num(3.0)]))
             .expect_err("width too small should fail");
         assert!(err.to_string().contains("N is too small"));
+    }
+
+    #[test]
+    fn digit_conversions_reject_zero_width_and_fractional_values_exactly() {
+        let width = block_on(super::de2bi_builtin(Value::Num(0.0), vec![Value::Num(0.0)]))
+            .expect_err("explicit zero width is invalid even for zero input");
+        assert!(width.to_string().contains("N must be a positive integer"));
+
+        let near_integer = 2.0 + 5e-10;
+        let base = block_on(super::bi2de_builtin(
+            tensor(vec![1.0], vec![1, 1]),
+            vec![Value::Num(near_integer)],
+        ))
+        .expect_err("fractional base is invalid");
+        assert!(base.to_string().contains("nonnegative integer"));
+
+        let width = block_on(super::de2bi_builtin(
+            Value::Num(1.0),
+            vec![Value::Num(1.0 + 5e-10)],
+        ))
+        .expect_err("fractional width is invalid");
+        assert!(width.to_string().contains("nonnegative integer"));
+
+        let data = block_on(super::de2bi_builtin(Value::Num(1.0 + 5e-10), vec![]))
+            .expect_err("fractional data is invalid");
+        assert!(data.to_string().contains("integer values"));
     }
 
     #[test]
