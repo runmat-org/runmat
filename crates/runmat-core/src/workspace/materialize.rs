@@ -1,5 +1,5 @@
 use anyhow::Result;
-use runmat_accelerate_api::provider_for_handle;
+use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
 use runmat_value::{NumericStorage, Tensor, Value};
 
 use super::{WorkspaceMaterializeOptions, WorkspaceSliceOptions};
@@ -83,7 +83,7 @@ pub(crate) fn gpu_dtype_label(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Option<&'static str> {
     let precision = runmat_accelerate_api::handle_precision(handle)
-        .unwrap_or(runmat_accelerate_api::ProviderPrecision::F64);
+        .unwrap_or(ProviderPrecision::F64);
     match precision {
         ProviderPrecision::F32 => Some("single"),
         ProviderPrecision::F64 => Some("double"),
