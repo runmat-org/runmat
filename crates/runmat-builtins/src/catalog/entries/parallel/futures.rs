@@ -4,6 +4,8 @@ use super::documentation::{
 };
 use super::*;
 
+mod inference;
+
 const FUTURE_INPUTS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "pool",
@@ -221,7 +223,7 @@ pub const FETCH_NEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 parallel_entry!(
     PARFEVAL_CATALOG_ENTRY,
     "parfeval",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::Parfeval),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(inference::infer_parfeval)),
     PARFEVAL_DOCUMENTATION,
     PARFEVAL_DESCRIPTOR,
     BuiltinContractMaturity::Complete,
@@ -232,7 +234,9 @@ parallel_entry!(
 parallel_entry!(
     PARFEVAL_ON_ALL_CATALOG_ENTRY,
     "parfevalOnAll",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::ParfevalOnAll),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(
+        inference::infer_parfeval_on_all
+    )),
     PARFEVAL_ON_ALL_DOCUMENTATION,
     PARFEVAL_ON_ALL_DESCRIPTOR,
     BuiltinContractMaturity::Complete,

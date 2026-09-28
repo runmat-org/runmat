@@ -1,9 +1,8 @@
-use super::{default_double_scalar, finish_fixed, literal_text};
+use super::{default_double_scalar, finish_fixed};
 use crate::{BuiltinCatalogEntry, BuiltinInferenceRule, ParallelInferenceRule};
 use runmat_types::{
     codistributor_fact, infer_call, CallContract, CallInference, CallRequest, CodistributorClass,
-    DynamicReason, ExecutionFact, FutureStateFact, LiteralValue, ShapeFact, ValueFact,
-    ValueKindFact,
+    DynamicReason, ExecutionFact, ShapeFact, ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer_parallel_data(
@@ -81,99 +80,13 @@ pub(super) fn infer_parallel_data(
         | ParallelInferenceRule::Receive => ValueFact::unknown(DynamicReason::RuntimeValue),
         ParallelInferenceRule::FetchNext
         | ParallelInferenceRule::FetchOutputs
-        | ParallelInferenceRule::Gcp
         | ParallelInferenceRule::GetCurrentJob
         | ParallelInferenceRule::GetCurrentTask
-        | ParallelInferenceRule::GetCurrentWorker
-        | ParallelInferenceRule::Parfeval
-        | ParallelInferenceRule::ParfevalOnAll
-        | ParallelInferenceRule::Parpool => {
+        | ParallelInferenceRule::GetCurrentWorker => {
             unreachable!("parallel rule was routed to its dedicated inference handler")
         }
     };
     finish_fixed(entry, request, output, Vec::new())
-}
-
-pub(super) fn infer_parallel_pool(
-    request: &CallRequest,
-    entry: &BuiltinCatalogEntry,
-    current_pool: bool,
-) -> CallInference {
-    let nocreate = current_pool
-        && request
-            .literals
-            .literal_args
-            .first()
-            .and_then(literal_text)
-            .is_some_and(|value| value.eq_ignore_ascii_case("nocreate"));
-    let output = if nocreate {
-        ValueFact::unknown(DynamicReason::RuntimeValue)
-    } else {
-        ValueFact::scalar(ValueKindFact::Execution(ExecutionFact::Pool))
-    };
-    finish_fixed(entry, request, output, Vec::new())
-}
-
-pub(super) fn infer_parallel_future(
-    request: &CallRequest,
-    entry: &BuiltinCatalogEntry,
-) -> CallInference {
-    let explicit_pool = matches!(
-        request.arguments.first().map(|fact| &fact.kind),
-        Some(ValueKindFact::Execution(ExecutionFact::Pool))
-    );
-    let callable_index = usize::from(explicit_pool);
-    let output_count_index = callable_index + 1;
-    let output = scheduled_callable_output(request, callable_index, output_count_index);
-    let future = ValueFact::scalar(ValueKindFact::Execution(ExecutionFact::Future {
-        output,
-        state: FutureStateFact::Unknown,
-    }));
-    finish_fixed(entry, request, future, Vec::new())
-}
-
-fn scheduled_callable_output(
-    request: &CallRequest,
-    callable_index: usize,
-    output_count_index: usize,
-) -> runmat_types::ValueSequenceFact {
-    let Some(ValueKindFact::Callable(callable)) =
-        request.arguments.get(callable_index).map(|fact| &fact.kind)
-    else {
-        return runmat_types::ValueSequenceFact::dynamic();
-    };
-    let Some(output_count) = request
-        .literals
-        .literal_args
-        .get(output_count_index)
-        .and_then(literal_output_count)
-    else {
-        return runmat_types::ValueSequenceFact::dynamic();
-    };
-    if output_count == 0 {
-        return runmat_types::ValueSequenceFact::fixed(Vec::new());
-    }
-    let outputs = (0..output_count)
-        .map(|index| {
-            callable
-                .outputs
-                .get(index)
-                .cloned()
-                .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue))
-        })
-        .collect::<Vec<_>>();
-    runmat_types::ValueSequenceFact {
-        outputs,
-        variadic: !callable.outputs_complete || callable.variadic_outputs,
-    }
-}
-
-fn literal_output_count(literal: &LiteralValue) -> Option<usize> {
-    let LiteralValue::Number(value) = literal else {
-        return None;
-    };
-    (value.is_finite() && *value >= 0.0 && value.fract() == 0.0 && *value <= usize::MAX as f64)
-        .then_some(*value as usize)
 }
 
 pub(super) fn infer_parallel_fetch(
