@@ -93,7 +93,7 @@ const INPUT_EDGES: [BuiltinParamDescriptor; 2] = [X, EDGES];
 const INPUT_COUNT: [BuiltinParamDescriptor; 2] = [X, COUNT];
 const INPUT_VALUES: [BuiltinParamDescriptor; 3] = [X, EDGES_OR_COUNT, VALUES];
 const INPUT_EDGE: [BuiltinParamDescriptor; 4] = [X, EDGES_OR_COUNT, INCLUDED_EDGE, SIDE];
-const INPUT_REST: [BuiltinParamDescriptor; 3] = [X, COUNT, REST];
+const INPUT_REST: [BuiltinParamDescriptor; 3] = [X, EDGES_OR_COUNT, REST];
 const SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
         label: "Y = discretize(X, edges)",

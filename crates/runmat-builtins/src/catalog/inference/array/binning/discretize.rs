@@ -16,13 +16,28 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut output = replacement_fact(request).unwrap_or_else(|| double_fact(output_shape.clone()));
     output.shape = output_shape;
     support::facts::materialize(&mut output);
+    // This builtin always constructs a Tensor/StringArray, even for one element.
+    output.storage = StorageFact::Dense;
     output.residency = ResidencyFact::Host;
 
-    let mut edges = double_fact(ShapeFact::from(vec![Some(1), None]));
+    let edge_count = request
+        .literals
+        .numeric_at(1)
+        .filter(|count| {
+            count.is_finite() && *count > 0.0 && count.fract() == 0.0 && *count < usize::MAX as f64
+        })
+        .and_then(|count| (count as usize).checked_add(1));
+    let mut edges = double_fact(ShapeFact::from(vec![Some(1), edge_count]));
     support::facts::materialize(&mut edges);
     edges.residency = ResidencyFact::Host;
 
-    if request.outputs.requested.known_count() == Some(2) && !may_compute_edges(request) {
+    if request.outputs.requested.known_count() == Some(2)
+        && request
+            .arguments
+            .get(1)
+            .and_then(|value| value.shape.element_count())
+            .is_some_and(|count| count != 1)
+    {
         diagnostics.push(argument_error(
             "RM-CATALOG-DISCRETIZE-OUTPUTS",
             "discretize returns a second edge output only for a scalar bin count",
@@ -48,13 +63,6 @@ fn validate_request(request: &CallRequest) -> Vec<runmat_types::InferenceDiagnos
             request.arguments.len(),
         ));
     }
-    if request.arguments.len() > 5 {
-        diagnostics.push(argument_error(
-            "RM-CATALOG-DISCRETIZE-ARITY",
-            "discretize accepts at most five inputs",
-            5,
-        ));
-    }
     if let Some(input) = request.arguments.first() {
         let supported = matches!(
             input.kind,
@@ -71,7 +79,116 @@ fn validate_request(request: &CallRequest) -> Vec<runmat_types::InferenceDiagnos
             ));
         }
     }
+    if let Some(edge) = request.arguments.get(1) {
+        if !matches!(
+            edge.kind,
+            ValueKindFact::Unknown
+                | ValueKindFact::Logical
+                | ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                })
+        ) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-DISCRETIZE-EDGES",
+                "discretize requires real numeric edges or a bin count",
+                1,
+            ));
+        }
+        if known_nonvector(&edge.shape) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-DISCRETIZE-EDGES",
+                "discretize edges must be a vector",
+                1,
+            ));
+        }
+    }
+    if let Some(count) = request.literals.numeric_at(1) {
+        if !count.is_finite() || count <= 0.0 || count.fract() != 0.0 {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-DISCRETIZE-COUNT",
+                "discretize bin count is outside the supported positive integer range",
+                1,
+            ));
+        }
+    }
+    validate_tail(request, &mut diagnostics);
     diagnostics
+}
+
+fn validate_tail(request: &CallRequest, diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>) {
+    let Some(first) = request.arguments.get(2) else {
+        return;
+    };
+    let text = request.literals.literal_args.get(2).and_then(literal_text);
+    let option = text.is_some_and(|text| text.eq_ignore_ascii_case("IncludedEdge"));
+    let ambiguous = text.is_none()
+        && matches!(
+            first.kind,
+            ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
+        );
+    if ambiguous {
+        return;
+    }
+    let start = if option { 2 } else { 3 };
+    if !option {
+        if known_nonvector(&first.shape) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-DISCRETIZE-VALUES",
+                "replacement values must be a vector",
+                2,
+            ));
+        }
+        if !matches!(
+            first.kind,
+            ValueKindFact::Unknown
+                | ValueKindFact::String
+                | ValueKindFact::Character
+                | ValueKindFact::Cell(_)
+                | ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                })
+        ) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-DISCRETIZE-VALUES",
+                "replacement values must be real numeric or text",
+                2,
+            ));
+        }
+    }
+    if (request.arguments.len() - start) % 2 != 0 {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-DISCRETIZE-OPTIONS",
+            "name-value options must occur in pairs",
+            start,
+        ));
+        return;
+    }
+    for index in (start..request.arguments.len()).step_by(2) {
+        for (position, accepted) in [
+            (index, &["IncludedEdge"][..]),
+            (index + 1, &["left", "right"][..]),
+        ] {
+            if request
+                .literals
+                .literal_args
+                .get(position)
+                .and_then(literal_text)
+                .is_some_and(|text| {
+                    !accepted
+                        .iter()
+                        .any(|candidate| text.eq_ignore_ascii_case(candidate))
+                })
+            {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-DISCRETIZE-OPTIONS",
+                    "unsupported bin edge option",
+                    position,
+                ));
+            }
+        }
+    }
 }
 
 fn replacement_fact(request: &CallRequest) -> Option<ValueFact> {
@@ -84,6 +201,20 @@ fn replacement_fact(request: &CallRequest) -> Option<ValueFact> {
         .is_some_and(|name| name.eq_ignore_ascii_case("IncludedEdge"))
     {
         return None;
+    }
+    if request.arguments.len() >= 4
+        && request
+            .literals
+            .literal_args
+            .get(2)
+            .and_then(literal_text)
+            .is_none()
+        && matches!(
+            replacement.kind,
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+        )
+    {
+        return Some(ValueFact::unknown(DynamicReason::RuntimeValue));
     }
     let kind = match &replacement.kind {
         ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Real => {
@@ -102,15 +233,19 @@ fn replacement_fact(request: &CallRequest) -> Option<ValueFact> {
     ))
 }
 
-fn may_compute_edges(request: &CallRequest) -> bool {
-    request
-        .literals
-        .numeric_at(1)
-        .is_some_and(|value| value.is_finite() && value > 0.0 && value.fract() == 0.0)
-        || request
-            .arguments
-            .get(1)
-            .is_some_and(|value| value.is_scalar() && value.numeric().is_some())
+fn known_nonvector(shape: &ShapeFact) -> bool {
+    let Some(dims) = shape.known_dims() else {
+        return false;
+    };
+    dims.iter()
+        .skip(2)
+        .any(|extent| extent.is_some_and(|extent| extent != 1))
+        || dims
+            .iter()
+            .take(2)
+            .filter(|extent| extent.is_some_and(|extent| extent != 1))
+            .count()
+            > 1
 }
 
 fn double_fact(shape: ShapeFact) -> ValueFact {

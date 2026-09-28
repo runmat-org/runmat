@@ -10,7 +10,30 @@ pub(super) enum Labels {
 }
 
 impl Labels {
+    /// Validate borrowed labels without cloning their storage or text payload.
+    pub(super) fn validate_len(value: &Value) -> BuiltinResult<usize> {
+        match value {
+            Value::Num(_) | Value::Int(_) | Value::String(_) => Ok(1),
+            Value::Tensor(tensor) => Ok(tensor.len()),
+            Value::StringArray(strings) => Ok(strings.data.len()),
+            Value::CharArray(_) => {
+                super::arguments::validate_scalar_text(value, "replacement value")?;
+                Ok(1)
+            }
+            Value::Cell(cell) => {
+                for value in cell.iter_column_major() {
+                    super::arguments::validate_scalar_text(value, "text replacement cell")?;
+                }
+                Ok(cell.data.len())
+            }
+            _ => Err(error::invalid(
+                "discretize: replacement values must be real numeric or text",
+            )),
+        }
+    }
+
     pub(super) fn from_value(value: &Value) -> BuiltinResult<Self> {
+        Self::validate_len(value)?;
         match value {
             Value::Num(value) => Ok(Self::Numeric(NumericStorage::F64(vec![*value]))),
             Value::Int(value) => Ok(Self::Numeric(integer_scalar(value))),
@@ -91,17 +114,12 @@ fn text_values(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(value) => Ok(vec![value.clone()]),
         Value::StringArray(value) => Ok(value.data.clone()),
-        Value::CharArray(value) if value.rows <= 1 => Ok(vec![value.data.iter().collect()]),
+        Value::CharArray(_) => {
+            super::arguments::scalar_text(value, "replacement value").map(|text| vec![text])
+        }
         Value::Cell(value) => value
-            .data
-            .iter()
-            .map(|item| match item {
-                Value::String(text) => Ok(text.clone()),
-                Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
-                other => Err(error::invalid(format!(
-                    "discretize: text replacement cell contains {other:?}"
-                ))),
-            })
+            .iter_column_major()
+            .map(|item| super::arguments::scalar_text(item, "text replacement cell"))
             .collect(),
         other => Err(error::invalid(format!(
             "discretize: replacement values must be real numeric or text, got {other:?}"
