@@ -3,6 +3,8 @@ use super::documentation::{
 };
 use super::*;
 
+mod inference;
+
 const CURRENT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "context",
     ty: BuiltinParamType::Any,
@@ -34,6 +36,21 @@ pub const GET_CURRENT_WORKER_DESCRIPTOR: BuiltinDescriptor =
 pub const GET_CURRENT_JOB_DESCRIPTOR: BuiltinDescriptor =
     current_descriptor(&GET_CURRENT_JOB_SIGNATURES);
 
+const CURRENT_ERRORS: [BuiltinErrorDescriptor; 2] = [
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.CURRENT_TOO_MANY_INPUTS",
+        identifier: Some("RunMat:parallel:TooManyInputs"),
+        when: "An input argument is supplied.",
+        message: "current-execution introspection does not accept input arguments",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PARALLEL.RUNTIME_CONTEXT_UNAVAILABLE",
+        identifier: Some("RunMat:parallel:RuntimeContextUnavailable"),
+        when: "No active runtime context is installed for the call.",
+        message: "no active runtime context",
+    },
+];
+
 const fn current_descriptor(
     signatures: &'static [BuiltinSignatureDescriptor],
 ) -> BuiltinDescriptor {
@@ -41,7 +58,7 @@ const fn current_descriptor(
         signatures,
         output_mode: BuiltinOutputMode::Fixed,
         completion_policy: BuiltinCompletionPolicy::Public,
-        errors: &[],
+        errors: &CURRENT_ERRORS,
     }
 }
 macro_rules! current_execution_entry {
@@ -80,21 +97,21 @@ macro_rules! current_execution_entry {
 current_execution_entry!(
     GET_CURRENT_TASK_CATALOG_ENTRY,
     "getCurrentTask",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentTask),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(inference::infer)),
     GET_CURRENT_TASK_DOCUMENTATION,
     GET_CURRENT_TASK_DESCRIPTOR
 );
 current_execution_entry!(
     GET_CURRENT_WORKER_CATALOG_ENTRY,
     "getCurrentWorker",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentWorker),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(inference::infer)),
     GET_CURRENT_WORKER_DOCUMENTATION,
     GET_CURRENT_WORKER_DESCRIPTOR
 );
 current_execution_entry!(
     GET_CURRENT_JOB_CATALOG_ENTRY,
     "getCurrentJob",
-    BuiltinInferenceRule::Parallel(ParallelInferenceRule::GetCurrentJob),
+    BuiltinInferenceRule::Identity(crate::IdentityInferenceRule::new(inference::infer)),
     GET_CURRENT_JOB_DOCUMENTATION,
     GET_CURRENT_JOB_DESCRIPTOR
 );
