@@ -67,6 +67,14 @@ fn datenum_distinguishes_date_vector_rows_from_serial_array_shapes() {
         result.outputs[0].shape,
         ShapeFact::from(vec![Some(2), Some(2)])
     );
+    let unknown_columns = number(ShapeFact::from(vec![Some(2), None]));
+    let datenum = inference::datenum(
+        &call(vec![unknown_columns.clone()], 1),
+        &DATENUM_CATALOG_ENTRY,
+    );
+    assert_eq!(datenum.outputs[0].shape, ShapeFact::Unknown);
+    let datestr = inference::datestr(&call(vec![unknown_columns], 1), &DATESTR_CATALOG_ENTRY);
+    assert_eq!(datestr.outputs[0].shape.known_dims().unwrap()[0], None);
 }
 
 #[test]
@@ -156,4 +164,113 @@ fn weekday_rejects_invalid_known_day_form() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-WEEKDAY-FORM"));
+}
+
+#[test]
+fn weekday_accepts_case_insensitive_day_form_literals() {
+    let mut request = call(
+        vec![
+            number(ShapeFact::Scalar),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        2,
+    );
+    request.literals = LiteralContext::new(vec![
+        LiteralValue::Unknown,
+        LiteralValue::String("LONG".into()),
+    ]);
+    let result = inference::weekday(&request, &WEEKDAY_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty());
+}
+
+#[test]
+fn known_other_object_is_not_a_datetime_input() {
+    let other = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: Some(ClassId(7)),
+            runtime_class: None,
+            properties: std::collections::BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: None,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    let result = inference::datenum(&call(vec![other], 1), &DATENUM_CATALOG_ENTRY);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DATETIME-LEGACY-INPUT"));
+}
+
+#[test]
+fn date_arrays_expand_scalars_but_not_distinct_non_scalar_shapes() {
+    let column = number(ShapeFact::from(vec![Some(2), Some(1)]));
+    let row = number(ShapeFact::from(vec![Some(1), Some(3)]));
+    let eomday = inference::eomday(
+        &call(vec![column.clone(), row.clone()], 1),
+        &EOMDAY_CATALOG_ENTRY,
+    );
+    assert!(eomday
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-EOMDAY-SHAPE"));
+    let two_date_vectors = number(ShapeFact::from(vec![Some(2), Some(6)]));
+    let three_date_vectors = number(ShapeFact::from(vec![Some(3), Some(6)]));
+    let etime = inference::etime(
+        &call(vec![two_date_vectors, three_date_vectors], 1),
+        &ETIME_CATALOG_ENTRY,
+    );
+    assert!(etime
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-ETIME-SHAPE"));
+    let between = inference::isbetween(
+        &call(vec![column.clone(), number(ShapeFact::Scalar), row], 1),
+        &ISBETWEEN_CATALOG_ENTRY,
+    );
+    assert!(between.diagnostics.is_empty());
+    assert_eq!(
+        between.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), Some(3)])
+    );
+    let incompatible = inference::isbetween(
+        &call(
+            vec![
+                column.clone(),
+                number(ShapeFact::from(vec![Some(3), Some(1)])),
+                number(ShapeFact::Scalar),
+            ],
+            1,
+        ),
+        &ISBETWEEN_CATALOG_ENTRY,
+    );
+    assert!(incompatible
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-ISBETWEEN-SHAPE"));
+    let empty = inference::isbetween(
+        &call(
+            vec![
+                number(ShapeFact::from(vec![Some(0), Some(1)])),
+                number(ShapeFact::from(vec![Some(1), Some(3)])),
+                number(ShapeFact::Scalar),
+            ],
+            1,
+        ),
+        &ISBETWEEN_CATALOG_ENTRY,
+    );
+    assert_eq!(
+        empty.outputs[0].shape,
+        ShapeFact::from(vec![Some(0), Some(3)])
+    );
+    let scalar_bound = inference::isbetween(
+        &call(
+            vec![column.clone(), number(ShapeFact::Scalar), column.clone()],
+            1,
+        ),
+        &ISBETWEEN_CATALOG_ENTRY,
+    );
+    assert!(scalar_bound.diagnostics.is_empty());
+    assert_eq!(scalar_bound.outputs[0].shape, column.shape);
 }

@@ -98,7 +98,7 @@ pub(super) const EOMDAY: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("eomday"), slug: Some("eomday"),
     summary: "Return the last day number for a calendar month.",
-    description: "`eomday(Y,M)` returns a host double array of month lengths for year and month inputs. Scalar values expand over array inputs; compatible arrays follow implicit expansion. Calendar validation includes leap years.",
+    description: "`eomday(Y,M)` returns a host double array of month lengths for year and month inputs. Scalar values expand over an array input; non-scalar inputs must have matching sizes. Calendar validation includes leap years.",
     keywords: &["eomday", "end of month", "leap year", "calendar"], related: &["datetime", "day"],
     sections: &[BuiltinDocumentationSection { heading: "Calendar values", paragraphs: &[
         "Years must be finite whole values within the current date range, and months must be whole values from 1 through 12. Invalid dates or incompatible input shapes raise an error rather than wrapping or silently truncating.",
@@ -114,7 +114,7 @@ pub(super) const ETIME: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("etime"), slug: Some("etime"),
     summary: "Find elapsed seconds between date vectors.",
-    description: "`etime(t2,t1)` converts three- or six-component date-vector rows to serial dates and returns `(t2-t1)*86400` seconds. Scalar date vectors expand over compatible arrays of rows.",
+    description: "`etime(t2,t1)` converts three- or six-component date-vector rows to serial dates and returns `(t2-t1)*86400` seconds. A single date-vector row expands over the rows of the other input; non-scalar row counts must match.",
     keywords: &["etime", "elapsed seconds", "datevec", "datetime"], related: &["datevec", "seconds"],
     sections: &[BuiltinDocumentationSection { heading: "Precision and shapes", paragraphs: &[
         "The output is host double. Seconds are calculated from RunMat's floating serial-day representation; small intervals at large date magnitudes can therefore lose subsecond precision. This function accepts date vectors, not arbitrary datetime objects or timezone-aware instants.",

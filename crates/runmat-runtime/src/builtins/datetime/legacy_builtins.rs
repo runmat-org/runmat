@@ -354,7 +354,7 @@ pub(super) async fn isbetween_builtin(
     let lower = numeric_or_datetime_serial_tensor(lower, "isbetween")?;
     let upper = numeric_or_datetime_serial_tensor(upper, "isbetween")?;
     let (values_data, lower_data, upper_data, shape) =
-        broadcast_three_numeric_tensors(&values, &lower, &upper, "isbetween")?;
+        implicit_broadcast_three_numeric_tensors(&values, &lower, &upper, "isbetween")?;
     let out = values_data
         .iter()
         .zip(lower_data.iter())

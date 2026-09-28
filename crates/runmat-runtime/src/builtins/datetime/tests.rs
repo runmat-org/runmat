@@ -1026,6 +1026,7 @@ fn legacy_weekday_names_use_short_char_rows_by_default_and_long_on_request() {
     for (options, expected) in [
         (Vec::new(), "Thurs"),
         (vec![Value::from("long")], "Thursday"),
+        (vec![Value::from("LONG")], "Thursday"),
     ] {
         let result = futures::executor::block_on(weekday_builtin(Value::Num(serial), options))
             .expect("weekday names");
@@ -1038,6 +1039,59 @@ fn legacy_weekday_names_use_short_char_rows_by_default_and_long_on_request() {
         };
         assert_eq!(names.data.iter().collect::<String>(), expected);
     }
+}
+
+#[test]
+fn legacy_date_array_shapes_follow_each_operation_contract() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let years = Value::Tensor(Tensor::new(vec![2024.0, 2025.0], vec![2, 1]).unwrap());
+    let months = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+    let eomday_error = futures::executor::block_on(eomday_builtin(years, months))
+        .expect_err("distinct non-scalar shapes must not broadcast");
+    assert!(eomday_error.message().contains("matching sizes"));
+
+    let dates = Value::Tensor(Tensor::new(vec![739_000.0, 739_002.0], vec![2, 1]).unwrap());
+    let lower =
+        Value::Tensor(Tensor::new(vec![738_999.0, 739_001.0, 739_003.0], vec![1, 3]).unwrap());
+    let between =
+        futures::executor::block_on(isbetween_builtin(dates, lower, Value::Num(739_002.0)))
+            .expect("isbetween must implicitly expand compatible shapes");
+    let Value::LogicalArray(between) = between else {
+        panic!("non-scalar comparison must return a logical array");
+    };
+    assert_eq!(between.shape, vec![2, 3]);
+    assert_eq!(between.data, vec![1, 1, 0, 1, 0, 0]);
+
+    let mismatch = futures::executor::block_on(isbetween_builtin(
+        Value::Tensor(Tensor::new(vec![739_000.0, 739_001.0], vec![2, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![738_999.0; 3], vec![3, 1]).unwrap()),
+        Value::Num(739_002.0),
+    ))
+    .expect_err("incompatible dimension sizes must fail");
+    assert!(mismatch.message().contains("size mismatch"));
+
+    let empty = futures::executor::block_on(isbetween_builtin(
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![739_000.0; 3], vec![1, 3]).unwrap()),
+        Value::Num(739_002.0),
+    ))
+    .expect("empty and singleton dimensions are compatible");
+    let Value::LogicalArray(empty) = empty else {
+        panic!("empty comparison must remain a logical array");
+    };
+    assert_eq!(empty.shape, vec![0, 3]);
+    assert!(empty.data.is_empty());
+
+    let preserved = futures::executor::block_on(isbetween_builtin(
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 3]).unwrap()),
+        Value::Num(739_000.0),
+        Value::Num(739_002.0),
+    ))
+    .expect("empty non-scalar shape must survive scalar bounds");
+    let Value::LogicalArray(preserved) = preserved else {
+        panic!("empty comparison must remain a logical array");
+    };
+    assert_eq!(preserved.shape, vec![0, 3]);
 }
 
 #[test]
@@ -1083,6 +1137,18 @@ fn legacy_date_extensions_reject_before_provider_access_in_matlab_mode() {
     .expect_err("resident date is an extension");
     assert_eq!(
         error.identifier(),
+        Some("RunMat:compatibility:DatetimeGpuInputExtension")
+    );
+    let bound = datetime_object_from_serials(vec![serial], vec![1, 1], DEFAULT_DATETIME_FORMAT)
+        .expect("datetime bound");
+    let between_error = futures::executor::block_on(isbetween_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        bound.clone(),
+        bound,
+    ))
+    .expect_err("resident date comparison must gate before provider access");
+    assert_eq!(
+        between_error.identifier(),
         Some("RunMat:compatibility:DatetimeGpuInputExtension")
     );
     assert_eq!(resident.probe.retirements(), 0);

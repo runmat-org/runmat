@@ -52,10 +52,10 @@ fn datetime_or_number_or_text(value: &ValueFact) -> bool {
     match &value.kind {
         ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character => true,
         ValueKindFact::Numeric(number) => number.domain == NumericDomain::Real,
-        ValueKindFact::Object(object) => object
-            .runtime_class
-            .as_ref()
-            .is_none_or(|class| class == &standard::DATETIME.owned()),
+        ValueKindFact::Object(object) => match object.runtime_class.as_ref() {
+            Some(class) => class == &standard::DATETIME.owned(),
+            None => object.class.is_none(),
+        },
         _ => false,
     }
 }
@@ -128,6 +128,11 @@ fn serial_shape(value: &ValueFact, recognize_datevec: bool) -> ShapeFact {
             };
             if dims.len() >= 2 && matches!(dims[1], Some(3 | 6)) {
                 return ShapeFact::from(vec![dims[0], Some(1)]);
+            }
+            if dims.len() >= 2 && dims[1].is_none() {
+                // At runtime three or six columns yield one serial per row;
+                // every other column count retains the input serial shape.
+                return ShapeFact::Unknown;
             }
             if matches!(value.shape.element_count(), Some(3 | 6)) {
                 return ShapeFact::Scalar;
@@ -350,12 +355,12 @@ pub(super) fn eomday(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Call
     );
     check_numeric(request, 2, &mut diagnostics);
     let shape = if request.arguments.len() >= 2 {
-        match broadcast_shape(&request.arguments[0].shape, &request.arguments[1].shape) {
+        match scalar_or_matching_shape(&request.arguments[0].shape, &request.arguments[1].shape) {
             Ok(shape) => shape,
             Err(_) => {
                 diagnostics.push(argument_error(
                     "RM-EOMDAY-SHAPE",
-                    "year and month cannot broadcast",
+                    "year and month must be scalar or have matching sizes",
                     1,
                 ));
                 ShapeFact::Unknown
@@ -379,12 +384,12 @@ pub(super) fn etime(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let shape = if request.arguments.len() >= 2 {
         let left = datevec_rows(&request.arguments[0]);
         let right = datevec_rows(&request.arguments[1]);
-        match broadcast_shape(&left, &right) {
+        match scalar_or_matching_shape(&left, &right) {
             Ok(shape) => shape,
             Err(_) => {
                 diagnostics.push(argument_error(
                     "RM-ETIME-SHAPE",
-                    "date-vector row counts cannot broadcast",
+                    "date-vector row counts must be scalar or match",
                     1,
                 ));
                 ShapeFact::Unknown
@@ -437,4 +442,24 @@ pub(super) fn isbetween(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
         ShapeFact::Unknown
     };
     finish(entry, request, vec![logical(shape)], diagnostics)
+}
+
+fn scalar_or_matching_shape(left: &ShapeFact, right: &ShapeFact) -> Result<ShapeFact, ()> {
+    if left.element_count() == Some(1) {
+        return Ok(right.clone());
+    }
+    if right.element_count() == Some(1) {
+        return Ok(left.clone());
+    }
+    let left_known = left
+        .known_dims()
+        .is_some_and(|dims| dims.iter().all(Option::is_some));
+    let right_known = right
+        .known_dims()
+        .is_some_and(|dims| dims.iter().all(Option::is_some));
+    match (left_known, right_known) {
+        (true, true) if left.is_proven_equivalent(right) => Ok(left.clone()),
+        (true, true) => Err(()),
+        _ => Ok(ShapeFact::Unknown),
+    }
 }

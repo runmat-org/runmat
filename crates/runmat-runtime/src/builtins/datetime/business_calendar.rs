@@ -116,6 +116,57 @@ pub(super) fn broadcast_three_numeric_tensors(
     Ok((expand(a)?, expand(b)?, expand(c)?, output_shape))
 }
 
+/// Expand three date operands under MATLAB's dimension-wise implicit expansion.
+/// Calendar-duration arithmetic retains the separate scalar-or-exact helper above.
+pub(super) fn implicit_broadcast_three_numeric_tensors(
+    a: &Tensor,
+    b: &Tensor,
+    c: &Tensor,
+    context: &str,
+) -> BuiltinResult<Broadcast3> {
+    use crate::builtins::common::broadcast;
+
+    let shape_for = |operand: &Tensor| {
+        if operand.shape.is_empty() {
+            vec![1, 1]
+        } else {
+            operand.shape.clone()
+        }
+    };
+    let a_shape = shape_for(a);
+    let b_shape = shape_for(b);
+    let c_shape = shape_for(c);
+    let ab_shape =
+        broadcast::broadcast_shapes(context, &a_shape, &b_shape).map_err(datetime_error)?;
+    let output_shape =
+        broadcast::broadcast_shapes(context, &ab_shape, &c_shape).map_err(datetime_error)?;
+    let output_len = output_shape
+        .iter()
+        .try_fold(1usize, |length, dimension| length.checked_mul(*dimension))
+        .ok_or_else(|| datetime_error(format!("{context}: broadcast result is too large")))?;
+
+    let expand = |operand: &Tensor, shape: &[usize]| -> BuiltinResult<Vec<f64>> {
+        let aligned = broadcast::align_shape(shape, output_shape.len());
+        let strides = broadcast::compute_strides(&aligned);
+        let values = tensor::tensor_values_f64_cow(operand);
+        let mut result = Vec::with_capacity(output_len);
+        for index in 0..output_len {
+            let source = broadcast::broadcast_index(index, &output_shape, &aligned, &strides);
+            result.push(*values.get(source).ok_or_else(|| {
+                datetime_error(format!("{context}: tensor data does not match its shape"))
+            })?);
+        }
+        Ok(result)
+    };
+
+    Ok((
+        expand(a, &a_shape)?,
+        expand(b, &b_shape)?,
+        expand(c, &c_shape)?,
+        output_shape,
+    ))
+}
+
 pub(super) fn serial_date_key(serial: f64) -> BuiltinResult<i64> {
     if !serial.is_finite() {
         return Err(datetime_error("date values must be finite"));
