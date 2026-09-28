@@ -1,10 +1,9 @@
 //! MATLAB-compatible `strtrim` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRTRIM_ERROR_CELL_ELEMENT, STRTRIM_ERROR_INTERNAL,
+    STRTRIM_ERROR_INVALID_INPUT,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
 
@@ -16,6 +15,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::common::{
     char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
 };
+#[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -33,7 +33,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Executes on the CPU; GPU-resident inputs are gathered to host memory before trimming whitespace.",
+        "Executes on host text; resident numeric inputs reject before provider access or gathering.",
 };
 
 #[runmat_macros::register_fusion_spec(
@@ -46,73 +46,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "String transformation builtin; not eligible for fusion and always gathers GPU inputs.",
+    notes: "Host text transformation; not eligible for fusion. Resident numeric inputs reject.",
 };
 
 const BUILTIN_NAME: &str = "strtrim";
-
-const STRTRIM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Trimmed text preserving input container kind and shape.",
-}];
-
-const STRTRIM_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String/char/cell text input to trim.",
-}];
-
-const STRTRIM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = strtrim(str)",
-    inputs: &STRTRIM_INPUTS,
-    outputs: &STRTRIM_OUTPUT,
-}];
-
-const STRTRIM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRTRIM.INVALID_INPUT",
-    identifier: Some("RunMat:strtrim:InvalidInput"),
-    when: "Input is not a string array, character array, or cell array of text scalars.",
-    message:
-        "strtrim: first argument must be a string array, character array, or cell array of character vectors",
-};
-
-const STRTRIM_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRTRIM.CELL_ELEMENT",
-    identifier: Some("RunMat:strtrim:CellElement"),
-    when: "Cell array contains a non-text element or non-row char array element.",
-    message: "strtrim: cell array elements must be string scalars or character vectors",
-};
-
-const STRTRIM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRTRIM.INTERNAL",
-    identifier: Some("RunMat:strtrim:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "strtrim: internal error",
-};
-
-const STRTRIM_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    STRTRIM_ERROR_INVALID_INPUT,
-    STRTRIM_ERROR_CELL_ELEMENT,
-    STRTRIM_ERROR_INTERNAL,
-];
-
-pub const STRTRIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRTRIM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRTRIM_ERRORS,
-};
-
-pub const STRTRIM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "strtrim removes whitespace from text containers. Numeric, integer, and provider-resident values reject before provider access and are not interpreted as character codes.",
-};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
@@ -135,13 +72,7 @@ fn strtrim_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strtrim",
-    category = "strings/transform",
-    summary = "Remove leading and trailing whitespace from text inputs.",
-    keywords = "strtrim,trim,whitespace,strings,character array,text",
-    accel = "sink",
-    type_resolver(text_preserve_type),
-    descriptor(crate::builtins::strings::transform::strtrim::STRTRIM_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::strtrim::STRTRIM_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
 async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
