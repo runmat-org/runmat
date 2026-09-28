@@ -2,7 +2,7 @@ use super::*;
 
 mod analytics;
 mod constructors;
-mod conversions;
+pub(crate) mod conversions;
 mod indexing;
 mod io;
 mod predicates;

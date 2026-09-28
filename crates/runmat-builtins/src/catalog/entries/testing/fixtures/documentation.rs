@@ -30,7 +30,7 @@ const TEMP_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
-        source: "assert(isa(fixture, 'matlab.unittest.fixtures.TemporaryFolderFixture'));\nassert(isempty(fixture.Folder));",
+        source: "assert(isa(fixture, 'matlab.unittest.fixtures.TemporaryFolderFixture'));\nassert(strcmp(fixture.Folder, ''));",
     },
 }];
 const APPLY_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {

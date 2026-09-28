@@ -43,6 +43,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     i,
                 ));
             }
+            if literals
+                .get(i)
+                .is_some_and(|literal| !valid_dimension_literal(literal))
+            {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-STRING-EMPTY-SIZE",
+                    "size inputs must be finite, non-negative integers",
+                    i,
+                ));
+            }
             sizes.push(literals.get(i));
             i += 1;
         }
@@ -102,13 +112,7 @@ fn inferred_empty_shape(literals: &[Option<&LiteralValue>]) -> ShapeFact {
 fn dimension(value: &LiteralValue) -> Option<usize> {
     match value {
         LiteralValue::Bool(b) => Some(usize::from(*b)),
-        LiteralValue::Integer { text, .. } => {
-            if text.starts_with('-') {
-                Some(0)
-            } else {
-                text.parse::<usize>().ok()
-            }
-        }
+        LiteralValue::Integer { text, .. } => text.parse::<usize>().ok(),
         LiteralValue::Number(n)
             if n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n < 9_007_199_254_740_992.0 =>
         {
@@ -119,6 +123,14 @@ fn dimension(value: &LiteralValue) -> Option<usize> {
             .ok()
             .and_then(|n| dimension(&LiteralValue::Number(n))),
         _ => None,
+    }
+}
+
+fn valid_dimension_literal(value: &LiteralValue) -> bool {
+    match value {
+        LiteralValue::Unknown | LiteralValue::Empty => true,
+        LiteralValue::Vector(values) => values.iter().all(|value| dimension(value).is_some()),
+        _ => dimension(value).is_some(),
     }
 }
 
@@ -210,6 +222,25 @@ mod tests {
             .outputs[0]
                 .shape,
             ShapeFact::from(vec![Some(0), Some(2)])
+        );
+    }
+
+    #[test]
+    fn negative_integer_dimension_is_diagnosed_instead_of_proving_a_shape() {
+        let result = call(
+            vec![numeric(ShapeFact::from(vec![Some(1), Some(1)]))],
+            vec![LiteralValue::Integer {
+                text: "-3".into(),
+                class: NumericClass::Int64,
+            }],
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-STRING-EMPTY-SIZE"));
+        assert_eq!(
+            result.outputs[0].shape,
+            ShapeFact::from(vec![Some(0), None])
         );
     }
 }

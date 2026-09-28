@@ -2,12 +2,12 @@ use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "`string.empty` with no arguments yields a `0×0` string array.",
+        "`string.empty()` yields a `0×0` string array.",
         "`string.empty(n)` produces a `0×n` array. The leading dimension is fixed at `0`, so the result is still empty even if `n > 0`.",
         "`string.empty(m, n, p, ...)` returns a `0×n×p×…` array. All trailing dimensions are honoured while the leading dimension remains zero.",
         "You can provide a single size vector such as `string.empty([0 5 3])`; the first entry is ignored beyond confirming it is non-negative, and the remaining entries set the trailing dimensions.",
         "`string.empty(___, 'like', prototype)` copies the trailing dimensions from `prototype` when you do not supply explicit sizes. Any dimensions you pass explicitly take precedence. GPU-resident prototypes are automatically gathered so their shape can be inspected.",
-        "Size inputs must be finite, real, integer-valued dimensions. Fractional and negative floating values reject. The shared constructor parser currently clamps negative fixed-width integer dimensions to zero; this is not claimed as MATLAB parity.",
+        "Size inputs must be finite, real, non-negative integers. Fractional and negative values, including negative fixed-width integers, raise an error.",
         "The result always resides on the host; there is no GPU counterpart for string arrays.",
     ] },
     BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
@@ -19,7 +19,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
         id: "example-1",
         title: "Creating a 0x0 string array",
-        program: "S = string.empty",
+        program: "S = string.empty()",
         display_output: Some("S =\n  0x0 string array"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable,
@@ -129,9 +129,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "What does the `'like'` option do?", answer: "`'like', prototype` copies the trailing dimensions from `prototype` when you omit explicit sizes. The first dimension is still forced to `0`, so the result remains empty. The prototype is gathered automatically if it resides on the GPU." },
         BuiltinDocumentationFaq { question: "Does the result share storage with existing arrays?", answer: "No. Each result is a new empty string-array value with its own shape metadata; there is no payload to alias." },
         BuiltinDocumentationFaq { question: "Is there a GPU-accelerated variant?", answer: "No. The result is host text. A resident prototype or size argument may be gathered to inspect its shape or values, but construction does not run a GPU kernel." },
-        BuiltinDocumentationFaq { question: "How do I obtain a 0x0 string array quickly?", answer: "Call `string.empty` with no arguments. It is equivalent to `strings(0)` but makes the intention explicit." },
+        BuiltinDocumentationFaq { question: "How do I obtain a 0x0 string array quickly?", answer: "Call `string.empty()`. It is equivalent to `strings(0)` but makes the intention explicit." },
         BuiltinDocumentationFaq { question: "Can I use `size` output directly?", answer: "Yes. Expressions like `string.empty(size(existingArray))` are supported. The first element of the size vector is ignored when constructing the new array so that the first dimension is zero." },
-        BuiltinDocumentationFaq { question: "What happens if I pass an empty array as the size vector?", answer: "`string.empty([])` returns the canonical `0×0` string array, just like calling `string.empty` with no arguments." },
+        BuiltinDocumentationFaq { question: "What happens if I pass an empty array as the size vector?", answer: "`string.empty([])` returns the canonical `0×0` string array, just like calling `string.empty()`." },
         BuiltinDocumentationFaq { question: "What if I provide both explicit dimensions and a `'like'` prototype?", answer: "Explicit dimensions set the output shape; the prototype is still validated but does not override them. Unsupported extra arguments raise an error." },
     ],
     links: &[

@@ -449,12 +449,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn negative_fixed_width_integer_dimension_uses_constructor_clamp() {
-        let result = string_empty_builtin(vec![Value::Int(IntValue::I64(-3))])
-            .expect("constructor integer dimension");
-        match result {
-            Value::StringArray(sa) => assert_eq!(sa.shape, vec![0, 0]),
-            other => panic!("expected string array, got {other:?}"),
-        }
+    fn negative_fixed_width_integer_dimension_is_rejected() {
+        let err = string_empty_builtin(vec![Value::Int(IntValue::I64(-3))])
+            .expect_err("negative integer dimension must be rejected");
+        assert_eq!(err.identifier(), Some("RunMat:string.empty:InvalidSize"));
     }
 }

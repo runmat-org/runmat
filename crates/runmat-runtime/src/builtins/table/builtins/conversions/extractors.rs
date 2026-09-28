@@ -5,7 +5,7 @@ use runmat_macros::runtime_builtin;
 #[runtime_builtin(
     name = "table2struct",
     binding_variant = "default",
-    builtin_path = "crate::builtins::table::builtins"
+    builtin_path = "crate::builtins::table::builtins::conversions::extractors"
 )]
 pub(crate) async fn table2struct_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.chunks_exact(2).any(|pair| {
@@ -47,7 +47,7 @@ pub(crate) async fn table2struct_builtin(value: Value, rest: Vec<Value>) -> Buil
 #[runtime_builtin(
     name = "table2array",
     binding_variant = "default",
-    builtin_path = "crate::builtins::table::builtins"
+    builtin_path = "crate::builtins::table::builtins::conversions::extractors"
 )]
 pub(crate) async fn table2array_builtin(value: Value) -> BuiltinResult<Value> {
     let host = gather_if_needed_async(&value)
@@ -69,7 +69,7 @@ pub(crate) async fn table2array_builtin(value: Value) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "table2cell",
     binding_variant = "default",
-    builtin_path = "crate::builtins::table::builtins"
+    builtin_path = "crate::builtins::table::builtins::conversions::extractors"
 )]
 pub(crate) async fn table2cell_builtin(value: Value) -> BuiltinResult<Value> {
     let host = gather_if_needed_async(&value)

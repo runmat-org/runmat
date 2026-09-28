@@ -6,7 +6,7 @@ const BUILTIN_NAME: &str = "array2table";
 #[runtime_builtin(
     name = "array2table",
     binding_variant = "default",
-    builtin_path = "crate::builtins::table::builtins"
+    builtin_path = "crate::builtins::table::builtins::conversions::constructors"
 )]
 pub(crate) async fn array2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if matches!(value, Value::GpuTensor(_)) {
@@ -52,7 +52,7 @@ fn apply_array2table_dimension_names(
 #[runtime_builtin(
     name = "cell2table",
     binding_variant = "default",
-    builtin_path = "crate::builtins::table::builtins"
+    builtin_path = "crate::builtins::table::builtins::conversions::constructors"
 )]
 pub(crate) async fn cell2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let rest = gather_values(&rest).await?;
@@ -89,7 +89,7 @@ pub(crate) async fn cell2table_builtin(value: Value, rest: Vec<Value>) -> Builti
 #[runtime_builtin(
     name = "struct2table",
     binding_variant = "default",
-    builtin_path = "crate::builtins::table::builtins"
+    builtin_path = "crate::builtins::table::builtins::conversions::constructors"
 )]
 pub(crate) async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let value = gather_if_needed_async(&value)
