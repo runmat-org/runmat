@@ -93,6 +93,13 @@ fn unit_forms_infer_constructor_object_or_double_extraction() {
 
 #[test]
 fn constructor_and_predicate_keep_shape_and_class_facts() {
+    let component_arities: Vec<_> = contracts::CALENDARDURATION
+        .signatures
+        .iter()
+        .filter(|signature| signature.label.contains("Y,M,D"))
+        .map(|signature| signature.inputs.len())
+        .collect();
+    assert_eq!(component_arities, vec![3, 6]);
     let matrix = ShapeFact::Shaped {
         dims: vec![DimensionFact::Known(4), DimensionFact::Known(3)],
     };
@@ -106,6 +113,24 @@ fn constructor_and_predicate_keep_shape_and_class_facts() {
             dims: vec![DimensionFact::Known(4), DimensionFact::Known(1)],
         }
     );
+    let empty_matrix = ShapeFact::Shaped {
+        dims: vec![DimensionFact::Known(0), DimensionFact::Known(3)],
+    };
+    let empty = inference::constructor(
+        &call(vec![number(empty_matrix.clone())], 1),
+        &CALENDARDURATION_CATALOG_ENTRY,
+    );
+    assert_eq!(
+        empty.outputs[0].shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Known(0), DimensionFact::Known(1)],
+        }
+    );
+    let empty_unit = inference::unit(
+        &call(vec![number(empty_matrix.clone())], 1),
+        &CALDAYS_CATALOG_ENTRY,
+    );
+    assert_eq!(empty_unit.outputs[0].shape, empty_matrix);
     assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Object(_)));
     let predicate = inference::predicate(
         &call(vec![duration(ShapeFact::Scalar)], 1),

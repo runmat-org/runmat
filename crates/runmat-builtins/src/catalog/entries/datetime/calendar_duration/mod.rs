@@ -14,7 +14,7 @@ pub const CALENDAR_DURATION_SHORTHAND_EXTENSION: BuiltinExtensionDescriptor =
         id: "calendar-duration-shorthand",
         mode: BuiltinExtensionMode::RunMatOnly,
         description:
-            "The empty constructor and single-array-of-days shortcut are RunMat extensions",
+            "The empty constructor, single-array-of-days, four/five-component, and calendarDuration copy forms are RunMat extensions",
         error_identifier: Some("RunMat:compatibility:CalendarDurationShorthandExtension"),
     };
 

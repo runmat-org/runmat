@@ -65,14 +65,16 @@ pub(super) fn broadcast_component_data(
 ) -> BuiltinResult<(Vec<Vec<f64>>, Vec<usize>)> {
     let mut target_shape = vec![1, 1];
     let mut target_len = 1usize;
+    let mut has_array = false;
 
     for array in arrays {
         let len = tensor::tensor_element_len(array);
-        if len > 1 {
-            let shape = tensor::default_shape_for(&array.shape, len);
-            if target_len == 1 {
+        if len != 1 {
+            let shape = component_shape(array);
+            if !has_array {
                 target_len = len;
                 target_shape = shape;
+                has_array = true;
             } else if len != target_len || shape != target_shape {
                 return Err(datetime_error(
                     "datetime: non-scalar component inputs must have matching sizes",
@@ -101,12 +103,24 @@ pub(super) fn broadcast_component_data(
 
 pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor_from_numeric(value, context)?;
+    normalize_component_tensor(tensor, context)
+}
+
+pub(super) fn normalize_component_tensor(tensor: Tensor, context: &str) -> BuiltinResult<Tensor> {
     validate_authoritative_integer_storage(&tensor, context)?;
     let tensor = tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| datetime_error(format!("datetime: {err}")))?;
-    let shape = tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
+    let shape = component_shape(&tensor);
     let values = tensor::tensor_into_values_f64(tensor);
     Tensor::new(values, shape).map_err(|err| datetime_error(format!("datetime: {err}")))
+}
+
+fn component_shape(tensor: &Tensor) -> Vec<usize> {
+    if tensor.shape.is_empty() {
+        vec![1, 1]
+    } else {
+        tensor.shape.clone()
+    }
 }
 
 pub(super) fn build_from_components(

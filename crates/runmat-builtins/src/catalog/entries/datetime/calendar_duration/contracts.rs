@@ -69,25 +69,55 @@ const COMPONENTS: [BuiltinParamDescriptor; 6] = [
     BuiltinParamDescriptor {
         name: "H",
         ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
+        arity: BuiltinParamArity::Required,
+        default: None,
         description: "Whole hours.",
     },
     BuiltinParamDescriptor {
         name: "MI",
         ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
+        arity: BuiltinParamArity::Required,
+        default: None,
         description: "Whole minutes.",
     },
     BuiltinParamDescriptor {
         name: "S",
         ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("0"),
+        arity: BuiltinParamArity::Required,
+        default: None,
         description: "Seconds, possibly fractional.",
     },
 ];
+const COMPONENTS_THREE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Whole calendar years.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Whole calendar months.",
+    },
+    BuiltinParamDescriptor {
+        name: "D",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Whole calendar days.",
+    },
+];
+const CONSTRUCTOR_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Three- or six-column numeric component matrix. A numeric day array or existing calendarDuration is a RunMat-only extension.",
+}];
 pub(super) const CALENDARDURATION: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
         BuiltinSignatureDescriptor {
@@ -96,13 +126,18 @@ pub(super) const CALENDARDURATION: BuiltinDescriptor = BuiltinDescriptor {
             outputs: &DURATION_OUTPUT,
         },
         BuiltinSignatureDescriptor {
-            label: "C = calendarDuration(Y,M,D[,H,MI,S])",
+            label: "C = calendarDuration(Y,M,D)",
+            inputs: &COMPONENTS_THREE,
+            outputs: &DURATION_OUTPUT,
+        },
+        BuiltinSignatureDescriptor {
+            label: "C = calendarDuration(Y,M,D,H,MI,S)",
             inputs: &COMPONENTS,
             outputs: &DURATION_OUTPUT,
         },
         BuiltinSignatureDescriptor {
             label: "C = calendarDuration(X)",
-            inputs: &INPUT,
+            inputs: &CONSTRUCTOR_INPUT,
             outputs: &DURATION_OUTPUT,
         },
     ],

@@ -4,7 +4,7 @@ use super::*;
 async fn prepare_calendar_unit_input(name: &'static str, value: Value) -> BuiltinResult<Value> {
     if matches!(value, Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &super::capabilities::DATETIME_GPU_INPUT_EXTENSION,
+            &runmat_builtins::CALENDAR_DURATION_GPU_INPUT_EXTENSION,
             name,
         )?;
     }
@@ -32,7 +32,7 @@ pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::Builti
     }
     if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &super::capabilities::DATETIME_GPU_INPUT_EXTENSION,
+            &runmat_builtins::CALENDAR_DURATION_GPU_INPUT_EXTENSION,
             "calendarDuration",
         )?;
     }
@@ -42,6 +42,12 @@ pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::Builti
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &runmat_builtins::CALENDAR_DURATION_LOGICAL_COMPONENT_EXTENSION,
+            "calendarDuration",
+        )?;
+    }
+    if args.len() == 1 && is_calendar_duration_object(&args[0]) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::CALENDAR_DURATION_SHORTHAND_EXTENSION,
             "calendarDuration",
         )?;
     }
@@ -57,10 +63,7 @@ pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::Builti
     let positional = match args.len() {
         1 => {
             let components = component_tensor(args[0].clone(), "calendarDuration")?;
-            let shape = tensor::default_shape_for(
-                &components.shape,
-                tensor::tensor_element_len(&components),
-            );
+            let shape = components.shape.clone();
             if shape.len() == 2 && matches!(shape[1], 3 | 6) {
                 let rows = shape[0];
                 let columns = shape[1];
@@ -216,6 +219,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn all_calendar_unit_helpers_accept_logical_arrays_in_both_modes() {
+        let logical =
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap());
+        for enabled in [false, true] {
+            let _mode = crate::compatibility::push_runmat_extensions_enabled(enabled);
+            let results = [
+                futures::executor::block_on(caldays_builtin(logical.clone())),
+                futures::executor::block_on(calweeks_builtin(logical.clone())),
+                futures::executor::block_on(calmonths_builtin(logical.clone())),
+                futures::executor::block_on(calquarters_builtin(logical.clone())),
+                futures::executor::block_on(calyears_builtin(logical.clone())),
+            ];
+            for result in results {
+                let (months, days) =
+                    calendar_duration_tensors_from_value(&result.unwrap()).unwrap();
+                assert_eq!(months.shape, vec![1, 2]);
+                assert_eq!(days.shape, vec![1, 2]);
+                assert_eq!(
+                    (months.materialize_f64()[1], days.materialize_f64()[1]),
+                    (0.0, 0.0)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn unit_helpers_keep_months_and_days_separate_and_reject_fractions() {
         let month = futures::executor::block_on(calmonths_builtin(Value::Num(2.0))).unwrap();
         let day = futures::executor::block_on(caldays_builtin(Value::Num(5.0))).unwrap();
@@ -290,6 +319,48 @@ mod tests {
     }
 
     #[test]
+    fn empty_component_shapes_and_matrix_rows_are_preserved() {
+        let empty_matrix = Value::Tensor(Tensor::new(vec![], vec![0, 3]).unwrap());
+        let constructed =
+            futures::executor::block_on(calendar_duration_builtin(vec![empty_matrix.clone()]))
+                .unwrap();
+        let (months, days) = calendar_duration_tensors_from_value(&constructed).unwrap();
+        assert_eq!(months.shape, vec![0, 1]);
+        assert_eq!(days.shape, vec![0, 1]);
+
+        let unit = futures::executor::block_on(caldays_builtin(empty_matrix)).unwrap();
+        let (months, days) = calendar_duration_tensors_from_value(&unit).unwrap();
+        assert_eq!(months.shape, vec![0, 3]);
+        assert_eq!(days.shape, vec![0, 3]);
+        let Value::Tensor(extracted) = futures::executor::block_on(caldays_builtin(unit)).unwrap()
+        else {
+            panic!("expected empty numeric tensor")
+        };
+        assert_eq!(extracted.shape, vec![0, 3]);
+
+        let empty_component = Value::Tensor(Tensor::new(vec![], vec![0, 2]).unwrap());
+        let value = futures::executor::block_on(calendar_duration_builtin(vec![
+            empty_component.clone(),
+            Value::Num(1.0),
+            Value::Num(2.0),
+        ]))
+        .unwrap();
+        assert_eq!(
+            calendar_duration_tensors_from_value(&value)
+                .unwrap()
+                .0
+                .shape,
+            vec![0, 2]
+        );
+        assert!(futures::executor::block_on(calendar_duration_builtin(vec![
+            empty_component,
+            Value::Tensor(Tensor::new(vec![], vec![0, 3]).unwrap()),
+            Value::Num(2.0)
+        ]))
+        .is_err());
+    }
+
+    #[test]
     fn matlab_mode_rejects_runmat_constructor_shortcuts() {
         let _mode = crate::compatibility::push_runmat_extensions_enabled(false);
         assert!(futures::executor::block_on(calendar_duration_builtin(vec![])).is_err());
@@ -302,11 +373,84 @@ mod tests {
             Value::Num(3.0)
         ]))
         .is_err());
-        assert!(futures::executor::block_on(calendar_duration_builtin(vec![
+        let standard = futures::executor::block_on(calendar_duration_builtin(vec![
             Value::Num(1.0),
             Value::Num(2.0),
-            Value::Num(3.0)
+            Value::Num(3.0),
         ]))
-        .is_ok());
+        .unwrap();
+        assert!(
+            futures::executor::block_on(calendar_duration_builtin(vec![standard.clone()])).is_err()
+        );
+        for count in [4, 5] {
+            assert!(futures::executor::block_on(calendar_duration_builtin(vec![
+                Value::Num(1.0);
+                count
+            ]))
+            .is_err());
+        }
+        drop(_mode);
+        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for count in [4, 5] {
+            assert!(futures::executor::block_on(calendar_duration_builtin(vec![
+                Value::Num(1.0);
+                count
+            ]))
+            .is_ok());
+        }
+        assert!(futures::executor::block_on(calendar_duration_builtin(vec![standard])).is_ok());
+    }
+
+    #[test]
+    fn resident_inputs_gate_before_access_and_use_the_owner_in_runmat_mode() {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let resident = Value::GpuTensor(allocation.handle.clone());
+        {
+            let _mode = crate::compatibility::push_runmat_extensions_enabled(false);
+            let attempts = [
+                futures::executor::block_on(caldays_builtin(resident.clone())),
+                futures::executor::block_on(calweeks_builtin(resident.clone())),
+                futures::executor::block_on(calmonths_builtin(resident.clone())),
+                futures::executor::block_on(calquarters_builtin(resident.clone())),
+                futures::executor::block_on(calyears_builtin(resident.clone())),
+                futures::executor::block_on(calendar_duration_builtin(vec![resident.clone()])),
+            ];
+            for result in attempts {
+                assert_eq!(
+                    result.unwrap_err().identifier(),
+                    Some("RunMat:compatibility:DatetimeGpuInputExtension")
+                );
+            }
+            assert_eq!(
+                iscalendarduration_builtin(resident).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(allocation.probe.retirements(), 0);
+        }
+        allocation.handle.release().unwrap();
+
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let values = [2.0, 3.0];
+            let shape = [1, 2];
+            let handle = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &values,
+                    shape: &shape,
+                })
+                .unwrap();
+            let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
+            let result =
+                futures::executor::block_on(calmonths_builtin(Value::GpuTensor(handle))).unwrap();
+            let (months, days) = calendar_duration_tensors_from_value(&result).unwrap();
+            assert_eq!(months.materialize_f64(), vec![2.0, 3.0]);
+            assert_eq!(days.materialize_f64(), vec![0.0, 0.0]);
+        });
     }
 }

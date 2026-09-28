@@ -78,6 +78,14 @@ pub(super) fn calendar_duration_unit_value(
 ) -> BuiltinResult<Value> {
     if is_calendar_duration_object(&value) {
         let (months, days) = calendar_duration_tensors_from_value(&value)?;
+        if months.len() == 0 || days.len() == 0 {
+            if months.len() != 0 || days.len() != 0 || months.shape != days.shape {
+                return Err(datetime_error(format!(
+                    "{unit_name}: calendarDuration components must have matching sizes"
+                )));
+            }
+            return tensor_or_scalar(Vec::new(), months.shape);
+        }
         let (month_data, day_data, shape) =
             tensor::binary_numeric_tensors(&months, &days, unit_name, BUILTIN_NAME)?;
         let data = month_data
@@ -94,9 +102,15 @@ pub(super) fn calendar_duration_unit_value(
         return tensor_or_scalar(data, shape);
     }
 
-    let numeric = component_tensor(value, unit_name)?;
+    let numeric = if matches!(value, Value::Bool(_) | Value::LogicalArray(_)) {
+        let tensor = tensor::value_into_tensor_for(unit_name, value)
+            .map_err(|message| datetime_error(format!("{unit_name}: {message}")))?;
+        normalize_component_tensor(tensor, unit_name)?
+    } else {
+        component_tensor(value, unit_name)?
+    };
     let values = tensor::tensor_values_f64_cow(&numeric);
-    let shape = tensor::default_shape_for(&numeric.shape, values.len());
+    let shape = numeric.shape.clone();
     let mut months = Vec::with_capacity(values.len());
     let mut days = Vec::with_capacity(values.len());
     for value in values.iter().copied() {
