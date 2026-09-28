@@ -104,7 +104,7 @@ pub const WITH_TEXT_OUTPUT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     }],
 };
 pub const ADD_PLUGIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor { signatures: &[BuiltinSignatureDescriptor { label: "runner = addPlugin(runner, plugin)", inputs: RUNNER_AND_PLUGIN, outputs: RUNNER_OUTPUT }], output_mode: BuiltinOutputMode::Fixed, completion_policy: BuiltinCompletionPolicy::MethodOnly, errors: &[BuiltinErrorDescriptor { code: "RM.TESTING.RUNNER_PLUGIN", identifier: Some("RunMat:Testing:InvalidRunner"), when: "The receiver is not a TestRunner handle, the plugin is incompatible, or plugin storage cannot be updated.", message: "addPlugin requires a TestRunner handle and TestRunnerPlugin" }] };
-pub const RUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+pub const TEST_RUNNER_RUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
         label: "results = run(runner, suite)",
         inputs: RUNNER_AND_SUITE,
@@ -211,10 +211,10 @@ pub const ADD_PLUGIN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     &[EffectKind::EnvironmentWrite, EffectKind::MayThrow],
     &[],
 );
-pub const RUN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
+pub const TEST_RUNNER_RUN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     "matlab.unittest.TestRunner.run",
     documentation::RUN,
-    &RUN_DESCRIPTOR,
+    &TEST_RUNNER_RUN_DESCRIPTOR,
     inference::run,
     BuiltinAsyncBehavior::MaySuspend,
     BuiltinPurity::Impure,
@@ -233,5 +233,5 @@ pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &FUNCTIONTESTS_CATALOG_ENTRY,
     &WITH_TEXT_OUTPUT_CATALOG_ENTRY,
     &ADD_PLUGIN_CATALOG_ENTRY,
-    &RUN_CATALOG_ENTRY,
+    &TEST_RUNNER_RUN_CATALOG_ENTRY,
 ];

@@ -7,7 +7,10 @@ mod erase;
 mod erase_punctuation;
 mod erase_urls;
 mod erasebetween;
+mod lower;
 mod strjoin;
+mod strtrim;
+mod upper;
 
 pub use self::append::*;
 pub use self::deblank::*;
@@ -15,7 +18,10 @@ pub use self::erase::*;
 pub use self::erase_punctuation::*;
 pub use self::erase_urls::*;
 pub use self::erasebetween::*;
+pub use self::lower::*;
 pub use self::strjoin::*;
+pub use self::strtrim::*;
+pub use self::upper::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(append::ENTRIES.iter().copied());
@@ -24,5 +30,8 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(erase_punctuation::ENTRIES.iter().copied());
     values.extend(erase_urls::ENTRIES.iter().copied());
     values.extend(erasebetween::ENTRIES.iter().copied());
+    values.extend(lower::ENTRIES.iter().copied());
     values.extend(strjoin::ENTRIES.iter().copied());
+    values.extend(strtrim::ENTRIES.iter().copied());
+    values.extend(upper::ENTRIES.iter().copied());
 }

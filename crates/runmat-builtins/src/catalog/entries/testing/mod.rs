@@ -3,17 +3,23 @@
 
 mod constraints;
 mod diagnostics;
+mod execution;
 mod fixtures;
+mod plugins;
 mod qualifications;
 
 pub use self::constraints::*;
 pub use self::diagnostics::*;
+pub use self::execution::*;
 pub use self::fixtures::*;
+pub use self::plugins::*;
 pub use self::qualifications::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(constraints::ENTRIES.iter().copied());
     values.extend(diagnostics::ENTRIES.iter().copied());
+    values.extend(execution::ENTRIES.iter().copied());
     values.extend(fixtures::ENTRIES.iter().copied());
+    values.extend(plugins::ENTRIES.iter().copied());
     values.extend(qualifications::ENTRIES.iter().copied());
 }

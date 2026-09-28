@@ -77,8 +77,12 @@ pub(crate) fn contains_numeric_or_resident_text_input(value: &Value) -> bool {
         | Value::ComplexTensor(_)
         | Value::Symbolic(_)
         | Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_resident_text_input),
-        Value::StructArray(array) => array.any_value(contains_resident_text_input),
+        Value::Cell(_)
+        | Value::Struct(_)
+        | Value::StructArray(_)
+        | Value::Object(_)
+        | Value::Closure(_)
+        | Value::OutputList(_) => contains_resident_text_input(value),
         _ => false,
     }
 }
@@ -161,6 +165,18 @@ pub(crate) mod tests {
             )
             .unwrap();
         let resident = Value::GpuTensor(allocation.handle.clone());
+        let mut direct_struct = runmat_value::StructValue::new();
+        direct_struct.insert("payload", resident.clone());
+        assert!(contains_numeric_or_resident_text_input(&Value::Struct(
+            direct_struct
+        )));
+        let mut object = runmat_value::ObjectInstance::new("TextFixture".to_string());
+        object
+            .properties
+            .insert("payload".to_string(), resident.clone());
+        assert!(contains_numeric_or_resident_text_input(&Value::Object(
+            object
+        )));
         let mut first = runmat_value::StructValue::new();
         first.insert("payload", resident);
         let mut second = runmat_value::StructValue::new();

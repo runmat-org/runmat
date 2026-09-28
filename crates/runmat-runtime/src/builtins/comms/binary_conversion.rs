@@ -60,6 +60,10 @@ fn conversion_error(builtin: &'static str, message: impl Into<String>) -> Runtim
     build_runtime_error(message).with_builtin(builtin).build()
 }
 
+fn vector_or_scalar_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
+    Type::tensor()
+}
+
 fn char_matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::String
 }

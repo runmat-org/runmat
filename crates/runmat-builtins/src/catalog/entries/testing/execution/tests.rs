@@ -30,7 +30,7 @@ fn suite_and_results_retain_classes_but_not_a_fabricated_test_count() {
 
     let run = inference::run(
         &call(vec![unknown(), suite.outputs[0].clone()], 1),
-        &RUN_CATALOG_ENTRY,
+        &TEST_RUNNER_RUN_CATALOG_ENTRY,
     );
     assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
     assert_eq!(run.outputs[0].shape, ShapeFact::from(vec![Some(1), None]));
@@ -95,12 +95,13 @@ fn proven_invalid_forms_report_diagnostics_without_guessing_runtime_outcomes() {
     .diagnostics
     .iter()
     .any(|item| item.code == "RM-TESTING-RUNNER-RECEIVER"));
-    assert!(
-        inference::run(&call(vec![number, unknown()], 1), &RUN_CATALOG_ENTRY)
-            .diagnostics
-            .iter()
-            .any(|item| item.code == "RM-TESTING-RUNNER-RECEIVER")
-    );
+    assert!(inference::run(
+        &call(vec![number, unknown()], 1),
+        &TEST_RUNNER_RUN_CATALOG_ENTRY
+    )
+    .diagnostics
+    .iter()
+    .any(|item| item.code == "RM-TESTING-RUNNER-RECEIVER"));
 }
 
 #[test]
