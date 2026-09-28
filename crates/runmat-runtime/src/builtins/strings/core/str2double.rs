@@ -1,12 +1,8 @@
 //! MATLAB-compatible `str2double` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use std::borrow::Cow;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Tensor, Value};
 
@@ -17,8 +13,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
-use crate::builtins::strings::type_resolvers::numeric_text_scalar_or_tensor_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use runmat_builtins::{
+    STR2DOUBLE_DESCRIPTOR, STR2DOUBLE_ERROR_INTERNAL, STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT,
+    STR2DOUBLE_ERROR_INVALID_INPUT, STR2DOUBLE_ERROR_TOO_MANY_OUTPUTS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::str2double")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -33,7 +32,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Parses text on the CPU; GPU-resident inputs are gathered before conversion.",
+    notes: "Parses text on the CPU; numeric GPU-resident inputs reject before provider access.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::str2double")]
@@ -48,69 +47,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "str2double";
-
-const STR2DOUBLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Parsed double values; invalid parses become NaN.",
-}];
-
-const STR2DOUBLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String, character, or cell-array text input to parse.",
-}];
-
-const STR2DOUBLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "X = str2double(str)",
-    inputs: &STR2DOUBLE_INPUT,
-    outputs: &STR2DOUBLE_OUTPUT,
-}];
-
-const STR2DOUBLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2DOUBLE.INVALID_INPUT",
-    identifier: Some("RunMat:str2double:InvalidInput"),
-    when: "Input is not a supported text container.",
-    message: "str2double: input must be a string array, character array, or cell array of character vectors",
-};
-
-const STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2DOUBLE.INVALID_CELL_ELEMENT",
-    identifier: Some("RunMat:str2double:InvalidCellElement"),
-    when: "Cell array contains non-text or non-scalar text entries.",
-    message: "str2double: cell array elements must be character vectors or string scalars",
-};
-
-const STR2DOUBLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2DOUBLE.INTERNAL",
-    identifier: Some("RunMat:str2double:InternalError"),
-    when: "Internal tensor assembly failed while building parsed output.",
-    message: "str2double: internal error",
-};
-
-const STR2DOUBLE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    STR2DOUBLE_ERROR_INVALID_INPUT,
-    STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT,
-    STR2DOUBLE_ERROR_INTERNAL,
-];
-
-pub const STR2DOUBLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STR2DOUBLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STR2DOUBLE_ERRORS,
-};
-
-pub const STR2DOUBLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "str2double parses string, character, or cellstr input and returns double. Integer, numeric, and provider-resident numeric inputs reject before provider access rather than being implicitly converted to text.",
-    };
 
 fn str2double_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     str2double_error_with_message(error.message, error)
@@ -133,16 +69,15 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "str2double",
-    category = "strings/core",
-    summary = "Convert text representations of numbers into double-precision values.",
-    keywords = "str2double,string to double,text conversion,gpu",
-    accel = "sink",
-    type_resolver(numeric_text_scalar_or_tensor_type),
-    descriptor(crate::builtins::strings::core::str2double::STR2DOUBLE_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::str2double::STR2DOUBLE_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
 async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &STR2DOUBLE_DESCRIPTOR,
+        &STR2DOUBLE_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if contains_numeric_or_resident_text_input(&value) {
         return Err(str2double_error(&STR2DOUBLE_ERROR_INVALID_INPUT));
     }
@@ -244,7 +179,6 @@ fn parse_numeric_scalar(text: &str) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn str2double_builtin(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::str2double_builtin(value))
@@ -388,11 +322,4 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn str2double_type_is_numeric_text_scalar_or_tensor() {
-        assert_eq!(
-            numeric_text_scalar_or_tensor_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::Num
-        );
-    }
 }
