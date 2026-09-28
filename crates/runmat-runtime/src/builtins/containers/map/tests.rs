@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::common::{gpu_helpers, test_support};
 use futures::executor::block_on;
-use runmat_value::IntegerStorage;
+use runmat_value::{IntegerStorage, NumericDType};
 
 pub(super) fn error_message(err: crate::RuntimeError) -> String {
     err.message.clone()

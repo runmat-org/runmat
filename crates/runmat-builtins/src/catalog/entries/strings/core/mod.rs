@@ -2,9 +2,21 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod genvarname;
+mod strcmp;
+mod strcmpi;
+mod strlength;
+mod strncmp;
 
 pub use genvarname::*;
+pub use strcmp::*;
+pub use strcmpi::*;
+pub use strlength::*;
+pub use strncmp::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(genvarname::ENTRIES.iter().copied());
+    values.extend(strcmp::ENTRIES.iter().copied());
+    values.extend(strcmpi::ENTRIES.iter().copied());
+    values.extend(strlength::ENTRIES.iter().copied());
+    values.extend(strncmp::ENTRIES.iter().copied());
 }

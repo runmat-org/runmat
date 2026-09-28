@@ -19,7 +19,9 @@ fn nested_resident_inputs_are_gated_before_provider_access() {
     object.properties.insert("payload".into(), resident.clone());
     let nested = [
         Value::Struct(structure.clone()),
-        Value::StructArray(StructArray::new(vec![structure], vec![1, 1]).unwrap()),
+        Value::StructArray(
+            StructArray::new(vec![structure.clone(), structure], vec![1, 2]).unwrap(),
+        ),
         Value::Object(object.clone()),
         Value::ObjectArray(
             ObjectArray::row("TestResidentContainer", vec![Value::Object(object)]).unwrap(),
@@ -44,6 +46,7 @@ fn nested_resident_inputs_are_gated_before_provider_access() {
         }));
     }
     assert_eq!(allocation.probe.retirements(), 0);
+    drop(resident);
     allocation.handle.release().unwrap();
     assert_eq!(allocation.probe.retirements(), 1);
 }

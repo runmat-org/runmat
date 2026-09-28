@@ -45,7 +45,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Create key-value dictionary objects in MATLAB and RunMat.",
     description: "`containers.Map` creates host-resident handle objects that associate unique character or real numeric keys with values. Public key types are `char`, `double`, `single`, `int32`, `uint32`, `int64`, and `uint64`; declared value types include `any`, `char`, `logical`, both floating classes, and all eight integer classes.",
     keywords: &["containers.Map", "map", "dictionary", "hash map", "lookup"],
-    related: &["keys", "values", "isKey", "remove", "length"],
+    related: &["containers.Map.keys", "containers.Map.values", "containers.Map.isKey", "containers.Map.remove", "length"],
     sections: SECTIONS,
     examples: EXAMPLES,
     example_exemption: None,
