@@ -80,7 +80,15 @@ mod tests {
 
     #[test]
     fn equality_constraint_rejects_missing_and_extra_inputs() {
-        for args in [vec![], vec![Value::Bool(true), Value::Bool(false)]] {
+        for args in [
+            vec![],
+            vec![Value::Bool(true), Value::Bool(false)],
+            vec![
+                Value::String("A".into()),
+                Value::String("IgnoringCase".into()),
+                Value::Bool(true),
+            ],
+        ] {
             let error = is_equal_to(args).unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidConstraint"));
         }
