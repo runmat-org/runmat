@@ -8,7 +8,7 @@ const REGEXPI_OUTPUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor 
     description: "Primary regexpi output (depends on options and requested output count).",
 }];
 
-const REGEXPI_OUTPUT_MULTI: [BuiltinParamDescriptor; 6] = [
+const REGEXPI_OUTPUT_MULTI: [BuiltinParamDescriptor; 7] = [
     BuiltinParamDescriptor {
         name: "start",
         ty: BuiltinParamType::Any,
@@ -22,6 +22,13 @@ const REGEXPI_OUTPUT_MULTI: [BuiltinParamDescriptor; 6] = [
         arity: BuiltinParamArity::Optional,
         default: None,
         description: "1-based inclusive match end indices.",
+    },
+    BuiltinParamDescriptor {
+        name: "token_extents",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "1-based start and end indices of capture tokens.",
     },
     BuiltinParamDescriptor {
         name: "match",
@@ -106,7 +113,7 @@ const REGEXPI_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
         outputs: &REGEXPI_OUTPUT_ANY,
     },
     BuiltinSignatureDescriptor {
-        label: "[start,end_idx,match,tokens,names,split] = regexpi(subject, pattern, options...)",
+        label: "[start,end_idx,token_extents,match,tokens,names,split] = regexpi(subject, pattern, options...)",
         inputs: &REGEXPI_INPUTS_OPTIONS,
         outputs: &REGEXPI_OUTPUT_MULTI,
     },

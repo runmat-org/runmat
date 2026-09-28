@@ -56,6 +56,18 @@ async fn regexpi_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let evaluation = evaluate(subject, pattern, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let mut outputs = evaluation.outputs_for_multi()?;
+        if outputs.len() > out_count {
+            outputs.truncate(out_count);
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count, outputs,
+        ));
+    }
     let mut outputs = evaluation.outputs_for_single()?;
     if outputs.is_empty() {
         return Ok(Value::Num(0.0));
@@ -112,7 +124,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"out = regexpi(subject, pattern)"));
         assert!(labels.contains(&"out = regexpi(subject, pattern, options...)"));
         assert!(labels.contains(
-            &"[start,end_idx,match,tokens,names,split] = regexpi(subject, pattern, options...)"
+            &"[start,end_idx,token_extents,match,tokens,names,split] = regexpi(subject, pattern, options...)"
         ));
     }
 
@@ -202,6 +214,37 @@ pub(crate) mod tests {
                 assert_eq!(entry, &Value::String("Bar".into()));
             }
             other => panic!("unexpected builtin output {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexpi_default_third_output_is_token_extents() {
+        let _output_count = crate::output_count::push_output_count(Some(3));
+        let result = run_regexpi_builtin(
+            Value::String("AB12".into()),
+            Value::String("([a-z]+)(\\d+)".into()),
+            Vec::new(),
+        )
+        .unwrap();
+        match result {
+            Value::OutputList(outputs) => {
+                assert_eq!(outputs.len(), 3);
+                match &outputs[2] {
+                    Value::Cell(matches) => {
+                        assert_eq!(matches.data.len(), 1);
+                        match &matches.data[0] {
+                            Value::Tensor(extents) => {
+                                assert_eq!(extents.shape, vec![2, 2]);
+                                assert_eq!(extents.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
+                            }
+                            other => panic!("expected token extents, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected token extent cell, got {other:?}"),
+                }
+            }
+            other => panic!("expected output list, got {other:?}"),
         }
     }
 

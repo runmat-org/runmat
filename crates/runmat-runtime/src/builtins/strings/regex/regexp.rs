@@ -151,7 +151,7 @@ impl RegexpOptions {
         let mut force_cell_output = false;
         let mut case_insensitive = false;
         let mut multi_line = false;
-        let mut dot_all = false;
+        let mut dot_all = true;
         let mut idx = 0usize;
         while idx < rest.len() {
             let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
@@ -174,62 +174,33 @@ impl RegexpOptions {
                 "ignorecase" => case_insensitive = true,
                 "matchcase" => case_insensitive = false,
                 "lineanchors" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'lineanchors'"),
-                        )
-                    })?;
-                    multi_line = flag;
-                    idx += 1;
+                    let flag = parse_on_off(rest.get(idx));
+                    multi_line = flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "dotall" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'dotall'"),
-                        )
-                    })?;
-                    dot_all = flag;
-                    idx += 1;
+                    let flag = parse_on_off(rest.get(idx));
+                    dot_all = flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "dotexceptnewline" => {
-                    let flag = parse_on_off(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'on' or 'off' after 'dotExceptNewline'"),
-                        )
-                    })?;
-                    dot_all = !flag;
-                    idx += 1;
+                    let flag = parse_on_off(rest.get(idx));
+                    dot_all = !flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "emptymatch" => {
-                    let policy = rest.get(idx).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
-                        )
-                    })?;
-                    let policy_str = value_to_lower_string(policy).ok_or_else(|| {
-                        runtime_error_for(
-                            builtin,
-                            format!("{builtin}: expected 'allow' or 'remove' after 'emptymatch'"),
-                        )
-                    })?;
-                    idx += 1;
-                    match policy_str.as_str() {
-                        "allow" => emptymatch = EmptyMatchPolicy::Allow,
-                        "remove" => emptymatch = EmptyMatchPolicy::Remove,
-                        other => {
-                            return Err(runtime_error_for(
-                                builtin,
-                                format!(
-                                    "{builtin}: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
-                                ),
-                            ))
+                    emptymatch = EmptyMatchPolicy::Allow;
+                    match rest.get(idx).and_then(value_to_lower_string).as_deref() {
+                        Some("allow") => idx += 1,
+                        Some("remove") => {
+                            emptymatch = EmptyMatchPolicy::Remove;
+                            idx += 1;
                         }
+                        _ => {}
                     }
                 }
+                "noemptymatch" => emptymatch = EmptyMatchPolicy::Remove,
+                "stringanchors" => multi_line = false,
                 "warnings" => {
                     // MATLAB accepts 'on'/'off' here but RunMat currently ignores it.
                     if rest.get(idx).is_some() {
@@ -500,9 +471,7 @@ impl RegexpEvaluation {
         if options.multi_line {
             builder.multi_line(true);
         }
-        if options.dot_all {
-            builder.dot_matches_new_line(true);
-        }
+        builder.dot_matches_new_line(options.dot_all);
         let regex = builder
             .build()
             .map_err(|e| runtime_error_for(builtin, format!("{builtin}: {e}")))?;
@@ -512,10 +481,11 @@ impl RegexpEvaluation {
                 named_groups.push(name.to_string());
             }
         }
-        let compute_splits = options
-            .outputs
-            .iter()
-            .any(|spec| matches!(spec, OutputSpec::Split));
+        let compute_splits = options.outputs.is_empty()
+            || options
+                .outputs
+                .iter()
+                .any(|spec| matches!(spec, OutputSpec::Split));
         let mut data = Vec::with_capacity(subjects.entries.len());
         for text in &subjects.entries {
             let subject_data =
@@ -553,7 +523,15 @@ impl RegexpEvaluation {
 
     pub fn outputs_for_multi(&self) -> BuiltinResult<Vec<Value>> {
         let specs = if self.options.outputs.is_empty() {
-            vec![OutputSpec::Start, OutputSpec::End, OutputSpec::Match]
+            vec![
+                OutputSpec::Start,
+                OutputSpec::End,
+                OutputSpec::TokenExtents,
+                OutputSpec::Match,
+                OutputSpec::Tokens,
+                OutputSpec::Names,
+                OutputSpec::Split,
+            ]
         } else {
             self.options.outputs.clone()
         };
@@ -965,7 +943,7 @@ pub(crate) mod tests {
         assert!(labels.contains(&"out = regexp(subject, pattern)"));
         assert!(labels.contains(&"out = regexp(subject, pattern, options...)"));
         assert!(labels.contains(
-            &"[start,end_idx,match,tokens,names,split] = regexp(subject, pattern, options...)"
+            &"[start,end_idx,token_extents,match,tokens,names,split] = regexp(subject, pattern, options...)"
         ));
     }
 
@@ -1187,12 +1165,12 @@ pub(crate) mod tests {
     fn regexp_multi_output_default() {
         let eval = evaluate(
             Value::String("abcabc".into()),
-            Value::String("a.".into()),
+            Value::String("(a.)".into()),
             &[],
         )
         .unwrap();
         let outputs = eval.outputs_for_multi().unwrap();
-        assert_eq!(outputs.len(), 3);
+        assert_eq!(outputs.len(), 7);
         match &outputs[0] {
             Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
             other => panic!("unexpected output {other:?}"),
@@ -1204,9 +1182,72 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(ca) => {
                 assert_eq!(ca.data.len(), 2);
+                for entry in &ca.data {
+                    match entry {
+                        Value::Tensor(t) => assert_eq!(t.shape, vec![1, 2]),
+                        other => panic!("expected token extents, got {other:?}"),
+                    }
+                }
             }
             other => panic!("unexpected output {other:?}"),
         }
+        match &outputs[3] {
+            Value::Cell(ca) => assert_eq!(ca.data.len(), 2),
+            other => panic!("expected match cells, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexp_matlab_option_flags_and_dot_default() {
+        let subject = Value::String("a\nb".into());
+        let pattern = Value::String("a.b".into());
+        let all = evaluate(subject.clone(), pattern.clone(), &[]).unwrap();
+        assert_eq!(all.outputs_for_single().unwrap()[0], Value::Num(1.0));
+
+        let excluding_newline = evaluate(
+            subject.clone(),
+            pattern.clone(),
+            &[Value::String("dotexceptnewline".into())],
+        )
+        .unwrap();
+        assert_ne!(
+            excluding_newline.outputs_for_single().unwrap()[0],
+            Value::Num(1.0)
+        );
+
+        let including_again = evaluate(
+            subject,
+            pattern,
+            &[
+                Value::String("dotexceptnewline".into()),
+                Value::String("dotall".into()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            including_again.outputs_for_single().unwrap()[0],
+            Value::Num(1.0)
+        );
+
+        let empty = evaluate(
+            Value::String("abc".into()),
+            Value::String("^".into()),
+            &[Value::String("emptymatch".into())],
+        )
+        .unwrap();
+        assert_eq!(empty.outputs_for_single().unwrap()[0], Value::Num(1.0));
+
+        let removed = evaluate(
+            Value::String("abc".into()),
+            Value::String("^".into()),
+            &[
+                Value::String("emptymatch".into()),
+                Value::String("noemptymatch".into()),
+            ],
+        )
+        .unwrap();
+        assert_ne!(removed.outputs_for_single().unwrap()[0], Value::Num(1.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

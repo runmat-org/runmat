@@ -138,7 +138,7 @@ impl RegexprepOptions {
     fn parse(builtin: &'static str, rest: &[Value]) -> BuiltinResult<Self> {
         let mut case_insensitive = false;
         let mut multi_line = false;
-        let mut dot_all = false;
+        let mut dot_all = true;
         let mut once = false;
         let mut nth = None;
         let mut emptymatch = EmptyMatchPolicy::Remove;
@@ -161,55 +161,34 @@ impl RegexprepOptions {
                 "ignorecase" => case_insensitive = true,
                 "matchcase" => case_insensitive = false,
                 "lineanchors" => {
-                    let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected logical or 'on'/'off' after 'lineanchors'"
-                        ))
-                    })?;
-                    multi_line = flag;
-                    idx += 1;
+                    let flag = parse_toggle(rest.get(idx));
+                    multi_line = flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "dotall" => {
-                    let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected logical or 'on'/'off' after 'dotall'"
-                        ))
-                    })?;
-                    dot_all = flag;
-                    idx += 1;
+                    let flag = parse_toggle(rest.get(idx));
+                    dot_all = flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "dotexceptnewline" => {
-                    let flag = parse_toggle(rest.get(idx)).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected logical or 'on'/'off' after 'dotExceptNewline'"
-                        ))
-                    })?;
-                    dot_all = !flag;
-                    idx += 1;
+                    let flag = parse_toggle(rest.get(idx));
+                    dot_all = !flag.unwrap_or(true);
+                    idx += usize::from(flag.is_some());
                 }
                 "once" => once = true,
                 "emptymatch" => {
-                    let value = rest.get(idx).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected 'allow' or 'remove' after 'emptymatch'"
-                        ))
-                    })?;
-                    let policy = value_to_lower_string(value).ok_or_else(|| {
-                        runtime_error_for(format!(
-                            "{builtin}: expected 'allow' or 'remove' after 'emptymatch'"
-                        ))
-                    })?;
-                    idx += 1;
-                    match policy.as_str() {
-                        "allow" => emptymatch = EmptyMatchPolicy::Allow,
-                        "remove" => emptymatch = EmptyMatchPolicy::Remove,
-                        other => {
-                            return Err(runtime_error_for(format!(
-                                "{builtin}: invalid emptymatch policy '{other}', expected 'allow' or 'remove'"
-                            )))
+                    emptymatch = EmptyMatchPolicy::Allow;
+                    match rest.get(idx).and_then(value_to_lower_string).as_deref() {
+                        Some("allow") => idx += 1,
+                        Some("remove") => {
+                            emptymatch = EmptyMatchPolicy::Remove;
+                            idx += 1;
                         }
+                        _ => {}
                     }
                 }
+                "noemptymatch" => emptymatch = EmptyMatchPolicy::Remove,
+                "stringanchors" => multi_line = false,
                 "preservecase" => {
                     if idx < rest.len() {
                         if let Some(flag) = parse_toggle(rest.get(idx)) {
@@ -633,9 +612,7 @@ fn compile_regex(
     if options.multi_line {
         builder.multi_line(true);
     }
-    if options.dot_all {
-        builder.dot_matches_new_line(true);
-    }
+    builder.dot_matches_new_line(options.dot_all);
     builder
         .build()
         .map(Arc::new)
@@ -1235,6 +1212,49 @@ pub(crate) mod tests {
         )
         .expect("regexprep");
         assert_eq!(allowed, Value::String("Xabc".into()));
+
+        let allowed_flag = run_regexprep(
+            Value::String("abc".into()),
+            Value::String("^".into()),
+            Value::String("X".into()),
+            vec![Value::String("emptymatch".into())],
+        )
+        .expect("standalone emptymatch");
+        assert_eq!(allowed_flag, Value::String("Xabc".into()));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexprep_dot_matches_newline_by_default_and_option_overrides() {
+        let subject = Value::String("a\nb".into());
+        let pattern = Value::String("a.b".into());
+        let replacement = Value::String("HIT".into());
+        let default = run_regexprep(
+            subject.clone(),
+            pattern.clone(),
+            replacement.clone(),
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(default, Value::String("HIT".into()));
+
+        let excluding_newline = run_regexprep(
+            subject.clone(),
+            pattern.clone(),
+            replacement.clone(),
+            vec![Value::String("dotexceptnewline".into())],
+        )
+        .unwrap();
+        assert_eq!(excluding_newline, subject);
+
+        let explicit_off = run_regexprep(
+            Value::String("a\nb".into()),
+            pattern,
+            replacement,
+            vec![Value::String("dotall".into()), Value::Bool(false)],
+        )
+        .unwrap();
+        assert_eq!(explicit_off, Value::String("a\nb".into()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

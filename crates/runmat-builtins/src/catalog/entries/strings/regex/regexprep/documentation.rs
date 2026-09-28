@@ -5,8 +5,9 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "With scalar text inputs, the result is a scalar of the same kind (`char` inputs stay `char`, string scalars stay string scalars).",
         "String arrays and cell arrays are processed element-wise and produce containers with matching shapes. When patterns and replacements are provided as arrays of the same size, they are paired element-by-element; otherwise, scalar patterns/replacements broadcast to every element.",
         "Cell or string arrays of patterns apply sequentially: each `(pattern, replacement)` pair is applied in order to every element.",
-        "The `'once'` flag limits each element to the first match. `'emptymatch','remove'` (default) skips zero-length matches, while `'emptymatch','allow'` lets them participate.",
-        "`'ignorecase'` and `'matchcase'` control case sensitivity. `'lineanchors'`, `'dotall'`, and `'dotExceptNewline'` toggle multiline and dot behaviours in the same way as `regexp`.",
+        "The `'once'` flag limits each element to the first match. Zero-length matches are skipped by default; `'emptymatch'` includes them, and `'noemptymatch'` restores the default. The older two-argument allow/remove form also works in RunMat.",
+        "`'ignorecase'` and `'matchcase'` control case sensitivity. Dot (`.`) matches newlines by default; `'dotexceptnewline'` excludes them. `'lineanchors'` enables line-boundary matching for `^` and `$`.",
+        "The Rust regex engine does not support MATLAB lookaround, backreferences, atomic groups, or dynamic expressions. Unsupported patterns report an error.",
         "`'preservecase'` adjusts the replacement text so the case pattern of the first match (all upper, all lower, or title case) is preserved.",
         "A positive integer scalar option `N` replaces only the Nth eligible occurrence and accepts every integer class through exact native validation.",
         "Integer values in the subject, pattern, or replacement text roles reject without implicit decimal formatting or provider access.",
@@ -36,7 +37,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
     BuiltinExample {
         id: "example-3", title: "Performing case-insensitive replacements",
-        program: "names = regexprep([\"Alpha\"; \"beta\"; \"GaMmA\"], 'a', '_', 'ignorecase')", display_output: Some("names =\n  3×1 string array\n    \"_lph_\"\n    \"bet_\"\n    \"G__mM_\""),
+        program: "names = regexprep([\"Alpha\"; \"beta\"; \"GaMmA\"], 'a', '_', 'ignorecase')", display_output: Some("names =\n  3×1 string array\n    \"_lph_\"\n    \"bet_\"\n    \"G_Mm_\""),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
@@ -70,7 +71,7 @@ const EXAMPLES: &[BuiltinExample] = &[
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("regexprep"), slug: Some("regexprep"),
-    summary: "Replace text with regular expressions across char, string, and cell-text inputs using MATLAB-compatible rules.", description: "`regexprep(str, pattern, replacement)` searches `str` for regular-expression matches and replaces them with `replacement`. It supports character vectors, string arrays, and cell arrays of text, with MATLAB-compatible container and option semantics.",
+    summary: "Replace text with regular expressions across char, string, and cell-text inputs.", description: "`regexprep(str, pattern, replacement)` replaces regular-expression matches in character vectors, string arrays, and cell arrays of text. Common MATLAB container and option forms are supported; advanced MATLAB pattern syntax is not yet available.",
     keywords: &["regexprep", "regular expression", "replace", "substitute", "regex"],
     related: &["regexp", "regexpi", "strrep", "replace", "contains"],
     sections: SECTIONS, examples: EXAMPLES, example_exemption: None,
@@ -90,5 +91,5 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/regex/regexprep.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "runtime semantics", location: "builtins::strings::regex::regexprep::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "integrated behavior", location: "crates/runmat-vm/tests/integer_label_and_text_control_semantics.rs" }],
         notes: &["Legacy behavior, examples, FAQs, links, source and tested fields are reconciled here. Examples have value assertions; integrated native and browser execution remains to be verified."],
-    }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+    }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
