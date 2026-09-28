@@ -1704,7 +1704,7 @@ mod tests {
 
         let data = block_on(super::de2bi_builtin(Value::Num(1.0 + 5e-10), vec![]))
             .expect_err("fractional data is invalid");
-        assert!(data.to_string().contains("integer values"));
+        assert!(data.to_string().contains("nonnegative integer"));
     }
 
     #[test]

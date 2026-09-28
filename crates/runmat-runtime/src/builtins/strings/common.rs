@@ -16,6 +16,24 @@ pub(crate) fn cell_contains_string(value: &Value) -> bool {
     }
 }
 
+/// Whether an otherwise valid text cell uses RunMat's string-scalar cell extension.
+/// Invalid elements remain for the caller's cell-element validator to diagnose.
+pub(crate) fn cell_has_valid_string_scalar(value: &Value) -> bool {
+    let Value::Cell(cell) = value else {
+        return false;
+    };
+    let mut has_string = false;
+    for element in &cell.data {
+        match element {
+            Value::String(_) => has_string = true,
+            Value::StringArray(array) if array.data.len() == 1 => has_string = true,
+            Value::CharArray(chars) if chars.rows <= 1 => {}
+            _ => return false,
+        }
+    }
+    has_string
+}
+
 /// Canonical display for missing string scalars in MATLAB-compatible output.
 const MISSING_SENTINEL: &str = "<missing>";
 

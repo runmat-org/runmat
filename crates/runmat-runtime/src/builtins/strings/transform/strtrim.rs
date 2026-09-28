@@ -13,7 +13,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+    cell_has_valid_string_scalar, char_row_to_string_slice,
+    contains_numeric_or_resident_text_input, is_missing_string,
 };
 #[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
@@ -93,22 +94,6 @@ async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Cell(cell) => strtrim_cell_array(cell).await,
         _ => Err(strtrim_error(&STRTRIM_ERROR_INVALID_INPUT)),
     }
-}
-
-fn cell_has_valid_string_scalar(value: &Value) -> bool {
-    let Value::Cell(cell) = value else {
-        return false;
-    };
-    let mut has_string = false;
-    for element in &cell.data {
-        match element {
-            Value::String(_) => has_string = true,
-            Value::StringArray(array) if array.data.len() == 1 => has_string = true,
-            Value::CharArray(chars) if chars.rows <= 1 => {}
-            _ => return false,
-        }
-    }
-    has_string
 }
 
 fn strtrim_string_array(array: StringArray) -> BuiltinResult<Value> {
@@ -355,12 +340,12 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn strtrim_invalid_mixed_cell_keeps_input_error() {
+    fn strtrim_invalid_mixed_cell_keeps_element_error() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let cell =
             CellArray::new(vec![Value::String(" a ".into()), Value::Num(1.0)], 1, 2).unwrap();
         let error = run_strtrim(Value::Cell(cell)).expect_err("invalid cell element");
-        assert_eq!(error.identifier(), STRTRIM_ERROR_INVALID_INPUT.identifier);
+        assert_eq!(error.identifier(), STRTRIM_ERROR_CELL_ELEMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

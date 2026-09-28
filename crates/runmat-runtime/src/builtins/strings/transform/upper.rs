@@ -11,7 +11,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::strings::common::{char_row_to_string_slice, uppercase_preserving_missing};
+use crate::builtins::strings::common::{
+    cell_has_valid_string_scalar, char_row_to_string_slice, uppercase_preserving_missing,
+};
 #[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
@@ -88,22 +90,6 @@ async fn upper_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Cell(cell) => upper_cell_array(cell),
         _ => Err(upper_error(&UPPER_ERROR_INVALID_INPUT)),
     }
-}
-
-fn cell_has_valid_string_scalar(value: &Value) -> bool {
-    let Value::Cell(cell) = value else {
-        return false;
-    };
-    let mut has_string = false;
-    for element in &cell.data {
-        match element {
-            Value::String(_) => has_string = true,
-            Value::StringArray(array) if array.data.len() == 1 => has_string = true,
-            Value::CharArray(chars) if chars.rows <= 1 => {}
-            _ => return false,
-        }
-    }
-    has_string
 }
 
 fn upper_string_array(array: StringArray) -> BuiltinResult<Value> {

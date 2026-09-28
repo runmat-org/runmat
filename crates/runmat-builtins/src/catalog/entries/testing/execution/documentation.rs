@@ -68,7 +68,7 @@ pub(super) const FUNCTIONTESTS: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("functiontests"), slug: Some("functiontests"),
     summary: "Create a TestSuite from local function handles.",
     description: "`functiontests(localfunctions)` selects named local functions whose names begin with `test` and creates TestSuite objects; conventional setup and teardown handles are attached to each test.",
-    keywords: &["test", "localfunctions", "function test", "suite"], related: &["localfunctions", "matlab.unittest.TestRunner.run"],
+    keywords: &["test", "localfunctions", "function test", "suite"], related: &["matlab.unittest.TestRunner.run"],
     sections: &[BuiltinDocumentationSection { heading: "Current selection and fixtures", paragraphs: &["Pass a cell array of named function handles. The current implementation recognizes names beginning with `test`, case-insensitively, and `setupOnce`, `teardownOnce`, `setup`, and `teardown` fixtures. It does not yet select test names ending in `test`, which MATLAB also accepts.", "The returned suite records the source file, procedure names and fixture handles. Constructing the suite does not execute the tests; a Core-backed runner resolves the source and records structured outcomes."] }],
     examples: SUITE_EXAMPLES, example_exemption: None, faqs: &[], links: &[BuiltinDocumentationLink { label: "MATLAB functiontests", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/functiontests.html") }], media: &[], evidence: EVIDENCE, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
