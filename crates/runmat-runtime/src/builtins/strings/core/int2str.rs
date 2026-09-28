@@ -1,12 +1,9 @@
 //! MATLAB-compatible `int2str` builtin with GPU-aware host formatting.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, INT2STR_DESCRIPTOR, INT2STR_ERROR_INTERNAL,
+    INT2STR_ERROR_INVALID_INPUT, INT2STR_ERROR_INVALID_OPTION, INT2STR_ERROR_TOO_MANY_OUTPUTS,
+    INT2STR_LOGICAL_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor, Value};
@@ -18,94 +15,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::strings::type_resolvers::string_scalar_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "int2str";
-
-const INT2STR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "chr",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Character array containing the rounded integer text.",
-}];
-
-const INT2STR_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "N",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric or logical scalar, vector, or matrix input.",
-}];
-
-const INT2STR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "chr = int2str(N)",
-    inputs: &INT2STR_INPUT,
-    outputs: &INT2STR_OUTPUT,
-}];
-
-const INT2STR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INT2STR.INVALID_INPUT",
-    identifier: Some("RunMat:int2str:InvalidInput"),
-    when: "Input value is not a supported numeric/logical scalar, vector, or matrix.",
-    message: "int2str: unsupported input type",
-};
-
-const INT2STR_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INT2STR.INVALID_OPTION",
-    identifier: Some("RunMat:int2str:InvalidOption"),
-    when: "Arguments are malformed or too many were supplied.",
-    message: "int2str: invalid option arguments",
-};
-
-const INT2STR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.INT2STR.INTERNAL",
-    identifier: Some("RunMat:int2str:InternalError"),
-    when: "Internal char-array assembly failed.",
-    message: "int2str: internal error",
-};
-
-const INT2STR_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    INT2STR_ERROR_INVALID_INPUT,
-    INT2STR_ERROR_INVALID_OPTION,
-    INT2STR_ERROR_INTERNAL,
-];
-
-pub const INT2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &INT2STR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &INT2STR_ERRORS,
-};
-
-const INT2STR_LOGICAL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "int2str-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "int2str with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Int2strLogicalInputExtension"),
-};
-pub const INT2STR_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INT2STR_LOGICAL_EXTENSION];
-
-const INT2STR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "N",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Every integer class is formatted directly from authoritative storage, including wide values above flintmax.",
-    }];
-pub const INT2STR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "chr = int2str(integer_N)",
-        inputs: &INT2STR_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Integer text is exact and the result is a host character array. Documented gpuArray input is downloaded through its owner because int2str does not execute on the GPU.",
-    }];
 
 fn int2str_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     int2str_error_with_message(error.message, error)
@@ -156,17 +68,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "int2str",
-    category = "strings/core",
-    summary = "Convert rounded integer values to a character array.",
-    keywords = "int2str,integer to string,number to string,round",
-    examples = "chr = int2str([5 10 20; 100 200 400]);",
-    type_resolver(string_scalar_type),
-    descriptor(crate::builtins::strings::core::int2str::INT2STR_DESCRIPTOR),
-    extensions(crate::builtins::strings::core::int2str::INT2STR_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::core::int2str::INT2STR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::int2str"
 )]
 async fn int2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &INT2STR_DESCRIPTOR,
+        &INT2STR_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if !rest.is_empty() {
         return Err(int2str_error_with_message(
             "int2str: too many input arguments",
@@ -494,7 +404,6 @@ fn char_array(data: Vec<char>, rows: usize, cols: usize) -> BuiltinResult<CharAr
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, LogicalArray};
 
     fn int2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -653,13 +562,5 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).expect("tensor");
         let err = error_message(int2str_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err());
         assert!(err.contains("scalar, vector, or 2-D matrix"));
-    }
-
-    #[test]
-    fn int2str_type_is_string_scalar() {
-        assert_eq!(
-            string_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
     }
 }
