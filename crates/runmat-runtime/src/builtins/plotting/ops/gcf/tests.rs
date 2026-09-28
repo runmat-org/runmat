@@ -25,6 +25,9 @@ fn gcf_creates_once_preserves_selection_and_recreates_after_close() {
     let axes = state::current_axes_state();
     let axes_handles = state::axes_handles_for_figure(handle).unwrap();
     let revision = state::current_figure_revision(handle);
+    let events_before_gcf = events.lock().unwrap().clone();
+    assert_eq!(events_before_gcf.first(), Some(&(handle, FigureEventKind::Created)));
+    assert_eq!(events_before_gcf.last(), Some(&(handle, FigureEventKind::Updated)));
     assert_eq!(gcf_builtin().unwrap(), first);
     assert_eq!(state::current_axes_state().active_index, axes.active_index);
     assert_eq!(state::current_figure_revision(handle), revision);
@@ -32,10 +35,7 @@ fn gcf_creates_once_preserves_selection_and_recreates_after_close() {
         state::axes_handles_for_figure(handle).unwrap(),
         axes_handles
     );
-    assert_eq!(
-        *events.lock().unwrap(),
-        vec![(handle, FigureEventKind::Created)]
-    );
+    assert_eq!(*events.lock().unwrap(), events_before_gcf);
 
     let other = state::new_figure_handle();
     let before = events.lock().unwrap().len();
