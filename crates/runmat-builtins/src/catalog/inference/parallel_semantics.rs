@@ -78,11 +78,6 @@ pub(super) fn infer_parallel_data(
         | ParallelInferenceRule::Codistributed
         | ParallelInferenceRule::CodistributedBuild
         | ParallelInferenceRule::Receive => ValueFact::unknown(DynamicReason::RuntimeValue),
-        ParallelInferenceRule::GetCurrentJob
-        | ParallelInferenceRule::GetCurrentTask
-        | ParallelInferenceRule::GetCurrentWorker => {
-            unreachable!("parallel rule was routed to its dedicated inference handler")
-        }
     };
     finish_fixed(entry, request, output, Vec::new())
 }

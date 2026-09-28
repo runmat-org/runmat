@@ -36,7 +36,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Behavior",
         paragraphs: &[
-            "Current-execution functions project typed scheduler identity into read-only handle objects. Task objects expose `ID`, `AttemptID`, `PoolID`, `WorkerID`, and `State`; worker objects expose `ID`, `PoolID`, and `Backend`; job objects expose `ID`.",
+            "Current-execution functions project typed scheduler identity into read-only objects. Task objects expose `ID`, `AttemptID`, `PoolID`, `WorkerID`, and `State`; worker objects expose `ID`, `PoolID`, and `Backend`; job objects expose `ID`.",
             "An ordinary driver call has no task, worker, or durable-job assignment and returns `[]`. A worker task has task and worker assignments. A job object is present only when the execution belongs to a submitted durable job.",
             "Execution identity is dynamically scoped. Nested work sees its own assignment, and leaving that scope restores the previous one without leaking worker identity into the driver.",
         ],
