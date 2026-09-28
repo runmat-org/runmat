@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use super::*;
-use runmat_value::{CellArray, IntegerStorage, NumericStorage, Tensor};
+use runmat_value::{CellArray, IntegerStorage, NumericStorage, StructArray, StructValue, Tensor};
 
 fn extract_between_builtin(
     text: Value,
@@ -296,6 +296,60 @@ fn extractBetween_cell_array_preserves_types() {
         }
         other => panic!("expected cell array, got {other:?}"),
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn extractBetween_cell_and_structure_identity_does_not_depend_on_contents() {
+    let empty_cell = Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap());
+    let result = extract_between_builtin(
+        empty_cell,
+        Value::String("<".into()),
+        Value::String(">".into()),
+        Vec::new(),
+    )
+    .expect("empty cell remains a cell text container");
+    assert!(matches!(result, Value::Cell(cell) if cell.shape == [0, 0]));
+
+    let empty_structure = Value::StructArray(StructArray::empty(Vec::new(), vec![0, 0]).unwrap());
+    let error = extract_between_builtin(
+        empty_structure,
+        Value::String("<".into()),
+        Value::String(">".into()),
+        Vec::new(),
+    )
+    .expect_err("typed structure array is not a text cell, even when empty");
+    assert_eq!(
+        error.identifier(),
+        EXTRACT_BETWEEN_ERROR_INVALID_INPUT.identifier
+    );
+
+    let mut structure = StructValue::new();
+    structure.insert("payload", Value::CharArray(CharArray::new_row("A<B>")));
+    let structure_cell = Value::Cell(CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap());
+    let error = extract_between_builtin(
+        structure_cell.clone(),
+        Value::String("<".into()),
+        Value::String(">".into()),
+        Vec::new(),
+    )
+    .expect_err("a cell containing a structure is still a cell with an invalid text element");
+    assert_eq!(
+        error.identifier(),
+        EXTRACT_BETWEEN_ERROR_INVALID_INPUT.identifier
+    );
+
+    let error = extract_between_builtin(
+        Value::String("A<B>".into()),
+        structure_cell,
+        Value::String(">".into()),
+        Vec::new(),
+    )
+    .expect_err("a structure in a boundary cell is an invalid cell element");
+    assert_eq!(
+        error.identifier(),
+        EXTRACT_BETWEEN_ERROR_CELL_ELEMENT.identifier
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

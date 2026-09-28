@@ -26,6 +26,9 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntValue, NumericScalar, StringArray, Value};
 
+mod cell_text;
+use self::cell_text::{CellElementKind, TextCellScalar};
+
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -229,12 +232,14 @@ async fn extract_between_builtin(
 fn valid_extract_between_text_input(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
-        Value::Cell(cell) => cell.data.iter().all(|element| match element {
-            Value::String(_) => true,
-            Value::StringArray(array) => array.data.len() == 1,
-            Value::CharArray(array) => array.rows <= 1,
-            _ => false,
-        }),
+        Value::Cell(cell) => {
+            for element in &cell.data {
+                if TextCellScalar::from_value(element).is_none() {
+                    return false;
+                }
+            }
+            true
+        }
         _ => false,
     }
 }
@@ -500,12 +505,6 @@ struct CellInfo {
 }
 
 #[derive(Clone, Debug)]
-enum CellElementKind {
-    String,
-    Char,
-}
-
-#[derive(Clone, Debug)]
 enum TextKind {
     StringScalar,
     StringArray,
@@ -558,30 +557,11 @@ impl NormalizedText {
                 let mut data = Vec::with_capacity(cell.data.len());
                 let mut kinds = Vec::with_capacity(cell.data.len());
                 for element in &cell.data {
-                    match &element {
-                        Value::String(s) => {
-                            data.push(s.clone());
-                            kinds.push(CellElementKind::String);
-                        }
-                        Value::StringArray(sa) if sa.data.len() == 1 => {
-                            data.push(sa.data[0].clone());
-                            kinds.push(CellElementKind::String);
-                        }
-                        Value::CharArray(ca) if ca.rows <= 1 => {
-                            if ca.rows == 0 {
-                                data.push(String::new());
-                            } else {
-                                data.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
-                            }
-                            kinds.push(CellElementKind::Char);
-                        }
-                        Value::CharArray(_) => {
-                            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT))
-                        }
-                        _ => {
-                            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT))
-                        }
-                    }
+                    let scalar = TextCellScalar::from_value(element).ok_or_else(|| {
+                        extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT)
+                    })?;
+                    data.push(scalar.text());
+                    kinds.push(scalar.kind());
                 }
                 Ok(Self {
                     data,
@@ -808,25 +788,10 @@ impl BoundaryText {
                 let shape = cell.shape.clone();
                 let mut data = Vec::with_capacity(cell.data.len());
                 for element in &cell.data {
-                    match &element {
-                        Value::String(s) => data.push(s.clone()),
-                        Value::StringArray(sa) if sa.data.len() == 1 => {
-                            data.push(sa.data[0].clone());
-                        }
-                        Value::CharArray(ca) if ca.rows <= 1 => {
-                            if ca.rows == 0 {
-                                data.push(String::new());
-                            } else {
-                                data.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
-                            }
-                        }
-                        Value::CharArray(_) => {
-                            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT))
-                        }
-                        _ => {
-                            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT))
-                        }
-                    }
+                    let scalar = TextCellScalar::from_value(element).ok_or_else(|| {
+                        extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT)
+                    })?;
+                    data.push(scalar.text());
                 }
                 Ok(Self { data, shape })
             }
