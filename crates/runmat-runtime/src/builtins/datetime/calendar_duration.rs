@@ -85,9 +85,9 @@ pub(super) fn calendar_duration_unit_value(
             .zip(day_data.iter())
             .map(|(months, days)| {
                 if months_per_unit != 0.0 {
-                    months / months_per_unit + days / 30.436875 / months_per_unit
+                    (months / months_per_unit).trunc()
                 } else {
-                    days / days_per_unit
+                    (days / days_per_unit).trunc()
                 }
             })
             .collect::<Vec<_>>();
@@ -100,9 +100,9 @@ pub(super) fn calendar_duration_unit_value(
     let mut months = Vec::with_capacity(values.len());
     let mut days = Vec::with_capacity(values.len());
     for value in values.iter().copied() {
-        if !value.is_finite() {
+        if !value.is_finite() || value.fract() != 0.0 {
             return Err(datetime_error(format!(
-                "{unit_name}: values must be finite"
+                "{unit_name}: values must be finite integers"
             )));
         }
         let month_value = value * months_per_unit;

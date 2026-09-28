@@ -1,14 +1,53 @@
 use super::capabilities::SECONDS_PER_DAY;
 use super::*;
 
+async fn prepare_calendar_unit_input(name: &'static str, value: Value) -> BuiltinResult<Value> {
+    if matches!(value, Value::GpuTensor(_)) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &super::capabilities::DATETIME_GPU_INPUT_EXTENSION,
+            name,
+        )?;
+    }
+    gather_if_needed_async(&value)
+        .await
+        .map_err(|err| datetime_error(format!("{name}: {}", err.message())))
+}
+
 #[runmat_macros::runtime_builtin(
     name = "calendarDuration",
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Create calendar duration values from calendar components.",
     keywords = "calendarDuration,caldays,calmonths,calyears,datetime"
 )]
 pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if !matches!(args.len(), 0 | 1 | 3..=6) {
+        return Err(datetime_error(
+            "calendarDuration: expected no input, a component matrix, or Y/M/D[/H/M/S] components",
+        ));
+    }
+    if matches!(args.len(), 0 | 4 | 5) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::CALENDAR_DURATION_SHORTHAND_EXTENSION,
+            "calendarDuration",
+        )?;
+    }
+    if args.iter().any(|arg| matches!(arg, Value::GpuTensor(_))) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &super::capabilities::DATETIME_GPU_INPUT_EXTENSION,
+            "calendarDuration",
+        )?;
+    }
+    if args
+        .iter()
+        .any(|arg| matches!(arg, Value::Bool(_) | Value::LogicalArray(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::CALENDAR_DURATION_LOGICAL_COMPONENT_EXTENSION,
+            "calendarDuration",
+        )?;
+    }
     let args = gather_args(&args).await?;
     if args.is_empty() {
         return calendar_duration_object_from_components(vec![0.0], vec![0.0], vec![1, 1]);
@@ -20,16 +59,55 @@ pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::Builti
     let labels = ["years", "months", "days", "hours", "minutes", "seconds"];
     let positional = match args.len() {
         1 => {
-            let days = component_tensor(args[0].clone(), "calendarDuration")?;
-            let shape = tensor::default_shape_for(&days.shape, tensor::tensor_element_len(&days));
-            let day_values = tensor::tensor_into_values_f64(days);
+            let components = component_tensor(args[0].clone(), "calendarDuration")?;
+            let shape = tensor::default_shape_for(
+                &components.shape,
+                tensor::tensor_element_len(&components),
+            );
+            if shape.len() == 2 && matches!(shape[1], 3 | 6) {
+                let rows = shape[0];
+                let columns = shape[1];
+                let values = tensor::tensor_into_values_f64(components);
+                let mut months = Vec::with_capacity(rows);
+                let mut days = Vec::with_capacity(rows);
+                for row in 0..rows {
+                    let part = |column: usize| values[row + column * rows];
+                    for column in 0..columns {
+                        validate_calendar_component(part(column), column)?;
+                    }
+                    let month = part(0) * 12.0 + part(1);
+                    let day = part(2)
+                        + if columns == 6 {
+                            part(3) / 24.0 + part(4) / (24.0 * 60.0) + part(5) / SECONDS_PER_DAY
+                        } else {
+                            0.0
+                        };
+                    if !month.is_finite() || !day.is_finite() {
+                        return Err(datetime_error(
+                            "calendarDuration: resulting calendar duration is outside supported range",
+                        ));
+                    }
+                    months.push(month);
+                    days.push(day);
+                }
+                return calendar_duration_object_from_components(months, days, vec![rows, 1]);
+            }
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &runmat_builtins::CALENDAR_DURATION_SHORTHAND_EXTENSION,
+                "calendarDuration",
+            )?;
+            let day_values = tensor::tensor_into_values_f64(components);
+            for value in day_values.iter().copied() {
+                validate_calendar_component(value, 2)?;
+            }
             return calendar_duration_object_from_components(
                 vec![0.0; day_values.len()],
                 day_values,
                 shape,
             );
         }
-        3..=6 => args,
+        3 | 6 => args,
+        4 | 5 => args,
         _ => {
             return Err(datetime_error(
                 "calendarDuration: expected no input, days, or Y/M/D[/H/M/S] components",
@@ -49,6 +127,9 @@ pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::Builti
     let mut months = Vec::with_capacity(len);
     let mut days = Vec::with_capacity(len);
     for idx in 0..len {
+        for (component, values) in broadcasted.iter().enumerate() {
+            validate_calendar_component(values[idx], component)?;
+        }
         let month_value = broadcasted[0][idx] * 12.0 + broadcasted[1][idx];
         let day_value = broadcasted[2][idx]
             + broadcasted[3][idx] / 24.0
@@ -65,78 +146,83 @@ pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::Builti
     calendar_duration_object_from_components(months, days, shape)
 }
 
+fn validate_calendar_component(value: f64, component: usize) -> BuiltinResult<()> {
+    if !value.is_finite() || (component != 5 && value.fract() != 0.0) {
+        return Err(datetime_error(
+            "calendarDuration: calendar components must be finite; years, months, days, hours and minutes must be integers",
+        ));
+    }
+    Ok(())
+}
+
 #[runmat_macros::runtime_builtin(
     name = "caldays",
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Create calendar durations from days or convert calendar durations to day counts.",
     keywords = "caldays,calendarDuration,datetime"
 )]
 pub(super) async fn caldays_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| datetime_error(format!("caldays: {}", err.message())))?;
+    let value = prepare_calendar_unit_input("caldays", value).await?;
     calendar_duration_unit_value(value, "caldays", 0.0, 1.0)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "calweeks",
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Create calendar durations from weeks or convert calendar durations to week counts.",
     keywords = "calweeks,calendarDuration,datetime"
 )]
 pub(super) async fn calweeks_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| datetime_error(format!("calweeks: {}", err.message())))?;
+    let value = prepare_calendar_unit_input("calweeks", value).await?;
     calendar_duration_unit_value(value, "calweeks", 0.0, 7.0)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "calmonths",
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Create calendar durations from months or convert calendar durations to month counts.",
     keywords = "calmonths,calendarDuration,datetime"
 )]
 pub(super) async fn calmonths_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| datetime_error(format!("calmonths: {}", err.message())))?;
+    let value = prepare_calendar_unit_input("calmonths", value).await?;
     calendar_duration_unit_value(value, "calmonths", 1.0, 0.0)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "calquarters",
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Create calendar durations from quarters or convert calendar durations to quarter counts.",
     keywords = "calquarters,calendarDuration,datetime"
 )]
 pub(super) async fn calquarters_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| datetime_error(format!("calquarters: {}", err.message())))?;
+    let value = prepare_calendar_unit_input("calquarters", value).await?;
     calendar_duration_unit_value(value, "calquarters", 3.0, 0.0)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "calyears",
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Create calendar durations from years or convert calendar durations to year counts.",
     keywords = "calyears,calendarDuration,datetime"
 )]
 pub(super) async fn calyears_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| datetime_error(format!("calyears: {}", err.message())))?;
+    let value = prepare_calendar_unit_input("calyears", value).await?;
     calendar_duration_unit_value(value, "calyears", 12.0, 0.0)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "iscalendarduration",
+    binding_variant = "default",
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Return true for calendarDuration values.",
@@ -144,4 +230,104 @@ pub(super) async fn calyears_builtin(value: Value) -> crate::BuiltinResult<Value
 )]
 pub(super) fn iscalendarduration_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(is_calendar_duration_object(&value)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unit_helpers_keep_months_and_days_separate_and_reject_fractions() {
+        let month = futures::executor::block_on(calmonths_builtin(Value::Num(2.0))).unwrap();
+        let day = futures::executor::block_on(caldays_builtin(Value::Num(5.0))).unwrap();
+        assert_eq!(
+            futures::executor::block_on(calmonths_builtin(month.clone())).unwrap(),
+            Value::Num(2.0)
+        );
+        assert_eq!(
+            futures::executor::block_on(caldays_builtin(month)).unwrap(),
+            Value::Num(0.0)
+        );
+        assert_eq!(
+            futures::executor::block_on(calmonths_builtin(day.clone())).unwrap(),
+            Value::Num(0.0)
+        );
+        assert_eq!(
+            futures::executor::block_on(caldays_builtin(day)).unwrap(),
+            Value::Num(5.0)
+        );
+        for fractional in [
+            Value::Num(1.5),
+            Value::Num(f64::INFINITY),
+            Value::Num(f64::NAN),
+        ] {
+            assert!(futures::executor::block_on(calweeks_builtin(fractional)).is_err());
+        }
+        let integer = futures::executor::block_on(calmonths_builtin(Value::Int(
+            runmat_value::IntValue::I16(3),
+        )))
+        .unwrap();
+        assert_eq!(
+            futures::executor::block_on(calmonths_builtin(integer)).unwrap(),
+            Value::Num(3.0)
+        );
+        assert!(futures::executor::block_on(calyears_builtin(Value::Int(
+            runmat_value::IntValue::U64(u64::MAX),
+        )))
+        .is_err());
+    }
+
+    #[test]
+    fn matrix_constructor_uses_column_major_rows_and_validates_components() {
+        let matrix = Tensor::new(vec![1.0, 0.0, 2.0, 4.0, 3.0, 5.0], vec![2, 3]).unwrap();
+        let value =
+            futures::executor::block_on(calendar_duration_builtin(vec![Value::Tensor(matrix)]))
+                .unwrap();
+        let (months, days) = calendar_duration_tensors_from_value(&value).unwrap();
+        assert_eq!(months.shape, vec![2, 1]);
+        assert_eq!(months.materialize_f64(), vec![14.0, 4.0]);
+        assert_eq!(days.materialize_f64(), vec![3.0, 5.0]);
+        assert_eq!(
+            iscalendarduration_builtin(value).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            iscalendarduration_builtin(Value::Num(1.0)).unwrap(),
+            Value::Bool(false)
+        );
+        let fractional = Tensor::new(vec![1.0, 0.0, 2.5], vec![1, 3]).unwrap();
+        assert!(
+            futures::executor::block_on(calendar_duration_builtin(vec![Value::Tensor(fractional)]))
+                .is_err()
+        );
+        let with_seconds = Tensor::new(vec![0.0, 0.0, 1.0, 1.0, 30.0, 0.5], vec![1, 6]).unwrap();
+        let value = futures::executor::block_on(calendar_duration_builtin(vec![Value::Tensor(
+            with_seconds,
+        )]))
+        .unwrap();
+        let (_, days) = calendar_duration_tensors_from_value(&value).unwrap();
+        let expected = 1.0 + 1.0 / 24.0 + 30.0 / 1440.0 + 0.5 / SECONDS_PER_DAY;
+        assert!((days.materialize_f64()[0] - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn matlab_mode_rejects_runmat_constructor_shortcuts() {
+        let _mode = crate::compatibility::push_runmat_extensions_enabled(false);
+        assert!(futures::executor::block_on(calendar_duration_builtin(vec![])).is_err());
+        assert!(
+            futures::executor::block_on(calendar_duration_builtin(vec![Value::Num(2.0)])).is_err()
+        );
+        assert!(futures::executor::block_on(calendar_duration_builtin(vec![
+            Value::Bool(true),
+            Value::Num(2.0),
+            Value::Num(3.0)
+        ]))
+        .is_err());
+        assert!(futures::executor::block_on(calendar_duration_builtin(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0)
+        ]))
+        .is_ok());
+    }
 }
