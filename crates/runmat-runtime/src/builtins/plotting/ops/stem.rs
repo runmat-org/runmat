@@ -653,7 +653,7 @@ async fn build_stem_gpu_plot(
         parsed.appearance.color,
         parsed.baseline_visible,
         gpu_vertices,
-        (if parsed.baseline_visible { 2 } else { 0 }) + (x_ref.len as usize * 2),
+        (if parsed.baseline_visible { 2 } else { 0 }) + (x_ref.len * 2),
         bounds,
     )
     .with_gpu_source_inputs(inputs)

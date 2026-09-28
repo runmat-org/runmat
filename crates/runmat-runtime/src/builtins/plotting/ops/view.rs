@@ -9,6 +9,7 @@ use runmat_builtins::{
 };
 use runmat_value::{IntValue, IntegerStorage, NumericScalar, Tensor, Value};
 const BUILTIN_NAME: &str = "view";
+type ViewAxesTarget = (crate::builtins::plotting::state::FigureHandle, usize);
 fn view_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     view_error_with_message(error.message, error)
 }
@@ -36,20 +37,15 @@ fn map_view_figure_error(err: FigureError) -> RuntimeError {
     }
 }
 
-fn parse_view_target(
-    args: &[Value],
-) -> crate::BuiltinResult<(
-    Option<(crate::builtins::plotting::state::FigureHandle, usize)>,
-    &[Value],
-)> {
+fn parse_view_target(args: &[Value]) -> (Option<ViewAxesTarget>, &[Value]) {
     if let Some(first) = args.first() {
         if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(fig, axes)) =
             crate::builtins::plotting::properties::resolve_plot_handle(first, "view")
         {
-            return Ok((Some((fig, axes)), &args[1..]));
+            return (Some((fig, axes)), &args[1..]);
         }
     }
-    Ok((None, args))
+    (None, args)
 }
 
 fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
@@ -178,7 +174,7 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             )?;
         }
     }
-    let (target, rest) = parse_view_target(&args)?;
+    let (target, rest) = parse_view_target(&args);
     if rest.is_empty() {
         let target = target.unwrap_or_else(current_axes_target);
         let meta = crate::builtins::plotting::state::axes_metadata_snapshot(target.0, target.1)
