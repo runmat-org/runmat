@@ -45,6 +45,16 @@ const EXAMPLES: &[BuiltinExample] = &[
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(chr, '1'));" },
     },
+    BuiltinExample {
+        id: "gpu-gather", title: "Format resident numeric input on the host",
+        program: "G = gpuArray([10.2 20.8]); chr = int2str(G)",
+        display_output: Some("'10  21'"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Wgpu,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(ischar(chr)); assert(strcmp(chr, '10  21'));" },
+    },
 ];
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,

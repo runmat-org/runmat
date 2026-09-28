@@ -2,12 +2,10 @@
 
 use regex::Regex;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, NUM2STR_DESCRIPTOR, NUM2STR_ERROR_INTERNAL,
+    NUM2STR_ERROR_INVALID_FORMAT, NUM2STR_ERROR_INVALID_INPUT, NUM2STR_ERROR_INVALID_OPTION,
+    NUM2STR_ERROR_INVALID_PRECISION, NUM2STR_ERROR_TOO_MANY_OUTPUTS,
+    NUM2STR_EXPLICIT_GPU_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -21,207 +19,12 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::strings::type_resolvers::string_scalar_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
 const BUILTIN_NAME: &str = "num2str";
-
-const NUM2STR_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "num2str-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "num2str host formatting for explicit gpuArray input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Num2strExplicitGpuInputExtension"),
-};
-const NUM2STR_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [NUM2STR_EXPLICIT_GPU_EXTENSION];
-
-const NUM2STR_INTEGER_VALUE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are formatted directly from authoritative native storage; paired complex-integer components retain exact decimal text as well.",
-    }];
-const NUM2STR_INTEGER_PRECISION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "p",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The precision control accepts every integer class and is range checked exactly before conversion to a bounded host usize.",
-    }];
-pub const NUM2STR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "txt = num2str(integer_A, ...)",
-        inputs: &NUM2STR_INTEGER_VALUE_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Default and custom formatting preserve exact signed and unsigned decimal values, including values above flintmax. Automatic residency gathers through its owner; explicit gpuArray fallback is separately gated.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "txt = num2str(A, integer_p[, \"local\"])",
-        inputs: &NUM2STR_INTEGER_PRECISION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Precision is accepted only in the supported bounded range and does not determine output numeric storage.",
-    },
-];
-
-const NUM2STR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "txt",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Character array containing formatted numeric values.",
-}];
-
-const NUM2STR_INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric or logical scalar/vector/matrix input.",
-}];
-
-const NUM2STR_INPUT_PREC: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or logical input.",
-    },
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("15"),
-        description: "General-format precision (0..52).",
-    },
-];
-
-const NUM2STR_INPUT_FORMAT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or logical input.",
-    },
-    BuiltinParamDescriptor {
-        name: "formatSpec",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Custom format such as \"%0.3f\" or \"%.5g\".",
-    },
-];
-
-const NUM2STR_INPUT_LOCAL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or logical input.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Precision or format string.",
-    },
-    BuiltinParamDescriptor {
-        name: "local",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"local\""),
-        description: "Locale-aware decimal separator option.",
-    },
-];
-
-const NUM2STR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "txt = num2str(A)",
-        inputs: &NUM2STR_INPUT_A,
-        outputs: &NUM2STR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "txt = num2str(A, p)",
-        inputs: &NUM2STR_INPUT_PREC,
-        outputs: &NUM2STR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "txt = num2str(A, formatSpec)",
-        inputs: &NUM2STR_INPUT_FORMAT,
-        outputs: &NUM2STR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "txt = num2str(A, arg2, \"local\")",
-        inputs: &NUM2STR_INPUT_LOCAL,
-        outputs: &NUM2STR_OUTPUT,
-    },
-];
-
-const NUM2STR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NUM2STR.INVALID_INPUT",
-    identifier: Some("RunMat:num2str:InvalidInput"),
-    when: "Input value is not a supported numeric/logical scalar, vector, or matrix.",
-    message: "num2str: unsupported input type",
-};
-
-const NUM2STR_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NUM2STR.INVALID_OPTION",
-    identifier: Some("RunMat:num2str:InvalidOption"),
-    when: "Optional arguments are malformed or too many were supplied.",
-    message: "num2str: invalid option arguments",
-};
-
-const NUM2STR_ERROR_INVALID_PRECISION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NUM2STR.INVALID_PRECISION",
-    identifier: Some("RunMat:num2str:InvalidPrecision"),
-    when: "Precision argument is non-finite, non-integer, or out of range.",
-    message: "num2str: invalid precision",
-};
-
-const NUM2STR_ERROR_INVALID_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NUM2STR.INVALID_FORMAT",
-    identifier: Some("RunMat:num2str:InvalidFormat"),
-    when: "Custom format string is unsupported or malformed.",
-    message: "num2str: unsupported format string",
-};
-
-const NUM2STR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NUM2STR.INTERNAL",
-    identifier: Some("RunMat:num2str:InternalError"),
-    when: "Internal char-array assembly failed.",
-    message: "num2str: internal error",
-};
-
-const NUM2STR_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    NUM2STR_ERROR_INVALID_INPUT,
-    NUM2STR_ERROR_INVALID_OPTION,
-    NUM2STR_ERROR_INVALID_PRECISION,
-    NUM2STR_ERROR_INVALID_FORMAT,
-    NUM2STR_ERROR_INTERNAL,
-];
-
-pub const NUM2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NUM2STR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NUM2STR_ERRORS,
-};
 
 fn num2str_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     num2str_error_with_message(error.message, error)
@@ -272,17 +75,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "num2str",
-    category = "strings/core",
-    summary = "Convert numeric values to character arrays.",
-    keywords = "num2str,number to string,format,precision",
-    examples = "txt = num2str([1 2 3]);",
-    type_resolver(string_scalar_type),
-    extensions(NUM2STR_EXTENSIONS),
-    integer_capabilities(NUM2STR_INTEGER_CAPABILITIES),
-    descriptor(crate::builtins::strings::core::num2str::NUM2STR_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::num2str"
 )]
 async fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &NUM2STR_DESCRIPTOR,
+        &NUM2STR_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
         || rest
             .iter()
@@ -587,14 +388,30 @@ fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
     let flags = captures.get(1).map(|m| m.as_str()).unwrap_or("");
     let width = captures
         .get(2)
-        .map(|m| m.as_str().parse::<usize>().expect("width parse"));
-    let precision = captures.get(3).map(|m| {
-        if m.as_str().is_empty() {
-            0usize
-        } else {
-            m.as_str().parse::<usize>().expect("precision parse")
-        }
-    });
+        .map(|m| {
+            m.as_str().parse::<usize>().map_err(|_| {
+                num2str_error_with_message(
+                    "num2str: format width is too large",
+                    &NUM2STR_ERROR_INVALID_FORMAT,
+                )
+            })
+        })
+        .transpose()?;
+    let precision = captures
+        .get(3)
+        .map(|m| {
+            if m.as_str().is_empty() {
+                Ok(0usize)
+            } else {
+                m.as_str().parse::<usize>().map_err(|_| {
+                    num2str_error_with_message(
+                        "num2str: format precision is too large",
+                        &NUM2STR_ERROR_INVALID_PRECISION,
+                    )
+                })
+            }
+        })
+        .transpose()?;
     let conversion = captures
         .get(4)
         .map(|m| m.as_str().chars().next().unwrap())
@@ -1406,7 +1223,6 @@ fn apply_format_flags(mut text: String, fmt: &CustomFormat) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::num2str_builtin(value, rest))
@@ -1672,11 +1488,27 @@ pub(crate) mod tests {
         assert!(err.contains("unsupported format string"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn num2str_type_is_string_scalar() {
-        assert_eq!(
-            string_scalar_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::String
+    fn num2str_oversized_format_controls_return_errors() {
+        let width = error_message(
+            num2str_builtin(
+                Value::Num(1.0),
+                vec![Value::String("%9999999999999999999999999999999999f".into())],
+            )
+            .unwrap_err(),
         );
+        assert!(width.contains("format width is too large"));
+
+        let precision = error_message(
+            num2str_builtin(
+                Value::Num(1.0),
+                vec![Value::String(
+                    "%.9999999999999999999999999999999999f".into(),
+                )],
+            )
+            .unwrap_err(),
+        );
+        assert!(precision.contains("format precision is too large"));
     }
 }
