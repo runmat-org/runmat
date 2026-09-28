@@ -21,14 +21,10 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
     let mut including_subfolders = false;
     let mut index = 0;
     while index < args.len() {
-        if index + 1 < args.len() {
-            if let Value::String(name) = &args[index] {
-                if name.eq_ignore_ascii_case("IncludingSubfolders") {
-                    including_subfolders = bool_value(&args[index + 1])?;
-                    index += 2;
-                    continue;
-                }
-            }
+        if index + 1 < args.len() && is_subfolders_option(&args[index]) {
+            including_subfolders = bool_value(&args[index + 1])?;
+            index += 2;
+            continue;
         }
         match &args[index] {
             Value::String(folder) if !folder.trim().is_empty() => {
@@ -81,6 +77,16 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::Object(object))
 }
 
+fn is_subfolders_option(value: &Value) -> bool {
+    match value {
+        Value::String(name) => name.eq_ignore_ascii_case("IncludingSubfolders"),
+        Value::CharArray(chars) => chars
+            .row_string()
+            .is_some_and(|name| name.eq_ignore_ascii_case("IncludingSubfolders")),
+        _ => false,
+    }
+}
+
 fn code_coverage_plugin_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Object {
         class_name: Some(runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN.into()),
@@ -121,6 +127,24 @@ mod tests {
         assert!(plugin
             .class_name
             .is(runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN));
+        assert_eq!(
+            plugin.properties.get("IncludingSubfolders"),
+            Some(&Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn character_row_option_name_is_recognized() {
+        let option = runmat_value::CharArray::new_row("IncludingSubfolders");
+        let plugin = code_coverage_plugin_for_folder(vec![
+            Value::String("src".into()),
+            Value::CharArray(option),
+            Value::Bool(true),
+        ])
+        .unwrap();
+        let Value::Object(plugin) = plugin else {
+            panic!("coverage plugin must be an object");
+        };
         assert_eq!(
             plugin.properties.get("IncludingSubfolders"),
             Some(&Value::Bool(true))

@@ -31,3 +31,21 @@ fn test_runner_plugin_type(_args: &[Type], _context: &ResolveContext) -> Type {
         shape: Some(vec![Some(1), Some(1)]),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base_plugin_has_concrete_class_and_rejects_inputs() {
+        let plugin = test_runner_plugin(vec![]).unwrap();
+        assert!(
+            matches!(plugin, Value::Object(object) if object.class_name.is(runmat_types::standard::UNIT_TEST_RUNNER_PLUGIN))
+        );
+        let error = test_runner_plugin(vec![Value::Bool(true)]).unwrap_err();
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some("RunMat:Testing:InvalidPlugin")
+        );
+    }
+}
