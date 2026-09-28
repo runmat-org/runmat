@@ -38,6 +38,23 @@ impl CellArray {
         })
     }
 
+    /// Append to a 1×N cell row while keeping its full shape and cached
+    /// dimensions in sync. Reject a malformed or non-row array unchanged.
+    pub fn push_row_element(&mut self, value: Value) -> Result<(), String> {
+        if self.shape != [1, self.data.len()] || self.rows != 1 || self.cols != self.data.len() {
+            return Err("Cell array is not a valid row vector".into());
+        }
+        let next_count = self
+            .data
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| "Cell row length exceeds platform limits".to_string())?;
+        self.data.push(value);
+        self.shape[1] = next_count;
+        self.cols = next_count;
+        Ok(())
+    }
+
     pub fn from_column_major(data: Vec<Value>, shape: Vec<usize>) -> Result<Self, String> {
         let normalized = match shape.as_slice() {
             [] => vec![0, 0],
@@ -196,6 +213,20 @@ mod tests {
     fn borrowed_column_major_iteration_handles_empty_shape() {
         let array = CellArray::new(Vec::new(), 0, 0).unwrap();
         assert_eq!(array.iter_column_major().count(), 0);
+    }
+
+    #[test]
+    fn row_append_updates_full_shape_and_rejects_malformed_storage() {
+        let mut row = CellArray::new(Vec::new(), 1, 0).unwrap();
+        row.push_row_element(Value::Num(1.0)).unwrap();
+        row.push_row_element(Value::Num(2.0)).unwrap();
+        assert_eq!(row.shape, [1, 2]);
+        assert_eq!((row.rows, row.cols), (1, 2));
+        assert_eq!(row.data, vec![Value::Num(1.0), Value::Num(2.0)]);
+
+        row.shape[1] = 1;
+        assert!(row.push_row_element(Value::Num(3.0)).is_err());
+        assert_eq!(row.data.len(), 2);
     }
 
     #[test]

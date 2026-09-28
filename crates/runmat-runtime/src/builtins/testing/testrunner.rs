@@ -77,9 +77,8 @@ fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
                     Value::Cell(runmat_value::CellArray::new(Vec::new(), 1, 0).unwrap())
                 });
             if let Value::Cell(plugins) = plugins {
-                plugins.data.push(plugin);
-                plugins.cols += 1;
-                true
+                runmat_gc::gc_record_handle_write(&handle.target, &plugin);
+                plugins.push_row_element(plugin).is_ok()
             } else {
                 false
             }
@@ -164,6 +163,7 @@ fn runner_error(message: impl Into<String>) -> crate::RuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[test]
     fn text_runner_rejects_options_that_it_cannot_apply() {
@@ -182,5 +182,30 @@ mod tests {
             ignored.identifier(),
             Some("RunMat:Testing:UnsupportedRunnerOption")
         );
+    }
+
+    #[test]
+    fn add_plugin_updates_the_public_cell_shape() {
+        let runner = block_on(with_text_output(Vec::new())).unwrap();
+        let plugin = Value::Object(runmat_value::ObjectInstance::new(
+            runmat_types::standard::UNIT_TEST_RUNNER_PLUGIN.owned(),
+        ));
+
+        let updated = add_plugin(runner.clone(), plugin).unwrap();
+        assert_eq!(updated, runner);
+        let plugins = block_on(crate::object::resolve::load_member(
+            runner,
+            "Plugins".into(),
+            false,
+            None,
+        ))
+        .unwrap();
+        let Value::Cell(plugins) = plugins else {
+            panic!("runner.Plugins should be a cell array");
+        };
+        assert_eq!(plugins.shape, [1, 1]);
+        assert_eq!(plugins.rows, 1);
+        assert_eq!(plugins.cols, 1);
+        assert_eq!(plugins.data.len(), 1);
     }
 }
