@@ -560,17 +560,23 @@ async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
     }
 
     control.state.lock().unwrap().fail_store_at = None;
-    publisher
+    let mut clone = publisher.clone();
+    let clone_retry = clone
+        .publish_objects(fourth.reference.clone(), vec![fourth.clone()])
+        .await
+        .expect_err("every publisher clone must be fenced after an uncertain write");
+    assert!(clone_retry.to_string().contains("replace the driver"));
+    let retry = publisher
         .publish_objects(fourth.reference.clone(), vec![first, second, third, fourth])
         .await
-        .unwrap();
-    assert_eq!(publisher.checkpoint_sequence(), 7);
+        .expect_err("uncertain checkpoint write must fence this publisher generation");
+    assert!(retry.to_string().contains("replace the driver"));
+    assert_eq!(publisher.checkpoint_sequence(), 6);
     let state = control.state.lock().unwrap();
-    assert_eq!(state.stored.len(), 12);
-    assert_eq!(state.stored[11].kind, DriverArtifactKind::Checkpoint);
+    assert_eq!(state.stored.len(), 9);
     assert_eq!(
-        state.stored[11].checkpoint,
-        Some((7, CheckpointDisposition::ResumeSafe))
+        state.stored[6].checkpoint,
+        Some((6, CheckpointDisposition::ResumeSafe))
     );
 }
 

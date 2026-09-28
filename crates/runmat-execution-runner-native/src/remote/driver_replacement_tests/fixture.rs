@@ -255,6 +255,7 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
                 latest_checkpoint: None,
                 next_artifact: 0,
                 driver_interruption_triggered: false,
+                interrupted_committed_task: None,
                 cancellation_heartbeat_observed: false,
                 transitions: Vec::new(),
                 worker_authorizations: Vec::new(),

@@ -31,10 +31,22 @@ pub(super) struct RestoredObjectClosure {
 
 struct PublicationState {
     sequence: u64,
+    checkpoint_write_uncertain: bool,
     physical_catalog: Option<ProgramExecutionObjectLocation>,
     pool_catalog: Option<ProgramExecutionObjectLocation>,
     physical_locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
     pool_locations: BTreeMap<ValueId, ProgramExecutionObjectLocation>,
+}
+
+impl PublicationState {
+    fn ensure_writable(&self) -> NativeExecutionResult<()> {
+        if self.checkpoint_write_uncertain {
+            return Err(protocol(
+                "remote checkpoint acknowledgement is uncertain; replace the driver before publishing again",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// One transaction owner for periodic scheduler and physical solver publication.
@@ -81,6 +93,7 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             pool: None,
             state: Arc::new(Mutex::new(PublicationState {
                 sequence: checkpoint_sequence,
+                checkpoint_write_uncertain: false,
                 physical_catalog: restored.map(|closure| closure.catalog.clone()),
                 pool_catalog: None,
                 physical_locations,
@@ -134,6 +147,7 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             ));
         }
         let mut state = self.state.lock().await;
+        state.ensure_writable()?;
         let mut locations = Vec::with_capacity(objects.len());
         for object in objects {
             if object.reference.encryption_context != access.encryption_context {
@@ -180,6 +194,7 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             Vec<ProgramExecutionObjectLocation>,
         )>,
     ) -> NativeExecutionResult<()> {
+        state.ensure_writable()?;
         let sequence = state
             .sequence
             .checked_add(1)
@@ -215,6 +230,10 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             physical_catalog.clone(),
         )?
         .with_pool_catalog(pool_catalog.clone())?;
+        // Set this before the await: a timeout can drop this future while the
+        // control plane is still persisting the checkpoint. No clone of this
+        // publisher may reuse the sequence without a replacement bootstrap.
+        state.checkpoint_write_uncertain = true;
         super::driver::store_driver_checkpoint(
             self.control,
             self.authority,
@@ -222,6 +241,7 @@ impl<'a> RemoteRecoveryPublisher<'a> {
             &checkpoint,
         )
         .await?;
+        state.checkpoint_write_uncertain = false;
         // Neither root nor its reuse cache advances on upload failure or lost acknowledgment.
         state.sequence = sequence;
         state.physical_catalog = physical_catalog;
