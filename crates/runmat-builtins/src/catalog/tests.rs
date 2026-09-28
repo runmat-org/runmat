@@ -274,7 +274,7 @@ fn validation_rejects_incomplete_canonical_documentation() {
 
 #[test]
 fn root_documentation_is_catalog_owned_and_executable() {
-    for (name, expected_examples, expected_faqs) in [("sqrt", 6, 7), ("realsqrt", 5, 5)] {
+    for (name, expected_examples, expected_faqs) in [("sqrt", 7, 7), ("realsqrt", 6, 5)] {
         let entry = builtin_catalog_entry_by_name(name).expect("root catalog entry");
         let documentation = &entry.documentation;
         assert_eq!(
@@ -289,8 +289,20 @@ fn root_documentation_is_catalog_owned_and_executable() {
             .any(|section| section.heading == "GPU execution"));
         assert!(!documentation.evidence.implementation.is_empty());
         assert!(!documentation.evidence.verification.is_empty());
+        assert_eq!(
+            documentation
+                .examples
+                .iter()
+                .filter(|example| example.compatibility == BuiltinExampleCompatibility::Matlab)
+                .count(),
+            1,
+            "{name} must retain its portable single-precision example"
+        );
         assert!(documentation.examples.iter().all(|example| {
-            example.compatibility == BuiltinExampleCompatibility::RunMat && !example.id.is_empty()
+            matches!(
+                example.compatibility,
+                BuiltinExampleCompatibility::RunMat | BuiltinExampleCompatibility::Matlab
+            ) && !example.id.is_empty()
         }));
     }
 }
@@ -356,10 +368,10 @@ fn exponential_documentation_is_catalog_owned_and_executable() {
 #[test]
 fn logarithm_documentation_is_catalog_owned_and_executable() {
     for (name, example_count, faq_count) in [
-        ("log", 6, 6),
-        ("log10", 5, 6),
-        ("log1p", 5, 11),
-        ("log2", 7, 6),
+        ("log", 7, 6),
+        ("log10", 6, 6),
+        ("log1p", 6, 11),
+        ("log2", 8, 6),
     ] {
         let entry = builtin_catalog_entry_by_name(name).expect("logarithm catalog entry");
         let documentation = &entry.documentation;
@@ -1466,7 +1478,7 @@ fn unary_rounding_leaves_own_complete_contracts_documentation_and_examples() {
             entry.documentation.authority,
             BuiltinDocumentationAuthority::Catalog
         );
-        assert_eq!(entry.documentation.examples.len(), 6);
+        assert_eq!(entry.documentation.examples.len(), 7);
         assert_eq!(entry.documentation.faqs.len(), faq_count);
         assert!(entry.documentation.example_exemption.is_none());
         assert!(entry
@@ -1514,7 +1526,13 @@ fn unary_rounding_contracts_preserve_typed_facts_and_tabular_identity() {
         assert!(inferred.diagnostics.is_empty(), "{name}");
         assert_eq!(inferred.outputs[0].kind, single.kind, "{name}");
         assert_eq!(inferred.outputs[0].shape, single.shape, "{name}");
-        assert_eq!(inferred.outputs[0].residency, device, "{name}");
+        // Floating rounding may execute on the device or use structured host
+        // fallback; the static fact must not promise either placement.
+        assert_eq!(
+            inferred.outputs[0].residency,
+            ResidencyFact::Unknown,
+            "{name}"
+        );
 
         let mut integer = ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
@@ -1559,7 +1577,11 @@ fn unary_rounding_contracts_preserve_typed_facts_and_tabular_identity() {
             }),
             "{name}"
         );
-        assert_eq!(promoted.outputs[0].residency, device, "{name}");
+        assert_eq!(
+            promoted.outputs[0].residency,
+            ResidencyFact::Unknown,
+            "{name}"
+        );
 
         let table = ValueFact::proven(
             ValueKindFact::Object(ObjectFact {
@@ -1649,7 +1671,7 @@ fn round_owns_complete_multi_form_contract_documentation_and_examples() {
         entry.documentation.authority,
         BuiltinDocumentationAuthority::Catalog
     );
-    assert_eq!(entry.documentation.examples.len(), 8);
+    assert_eq!(entry.documentation.examples.len(), 9);
     assert_eq!(entry.documentation.faqs.len(), 9);
     assert!(entry.documentation.example_exemption.is_none());
     assert_eq!(entry.bindings, REQUIRED_DEFAULT_BINDING.as_slice());
@@ -1700,7 +1722,7 @@ fn round_contract_preserves_typed_data_and_validates_controls() {
     assert!(significant.diagnostics.is_empty());
     assert_eq!(significant.outputs[0].kind, single.kind);
     assert_eq!(significant.outputs[0].shape, single.shape);
-    assert_eq!(significant.outputs[0].residency, single.residency);
+    assert_eq!(significant.outputs[0].residency, ResidencyFact::Unknown);
 
     let mut integer = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
@@ -2445,12 +2467,9 @@ fn inverse_sine_and_cosine_track_value_dependent_domain_and_preserve_residency()
         assert!(dynamic.diagnostics.is_empty());
         assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
         assert_eq!(dynamic.outputs[0].shape, matrix_shape);
-        assert_eq!(
-            dynamic.outputs[0].residency,
-            ResidencyFact::Device {
-                provider: Some("source-provider".into())
-            }
-        );
+        // A value-dependent real/complex result may require host fallback,
+        // even when its input starts on a device.
+        assert_eq!(dynamic.outputs[0].residency, ResidencyFact::Unknown);
         assert_eq!(
             dynamic.outputs[0].certainty,
             CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
@@ -2569,7 +2588,7 @@ fn inverse_hyperbolic_cosine_tracks_exact_domain_shape_and_residency() {
     assert!(dynamic.diagnostics.is_empty());
     assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
     assert_eq!(dynamic.outputs[0].shape, unknown_real.shape);
-    assert_eq!(dynamic.outputs[0].residency, unknown_real.residency);
+    assert_eq!(dynamic.outputs[0].residency, ResidencyFact::Unknown);
     assert_eq!(
         dynamic.outputs[0].certainty,
         CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
@@ -2687,12 +2706,15 @@ fn inverse_hyperbolic_sine_proves_real_outputs_for_real_inputs() {
                 domain: NumericDomain::Real,
             })
         );
-        assert_eq!(
-            inferred.outputs[0].residency,
+        let expected_residency = if matches!(expected_class, NumericClass::Single) {
+            // Floating operands may take a structured host fallback.
+            ResidencyFact::Unknown
+        } else {
             ResidencyFact::Device {
-                provider: Some("asinh-provider".into())
+                provider: Some("asinh-provider".into()),
             }
-        );
+        };
+        assert_eq!(inferred.outputs[0].residency, expected_residency);
     }
 }
 
@@ -2775,7 +2797,7 @@ fn inverse_hyperbolic_tangent_tracks_the_exact_closed_unit_interval() {
     );
     assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
     assert_eq!(dynamic.outputs[0].shape, unknown_real.shape);
-    assert_eq!(dynamic.outputs[0].residency, unknown_real.residency);
+    assert_eq!(dynamic.outputs[0].residency, ResidencyFact::Unknown);
     assert_eq!(
         dynamic.outputs[0].certainty,
         CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
@@ -2796,7 +2818,7 @@ fn inverse_tangent_tracks_real_domain_and_typed_like_placement() {
             InverseTrigonometricFunction::Tangent
         ))
     );
-    assert_eq!(entry.documentation.examples.len(), 6);
+    assert_eq!(entry.documentation.examples.len(), 7);
     assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Candidate);
 
     let mut real_input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
@@ -2822,12 +2844,7 @@ fn inverse_tangent_tracks_real_domain_and_typed_like_placement() {
             domain: NumericDomain::Real,
         })
     );
-    assert_eq!(
-        real.outputs[0].residency,
-        ResidencyFact::Device {
-            provider: Some("input-provider".into())
-        }
-    );
+    assert_eq!(real.outputs[0].residency, ResidencyFact::Unknown);
 
     let mut prototype = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
@@ -2897,7 +2914,7 @@ fn integer_conversion_contracts_preserve_shape_domain_storage_and_residency_with
             domain: NumericDomain::Complex,
         }),
         ShapeFact::from(vec![Some(2), Some(3)]),
-        StorageFact::Sparse,
+        StorageFact::Dense,
     );
     source.residency = ResidencyFact::Device {
         provider: Some("integer-provider".into()),
@@ -2936,13 +2953,51 @@ fn integer_conversion_contracts_preserve_shape_domain_storage_and_residency_with
             "{name}"
         );
         assert_eq!(converted.outputs[0].shape, source.shape, "{name}");
-        assert_eq!(converted.outputs[0].storage, StorageFact::Sparse, "{name}");
+        assert_eq!(converted.outputs[0].storage, StorageFact::Dense, "{name}");
         assert_eq!(converted.outputs[0].residency, source.residency, "{name}");
         assert_eq!(converted.outputs[0].view, ViewFact::Materialized, "{name}");
         assert_eq!(converted.outputs[0].alias, AliasFact::Unique, "{name}");
     }
 
     let entry = builtin_catalog_entry_by_name("uint16").expect("uint16 catalog entry");
+    let real_sparse = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        source.shape.clone(),
+        StorageFact::Sparse,
+    );
+    let sparse_conversion = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![real_sparse.clone()],
+            literals: runmat_types::LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(sparse_conversion.diagnostics.is_empty());
+    assert_eq!(sparse_conversion.outputs[0].shape, real_sparse.shape);
+    assert_eq!(sparse_conversion.outputs[0].storage, StorageFact::Sparse);
+
+    let complex_sparse = ValueFact::proven(
+        source.kind.clone(),
+        source.shape.clone(),
+        StorageFact::Sparse,
+    );
+    let unsupported = infer_catalog_call(
+        entry,
+        &CallRequest {
+            arguments: vec![complex_sparse],
+            literals: runmat_types::LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(unsupported
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-INTEGER-CONVERSION-COMPLEX-SPARSE"));
+
     let invalid = infer_catalog_call(
         entry,
         &CallRequest {

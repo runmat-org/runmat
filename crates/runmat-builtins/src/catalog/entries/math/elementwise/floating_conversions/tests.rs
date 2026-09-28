@@ -10,7 +10,7 @@ use runmat_types::{
 
 #[test]
 fn documentation_is_catalog_owned_and_executable() {
-    for (name, example_count, faq_count) in [("double", 8, 9), ("single", 6, 10)] {
+    for (name, example_count, faq_count) in [("double", 9, 9), ("single", 7, 10)] {
         let entry = builtin_catalog_entry_by_name(name).expect("floating conversion entry");
         let documentation = &entry.documentation;
         assert_eq!(
