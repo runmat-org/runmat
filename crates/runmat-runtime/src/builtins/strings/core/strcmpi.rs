@@ -1,124 +1,20 @@
 //! MATLAB-compatible `strcmpi` builtin for RunMat (case-insensitive string comparison).
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRCMPI_DESCRIPTOR, STRCMPI_ERROR_INTERNAL,
+    STRCMPI_ERROR_INVALID_INPUT, STRCMPI_ERROR_SHAPE_MISMATCH, STRCMPI_ERROR_TOO_MANY_OUTPUTS,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
-use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strcmpi")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "strcmpi",
-    op_kind: GpuOpKind::Custom("string-compare"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Runs entirely on the CPU; GPU operands are gathered before comparison.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::strings::core::strcmpi")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "strcmpi",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Produces logical host results; not eligible for GPU fusion.",
-};
-
 const BUILTIN_NAME: &str = "strcmpi";
-
-const STRCMPI_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical comparison result.",
-}];
-
-const STRCMPI_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First text input (string/char/cell/string array).",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second text input (string/char/cell/string array).",
-    },
-];
-
-const STRCMPI_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = strcmpi(A, B)",
-    inputs: &STRCMPI_INPUTS,
-    outputs: &STRCMPI_OUTPUT,
-}];
-
-const STRCMPI_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCMPI.INVALID_INPUT",
-    identifier: Some("RunMat:strcmpi:InvalidInput"),
-    when: "At least one input is not a supported text container.",
-    message: "strcmpi: text inputs must be string/char/cell/string-array values",
-};
-
-const STRCMPI_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCMPI.SHAPE_MISMATCH",
-    identifier: Some("RunMat:strcmpi:ShapeMismatch"),
-    when: "Inputs are not broadcast-compatible for elementwise comparison.",
-    message: "strcmpi: input sizes are not broadcast-compatible",
-};
-
-const STRCMPI_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCMPI.INTERNAL",
-    identifier: Some("RunMat:strcmpi:InternalError"),
-    when: "Internal logical result assembly failed.",
-    message: "strcmpi: internal error",
-};
-
-const STRCMPI_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    STRCMPI_ERROR_INVALID_INPUT,
-    STRCMPI_ERROR_SHAPE_MISMATCH,
-    STRCMPI_ERROR_INTERNAL,
-];
-
-pub const STRCMPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRCMPI_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRCMPI_ERRORS,
-};
-
-pub const STRCMPI_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "strcmpi compares text containers. An unsupported integer or other numeric input returns scalar logical false as documented, without reading numeric payloads or accessing a provider.",
-};
 
 fn strcmpi_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strcmpi_error_with_message(error.message, error)
@@ -141,16 +37,15 @@ fn remap_strcmpi_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strcmpi",
-    category = "strings/core",
-    summary = "Compare text inputs for case-insensitive equality.",
-    keywords = "strcmpi,string compare,text equality",
-    accel = "sink",
-    type_resolver(logical_text_match_type),
-    descriptor(crate::builtins::strings::core::strcmpi::STRCMPI_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::strcmpi::STRCMPI_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::strcmpi"
 )]
 async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &STRCMPI_DESCRIPTOR,
+        &STRCMPI_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
         return Ok(Value::Bool(false));
     }
@@ -202,7 +97,6 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinRes
 pub(crate) mod tests {
     use super::*;
     use crate::RuntimeError;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CellArray, CharArray, LogicalArray, StringArray};
 
     fn strcmpi_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
@@ -211,6 +105,18 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strcmpi_rejects_excess_outputs_before_comparing() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error = strcmpi_builtin(Value::String("a".into()), Value::String("A".into()))
+            .expect_err("fixed output bound");
+        assert_eq!(
+            error.identifier(),
+            STRCMPI_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -389,16 +295,5 @@ pub(crate) mod tests {
             .expect("strcmpi");
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
         assert_eq!(result, Value::LogicalArray(expected));
-    }
-
-    #[test]
-    fn strcmpi_type_is_logical_match() {
-        assert_eq!(
-            logical_text_match_type(
-                &[Type::String, Type::String],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Bool
-        );
     }
 }

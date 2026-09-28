@@ -26,6 +26,7 @@ pub use distributed::infer_partition_local_call;
 pub(crate) use support::facts::materialize;
 pub(crate) use support::materialization::gathered_value_fact;
 pub(crate) use support::text::possible_character_row;
+pub(crate) use support::text::{invalid_text_comparison_container, text_comparison_result};
 pub(super) use support::{
     argument_error, default_double_scalar, finish_fixed, finish_fixed_outputs, literal_text,
     numeric_kind, preserved_binary_residency, unavailable_rule,
