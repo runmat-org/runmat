@@ -2,7 +2,7 @@ use super::*;
 use runmat_accelerate_api::AccelProvider;
 use runmat_builtins::{
     BuiltinIntegerAuditKind, APPEND_INTEGER_AUDIT, ERASE_PUNCTUATION_DESCRIPTOR,
-    ERASE_URLS_DESCRIPTOR,
+    ERASE_URLS_DESCRIPTOR, EXTRACT_BEFORE_RESIDENT_POSITION_EXTENSION,
 };
 use runmat_value::{CellArray, IntValue, IntegerStorage, ObjectInstance, StructValue, Tensor};
 use std::sync::atomic::{AtomicUsize, Ordering};

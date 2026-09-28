@@ -1014,6 +1014,7 @@ fn calendar_duration_helpers_and_datetime_arithmetic_work() {
 
 #[test]
 fn business_day_helpers_use_weekends_and_holidays() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let new_year = serial_for_date(2024, 1, 1);
     let friday = serial_for_date(2024, 1, 5);
     let saturday = serial_for_date(2024, 1, 6);
@@ -1276,4 +1277,88 @@ fn business_day_helpers_use_weekends_and_holidays() {
 
     let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
     assert!(futures::executor::block_on(holidays_builtin(vec![Value::Num(2024.0)])).is_err());
+}
+
+#[test]
+fn business_day_extensions_gate_before_resident_access() {
+    let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+    let date = Value::Num(serial_for_date(2024, 1, 2));
+    let typed = integer_tensor(runmat_value::IntegerStorage::U32(vec![739_253]), vec![1, 1]);
+    let typed_error = futures::executor::block_on(daysdif_builtin(typed, date.clone(), Vec::new()))
+        .expect_err("typed legacy date is an extension");
+    assert_eq!(
+        typed_error.identifier(),
+        Some("RunMat:compatibility:BusinessDayTypedLegacySerialExtension")
+    );
+
+    let logical_error = futures::executor::block_on(daysdif_builtin(
+        date.clone(),
+        date.clone(),
+        vec![Value::Bool(true)],
+    ))
+    .expect_err("logical Basis is an extension");
+    assert_eq!(
+        logical_error.identifier(),
+        Some("RunMat:compatibility:DatetimeLogicalInputExtension")
+    );
+
+    let allocation = unregistered_resident(vec![1, 1]);
+    let resident_error = futures::executor::block_on(isbusday_builtin(
+        Value::GpuTensor(allocation.handle.clone()),
+        Vec::new(),
+    ))
+    .expect_err("resident date is gated before provider lookup");
+    assert_eq!(
+        resident_error.identifier(),
+        Some("RunMat:compatibility:DatetimeGpuInputExtension")
+    );
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
+
+    let weekend = runmat_value::LogicalArray::new(vec![1, 0, 0, 0, 0, 0, 1], vec![1, 7]).unwrap();
+    assert!(futures::executor::block_on(isbusday_builtin(
+        date,
+        vec![
+            Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+            Value::LogicalArray(weekend)
+        ],
+    ))
+    .is_ok());
+}
+
+#[test]
+fn every_business_day_entrypoint_rejects_resident_input_before_provider_access() {
+    let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+    let allocation = unregistered_resident(vec![1, 1]);
+    let resident = Value::GpuTensor(allocation.handle.clone());
+    let date = Value::Num(serial_for_date(2024, 1, 2));
+    let cases = [
+        futures::executor::block_on(isbusday_builtin(resident.clone(), Vec::new())),
+        futures::executor::block_on(holidays_builtin(vec![date.clone(), resident.clone()])),
+        futures::executor::block_on(busdays_builtin(date.clone(), resident.clone(), Vec::new())),
+        futures::executor::block_on(days252bus_builtin(
+            date.clone(),
+            resident.clone(),
+            Vec::new(),
+        )),
+        futures::executor::block_on(daysdif_builtin(date.clone(), resident.clone(), Vec::new())),
+        futures::executor::block_on(fbusdate_builtin(
+            Value::Num(2024.0),
+            resident.clone(),
+            Vec::new(),
+        )),
+        futures::executor::block_on(lbusdate_builtin(Value::Num(2024.0), resident, Vec::new())),
+    ];
+    for result in cases {
+        assert_eq!(
+            result
+                .expect_err("strict-mode resident input must reject")
+                .identifier(),
+            Some("RunMat:compatibility:DatetimeGpuInputExtension")
+        );
+    }
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }

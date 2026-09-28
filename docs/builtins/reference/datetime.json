@@ -44,7 +44,7 @@
     "`now`, `today`, and `clock` expose current local time in MATLAB-compatible serial, datetime, and date-vector forms.",
     "`datenum`, `datevec`, `datestr`, `weekday`, `eomday`, `etime`, and `isbetween` cover common legacy serial-date conversion, formatting, query, and interval operations.",
     "`datetime + calendarDuration` and `datetime - calendarDuration` apply month-aware calendar arithmetic with end-of-month clamping.",
-    "`isbusday`, `holidays`, `busdays`, `days252bus`, `daysdif`, `fbusdate`, and `lbusdate` provide weekday plus market-holiday business-calendar compatibility for standard scripts. Custom weekend definitions and all Financial Toolbox option forms are not yet implemented."
+    "`isbusday`, `holidays`, `busdays`, `days252bus`, `daysdif`, `fbusdate`, and `lbusdate` provide weekday plus market-holiday business-calendar compatibility for standard scripts. Seven-element Sunday-first custom weekend masks are supported where the builtin accepts a Weekend argument. Other Financial Toolbox option forms are not yet implemented."
   ],
   "examples": [
     {

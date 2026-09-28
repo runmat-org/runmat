@@ -1,6 +1,42 @@
 use super::capabilities::{BUILTIN_NAME, DEFAULT_DATE_FORMAT, MAX_BUSDAYS_OUTPUT_LEN};
 use super::*;
 
+fn ensure_business_day_input_policy(
+    name: &'static str,
+    inputs: &[&Value],
+    date_inputs: &[&Value],
+    numeric_inputs: &[&Value],
+) -> BuiltinResult<()> {
+    if inputs
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::BUSINESS_DAY_RESIDENT_INPUT_EXTENSION,
+            name,
+        )?;
+    }
+    if date_inputs
+        .iter()
+        .any(|value| is_typed_legacy_numeric(value))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::BUSINESS_DAY_TYPED_LEGACY_SERIAL_EXTENSION,
+            name,
+        )?;
+    }
+    if numeric_inputs
+        .iter()
+        .any(|value| matches!(value, Value::Bool(_) | Value::LogicalArray(_)))
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::BUSINESS_DAY_LOGICAL_NUMERIC_INPUT_EXTENSION,
+            name,
+        )?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BusinessDayPeriod {
     Daily,
@@ -121,6 +157,17 @@ pub(super) async fn isbusday_builtin(
             "isbusday: expected a date, optional holidays, and optional weekend mask",
         ));
     }
+    ensure_business_day_input_policy(
+        "isbusday",
+        &std::iter::once(&value)
+            .chain(rest.iter())
+            .collect::<Vec<_>>(),
+        &[Some(&value), rest.first()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+        &[&value],
+    )?;
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| datetime_error(format!("isbusday: {}", err.message())))?;
@@ -172,6 +219,22 @@ pub(super) async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             "holidays",
         )?;
     }
+    let date_inputs: Vec<&Value> = if args.len() >= 2 {
+        args.iter().take(3).collect()
+    } else {
+        Vec::new()
+    };
+    let numeric_inputs: Vec<&Value> = if args.len() == 1 {
+        args.iter().collect()
+    } else {
+        date_inputs.clone()
+    };
+    ensure_business_day_input_policy(
+        "holidays",
+        &args.iter().collect::<Vec<_>>(),
+        &date_inputs,
+        &numeric_inputs,
+    )?;
     let output_datetime = args.len() < 2 || args.iter().any(is_datetime_object);
     let args = gather_args(&args).await?;
     let keys = match args.len() {
@@ -253,6 +316,21 @@ pub(super) async fn busdays_builtin(
             "busdays: expected a period and optional holiday list",
         ));
     }
+    ensure_business_day_input_policy(
+        "busdays",
+        &std::iter::once(&start)
+            .chain(std::iter::once(&end))
+            .chain(rest.iter())
+            .collect::<Vec<_>>(),
+        &[Some(&start), Some(&end), rest.get(1)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+        &[Some(&start), Some(&end), rest.first(), rest.get(1)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    )?;
     let start = gather_if_needed_async(&start)
         .await
         .map_err(|err| datetime_error(format!("busdays: {}", err.message())))?;
@@ -361,6 +439,21 @@ pub(super) async fn days252bus_builtin(
             "days252bus: expected at most one holiday list",
         ));
     }
+    ensure_business_day_input_policy(
+        "days252bus",
+        &std::iter::once(&start)
+            .chain(std::iter::once(&end))
+            .chain(rest.iter())
+            .collect::<Vec<_>>(),
+        &[Some(&start), Some(&end), rest.first()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+        &[Some(&start), Some(&end), rest.first()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    )?;
     let start = gather_if_needed_async(&start)
         .await
         .map_err(|err| datetime_error(format!("days252bus: {}", err.message())))?;
@@ -407,6 +500,18 @@ pub(super) async fn daysdif_builtin(
             "daysdif: expected at most one basis argument",
         ));
     }
+    ensure_business_day_input_policy(
+        "daysdif",
+        &std::iter::once(&start)
+            .chain(std::iter::once(&end))
+            .chain(rest.iter())
+            .collect::<Vec<_>>(),
+        &[&start, &end],
+        &[Some(&start), Some(&end), rest.first()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    )?;
     let start = gather_if_needed_async(&start)
         .await
         .map_err(|err| datetime_error(format!("daysdif: {}", err.message())))?;
@@ -443,22 +548,19 @@ pub(super) async fn daysdif_builtin(
             if basis == 1 {
                 let s = date_from_key(start_key)?;
                 let e = date_from_key(end_key)?;
-                let start_last_february =
-                    s.month() == 2 && s.day() == days_in_month(s.year(), 2)?;
-                let end_last_february =
-                    e.month() == 2 && e.day() == days_in_month(e.year(), 2)?;
+                let start_last_february = s.month() == 2 && s.day() == days_in_month(s.year(), 2)?;
+                let end_last_february = e.month() == 2 && e.day() == days_in_month(e.year(), 2)?;
                 let sd = if s.day() == 31 || start_last_february {
                     30
                 } else {
                     s.day()
                 } as i32;
-                let ed = if (start_last_february && end_last_february)
-                    || (sd == 30 && e.day() == 31)
-                {
-                    30
-                } else {
-                    e.day()
-                } as i32;
+                let ed =
+                    if (start_last_february && end_last_february) || (sd == 30 && e.day() == 31) {
+                        30
+                    } else {
+                        e.day()
+                    } as i32;
                 Ok(f64::from(
                     (e.year() - s.year()) * 360
                         + (e.month() as i32 - s.month() as i32) * 30
@@ -526,6 +628,18 @@ async fn month_business_date_builtin(
             "{name}: expected optional Holiday, Weekend, and outputType"
         )));
     }
+    ensure_business_day_input_policy(
+        name,
+        &std::iter::once(&year)
+            .chain(std::iter::once(&month))
+            .chain(rest.iter())
+            .collect::<Vec<_>>(),
+        &rest.first().into_iter().collect::<Vec<_>>(),
+        &[Some(&year), Some(&month), rest.first()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    )?;
     let output_datetime = match rest.get(2) {
         Some(value) => match scalar_text(value, "outputType")?
             .trim()
