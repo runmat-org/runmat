@@ -209,7 +209,10 @@ fn collect_direct_file_candidates(
 ) -> Result<Vec<PathBuf>, String> {
     let expanded = expand_user_path(name, error_prefix)?;
     let base = PathBuf::from(&expanded);
-    let mut candidates = vec![base.clone()];
+    let mut candidates = Vec::new();
+    if matches_extension(&base, extensions) {
+        candidates.push(base.clone());
+    }
     if base.extension().is_none() {
         for &ext in extensions {
             if ext.is_empty() {
@@ -236,7 +239,9 @@ fn collect_package_file_candidates(
             root.push(&prefix);
         }
         let base_path = root.join(&base_name);
-        push_unique(&mut candidates, base_path.clone());
+        if matches_extension(&base_path, extensions) {
+            push_unique(&mut candidates, base_path.clone());
+        }
         for &ext in extensions {
             if ext.is_empty() {
                 continue;
@@ -246,6 +251,17 @@ fn collect_package_file_candidates(
     }
 
     Ok(candidates)
+}
+
+fn matches_extension(path: &Path, extensions: &[&str]) -> bool {
+    extensions.contains(&"")
+        || path.extension().is_some_and(|actual| {
+            extensions.iter().any(|expected| {
+                expected
+                    .strip_prefix('.')
+                    .is_some_and(|expected| actual.eq_ignore_ascii_case(expected))
+            })
+        })
 }
 
 fn append_extension(path: &Path, ext: &str) -> PathBuf {
@@ -401,4 +417,31 @@ pub async fn path_is_directory(path: &Path) -> bool {
         .await
         .map(|meta| meta.is_dir())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{file_candidates, MEX_EXTENSIONS, PCODE_EXTENSIONS};
+    use std::path::PathBuf;
+
+    #[test]
+    fn explicit_files_only_match_requested_extensions() {
+        let text = file_candidates("./data.txt", MEX_EXTENSIONS, "test").expect("candidates");
+        assert!(text.is_empty());
+
+        let pcode = file_candidates("./packed.p", PCODE_EXTENSIONS, "test").expect("candidates");
+        assert_eq!(pcode, vec![PathBuf::from("./packed.p")]);
+    }
+
+    #[test]
+    fn extensionless_paths_respect_the_bare_file_option() {
+        let source = file_candidates("./entry", &[".m"], "test").expect("candidates");
+        assert_eq!(source, vec![PathBuf::from("./entry.m")]);
+
+        let source_or_bare = file_candidates("./entry", &[".m", ""], "test").expect("candidates");
+        assert_eq!(
+            source_or_bare,
+            vec![PathBuf::from("./entry"), PathBuf::from("./entry.m")]
+        );
+    }
 }
