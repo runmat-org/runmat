@@ -8,26 +8,16 @@ mod specification;
 pub(crate) use specification::*;
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, CONJ_CHARACTER_INPUT_EXTENSION, CONJ_ERROR_INTERNAL,
-    CONJ_ERROR_INVALID_INPUT,
+    CONJ_CHARACTER_INPUT_EXTENSION, CONJ_ERROR_INTERNAL, CONJ_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::BuiltinResult;
 const BUILTIN_NAME: &str = "conj";
 
-fn builtin_error_with_detail(
-    error: &'static BuiltinErrorDescriptor,
-    detail: impl AsRef<str>,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
-        .with_builtin(BUILTIN_NAME);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
+mod errors;
+use errors::builtin_error_with_detail;
 
 #[runtime_builtin(
     name = "conj",
@@ -62,14 +52,9 @@ async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
 pub(crate) use host::conjugate_integer_imaginary_storage;
 
 #[cfg(all(test, feature = "wgpu"))]
-fn conj_real(value: Value) -> BuiltinResult<Value> {
-    host::execute(value)
-}
-
+mod test_helpers;
 #[cfg(all(test, feature = "wgpu"))]
-async fn conj_gpu(handle: runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<Value> {
-    provider::execute(handle).await
-}
+use test_helpers::{conj_gpu, conj_real};
 
 #[cfg(test)]
 mod tests;
