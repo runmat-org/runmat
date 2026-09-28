@@ -89,6 +89,7 @@ enum ReplacementInterruption {
     ThermalCommitted,
     ThermalCheckpointAckLost,
     ThermalCheckpointRejectedBeforeStore,
+    ThermalAttemptActive,
 }
 
 /// Inspect only authenticated, already-stored checkpoint objects. Never infer a
@@ -160,13 +161,27 @@ fn committed_thermal_task(
     state: &DurableState,
     checkpoint: &RemoteDriverCheckpoint,
 ) -> Option<runmat_execution::TaskId> {
+    thermal_task(control, state, checkpoint, false)
+}
+
+fn thermal_task(
+    control: &DurableControl,
+    state: &DurableState,
+    checkpoint: &RemoteDriverCheckpoint,
+    active: bool,
+) -> Option<runmat_execution::TaskId> {
     use runmat_analysis_execution::AnalysisHostWorkload;
     use runmat_analysis_fea::execution::AnalysisWorkKind;
     use runmat_execution::value::{ValuePayload, ValueRefKind};
 
     let (pool, closure) = stored_pool_checkpoint(control, state, checkpoint)?;
     for (task_id, record) in &pool.test_snapshot().tasks {
-        if record.committed.is_none() {
+        let relevant = if active {
+            record.committed.is_none() && record.active_attempt.is_some()
+        } else {
+            record.committed.is_some()
+        };
+        if !relevant {
             continue;
         }
         let Some(program) = pool.test_program(*task_id) else {
@@ -322,6 +337,10 @@ impl DriverControlPlane for DurableControl {
                     | ReplacementInterruption::ThermalCheckpointRejectedBeforeStore => {
                         let state = self.state.lock().unwrap();
                         committed_thermal_task(self, &state, &checkpoint).is_some()
+                    }
+                    ReplacementInterruption::ThermalAttemptActive => {
+                        let state = self.state.lock().unwrap();
+                        thermal_task(self, &state, &checkpoint, true).is_some()
                     }
                     ReplacementInterruption::ReplayableExecutionStart => false,
                 })
@@ -524,6 +543,17 @@ fn rejected_thermal_checkpoint_cannot_be_restored_as_a_committed_prefix() {
     }
 }
 
+#[test]
+fn active_thermal_attempt_retries_after_actual_driver_replacement() {
+    for case in thermal::Case::matrix() {
+        let result = run_actual_driver_replacement_with_interruption(
+            ExactStudyFamily::ThermalPrestress(case),
+            ReplacementInterruption::ThermalAttemptActive,
+        );
+        assert!(result.is_some());
+    }
+}
+
 fn run_actual_driver_replacement(family: ExactStudyFamily) -> Option<thermal::ColdReplay> {
     run_actual_driver_replacement_with_interruption(family, family.interruption())
 }
@@ -570,6 +600,7 @@ async fn actual_driver_replacement_case(
         &fixture.inventory,
         fixture.run_key.clone(),
         1,
+        interruption == ReplacementInterruption::ThermalAttemptActive,
     );
     let first_driver = super::driver::run_remote_driver(
         RemoteDriverConfig {
@@ -649,6 +680,16 @@ async fn actual_driver_replacement_case(
     } else {
         None
     };
+    let active_thermal_before = if interruption == ReplacementInterruption::ThermalAttemptActive {
+        let state = control.state.lock().unwrap();
+        let checkpoint = stored_driver_checkpoint(&control, &state, &checkpoint_after_loss);
+        let task_id = thermal_task(&control, &state, &checkpoint, true)
+            .expect("driver loss must follow an authenticated active thermal attempt");
+        let (pool, _) = stored_pool_checkpoint(&control, &state, &checkpoint).unwrap();
+        Some((task_id, pool.test_snapshot().clone()))
+    } else {
+        None
+    };
     let second_relay = RelayServer::bind().await;
     let second_authority = driver_authority(2, second_relay.http_base());
     let second_worker = run_worker(
@@ -657,6 +698,7 @@ async fn actual_driver_replacement_case(
         &fixture.inventory,
         fixture.run_key.clone(),
         2,
+        false,
     );
     let second_driver = super::driver::run_remote_driver(
         RemoteDriverConfig {
@@ -782,6 +824,48 @@ async fn actual_driver_replacement_case(
             }),
             "replacement must complete downstream work, not replay an already completed study"
         );
+    }
+    if let Some((task_id, before)) = active_thermal_before {
+        use runmat_execution::state::AttemptState;
+        let state = control.state.lock().unwrap();
+        let final_id = state
+            .latest_checkpoint
+            .as_ref()
+            .expect("final pool checkpoint");
+        let checkpoint = stored_driver_checkpoint(&control, &state, final_id);
+        let (pool, _) = stored_pool_checkpoint(&control, &state, &checkpoint).unwrap();
+        let after = pool.test_snapshot();
+        let original = &before.tasks[&task_id];
+        let recovered = &after.tasks[&task_id];
+        let old_attempt = original.active_attempt.expect("in-flight thermal attempt");
+        assert_eq!(recovered.submission, original.submission);
+        assert_eq!(original.attempt_count, 1);
+        assert_eq!(recovered.attempt_count, 2);
+        assert_eq!(recovered.submission.request.id, task_id);
+        assert_eq!(
+            after.attempts[&old_attempt].request,
+            before.attempts[&old_attempt].request
+        );
+        assert_eq!(after.attempts[&old_attempt].state, AttemptState::Lost);
+        let committed = recovered
+            .committed
+            .as_ref()
+            .expect("replacement thermal commit");
+        assert_ne!(committed.attempt_id, old_attempt);
+        assert_eq!(committed.driver_fence, 2);
+        assert_eq!(
+            after
+                .attempts
+                .values()
+                .filter(|attempt| attempt.request.task_id == task_id)
+                .count(),
+            2,
+        );
+        assert!(after.tasks.iter().all(|(id, _)| {
+            *id == task_id
+                || before.tasks.contains_key(id)
+                || pool.test_program(*id) != pool.test_program(task_id)
+        }));
     }
     if interruption == ReplacementInterruption::ThermalCheckpointRejectedBeforeStore {
         let state = control.state.lock().unwrap();

@@ -34,6 +34,8 @@ impl MeshingCancellationSignal for AttemptCancellation {
 pub(super) struct RemoteMeshingHost {
     kernel: Arc<dyn MeshingStageKernel>,
     limits: crate::NativeMeshingHostLimits,
+    #[cfg(test)]
+    hold_thermal_attempt: bool,
 }
 
 impl RemoteMeshingHost {
@@ -41,7 +43,18 @@ impl RemoteMeshingHost {
         kernel: Arc<dyn MeshingStageKernel>,
         limits: crate::NativeMeshingHostLimits,
     ) -> Self {
-        Self { kernel, limits }
+        Self {
+            kernel,
+            limits,
+            #[cfg(test)]
+            hold_thermal_attempt: false,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn hold_thermal_attempt(mut self) -> Self {
+        self.hold_thermal_attempt = true;
+        self
     }
 }
 
@@ -55,6 +68,21 @@ pub(super) async fn execute(
     progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
 ) -> ProgramExecutionResponse {
     if program.artifact.form == ExecutableForm::AnalysisWorkload {
+        #[cfg(test)]
+        if meshing_host
+            .as_ref()
+            .is_some_and(|host| host.hold_thermal_attempt)
+            && runmat_analysis_execution::AnalysisHostWorkload::from_program_request(
+                &program, &objects,
+            )
+            .is_ok_and(|host| {
+                host.workload.kind == runmat_analysis_fea::execution::AnalysisWorkKind::SolveThermal
+            })
+        {
+            // The relay stays live, but this attempt cannot finish before the
+            // first driver is replaced. Dropping that worker releases the task.
+            std::future::pending::<()>().await;
+        }
         drop(progress_sender);
         return tokio::task::spawn_blocking(move || {
             let _guard = install_analysis_cancellation(attempt_id, &cancellation);

@@ -111,6 +111,23 @@ pub(crate) async fn run_remote_meshing_worker_relay_cached(
     .await
 }
 
+#[cfg(test)]
+pub(crate) async fn run_remote_meshing_worker_relay_with_held_thermal_attempt(
+    request: RemoteWorkerRelayRequest<'_>,
+    kernel: Arc<dyn MeshingStageKernel>,
+    limits: crate::NativeMeshingHostLimits,
+) -> NativeExecutionResult<()> {
+    limits.validate()?;
+    run_remote_worker_relay_cached_with_meshing(
+        request,
+        None,
+        Some(
+            super::worker_execution::RemoteMeshingHost::new(kernel, limits).hold_thermal_attempt(),
+        ),
+    )
+    .await
+}
+
 async fn run_remote_worker_relay_cached_with_meshing(
     request: RemoteWorkerRelayRequest<'_>,
     bundle_cache: Option<std::path::PathBuf>,

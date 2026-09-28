@@ -428,6 +428,7 @@ pub(super) async fn run_worker(
     inventory: &ResourceInventory,
     run_key: RunKeyMaterial,
     driver_fence: u64,
+    hold_thermal_attempt: bool,
 ) -> crate::NativeExecutionResult<()> {
     let allocation_id = allocation.allocation_lease_id.clone();
     let worker = WorkerSpec {
@@ -438,20 +439,30 @@ pub(super) async fn run_worker(
         pool_id: runmat_execution::identity::PoolId::derive(&[RUN_ID.as_bytes(), b"remote-pool"]),
         resources: inventory.clone(),
     };
-    run_remote_meshing_worker_relay_cached(
-        RemoteWorkerRelayRequest {
-            url: &relay_url,
-            headers: &[],
-            run_identity: RUN_ID.into(),
-            worker,
-            driver_fence,
-            session_id: session_id(RUN_ID, &allocation_id),
-            run_key,
-            limits: FrameLimits::default(),
-        },
-        None,
-        Arc::new(native_meshing_kernel_dispatcher()),
-        NativeMeshingHostLimits::default(),
-    )
-    .await
+    let request = RemoteWorkerRelayRequest {
+        url: &relay_url,
+        headers: &[],
+        run_identity: RUN_ID.into(),
+        worker,
+        driver_fence,
+        session_id: session_id(RUN_ID, &allocation_id),
+        run_key,
+        limits: FrameLimits::default(),
+    };
+    if hold_thermal_attempt {
+        super::super::worker_entry::run_remote_meshing_worker_relay_with_held_thermal_attempt(
+            request,
+            Arc::new(native_meshing_kernel_dispatcher()),
+            NativeMeshingHostLimits::default(),
+        )
+        .await
+    } else {
+        run_remote_meshing_worker_relay_cached(
+            request,
+            None,
+            Arc::new(native_meshing_kernel_dispatcher()),
+            NativeMeshingHostLimits::default(),
+        )
+        .await
+    }
 }
