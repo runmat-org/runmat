@@ -7,7 +7,7 @@ use runmat_accelerate_api::allocation::{
 };
 
 impl AllocationState {
-    pub(super) fn acquire(
+    pub(in crate::backend::cuda) fn acquire(
         &self,
         wire: &GpuTensorWireDescriptor,
     ) -> Result<GpuTensorHandle, Acquire> {
@@ -21,7 +21,10 @@ impl AllocationState {
         weak.acquire_tensor(wire)
     }
 
-    pub(super) fn validate_native_write(&self, handle: &GpuTensorHandle) -> Result<()> {
+    pub(in crate::backend::cuda) fn validate_native_write(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> Result<()> {
         self.allocation(handle)?;
         let records = self.records();
         let record = records

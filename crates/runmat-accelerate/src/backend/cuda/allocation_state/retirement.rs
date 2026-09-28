@@ -2,7 +2,7 @@ use super::context::ContextScope;
 use super::*;
 
 impl AllocationState {
-    fn retire_record(&self, id: u64) -> Result<()> {
+    pub(in crate::backend::cuda) fn retire_record(&self, id: u64) -> Result<()> {
         self.ensure_available()?;
         let allocation = {
             let mut records = self.records();
