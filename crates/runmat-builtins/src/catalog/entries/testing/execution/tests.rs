@@ -88,6 +88,13 @@ fn proven_invalid_forms_report_diagnostics_without_guessing_runtime_outcomes() {
     .diagnostics
     .iter()
     .any(|item| item.code == "RM-TESTING-RUNNER-OPTIONS"));
+    assert!(inference::with_text_output(
+        &call(vec![unknown(), unknown()], 1),
+        &WITH_TEXT_OUTPUT_CATALOG_ENTRY
+    )
+    .diagnostics
+    .iter()
+    .any(|item| item.code == "RM-TESTING-UNSUPPORTED-RUNNER-OPTION"));
     assert!(inference::add_plugin(
         &call(vec![number.clone(), number.clone()], 1),
         &ADD_PLUGIN_CATALOG_ENTRY
@@ -106,6 +113,12 @@ fn proven_invalid_forms_report_diagnostics_without_guessing_runtime_outcomes() {
 
 #[test]
 fn examples_assert_real_structured_pass_and_failure() {
+    assert!(documentation::ADD_PLUGIN.examples[0]
+        .program
+        .contains("runner.addPlugin(plugin)"));
+    assert!(documentation::RUN.examples[0]
+        .program
+        .contains("runner.run(suite)"));
     let BuiltinExampleFixture::Filesystem(fixture) = documentation::RUN.examples[0].fixture else {
         panic!("test run requires a source fixture")
     };

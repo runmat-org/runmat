@@ -16,7 +16,7 @@ fn runner_type(_args: &[Type], _context: &ResolveContext) -> Type {
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestRunner.withTextOutput",
     category = "testing",
-    summary = "Construct a test runner that emits text progress through the host reporter.",
+    summary = "Construct a test runner for the active Core test executor.",
     type_resolver(runner_type),
     builtin_path = "crate::builtins::testing::testrunner"
 )]
@@ -26,6 +26,14 @@ async fn with_text_output(options: Vec<Value>) -> BuiltinResult<Value> {
         return Err(runner_error(
             "TestRunner.withTextOutput options must be name-value pairs",
         ));
+    }
+    if !options.is_empty() {
+        return Err(
+            build_runtime_error("TestRunner.withTextOutput options are not supported yet")
+                .with_identifier("RunMat:Testing:UnsupportedRunnerOption")
+                .with_builtin("matlab.unittest.TestRunner.withTextOutput")
+                .build(),
+        );
     }
     let runner = crate::new_handle_object_builtin(TEST_RUNNER_CLASS.into()).await?;
     set_plugins(&runner, Vec::new())?;
@@ -151,4 +159,28 @@ fn runner_error(message: impl Into<String>) -> crate::RuntimeError {
         .with_identifier("RunMat:Testing:InvalidRunner")
         .with_builtin("matlab.unittest.TestRunner")
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_runner_rejects_options_that_it_cannot_apply() {
+        let odd = futures::executor::block_on(with_text_output(vec![Value::String(
+            "OutputDetail".into(),
+        )]))
+        .unwrap_err();
+        assert_eq!(odd.identifier(), Some("RunMat:Testing:InvalidRunner"));
+
+        let ignored = futures::executor::block_on(with_text_output(vec![
+            Value::String("OutputDetail".into()),
+            Value::String("Verbose".into()),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            ignored.identifier(),
+            Some("RunMat:Testing:UnsupportedRunnerOption")
+        );
+    }
 }

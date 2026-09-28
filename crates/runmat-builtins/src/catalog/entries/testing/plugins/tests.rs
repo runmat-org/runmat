@@ -176,3 +176,53 @@ fn invalid_or_missing_folder_and_option_are_reported_statically_when_proven() {
     );
     assert!(unknown_folder.diagnostics.is_empty());
 }
+
+#[test]
+fn known_unsupported_coverage_options_are_never_inferred_as_extra_folders() {
+    for name in ["Producing", "MetricLevel", "Filter"] {
+        for option in [
+            LiteralValue::String(name.into()),
+            LiteralValue::Character(name.into()),
+        ] {
+            let result = inference::code_coverage_for_folder(
+                &call(
+                    vec![
+                        ValueFact::scalar(ValueKindFact::String),
+                        ValueFact::scalar(ValueKindFact::String),
+                        ValueFact::scalar(ValueKindFact::String),
+                    ],
+                    vec![
+                        LiteralValue::String("src".into()),
+                        option,
+                        LiteralValue::String("value".into()),
+                    ],
+                    1,
+                ),
+                &CODE_COVERAGE_FOR_FOLDER_CATALOG_ENTRY,
+            );
+            assert!(result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-TESTING-COVERAGE-UNSUPPORTED-OPTION"));
+        }
+    }
+
+    let dangling = inference::code_coverage_for_folder(
+        &call(
+            vec![
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::String),
+            ],
+            vec![
+                LiteralValue::String("src".into()),
+                LiteralValue::String("IncludingSubfolders".into()),
+            ],
+            1,
+        ),
+        &CODE_COVERAGE_FOR_FOLDER_CATALOG_ENTRY,
+    );
+    assert!(dangling
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TESTING-COVERAGE-SUBFOLDERS"));
+}

@@ -49,12 +49,20 @@ const BASE_ERRORS: &[BuiltinErrorDescriptor] = &[BuiltinErrorDescriptor {
     when: "The TestRunnerPlugin constructor receives any input.",
     message: "TestRunnerPlugin: too many input arguments",
 }];
-const COVERAGE_ERRORS: &[BuiltinErrorDescriptor] = &[BuiltinErrorDescriptor {
-    code: "RM.TESTING.COVERAGE_PLUGIN_INPUT",
-    identifier: Some("RunMat:Testing:InvalidPlugin"),
-    when: "No nonempty folder is supplied, a folder is not supported host text, or IncludingSubfolders is not scalar logical or numeric 0/1.",
-    message: "CodeCoveragePlugin.forFolder requires supported nonempty folders and a valid IncludingSubfolders option",
-}];
+const COVERAGE_ERRORS: &[BuiltinErrorDescriptor] = &[
+    BuiltinErrorDescriptor {
+        code: "RM.TESTING.COVERAGE_PLUGIN_INPUT",
+        identifier: Some("RunMat:Testing:InvalidPlugin"),
+        when: "No nonempty folder is supplied, a folder is not supported host text, or IncludingSubfolders is absent or not scalar logical or numeric 0/1.",
+        message: "CodeCoveragePlugin.forFolder requires supported nonempty folders and a valid IncludingSubfolders option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.TESTING.COVERAGE_UNSUPPORTED_OPTION",
+        identifier: Some("RunMat:Testing:UnsupportedPluginOption"),
+        when: "Producing, MetricLevel, or Filter appears after a folder.",
+        message: "CodeCoveragePlugin.forFolder does not support that option",
+    },
+];
 
 pub const TEST_RUNNER_PLUGIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: BASE_SIGNATURES,

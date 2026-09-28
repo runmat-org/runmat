@@ -84,6 +84,29 @@ fn option_boolean(value: &ValueFact, literal: Option<&LiteralValue>) -> bool {
     }
 }
 
+#[derive(Clone, Copy)]
+enum CoverageOption {
+    IncludingSubfolders,
+    Unsupported,
+}
+
+fn coverage_option(literal: Option<&LiteralValue>) -> Option<CoverageOption> {
+    let name = match literal? {
+        LiteralValue::String(name) | LiteralValue::Character(name) => name,
+        _ => return None,
+    };
+    if name.eq_ignore_ascii_case("IncludingSubfolders") {
+        Some(CoverageOption::IncludingSubfolders)
+    } else if ["Producing", "MetricLevel", "Filter"]
+        .iter()
+        .any(|reserved| name.eq_ignore_ascii_case(reserved))
+    {
+        Some(CoverageOption::Unsupported)
+    } else {
+        None
+    }
+}
+
 pub(super) fn code_coverage_for_folder(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
@@ -99,24 +122,40 @@ pub(super) fn code_coverage_for_folder(
     let mut possible_folder = false;
     let mut index = 0;
     while index < request.arguments.len() {
-        let option_name = matches!(
-            request.literals.literal_args.get(index),
-            Some(LiteralValue::String(name) | LiteralValue::Character(name))
-                if name.eq_ignore_ascii_case("IncludingSubfolders")
-        );
-        if option_name && index + 1 < request.arguments.len() {
-            if !option_boolean(
-                &request.arguments[index + 1],
-                request.literals.literal_args.get(index + 1),
-            ) {
-                diagnostics.push(argument_error(
-                    "RM-TESTING-COVERAGE-SUBFOLDERS",
-                    "IncludingSubfolders requires scalar logical or double 0/1",
-                    index + 1,
-                ));
+        if index > 0 {
+            if let Some(option) = coverage_option(request.literals.literal_args.get(index)) {
+                match option {
+                    CoverageOption::IncludingSubfolders => {
+                        if let Some(value) = request.arguments.get(index + 1) {
+                            if !option_boolean(value, request.literals.literal_args.get(index + 1))
+                            {
+                                diagnostics.push(argument_error(
+                                    "RM-TESTING-COVERAGE-SUBFOLDERS",
+                                    "IncludingSubfolders requires scalar logical or double 0/1",
+                                    index + 1,
+                                ));
+                            }
+                        } else {
+                            diagnostics.push(argument_error(
+                                "RM-TESTING-COVERAGE-SUBFOLDERS",
+                                "IncludingSubfolders requires a value",
+                                index,
+                            ));
+                        }
+                    }
+                    CoverageOption::Unsupported => diagnostics.push(argument_error(
+                        "RM-TESTING-COVERAGE-UNSUPPORTED-OPTION",
+                        "CodeCoveragePlugin.forFolder does not support this option",
+                        index,
+                    )),
+                }
+                index += if index + 1 < request.arguments.len() {
+                    2
+                } else {
+                    1
+                };
+                continue;
             }
-            index += 2;
-            continue;
         }
         let folder = &request.arguments[index];
         if !is_host_folder(folder) {

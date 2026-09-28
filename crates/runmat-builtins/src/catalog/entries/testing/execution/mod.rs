@@ -18,7 +18,7 @@ const HANDLES: &[BuiltinParamDescriptor] = &[BuiltinParamDescriptor {
     default: None,
     description: "Cell array of named local function handles, normally from localfunctions.",
 }];
-const OPTIONS: &[BuiltinParamDescriptor] = &[BuiltinParamDescriptor { name: "nameValue", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Variadic, default: None, description: "Name-value arguments; the current runner checks pair count but does not apply text-output options." }];
+const OPTIONS: &[BuiltinParamDescriptor] = &[BuiltinParamDescriptor { name: "nameValue", ty: BuiltinParamType::Any, arity: BuiltinParamArity::Variadic, default: None, description: "Reserved name-value arguments; all nonempty option lists currently return UnsupportedRunnerOption." }];
 const RUNNER_AND_PLUGIN: &[BuiltinParamDescriptor] = &[
     BuiltinParamDescriptor {
         name: "runner",
@@ -96,17 +96,25 @@ pub const WITH_TEXT_OUTPUT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     }],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[BuiltinErrorDescriptor {
-        code: "RM.TESTING.RUNNER_OPTIONS",
-        identifier: Some("RunMat:Testing:InvalidRunner"),
-        when: "The number of option arguments is odd or runner allocation fails.",
-        message: "TestRunner.withTextOutput options must be name-value pairs",
-    }],
+    errors: &[
+        BuiltinErrorDescriptor {
+            code: "RM.TESTING.RUNNER_OPTIONS",
+            identifier: Some("RunMat:Testing:InvalidRunner"),
+            when: "The number of option arguments is odd or runner allocation fails.",
+            message: "TestRunner.withTextOutput options must be name-value pairs",
+        },
+        BuiltinErrorDescriptor {
+            code: "RM.TESTING.UNSUPPORTED_RUNNER_OPTION",
+            identifier: Some("RunMat:Testing:UnsupportedRunnerOption"),
+            when: "Any name-value argument is supplied; runner options are not implemented yet.",
+            message: "TestRunner.withTextOutput options are not supported yet",
+        },
+    ],
 };
-pub const ADD_PLUGIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor { signatures: &[BuiltinSignatureDescriptor { label: "runner = addPlugin(runner, plugin)", inputs: RUNNER_AND_PLUGIN, outputs: RUNNER_OUTPUT }], output_mode: BuiltinOutputMode::Fixed, completion_policy: BuiltinCompletionPolicy::MethodOnly, errors: &[BuiltinErrorDescriptor { code: "RM.TESTING.RUNNER_PLUGIN", identifier: Some("RunMat:Testing:InvalidRunner"), when: "The receiver is not a TestRunner handle, the plugin is incompatible, or plugin storage cannot be updated.", message: "addPlugin requires a TestRunner handle and TestRunnerPlugin" }] };
+pub const ADD_PLUGIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor { signatures: &[BuiltinSignatureDescriptor { label: "runner = runner.addPlugin(plugin)", inputs: RUNNER_AND_PLUGIN, outputs: RUNNER_OUTPUT }], output_mode: BuiltinOutputMode::Fixed, completion_policy: BuiltinCompletionPolicy::MethodOnly, errors: &[BuiltinErrorDescriptor { code: "RM.TESTING.RUNNER_PLUGIN", identifier: Some("RunMat:Testing:InvalidRunner"), when: "The receiver is not a TestRunner handle, the plugin is incompatible, or plugin storage cannot be updated.", message: "addPlugin requires a TestRunner handle and TestRunnerPlugin" }] };
 pub const TEST_RUNNER_RUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
-        label: "results = run(runner, suite)",
+        label: "results = runner.run(suite)",
         inputs: RUNNER_AND_SUITE,
         outputs: RESULT_OUTPUT,
     }],

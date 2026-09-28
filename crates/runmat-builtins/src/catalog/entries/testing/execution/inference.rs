@@ -128,13 +128,19 @@ pub(super) fn with_text_output(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
-    let diagnostics = if request.arguments.len().is_multiple_of(2) {
+    let diagnostics = if request.arguments.is_empty() {
         Vec::new()
-    } else {
+    } else if !request.arguments.len().is_multiple_of(2) {
         vec![argument_error(
             "RM-TESTING-RUNNER-OPTIONS",
             "withTextOutput requires name-value pairs",
             request.arguments.len() - 1,
+        )]
+    } else {
+        vec![argument_error(
+            "RM-TESTING-UNSUPPORTED-RUNNER-OPTION",
+            "withTextOutput options are not supported yet",
+            0,
         )]
     };
     finish_fixed(entry, request, runner(), diagnostics)

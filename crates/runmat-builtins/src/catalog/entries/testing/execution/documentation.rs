@@ -35,7 +35,7 @@ const RUNNER_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
 
 const PLUGIN_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "attach-plugin", title: "Attach a plugin to the same runner handle",
-    program: "runner = matlab.unittest.TestRunner.withTextOutput();\nplugin = matlab.unittest.plugins.TestRunnerPlugin();\nrunner = addPlugin(runner, plugin);",
+    program: "runner = matlab.unittest.TestRunner.withTextOutput();\nplugin = matlab.unittest.plugins.TestRunnerPlugin();\nrunner = runner.addPlugin(plugin);",
     display_output: None, compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
     requirements: BuiltinExampleRequirements::NONE,
@@ -44,7 +44,7 @@ const PLUGIN_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
 
 const RUN_EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "inspect-pass-and-fail", title: "Inspect both successful and failed test outcomes",
-    program: "suite = sampleTest();\nrunner = matlab.unittest.TestRunner.withTextOutput();\nresults = run(runner, suite);",
+    program: "suite = sampleTest();\nrunner = matlab.unittest.TestRunner.withTextOutput();\nresults = runner.run(suite);",
     display_output: None, compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem, fixture: TEST_FILE,
     requirements: BuiltinExampleRequirements::NONE,
@@ -78,14 +78,14 @@ pub(super) const WITH_TEXT_OUTPUT: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Construct a TestRunner handle for Core-backed tests.",
     description: "`withTextOutput()` creates a TestRunner handle with an empty plugin list. It can run a TestSuite through the active Core test executor.",
     keywords: &["test", "runner", "text output"], related: &["matlab.unittest.TestRunner.run", "matlab.unittest.TestRunner.addPlugin"],
-    sections: &[BuiltinDocumentationSection { heading: "Current options and reporting", paragraphs: &["The constructor accepts zero arguments or an even number of arguments. It currently checks only pair count: option names and values are not applied, and MATLAB-compatible text progress or diagnostics are not guaranteed. The returned handle retains plugins added later."] }],
+    sections: &[BuiltinDocumentationSection { heading: "Current options and reporting", paragraphs: &["The supported form takes no arguments. An odd argument count returns InvalidRunner; any complete name-value pair returns UnsupportedRunnerOption instead of being silently ignored. MATLAB-compatible text progress and diagnostic output are not guaranteed yet. The returned handle retains plugins added later."] }],
     examples: RUNNER_EXAMPLES, example_exemption: None, faqs: &[], links: &[BuiltinDocumentationLink { label: "MATLAB withTextOutput", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.testrunner.withtextoutput.html") }], media: &[], evidence: EVIDENCE, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 
 pub(super) const ADD_PLUGIN: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("matlab.unittest.TestRunner.addPlugin"), slug: Some("matlab.unittest.TestRunner.addPlugin"),
     summary: "Attach a TestRunnerPlugin to a runner handle.",
-    description: "`addPlugin(runner, plugin)` mutates the runner's plugin list and returns the same TestRunner handle.",
+    description: "`runner.addPlugin(plugin)` mutates the runner's plugin list and returns the same TestRunner handle.",
     keywords: &["test", "runner", "plugin"], related: &["matlab.unittest.plugins.TestRunnerPlugin", "matlab.unittest.plugins.CodeCoveragePlugin.forFolder", "matlab.unittest.TestRunner.run"],
     sections: &[BuiltinDocumentationSection { heading: "Plugin execution", paragraphs: &["The plugin must be a TestRunnerPlugin object or subclass. The Core executor recognizes CodeCoveragePlugin folder selection during a run. Arbitrary plugin lifecycle callbacks and report generation are not dispatched yet; storing a custom plugin is not a promise that its hooks execute."] }],
     examples: PLUGIN_EXAMPLES, example_exemption: None, faqs: &[], links: &[BuiltinDocumentationLink { label: "MATLAB addPlugin", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.testrunner.addplugin.html") }], media: &[], evidence: EVIDENCE, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
@@ -94,7 +94,7 @@ pub(super) const ADD_PLUGIN: BuiltinDocumentation = BuiltinDocumentation {
 pub(super) const RUN: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("matlab.unittest.TestRunner.run"), slug: Some("matlab.unittest.TestRunner.run"),
     summary: "Run selected tests and return structured TestResult objects.",
-    description: "`run(runner, suite)` delegates a TestSuite selection to the active Core test executor and returns one TestResult per executed test.",
+    description: "`runner.run(suite)` delegates a TestSuite selection to the active Core test executor and returns one TestResult per executed test.",
     keywords: &["test", "runner", "results", "failure"], related: &["functiontests", "matlab.unittest.TestRunner.withTextOutput", "runtests"],
     sections: &[BuiltinDocumentationSection { heading: "Execution and outcomes", paragraphs: &["The runner resolves the suite's source files through Core, executes selected tests in isolated test sessions and projects Passed, Failed, Incomplete, Details and other result properties. A failed test is represented by a failed TestResult; it does not make the runner call itself succeed as a passing test.", "This operation requires an installed Core testing service and access to the selected source files. Without one, it returns RunMat:Testing:RequiresExecutor. The exact MATLAB text reporter and arbitrary plugin callbacks are not implemented."] }],
     examples: RUN_EXAMPLES, example_exemption: None, faqs: &[], links: &[BuiltinDocumentationLink { label: "MATLAB TestRunner.run", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/matlab.unittest.testrunner.run.html") }], media: &[], evidence: EVIDENCE, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
