@@ -20,14 +20,14 @@ pub(super) fn tensor_from_datevec_like(value: Value, context: &str) -> BuiltinRe
         Tensor::new(padded, vec![rows, 6])
             .map_err(|err| datetime_error(format!("{context}: {err}")))
     };
+    if shape.len() >= 2 && (shape[1] == 3 || shape[1] == 6) {
+        return normalize(shape[0], shape[1], values);
+    }
     if values.len() == 3 {
         return normalize(1, 3, values);
     }
     if values.len() == 6 {
         return normalize(1, 6, values);
-    }
-    if shape.len() >= 2 && (shape[1] == 3 || shape[1] == 6) {
-        return normalize(shape[0], shape[1], values);
     }
     Err(datetime_error(format!(
         "{context}: expected a date vector with three or six columns"

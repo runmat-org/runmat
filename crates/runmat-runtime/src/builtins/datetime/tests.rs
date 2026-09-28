@@ -963,8 +963,8 @@ fn legacy_date_conversion_and_query_helpers_work() {
         "2024-03-14"
     );
 
-    let weekday =
-        futures::executor::block_on(weekday_builtin(Value::Num(serial))).expect("weekday");
+    let weekday = futures::executor::block_on(weekday_builtin(Value::Num(serial), Vec::new()))
+        .expect("weekday");
     assert_eq!(weekday, Value::Num(5.0));
     assert_eq!(
         futures::executor::block_on(eomday_builtin(Value::Num(2024.0), Value::Num(2.0)))
@@ -986,8 +986,125 @@ fn legacy_date_conversion_and_query_helpers_work() {
             Value::Num(serial + 1.0),
         ))
         .expect("isbetween"),
-        Value::Num(1.0)
+        Value::Bool(true)
     );
+}
+
+#[test]
+fn legacy_datevec_single_output_is_a_six_column_matrix() {
+    let _outputs = crate::output_count::push_output_count(Some(1));
+    let serial = serial_for_date(2024, 3, 14);
+    let value =
+        futures::executor::block_on(datevec_builtin(Value::Num(serial))).expect("date vector");
+    let Value::Tensor(matrix) = value else {
+        panic!("single output must be the full date-vector matrix");
+    };
+    assert_eq!(matrix.shape, vec![1, 6]);
+    assert_eq!(&matrix.materialize_f64()[..3], &[2024.0, 3.0, 14.0]);
+}
+
+#[test]
+fn two_by_three_date_vectors_keep_both_rows() {
+    let vectors =
+        Tensor::new(vec![2024.0, 2024.0, 3.0, 3.0, 14.0, 15.0], vec![2, 3]).expect("date vectors");
+    let serials = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(vectors)]))
+        .expect("two dates");
+    let Value::Tensor(serials) = serials else {
+        panic!("two input rows must yield two serial dates");
+    };
+    assert_eq!(serials.shape, vec![2, 1]);
+    assert_eq!(
+        serials.materialize_f64(),
+        vec![serial_for_date(2024, 3, 14), serial_for_date(2024, 3, 15)]
+    );
+}
+
+#[test]
+fn legacy_weekday_names_use_short_char_rows_by_default_and_long_on_request() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let serial = serial_for_date(2024, 3, 14);
+    for (options, expected) in [
+        (Vec::new(), "Thurs"),
+        (vec![Value::from("long")], "Thursday"),
+    ] {
+        let result = futures::executor::block_on(weekday_builtin(Value::Num(serial), options))
+            .expect("weekday names");
+        let Value::OutputList(outputs) = result else {
+            panic!("two outputs expected");
+        };
+        assert_eq!(outputs[0], Value::Num(5.0));
+        let Value::CharArray(names) = &outputs[1] else {
+            panic!("day names must be character rows");
+        };
+        assert_eq!(names.data.iter().collect::<String>(), expected);
+    }
+}
+
+#[test]
+fn legacy_date_extensions_reject_before_provider_access_in_matlab_mode() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let typed = integer_tensor(runmat_value::IntegerStorage::U32(vec![739_000]), vec![1, 1]);
+    let typed_error = futures::executor::block_on(datevec_builtin(typed))
+        .expect_err("typed legacy serial is an extension");
+    assert_eq!(
+        typed_error.identifier(),
+        Some("RunMat:compatibility:LegacyDatetimeTypedNumericExtension")
+    );
+
+    let partial = futures::executor::block_on(datenum_builtin(vec![
+        Value::Num(2024.0),
+        Value::Num(3.0),
+        Value::Num(14.0),
+        Value::Num(1.0),
+    ]))
+    .expect_err("four-component datenum is an extension");
+    assert_eq!(
+        partial.identifier(),
+        Some("RunMat:compatibility:DatenumPartialComponentsExtension")
+    );
+
+    let serial = serial_for_date(2024, 3, 14);
+    let between = futures::executor::block_on(isbetween_builtin(
+        Value::Num(serial),
+        Value::Num(serial - 1.0),
+        Value::Num(serial + 1.0),
+    ))
+    .expect_err("numeric isbetween is an extension");
+    assert_eq!(
+        between.identifier(),
+        Some("RunMat:compatibility:IsbetweenSerialDateExtension")
+    );
+
+    let resident = unregistered_resident(vec![1, 1]);
+    let error = futures::executor::block_on(weekday_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        Vec::new(),
+    ))
+    .expect_err("resident date is an extension");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:DatetimeGpuInputExtension")
+    );
+    assert_eq!(resident.probe.retirements(), 0);
+    resident.handle.release().expect("release owner allocation");
+    assert_eq!(resident.probe.retirements(), 1);
+}
+
+#[test]
+fn legacy_date_output_counts_reject_unsupported_requests() {
+    let serial = serial_for_date(2024, 3, 14);
+    {
+        let _outputs = crate::output_count::push_output_count(Some(7));
+        let err = futures::executor::block_on(datevec_builtin(Value::Num(serial)))
+            .expect_err("datevec has six components");
+        assert!(err.message().contains("at most six outputs"));
+    }
+    {
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let err = futures::executor::block_on(weekday_builtin(Value::Num(serial), Vec::new()))
+            .expect_err("weekday has two outputs");
+        assert!(err.message().contains("at most two outputs"));
+    }
 }
 
 #[test]
