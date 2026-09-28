@@ -8,6 +8,7 @@ pub mod feedback;
 pub mod impulse;
 pub mod isstable;
 pub mod lqr;
+pub(crate) mod model_polynomial;
 pub mod nyquist;
 pub(crate) mod plot_setup_error;
 pub mod pole;

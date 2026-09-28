@@ -32,22 +32,6 @@ pub fn stepinfo_type(_args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-pub fn pole_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
-pub fn zero_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
-pub fn pzmap_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
-pub fn rlocus_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
 pub fn ss_type(args: &[Type], context: &ResolveContext) -> Type {
     let rest = match args {
         [a, b, c, d, rest @ ..] if valid_state_space_matrix_types(a, b, c, d) => rest,

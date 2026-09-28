@@ -857,6 +857,29 @@ pub fn ss_poles_from_object(
     Ok((eigenvalues.iter().copied().collect(), sample_time))
 }
 
+/// Gather only the state-space properties consumed by an analysis operation.
+pub async fn gather_ss_properties(
+    mut object: ObjectInstance,
+    required: &[&str],
+    builtin: &'static str,
+) -> BuiltinResult<ObjectInstance> {
+    for &name in required {
+        if !object.properties.contains_key(name) {
+            return Err(control_error(
+                builtin,
+                invalid_model_identifier(builtin),
+                format!("{builtin}: ss object is missing {name}"),
+            ));
+        }
+    }
+    for &name in required {
+        let value = object.properties.get(name).expect("preflight checked property");
+        let gathered = dispatcher::gather_if_needed_async(value).await?;
+        object.properties.insert(name.to_string(), gathered);
+    }
+    Ok(object)
+}
+
 /// Gather only the state matrix and sample time used by pole analysis. Other
 /// state-space properties may contain resident values but are not read here.
 pub async fn ss_poles_from_object_async(
@@ -1315,7 +1338,7 @@ fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
     }
 }
 
-fn invalid_model_identifier(builtin: &str) -> &'static str {
+pub(crate) fn invalid_model_identifier(builtin: &str) -> &'static str {
     match builtin {
         "feedback" => "RunMat:feedback:InvalidModel",
         "stepinfo" => "RunMat:stepinfo:InvalidSystem",
@@ -1330,7 +1353,7 @@ fn invalid_model_identifier(builtin: &str) -> &'static str {
     }
 }
 
-fn unsupported_model_identifier(builtin: &str) -> &'static str {
+pub(crate) fn unsupported_model_identifier(builtin: &str) -> &'static str {
     match builtin {
         "feedback" => "RunMat:feedback:UnsupportedModel",
         "stepinfo" => "RunMat:stepinfo:UnsupportedModel",
@@ -1345,7 +1368,7 @@ fn unsupported_model_identifier(builtin: &str) -> &'static str {
     }
 }
 
-fn internal_identifier(builtin: &str) -> &'static str {
+pub(crate) fn internal_identifier(builtin: &str) -> &'static str {
     match builtin {
         "feedback" => "RunMat:feedback:Internal",
         "stepinfo" => "RunMat:stepinfo:Internal",

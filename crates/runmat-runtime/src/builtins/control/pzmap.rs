@@ -2,13 +2,12 @@
 
 use num_complex::Complex64;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, PZMAP_ERROR_INTERNAL, PZMAP_ERROR_INVALID_ARGUMENT,
+    PZMAP_ERROR_INVALID_MODEL, PZMAP_ERROR_PLOT_FAILED, PZMAP_ERROR_UNSUPPORTED_MODEL,
 };
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinIntegerInputAvailability, PZMAP_DESCRIPTOR, PZMAP_INTEGER_CAPABILITIES,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
@@ -17,116 +16,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::control::model_polynomial::ss_object_to_tf_async;
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::tf_model::{output_complex_column, TfModel, EPS, SS_CLASS, TF_CLASS};
-use crate::builtins::control::type_resolvers::pzmap_type;
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "pzmap";
-
-const PZMAP_OUTPUT_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Poles of the SISO tf or ss model as a column vector.",
-};
-const PZMAP_OUTPUT_Z: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "z",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zeros of the SISO tf or ss model as a column vector.",
-};
-const PZMAP_INPUT_SYS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf or ss model.",
-};
-const PZMAP_OUTPUTS_P: [BuiltinParamDescriptor; 1] = [PZMAP_OUTPUT_P];
-const PZMAP_OUTPUTS_P_Z: [BuiltinParamDescriptor; 2] = [PZMAP_OUTPUT_P, PZMAP_OUTPUT_Z];
-const PZMAP_INPUTS_SYS: [BuiltinParamDescriptor; 1] = [PZMAP_INPUT_SYS];
-const PZMAP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "pzmap(sys)",
-        inputs: &PZMAP_INPUTS_SYS,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = pzmap(sys)",
-        inputs: &PZMAP_INPUTS_SYS,
-        outputs: &PZMAP_OUTPUTS_P,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p,z] = pzmap(sys)",
-        inputs: &PZMAP_INPUTS_SYS,
-        outputs: &PZMAP_OUTPUTS_P_Z,
-    },
-];
-const PZMAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.INVALID_ARGUMENT",
-    identifier: Some("RunMat:pzmap:InvalidArgument"),
-    when: "Inputs do not match supported pzmap invocation forms.",
-    message: "pzmap: invalid argument",
-};
-const PZMAP_ERROR_INVALID_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.INVALID_MODEL",
-    identifier: Some("RunMat:pzmap:InvalidModel"),
-    when: "Input system is not a valid SISO tf object.",
-    message: "pzmap: invalid model",
-};
-const PZMAP_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.UNSUPPORTED_MODEL",
-    identifier: Some("RunMat:pzmap:UnsupportedModel"),
-    when: "Model form is not supported by the current implementation.",
-    message: "pzmap: unsupported model",
-};
-const PZMAP_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.PLOT_FAILED",
-    identifier: Some("RunMat:pzmap:PlotFailed"),
-    when: "Statement-form plotting failed for reasons other than known nonfatal setup conditions.",
-    message: "pzmap: plotting failed",
-};
-const PZMAP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PZMAP.INTERNAL",
-    identifier: Some("RunMat:pzmap:Internal"),
-    when: "Pole-zero extraction or output construction failed.",
-    message: "pzmap: internal error",
-};
-const PZMAP_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    PZMAP_ERROR_INVALID_ARGUMENT,
-    PZMAP_ERROR_INVALID_MODEL,
-    PZMAP_ERROR_UNSUPPORTED_MODEL,
-    PZMAP_ERROR_PLOT_FAILED,
-    PZMAP_ERROR_INTERNAL,
-];
-pub const PZMAP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PZMAP_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PZMAP_ERRORS,
-};
-const PZMAP_INTEGER_SYS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "sys",
-    classes: &[],
-    availability: BuiltinIntegerInputAvailability::Rejected,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "pzmap accepts a dynamic-system object. Integer coefficient support belongs to the tf/ss constructors and does not make an integer array a valid sys input.",
-}];
-pub const PZMAP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[p,z] = pzmap(integer_sys)",
-        inputs: &PZMAP_INTEGER_SYS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer input is inapplicable at the dynamic-system object boundary and rejects before provider access. Model coefficients have already crossed their constructor's model-numeric boundary.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::pzmap")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -157,17 +53,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "pzmap",
-    category = "control",
-    summary = "Plot or return poles and zeros of SISO transfer-function and state-space models.",
-    keywords = "pzmap,pole zero map,poles,zeros,control system,transfer function,state space,tf,ss",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(pzmap_type),
-    descriptor(crate::builtins::control::pzmap::PZMAP_DESCRIPTOR),
-    integer_capabilities(crate::builtins::control::pzmap::PZMAP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::pzmap"
 )]
 async fn pzmap_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        return Err(pzmap_error(
+            "pzmap: too many output arguments",
+            &PZMAP_ERROR_INVALID_ARGUMENT,
+        ));
+    }
     if is_plot_form_call() {
         plot_pole_zero_map_statement(sys, rest).await?;
         return Ok(Value::OutputList(Vec::new()));
@@ -208,8 +103,7 @@ fn is_plot_form_call() -> bool {
 async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
     let mut systems = vec![(first_sys, None)];
     for arg in rest {
-        let gathered = crate::dispatcher::gather_if_needed_async(&arg).await?;
-        if is_plot_style_arg(&gathered) {
+        if is_plot_style_arg(&arg) {
             if let Some((_, style)) = systems.last_mut() {
                 if style.is_some() {
                     return Err(pzmap_error(
@@ -217,12 +111,12 @@ async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> Bui
                         &PZMAP_ERROR_INVALID_ARGUMENT,
                     ));
                 }
-                *style = Some(gathered);
+                *style = Some(arg);
                 continue;
             }
         }
-        if is_dynamic_model_object(&gathered) {
-            systems.push((gathered, None));
+        if is_dynamic_model_object(&arg) {
+            systems.push((arg, None));
             continue;
         }
         return Err(pzmap_error(
@@ -258,13 +152,12 @@ struct PoleZeroMap {
 
 impl PoleZeroMap {
     async fn from_value_async(value: Value) -> BuiltinResult<Self> {
-        let gathered = crate::dispatcher::gather_if_needed_async(&value).await?;
-        let model = match gathered {
+        let model = match value {
             Value::Object(object) if object.is_class(TF_CLASS) => {
-                TfModel::from_value(Value::Object(object), BUILTIN_NAME)?
+                TfModel::from_value_async(Value::Object(object), BUILTIN_NAME).await?
             }
             Value::Object(object) if object.is_class(SS_CLASS) => {
-                super::rlocus::ss_object_to_tf(&object).map_err(map_rlocus_ss_error)?
+                ss_object_to_tf_async(object, BUILTIN_NAME).await?
             }
             Value::Object(object) => {
                 return Err(pzmap_error(
@@ -417,17 +310,6 @@ fn map_model_error(err: RuntimeError) -> RuntimeError {
     pzmap_error(err.message().to_string(), &PZMAP_ERROR_INTERNAL)
 }
 
-fn map_rlocus_ss_error(err: RuntimeError) -> RuntimeError {
-    let message = err.message().replace("rlocus", BUILTIN_NAME);
-    let descriptor = match err.identifier() {
-        Some("RunMat:rlocus:UnsupportedModel") => &PZMAP_ERROR_UNSUPPORTED_MODEL,
-        Some("RunMat:rlocus:Internal") => &PZMAP_ERROR_INTERNAL,
-        Some("RunMat:rlocus:InvalidArgument") => &PZMAP_ERROR_INVALID_ARGUMENT,
-        _ => &PZMAP_ERROR_INVALID_MODEL,
-    };
-    pzmap_error(message, descriptor)
-}
-
 fn pzmap_error(message: impl Into<String>, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = crate::build_runtime_error(message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
@@ -440,6 +322,41 @@ fn pzmap_error(message: impl Into<String>, error: &'static BuiltinErrorDescripto
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::ObjectInstance;
+
+    #[test]
+    fn unrelated_resident_property_is_not_downloaded_for_data_form() {
+        let unrelated = Tensor::new(vec![5.0, 6.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &unrelated)
+                    .expect("upload unrelated property");
+            let mut model = ObjectInstance::new(TF_CLASS.to_string());
+            model.properties.insert("Numerator".into(), Value::Num(2.0));
+            model
+                .properties
+                .insert("Denominator".into(), Value::Num(1.0));
+            model.properties.insert("Ts".into(), Value::Num(0.0));
+            model
+                .properties
+                .insert("InputDelay".into(), Value::Num(0.0));
+            model
+                .properties
+                .insert("OutputDelay".into(), Value::Num(0.0));
+            model
+                .properties
+                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            provider.reset_telemetry();
+            let Value::OutputList(values) =
+                block_on(pzmap_builtin(Value::Object(model), vec![])).expect("static gain")
+            else {
+                panic!("expected two outputs");
+            };
+            assert_eq!(values.len(), 2);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
 
     fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
         block_on(crate::call_builtin_async(

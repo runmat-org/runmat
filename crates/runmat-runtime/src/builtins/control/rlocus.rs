@@ -1,14 +1,12 @@
 //! Root-locus analysis for SISO transfer-function models.
 
-use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
+#[cfg(test)]
+use runmat_builtins::RLOCUS_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, RLOCUS_ERROR_INTERNAL, RLOCUS_ERROR_INVALID_ARGUMENT,
+    RLOCUS_ERROR_INVALID_MODEL, RLOCUS_ERROR_PLOT_FAILED, RLOCUS_ERROR_UNSUPPORTED_MODEL,
+    RLOCUS_INTEGER_GAIN_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, ObjectInstance, Tensor, Value};
@@ -20,140 +18,16 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::builtins::control::model_polynomial::{clean_coefficients, ss_object_to_tf_async};
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::tf_model::{
-    poly_eval, polynomial_roots, scalar_f64, TfModel, EPS, SS_CLASS, TF_CLASS,
+    poly_eval, polynomial_roots, TfModel, EPS, SS_CLASS, TF_CLASS,
 };
-use crate::builtins::control::type_resolvers::rlocus_type;
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "rlocus";
 const DEFAULT_GAIN_POINTS: usize = 121;
 const DEFAULT_GAIN_DECADES: f64 = 4.0;
-
-const RLOCUS_OUTPUT_R: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "r",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Closed-loop pole locations as a branches-by-gains matrix.",
-};
-const RLOCUS_OUTPUT_K: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "k",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Gain vector used to compute the root locus.",
-};
-const RLOCUS_INPUT_SYS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "SISO tf or ss model.",
-};
-const RLOCUS_INPUT_K: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "k",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Finite nonnegative gain vector.",
-};
-const RLOCUS_OUTPUTS_R: [BuiltinParamDescriptor; 1] = [RLOCUS_OUTPUT_R];
-const RLOCUS_OUTPUTS_R_K: [BuiltinParamDescriptor; 2] = [RLOCUS_OUTPUT_R, RLOCUS_OUTPUT_K];
-const RLOCUS_INPUTS_SYS: [BuiltinParamDescriptor; 1] = [RLOCUS_INPUT_SYS];
-const RLOCUS_INPUTS_SYS_K: [BuiltinParamDescriptor; 2] = [RLOCUS_INPUT_SYS, RLOCUS_INPUT_K];
-const RLOCUS_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "r = rlocus(sys)",
-        inputs: &RLOCUS_INPUTS_SYS,
-        outputs: &RLOCUS_OUTPUTS_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "r = rlocus(sys, k)",
-        inputs: &RLOCUS_INPUTS_SYS_K,
-        outputs: &RLOCUS_OUTPUTS_R,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[r,k] = rlocus(sys)",
-        inputs: &RLOCUS_INPUTS_SYS,
-        outputs: &RLOCUS_OUTPUTS_R_K,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[r,k] = rlocus(sys, k)",
-        inputs: &RLOCUS_INPUTS_SYS_K,
-        outputs: &RLOCUS_OUTPUTS_R_K,
-    },
-];
-const RLOCUS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RLOCUS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:rlocus:InvalidArgument"),
-    when: "Inputs do not match supported rlocus invocation forms.",
-    message: "rlocus: invalid argument",
-};
-const RLOCUS_ERROR_INVALID_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RLOCUS.INVALID_MODEL",
-    identifier: Some("RunMat:rlocus:InvalidModel"),
-    when: "Input system is not a valid SISO tf or ss object.",
-    message: "rlocus: invalid model",
-};
-const RLOCUS_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RLOCUS.UNSUPPORTED_MODEL",
-    identifier: Some("RunMat:rlocus:UnsupportedModel"),
-    when: "Model form is not supported by the current implementation.",
-    message: "rlocus: unsupported model",
-};
-const RLOCUS_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RLOCUS.PLOT_FAILED",
-    identifier: Some("RunMat:rlocus:PlotFailed"),
-    when: "Statement-form plotting failed for reasons other than known nonfatal setup conditions.",
-    message: "rlocus: plotting failed",
-};
-const RLOCUS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.RLOCUS.INTERNAL",
-    identifier: Some("RunMat:rlocus:Internal"),
-    when: "Root-locus computation or output construction failed.",
-    message: "rlocus: internal error",
-};
-const RLOCUS_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    RLOCUS_ERROR_INVALID_ARGUMENT,
-    RLOCUS_ERROR_INVALID_MODEL,
-    RLOCUS_ERROR_UNSUPPORTED_MODEL,
-    RLOCUS_ERROR_PLOT_FAILED,
-    RLOCUS_ERROR_INTERNAL,
-];
-pub const RLOCUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RLOCUS_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &RLOCUS_ERRORS,
-};
-const RLOCUS_INTEGER_GAIN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rlocus-integer-gain",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rlocus accepts a typed-integer gain vector as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RlocusIntegerGainExtension"),
-};
-const RLOCUS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RLOCUS_INTEGER_GAIN_EXTENSION];
-const RLOCUS_INTEGER_GAIN_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "k",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public gain surface does not document typed integer classes; RunMat mode admits them only through a checked binary64 root-locus boundary.",
-    }];
-pub const RLOCUS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "r = rlocus(sys, integer_k)",
-        inputs: &RLOCUS_INTEGER_GAIN_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Gain values are gated and checked before any provider lookup, then intentionally enter double polynomial-root computation; returned gains are double.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::rlocus")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -196,15 +70,7 @@ fn rlocus_error(
 
 #[runtime_builtin(
     name = "rlocus",
-    category = "control",
-    summary = "Compute or plot root loci of SISO transfer-function models.",
-    keywords = "rlocus,root locus,control system,transfer function,tf",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(rlocus_type),
-    descriptor(crate::builtins::control::rlocus::RLOCUS_DESCRIPTOR),
-    extensions(RLOCUS_EXTENSIONS),
-    integer_capabilities(RLOCUS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::control::rlocus"
 )]
 async fn rlocus_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -281,8 +147,7 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
     let mut gains = None;
 
     for arg in rest {
-        let gathered = crate::dispatcher::gather_if_needed_async(&arg).await?;
-        if is_plot_style_arg(&gathered) {
+        if is_plot_style_arg(&arg) {
             if let Some((_, style)) = systems.last_mut() {
                 if style.is_some() {
                     return Err(rlocus_error(
@@ -290,22 +155,22 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
                         &RLOCUS_ERROR_INVALID_ARGUMENT,
                     ));
                 }
-                *style = Some(gathered);
+                *style = Some(arg);
                 continue;
             }
         }
-        if is_dynamic_model_object(&gathered) {
+        if is_dynamic_model_object(&arg) {
             if gains.is_some() {
                 return Err(rlocus_error(
                     "rlocus: gain vector must follow all systems in statement-form plots",
                     &RLOCUS_ERROR_INVALID_ARGUMENT,
                 ));
             }
-            systems.push((gathered, None));
+            systems.push((arg, None));
             continue;
         }
-        if is_numeric_vector_like(&gathered) && gains.is_none() {
-            gains = Some(real_gain_vector(gathered)?);
+        if is_numeric_vector_like(&arg) && gains.is_none() {
+            gains = Some(parse_gain_arg(&arg).await?);
             continue;
         }
         return Err(rlocus_error(
@@ -314,11 +179,17 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
         ));
     }
 
-    let mut first = true;
-    let mut hold_guard = HoldOffGuard::new();
+    // Resolve every model before mutating graphics state. A malformed later
+    // system must not leave a partially rendered root-locus plot behind.
+    let mut prepared = Vec::with_capacity(systems.len());
     for (system, style) in systems {
         let model = DynamicModel::from_value_async(system).await?;
         let eval = RootLocus::compute(&model.tf, gains.clone())?;
+        prepared.push((eval, style));
+    }
+    let mut first = true;
+    let mut hold_guard = HoldOffGuard::new();
+    for (eval, style) in prepared {
         render_root_locus_plot(&eval, style.as_ref()).await?;
         if first {
             first = false;
@@ -377,6 +248,7 @@ fn is_numeric_vector_like(value: &Value) -> bool {
         Value::Tensor(tensor) => is_vector_shape(&tensor.shape),
         Value::ComplexTensor(tensor) => is_vector_shape(&tensor.shape),
         Value::LogicalArray(logical) => is_vector_shape(&logical.shape),
+        Value::GpuTensor(handle) => is_vector_shape(handle.shape()),
         _ => false,
     }
 }
@@ -484,8 +356,7 @@ struct DynamicModel {
 
 impl DynamicModel {
     async fn from_value_async(value: Value) -> BuiltinResult<Self> {
-        let gathered = crate::dispatcher::gather_if_needed_async(&value).await?;
-        let Value::Object(object) = gathered else {
+        let Value::Object(object) = value else {
             return Err(rlocus_error(
                 "rlocus: expected a SISO dynamic system model",
                 &RLOCUS_ERROR_INVALID_MODEL,
@@ -493,12 +364,12 @@ impl DynamicModel {
         };
         if object.is_class(TF_CLASS) {
             return Ok(Self {
-                tf: TfModel::from_value(Value::Object(object), BUILTIN_NAME)?,
+                tf: TfModel::from_value_async(Value::Object(object), BUILTIN_NAME).await?,
             });
         }
         if object.is_class(SS_CLASS) {
             return Ok(Self {
-                tf: ss_object_to_tf(&object)?,
+                tf: ss_object_to_tf_async(object, BUILTIN_NAME).await?,
             });
         }
         Err(rlocus_error(
@@ -599,339 +470,6 @@ fn ensure_supported_model(model: &TfModel) -> BuiltinResult<()> {
         ));
     }
     Ok(())
-}
-
-pub(crate) fn ss_object_to_tf(object: &ObjectInstance) -> BuiltinResult<TfModel> {
-    let a = matrix_property(object, "A")?;
-    let b = matrix_property(object, "B")?;
-    let c = matrix_property(object, "C")?;
-    let d = matrix_property(object, "D")?;
-    let sample_time = scalar_property(object, "Ts")?;
-    if !sample_time.is_finite() || sample_time < 0.0 {
-        return Err(rlocus_error(
-            "rlocus: ss sample time must be a finite nonnegative scalar",
-            &RLOCUS_ERROR_INVALID_MODEL,
-        ));
-    }
-    ensure_zero_delay_property(object, "InputDelay")?;
-    ensure_zero_delay_property(object, "OutputDelay")?;
-    validate_ss_dimensions(&a, &b, &c, &d)?;
-
-    let denominator = characteristic_polynomial_from_matrix(&a)?;
-    let numerator = state_space_numerator(&a, &b, &c, d[(0, 0)], &denominator)?;
-    let numerator = trim_leading_complex_zeros(clean_coefficients(numerator));
-    let denominator = trim_leading_complex_zeros(clean_coefficients(denominator));
-    if denominator.is_empty() || denominator[0].norm() <= EPS {
-        return Err(rlocus_error(
-            "rlocus: ss model produced an invalid denominator polynomial",
-            &RLOCUS_ERROR_INTERNAL,
-        ));
-    }
-    ensure_finite_coefficients("Numerator", &numerator)?;
-    ensure_finite_coefficients("Denominator", &denominator)?;
-
-    Ok(TfModel {
-        numerator,
-        denominator,
-        variable: if sample_time > 0.0 { "z" } else { "s" }.to_string(),
-        sample_time,
-        input_delay: 0.0,
-        output_delay: 0.0,
-    })
-}
-
-fn property<'a>(object: &'a ObjectInstance, name: &str) -> BuiltinResult<&'a Value> {
-    object.properties.get(name).ok_or_else(|| {
-        rlocus_error(
-            format!("rlocus: model object is missing {name} property"),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        )
-    })
-}
-
-fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<DMatrix<Complex64>> {
-    let value = property(object, name)?;
-    match value {
-        Value::Tensor(tensor) => {
-            ensure_matrix_shape(name, &tensor.shape)?;
-            let data = tensor::tensor_values_f64(tensor)
-                .into_iter()
-                .map(|re| Complex64::new(re, 0.0))
-                .collect::<Vec<_>>();
-            ensure_finite_coefficients(name, &data)?;
-            Ok(DMatrix::from_column_slice(tensor.rows, tensor.cols, &data))
-        }
-        Value::ComplexTensor(tensor) => {
-            ensure_matrix_shape(name, &tensor.shape)?;
-            let data = tensor::complex_tensor_values_complex64(tensor);
-            ensure_finite_coefficients(name, &data)?;
-            Ok(DMatrix::from_column_slice(tensor.rows, tensor.cols, &data))
-        }
-        Value::LogicalArray(logical) => {
-            ensure_matrix_shape(name, &logical.shape)?;
-            let (rows, cols) = rows_cols(&logical.shape);
-            let data = logical
-                .data
-                .iter()
-                .map(|&value| Complex64::new(if value == 0 { 0.0 } else { 1.0 }, 0.0))
-                .collect::<Vec<_>>();
-            Ok(DMatrix::from_column_slice(rows, cols, &data))
-        }
-        Value::Num(n) => scalar_matrix(*n, 0.0, name),
-        Value::Int(i) => scalar_matrix(i.to_f64(), 0.0, name),
-        Value::Bool(b) => scalar_matrix(if *b { 1.0 } else { 0.0 }, 0.0, name),
-        Value::Complex(re, im) => scalar_matrix(*re, *im, name),
-        other => Err(rlocus_error(
-            format!("rlocus: ss {name} must be a finite numeric matrix, got {other:?}"),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        )),
-    }
-}
-
-fn scalar_matrix(re: f64, im: f64, name: &str) -> BuiltinResult<DMatrix<Complex64>> {
-    let value = Complex64::new(re, im);
-    ensure_finite_coefficients(name, &[value])?;
-    Ok(DMatrix::from_element(1, 1, value))
-}
-
-fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
-    if shape.len() <= 2 {
-        Ok(())
-    } else {
-        Err(rlocus_error(
-            format!("rlocus: ss {name} must be a 2-D matrix, got shape {shape:?}"),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        ))
-    }
-}
-
-fn rows_cols(shape: &[usize]) -> (usize, usize) {
-    if shape.len() >= 2 {
-        (shape[0], shape[1])
-    } else if shape.len() == 1 {
-        (1, shape[0])
-    } else {
-        (0, 0)
-    }
-}
-
-fn scalar_property(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
-    let value = scalar_f64(property(object, name)?, name, BUILTIN_NAME)?;
-    if value.is_finite() {
-        Ok(value)
-    } else {
-        Err(rlocus_error(
-            format!("rlocus: ss {name} must be finite"),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        ))
-    }
-}
-
-fn ensure_zero_delay_property(object: &ObjectInstance, name: &str) -> BuiltinResult<()> {
-    let values = numeric_values(property(object, name)?, name)?;
-    if values.iter().any(|value| value.norm() > EPS) {
-        return Err(rlocus_error(
-            "rlocus: ss models with input or output delays are not supported",
-            &RLOCUS_ERROR_UNSUPPORTED_MODEL,
-        ));
-    }
-    Ok(())
-}
-
-fn numeric_values(value: &Value, name: &str) -> BuiltinResult<Vec<Complex64>> {
-    let values = match value {
-        Value::Num(n) => vec![Complex64::new(*n, 0.0)],
-        Value::Int(i) => vec![Complex64::new(i.to_f64(), 0.0)],
-        Value::Bool(b) => vec![Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)],
-        Value::Complex(re, im) => vec![Complex64::new(*re, *im)],
-        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor)
-            .into_iter()
-            .map(|re| Complex64::new(re, 0.0))
-            .collect(),
-        Value::ComplexTensor(tensor) => tensor::complex_tensor_values_complex64(tensor),
-        Value::LogicalArray(logical) => logical
-            .data
-            .iter()
-            .map(|&value| Complex64::new(if value == 0 { 0.0 } else { 1.0 }, 0.0))
-            .collect(),
-        other => {
-            return Err(rlocus_error(
-                format!("rlocus: ss {name} must be numeric, got {other:?}"),
-                &RLOCUS_ERROR_INVALID_MODEL,
-            ));
-        }
-    };
-    ensure_finite_coefficients(name, &values)?;
-    Ok(values)
-}
-
-fn validate_ss_dimensions(
-    a: &DMatrix<Complex64>,
-    b: &DMatrix<Complex64>,
-    c: &DMatrix<Complex64>,
-    d: &DMatrix<Complex64>,
-) -> BuiltinResult<()> {
-    if a.nrows() != a.ncols() {
-        return Err(rlocus_error(
-            format!(
-                "rlocus: ss A must be square, got {}x{}",
-                a.nrows(),
-                a.ncols()
-            ),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        ));
-    }
-    let states = a.nrows();
-    if b.nrows() != states {
-        return Err(rlocus_error(
-            format!(
-                "rlocus: ss B must have {states} rows to match A, got {}x{}",
-                b.nrows(),
-                b.ncols()
-            ),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        ));
-    }
-    if c.ncols() != states {
-        return Err(rlocus_error(
-            format!(
-                "rlocus: ss C must have {states} columns to match A, got {}x{}",
-                c.nrows(),
-                c.ncols()
-            ),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        ));
-    }
-    if d.nrows() != c.nrows() || d.ncols() != b.ncols() {
-        return Err(rlocus_error(
-            format!(
-                "rlocus: ss D must have shape {}x{} to match C outputs and B inputs, got {}x{}",
-                c.nrows(),
-                b.ncols(),
-                d.nrows(),
-                d.ncols()
-            ),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        ));
-    }
-    if b.ncols() != 1 || c.nrows() != 1 || d.nrows() != 1 || d.ncols() != 1 {
-        return Err(rlocus_error(
-            "rlocus: only SISO ss models are supported",
-            &RLOCUS_ERROR_UNSUPPORTED_MODEL,
-        ));
-    }
-    Ok(())
-}
-
-fn characteristic_polynomial_from_matrix(a: &DMatrix<Complex64>) -> BuiltinResult<Vec<Complex64>> {
-    let n = a.nrows();
-    if n == 0 {
-        return Ok(vec![Complex64::new(1.0, 0.0)]);
-    }
-    let mut coeffs = Vec::with_capacity(n + 1);
-    coeffs.push(Complex64::new(1.0, 0.0));
-    let mut b = DMatrix::<Complex64>::identity(n, n);
-    for k in 1..=n {
-        let ab = a * &b;
-        let trace = (0..n).fold(Complex64::new(0.0, 0.0), |acc, idx| acc + ab[(idx, idx)]);
-        let coeff = -trace / Complex64::new(k as f64, 0.0);
-        coeffs.push(coeff);
-        let mut next = ab;
-        for idx in 0..n {
-            next[(idx, idx)] += coeff;
-        }
-        b = next;
-    }
-    let coeffs = clean_coefficients(coeffs);
-    ensure_finite_coefficients("ss characteristic polynomial", &coeffs)?;
-    Ok(coeffs)
-}
-
-fn state_space_numerator(
-    a: &DMatrix<Complex64>,
-    b: &DMatrix<Complex64>,
-    c: &DMatrix<Complex64>,
-    d: Complex64,
-    denominator: &[Complex64],
-) -> BuiltinResult<Vec<Complex64>> {
-    let degree = a.nrows();
-    if degree == 0 {
-        return Ok(vec![d]);
-    }
-
-    let mut points = Vec::with_capacity(degree + 1);
-    let mut values = Vec::with_capacity(degree + 1);
-    for point in interpolation_candidates(degree) {
-        let Some(response) = state_space_response_at(a, b, c, d, point) else {
-            continue;
-        };
-        points.push(point);
-        values.push(response * poly_eval(denominator, point));
-        if points.len() == degree + 1 {
-            break;
-        }
-    }
-    if points.len() != degree + 1 {
-        return Err(rlocus_error(
-            "rlocus: failed to find enough nonsingular interpolation points for ss model",
-            &RLOCUS_ERROR_INTERNAL,
-        ));
-    }
-
-    let mut vandermonde = DMatrix::<Complex64>::zeros(degree + 1, degree + 1);
-    for (row, point) in points.iter().enumerate() {
-        for col in 0..=degree {
-            vandermonde[(row, col)] = point.powu((degree - col) as u32);
-        }
-    }
-    let rhs = DVector::<Complex64>::from_vec(values);
-    let coeffs = vandermonde.lu().solve(&rhs).ok_or_else(|| {
-        rlocus_error(
-            "rlocus: failed to solve ss numerator interpolation system",
-            &RLOCUS_ERROR_INTERNAL,
-        )
-    })?;
-    let coeffs = clean_coefficients(coeffs.iter().copied().collect());
-    ensure_finite_coefficients("ss numerator polynomial", &coeffs)?;
-    Ok(coeffs)
-}
-
-fn interpolation_candidates(degree: usize) -> Vec<Complex64> {
-    let needed = degree + 1;
-    let mut points = Vec::with_capacity(needed * 6);
-    for radius_idx in 0..4 {
-        let radius = 0.75 + radius_idx as f64;
-        for idx in 0..needed {
-            let angle = std::f64::consts::TAU * ((idx as f64 + 0.37) / needed as f64);
-            points.push(Complex64::from_polar(radius, angle));
-        }
-    }
-    for idx in 1..=(needed * 2) {
-        let value = idx as f64;
-        points.push(Complex64::new(value, 0.0));
-        points.push(Complex64::new(-value, 0.0));
-    }
-    points
-}
-
-fn state_space_response_at(
-    a: &DMatrix<Complex64>,
-    b: &DMatrix<Complex64>,
-    c: &DMatrix<Complex64>,
-    d: Complex64,
-    point: Complex64,
-) -> Option<Complex64> {
-    let n = a.nrows();
-    if n == 0 {
-        return Some(d);
-    }
-    let mut system = -a.clone();
-    for idx in 0..n {
-        system[(idx, idx)] += point;
-    }
-    let state = system.lu().solve(b)?;
-    let output = c * state;
-    Some(d + output[(0, 0)])
 }
 
 fn characteristic_branch_count(model: &TfModel) -> usize {
@@ -1088,41 +626,6 @@ fn poly_sub(left: &[Complex64], right: &[Complex64]) -> Vec<Complex64> {
     clean_coefficients(out)
 }
 
-fn clean_coefficients(mut coeffs: Vec<Complex64>) -> Vec<Complex64> {
-    let scale = max_norm(&coeffs).max(1.0);
-    let tol = scale * 1.0e-10;
-    for coeff in &mut coeffs {
-        if coeff.re.abs() <= tol {
-            coeff.re = 0.0;
-        }
-        if coeff.im.abs() <= tol {
-            coeff.im = 0.0;
-        }
-    }
-    coeffs
-}
-
-fn trim_leading_complex_zeros(coeffs: Vec<Complex64>) -> Vec<Complex64> {
-    let first_nonzero = coeffs
-        .iter()
-        .position(|value| value.norm() > EPS)
-        .unwrap_or(coeffs.len());
-    coeffs[first_nonzero..].to_vec()
-}
-
-fn ensure_finite_coefficients(label: &str, coeffs: &[Complex64]) -> BuiltinResult<()> {
-    if coeffs
-        .iter()
-        .any(|value| !value.re.is_finite() || !value.im.is_finite())
-    {
-        return Err(rlocus_error(
-            format!("rlocus: {label} values must be finite"),
-            &RLOCUS_ERROR_INVALID_MODEL,
-        ));
-    }
-    Ok(())
-}
-
 fn sort_roots(mut roots: Vec<Complex64>) -> Vec<Complex64> {
     roots.sort_by(|a, b| a.re.total_cmp(&b.re).then(a.im.total_cmp(&b.im)));
     roots
@@ -1247,7 +750,42 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::{IntegerComplexStorage, IntegerStorage};
+
+    #[test]
+    fn unrelated_resident_model_property_is_not_downloaded() {
+        let unrelated = Tensor::new(vec![5.0, 6.0], vec![1, 2]).unwrap();
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &unrelated)
+                    .expect("upload unrelated property");
+            let mut model = ObjectInstance::new(TF_CLASS.to_string());
+            model.properties.insert("Numerator".into(), Value::Num(1.0));
+            model.properties.insert(
+                "Denominator".into(),
+                Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+            );
+            model.properties.insert("Ts".into(), Value::Num(0.0));
+            model
+                .properties
+                .insert("InputDelay".into(), Value::Num(0.0));
+            model
+                .properties
+                .insert("OutputDelay".into(), Value::Num(0.0));
+            model
+                .properties
+                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            let Value::Tensor(roots) =
+                block_on(rlocus_builtin(Value::Object(model), vec![Value::Num(1.0)]))
+                    .expect("root locus")
+            else {
+                panic!("expected root matrix");
+            };
+            assert_eq!(roots.shape, vec![1, 1]);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+    use runmat_value::IntegerStorage;
 
     fn tf(num: Vec<f64>, den: Vec<f64>) -> Value {
         block_on(crate::call_builtin_async(
@@ -1285,74 +823,6 @@ mod tests {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected tensor, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn numeric_values_reads_typed_integer_storage_exactly() {
-        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3])
-            .expect("typed integer tensor");
-
-        assert_eq!(
-            numeric_values(&Value::Tensor(tensor), "A").expect("numeric values"),
-            vec![
-                Complex64::new(-1.0, 0.0),
-                Complex64::new(0.0, 0.0),
-                Complex64::new(2.0, 0.0),
-            ]
-        );
-    }
-
-    #[test]
-    fn numeric_values_reads_complex_integer_storage_exactly() {
-        let storage = IntegerComplexStorage::new(
-            IntegerStorage::I16(vec![1, -2]),
-            IntegerStorage::I16(vec![3, -4]),
-        )
-        .expect("complex integer storage");
-        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
-
-        assert_eq!(
-            numeric_values(&Value::ComplexTensor(tensor), "A").expect("numeric values"),
-            vec![Complex64::new(1.0, 3.0), Complex64::new(-2.0, -4.0)]
-        );
-    }
-
-    #[test]
-    fn matrix_property_reads_typed_integer_storage_exactly() {
-        let matrix = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2])
-            .expect("typed integer matrix");
-        let mut object = ObjectInstance::new("ss".to_string());
-        object
-            .properties
-            .insert("A".to_string(), Value::Tensor(matrix));
-
-        let parsed = matrix_property(&object, "A").expect("matrix property");
-
-        assert_eq!(parsed[(0, 0)], Complex64::new(1.0, 0.0));
-        assert_eq!(parsed[(1, 0)], Complex64::new(3.0, 0.0));
-        assert_eq!(parsed[(0, 1)], Complex64::new(2.0, 0.0));
-        assert_eq!(parsed[(1, 1)], Complex64::new(4.0, 0.0));
-    }
-
-    #[test]
-    fn matrix_property_reads_complex_integer_storage_exactly() {
-        let storage = IntegerComplexStorage::new(
-            IntegerStorage::I16(vec![1, 3, 2, 4]),
-            IntegerStorage::I16(vec![-1, -3, -2, -4]),
-        )
-        .expect("complex integer storage");
-        let matrix = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
-        let mut object = ObjectInstance::new("ss".to_string());
-        object
-            .properties
-            .insert("A".to_string(), Value::ComplexTensor(matrix));
-
-        let parsed = matrix_property(&object, "A").expect("matrix property");
-
-        assert_eq!(parsed[(0, 0)], Complex64::new(1.0, -1.0));
-        assert_eq!(parsed[(1, 0)], Complex64::new(3.0, -3.0));
-        assert_eq!(parsed[(0, 1)], Complex64::new(2.0, -2.0));
-        assert_eq!(parsed[(1, 1)], Complex64::new(4.0, -4.0));
     }
 
     #[test]
