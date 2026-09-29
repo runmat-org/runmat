@@ -77,7 +77,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                         &grad_values,
                         lhs_shape,
                         &node.value.shape,
-                        node_dtype(&nodes, *lhs, node.value.numeric_dtype()),
+                        node_dtype(nodes, *lhs, node.value.numeric_dtype()),
                     )?,
                 );
                 accumulate_parent(
@@ -87,7 +87,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                         &grad_values,
                         rhs_shape,
                         &node.value.shape,
-                        node_dtype(&nodes, *rhs, node.value.numeric_dtype()),
+                        node_dtype(nodes, *rhs, node.value.numeric_dtype()),
                     )?,
                 );
             }
@@ -104,10 +104,10 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                         &grad_values,
                         lhs_shape,
                         &node.value.shape,
-                        node_dtype(&nodes, *lhs, node.value.numeric_dtype()),
+                        node_dtype(nodes, *lhs, node.value.numeric_dtype()),
                     )?,
                 );
-                let rhs_dtype = node_dtype(&nodes, *rhs, node.value.numeric_dtype());
+                let rhs_dtype = node_dtype(nodes, *rhs, node.value.numeric_dtype());
                 let rhs_grad =
                     reduce_gradient(&grad_values, rhs_shape, &node.value.shape, rhs_dtype)?;
                 let rhs_shape = rhs_grad.shape.clone();
@@ -143,7 +143,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                             &data,
                             lhs_shape,
                             &node.value.shape,
-                            node_dtype(&nodes, Some(parent), node.value.numeric_dtype()),
+                            node_dtype(nodes, Some(parent), node.value.numeric_dtype()),
                         )?,
                     );
                 }
@@ -160,7 +160,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                             &data,
                             rhs_shape,
                             &node.value.shape,
-                            node_dtype(&nodes, Some(parent), node.value.numeric_dtype()),
+                            node_dtype(nodes, Some(parent), node.value.numeric_dtype()),
                         )?,
                     );
                 }
@@ -186,7 +186,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                             &data,
                             lhs_shape,
                             &node.value.shape,
-                            node_dtype(&nodes, Some(parent), node.value.numeric_dtype()),
+                            node_dtype(nodes, Some(parent), node.value.numeric_dtype()),
                         )?,
                     );
                 }
@@ -204,7 +204,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                             &data,
                             rhs_shape,
                             &node.value.shape,
-                            node_dtype(&nodes, Some(parent), node.value.numeric_dtype()),
+                            node_dtype(nodes, Some(parent), node.value.numeric_dtype()),
                         )?,
                     );
                 }
@@ -280,7 +280,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                     floating_tensor_from_f64(
                         bias_grad,
                         vec![weights_value.rows, 1],
-                        node_dtype(&nodes, *bias, weights_value.numeric_dtype()),
+                        node_dtype(nodes, *bias, weights_value.numeric_dtype()),
                         "dlgradient",
                     )?,
                 );
@@ -294,7 +294,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                     floating_tensor_from_f64(
                         vec![seed; count],
                         input_shape.clone(),
-                        node_dtype(&nodes, Some(*input), node.value.numeric_dtype()),
+                        node_dtype(nodes, Some(*input), node.value.numeric_dtype()),
                         "dlgradient",
                     )?,
                 );

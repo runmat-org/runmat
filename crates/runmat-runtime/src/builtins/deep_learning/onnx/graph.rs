@@ -12,7 +12,7 @@ pub(super) fn build_export_graph(
         ));
     }
 
-    let layer_names = super::layer_names(&layers, EXPORT_ONNX)?;
+    let layer_names = super::layer_names(layers, EXPORT_ONNX)?;
     ensure_unique_layer_names(&layer_names)?;
     let input_name = match &options.input_name {
         Some(name) => name.clone(),
@@ -206,7 +206,7 @@ pub(super) fn build_export_graph(
         input: ValueInfo {
             name: input_name,
             batch_size: options.batch_size,
-            features: feature_input_width_from_first_layer(&layers)?,
+            features: feature_input_width_from_first_layer(layers)?,
         },
         output: ValueInfo {
             name: output_name,

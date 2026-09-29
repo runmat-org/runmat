@@ -116,8 +116,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
-    for index in 5..args.len() {
-        let arg = &args[index];
+    for (index, arg) in args.iter().enumerate().skip(5) {
         if !matches!(arg.kind, ValueKindFact::Numeric(_) | ValueKindFact::Unknown)
             || arg.shape.element_count().is_some_and(|count| count != 1)
         {
