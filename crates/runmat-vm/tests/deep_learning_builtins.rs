@@ -150,3 +150,66 @@ fn compiled_deep_learning_extension_and_exact_metadata_boundaries() {
     .expect_err("inexact wide integer cannot become double-valued metadata");
     assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
 }
+
+#[test]
+fn compiled_dlarray_wraps_typed_host_data_and_projects_shape() {
+    execute_source(
+        r#"
+        X = dlarray(single([1 2; 3 4]), 'CB');
+        assert(strcmp(class(X), 'dlarray'));
+        assert(isequal(size(X), [2 2]) && numel(X) == 4);
+        assert(isa(X.Data, 'single') && isequal(X.Data, single([1 2; 3 4])));
+        assert(strcmp(X.Format, 'CB') && strcmp(X.Labels, 'CB'));
+        flags = dlarray(logical([1 0 1]));
+        assert(isa(flags.Data, 'logical') && isequal(size(flags), [1 3]));
+        assert(strcmp(flags.Format, '') && strcmp(flags.Labels, ''));
+        "#,
+    )
+    .expect("compiled dlarray preserves typed payloads, labels and array geometry");
+}
+
+#[test]
+fn compiled_training_options_preserve_defaults_and_exact_integer_controls() {
+    execute_source(
+        r#"
+        sgdm = trainingOptions('sgdm');
+        adam = trainingOptions('adam', 'MaxEpochs', uint16(5), 'Verbose', false);
+        rmsprop = trainingOptions('rmsprop');
+        assert(strcmp(class(adam), 'nnet.cnn.TrainingOptions'));
+        assert(strcmp(sgdm.SolverName, 'sgdm') && sgdm.MaxEpochs == 30);
+        assert(sgdm.MiniBatchSize == 128 && sgdm.InitialLearnRate == 0.01);
+        assert(adam.InitialLearnRate == 0.001 && isa(adam.MaxEpochs, 'uint16'));
+        assert(adam.MaxEpochs == uint16(5) && adam.Verbose == false);
+        assert(rmsprop.InitialLearnRate == 0.001);
+        wide = uint64(9007199254740992) + uint64(1);
+        metadata = trainingOptions('adam', 'MaxEpochs', wide);
+        assert(isa(metadata.MaxEpochs, 'uint64') && metadata.MaxEpochs == wide);
+        "#,
+    )
+    .expect("compiled training options retain class, defaults and exact control metadata");
+}
+
+#[test]
+fn compiled_deep_learning_object_constructors_check_arity_even_when_discarded() {
+    execute_source("dlarray(1); trainingOptions('adam');")
+        .expect("discarded objects still execute valid constructors");
+    for (source, identifier) in [
+        ("[a,b] = dlarray(1);", "RunMat:deepLearning:InvalidInput"),
+        (
+            "[a,b] = trainingOptions('adam');",
+            "RunMat:deepLearning:InvalidInput",
+        ),
+        (
+            "trainingOptions('unavailable');",
+            "RunMat:deepLearning:InvalidInput",
+        ),
+        (
+            "trainingOptions('adam', 'MaxEpochs');",
+            "RunMat:deepLearning:InvalidInput",
+        ),
+    ] {
+        let error = execute_source(source).expect_err("invalid constructor invocation");
+        assert_eq!(error.identifier(), Some(identifier), "{source}: {error}");
+    }
+    execute_source("trainingOptions();").expect_err("solver argument is required");
+}
