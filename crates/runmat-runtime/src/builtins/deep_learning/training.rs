@@ -118,7 +118,6 @@ fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
 
 #[runtime_builtin(
     name = "dlfeval",
-    execution_stack = "process",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
