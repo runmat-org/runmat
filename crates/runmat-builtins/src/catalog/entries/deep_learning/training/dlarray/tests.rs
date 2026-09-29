@@ -68,3 +68,19 @@ fn known_non_numeric_and_integer_data_are_diagnosed_without_rejecting_unknown() 
         Some("RunMat:deepLearning:InvalidInput")
     );
 }
+
+#[test]
+fn ambient_autodiff_tape_effect_and_resident_unsupported_error_are_declared() {
+    assert_eq!(DLARRAY_CATALOG_ENTRY.contract.purity, BuiltinPurity::Impure);
+    for effect in [
+        runmat_types::EffectKind::EnvironmentRead,
+        runmat_types::EffectKind::EnvironmentWrite,
+        runmat_types::EffectKind::MayThrow,
+    ] {
+        assert!(DLARRAY_CATALOG_ENTRY.contract.effects.contains(&effect));
+    }
+    assert!(DLARRAY_DESCRIPTOR
+        .errors
+        .iter()
+        .any(|error| { error.identifier == Some("RunMat:deepLearning:Unsupported") }));
+}

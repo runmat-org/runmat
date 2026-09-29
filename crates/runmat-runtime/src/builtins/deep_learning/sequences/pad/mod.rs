@@ -10,8 +10,9 @@ mod execution;
 mod options;
 
 use admission::{
-    preflight_uniform_shapes, validate_pad_option, validate_resident_pad_option,
-    validate_resident_padding_dim, validate_resident_sequence, SequenceInput,
+    admit_padding_rank, preflight_uniform_shapes, validate_pad_option,
+    validate_resident_pad_option, validate_resident_padding_dim, validate_resident_sequence,
+    SequenceInput,
 };
 use execution::{check_pad_elements, checked_numel, non_padding_dims_match, pad_sequence};
 pub(in crate::builtins::deep_learning) use options::SequenceLength;
@@ -82,6 +83,7 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
         Some(positive_usize(&rest[0], "padsequences", "paddingDim")? - 1)
     };
     if let Some(dim) = host_dim {
+        admit_padding_rank(dim, &cell.data, &prepared)?;
         preflight_uniform_shapes(&cell.data, &prepared, &parsed, dim)?;
     }
     let padding_dim = match host_dim {
@@ -94,6 +96,10 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
             )? - 1
         }
     };
+    if host_dim.is_none() {
+        admit_padding_rank(padding_dim, &cell.data, &prepared)?;
+        preflight_uniform_shapes(&cell.data, &prepared, &parsed, padding_dim)?;
+    }
     let mut seqs = Vec::with_capacity(prepared.len());
     for (parsed, item) in prepared.into_iter().zip(&cell.data) {
         seqs.push(match parsed {

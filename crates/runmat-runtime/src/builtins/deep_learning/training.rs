@@ -10,7 +10,8 @@ use crate::BuiltinResult;
 
 use super::{
     any_type, autodiff, deep_learning_error, ensure_dlarray_class_registered, gather_args, model,
-    object, parse_name_values, positive_usize, scalar_text, text_or_missing, unsupported_error,
+    object, object_with_identity, parse_name_values, positive_usize, scalar_text, text_or_missing,
+    unsupported_error,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 
@@ -18,17 +19,17 @@ const DLUPDATE_MAX_DEPTH: usize = 256;
 
 #[runtime_builtin(
     name = "trainingOptions",
-    category = "deep_learning",
-    summary = "Create training options compatibility objects.",
-    keywords = "trainingOptions,deep learning,training,options,solver",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(super) async fn training_options_builtin(
     solver: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    super::errors::admit_single_output(
+        "trainingOptions",
+        &runmat_builtins::TRAINING_OPTIONS_INVALID_INPUT,
+    )?;
     let solver = scalar_text(&solver, "trainingOptions")?.to_ascii_lowercase();
     match solver.as_str() {
         "sgdm" | "adam" | "rmsprop" => {}
@@ -45,7 +46,7 @@ pub(super) async fn training_options_builtin(
         ("MiniBatchSize".to_string(), Value::Num(128.0)),
         (
             "InitialLearnRate".to_string(),
-            Value::Num(if solver == "adam" { 0.001 } else { 0.01 }),
+            Value::Num(if solver == "sgdm" { 0.01 } else { 0.001 }),
         ),
         ("Shuffle".to_string(), Value::String("once".into())),
         ("Verbose".to_string(), Value::Bool(true)),
@@ -55,35 +56,15 @@ pub(super) async fn training_options_builtin(
             Value::String("auto".into()),
         ),
     ];
-    for (key, value) in parse_name_values(gather_args(rest).await?, "trainingOptions")? {
-        properties.push((canonical_training_option(&key), value));
+    // An options object stores its values; construction has no reason to
+    // download resident values just to copy them into metadata.
+    for (key, value) in parse_name_values(rest, "trainingOptions")? {
+        properties.push((runmat_builtins::canonical_training_option_name(&key), value));
     }
-    Ok(object("nnet.cnn.TrainingOptions", properties))
-}
-
-fn canonical_training_option(name: &str) -> String {
-    match name.to_ascii_lowercase().as_str() {
-        "maxepochs" => "MaxEpochs",
-        "minibatchsize" => "MiniBatchSize",
-        "initiallearnrate" => "InitialLearnRate",
-        "shuffle" => "Shuffle",
-        "verbose" => "Verbose",
-        "plots" => "Plots",
-        "executionenvironment" => "ExecutionEnvironment",
-        "validationdata" => "ValidationData",
-        "validationfrequency" => "ValidationFrequency",
-        "learnrateschedule" => "LearnRateSchedule",
-        "learnratedropperiod" => "LearnRateDropPeriod",
-        "learnratedropfactor" => "LearnRateDropFactor",
-        "gradientthreshold" => "GradientThreshold",
-        "l2regularization" => "L2Regularization",
-        "momentum" => "Momentum",
-        "squaredgradientdecayfactor" => "SquaredGradientDecayFactor",
-        "gradientdecayfactor" => "GradientDecayFactor",
-        "epsilon" => "Epsilon",
-        other => other,
-    }
-    .to_string()
+    Ok(object_with_identity(
+        super::TRAINING_OPTIONS_CLASS,
+        properties,
+    ))
 }
 
 #[runtime_builtin(

@@ -20,7 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Data and labels",
             paragraphs: &[
                 "Host `double`, `single`, complex, and logical values are accepted. A valid provider-resident gpuArray remains in its original provider-owned handle inside `Data`; construction does not gather it. Native integer classes are not silently widened. The optional second argument must be host text, and this implementation stores its text as both `Format` and `Labels`.",
-                "The object is a value-backed wrapper. When an autodiff tape is active, supported host values can be annotated for differentiation. This constructor does not itself run a kernel, train a network, or promise every labeled-axis operation from MATLAB's Deep Learning Toolbox.",
+                "The object is a value-backed wrapper. When a `dlfeval` autodiff tape is active, supported host values are recorded as tape nodes. That is an ambient runtime-state effect, not pure construction. Provider-resident Data constructs without a download outside the tape, but an active tape rejects it with `RunMat:deepLearning:Unsupported` until resident tape kernels exist.",
             ],
         },
         BuiltinDocumentationSection {

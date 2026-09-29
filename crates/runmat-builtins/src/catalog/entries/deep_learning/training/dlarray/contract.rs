@@ -44,7 +44,13 @@ pub const DLARRAY_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     when: "Data is not an admitted numeric/logical payload, has a native integer class, the format is not host text, the argument count is invalid, or more than one output is requested.",
     message: "dlarray: invalid data or dimension-label format",
 };
-const ERRORS: [BuiltinErrorDescriptor; 1] = [DLARRAY_INVALID_INPUT];
+pub const DLARRAY_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DEEP_LEARNING.UNSUPPORTED",
+    identifier: Some("RunMat:deepLearning:Unsupported"),
+    when: "A dlfeval autodiff tape is active and Data requires a provider-resident tape kernel that this implementation does not have.",
+    message: "dlarray: provider-resident automatic differentiation is not supported",
+};
+const ERRORS: [BuiltinErrorDescriptor; 2] = [DLARRAY_INVALID_INPUT, DLARRAY_UNSUPPORTED];
 pub const DLARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

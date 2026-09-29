@@ -3,6 +3,48 @@ use runmat_value::{NumericScalar, NumericStorage, Tensor, Value};
 use crate::BuiltinResult;
 
 use super::super::super::{deep_learning_error, numeric_scalar, scalar_text};
+
+// Metadata growth is charged against the same bounded work budget as the
+// padded result. Shape copies and strides must not become an unbounded
+// allocation merely because paddingDim names a distant singleton axis.
+const MAX_PAD_METADATA_BYTES: usize = super::super::super::MAX_PAD_ELEMENTS;
+
+pub(super) fn admit_padding_rank(
+    padding_dim: usize,
+    values: &[Value],
+    prepared: &[Option<SequenceInput>],
+) -> BuiltinResult<()> {
+    let existing_rank = values
+        .iter()
+        .zip(prepared)
+        .map(|(value, parsed)| match parsed {
+            Some(sequence) => sequence.shape.len(),
+            None => match value {
+                Value::GpuTensor(handle) => handle.shape().len(),
+                _ => unreachable!("resident sequence admitted above"),
+            },
+        })
+        .max()
+        .unwrap_or(0);
+    let rank = padding_dim.saturating_add(1).max(existing_rank);
+    let shape_vectors = values.len().saturating_mul(2).saturating_add(4);
+    let bytes = rank
+        .checked_mul(shape_vectors)
+        .and_then(|count| count.checked_mul(std::mem::size_of::<usize>()))
+        .ok_or_else(|| {
+            deep_learning_error(
+                "padsequences",
+                "padsequences: padding rank exceeds metadata capacity",
+            )
+        })?;
+    if bytes > MAX_PAD_METADATA_BYTES {
+        return Err(deep_learning_error(
+            "padsequences",
+            "padsequences: padding rank exceeds metadata capacity",
+        ));
+    }
+    Ok(())
+}
 use super::{
     execution::non_padding_dims_match,
     options::{parse_bool, PaddingDirection, SequenceLength},

@@ -1544,4 +1544,34 @@ mod struct_array_tests {
             assert_eq!(data.materialize_f64(), [0.0]);
         }
     }
+
+    #[test]
+    fn dlarray_constructor_records_active_tape_and_rejects_resident_tape_input() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .expect("resident data");
+            ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = Some(Tape { nodes: Vec::new() }));
+            let host = futures::executor::block_on(super::super::training::dlarray_builtin(
+                Value::Num(2.0),
+                vec![],
+            ))
+            .expect("host dlarray is tape-tracked");
+            assert!(matches!(host, Value::Object(_)));
+            ACTIVE_TAPE.with(|slot| assert_eq!(slot.borrow().as_ref().unwrap().nodes.len(), 1));
+
+            provider.reset_telemetry();
+            let error = futures::executor::block_on(super::super::training::dlarray_builtin(
+                Value::GpuTensor(resident),
+                vec![],
+            ))
+            .expect_err("resident autodiff needs a tape kernel");
+            ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = None);
+            assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
 }

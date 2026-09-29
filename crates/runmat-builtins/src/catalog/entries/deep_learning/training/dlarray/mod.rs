@@ -9,7 +9,9 @@ mod inference;
 #[cfg(test)]
 mod tests;
 
-pub use contract::{DLARRAY_DESCRIPTOR, DLARRAY_INTEGER_CAPABILITIES, DLARRAY_INVALID_INPUT};
+pub use contract::{
+    DLARRAY_DESCRIPTOR, DLARRAY_INTEGER_CAPABILITIES, DLARRAY_INVALID_INPUT, DLARRAY_UNSUPPORTED,
+};
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DLARRAY_CATALOG_ENTRY];
 
@@ -26,11 +28,15 @@ pub const DLARRAY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
-        purity: BuiltinPurity::Pure,
+        purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &[EffectKind::MayThrow],
+        effects: &[
+            EffectKind::EnvironmentRead,
+            EffectKind::EnvironmentWrite,
+            EffectKind::MayThrow,
+        ],
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {

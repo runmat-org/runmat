@@ -1804,6 +1804,66 @@ fn padsequences_nested_resident_preflight_rejects_later_host_errors_without_down
 }
 
 #[test]
+fn padsequences_rank_admission_bounds_metadata_without_allocating_distant_axes() {
+    let sequences = Value::Cell(CellArray::new(vec![Value::Num(7.0)], 1, 1).unwrap());
+    let error = block_on(padsequences_builtin(
+        sequences,
+        vec![Value::Int(IntValue::U64(super::MAX_PAD_ELEMENTS as u64))],
+    ))
+    .expect_err("rank beyond the output-work metadata budget");
+    assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+
+    let sequences = Value::Cell(CellArray::new(vec![Value::Num(7.0)], 1, 1).unwrap());
+    let output = block_on(padsequences_builtin(sequences, vec![Value::Num(4.0)]))
+        .expect("ordinary higher-dimensional padding remains supported");
+    let Value::Tensor(output) = output else {
+        panic!("expected tensor")
+    };
+    assert_eq!(output.shape, vec![1, 1, 1, 1, 1]);
+    assert_eq!(output.materialize_f64(), vec![7.0]);
+}
+
+#[test]
+fn resident_padding_dimension_resolves_before_nested_sequence_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident_sequence = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 2],
+            })
+            .expect("resident sequence");
+        let resident_dimension = provider
+            .upload(&HostTensorView {
+                data: &[2.0],
+                shape: &[1, 1],
+            })
+            .expect("resident dimension");
+        let sequences = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::GpuTensor(resident_sequence),
+                    Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap()),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        );
+        provider.reset_telemetry();
+        let error = block_on(padsequences_builtin(
+            sequences,
+            vec![Value::GpuTensor(resident_dimension)],
+        ))
+        .expect_err("known nonpadding shape mismatch");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(
+            provider.telemetry_snapshot().download_bytes,
+            std::mem::size_of::<f64>()
+        );
+    });
+}
+
+#[test]
 fn sequence_resident_operands_gather_once_and_return_host_results() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let values = [1.0, 2.0];
@@ -2204,6 +2264,79 @@ fn fixed_output_rejection_precedes_resident_input_download() {
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0, "{name}");
         }
     });
+}
+
+#[test]
+fn training_options_store_exact_controls_and_resident_metadata_without_gather() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 2],
+            })
+            .expect("resident option value");
+        let wide = (1_u64 << 53) + 1;
+        provider.reset_telemetry();
+        let value = block_on(training_options_builtin(
+            Value::String("adam".into()),
+            vec![
+                Value::String("MaxEpochs".into()),
+                Value::Int(IntValue::U64(wide)),
+                Value::String("ValidationData".into()),
+                Value::GpuTensor(resident.clone()),
+            ],
+        ))
+        .expect("training metadata");
+        let Value::Object(options) = value else {
+            panic!("expected options object")
+        };
+        assert_eq!(
+            options.properties["MaxEpochs"],
+            Value::Int(IntValue::U64(wide))
+        );
+        let Value::GpuTensor(retained) = &options.properties["ValidationData"] else {
+            panic!("expected resident metadata")
+        };
+        assert_eq!(
+            retained.allocation_identity(),
+            resident.allocation_identity()
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let error = block_on(crate::call_builtin_async_with_outputs(
+            "trainingOptions",
+            &[
+                Value::String("adam".into()),
+                Value::String("ValidationData".into()),
+                Value::GpuTensor(resident),
+            ],
+            2,
+        ))
+        .expect_err("fixed result count");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn discarded_training_options_still_validate_solver_and_pairs() {
+    let error = block_on(crate::call_builtin_async_with_outputs(
+        "trainingOptions",
+        &[Value::String("invalid".into())],
+        0,
+    ))
+    .expect_err("discarded result still validates solver");
+    assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+    let error = block_on(crate::call_builtin_async_with_outputs(
+        "trainingOptions",
+        &[
+            Value::String("adam".into()),
+            Value::String("MaxEpochs".into()),
+        ],
+        0,
+    ))
+    .expect_err("discarded result still validates complete pairs");
+    assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
 }
 
 #[test]

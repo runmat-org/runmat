@@ -15,7 +15,7 @@ pub(in crate::builtins) use runmat_builtins::{
     SOFTMAX_LAYER_CLASS,
 };
 pub(in crate::builtins) const TRAINING_OPTIONS_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptions");
+    runmat_builtins::TRAINING_OPTIONS_CLASS;
 
 pub(super) const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.INVALID_INPUT",
