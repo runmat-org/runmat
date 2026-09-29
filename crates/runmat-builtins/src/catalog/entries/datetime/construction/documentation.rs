@@ -61,7 +61,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[
         BuiltinExample {
             id: "components", title: "Construct a scalar from calendar components",
-            program: "t = datetime(2024,4,9,13,30,0);",
+            program: "t = datetime(2024,4,9,13,30,0); disp(t);",
             display_output: Some("09-Apr-2024 13:30:00"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -69,7 +69,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "text-array", title: "Parse two text dates",
-            program: "t = datetime([\"2024-04-09 13:30:00\"; \"2024-04-10 08:15:00\"]);",
+            program: "t = datetime([\"2024-04-09 13:30:00\"; \"2024-04-10 08:15:00\"]); disp(t);",
             display_output: Some("09-Apr-2024 13:30:00\n10-Apr-2024 08:15:00"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -77,7 +77,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "extract-components", title: "Extract calendar and clock components",
-            program: "t = datetime(2024,4,9,13,30,5); y = year(t); m = month(t); d = day(t); h = hour(t);",
+            program: "t = datetime(2024,4,9,13,30,5); y = year(t); m = month(t); d = day(t); h = hour(t); fprintf('y = %.0f\\nm = %.0f\\nd = %.0f\\nh = %.0f\\n',y,m,d,h);",
             display_output: Some("y = 2024\nm = 4\nd = 9\nh = 13"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -85,7 +85,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "serial-datenum", title: "Convert explicit serial date numbers",
-            program: "serials = [739351; 739352]; t = datetime(serials,'ConvertFrom','datenum');",
+            program: "serials = [739351; 739352]; t = datetime(serials,'ConvertFrom','datenum'); disp(t);",
             display_output: Some("09-Apr-2024 00:00:00\n10-Apr-2024 00:00:00"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -93,7 +93,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "display-format", title: "Change display format without changing the date",
-            program: "t = datetime(2024,4,9,13,30,0); before = datenum(t); t.Format = 'yyyy-MM-dd HH:mm:ss';",
+            program: "t = datetime(2024,4,9,13,30,0); before = datenum(t); t.Format = 'yyyy-MM-dd HH:mm:ss'; disp(t);",
             display_output: Some("2024-04-09 13:30:00"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -101,7 +101,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "month-end", title: "Add a calendar month at month end",
-            program: "t = datetime(2024,1,31,'Format','yyyy-MM-dd'); shifted = t + calmonths(1);",
+            program: "t = datetime(2024,1,31,'Format','yyyy-MM-dd'); shifted = t + calmonths(1); disp(shifted);",
             display_output: Some("2024-02-29"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -109,7 +109,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "day-arithmetic", title: "Shift a date and subtract two datetimes",
-            program: "t0 = datetime(2024,4,9); t1 = t0 + 7; delta = t1 - t0;",
+            program: "t0 = datetime(2024,4,9); t1 = t0 + 7; delta = t1 - t0; fprintf('delta = %.0f\\n',delta);",
             display_output: Some("delta = 7"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
@@ -117,7 +117,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "serial-helpers", title: "Use serial-date conversion helpers",
-            program: "n = datenum(2024,4,9); v = datevec(n); s = datestr(n,'yyyy-MM-dd');",
+            program: "n = datenum(2024,4,9); v = datevec(n); s = datestr(n,'yyyy-MM-dd'); disp(s);",
             display_output: Some("2024-04-09"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
