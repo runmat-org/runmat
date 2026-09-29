@@ -272,6 +272,24 @@ mod tests {
     }
 
     #[test]
+    fn wide_integer_scalar_gain_rounds_at_double_coefficient_boundary() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let gain = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        );
+        let expected = 9_007_199_254_740_992.0;
+        for result in [
+            block_on(tf_plus(model(0.0), gain.clone())),
+            block_on(tf_plus(gain, model(0.0))),
+        ] {
+            let result = result.expect("wide scalar gain remains admissible");
+            assert_eq!(coefficients(&result, "Numerator"), vec![expected]);
+            assert_eq!(coefficients(&result, "Denominator"), vec![1.0]);
+        }
+    }
+
+    #[test]
     fn unary_and_power_bindings_reject_numeric_receivers() {
         for result in [
             block_on(tf_uplus(Value::Num(2.0))),

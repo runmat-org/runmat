@@ -50,7 +50,7 @@ const POWER_INPUTS: [BuiltinParamDescriptor; 2] = [
 
 // The model parser and polynomial arithmetic report these stable identifiers.
 // Methods do not expose a fabricated, catch-all OperatorError identifier.
-const ERRORS: [BuiltinErrorDescriptor; 14] = [
+const ERRORS: [BuiltinErrorDescriptor; 13] = [
     BuiltinErrorDescriptor {
         code: "RM.TF.INVALID_ARGUMENT",
         identifier: Some("RunMat:tf:InvalidArgument"),
@@ -124,12 +124,6 @@ const ERRORS: [BuiltinErrorDescriptor; 14] = [
         message: "tf: invalid exponent",
     },
     BuiltinErrorDescriptor {
-        code: "RM.TF.INTEGER_PRECISION_LOSS",
-        identifier: Some("RunMat:tf:IntegerPrecisionLoss"),
-        when: "Typed integer scalar gain cannot cross the double coefficient boundary exactly.",
-        message: "tf: integer scalar gain must be exactly representable as double",
-    },
-    BuiltinErrorDescriptor {
         code: "RM.TF.INTERNAL",
         identifier: Some("RunMat:tf:Internal"),
         when: "A result object or coefficient array cannot be constructed.",
@@ -194,18 +188,18 @@ descriptor!(
 );
 
 const INTEGER_GAIN_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "lhs", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A typed integer scalar gain is admitted only in RunMat mode and must be exactly representable as double before tf polynomial arithmetic." },
-    BuiltinIntegerInputCapability { name: "rhs", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The right scalar gain has the same checked binary64 boundary; a tf object itself is parsed through the shared model owner." },
+    BuiltinIntegerInputCapability { name: "lhs", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "A typed integer scalar gain is admitted only in RunMat mode and converted to binary64 before tf polynomial arithmetic; wide values may round." },
+    BuiltinIntegerInputCapability { name: "rhs", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "The right scalar gain follows the same potentially rounding binary64 conversion; a tf object itself is parsed through the shared model owner." },
 ];
 pub const INTEGER_GAIN_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor {
     form: "tf binary operator with typed-integer scalar gain",
     inputs: &INTEGER_GAIN_INPUTS,
     computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
     output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-    overflow: BuiltinIntegerOverflowRule::Error,
+    overflow: BuiltinIntegerOverflowRule::NotApplicable,
     backend: BuiltinIntegerBackendRule::GatherFallback,
     overload: BuiltinIntegerOverloadKind::ScalarOnly,
-    notes: "The result is a host tf object with double or complex-double coefficients; no integer array arithmetic or implicit lossy conversion occurs.",
+    notes: "The result is a host tf object with double or complex-double coefficients. Scalar integer gains may round at the binary64 boundary; this is distinct from checked integer coefficient inputs to tf construction.",
 }];
 const INTEGER_EXPONENT_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "exponent",

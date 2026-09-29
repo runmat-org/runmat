@@ -68,6 +68,11 @@ fn all_twelve_are_method_only_with_distinct_contracts_and_examples() {
             entry.placement.portability,
             BuiltinPortability::NativeAndWasm
         );
+        assert!(!entry
+            .descriptor
+            .errors
+            .iter()
+            .any(|error| error.identifier == Some("RunMat:tf:IntegerPrecisionLoss")));
     }
 }
 
