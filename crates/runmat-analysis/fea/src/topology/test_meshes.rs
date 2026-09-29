@@ -167,6 +167,94 @@ pub(crate) fn slab_mesh(cell_count: usize) -> SolverMeshArtifact {
     artifact
 }
 
+/// Straight-sided quadratic version of the same shared convergence fixture.
+/// Midpoints are shared by global edge identity, including the Tri6 boundary.
+pub(crate) fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
+    use runmat_meshing_core::{
+        solver_midside_node_identity, sort_solver_node_exact_parameters, SolverNodeExactParameter,
+        TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+    };
+    let mut mesh = slab_mesh(cell_count);
+    let mut midsides = BTreeMap::new();
+    for element in &mesh.topology.volume_elements {
+        for [a, b] in TETRAHEDRON_MIDSIDE_EDGE_CORNERS {
+            let mut edge = [element.node_ids[a], element.node_ids[b]];
+            edge.sort_unstable();
+            if midsides.contains_key(&edge) {
+                continue;
+            }
+            let endpoints = edge.map(|id| &mesh.topology.nodes[id as usize - 1]);
+            let coordinates_m = std::array::from_fn(|axis| {
+                (endpoints[0].coordinates_m[axis] + endpoints[1].coordinates_m[axis]) * 0.5
+            });
+            let stable_identity =
+                solver_midside_node_identity(endpoints.map(|n| n.stable_identity));
+            let node_id = mesh.topology.nodes.len() as u64 + 1;
+            mesh.topology.nodes.push(SolverMeshNode {
+                node_id,
+                stable_identity,
+                coordinates_m,
+                provenance: element.provenance.clone(),
+                exact_parameters: Vec::new(),
+            });
+            midsides.insert(edge, node_id);
+        }
+    }
+    let midpoint = |a, b| {
+        let mut edge = [a, b];
+        edge.sort_unstable();
+        midsides[&edge]
+    };
+    for element in &mut mesh.topology.volume_elements {
+        let corners = element.node_ids.clone();
+        element.node_ids.extend(
+            TETRAHEDRON_MIDSIDE_EDGE_CORNERS.map(|[a, b]| midpoint(corners[a], corners[b])),
+        );
+        element.order = ElementOrder::Tet10;
+    }
+    for face in &mut mesh.topology.boundary_faces {
+        let corners = face.node_ids.clone();
+        let midsides = [[0, 1], [1, 2], [2, 0]].map(|[a, b]| midpoint(corners[a], corners[b]));
+        // Planar fixture charts use physical tangent coordinates and actual source IDs.
+        let coordinates =
+            [0, 1, 2].map(|i| mesh.topology.nodes[corners[i] as usize - 1].coordinates_m);
+        let normal_axis = (0..3)
+            .find(|&axis| coordinates.iter().all(|p| p[axis] == coordinates[0][axis]))
+            .unwrap();
+        let tangent_axes = match normal_axis {
+            0 => [1, 2],
+            1 => [0, 2],
+            _ => [0, 1],
+        };
+        for id in midsides {
+            let node = &mut mesh.topology.nodes[id as usize - 1];
+            for source_face_id in &face.provenance {
+                node.provenance.push(source_face_id.clone());
+                node.exact_parameters
+                    .push(SolverNodeExactParameter::Surface {
+                        source_face_id: source_face_id.clone(),
+                        chart_id: face.stable_identity,
+                        evaluator_uv: tangent_axes.map(|axis| node.coordinates_m[axis]),
+                    });
+            }
+            node.provenance.sort();
+            node.provenance.dedup();
+            sort_solver_node_exact_parameters(&mut node.exact_parameters);
+        }
+        face.node_ids.extend(midsides);
+        face.order = BoundaryTriangleOrder::Tri6;
+    }
+    for field in &mut mesh.topology.field_topologies {
+        if field.location == FieldTopologyLocation::Node {
+            field.ordered_entity_ids = mesh.topology.nodes.iter().map(|n| n.node_id).collect();
+        }
+    }
+    mesh.resolved_request.element_order = ElementOrder::Tet10;
+    mesh.resolved_request.resources.maximum_nodes = mesh.topology.nodes.len() as u64;
+    mesh.seal_canonical_digest().unwrap();
+    mesh
+}
+
 fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
     let [a, b, c, d] = corners.map(|id| nodes[id as usize - 1].coordinates_m);
     let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];

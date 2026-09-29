@@ -7,6 +7,7 @@
 
 mod assembly;
 mod boundary;
+mod recovery;
 mod response;
 #[cfg(test)]
 mod tests;

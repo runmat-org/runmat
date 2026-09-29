@@ -16,6 +16,7 @@ pub(super) struct AcousticAssembly {
     pub impedance: RealSparseMatrix,
     pub omega: f64,
     pub density: Vec<f64>,
+    pub compressibility: Vec<f64>,
     pub source: Vec<ProjectionScalar>,
     pub prescribed: Vec<Option<ProjectionScalar>>,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
@@ -31,6 +32,7 @@ impl AcousticAssembly {
         let mut stiffness = assembler(size, OperatorRole::Stiffness, "pressure_gradient");
         let mut mass = assembler(size, OperatorRole::Mass, "pressure_compressibility");
         let mut density = Vec::with_capacity(projection.elements.len());
+        let mut compressibility = Vec::with_capacity(projection.elements.len());
         for element in &projection.elements {
             let material = &properties
                 .solid_material(element.stable_identity)
@@ -54,6 +56,13 @@ impl AcousticAssembly {
                 ));
             }
             density.push(rho);
+            let beta = 1.0 / rho / c / c;
+            if !beta.is_finite() || beta <= 0.0 {
+                return Err(AcousticHarmonicError::Material(
+                    "fluid compressibility is not representable as a positive finite value".into(),
+                ));
+            }
+            compressibility.push(beta);
             projection
                 .visit_element_quadrature(element, |point| {
                     for (i, &row) in element.node_indices.iter().enumerate() {
@@ -90,6 +99,7 @@ impl AcousticAssembly {
             ))?,
             omega,
             density,
+            compressibility,
             source: vec![
                 ProjectionScalar {
                     real: 0.0,

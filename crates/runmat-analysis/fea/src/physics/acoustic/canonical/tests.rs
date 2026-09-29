@@ -1,4 +1,5 @@
 use super::*;
+mod continuum;
 use crate::fixtures::{fixture_model, replace_fixture_excitations, FixtureId};
 use crate::topology::test_meshes::slab_mesh;
 use runmat_analysis_core::{
@@ -398,7 +399,46 @@ fn straight_and_curved_tet10_preserve_integrals_and_affine_velocity_recovery() {
         for (actual, expected) in velocity.imaginary.iter().zip([2.0 / 3.0, 1.0, -4.0 / 3.0]) {
             assert!((actual - expected).abs() < 1e-10);
         }
+        assert!(result.element_mean_intensity_w_per_m2[0]
+            .iter()
+            .all(|i| i.abs() < 1e-12));
+        // Straight unit tetrahedron: E[p²]=3 from barycentric second moments,
+        // |grad p|²=29; E=(3/12 + 29/3)/4=119/48 J/m³.
+        if warp == 0.0 {
+            assert!((result.element_mean_energy_density_j_per_m3[0] - 119.0 / 48.0).abs() < 1e-12);
+        }
     }
+}
+
+#[test]
+fn quadratic_phasor_recovery_integrates_products_not_products_of_averages() {
+    let model = model();
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let properties = crate::properties::compile_solid_property_map(&model, &mesh).unwrap();
+    let mut assembly = AcousticAssembly::assemble(projection, &properties, 1.0).unwrap();
+    // p=x²+i*x, omega=1, rho=3, c=2. Every nodal value is prescribed,
+    // so this isolates recovery from any numerical field-solve approximation.
+    for (i, node) in assembly.projection.nodes.iter().enumerate() {
+        let x = node.coordinates_m[0];
+        assembly.prescribed[i] = Some(crate::excitation::ProjectionScalar {
+            real: x * x,
+            imaginary: x,
+        });
+    }
+    let result = super::response::solve(
+        assembly,
+        1.0 / std::f64::consts::TAU,
+        AcousticHarmonicPolicy::default(),
+    )
+    .unwrap();
+    // v=(-1/3 + 2ix/3,0,0), I=(x²/6,0,0). Unit tetrahedral moments
+    // E[x]=1/4, E[x²]=1/10, E[x⁴]=1/35 give I_x=1/60, E=401/3360.
+    // Multiplying averaged p and v would incorrectly return I_x=1/240.
+    let intensity = result.element_mean_intensity_w_per_m2[0];
+    assert!((intensity[0] - 1.0 / 60.0).abs() < 1e-13);
+    assert!(intensity[1].abs() < 1e-13 && intensity[2].abs() < 1e-13);
+    assert!((result.element_mean_energy_density_j_per_m3[0] - 401.0 / 3360.0).abs() < 1e-13);
 }
 
 #[test]

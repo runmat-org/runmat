@@ -67,6 +67,65 @@ is `p(x)=cos(k(1-x))/cos(k)`. The same refinement sequence verifies pressure
 convergence and no artificial mean loss. Reactive apparent power normalizes balance,
 so a lossless case does not divide by zero real power or use a dimensional floor.
 
+### Quadratic continuum and forced rigid cavity
+
+The straight Tet10 unit-cube fixture shares midsides by canonical global-edge identity,
+uses Tri6 faces with actual planar source-face parameters, and is sealed/validated through
+the ordinary meshing contract. It is a qualification fixture, not a generated replacement
+for imported production topology. At `f=0.2` and `0.5 Hz`, the velocity-driven matched
+wave uses 1/2/4 cells per axis. Nodal relative RMS pressure error must decrease by more
+than six on each refinement and finish below 0.4 percent. Finest particle-velocity RMS
+error must be below `0.01 m/s`, intensity RMS error below `0.005 W/m²`, and energy-density
+RMS error below `0.005 J/m³`. Residual and boundary-power tests are separate from these
+discretization-accuracy tests.
+
+For the same cube with rigid side/right walls and prescribed outward left velocity
+`v_n=-(1+0.4i)/6 m/s`, the independent axial forced-cavity solution is
+
+$$
+p(x)=i\rho c v_n\frac{\cos(k(1-x))}{\sin k},\qquad
+v_x(x)=-v_n\frac{\sin(k(1-x))}{\sin k}.
+$$
+
+The axial poles are `f_n=n c/(2L)=n Hz`. Tests at 0.9/1.1 Hz check convergence on
+both sides of the first pole and the reversal of boundary pressure phase. Tet4 uses
+4/8/16 cells per axis, Tet10 1/2/4. Finest pressure relative RMS error must be below
+10 percent; energy-density relative RMS error below 15 percent. The eight-cell Tet4
+case failed the energy target above resonance, motivating finer resolution rather
+than a relaxed target. These are bounded forced-response checks, **not** an acoustic
+eigenvalue solver, exact-pole uniqueness test, or arbitrary resonance-conditioning certificate.
+
+### Intensity and energy recovery
+
+Measured finest-mesh nodal relative RMS pressure errors for these bounded cases:
+
+| Case | Frequency (Hz) | Element | Error (%) |
+|---|---:|---|---:|
+| Matched traveling wave | 0.2 | Tet10 | 0.001377 |
+| Matched traveling wave | 0.5 | Tet10 | 0.021076 |
+| Forced rigid cavity | 0.9 | Tet4 | 1.076073 |
+| Forced rigid cavity | 1.1 | Tet4 | 2.266279 |
+| Forced rigid cavity | 0.9 | Tet10 | 0.188602 |
+| Forced rigid cavity | 1.1 | Tet10 | 0.376441 |
+
+Canonical recovery now reports volume-averaged particle velocity, time-averaged intensity
+`I=Re(p conjugate(v))/2`, and lossless acoustic energy density
+`E=(|p|²/(rho c²)+rho |v|²)/4`, using peak phasors. Products are evaluated at physical
+quadrature points before volume averaging, not reconstructed from averaged fields.
+The intensity convention follows
+[COMSOL's frequency-domain postprocessing equations](https://doc.comsol.com/6.3/doc/com.comsol.help.aco/aco_ug_pressure.05.140.html);
+the energy expression follows averaging the pressure/compression and fluid kinetic energies.
+No COMSOL numerical output is used as evidence.
+
+The traveling wave has `I=(1.16/12,0,0) W/m²` and `E=1.16/24 J/m³`.
+The forced rigid cavity has zero mean intensity/loss and constant
+`E=1.16/(48 sin² k) J/m³`. A separate straight Tet10 polynomial reference,
+`p=x²+i x`, checks `I_x=1/60 W/m²` and `E=401/3360 J/m³` using exact
+tetrahedral moments; multiplying averaged pressure and velocity would wrongly give
+`I_x=1/240`. An affine straight-tetrahedron reference checks `E=119/48`.
+Curved Tet10 retains the earlier integral/affine-velocity evidence; this does not qualify
+curved non-affine energy-form integration or all geometric/quadrature accuracy envelopes.
+
 ## Verification and remaining gates
 
 ```sh
@@ -80,7 +139,7 @@ zero frequency, material damping and unsupported radiation. Field recovery retur
 nodal complex pressure and volume-averaged element velocity, with immutable mesh
 projection identity, source evidence and power metrics.
 
-Stage 8 remains open. Required follow-on work includes Tet10 continuum convergence,
+Stage 8 remains open. Required follow-on work includes wider Tet10/curved continuum envelopes,
 heterogeneous interfaces, cavity eigenfrequencies and resonance/uniqueness diagnostics,
 radiation references, complex/frequency-dependent impedance where advertised,
 periodic/Bloch constraints, incident-field support, explicit/generated spectrum

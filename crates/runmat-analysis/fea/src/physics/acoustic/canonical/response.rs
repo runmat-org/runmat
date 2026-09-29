@@ -15,6 +15,10 @@ pub struct CanonicalAcousticResponse {
     pub pressure_pa: Vec<ProjectionScalar>,
     /// Volume-averaged particle velocity phasors in m/s, in projection element order.
     pub element_velocity_m_per_s: Vec<ProjectionVector3>,
+    /// Volume average of 0.5 Re(p conjugate(v)), from peak phasors, in element order.
+    pub element_mean_intensity_w_per_m2: Vec<[f64; 3]>,
+    /// Volume average of (|p|²/(rho c²) + rho |v|²)/4, in element order.
+    pub element_mean_energy_density_j_per_m3: Vec<f64>,
     pub iterations: u32,
     pub relative_residual: f64,
     /// Positive into the fluid; includes prescribed-pressure reaction flux.
@@ -141,38 +145,12 @@ pub(super) fn solve(
     } else {
         (mean_input_power_w - mean_impedance_loss_w).abs() / power_scale
     };
-    let mut velocities = Vec::with_capacity(assembly.projection.elements.len());
-    for (index, element) in assembly.projection.elements.iter().enumerate() {
-        let mut velocity = ProjectionVector3 {
-            real: [0.0; 3],
-            imaginary: [0.0; 3],
-        };
-        let mut volume = 0.0;
-        assembly
-            .projection
-            .visit_element_quadrature(element, |point| {
-                volume += point.volume_weight_m3;
-                for (local, &node) in element.node_indices.iter().enumerate() {
-                    for axis in 0..3 {
-                        let factor = point.physical_shape_gradients()[local][axis]
-                            * point.volume_weight_m3
-                            / assembly.omega
-                            / assembly.density[index];
-                        velocity.real[axis] -= imaginary[node] * factor;
-                        velocity.imaginary[axis] += real[node] * factor;
-                    }
-                }
-            })
-            .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
-        velocity.real = velocity.real.map(|v| v / volume);
-        velocity.imaginary = velocity.imaginary.map(|v| v / volume);
-        velocities.push(velocity);
-    }
+    let recovered = super::recovery::recover(&assembly, &real, &imaginary)?;
     if real
         .iter()
         .chain(&imaginary)
         .any(|value| !value.is_finite())
-        || velocities.iter().any(|v| {
+        || recovered.velocity.iter().any(|v| {
             v.real
                 .iter()
                 .chain(&v.imaginary)
@@ -200,7 +178,9 @@ pub(super) fn solve(
         frequency_hz,
         projection: assembly.projection,
         pressure_pa,
-        element_velocity_m_per_s: velocities,
+        element_velocity_m_per_s: recovered.velocity,
+        element_mean_intensity_w_per_m2: recovered.intensity,
+        element_mean_energy_density_j_per_m3: recovered.energy,
         iterations,
         relative_residual,
         mean_input_power_w,
