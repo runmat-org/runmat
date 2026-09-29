@@ -289,9 +289,11 @@ mod tests {
             integer_exponent(&Value::Int(IntValue::I64(i64::MIN))).unwrap(),
             i64::MIN
         );
-        for operator in [tf_power, tf_mpower] {
-            let result = block_on(operator(model(-1.0), Value::Int(IntValue::I64(i64::MIN))))
-                .expect("minimum signed exponent");
+        for result in [
+            block_on(tf_power(model(-1.0), Value::Int(IntValue::I64(i64::MIN)))),
+            block_on(tf_mpower(model(-1.0), Value::Int(IntValue::I64(i64::MIN)))),
+        ] {
+            let result = result.expect("minimum signed exponent");
             assert_eq!(coefficients(&result, "Numerator"), vec![1.0]);
             assert_eq!(coefficients(&result, "Denominator"), vec![1.0]);
         }
@@ -397,9 +399,11 @@ mod tests {
                 .properties
                 .insert("Numerator".into(), Value::GpuTensor(numerator));
             provider.reset_telemetry();
-            for operator in [tf_power, tf_mpower] {
-                let error = block_on(operator(sys.clone(), Value::GpuTensor(exponent.clone())))
-                    .unwrap_err();
+            for result in [
+                block_on(tf_power(sys.clone(), Value::GpuTensor(exponent.clone()))),
+                block_on(tf_mpower(sys.clone(), Value::GpuTensor(exponent.clone()))),
+            ] {
+                let error = result.unwrap_err();
                 assert_eq!(error.identifier(), Some("RunMat:tf:InvalidExponent"));
                 assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             }

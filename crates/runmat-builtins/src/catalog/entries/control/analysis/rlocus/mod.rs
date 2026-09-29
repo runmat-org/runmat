@@ -1,4 +1,6 @@
 use crate::*;
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&RLOCUS_CATALOG_ENTRY];
 use runmat_types::{
     CallInference, CallRequest, CapabilityRequirement, EffectKind, ExecutionStackRequirement,
 };

@@ -10,7 +10,7 @@ pub use self::models::*;
 pub use self::response::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
-    values.extend(analysis::ENTRIES.iter().copied());
+    analysis::extend_entries(values);
     models::extend_entries(values);
-    values.extend(response::ENTRIES.iter().copied());
+    response::extend_entries(values);
 }

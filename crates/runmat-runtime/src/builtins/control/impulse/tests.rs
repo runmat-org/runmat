@@ -296,7 +296,8 @@ fn impulse_rejects_direct_feedthrough_tf() {
 fn impulse_rejects_invalid_time_metadata() {
     let err = run_impulse(tf_object(vec![1.0], vec![1.0, -0.5], -0.1), Vec::new())
         .expect_err("negative sample time should fail");
-    assert!(err.message().contains("Ts must be"));
+    assert!(err.message().contains("sample time must be"), "{err}");
+    assert_eq!(err.identifier(), IMPULSE_ERROR_INVALID_MODEL.identifier);
 
     let err = run_impulse(
         tf_object_with_delays(vec![1.0], vec![1.0, 5.0], 0.0, f64::NAN, 0.0),

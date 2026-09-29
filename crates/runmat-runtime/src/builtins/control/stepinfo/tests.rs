@@ -158,7 +158,7 @@ fn model_nested_residency_checks_host_options_before_owner_download() {
         assert!((field(&info, "SteadyStateValue") - 1.0).abs() < 1e-12);
         assert_eq!(
             provider.telemetry_snapshot().download_bytes,
-            numerator.len() * std::mem::size_of::<f64>()
+            u64::try_from(numerator.len() * std::mem::size_of::<f64>()).unwrap()
         );
     });
 }

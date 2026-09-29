@@ -1,4 +1,6 @@
 use crate::*;
+
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DB_CATALOG_ENTRY];
 use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequirement};
 
 mod contract;

@@ -1,7 +1,10 @@
 use super::*;
-use crate::builtins::control::response::step::DEFAULT_SAMPLES;
+use crate::builtins::control::response::step::{DEFAULT_SAMPLES, MAX_DISCRETE_SAMPLES};
 use futures::executor::block_on;
-use runmat_builtins::STEP_DESCRIPTOR;
+use runmat_builtins::{
+    STEP_DESCRIPTOR, STEP_ERROR_DISCRETE_LIMIT, STEP_ERROR_INVALID_MODEL,
+    STEP_ERROR_UNSUPPORTED_MODEL,
+};
 use runmat_value::{
     CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, ObjectInstance, Tensor,
 };

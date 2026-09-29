@@ -2,8 +2,10 @@
 //! Admission and provider ownership stay with the calling builtin.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, STEP_ERROR_DISCRETE_LIMIT, STEP_ERROR_INTERNAL,
-    STEP_ERROR_INVALID_MODEL, STEP_ERROR_INVALID_TIME, STEP_ERROR_UNSUPPORTED_MODEL,
+    BuiltinErrorDescriptor, STEPINFO_ERROR_INTERNAL, STEPINFO_ERROR_INVALID_DATA,
+    STEPINFO_ERROR_INVALID_SYSTEM, STEPINFO_ERROR_UNSUPPORTED_MODEL, STEP_ERROR_DISCRETE_LIMIT,
+    STEP_ERROR_INTERNAL, STEP_ERROR_INVALID_MODEL, STEP_ERROR_INVALID_TIME,
+    STEP_ERROR_UNSUPPORTED_MODEL,
 };
 use runmat_value::Value;
 
@@ -12,7 +14,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 pub(crate) const DEFAULT_SAMPLES: usize = 101;
-const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
+pub(crate) const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
 
 mod solver;
 mod time;
@@ -34,27 +36,23 @@ impl StepSimulationCaller {
         }
     }
 
-    fn descriptor(self, kind: SimulationErrorKind) -> Option<&'static BuiltinErrorDescriptor> {
+    fn descriptor(self, kind: SimulationErrorKind) -> &'static BuiltinErrorDescriptor {
         match self {
-            Self::Step => Some(match kind {
+            Self::Step => match kind {
                 SimulationErrorKind::InvalidModel => &STEP_ERROR_INVALID_MODEL,
                 SimulationErrorKind::InvalidTime => &STEP_ERROR_INVALID_TIME,
                 SimulationErrorKind::UnsupportedModel => &STEP_ERROR_UNSUPPORTED_MODEL,
                 SimulationErrorKind::DiscreteLimit => &STEP_ERROR_DISCRETE_LIMIT,
                 SimulationErrorKind::Internal => &STEP_ERROR_INTERNAL,
-            }),
-            Self::StepInfo => None,
-        }
-    }
-
-    fn identifier(self, kind: SimulationErrorKind) -> &'static str {
-        match kind {
-            SimulationErrorKind::InvalidModel => "RunMat:stepinfo:InvalidSystem",
-            SimulationErrorKind::InvalidTime => "RunMat:stepinfo:InvalidData",
-            SimulationErrorKind::UnsupportedModel => "RunMat:stepinfo:UnsupportedModel",
-            SimulationErrorKind::DiscreteLimit | SimulationErrorKind::Internal => {
-                "RunMat:stepinfo:Internal"
-            }
+            },
+            Self::StepInfo => match kind {
+                SimulationErrorKind::InvalidModel => &STEPINFO_ERROR_INVALID_SYSTEM,
+                SimulationErrorKind::InvalidTime => &STEPINFO_ERROR_INVALID_DATA,
+                SimulationErrorKind::UnsupportedModel => &STEPINFO_ERROR_UNSUPPORTED_MODEL,
+                SimulationErrorKind::DiscreteLimit | SimulationErrorKind::Internal => {
+                    &STEPINFO_ERROR_INTERNAL
+                }
+            },
         }
     }
 }
@@ -84,20 +82,13 @@ impl SimulationError {
         match self {
             Self::Model(error) => error,
             Self::Domain(kind, detail) => {
-                if let Some(descriptor) = caller.descriptor(kind) {
-                    let mut builder =
-                        build_runtime_error(format!("{}: {detail}", descriptor.message))
-                            .with_builtin(caller.name());
-                    if let Some(identifier) = descriptor.identifier {
-                        builder = builder.with_identifier(identifier);
-                    }
-                    builder.build()
-                } else {
-                    build_runtime_error(format!("{}: {detail}", caller.name()))
-                        .with_builtin(caller.name())
-                        .with_identifier(caller.identifier(kind))
-                        .build()
+                let descriptor = caller.descriptor(kind);
+                let mut builder = build_runtime_error(format!("{}: {detail}", descriptor.message))
+                    .with_builtin(caller.name());
+                if let Some(identifier) = descriptor.identifier {
+                    builder = builder.with_identifier(identifier);
                 }
+                builder.build()
             }
         }
     }

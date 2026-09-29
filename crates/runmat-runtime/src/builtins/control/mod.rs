@@ -20,5 +20,4 @@ pub mod step;
 pub mod stepinfo;
 pub mod tf;
 pub mod tf_model;
-pub(crate) mod type_resolvers;
 pub mod zero;

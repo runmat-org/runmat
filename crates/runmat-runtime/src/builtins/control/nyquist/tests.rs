@@ -184,7 +184,7 @@ fn valid_nested_resident_coefficients_gather_only_consumed_values() {
         assert_eq!(values(&outputs[0]), vec![1.0]);
         assert_eq!(
             provider.telemetry_snapshot().download_bytes,
-            denominator.len() * std::mem::size_of::<f64>()
+            u64::try_from(denominator.len() * std::mem::size_of::<f64>()).unwrap()
         );
     });
 }

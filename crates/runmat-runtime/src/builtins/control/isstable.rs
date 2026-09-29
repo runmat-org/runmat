@@ -202,6 +202,7 @@ mod tests {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload float");
+            provider.reset_telemetry();
             let error = block_on(isstable_builtin(Value::GpuTensor(handle)))
                 .expect_err("resident numeric input is not a system model");
             assert_eq!(

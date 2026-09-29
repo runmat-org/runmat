@@ -138,8 +138,8 @@ pub const NYQUIST_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
     NYQUIST_RESIDENT_EXTENSION,
 ];
 const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability { name: "sys numeric metadata", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer coefficients and timing metadata must convert exactly before complex binary64 evaluation." },
-    BuiltinIntegerInputCapability { name: "w", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Native integer frequencies must convert exactly and remain nonnegative." },
+    BuiltinIntegerInputCapability { name: "sys numeric metadata", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Native integer coefficients and timing metadata must convert exactly before complex binary64 evaluation." },
+    BuiltinIntegerInputCapability { name: "w", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Native integer frequencies must convert exactly and remain nonnegative." },
 ];
 pub const NYQUIST_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

@@ -124,13 +124,13 @@ pub const STEPINFO_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
     STEPINFO_INTEGER_THRESHOLD_EXTENSION,
 ];
 const INTEGER_DATA: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability { name: "y", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Every native integer response sample must convert exactly to binary64 before floating-point metrics." },
-    BuiltinIntegerInputCapability { name: "t", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer time samples must be exactly representable and ordered." },
-    BuiltinIntegerInputCapability { name: "yfinal", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer steady-state values must be exactly representable." },
+    BuiltinIntegerInputCapability { name: "y", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Every native integer response sample must convert exactly to binary64 before floating-point metrics." },
+    BuiltinIntegerInputCapability { name: "t", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer time samples must be exactly representable and ordered." },
+    BuiltinIntegerInputCapability { name: "yfinal", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer steady-state values must be exactly representable." },
 ];
 const INTEGER_THRESHOLD: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
     name: "SettlingTimeThreshold",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+    classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
     notes: "An exactly represented threshold must also lie strictly between zero and one.",
