@@ -10,14 +10,14 @@ pub(super) struct AdmittedExport {
 
 /// Validate every host-decidable input before acquiring any provider-owned data.
 /// Only the option values and learnables consumed by the exporter are downloaded.
-pub(super) async fn admit_export_call(args: Vec<Value>) -> BuiltinResult<AdmittedExport> {
+pub(super) async fn admit_export_call(mut args: Vec<Value>) -> BuiltinResult<AdmittedExport> {
     if args.len() < 2 {
         return Err(deep_learning_error(
             EXPORT_ONNX,
             "exportONNXNetwork: expected network and filename",
         ));
     }
-    let network = require_network_object(&args[0])?.clone();
+    let network = require_network_object(&args[0])?;
     let filename = scalar_text(&args[1], EXPORT_ONNX)?;
     if filename.is_empty() {
         return Err(deep_learning_error(
@@ -25,7 +25,7 @@ pub(super) async fn admit_export_call(args: Vec<Value>) -> BuiltinResult<Admitte
             "exportONNXNetwork: filename must not be empty",
         ));
     }
-    let mut options_map = parse_name_values(args[2..].to_vec(), EXPORT_ONNX)?;
+    let mut options_map = parse_name_values(args.split_off(2), EXPORT_ONNX)?;
     if options_map.iter().any(|(key, value)| {
         matches!(key.as_str(), "opsetversion" | "batchsize" | "verbose")
             && crate::builtins::common::validation::value_has_native_integer_class(value)
@@ -38,8 +38,8 @@ pub(super) async fn admit_export_call(args: Vec<Value>) -> BuiltinResult<Admitte
     for (key, value) in &options_map {
         validate_option(key, value)?;
     }
-    let layers = model::layers_from_network_value(Value::Object(network.clone()), EXPORT_ONNX)?;
-    preflight_layers(&network, &layers, &options_map)?;
+    let layers = model::layers_from_network_ref(&args[0], EXPORT_ONNX)?;
+    preflight_layers(network, layers, &options_map)?;
 
     for value in options_map.values_mut() {
         if matches!(value, Value::GpuTensor(_)) {
@@ -47,6 +47,16 @@ pub(super) async fn admit_export_call(args: Vec<Value>) -> BuiltinResult<Admitte
         }
     }
     let options = parse_export_options(options_map)?;
+    // The model metadata stays with the owned object; move its consumed Layers
+    // collection into preparation instead of copying every learned parameter.
+    let Value::Object(mut network) = args.remove(0) else {
+        unreachable!("network identity was admitted above")
+    };
+    let layers_value = network
+        .properties
+        .remove("Layers")
+        .expect("nonempty Layers collection was admitted above");
+    let layers = model::layers_from_network_value(layers_value, EXPORT_ONNX)?;
     let mut prepared = Vec::with_capacity(layers.len());
     for layer in layers {
         let Value::Object(mut object) = layer else {
@@ -119,29 +129,11 @@ fn preflight_layers(
                     EXPORT_ONNX,
                     "exportONNXNetwork: fullyConnectedLayer requires a preceding featureInputLayer",
                 ))?;
-                let output_size = model::positive_property_usize(layer, "OutputSize", EXPORT_ONNX)?;
-                let mut shapes = Vec::with_capacity(2);
-                for property in ["Weights", "Bias"] {
-                    let value = layer.properties.get(property).ok_or_else(|| {
-                        deep_learning_error(
-                            EXPORT_ONNX,
-                            format!("exportONNXNetwork: layer is missing {property}"),
-                        )
-                    })?;
-                    shapes.push(preflight_learnable(value, property)?);
-                }
-                let weights = &shapes[0];
-                let weight_rows = weights.first().copied().unwrap_or(0);
-                let weight_cols = weights.get(1).copied().unwrap_or(1);
-                if weights.len() > 2 || weight_rows != output_size || weight_cols != input_features {
-                    return Err(deep_learning_error(EXPORT_ONNX, format!("exportONNXNetwork: fullyConnectedLayer Weights must be {output_size}-by-{input_features}")));
-                }
-                let bias_len = shapes[1].iter().try_fold(1usize, |count, extent| count.checked_mul(*extent))
-                    .ok_or_else(|| deep_learning_error(EXPORT_ONNX, "exportONNXNetwork: Bias element count exceeds addressable storage"))?;
-                if bias_len != output_size {
-                    return Err(deep_learning_error(EXPORT_ONNX, format!("exportONNXNetwork: fullyConnectedLayer Bias must have {output_size} elements")));
-                }
-                current_features = Some(output_size);
+                current_features = Some(model::fully_connected_output_width(
+                    layer,
+                    input_features,
+                    EXPORT_ONNX,
+                )?);
             }
             Some(ForwardLayerKind::Elu) if index > 0 => {
                 if let Some(value) = layer.properties.get("Alpha") {
@@ -197,31 +189,6 @@ fn learnable_data(value: &Value) -> BuiltinResult<&Value> {
             })
         }
         other => Ok(other),
-    }
-}
-
-fn preflight_learnable(value: &Value, property: &str) -> BuiltinResult<Vec<usize>> {
-    match learnable_data(value)? {
-        Value::GpuTensor(handle) => {
-            if runmat_accelerate_api::handle_is_logical(handle)
-                || runmat_accelerate_api::handle_storage(handle)
-                    != runmat_accelerate_api::GpuTensorStorage::Real
-            {
-                return Err(deep_learning_error(
-                    EXPORT_ONNX,
-                    format!("exportONNXNetwork: {property} must contain real numeric values"),
-                ));
-            }
-            Ok(handle.shape().to_vec())
-        }
-        _ => {
-            let value = super::super::autodiff::dlarray_data(value, EXPORT_ONNX)?;
-            let tensor = crate::builtins::common::tensor::value_into_tensor_for(EXPORT_ONNX, value)
-                .map_err(|err| {
-                    deep_learning_error(EXPORT_ONNX, format!("exportONNXNetwork: {property} {err}"))
-                })?;
-            Ok(tensor.shape)
-        }
     }
 }
 
