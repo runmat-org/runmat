@@ -1,0 +1,160 @@
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, ProviderCrossentropyMode,
+    ProviderCrossentropyRequest,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{NumericDType, Tensor, Value};
+
+use crate::{builtins::common::tensor, BuiltinResult};
+
+use super::{
+    deep_learning_error, gather_args, numeric_scalar, object, parse_name_values, scalar_text,
+};
+
+mod admission;
+mod format;
+mod gpu;
+mod host;
+mod mask;
+mod options;
+mod weights;
+
+use format::{
+    batch_size, batch_size_for_shape, column_major_strides, label_index_for_shape,
+    reduce_mask_included, validate_format_for_shape,
+};
+use gpu::try_crossentropy_gpu;
+use host::{
+    evaluate_crossentropy_terms, is_crossentropy_option_name, require_loss_payload_compatible,
+    LossPayload,
+};
+use mask::{mask_values_for_layout, LossMask};
+use options::{
+    ClassificationMode, CrossentropyOptions, CrossentropyReduction, NormalizationFactor,
+};
+use weights::LossWeights;
+
+#[cfg(test)]
+mod tests;
+
+#[runtime_builtin(
+    name = "crossentropy",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::deep_learning::losses"
+)]
+pub(super) async fn crossentropy_builtin(
+    predictions: Value,
+    targets: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::errors::admit_single_output(
+        "crossentropy",
+        &runmat_builtins::CROSSENTROPY_INVALID_INPUT,
+    )?;
+    let positional_weights = rest
+        .first()
+        .is_some_and(|value| !is_crossentropy_option_name(value));
+    let options = &rest[usize::from(positional_weights)..];
+    let integer_data =
+        crate::builtins::common::validation::value_has_native_integer_class(&predictions)
+            || crate::builtins::common::validation::value_has_native_integer_class(&targets)
+            || (positional_weights
+                && crate::builtins::common::validation::value_has_native_integer_class(&rest[0]))
+            || options.chunks_exact(2).any(|pair| {
+                scalar_text(&pair[0], "crossentropy")
+                    .is_ok_and(|name| name.eq_ignore_ascii_case("weights"))
+                    && crate::builtins::common::validation::value_has_native_integer_class(&pair[1])
+            });
+    if integer_data {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::CROSSENTROPY_INTEGER_EXTENSION,
+            "crossentropy",
+        )?;
+    }
+    if matches!(
+        &predictions,
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) | Value::GpuTensor(_)
+    ) && matches!(
+        &targets,
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) | Value::GpuTensor(_)
+    ) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::CROSSENTROPY_PLAIN_NUMERIC_EXTENSION,
+            "crossentropy",
+        )?;
+    }
+    admission::preflight_host_decidable(&predictions, &targets, &rest)?;
+    let has_gpu = matches!(&predictions, Value::GpuTensor(_))
+        || matches!(&targets, Value::GpuTensor(_))
+        || rest
+            .iter()
+            .any(|value| matches!(value, Value::GpuTensor(_)));
+    let (predictions, targets) = if has_gpu {
+        if let Some(value) = try_crossentropy_gpu(&predictions, &targets, &rest).await? {
+            return Ok(value);
+        }
+        let mut gathered = gather_args(vec![predictions, targets]).await?;
+        (gathered.remove(0), gathered.remove(0))
+    } else {
+        (predictions, targets)
+    };
+
+    let predictions = LossPayload::parse(&predictions, "predictions")?;
+    let targets = LossPayload::parse(&targets, "targets")?;
+    if predictions.data.len() != targets.data.len() {
+        return Err(deep_learning_error(
+            "crossentropy",
+            "crossentropy: predictions and targets must have the same number of elements",
+        ));
+    }
+    if predictions.data.is_empty() {
+        return Err(deep_learning_error(
+            "crossentropy",
+            "crossentropy: predictions and targets must not be empty",
+        ));
+    }
+    let mut args = gather_args(rest).await?;
+    let weights = if args
+        .first()
+        .is_some_and(|value| !is_crossentropy_option_name(value))
+    {
+        Some(LossWeights::parse(&args.remove(0), "weights")?)
+    } else {
+        None
+    };
+    let mut options = CrossentropyOptions::from_args(args, &predictions)?;
+    if let Some(weights) = weights {
+        options.weights = Some(weights);
+    }
+    require_loss_payload_compatible(&predictions, &targets, options.data_format.as_deref())?;
+
+    let mask = options.mask_values(&predictions)?;
+    let weights = match options.weights {
+        Some(ref weights) => weights.materialize(
+            &predictions,
+            options.data_format.as_deref(),
+            options.weights_format.as_deref(),
+        )?,
+        None => vec![1.0; predictions.data.len()],
+    };
+
+    let losses = evaluate_crossentropy_terms(&predictions.data, &targets.data, &options.mode)?;
+    let mut weighted_losses = Vec::with_capacity(losses.len());
+    for ((loss, weight), mask) in losses.iter().zip(weights.iter()).zip(mask.iter()) {
+        weighted_losses.push(loss * weight * mask);
+    }
+
+    match options.reduction {
+        CrossentropyReduction::Sum => {
+            let normalized = options.reduce_sum(&predictions, &weighted_losses, &mask)?;
+            if !normalized.is_finite() {
+                return Err(deep_learning_error(
+                    "crossentropy",
+                    "crossentropy: reduction produced a non-finite loss",
+                ));
+            }
+            predictions.materialize_scalar(normalized)
+        }
+        CrossentropyReduction::None => predictions.materialize_array(weighted_losses, false),
+    }
+}
