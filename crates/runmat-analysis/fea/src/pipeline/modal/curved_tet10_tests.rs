@@ -16,6 +16,8 @@ use crate::{
     ComputeBackend, ModalSolveOptions,
 };
 
+mod harmonic;
+
 // Independent 24-point rule for the rational curved-element stiffness reference.
 // Production admits only a converged eight/twelve or twelve/sixteen pair.
 const GAUSS_TWENTY_FOUR_UNIT: [(f64, f64); 24] = [

@@ -244,6 +244,11 @@ Use direct response when modal truncation is unacceptable; use modal response wh
 captures the excited band and participation. Check damping, frequency spacing around resonances,
 complex equilibrium residual, and modal truncation. A frequency list is part of study identity.
 
+The [solid harmonic qualification case](../qualification/solid-harmonic) checks physical
+Tet4/Tet10 direct and modal response against independent element integrals and oscillator
+amplitude, phase, and power references. Its one-DOF scope and remaining promotion gates are
+documented with the runnable test.
+
 ## How do preload, prestressed modes, and buckling connect?
 
 A preload step retains a prestress state. Prestressed modal, buckling, or harmonic steps must name
