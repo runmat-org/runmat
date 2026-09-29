@@ -344,5 +344,7 @@ pub const INTEGER_EXPONENT_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1]
     notes: "The exact exponent selects repeated polynomial multiplication or reciprocal. The result is a host tf object.",
 }];
 
-pub const INTEGER_GAIN_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [super::super::tf::INTEGER_COEFFICIENT_EXTENSION];
+// Binary gains use the coefficient gate already present in this consumed-model
+// set. Unary and power methods consume the same mutable tf properties.
+pub const CONSUMED_MODEL_EXTENSIONS: [BuiltinExtensionDescriptor; 3] =
+    super::super::tf::TF_CONSUMED_PROPERTY_EXTENSIONS;

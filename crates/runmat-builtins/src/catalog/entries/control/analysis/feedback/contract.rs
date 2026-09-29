@@ -58,6 +58,19 @@ pub const FEEDBACK_EXTENSIONS: [BuiltinExtensionDescriptor; 8] = [
     RESIDENT_NUMERIC_EXTENSION,
     SINGLE_NUMERIC_EXTENSION,
 ];
+pub const FEEDBACK_AND_MODEL_EXTENSIONS: [BuiltinExtensionDescriptor; 11] = [
+    SINGLE_SYSTEM_EXTENSION,
+    SCALAR_FORWARD_EXTENSION,
+    SCALAR_SYSTEMS_EXTENSION,
+    INTEGER_GAIN_EXTENSION,
+    INTEGER_SIGN_EXTENSION,
+    LOGICAL_NUMERIC_EXTENSION,
+    RESIDENT_NUMERIC_EXTENSION,
+    SINGLE_NUMERIC_EXTENSION,
+    super::super::super::models::INTEGER_COEFFICIENT_EXTENSION,
+    super::super::super::models::LOGICAL_COEFFICIENT_EXTENSION,
+    super::super::super::models::INTEGER_SAMPLE_TIME_EXTENSION,
+];
 
 const INTEGER_GAIN_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability { name: "sys1", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Typed-integer scalar forward gain is independently gated and converted once to floating/complex tf coefficients." },

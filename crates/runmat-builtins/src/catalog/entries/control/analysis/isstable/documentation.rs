@@ -21,7 +21,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "For continuous-time models, the pole test requires each real component to be less than -1e-12. For discrete-time models, each pole magnitude must be less than 1-1e-12. A pole on or very near the imaginary axis or unit circle therefore returns false. These numerical margins are current RunMat behavior; exact MATLAB boundary behavior has not been established here.",
         ] },
         BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
-            "The result is always a host logical scalar. Transfer-function coefficient values stored on an acceleration provider are gathered through their owner while the model is parsed; pole analysis then runs on the host. This operation has no GPU kernel and is a fusion boundary.",
+            "The result is always a host logical scalar. Typed-integer tf coefficients or Ts and logical tf coefficients assigned after construction are admitted through their model-property compatibility gates, and integer values must convert exactly to the host model domain. Transfer-function coefficient values stored on an acceleration provider are gathered through their owner while the model is parsed; pole analysis then runs on the host. This operation has no GPU kernel and is a fusion boundary.",
             "The call may suspend while gathering nested resident coefficient values and may throw for an invalid model or failed pole calculation. It has no callback, workspace, filesystem, network, user-interface, randomness, or time effect. Remote execution-owned model objects are not supported.",
         ] },
     ],

@@ -151,6 +151,13 @@ pub const STEPINFO_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
     STEPINFO_INTEGER_DATA_EXTENSION,
     STEPINFO_INTEGER_THRESHOLD_EXTENSION,
 ];
+pub const STEPINFO_AND_MODEL_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    STEPINFO_INTEGER_DATA_EXTENSION,
+    STEPINFO_INTEGER_THRESHOLD_EXTENSION,
+    super::super::super::models::INTEGER_COEFFICIENT_EXTENSION,
+    super::super::super::models::LOGICAL_COEFFICIENT_EXTENSION,
+    super::super::super::models::INTEGER_SAMPLE_TIME_EXTENSION,
+];
 const INTEGER_DATA: [BuiltinIntegerInputCapability; 3] = [
     BuiltinIntegerInputCapability { name: "y", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Every native integer response sample must convert exactly to binary64 before floating-point metrics." },
     BuiltinIntegerInputCapability { name: "t", classes: &ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::RunMatOnly, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Integer time samples must be exactly representable and ordered." },

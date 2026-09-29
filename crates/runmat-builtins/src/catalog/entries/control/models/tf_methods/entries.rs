@@ -53,7 +53,7 @@ method_entry!(
     PLUS,
     PLUS_DESCRIPTOR,
     binary,
-    &contract::INTEGER_GAIN_EXTENSIONS,
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_GAIN_CAPABILITIES
 );
 method_entry!(
@@ -62,7 +62,7 @@ method_entry!(
     MINUS,
     MINUS_DESCRIPTOR,
     binary,
-    &contract::INTEGER_GAIN_EXTENSIONS,
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_GAIN_CAPABILITIES
 );
 method_entry!(
@@ -71,7 +71,7 @@ method_entry!(
     UPLUS,
     UPLUS_DESCRIPTOR,
     unary,
-    &[],
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &[]
 );
 method_entry!(
@@ -80,7 +80,7 @@ method_entry!(
     UMINUS,
     UMINUS_DESCRIPTOR,
     unary,
-    &[],
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &[]
 );
 method_entry!(
@@ -89,7 +89,7 @@ method_entry!(
     TIMES,
     TIMES_DESCRIPTOR,
     binary,
-    &contract::INTEGER_GAIN_EXTENSIONS,
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_GAIN_CAPABILITIES
 );
 method_entry!(
@@ -98,7 +98,7 @@ method_entry!(
     MTIMES,
     MTIMES_DESCRIPTOR,
     binary,
-    &contract::INTEGER_GAIN_EXTENSIONS,
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_GAIN_CAPABILITIES
 );
 method_entry!(
@@ -107,7 +107,7 @@ method_entry!(
     RDIVIDE,
     RDIVIDE_DESCRIPTOR,
     binary,
-    &contract::INTEGER_GAIN_EXTENSIONS,
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_GAIN_CAPABILITIES
 );
 method_entry!(
@@ -116,7 +116,7 @@ method_entry!(
     MRDIVIDE,
     MRDIVIDE_DESCRIPTOR,
     binary,
-    &contract::INTEGER_GAIN_EXTENSIONS,
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_GAIN_CAPABILITIES
 );
 method_entry!(
@@ -125,7 +125,7 @@ method_entry!(
     LDIVIDE,
     LDIVIDE_DESCRIPTOR,
     binary,
-    &contract::INTEGER_GAIN_EXTENSIONS,
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_GAIN_CAPABILITIES
 );
 method_entry!(
@@ -134,7 +134,7 @@ method_entry!(
     MLDIVIDE,
     MLDIVIDE_DESCRIPTOR,
     binary,
-    &contract::INTEGER_GAIN_EXTENSIONS,
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_GAIN_CAPABILITIES
 );
 method_entry!(
@@ -143,7 +143,7 @@ method_entry!(
     POWER,
     POWER_DESCRIPTOR,
     power,
-    &[],
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_EXPONENT_CAPABILITIES
 );
 method_entry!(
@@ -152,7 +152,7 @@ method_entry!(
     MPOWER,
     MPOWER_DESCRIPTOR,
     power,
-    &[],
+    &contract::CONSUMED_MODEL_EXTENSIONS,
     &contract::INTEGER_EXPONENT_CAPABILITIES
 );
 

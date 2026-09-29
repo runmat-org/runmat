@@ -104,6 +104,14 @@ pub const RLOCUS_INTEGER_GAIN_EXTENSION: BuiltinExtensionDescriptor = BuiltinExt
     error_identifier: Some("RunMat:compatibility:RlocusIntegerGainExtension"),
 };
 pub const RLOCUS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RLOCUS_INTEGER_GAIN_EXTENSION];
+pub const RLOCUS_AND_MODEL_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
+    RLOCUS_INTEGER_GAIN_EXTENSION,
+    super::super::super::models::INTEGER_COEFFICIENT_EXTENSION,
+    super::super::super::models::LOGICAL_COEFFICIENT_EXTENSION,
+    super::super::super::models::INTEGER_SAMPLE_TIME_EXTENSION,
+    super::super::super::models::SS_INTEGER_MATRIX_EXTENSION,
+    super::super::super::models::SS_INTEGER_SAMPLE_TIME_EXTENSION,
+];
 const RLOCUS_INTEGER_GAIN_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "k",

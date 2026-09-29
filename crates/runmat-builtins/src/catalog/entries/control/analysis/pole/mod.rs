@@ -46,7 +46,7 @@ pub const POLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &super::super::models::TF_OR_SS_CONSUMED_PROPERTY_EXTENSIONS,
     integer_capabilities: &POLE_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,

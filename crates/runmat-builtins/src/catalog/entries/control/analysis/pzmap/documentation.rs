@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Model and output forms", paragraphs: &[
             "A scalar SISO tf model can have real or complex coefficients. A scalar SISO ss model is converted to a transfer function before root extraction; MIMO and model-array forms remain unsupported. Nonzero input or output delay is unsupported. The returned columns are real double when their roots are real within the root tolerance, complex double otherwise, and empty 0-by-1 for a static gain.",
             "One and two requested outputs are data-returning forms. Exactly zero outputs draws poles as x markers and zeros as o markers. Plot form accepts `pzmap(sys1,'r',sys2,'b')`; each system can have one style argument. More than two requested outputs and extra arguments in data-returning forms raise an error.",
-            "An integer array is not a dynamic-system object. Integer coefficients must be admitted by tf or ss when the model is constructed.",
+            "An integer array is not a dynamic-system object. Typed-integer tf coefficients or Ts and consumed ss matrices or Ts assigned after construction are checked when pzmap admits those model fields, including exact conversion to the host model's numeric domain. Logical tf coefficients have a separate model-property gate.",
         ] },
         BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
             "Root computation runs on the host; no GPU kernel or fusion applies. Required tf or ss properties gather through their owner after class and property preflight. Unrelated object properties are not downloaded. Returned tensors are host-owned and do not alias the model.",

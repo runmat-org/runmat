@@ -100,5 +100,5 @@ pub const PZMAP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer input is inapplicable at the dynamic-system object boundary and rejects before provider access. Model coefficients have already crossed their constructor's model-numeric boundary.",
+        notes: "A direct integer sys is not a dynamic-system object and rejects before provider access. Consumed typed integer properties of an existing tf/ss object have their own model-admission gates and exact numeric checks.",
     }];

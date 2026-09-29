@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Gain and singularities", paragraphs: &[
             "Finite gain comes from direct evaluation of the transfer-function polynomials. An integrator produces an infinite gain; RunMat derives its sign or complex axis from the first nonzero local denominator coefficient at the evaluation point. Exact pole-zero cancellation at that point remains indeterminate. These singularity details are current RunMat behavior, not a claim of verified parity for all MATLAB model forms.",
-            "A typed integer array is not a valid system input. Integer coefficients accepted by `tf` have already crossed the model constructor's numeric boundary and do not make `dcgain` an integer-array operation.",
+            "A typed integer array is not a valid system input and does not make `dcgain` an integer-array operation. If a tf object's consumed coefficients or sample time were assigned typed integer values after construction, dcgain checks the corresponding RunMat-only model-property gate and exact conversion at admission.",
         ] },
         BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
             "The model parser and gain calculation run on the host and do not use a GPU kernel or fuse with elementwise operations. Direct resident numeric inputs are invalid system objects and reject before provider access. Required nested resident coefficient values in a valid tf object are gathered through their owning provider; unrelated properties are not read.",

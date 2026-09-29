@@ -71,5 +71,5 @@ pub const ISSTABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 pub const ISSTABLE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
-    notes: "isstable requires a dynamic-system model; fundamental integer host or resident values are invalid-domain inputs and reject before payload or provider access.",
+    notes: "A fundamental integer sys is not a dynamic-system model and rejects before provider access. This direct-input audit does not cover typed integer properties assigned to an existing tf object; consumed properties undergo separate extension and exactness admission.",
 };

@@ -49,7 +49,7 @@ pub const ISSTABLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &super::super::models::TF_CONSUMED_PROPERTY_EXTENSIONS,
     integer_capabilities: &[],
     integer_audit: Some(&ISSTABLE_INTEGER_AUDIT),
     suppress_auto_output: false,

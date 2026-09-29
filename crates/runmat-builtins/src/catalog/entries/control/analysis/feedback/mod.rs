@@ -51,7 +51,7 @@ pub const FEEDBACK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &FEEDBACK_EXTENSIONS,
+    extensions: &contract::FEEDBACK_AND_MODEL_EXTENSIONS,
     integer_capabilities: &FEEDBACK_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,

@@ -47,6 +47,25 @@ pub const TF_EXTENSIONS: [BuiltinExtensionDescriptor; 6] = [
     EXPLICIT_GPU_INPUT_EXTENSION,
 ];
 
+// These are the constructor gates also reached when another control builtin
+// consumes mutable tf model properties. Shorthand and explicit-input gates
+// belong only to construction, not to model-property admission.
+pub const TF_CONSUMED_PROPERTY_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+    INTEGER_COEFFICIENT_EXTENSION,
+    LOGICAL_COEFFICIENT_EXTENSION,
+    INTEGER_SAMPLE_TIME_EXTENSION,
+];
+
+// Mixed tf/ss consumers reach both parsers. Keep this inventory at the model
+// boundary so analysis entries can share the exact transitive gate set.
+pub const TF_OR_SS_CONSUMED_PROPERTY_EXTENSIONS: [BuiltinExtensionDescriptor; 5] = [
+    INTEGER_COEFFICIENT_EXTENSION,
+    LOGICAL_COEFFICIENT_EXTENSION,
+    INTEGER_SAMPLE_TIME_EXTENSION,
+    super::super::ss::SS_INTEGER_MATRIX_EXTENSION,
+    super::super::ss::SS_INTEGER_SAMPLE_TIME_EXTENSION,
+];
+
 const INTEGER_COEFFICIENT_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "numerator",

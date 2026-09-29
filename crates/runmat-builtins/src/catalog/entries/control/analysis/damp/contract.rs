@@ -103,5 +103,5 @@ pub const DAMP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer input is inapplicable at the object boundary and rejects without provider dispatch. Model coefficients have already crossed their constructor's documented numeric boundary.",
+        notes: "A direct integer sys is not a model and rejects without provider dispatch. This says nothing about typed integer properties of an existing tf/ss object: consumed properties are independently gated and checked at model admission.",
     }];

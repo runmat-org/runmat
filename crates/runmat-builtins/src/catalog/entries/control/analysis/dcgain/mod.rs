@@ -46,7 +46,7 @@ pub const DCGAIN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
+    extensions: &super::super::models::TF_CONSUMED_PROPERTY_EXTENSIONS,
     integer_capabilities: &DCGAIN_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,

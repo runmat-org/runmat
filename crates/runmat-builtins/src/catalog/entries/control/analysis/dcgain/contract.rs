@@ -60,5 +60,5 @@ pub const DCGAIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     overflow: BuiltinIntegerOverflowRule::NotApplicable,
     backend: BuiltinIntegerBackendRule::HostOnly,
     overload: BuiltinIntegerOverloadKind::Multiple,
-    notes: "Integer input rejects at the model-object boundary before provider access. Integer coefficients have already crossed the constructor's numeric boundary.",
+    notes: "A direct integer sys rejects at the model-object boundary before provider access. Typed integer properties of an existing tf object are separately gated and checked when this call reads them.",
 }];

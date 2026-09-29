@@ -54,5 +54,5 @@ pub const ZERO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 pub const ZERO_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
     kind: BuiltinIntegerAuditKind::NotApplicable,
     canonical_builtin: None,
-    notes: "zero accepts a dynamic-system model; fundamental integer values are invalid model inputs and reject before model payload or provider access.",
+    notes: "A fundamental integer sys is not a dynamic-system model and rejects before provider access. This direct-input audit does not cover typed integer properties assigned to an existing tf object; consumed properties undergo separate extension and exactness admission.",
 };

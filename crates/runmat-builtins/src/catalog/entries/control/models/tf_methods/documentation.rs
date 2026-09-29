@@ -10,7 +10,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "Results are new host tf values. Polynomial coefficient arrays remain double or complex-double, while sample time and variable metadata come from the input model. Nonzero input/output delay arithmetic, MIMO models, and incompatible sample times or variables are rejected.",
     ] },
     BuiltinDocumentationSection { heading: "Precision and execution", paragraphs: &[
-        "Typed integer scalar gains are a RunMat-mode extension. They convert to double for polynomial arithmetic, so wide integer gains can round; this differs from checked integer coefficient inputs to tf construction. Integer-valued power exponents are decoded exactly as signed 64-bit counts; zero returns a unity model and negative counts use a reciprocal. Coefficient arithmetic is host-side; resident scalar gains and model properties may gather through their owning provider. The method call can suspend and terminates numeric fusion.",
+        "Typed integer scalar gains are a RunMat-mode extension. They convert to double for polynomial arithmetic, so wide integer gains can round; this differs from checked integer coefficients stored in a tf model. Typed-integer or logical coefficients and typed-integer Ts assigned after construction are gated again when a method admits the model, with exact conversion for integer model properties. Integer-valued power exponents are decoded exactly as signed 64-bit counts; zero returns a unity model and negative counts use a reciprocal. Coefficient arithmetic is host-side; resident scalar gains and model properties may gather through their owning provider. The method call can suspend and terminates numeric fusion.",
     ] },
 ];
 const FAQS: &[BuiltinDocumentationFaq] = &[

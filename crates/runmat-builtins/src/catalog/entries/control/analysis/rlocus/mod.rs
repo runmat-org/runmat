@@ -56,7 +56,7 @@ pub const RLOCUS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &RLOCUS_EXTENSIONS,
+    extensions: &contract::RLOCUS_AND_MODEL_EXTENSIONS,
     integer_capabilities: &RLOCUS_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: true,

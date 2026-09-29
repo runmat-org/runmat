@@ -50,7 +50,7 @@ pub const STEPINFO_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &STEPINFO_EXTENSIONS,
+    extensions: &contract::STEPINFO_AND_MODEL_EXTENSIONS,
     integer_capabilities: &STEPINFO_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,

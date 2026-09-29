@@ -200,6 +200,12 @@ pub const STEP_INTEGER_TIME_EXTENSION: BuiltinExtensionDescriptor = BuiltinExten
     error_identifier: Some("RunMat:compatibility:StepIntegerTimeExtension"),
 };
 pub const STEP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [STEP_INTEGER_TIME_EXTENSION];
+pub const STEP_AND_MODEL_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
+    STEP_INTEGER_TIME_EXTENSION,
+    super::super::super::models::INTEGER_COEFFICIENT_EXTENSION,
+    super::super::super::models::LOGICAL_COEFFICIENT_EXTENSION,
+    super::super::super::models::INTEGER_SAMPLE_TIME_EXTENSION,
+];
 const STEP_INTEGER_TIME_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "t or tFinal",
