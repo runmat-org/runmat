@@ -74,6 +74,96 @@ pub(super) async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     Ok(out)
 }
 
+pub(super) fn validate_duration_operand(value: &Value, numeric_allowed: bool) -> BuiltinResult<()> {
+    match value {
+        Value::Object(object) if object.is_class(DURATION_CLASS) => {
+            match object.properties.get(DAYS_FIELD) {
+                Some(Value::Num(_) | Value::Tensor(_)) => Ok(()),
+                Some(Value::GpuTensor(handle))
+                    if handle.physical().storage()
+                        == runmat_accelerate_api::GpuTensorStorage::Real =>
+                {
+                    Ok(())
+                }
+                Some(_) => Err(duration_error("duration: invalid internal day storage")),
+                None => Err(duration_error("duration: missing internal day storage")),
+            }
+        }
+        Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_)
+        | Value::Tensor(_)
+        | Value::LogicalArray(_)
+            if numeric_allowed =>
+        {
+            Ok(())
+        }
+        Value::GpuTensor(handle)
+            if numeric_allowed
+                && handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real =>
+        {
+            Ok(())
+        }
+        _ => Err(duration_error(
+            "duration: expected a duration or real numeric value",
+        )),
+    }
+}
+
+pub(super) async fn duration_days_operand(
+    value: &Value,
+    numeric_allowed: bool,
+) -> BuiltinResult<Tensor> {
+    validate_duration_operand(value, numeric_allowed)?;
+    match value {
+        Value::Object(object) if object.is_class(DURATION_CLASS) => {
+            let days = object
+                .properties
+                .get(DAYS_FIELD)
+                .expect("validated duration day storage");
+            if matches!(days, Value::GpuTensor(_)) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &DURATION_GPU_INPUT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+                let gathered = gather_if_needed_async(days).await?;
+                match gathered {
+                    Value::Tensor(tensor) => Ok(tensor),
+                    _ => Err(duration_error("duration: invalid gathered day storage")),
+                }
+            } else {
+                duration_tensor_from_duration_value(value)
+            }
+        }
+        Value::GpuTensor(_) => {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &DURATION_GPU_INPUT_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+            let gathered = gather_if_needed_async(value).await?;
+            component_tensor(gathered, "numeric day count")
+        }
+        _ => component_tensor(value.clone(), "numeric day count"),
+    }
+}
+
+pub(super) fn broadcast_duration_days(
+    lhs: &Tensor,
+    rhs: &Tensor,
+) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
+    let plan = crate::builtins::common::broadcast::BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(duration_error)?;
+    let lhs_values = tensor::tensor_values_f64_cow(lhs);
+    let rhs_values = tensor::tensor_values_f64_cow(rhs);
+    let mut left = Vec::with_capacity(plan.len());
+    let mut right = Vec::with_capacity(plan.len());
+    for (_, lhs_index, rhs_index) in plan.iter() {
+        left.push(lhs_values[lhs_index]);
+        right.push(rhs_values[rhs_index]);
+    }
+    Ok((left, right, plan.output_shape().to_vec()))
+}
+
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
@@ -82,6 +172,16 @@ pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String>
         _ => Err(duration_error(format!(
             "duration: {context} must be a string scalar or character vector"
         ))),
+    }
+}
+
+pub(super) fn validate_duration_format(format: &str) -> BuiltinResult<()> {
+    if matches!(format, "hh:mm:ss" | "hh:mm" | "mm:ss" | "s" | "ss") {
+        Ok(())
+    } else {
+        Err(duration_error(format!(
+            "duration: unsupported Format value '{format}'"
+        )))
     }
 }
 
@@ -97,7 +197,9 @@ pub(super) fn parse_trailing_format(args: &[Value]) -> BuiltinResult<(usize, Opt
         if !name.trim().eq_ignore_ascii_case("format") {
             break;
         }
-        format = Some(scalar_text(&args[positional_end - 1], "Format option")?);
+        let value = scalar_text(&args[positional_end - 1], "Format option")?;
+        validate_duration_format(&value)?;
+        format = Some(value);
         positional_end -= 2;
     }
 
@@ -111,7 +213,11 @@ pub(super) fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<
 
 pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor_from_numeric(value, context)?;
-    let shape = tensor::default_shape_for(&tensor.shape, tensor.len());
+    let shape = if tensor.shape.is_empty() {
+        vec![1, 1]
+    } else {
+        tensor.shape.clone()
+    };
     let values = tensor::tensor_into_values_f64(tensor);
     Tensor::new(values, shape).map_err(|err| duration_error(format!("duration: {err}")))
 }
@@ -179,47 +285,35 @@ pub(super) async fn duration_unit_value(
     unit_name: &str,
     days_per_unit: f64,
 ) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| duration_error(format!("{unit_name}: {}", err.message())))?;
     if is_duration_object(&value) {
-        let days = duration_tensor_from_duration_value(&value)?;
+        let days = duration_days_operand(&value, false).await?;
         let day_values = tensor::tensor_values_f64_cow(&days);
         let data = day_values
             .iter()
             .map(|day| day / days_per_unit)
             .collect::<Vec<_>>();
-        return if data.len() == 1 {
+        return if days.shape.iter().product::<usize>() == 1 {
             Ok(Value::Num(data[0]))
         } else {
             Ok(Value::Tensor(
-                Tensor::new(
-                    data,
-                    tensor::default_shape_for(&days.shape, day_values.len()),
-                )
-                .map_err(|err| duration_error(format!("{unit_name}: {err}")))?,
+                Tensor::new(data, days.shape.clone())
+                    .map_err(|err| duration_error(format!("{unit_name}: {err}")))?,
             ))
         };
     }
-    let numeric = component_tensor(value, unit_name)?;
-    let shape = tensor::default_shape_for(&numeric.shape, numeric.len());
+    let numeric = duration_days_operand(&value, true).await?;
+    let shape = numeric.shape.clone();
     let values = tensor::tensor_into_values_f64(numeric);
     let days = values
         .iter()
         .map(|value| {
-            if !value.is_finite() {
+            let days = value * days_per_unit;
+            if value.is_finite() && !days.is_finite() {
                 Err(duration_error(format!(
-                    "{unit_name}: values must be finite"
+                    "{unit_name}: resulting duration is outside supported range"
                 )))
             } else {
-                let days = value * days_per_unit;
-                if days.is_finite() {
-                    Ok(days)
-                } else {
-                    Err(duration_error(format!(
-                        "{unit_name}: resulting duration is outside supported range"
-                    )))
-                }
+                Ok(days)
             }
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
@@ -230,24 +324,26 @@ pub(super) fn broadcast_component_data(
     arrays: &[Tensor],
     labels: &[&str],
 ) -> BuiltinResult<(Vec<Vec<f64>>, Vec<usize>)> {
-    let mut target_shape = vec![1, 1];
-    let mut target_len = 1usize;
+    let mut target_shape = None;
 
     for array in arrays {
         let len = array.len();
-        if len > 1 {
-            let shape = tensor::default_shape_for(&array.shape, len);
-            if target_len == 1 {
-                target_len = len;
-                target_shape = shape;
-            } else if len != target_len || shape != target_shape {
-                return Err(duration_error(
-                    "duration: non-scalar component inputs must have matching sizes",
-                ));
+        if len != 1 {
+            let shape = array.shape.clone();
+            if let Some(existing) = &target_shape {
+                if existing != &shape {
+                    return Err(duration_error(
+                        "duration: non-scalar component inputs must have matching sizes",
+                    ));
+                }
+            } else {
+                target_shape = Some(shape);
             }
         }
     }
 
+    let target_shape = target_shape.unwrap_or_else(|| vec![1, 1]);
+    let target_len = target_shape.iter().product::<usize>();
     let mut broadcasted = Vec::with_capacity(arrays.len());
     for (idx, array) in arrays.iter().enumerate() {
         let values = array
@@ -255,7 +351,7 @@ pub(super) fn broadcast_component_data(
             .expect("duration components are normalized to double storage");
         if values.len() == 1 {
             broadcasted.push(vec![values[0]; target_len]);
-        } else if values.len() == target_len {
+        } else if values.len() == target_len && array.shape == target_shape {
             broadcasted.push(values.to_vec());
         } else {
             return Err(duration_error(format!(
@@ -310,10 +406,8 @@ pub(super) fn is_public_duration_matrix(value: &Value) -> bool {
 }
 
 pub(super) fn is_numeric_duration_input(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Num(_) | Value::Int(_) | Value::Tensor(_) | Value::GpuTensor(_)
-    )
+    matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
+        || matches!(value, Value::GpuTensor(handle) if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real)
 }
 
 pub(super) fn build_from_matrix(value: Value, format: Option<String>) -> BuiltinResult<Value> {

@@ -83,8 +83,7 @@ pub fn duration_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
     for value in day_values.iter() {
         strings.push(format_duration_value(*value, &format)?);
     }
-    let shape = tensor::default_shape_for(&days.shape, day_values.len());
-    let array = StringArray::new(strings, shape)
+    let array = StringArray::new(strings, days.shape.clone())
         .map_err(|err| duration_error(format!("duration: {err}")))?;
     Ok(Some(array))
 }
@@ -140,7 +139,7 @@ pub fn duration_summary(value: &Value) -> BuiltinResult<Option<String>> {
     if len == 1 {
         return duration_display_text(value);
     }
-    let shape = tensor::default_shape_for(&days.shape, len);
+    let shape = days.shape.clone();
     Ok(Some(format!(
         "[{} duration]",
         shape

@@ -1,30 +1,36 @@
 use super::*;
 
-pub(super) fn compare_duration(
+pub(super) async fn compare_duration(
     lhs: Value,
     rhs: Value,
     op: &str,
     cmp: impl Fn(f64, f64) -> bool,
 ) -> BuiltinResult<Value> {
-    let lhs_days = duration_tensor_from_duration_value(&lhs)?;
-    let rhs_days = duration_tensor_from_duration_value(&rhs)?;
-    let (left, right, shape) =
-        tensor::binary_numeric_tensors(&lhs_days, &rhs_days, op, BUILTIN_NAME)?;
+    validate_duration_operand(&lhs, true)?;
+    validate_duration_operand(&rhs, true)?;
+    let lhs_days = duration_days_operand(&lhs, true).await?;
+    let rhs_days = duration_days_operand(&rhs, true).await?;
+    let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_days)
+        .map_err(|err| duration_error(format!("duration.{op}: {}", err.message())))?;
     let out = left
         .iter()
         .zip(right.iter())
-        .map(|(a, b)| if cmp(*a, *b) { 1.0 } else { 0.0 })
+        .map(|(a, b)| u8::from(cmp(*a, *b)))
         .collect::<Vec<_>>();
-    if out.len() == 1 {
-        Ok(Value::Num(out[0]))
+    if shape.iter().product::<usize>() == 1 {
+        Ok(Value::Bool(out[0] != 0))
     } else {
-        Ok(Value::Tensor(Tensor::new(out, shape).map_err(|err| {
-            duration_error(format!("duration: {err}"))
-        })?))
+        Ok(Value::LogicalArray(
+            runmat_value::LogicalArray::new(out, shape)
+                .map_err(|err| duration_error(format!("duration: {err}")))?,
+        ))
     }
 }
 
-pub(super) async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
+pub(super) async fn duration_indexing(
+    obj: Value,
+    step: crate::object::indexing::ObjectSubscript,
+) -> BuiltinResult<Value> {
     let Value::Object(object) = obj else {
         return Err(duration_error(
             "duration.subsref: receiver must be a duration object",
@@ -33,69 +39,77 @@ pub(super) async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResu
     let format = format_for_object(&object);
     let days = duration_tensor_from_duration_value(&Value::Object(object.clone()))?;
 
-    let Value::Cell(cell) = payload else {
-        return Err(duration_error(
-            "duration.subsref: indexing payload must be a cell array",
-        ));
+    let crate::object::indexing::ObjectIndexSelector::IndexValues { components } = step.selector()
+    else {
+        return Err(duration_error("duration.subsref: invalid index selector"));
     };
-    if cell.data.is_empty() {
+    if components.is_empty() {
         return duration_object_from_days_tensor(days, format);
     }
-    if cell.data.len() != 1 {
-        return Err(duration_error(
-            "duration.subsref: only linear duration indexing is currently supported",
-        ));
+    for component in components {
+        if let crate::object::indexing::ObjectIndexComponent::Value(value) = component {
+            if crate::value_contains_gpu(value) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &DURATION_GPU_INPUT_EXTENSION,
+                    "duration.subsref",
+                )?;
+            }
+        }
     }
-    let selector = cell.data[0].clone();
-    let selector = match selector {
-        Value::Tensor(tensor) => tensor,
-        Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
-            .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
-        Value::Int(value) => {
-            Tensor::new_integer(runmat_value::IntegerStorage::from_scalar(value), vec![1, 1])
-                .map_err(|err| duration_error(format!("duration.subsref: {err}")))?
-        }
-        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
-        other => {
-            return Err(duration_error(format!(
-                "duration.subsref: unsupported index value {other:?}"
-            )))
-        }
-    };
-    let indexed =
-        crate::perform_indexing(&Value::Tensor(days), &tensor::tensor_values_f64(&selector))
+    let selectors =
+        crate::indexing::selectors::build_component_selectors(components, &days.shape, false)
             .await
             .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
-    let indexed_days = match indexed {
-        Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
-            .map_err(|err| duration_error(format!("duration.subsref: {err}")))?,
-        Value::Tensor(tensor) => tensor,
-        other => {
-            return Err(duration_error(format!(
-                "duration.subsref: unexpected indexing result {other:?}"
-            )))
-        }
-    };
+    let plan = crate::indexing::plan::build_index_plan(&selectors, components.len(), &days.shape)
+        .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
+    let indexed = crate::indexing::value::read_with_plan(Value::Tensor(days), &plan)
+        .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
+    let indexed_days = tensor_from_numeric(indexed, "duration index")?;
     duration_object_from_days_tensor(indexed_days, format)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration",
-    descriptor(crate::builtins::duration::DURATION_DESCRIPTOR),
-    builtin_path = "crate::builtins::duration",
-    category = "datetime",
-    summary = "Create duration arrays from hour, minute, and second components.",
-    keywords = "duration,time span,elapsed time,Format",
-    related = "datetime,string,char,disp",
-    examples = "t = duration(1, 30, 45);",
-    extensions(DURATION_EXTENSIONS),
-    integer_capabilities(DURATION_INTEGER_CAPABILITIES)
+    binding_variant = "default",
+    builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     ensure_duration_class_registered();
     let (raw_positional_end, _) = parse_trailing_format(&args)?;
     let raw_positional = &args[..raw_positional_end];
+    if !(1..=4).contains(&raw_positional.len())
+        || !raw_positional.iter().all(is_numeric_duration_input)
+    {
+        return Err(duration_error(
+            "duration: expected a numeric three-column matrix or H/MI/S[/MS] components",
+        ));
+    }
+    if raw_positional.len() > 1 {
+        let mut component_shape: Option<&[usize]> = None;
+        for value in raw_positional {
+            let shape = match value {
+                Value::Tensor(tensor) => tensor.shape.as_slice(),
+                Value::GpuTensor(handle) => handle.shape(),
+                _ => continue,
+            };
+            let count = shape
+                .iter()
+                .try_fold(1usize, |count, dim| count.checked_mul(*dim))
+                .ok_or_else(|| duration_error("duration: component shape is too large"))?;
+            if count == 1 {
+                continue;
+            }
+            if let Some(existing) = component_shape {
+                if existing != shape {
+                    return Err(duration_error(
+                        "duration: non-scalar component inputs must have matching sizes",
+                    ));
+                }
+            } else {
+                component_shape = Some(shape);
+            }
+        }
+    }
     if args.iter().any(crate::value_contains_gpu) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DURATION_GPU_INPUT_EXTENSION,
@@ -132,10 +146,8 @@ pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
 
 #[runmat_macros::runtime_builtin(
     name = "days",
-    builtin_path = "crate::builtins::duration",
-    category = "datetime",
-    summary = "Create duration values from days or convert duration values to day counts.",
-    keywords = "days,duration,datetime"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn days_builtin(value: Value) -> crate::BuiltinResult<Value> {
     duration_unit_value(value, "days", 1.0).await
@@ -143,10 +155,8 @@ pub(super) async fn days_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "hours",
-    builtin_path = "crate::builtins::duration",
-    category = "datetime",
-    summary = "Create duration values from hours or convert duration values to hour counts.",
-    keywords = "hours,duration,datetime"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn hours_builtin(value: Value) -> crate::BuiltinResult<Value> {
     duration_unit_value(value, "hours", 1.0 / 24.0).await
@@ -154,10 +164,8 @@ pub(super) async fn hours_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "minutes",
-    builtin_path = "crate::builtins::duration",
-    category = "datetime",
-    summary = "Create duration values from minutes or convert duration values to minute counts.",
-    keywords = "minutes,duration,datetime"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn minutes_builtin(value: Value) -> crate::BuiltinResult<Value> {
     duration_unit_value(value, "minutes", 1.0 / (24.0 * 60.0)).await
@@ -165,10 +173,8 @@ pub(super) async fn minutes_builtin(value: Value) -> crate::BuiltinResult<Value>
 
 #[runmat_macros::runtime_builtin(
     name = "seconds",
-    builtin_path = "crate::builtins::duration",
-    category = "datetime",
-    summary = "Create duration values from seconds or convert duration values to second counts.",
-    keywords = "seconds,duration,datetime"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn seconds_builtin(value: Value) -> crate::BuiltinResult<Value> {
     duration_unit_value(value, "seconds", 1.0 / SECONDS_PER_DAY).await
@@ -176,10 +182,8 @@ pub(super) async fn seconds_builtin(value: Value) -> crate::BuiltinResult<Value>
 
 #[runmat_macros::runtime_builtin(
     name = "milliseconds",
-    builtin_path = "crate::builtins::duration",
-    category = "datetime",
-    summary = "Create duration values from milliseconds or convert duration values to millisecond counts.",
-    keywords = "milliseconds,duration,datetime"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn milliseconds_builtin(value: Value) -> crate::BuiltinResult<Value> {
     duration_unit_value(value, "milliseconds", 1.0 / (SECONDS_PER_DAY * 1000.0)).await
@@ -187,10 +191,8 @@ pub(super) async fn milliseconds_builtin(value: Value) -> crate::BuiltinResult<V
 
 #[runmat_macros::runtime_builtin(
     name = "years",
-    builtin_path = "crate::builtins::duration",
-    category = "datetime",
-    summary = "Create fixed-length duration values from years or convert durations to fixed-length years.",
-    keywords = "years,duration,datetime"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn years_builtin(value: Value) -> crate::BuiltinResult<Value> {
     duration_unit_value(value, "years", 365.2425).await
@@ -198,10 +200,8 @@ pub(super) async fn years_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "isduration",
-    builtin_path = "crate::builtins::duration",
-    category = "datetime",
-    summary = "Return true for duration values.",
-    keywords = "isduration,duration,predicate"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::duration"
 )]
 pub(super) fn isduration_builtin(value: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Bool(is_duration_object(&value)))
@@ -209,7 +209,7 @@ pub(super) fn isduration_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "duration.subsref",
-    descriptor(crate::builtins::duration::DURATION_SUBSREF_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_subsref(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
@@ -221,16 +221,15 @@ pub(super) async fn duration_read_step(
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
 ) -> crate::BuiltinResult<Value> {
-    let payload = step.selector_value()?;
     match step.kind() {
-        crate::object::indexing::ObjectIndexKind::Paren => duration_indexing(obj, payload).await,
+        crate::object::indexing::ObjectIndexKind::Paren => duration_indexing(obj, step).await,
         crate::object::indexing::ObjectIndexKind::Member => {
             let Value::Object(object) = obj else {
                 return Err(duration_error(
                     "duration.subsref: receiver must be a duration object",
                 ));
             };
-            let field = scalar_text(&payload, "field selector")?;
+            let field = scalar_text(&step.selector_value()?, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => Ok(Value::String(format_for_object(&object))),
                 _ => Err(duration_error(format!(
@@ -246,7 +245,7 @@ pub(super) async fn duration_read_step(
 
 #[runmat_macros::runtime_builtin(
     name = "duration.subsasgn",
-    descriptor(crate::builtins::duration::DURATION_SUBSASGN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_subsasgn(
@@ -288,6 +287,7 @@ pub(super) async fn duration_write_step(
             match field.as_str() {
                 FORMAT_FIELD => {
                     let text = scalar_text(&rhs, "Format value")?;
+                    validate_duration_format(&text)?;
                     object
                         .properties
                         .insert(FORMAT_FIELD.to_string(), Value::String(text));
@@ -306,69 +306,76 @@ pub(super) async fn duration_write_step(
 
 #[runmat_macros::runtime_builtin(
     name = "duration.eq",
-    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_duration(lhs, rhs, "eq", |a, b| (a - b).abs() <= 1e-12)
+    compare_duration(lhs, rhs, "eq", |a, b| a == b).await
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration.ne",
-    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_duration(lhs, rhs, "ne", |a, b| (a - b).abs() > 1e-12)
+    compare_duration(lhs, rhs, "ne", |a, b| a != b).await
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration.lt",
-    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_duration(lhs, rhs, "lt", |a, b| a < b)
+    compare_duration(lhs, rhs, "lt", |a, b| a < b).await
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration.le",
-    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_le(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_duration(lhs, rhs, "le", |a, b| a <= b)
+    compare_duration(lhs, rhs, "le", |a, b| a <= b).await
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration.gt",
-    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_gt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_duration(lhs, rhs, "gt", |a, b| a > b)
+    compare_duration(lhs, rhs, "gt", |a, b| a > b).await
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration.ge",
-    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_duration(lhs, rhs, "ge", |a, b| a >= b)
+    compare_duration(lhs, rhs, "ge", |a, b| a >= b).await
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration.plus",
-    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let lhs_days = duration_tensor_from_duration_value(&lhs)?;
-    if crate::builtins::datetime::is_datetime_object(&rhs) {
-        let rhs_serials = crate::builtins::datetime::serials_from_datetime_value(&rhs)?;
-        let (left, right, shape) =
-            tensor::binary_numeric_tensors(&lhs_days, &rhs_serials, "plus", BUILTIN_NAME)?;
+    validate_duration_operand(&lhs, false)?;
+    let rhs_serials = if crate::builtins::datetime::is_datetime_object(&rhs) {
+        Some(crate::builtins::datetime::serials_from_datetime_value(
+            &rhs,
+        )?)
+    } else {
+        validate_duration_operand(&rhs, true)?;
+        None
+    };
+    let lhs_days = duration_days_operand(&lhs, false).await?;
+    if let Some(rhs_serials) = rhs_serials {
+        let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_serials)?;
         let serials = left
             .iter()
             .zip(right.iter())
@@ -382,9 +389,8 @@ pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
         );
     }
 
-    let rhs_days = duration_tensor_from_duration_value(&rhs)?;
-    let (left, right, shape) =
-        tensor::binary_numeric_tensors(&lhs_days, &rhs_days, "plus", BUILTIN_NAME)?;
+    let rhs_days = duration_days_operand(&rhs, true).await?;
+    let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_days)?;
     let days = left
         .iter()
         .zip(right.iter())
@@ -395,14 +401,15 @@ pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
 
 #[runmat_macros::runtime_builtin(
     name = "duration.minus",
-    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let lhs_days = duration_tensor_from_duration_value(&lhs)?;
-    let rhs_days = duration_tensor_from_duration_value(&rhs)?;
-    let (left, right, shape) =
-        tensor::binary_numeric_tensors(&lhs_days, &rhs_days, "minus", BUILTIN_NAME)?;
+    validate_duration_operand(&lhs, false)?;
+    validate_duration_operand(&rhs, true)?;
+    let lhs_days = duration_days_operand(&lhs, false).await?;
+    let rhs_days = duration_days_operand(&rhs, true).await?;
+    let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_days)?;
     let days = left
         .iter()
         .zip(right.iter())

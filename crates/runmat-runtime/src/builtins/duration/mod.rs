@@ -9,10 +9,6 @@ pub use display::{
 };
 pub(crate) use metadata::DEFAULT_DURATION_FORMAT;
 use metadata::*;
-pub use metadata::{
-    DURATION_BINARY_DESCRIPTOR, DURATION_DESCRIPTOR, DURATION_INTEGER_CAPABILITIES,
-    DURATION_SUBSASGN_DESCRIPTOR, DURATION_SUBSREF_DESCRIPTOR,
-};
 pub use model::is_duration_object;
 use model::*;
 pub(crate) use model::{
@@ -20,6 +16,11 @@ pub(crate) use model::{
     duration_tensor_from_duration_value,
 };
 use prelude::*;
+pub use runmat_builtins::{
+    DURATION_BINARY_DESCRIPTOR, DURATION_DESCRIPTOR, DURATION_INTEGER_CAPABILITIES,
+    DURATION_SUBSASGN_DESCRIPTOR, DURATION_SUBSREF_DESCRIPTOR,
+};
+use runmat_builtins::{DURATION_GPU_INPUT_EXTENSION, DURATION_SHORT_COMPONENT_EXTENSION};
 
 #[cfg(test)]
 mod tests;

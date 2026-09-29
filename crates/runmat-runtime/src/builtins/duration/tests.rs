@@ -360,3 +360,168 @@ fn duration_typed_integer_index_selectors_are_exact() {
         .expect("duration text");
     assert_eq!(text, "02:00:00");
 }
+
+#[test]
+fn duration_wide_index_does_not_round_through_double() {
+    let array = run_duration(vec![
+        integer_tensor(runmat_value::IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
+        Value::Num(0.0),
+        Value::Num(0.0),
+    ]);
+    let payload = Value::Cell(
+        runmat_value::CellArray::new(
+            vec![integer_tensor(
+                runmat_value::IntegerStorage::U64(vec![u64::MAX]),
+                vec![1, 1],
+            )],
+            1,
+            1,
+        )
+        .unwrap(),
+    );
+    futures::executor::block_on(duration_subsref(array, "()".to_string(), payload))
+        .expect_err("wide out-of-range index must not round to a valid double index");
+}
+
+#[test]
+fn duration_comparisons_return_logical_values_without_tolerance() {
+    let zero = duration_object_from_days(vec![0.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
+        .expect("zero duration");
+    let tiny = duration_object_from_days(vec![1.0e-13], vec![1, 1], DEFAULT_DURATION_FORMAT)
+        .expect("tiny duration");
+    assert_eq!(
+        futures::executor::block_on(super::builtins::duration_eq(zero.clone(), tiny.clone()))
+            .expect("equality"),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        futures::executor::block_on(super::builtins::duration_ne(zero.clone(), tiny))
+            .expect("inequality"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        futures::executor::block_on(super::builtins::duration_le(zero, Value::Num(0.0)))
+            .expect("numeric day comparison"),
+        Value::Bool(true)
+    );
+}
+
+#[test]
+fn duration_arithmetic_and_comparison_broadcast_dimensions() {
+    let column = duration_object_from_days(vec![1.0, 2.0], vec![2, 1], DEFAULT_DURATION_FORMAT)
+        .expect("column duration");
+    let row = duration_object_from_days(vec![1.0, 3.0], vec![1, 2], DEFAULT_DURATION_FORMAT)
+        .expect("row duration");
+    let equal = futures::executor::block_on(super::builtins::duration_eq(column.clone(), row))
+        .expect("broadcast equality");
+    let Value::LogicalArray(equal) = equal else {
+        panic!("comparison must return a logical array");
+    };
+    assert_eq!(equal.shape, vec![2, 2]);
+    let shifted =
+        futures::executor::block_on(super::builtins::duration_plus(column, Value::Num(1.0)))
+            .expect("numeric days addition");
+    let days = duration_tensor_from_duration_value(&shifted).expect("duration days");
+    assert_eq!(days.shape, vec![2, 1]);
+    assert_eq!(days.materialize_f64(), vec![2.0, 3.0]);
+}
+
+#[test]
+fn duration_empty_component_and_unit_shapes_are_retained() {
+    let empty = Value::Tensor(Tensor::new(vec![], vec![0, 2]).expect("empty tensor"));
+    let value = run_duration(vec![empty, Value::Num(0.0), Value::Num(0.0)]);
+    let days = duration_tensor_from_duration_value(&value).expect("duration days");
+    assert_eq!(days.shape, vec![0, 2]);
+    let hours = futures::executor::block_on(hours_builtin(value)).expect("hours");
+    let Value::Tensor(hours) = hours else {
+        panic!("empty unit counts remain an array")
+    };
+    assert_eq!(hours.shape, vec![0, 2]);
+}
+
+#[test]
+fn duration_does_not_download_unrelated_resident_object_property() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident allocation");
+    let mut value = duration_object_from_days(vec![1.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
+        .expect("duration");
+    let Value::Object(ref mut object) = value else {
+        unreachable!()
+    };
+    object.properties.insert(
+        "unrelated".into(),
+        Value::GpuTensor(allocation.handle.clone()),
+    );
+    let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    assert_eq!(
+        futures::executor::block_on(hours_builtin(value)).expect("host day count"),
+        Value::Num(24.0)
+    );
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(strict);
+    allocation
+        .handle
+        .release()
+        .expect("release resident allocation");
+}
+
+#[test]
+fn duration_nested_resident_day_count_rejects_before_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident allocation");
+    let mut value = duration_object_from_days(vec![1.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
+        .expect("duration");
+    let Value::Object(ref mut object) = value else {
+        unreachable!()
+    };
+    object.properties.insert(
+        DAYS_FIELD.into(),
+        Value::GpuTensor(allocation.handle.clone()),
+    );
+    let strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = futures::executor::block_on(hours_builtin(value)).expect_err("strict mode");
+    assert_eq!(
+        error.identifier(),
+        DURATION_GPU_INPUT_EXTENSION.error_identifier
+    );
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(strict);
+    allocation
+        .handle
+        .release()
+        .expect("release resident allocation");
+}
+
+#[test]
+fn duration_constructor_rejects_host_shape_conflict_before_resident_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 2],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident allocation");
+    let host = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+    let error = futures::executor::block_on(duration_builtin(vec![
+        host,
+        Value::GpuTensor(allocation.handle.clone()),
+        Value::Num(0.0),
+    ]))
+    .expect_err("shape mismatch must preflight before provider access");
+    assert!(error.message().contains("matching sizes"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation
+        .handle
+        .release()
+        .expect("release resident allocation");
+}
