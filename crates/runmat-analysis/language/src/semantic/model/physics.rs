@@ -7,7 +7,7 @@ use runmat_analysis_core::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
     AuthoredInterface, AuthoredInterfaceKind, Damping, FoundationModulus, FrictionCoefficient,
     HeatFlux, HeatTransferCoefficient, PrescribedValue, Pressure, SpecificAcousticImpedance,
-    Stiffness, Temperature, ThermalContactResistance,
+    Stiffness, SurfaceEmissivity, Temperature, ThermalContactResistance,
 };
 use runmat_parser::fea::FeaModelDefinitionKind;
 
@@ -92,6 +92,7 @@ fn boundary(
             &["target", "value"][..]
         }
         "thermal.convection" => &["target", "ambient_temperature", "coefficient"][..],
+        "thermal.radiation" => &["target", "ambient_temperature", "emissivity"][..],
         "acoustic.impedance" => &["target", "impedance"][..],
         "magnetic.insulation" | "acoustic.rigid_wall" | "acoustic.radiation" => &["target"][..],
         _ => {
@@ -137,6 +138,21 @@ fn boundary(
                 body,
                 "coefficient",
                 heat_transfer_coefficient()?,
+                diagnostics,
+            )?),
+        },
+        "thermal.radiation" => AuthoredBoundaryKind::ThermalRadiation {
+            ambient_temperature: PrescribedValue::Constant(Temperature::new(required_quantity(
+                declaration,
+                body,
+                "ambient_temperature",
+                PhysicalDimension::TEMPERATURE,
+                diagnostics,
+            )?)),
+            emissivity: SurfaceEmissivity::new(required_scalar(
+                declaration,
+                body,
+                "emissivity",
                 diagnostics,
             )?),
         },

@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     prescribed_value::PrescribedValue,
     quantity::{
-        HeatFlux, HeatTransferCoefficient, Pressure, SpecificAcousticImpedance, Temperature,
+        HeatFlux, HeatTransferCoefficient, Pressure, SpecificAcousticImpedance, SurfaceEmissivity,
+        Temperature,
     },
     target::RegionTarget,
 };
@@ -28,6 +29,12 @@ pub enum BoundaryOperator {
     ThermalConvection {
         ambient_temperature: PrescribedValue<Temperature>,
         coefficient: HeatTransferCoefficient,
+    },
+    /// Diffuse gray surface exchanging with a prescribed, nonparticipating ambient.
+    /// This is not enclosure/view-factor or participating-medium radiation.
+    ThermalRadiation {
+        ambient_temperature: PrescribedValue<Temperature>,
+        emissivity: SurfaceEmissivity,
     },
     MagneticInsulation,
     AcousticRigidWall,

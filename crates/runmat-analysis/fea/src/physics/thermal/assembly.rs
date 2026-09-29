@@ -129,6 +129,8 @@ pub(crate) enum ThermalAssemblyError {
     ComplexBoundary { operator_id: String },
     #[error("thermal boundary or constraint {operator_id} does not resolve any boundary faces")]
     UnmappedBoundary { operator_id: String },
+    #[error("thermal radiation boundary {operator_id} requires the nonlinear radiation solver, which is not yet admitted")]
+    RadiationNotAdmitted { operator_id: String },
     #[error("thermal constraints prescribe conflicting temperatures at solver node {node_id}")]
     ConflictingTemperature { node_id: u64 },
     #[error("temperature-field excitation {excitation_id} uses an unsupported complex ordinate")]
@@ -395,6 +397,11 @@ pub(crate) fn assemble(
             .boundary_faces_for_target(&boundary.target)
             .peekable();
         match &boundary.operator {
+            BoundaryOperator::ThermalRadiation { .. } => {
+                return Err(ThermalAssemblyError::RadiationNotAdmitted {
+                    operator_id: boundary.boundary_id.clone(),
+                });
+            }
             BoundaryOperator::ThermalHeatFlux { value } => {
                 let heat_flux = sample_prescribed_heat_flux(value, &model.signals, sample)
                     .map_err(|error| ThermalAssemblyError::SignalRealization {

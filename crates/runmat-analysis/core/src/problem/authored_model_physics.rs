@@ -5,7 +5,8 @@ use super::{
     prescribed_value::PrescribedValue,
     quantity::{
         Damping, FoundationModulus, FrictionCoefficient, HeatFlux, HeatTransferCoefficient,
-        Pressure, SpecificAcousticImpedance, Stiffness, Temperature, ThermalContactResistance,
+        Pressure, SpecificAcousticImpedance, Stiffness, SurfaceEmissivity, Temperature,
+        ThermalContactResistance,
     },
 };
 use runmat_geometry_core::GeometryRegionRole;
@@ -31,6 +32,10 @@ pub enum AuthoredBoundaryKind {
     ThermalConvection {
         ambient_temperature: PrescribedValue<Temperature>,
         coefficient: HeatTransferCoefficient,
+    },
+    ThermalRadiation {
+        ambient_temperature: PrescribedValue<Temperature>,
+        emissivity: SurfaceEmissivity,
     },
     MagneticInsulation,
     AcousticRigidWall,
@@ -121,6 +126,19 @@ impl AuthoredBoundary {
                     && temperature.kelvin >= 0.0
                     && coefficient.is_finite()
                     && coefficient.watts_per_square_meter_kelvin >= 0.0
+            }
+            AuthoredBoundaryKind::ThermalRadiation {
+                ambient_temperature,
+                emissivity,
+            } => {
+                emissivity.is_finite()
+                    && (0.0..=1.0).contains(&emissivity.fraction)
+                    && match ambient_temperature {
+                        PrescribedValue::Constant(value) => {
+                            value.is_finite() && value.kelvin >= 0.0
+                        }
+                        PrescribedValue::Signal(_) => true,
+                    }
             }
             AuthoredBoundaryKind::AcousticImpedance { impedance } => {
                 impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0

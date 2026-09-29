@@ -1,10 +1,10 @@
 use super::{
-    boundary_shape, weighted_derivative, weighted_position, GAUSS_LEGENDRE_EIGHT_UNIT,
-    GAUSS_LEGENDRE_SIXTEEN_UNIT, GAUSS_LEGENDRE_TWELVE_UNIT,
+    boundary_tensor, GAUSS_LEGENDRE_EIGHT_UNIT, GAUSS_LEGENDRE_SIXTEEN_UNIT,
+    GAUSS_LEGENDRE_TWELVE_UNIT,
 };
 use crate::topology::{
     contract::BoundaryQuadraturePoint,
-    element::{cross, dot, norm, subtract},
+    element::{norm, subtract},
 };
 use runmat_meshing_core::BoundaryTriangleOrder;
 
@@ -23,18 +23,13 @@ pub(super) fn is_curved(coordinates: &[[f64; 3]]) -> bool {
     })
 }
 
-pub(super) fn converged_points(
-    coordinates: &[[f64; 3]],
-    corner_normal: [f64; 3],
-) -> Option<Vec<BoundaryQuadraturePoint>> {
-    let (eight, _) = integrate(coordinates, corner_normal, &GAUSS_LEGENDRE_EIGHT_UNIT)?;
-    let (twelve, twelve_points) =
-        integrate(coordinates, corner_normal, &GAUSS_LEGENDRE_TWELVE_UNIT)?;
+pub(super) fn converged_points(coordinates: &[[f64; 3]]) -> Option<Vec<BoundaryQuadraturePoint>> {
+    let (eight, _) = integrate(coordinates, &GAUSS_LEGENDRE_EIGHT_UNIT)?;
+    let (twelve, twelve_points) = integrate(coordinates, &GAUSS_LEGENDRE_TWELVE_UNIT)?;
     if moments_converged(&eight, &twelve, coordinates) {
         return Some(twelve_points);
     }
-    let (sixteen, sixteen_points) =
-        integrate(coordinates, corner_normal, &GAUSS_LEGENDRE_SIXTEEN_UNIT)?;
+    let (sixteen, sixteen_points) = integrate(coordinates, &GAUSS_LEGENDRE_SIXTEEN_UNIT)?;
     moments_converged(&twelve, &sixteen, coordinates).then_some(sixteen_points)
 }
 
@@ -48,44 +43,21 @@ struct BoundaryMoments {
 
 fn integrate(
     coordinates: &[[f64; 3]],
-    corner_normal: [f64; 3],
     rule: &[(f64, f64)],
 ) -> Option<(BoundaryMoments, Vec<BoundaryQuadraturePoint>)> {
     let mut moments = BoundaryMoments::default();
     let mut points = Vec::with_capacity(rule.len() * rule.len());
-    for &(r, r_weight) in rule {
-        for &(s, s_weight) in rule {
-            let barycentric = [(1.0 - r) * (1.0 - s), r, (1.0 - r) * s];
-            let (shape_values, derivatives) =
-                boundary_shape(BoundaryTriangleOrder::Tri6, barycentric);
-            let position_m = weighted_position(coordinates, &shape_values);
-            let tangent_r = weighted_derivative(coordinates, &derivatives, 0);
-            let tangent_s = weighted_derivative(coordinates, &derivatives, 1);
-            let area_vector = cross(tangent_r, tangent_s);
-            let jacobian = norm(area_vector);
-            if !jacobian.is_finite() || jacobian <= 0.0 || dot(area_vector, corner_normal) <= 0.0 {
-                return None;
-            }
-            let weight = r_weight * s_weight * (1.0 - r);
-            let area_weight_m2 = jacobian * weight;
-            let area_vector_weight_m2 = area_vector.map(|component| component * weight);
-            moments.area += area_weight_m2;
-            for (sum, shape) in moments.nodal_area.iter_mut().zip(shape_values) {
-                *sum += shape * area_weight_m2;
-            }
-            for axis in 0..3 {
-                moments.first_moment[axis] += position_m[axis] * area_weight_m2;
-                moments.area_vector[axis] += area_vector_weight_m2[axis];
-            }
-            points.push(BoundaryQuadraturePoint {
-                position_m,
-                area_vector_weight_m2,
-                area_weight_m2,
-                shape_values,
-                node_count: 6,
-            });
+    boundary_tensor::visit(BoundaryTriangleOrder::Tri6, coordinates, rule, |point| {
+        moments.area += point.area_weight_m2;
+        for (sum, shape) in moments.nodal_area.iter_mut().zip(point.shape_values) {
+            *sum += shape * point.area_weight_m2;
         }
-    }
+        for axis in 0..3 {
+            moments.first_moment[axis] += point.position_m[axis] * point.area_weight_m2;
+            moments.area_vector[axis] += point.area_vector_weight_m2[axis];
+        }
+        points.push(point);
+    })?;
     moments.area.is_finite().then_some((moments, points))
 }
 

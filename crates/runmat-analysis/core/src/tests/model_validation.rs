@@ -321,3 +321,37 @@ fn invalid_frame_and_boundary_coefficients_are_rejected() {
         Err(AnalysisValidationError::InvalidBoundary { .. })
     ));
 }
+
+#[test]
+fn radiation_boundary_requires_physical_emissivity_and_absolute_ambient() {
+    for (ambient, emissivity, valid) in [
+        (0.0, 0.0, true),
+        (300.0, 1.0, true),
+        (300.0, 0.8, true),
+        (-1.0, 0.8, false),
+        (f64::NAN, 0.8, false),
+        (300.0, -0.1, false),
+        (300.0, 1.1, false),
+        (300.0, f64::INFINITY, false),
+    ] {
+        let mut model = valid_model();
+        model.boundaries = vec![AnalysisBoundary {
+            boundary_id: "radiation".into(),
+            target: RegionTarget::boundary("root"),
+            operator: BoundaryOperator::ThermalRadiation {
+                ambient_temperature: PrescribedValue::Constant(Temperature::new(ambient)),
+                emissivity: SurfaceEmissivity::new(emissivity),
+            },
+        }];
+        assert_eq!(
+            validate_model(&model).is_ok(),
+            valid,
+            "ambient={ambient}, emissivity={emissivity}"
+        );
+        if valid {
+            let wire = serde_json::to_vec(&model.boundaries[0]).unwrap();
+            let restored: AnalysisBoundary = serde_json::from_slice(&wire).unwrap();
+            assert_eq!(restored, model.boundaries[0]);
+        }
+    }
+}

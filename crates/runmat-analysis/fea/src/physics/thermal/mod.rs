@@ -1,6 +1,7 @@
 pub(crate) mod assembly;
 pub(crate) mod history_fields;
 pub(crate) mod initial_state;
+pub mod radiation;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThermalConstitutiveStats {

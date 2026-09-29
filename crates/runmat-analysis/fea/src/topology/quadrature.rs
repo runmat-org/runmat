@@ -2,12 +2,14 @@ use runmat_meshing_core::BoundaryTriangleOrder;
 
 mod boundary_curved;
 mod boundary_nodes;
+mod boundary_tensor;
 mod volume;
 pub(crate) use volume::{
     tensor_tetrahedron_rule, visit_volume_quadrature, visit_volume_rule, volume_shape,
 };
 
 pub(super) use boundary_nodes::boundary_nodal_area_vectors;
+pub(super) use boundary_tensor::visit as visit_boundary_tensor_rule;
 
 use super::{
     contract::BoundaryQuadraturePoint,
@@ -342,7 +344,7 @@ pub(super) fn visit_boundary_quadrature(
     // Curved area and consistent nodal traction are non-polynomial; the
     // seven-point planar rule does not reliably integrate their moments.
     if order == BoundaryTriangleOrder::Tri6 && boundary_curved::is_curved(coordinates) {
-        for point in boundary_curved::converged_points(coordinates, corner_normal)? {
+        for point in boundary_curved::converged_points(coordinates)? {
             visit(point);
         }
         return Some(());

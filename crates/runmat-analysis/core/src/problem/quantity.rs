@@ -68,6 +68,7 @@ scalar_quantity!(BodyForceDensity, newtons_per_cubic_meter);
 scalar_quantity!(HeatFlux, watts_per_square_meter);
 scalar_quantity!(HeatGenerationDensity, watts_per_cubic_meter);
 scalar_quantity!(HeatTransferCoefficient, watts_per_square_meter_kelvin);
+scalar_quantity!(SurfaceEmissivity, fraction);
 scalar_quantity!(SpecificAcousticImpedance, pascal_seconds_per_meter);
 scalar_quantity!(MassFlowRate, kilograms_per_second);
 scalar_quantity!(ElectricCurrentDensity, amperes_per_square_meter);

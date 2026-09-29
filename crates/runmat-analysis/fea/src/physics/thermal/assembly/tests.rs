@@ -124,6 +124,35 @@ fn thermal_reference_model() -> (
 }
 
 #[test]
+fn radiation_is_never_silently_dropped_by_linear_thermal_assembly() {
+    let (mut model, mesh, _, region) = thermal_reference_model();
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "radiation".into(),
+        target: RegionTarget::boundary(region),
+        operator: BoundaryOperator::ThermalRadiation {
+            ambient_temperature: PrescribedValue::Constant(Temperature::new(300.0)),
+            emissivity: runmat_analysis_core::SurfaceEmissivity::new(0.8),
+        },
+    });
+    let error = assemble(
+        &model,
+        &mesh,
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            .unwrap()
+            .support(),
+        &RealizedExcitations::default(),
+        ExcitationSamplePoint::Static,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        ThermalAssemblyError::RadiationNotAdmitted {
+            operator_id: "radiation".into()
+        }
+    );
+}
+
+#[test]
 fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics() {
     let (model, mesh, _, _) = thermal_reference_model();
     let mut with_unused_material = model.clone();

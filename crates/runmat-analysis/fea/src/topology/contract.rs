@@ -38,6 +38,29 @@ impl Default for AnalysisProjectionPolicy {
 }
 
 impl AnalysisProjection {
+    /// High-order boundary integration for nonlinear forms. Unlike the default
+    /// geometry-moment rule, this does not certify integrand convergence.
+    pub(crate) fn visit_boundary_tensor_rule(
+        &self,
+        face: &ProjectedBoundaryFace,
+        rule: &[(f64, f64)],
+        mut visit: impl FnMut(BoundaryQuadraturePoint),
+    ) -> Result<(), AnalysisProjectionError> {
+        let (coordinates, orientation) = self.boundary_coordinates_and_orientation(face)?;
+        super::quadrature::visit_boundary_tensor_rule(
+            face.order,
+            &coordinates,
+            rule,
+            |mut point| {
+                point.area_vector_weight_m2 = point.area_vector_weight_m2.map(|v| v * orientation);
+                visit(point);
+            },
+        )
+        .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
+            face_id: face.face_id,
+        })
+    }
+
     pub fn node_index(&self, node_id: u64) -> Option<usize> {
         self.node_by_id.get(&node_id).copied()
     }

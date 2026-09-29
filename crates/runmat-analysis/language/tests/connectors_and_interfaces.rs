@@ -4,6 +4,57 @@ use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
 #[test]
+fn radiation_requires_kelvin_and_dimensionless_physical_emissivity() {
+    let source = r#"
+geometry part {
+    construct {
+        feature body = box(width = 1 m, depth = 1 m, height = 1 m)
+        result = feature.body
+    }
+    region wall : face {
+        select result
+        expect one_or_more
+    }
+}
+model heated {
+    load radiation {
+        thermal.radiation {
+            target = geometry.part.region.wall
+            ambient_temperature = AMBIENT
+            emissivity = EMISSIVITY
+        }
+    }
+}
+"#;
+    for (ambient, emissivity, valid) in [
+        ("0 K", "0", true),
+        ("300 K", "1", true),
+        ("-1 K", "0.8", false),
+        ("300 K", "-0.1", false),
+        ("300 K", "1.1", false),
+        ("300 K", "0.8 m", false),
+        ("300 m", "0.8", false),
+    ] {
+        let source = source
+            .replace("AMBIENT", ambient)
+            .replace("EMISSIVITY", emissivity);
+        let host = TestHost::default();
+        let program = FeaCompiler::new(&host).check(CheckRequest {
+            modules: ModuleGraphRequest {
+                source_root: LogicalSourcePath::new("project").unwrap(),
+                root: source_module("project/main.fea", &source, 1),
+            },
+        });
+        assert_eq!(
+            program.is_valid(),
+            valid,
+            "{ambient}, {emissivity}: {:#?}",
+            program.diagnostics
+        );
+    }
+}
+
+#[test]
 fn natural_boundaries_connectors_and_interfaces_lower_with_typed_physics() {
     let source = r#"
 geometry part {
@@ -50,6 +101,13 @@ model coupled {
     }
     load insulation {
         magnetic.insulation { target = geometry.part.region.wall }
+    }
+    load ambient_radiation {
+        thermal.radiation {
+            target = geometry.part.region.wall
+            ambient_temperature = 20 degC
+            emissivity = 0.8
+        }
     }
     load radiation {
         acoustic.radiation { target = geometry.part.region.wall }
@@ -122,7 +180,12 @@ model coupled {
     });
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
     let model = program.models.values().next().unwrap();
-    assert_eq!(model.boundaries.len(), 7);
+    assert_eq!(model.boundaries.len(), 8);
+    assert!(model.boundaries.iter().any(|boundary| matches!(
+        boundary.kind,
+        runmat_analysis_core::AuthoredBoundaryKind::ThermalRadiation { emissivity, .. }
+        if emissivity.fraction == 0.8
+    )));
     assert_eq!(model.connectors.len(), 4);
     assert!(matches!(
         model.connectors[0].kind,

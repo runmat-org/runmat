@@ -144,6 +144,13 @@ fn boundary_operator(value: &AuthoredBoundaryKind) -> BoundaryOperator {
             ambient_temperature: ambient_temperature.clone(),
             coefficient: *coefficient,
         },
+        AuthoredBoundaryKind::ThermalRadiation {
+            ambient_temperature,
+            emissivity,
+        } => BoundaryOperator::ThermalRadiation {
+            ambient_temperature: ambient_temperature.clone(),
+            emissivity: *emissivity,
+        },
         AuthoredBoundaryKind::MagneticInsulation => BoundaryOperator::MagneticInsulation,
         AuthoredBoundaryKind::AcousticRigidWall => BoundaryOperator::AcousticRigidWall,
         AuthoredBoundaryKind::AcousticRadiation => BoundaryOperator::AcousticRadiation,

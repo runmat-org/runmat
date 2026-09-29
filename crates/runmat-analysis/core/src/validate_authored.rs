@@ -240,6 +240,18 @@ fn validate_boundaries(
                     && coefficient.is_finite()
                     && coefficient.watts_per_square_meter_kelvin >= 0.0
             }
+            BoundaryOperator::ThermalRadiation {
+                ambient_temperature,
+                emissivity,
+            } => {
+                ambient_temperature.is_well_formed(signals)
+                    && match ambient_temperature {
+                        crate::PrescribedValue::Constant(value) => value.kelvin >= 0.0,
+                        crate::PrescribedValue::Signal(_) => true,
+                    }
+                    && emissivity.is_finite()
+                    && (0.0..=1.0).contains(&emissivity.fraction)
+            }
             BoundaryOperator::AcousticImpedance { impedance } => {
                 impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0
             }
