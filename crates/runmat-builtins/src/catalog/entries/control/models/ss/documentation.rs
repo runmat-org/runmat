@@ -20,6 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
     ],
     examples: &[
+        BuiltinExample { id: "stored-matrices", title: "Read stored matrices in column-major order", program: "G = ss([0 1; -2 -3], [0; 1], [1 0], 0);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(G.A(:), [0; -2; 1; -3])); assert(isequal(G.B, [0; 1])); assert(isequal(G.C, [1 0])); assert(G.D == 0);" } },
         BuiltinExample { id: "continuous", title: "Continuous state-space model", program: "A = [0 1; -2 -3]; B = [0; 1]; C = [1 0]; G = ss(A,B,C,0);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(G), 'ss')); assert(isequal(G.A, A)); assert(isequal(size(G.B), [2 1])); assert(G.Ts == 0);" } },
         BuiltinExample { id: "discrete", title: "Discrete sample time", program: "G = ss(0.5,1,1,0,0.1);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(G.Ts - 0.1) < 1e-12); assert(isequal(size(G.A), [1 1]));" } },
         BuiltinExample { id: "named-sample-time", title: "Named sample time", program: "G = ss(0.5,1,1,0,'SampleTime',0.2);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(G.Ts - 0.2) < 1e-12);" } },
@@ -27,6 +28,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     example_exemption: None,
     faqs: &[
+        BuiltinDocumentationFaq { question: "How are matrix dimensions validated?", answer: "A must be n-by-n, B n-by-nu, C ny-by-n, and D ny-by-nu. Their stored orientations are preserved." },
         BuiltinDocumentationFaq { question: "Does ss simulate a response?", answer: "No. It constructs a model; step and impulse perform response calculations." },
         BuiltinDocumentationFaq { question: "Are complex and sparse matrices supported?", answer: "No. This constructor currently requires finite real dense matrices." },
         BuiltinDocumentationFaq { question: "Is the result GPU-resident?", answer: "No. Accepted resident inputs are gathered and the model owns host-side double matrices." },

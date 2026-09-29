@@ -5,7 +5,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("zero"), slug: Some("zero"),
     summary: "Return zeros of a SISO transfer function.",
     description: "`zero(sys)` returns numerator roots of a scalar SISO `tf` object. Static gains return an empty 0-by-1 column. State-space transmission zeros and MIMO models are not yet supported.",
-    keywords: &["zero", "control system", "roots", "transfer function", "state space"],
+    keywords: &["zero", "zeros", "control system", "roots", "transfer function", "state space"],
     related: &["tf", "pole", "roots"],
     sections: &[
         BuiltinDocumentationSection { heading: "Model semantics", paragraphs: &["The result is a host N-by-1 real double column when all zeros are real within the root tolerance, or a complex double column otherwise. The implementation does not cancel common numerator and denominator factors. Fundamental integer input is not a model and rejects before provider access."] },

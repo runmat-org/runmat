@@ -358,7 +358,7 @@ mod tests {
         let error = block_on(isstable_builtin(Value::Object(bad_pairing))).unwrap_err();
         assert_eq!(
             error.identifier.as_deref(),
-            Some("RunMat:tf:InvalidSampleTime")
+            Some("RunMat:isstable:InvalidModel")
         );
     }
 }

@@ -7,7 +7,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("pzmap"), slug: Some("pzmap"),
     summary: "Plot or return poles and zeros of a SISO dynamic model.",
     description: "`pzmap(sys)` plots pole and zero locations for a supported SISO `tf` or `ss` model. With one output it returns poles; with two, `[p,z]` returns separate pole and zero columns. Statement form accepts multiple models with optional line styles.",
-    keywords: &["pzmap", "pole zero map", "poles", "zeros", "control system", "tf", "ss"],
+    keywords: &["pzmap", "pole zero map", "poles", "zeros", "control system", "transfer function", "state space", "tf", "ss"],
     related: &["tf", "ss", "pole", "zero", "plot"],
     sections: &[
         BuiltinDocumentationSection { heading: "Model and output forms", paragraphs: &[

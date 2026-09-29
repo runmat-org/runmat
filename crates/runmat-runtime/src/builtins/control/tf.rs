@@ -173,7 +173,10 @@ async fn tf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                     .iter()
                     .all(|value| value.re == 0.0 && value.im == 0.0)
             }) {
-                return Err(tf_error(&TF_ERROR_DENOMINATOR_INVALID));
+                return Err(tf_error_with_detail(
+                    &TF_ERROR_DENOMINATOR_INVALID,
+                    "denominator coefficients must not all be zero",
+                ));
             }
             let options = admitted_options.resolve(host_sample_times).await?;
             let numerator = resolve_coefficients(host_numerator, numerator, "numerator").await?;
@@ -1040,6 +1043,7 @@ mod tests {
 
     #[test]
     fn tf_accepts_variable_name_value_option() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sys = run_tf(
             Value::Num(1.0),
             Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),

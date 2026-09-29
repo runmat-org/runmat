@@ -9,7 +9,7 @@ use runmat_builtins::{
     RLOCUS_INTEGER_GAIN_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, ObjectInstance, Tensor, Value};
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::{
     spec::{
@@ -758,6 +758,7 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_value::ObjectInstance;
 
     #[test]
     fn invalid_gain_or_style_rejects_before_model_download() {

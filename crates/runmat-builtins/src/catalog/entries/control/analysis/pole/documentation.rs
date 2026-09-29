@@ -5,7 +5,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("pole"), slug: Some("pole"),
     summary: "Return poles of a transfer-function or state-space model.",
     description: "`pole(sys)` returns denominator roots for a scalar SISO `tf` object or eigenvalues of A for a scalar `ss` object. A static transfer-function gain returns an empty 0-by-1 column.",
-    keywords: &["pole", "control system", "roots", "transfer function", "state space"],
+    keywords: &["pole", "poles", "stability", "ss", "control system", "roots", "transfer function", "state space"],
     related: &["tf", "ss", "zero"],
     sections: &[
         BuiltinDocumentationSection { heading: "Model semantics", paragraphs: &["The result is an N-by-1 host column. It is real double if all computed poles are real within the control root tolerance, and complex double otherwise. The implementation does not cancel pole-zero pairs. Model-array selectors and model arrays are not implemented; only one model argument is accepted."] },

@@ -7,8 +7,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("tf"), slug: Some("tf"),
     summary: "Construct a SISO transfer function from coefficients or a variable shorthand.",
     description: "`tf(num,den)` constructs a scalar-input scalar-output transfer-function object from polynomial coefficients in descending power order. Each input is a numeric scalar, row vector, or column vector; stored coefficient arrays are double-precision row vectors.",
-    keywords: &["tf", "transfer function", "control system", "coefficients", "polynomial"],
-    related: &["ss", "feedback", "step", "roots"],
+    keywords: &["tf", "transfer function", "control system", "coefficients", "coefficient vector", "polynomial", "feedback", "step response"],
+    related: &["ss", "feedback", "step", "roots", "polyval", "damp"],
     sections: &[
         BuiltinDocumentationSection { heading: "Forms and model properties", paragraphs: &[
             "`tf('s')` constructs a continuous-time indeterminate. `tf('z',Ts)` constructs a discrete-time indeterminate with positive Ts or -1 for unspecified sample time. `tf(num,den,Ts)` accepts zero, a positive Ts, or -1; nonzero Ts defaults the variable to z. The `Variable` and `Ts`/`SampleTime` name/value options select the same metadata.",
@@ -21,6 +21,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
     ],
     examples: &[
+        BuiltinExample { id: "closed-loop", title: "Create a closed-loop model", program: "s = tf('s'); G = 1/(s + 1); T = feedback(2*G, 1); k = dcgain(T);", display_output: Some("0.6667"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(k - 2/3) < 1e-10);" } },
         BuiltinExample { id: "variable", title: "Continuous transfer-function variable", program: "s = tf('s'); G = 2.5/(0.4*s^2 + 1.8*s + 1);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(G), 'tf')); assert(max(abs(G.Denominator - [0.4 1.8 1])) < 1e-10);" } },
         BuiltinExample { id: "coefficients", title: "Construct from coefficient vectors", program: "H = tf([1 2], [1 3 2]);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(H.Numerator, [1 2])); assert(isequal(H.Denominator, [1 3 2])); assert(H.Ts == 0);" } },
         BuiltinExample { id: "first-order", title: "First-order continuous-time model", program: "H = tf(20, [1 5]);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(H), 'tf')); assert(isequal(H.Numerator, 20)); assert(isequal(H.Denominator, [1 5]));" } },
@@ -30,6 +31,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     example_exemption: None,
     faqs: &[
+        BuiltinDocumentationFaq { question: "Does tf evaluate frequency responses?", answer: "No. It constructs a model; frequency-response helpers such as bode, freqresp, and evalfr are separate APIs, not operations performed by this constructor." },
+        BuiltinDocumentationFaq { question: "Can I construct models with s = tf('s')?", answer: "Yes. The variable shorthand and integer powers support polynomial model construction." },
+        BuiltinDocumentationFaq { question: "Which response and analysis helpers are implemented?", answer: "step, impulse, nyquist, stepinfo, feedback, dcgain, pole, damp, and isstable are separate control builtins." },
+        BuiltinDocumentationFaq { question: "Can I pass matrices of coefficients?", answer: "No. Numerator and denominator inputs must be scalars or vectors." },
+        BuiltinDocumentationFaq { question: "Can I use integer coefficients?", answer: "RunMat mode accepts all eight integer classes when each coefficient is exactly representable as double. MATLAB compatibility mode restricts coefficients to the documented floating-point surface." },
         BuiltinDocumentationFaq { question: "Can tf build MIMO models?", answer: "Not yet. The current constructor accepts one numerator and one denominator vector." },
         BuiltinDocumentationFaq { question: "What does Ts = -1 mean?", answer: "It marks a discrete-time model with unspecified sample time." },
         BuiltinDocumentationFaq { question: "Can the denominator contain only zeros?", answer: "No. It must include at least one nonzero coefficient." },
@@ -39,6 +45,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "feedback", target: BuiltinDocumentationLinkTarget::Builtin("feedback") },
         BuiltinDocumentationLink { label: "step", target: BuiltinDocumentationLinkTarget::Builtin("step") },
         BuiltinDocumentationLink { label: "roots", target: BuiltinDocumentationLinkTarget::Builtin("roots") },
+        BuiltinDocumentationLink { label: "polyval", target: BuiltinDocumentationLinkTarget::Builtin("polyval") },
+        BuiltinDocumentationLink { label: "damp", target: BuiltinDocumentationLinkTarget::Builtin("damp") },
         SOURCE,
     ],
     media: &[],
