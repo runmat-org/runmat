@@ -942,6 +942,12 @@ pub(super) fn feature_input_width(
         .get("InputSize")
         .ok_or_else(|| deep_learning_error(function, "featureInputLayer is missing InputSize"))
         .and_then(|value| numeric_vector(value, function, "InputSize"))?;
+    if values.len() > 1 {
+        return Err(deep_learning_error(
+            function,
+            "featureInputLayer with vector InputSize is metadata-only; this forward path requires one feature dimension",
+        ));
+    }
     let Some(width) = values.first() else {
         return Err(deep_learning_error(
             function,

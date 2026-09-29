@@ -136,7 +136,53 @@ fn layer_constructors_preserve_core_properties_and_name_values() {
 }
 
 #[test]
+fn layer_option_syntax_precedes_resident_parameter_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let values = [1.0, 2.0];
+        let shape = [1usize, 2usize];
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("resident option");
+        provider.reset_telemetry();
+        let error = block_on(fully_connected_layer_builtin(
+            Value::Num(2.0),
+            vec![
+                Value::String("Weights".into()),
+                Value::GpuTensor(resident.clone()),
+                Value::String("Name".into()),
+                Value::Num(1.0),
+            ],
+        ))
+        .expect_err("invalid host Name");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let alpha = [1.0];
+        let scalar_shape = [1usize, 1usize];
+        let resident_alpha = provider
+            .upload(&HostTensorView {
+                data: &alpha,
+                shape: &scalar_shape,
+            })
+            .expect("resident alpha");
+        provider.reset_telemetry();
+        let error = block_on(elu_layer_builtin(vec![
+            Value::GpuTensor(resident_alpha),
+            Value::String("Name".into()),
+            Value::Num(2.0),
+        ]))
+        .expect_err("invalid host Name before resident alpha");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
 fn layer_constructors_read_typed_integer_size_storage_exactly() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let output_size = cleared_int_tensor(IntegerStorage::U16(vec![10]), vec![1, 1]);
     let fc = block_on(fully_connected_layer_builtin(output_size, vec![])).unwrap();
     let Value::Object(object) = &fc else {
@@ -158,12 +204,84 @@ fn layer_constructors_read_typed_integer_size_storage_exactly() {
 
     let exact = (1_u64 << 53) + 1;
     let large_input = poisoned_int_tensor(IntegerStorage::U64(vec![exact]), vec![1, 1], f64::NAN);
-    let large = block_on(feature_input_layer_builtin(large_input, vec![]));
+    let error = block_on(feature_input_layer_builtin(large_input, vec![]))
+        .expect_err("structural metadata must not round a wide input dimension");
+    assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+    let large_output = poisoned_int_tensor(IntegerStorage::U64(vec![exact]), vec![1, 1], f64::NAN);
+    let error = block_on(fully_connected_layer_builtin(large_output, vec![]))
+        .expect_err("structural metadata must not round a wide output dimension");
+    assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+
     if usize::BITS == 64 {
-        assert!(large.is_ok());
-    } else {
-        assert!(large.is_err());
+        let aligned = 1_u64 << 54;
+        let input_size =
+            poisoned_int_tensor(IntegerStorage::U64(vec![aligned]), vec![1, 1], f64::NAN);
+        let layer = block_on(feature_input_layer_builtin(input_size, vec![]))
+            .expect("aligned wide dimension remains exact in double metadata");
+        let Value::Object(layer) = layer else {
+            panic!("expected feature layer")
+        };
+        assert_eq!(
+            layer.properties.get("InputSize"),
+            Some(&Value::Tensor(
+                Tensor::new(vec![aligned as f64], vec![1, 1]).unwrap()
+            ))
+        );
     }
+}
+
+#[test]
+fn feature_input_vector_size_is_a_runmat_metadata_extension() {
+    let input_size = Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap());
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(feature_input_layer_builtin(input_size.clone(), vec![]))
+        .expect_err("MATLAB mode accepts a scalar feature count only");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:FeatureInputVectorExtension")
+    );
+    drop(_strict);
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let layer = block_on(feature_input_layer_builtin(input_size, vec![])).unwrap();
+    let Value::Object(object) = layer else {
+        panic!("expected layer")
+    };
+    assert_eq!(
+        object.properties.get("InputSize"),
+        Some(&Value::Tensor(
+            Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()
+        ))
+    );
+    let error = feature_input_width(&object, "forward")
+        .expect_err("current model path must not ignore trailing feature dimensions");
+    assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+}
+
+#[test]
+fn feature_input_vector_gate_precedes_option_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let data = [1.0];
+        let shape = [1usize, 1usize];
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let input_size = Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap());
+        let error = block_on(feature_input_layer_builtin(
+            input_size,
+            vec![Value::String("Weights".into()), Value::GpuTensor(resident)],
+        ))
+        .expect_err("vector extension gate must precede resident option handling");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:FeatureInputVectorExtension")
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
 }
 
 #[test]
@@ -274,6 +392,29 @@ fn recurrent_and_input_layers_accept_common_shapes() {
     assert_eq!(
         object.properties.get("OutputMode"),
         Some(&Value::String("sequence".into()))
+    );
+    let default_lstm = block_on(lstm_layer_builtin(Value::Num(4.0), vec![])).unwrap();
+    let Value::Object(default_lstm) = default_lstm else {
+        panic!("expected LSTM object")
+    };
+    assert_eq!(
+        default_lstm.properties.get("OutputMode"),
+        Some(&Value::String("sequence".into()))
+    );
+    let last_bilstm = block_on(bilstm_layer_builtin(
+        Value::Num(4.0),
+        vec![
+            Value::String("OutputMode".into()),
+            Value::String("last".into()),
+        ],
+    ))
+    .unwrap();
+    let Value::Object(last_bilstm) = last_bilstm else {
+        panic!("expected BiLSTM object")
+    };
+    assert_eq!(
+        last_bilstm.properties.get("OutputMode"),
+        Some(&Value::String("last".into()))
     );
 }
 

@@ -1,12 +1,56 @@
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::BuiltinResult;
+use crate::{gather_if_needed_async, BuiltinResult};
 
 use super::{
-    any_type, gather_args, layer_object, numeric_scalar, numeric_vector, positive_usize,
-    tensor_value,
+    deep_learning_error, gather_args, layer_object, numeric_scalar, numeric_vector,
+    parse_name_values, positive_usize, scalar_text, tensor_value,
 };
+
+// Structural layer dimensions are exposed as double-valued metadata. Admit
+// only integers that retain their value through that representation boundary.
+fn metadata_size(value: &Value, function: &'static str, label: &str) -> BuiltinResult<usize> {
+    let size = positive_usize(value, function, label)?;
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: {label} cannot be represented exactly in layer metadata"),
+        ));
+    }
+    Ok(size)
+}
+
+fn metadata_sizes(value: &Value, function: &'static str, label: &str) -> BuiltinResult<Vec<usize>> {
+    let sizes = numeric_vector(value, function, label)?;
+    if sizes.is_empty()
+        || !crate::builtins::common::validation::native_integer_value_is_exact_f64(value)
+    {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: {label} must contain exactly representable positive dimensions"),
+        ));
+    }
+    Ok(sizes)
+}
+
+async fn admitted_layer_options(
+    rest: Vec<Value>,
+    function: &'static str,
+) -> BuiltinResult<Vec<Value>> {
+    preflight_layer_options(&rest, function)?;
+    gather_args(rest).await
+}
+
+fn preflight_layer_options(rest: &[Value], function: &'static str) -> BuiltinResult<()> {
+    let options = parse_name_values(rest.to_vec(), function)?;
+    for (name, value) in options {
+        if matches!(name.as_str(), "name" | "description") {
+            scalar_text(&value, function)?;
+        }
+    }
+    Ok(())
+}
 
 fn is_numeric_scalar(value: &Value) -> bool {
     match value {
@@ -16,6 +60,12 @@ fn is_numeric_scalar(value: &Value) -> bool {
             crate::builtins::common::tensor::is_scalar_tensor(t)
                 && crate::builtins::common::tensor::tensor_value_f64(t, 0).is_finite()
         }
+        Value::GpuTensor(handle) => {
+            handle.shape().iter().all(|dimension| *dimension == 1)
+                && runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && !runmat_accelerate_api::handle_is_logical(handle)
+        }
         _ => false,
     }
 }
@@ -23,22 +73,19 @@ fn is_numeric_scalar(value: &Value) -> bool {
 #[runtime_builtin(
     name = "fullyConnectedLayer",
     category = "deep_learning",
-    summary = "Create a fully connected layer compatibility object.",
-    keywords = "fullyConnectedLayer,deep learning,layer,neural network",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn fully_connected_layer_builtin(
     output_size: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let output_size = positive_usize(&output_size, "fullyConnectedLayer", "outputSize")?;
+    let output_size = metadata_size(&output_size, "fullyConnectedLayer", "outputSize")?;
     layer_object(
         "nnet.cnn.layer.FullyConnectedLayer",
         "Fully Connected",
         vec![("OutputSize", Value::Num(output_size as f64))],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "fullyConnectedLayer").await?,
         "fullyConnectedLayer",
     )
 }
@@ -46,17 +93,20 @@ pub(super) async fn fully_connected_layer_builtin(
 #[runtime_builtin(
     name = "featureInputLayer",
     category = "deep_learning",
-    summary = "Create a feature input layer compatibility object.",
-    keywords = "featureInputLayer,deep learning,input layer,features",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn feature_input_layer_builtin(
     input_size: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let input_size = numeric_vector(&input_size, "featureInputLayer", "inputSize")?;
+    let input_size = metadata_sizes(&input_size, "featureInputLayer", "inputSize")?;
+    if input_size.len() > 1 {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::FEATURE_INPUT_VECTOR_EXTENSION,
+            "featureInputLayer",
+        )?;
+    }
     layer_object(
         "nnet.cnn.layer.FeatureInputLayer",
         "Feature Input",
@@ -68,7 +118,7 @@ pub(super) async fn feature_input_layer_builtin(
                 "featureInputLayer",
             )?,
         )],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "featureInputLayer").await?,
         "featureInputLayer",
     )
 }
@@ -76,17 +126,14 @@ pub(super) async fn feature_input_layer_builtin(
 #[runtime_builtin(
     name = "sequenceInputLayer",
     category = "deep_learning",
-    summary = "Create a sequence input layer compatibility object.",
-    keywords = "sequenceInputLayer,deep learning,sequence,input layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn sequence_input_layer_builtin(
     input_size: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let input_size = numeric_vector(&input_size, "sequenceInputLayer", "inputSize")?;
+    let input_size = metadata_sizes(&input_size, "sequenceInputLayer", "inputSize")?;
     layer_object(
         "nnet.cnn.layer.SequenceInputLayer",
         "Sequence Input",
@@ -98,7 +145,7 @@ pub(super) async fn sequence_input_layer_builtin(
                 "sequenceInputLayer",
             )?,
         )],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "sequenceInputLayer").await?,
         "sequenceInputLayer",
     )
 }
@@ -106,10 +153,7 @@ pub(super) async fn sequence_input_layer_builtin(
 #[runtime_builtin(
     name = "reluLayer",
     category = "deep_learning",
-    summary = "Create a ReLU layer compatibility object.",
-    keywords = "reluLayer,deep learning,activation,layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -117,7 +161,7 @@ pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value>
         "nnet.cnn.layer.ReLULayer",
         "ReLU",
         vec![],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "reluLayer").await?,
         "reluLayer",
     )
 }
@@ -125,16 +169,21 @@ pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value>
 #[runtime_builtin(
     name = "eluLayer",
     category = "deep_learning",
-    summary = "Create an ELU layer compatibility object.",
-    keywords = "eluLayer,deep learning,activation,layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-    let mut args = gather_args(rest).await?;
+    let mut args = rest;
+    let leading_alpha = args.first().is_some_and(is_numeric_scalar);
+    if leading_alpha {
+        preflight_layer_options(&args[1..], "eluLayer")?;
+    }
     let alpha = if args.first().is_some_and(is_numeric_scalar) {
-        numeric_scalar(&args.remove(0), "eluLayer", "alpha")?
+        numeric_scalar(
+            &gather_if_needed_async(&args.remove(0)).await?,
+            "eluLayer",
+            "alpha",
+        )?
     } else {
         1.0
     };
@@ -142,7 +191,7 @@ pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> 
         "nnet.cnn.layer.ELULayer",
         "ELU",
         vec![("Alpha", Value::Num(alpha))],
-        args,
+        admitted_layer_options(args, "eluLayer").await?,
         "eluLayer",
     )
 }
@@ -150,10 +199,7 @@ pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> 
 #[runtime_builtin(
     name = "softmaxLayer",
     category = "deep_learning",
-    summary = "Create a softmax layer compatibility object.",
-    keywords = "softmaxLayer,deep learning,softmax,layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -161,7 +207,7 @@ pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Val
         "nnet.cnn.layer.SoftmaxLayer",
         "Softmax",
         vec![],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "softmaxLayer").await?,
         "softmaxLayer",
     )
 }
@@ -169,10 +215,7 @@ pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Val
 #[runtime_builtin(
     name = "classificationLayer",
     category = "deep_learning",
-    summary = "Create a classification output layer compatibility object.",
-    keywords = "classificationLayer,deep learning,classification,output layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -180,7 +223,7 @@ pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinRes
         "nnet.cnn.layer.ClassificationOutputLayer",
         "Classification Output",
         vec![("Classes", Value::String("auto".into()))],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "classificationLayer").await?,
         "classificationLayer",
     )
 }
@@ -188,10 +231,7 @@ pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinRes
 #[runtime_builtin(
     name = "regressionLayer",
     category = "deep_learning",
-    summary = "Create a regression output layer compatibility object.",
-    keywords = "regressionLayer,deep learning,regression,output layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -199,7 +239,7 @@ pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<
         "nnet.cnn.layer.RegressionOutputLayer",
         "Regression Output",
         vec![],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "regressionLayer").await?,
         "regressionLayer",
     )
 }
@@ -207,10 +247,7 @@ pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<
 #[runtime_builtin(
     name = "layerNormalizationLayer",
     category = "deep_learning",
-    summary = "Create a layer normalization layer compatibility object.",
-    keywords = "layerNormalizationLayer,deep learning,normalization,layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -218,7 +255,7 @@ pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> Built
         "nnet.cnn.layer.LayerNormalizationLayer",
         "Layer Normalization",
         vec![("Epsilon", Value::Num(1.0e-5))],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "layerNormalizationLayer").await?,
         "layerNormalizationLayer",
     )
 }
@@ -226,10 +263,7 @@ pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> Built
 #[runtime_builtin(
     name = "globalAveragePooling1dLayer",
     category = "deep_learning",
-    summary = "Create a global average pooling 1-D layer compatibility object.",
-    keywords = "globalAveragePooling1dLayer,deep learning,pooling,layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn global_average_pooling_1d_layer_builtin(
@@ -239,7 +273,7 @@ pub(super) async fn global_average_pooling_1d_layer_builtin(
         "nnet.cnn.layer.GlobalAveragePooling1DLayer",
         "Global Average Pooling 1D",
         vec![],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "globalAveragePooling1dLayer").await?,
         "globalAveragePooling1dLayer",
     )
 }
@@ -247,10 +281,7 @@ pub(super) async fn global_average_pooling_1d_layer_builtin(
 #[runtime_builtin(
     name = "lstmLayer",
     category = "deep_learning",
-    summary = "Create an LSTM layer compatibility object.",
-    keywords = "lstmLayer,deep learning,lstm,recurrent,layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn lstm_layer_builtin(
@@ -270,10 +301,7 @@ pub(super) async fn lstm_layer_builtin(
 #[runtime_builtin(
     name = "bilstmLayer",
     category = "deep_learning",
-    summary = "Create a bidirectional LSTM layer compatibility object.",
-    keywords = "bilstmLayer,deep learning,lstm,bidirectional,recurrent,layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn bilstm_layer_builtin(
@@ -297,15 +325,15 @@ pub(super) async fn recurrent_layer(
     num_hidden_units: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let units = positive_usize(&num_hidden_units, function, "numHiddenUnits")?;
+    let units = metadata_size(&num_hidden_units, function, "numHiddenUnits")?;
     layer_object(
         class_name,
         type_name,
         vec![
             ("NumHiddenUnits", Value::Num(units as f64)),
-            ("OutputMode", Value::String("last".into())),
+            ("OutputMode", Value::String("sequence".into())),
         ],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, function).await?,
         function,
     )
 }
@@ -313,10 +341,7 @@ pub(super) async fn recurrent_layer(
 #[runtime_builtin(
     name = "convolution1dLayer",
     category = "deep_learning",
-    summary = "Create a 1-D convolution layer compatibility object.",
-    keywords = "convolution1dLayer,deep learning,convolution,layer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn convolution_1d_layer_builtin(
@@ -324,8 +349,8 @@ pub(super) async fn convolution_1d_layer_builtin(
     num_filters: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let filter_size = positive_usize(&filter_size, "convolution1dLayer", "filterSize")?;
-    let num_filters = positive_usize(&num_filters, "convolution1dLayer", "numFilters")?;
+    let filter_size = metadata_size(&filter_size, "convolution1dLayer", "filterSize")?;
+    let num_filters = metadata_size(&num_filters, "convolution1dLayer", "numFilters")?;
     layer_object(
         "nnet.cnn.layer.Convolution1DLayer",
         "Convolution 1D",
@@ -335,7 +360,7 @@ pub(super) async fn convolution_1d_layer_builtin(
             ("Stride", Value::Num(1.0)),
             ("Padding", Value::String("same".into())),
         ],
-        gather_args(rest).await?,
+        admitted_layer_options(rest, "convolution1dLayer").await?,
         "convolution1dLayer",
     )
 }
