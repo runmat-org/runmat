@@ -1619,6 +1619,7 @@ fn combvec_matches_neural_network_column_order() {
 
 #[test]
 fn combvec_reads_typed_integer_storage_exactly() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(combvec_builtin(vec![
         poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![2, 2], 99.0),
         poisoned_int_tensor(IntegerStorage::U16(vec![10, 20]), vec![1, 2], 99.0),
@@ -1981,6 +1982,47 @@ fn padsequences_reads_typed_integer_storage_exactly() {
     assert_eq!(tensor.shape, vec![1, 2, 2]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, -1.0]);
     assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+}
+
+#[test]
+fn padsequences_uniform_mixed_storage_applies_padding_in_result_class() {
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let sequences = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).unwrap(),
+                ),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    let result = block_on(padsequences_builtin(
+        sequences,
+        vec![
+            Value::Num(2.0),
+            Value::String("PaddingValue".into()),
+            Value::Num(-0.5),
+        ],
+    ))
+    .expect("mixed storage padding");
+    let Value::OutputList(outputs) = result else {
+        panic!("data and mask outputs")
+    };
+    let Value::Tensor(data) = &outputs[0] else {
+        panic!("numeric padding output")
+    };
+    assert_eq!(data.numeric_dtype(), NumericDType::F64);
+    assert_eq!(data.shape, vec![1, 2, 2]);
+    assert_eq!(data.materialize_f64(), vec![1.0, 2.0, 3.0, -0.5]);
+    let Value::LogicalArray(mask) = &outputs[1] else {
+        panic!("logical validity mask")
+    };
+    assert_eq!(mask.shape, data.shape);
+    assert_eq!(mask.data, vec![1, 1, 1, 0]);
 }
 
 #[test]
@@ -2893,12 +2935,12 @@ fn adamupdate_default_call_returns_updated_parameters_directly() {
 
 #[test]
 fn adamupdate_preserves_dlarray_wrapper_for_state_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(3));
     let params = block_on(dlarray_builtin(
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
         vec![Value::String("CB".into())],
     ))
     .unwrap();
+    let _guard = crate::output_count::push_output_count(Some(3));
     let out = block_on(adamupdate_builtin(vec![
         params,
         Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap()),

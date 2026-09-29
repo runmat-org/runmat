@@ -179,6 +179,11 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
             seq,
             padding_dim,
             target_len,
+            if options.uniform_output {
+                dtype
+            } else {
+                seq.data.numeric_dtype()
+            },
             options,
             requested_outputs == 2,
         )?);

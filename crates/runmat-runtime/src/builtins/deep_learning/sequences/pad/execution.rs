@@ -1,4 +1,4 @@
-use runmat_value::{LogicalArray, NumericStorage, Tensor};
+use runmat_value::{LogicalArray, NumericDType, NumericStorage, Tensor};
 
 use crate::BuiltinResult;
 
@@ -12,6 +12,7 @@ pub(super) fn pad_sequence(
     seq: &SequenceInput,
     padding_dim: usize,
     target_len: usize,
+    output_dtype: NumericDType,
     options: PadOptions,
     with_mask: bool,
 ) -> BuiltinResult<(Tensor, Option<LogicalArray>)> {
@@ -20,7 +21,7 @@ pub(super) fn pad_sequence(
     let total = checked_numel(&out_shape, "padsequences")?;
     check_pad_elements(total)?;
     let mut out = Tensor::from_numeric_storage(
-        NumericStorage::zeros(seq.data.numeric_dtype(), total),
+        NumericStorage::zeros(output_dtype, total),
         out_shape.clone(),
     )
     .map_err(|err| deep_learning_error("padsequences", err))?;
