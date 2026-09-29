@@ -30,6 +30,7 @@ fn tf_constructs_object_through_vm_dispatch() {
 
 #[test]
 fn compiled_ss_integer_precision_boundary_reports_owning_identifiers() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for (source, identifier) in [
         (
             "wide=uint64(9007199254740992)+uint64(1); S=ss(wide,1,1,1);",
