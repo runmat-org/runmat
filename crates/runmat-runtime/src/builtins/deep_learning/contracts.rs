@@ -106,30 +106,6 @@ pub(super) const DLFEVAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
         outputs: &OUT_VARARG,
     }];
 
-pub(super) const DLUPDATE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "fun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Function handle applied to matching leaves in the parameter trees.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "One or more compatible parameter trees.",
-    },
-];
-
-pub(super) const DLUPDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "varargout = dlupdate(fun, args...)",
-        inputs: &DLUPDATE_INPUTS,
-        outputs: &OUT_VARARG,
-    }];
-
 pub(super) const DLGRADIENT_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "loss",
@@ -170,13 +146,6 @@ pub const ARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 pub const DLFEVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DLFEVAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const DLUPDATE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DLUPDATE_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,

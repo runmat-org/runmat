@@ -3401,6 +3401,20 @@ fn dlupdate_rejects_non_callable_and_mismatched_trees() {
 }
 
 #[test]
+fn dlupdate_discarded_result_still_invokes_callback_and_retains_failure_source() {
+    use std::error::Error;
+
+    let _guard = crate::output_count::push_output_count(Some(0));
+    let err = block_on(dlupdate_builtin(vec![
+        Value::FunctionHandle("__missing_dlupdate_callback".into()),
+        Value::Num(1.0),
+    ]))
+    .expect_err("discarded callback call must still execute");
+    assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+    assert!(err.source().is_some());
+}
+
+#[test]
 fn dlarray_and_crossentropy_reject_unsupported_forms() {
     let err = block_on(dlarray_builtin(
         Value::Num(1.0),

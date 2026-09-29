@@ -1,5 +1,6 @@
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, ProviderAdamUpdateRequest, ProviderAdamUpdateResult,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderAdamUpdateRequest,
+    ProviderAdamUpdateResult, ProviderExecutionError,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -285,11 +286,7 @@ fn preflight_adam_host_operands(args: &[Value]) -> BuiltinResult<()> {
 #[runtime_builtin(
     name = "dlupdate",
     execution_stack = "process",
-    category = "deep_learning",
-    summary = "Apply a function handle across matching parameter trees.",
-    keywords = "dlupdate,deep learning,model update",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::DLUPDATE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(super) async fn dlupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -314,12 +311,10 @@ pub(super) async fn dlupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
     let trees = rest.to_vec();
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
-    if requested_outputs == 0 {
-        return Ok(Value::OutputList(Vec::new()));
-    }
-
     let outputs = dlupdate_node(function, &trees, requested_outputs, 0).await?;
-    if requested_outputs == 1 {
+    if requested_outputs == 0 {
+        Ok(Value::OutputList(Vec::new()))
+    } else if requested_outputs == 1 {
         Ok(outputs.into_iter().next().unwrap())
     } else {
         Ok(Value::OutputList(outputs))
@@ -875,15 +870,21 @@ async fn dlupdate_leaf(
     let result = crate::call_feval_async_with_outputs(function.clone(), values, requested_outputs)
         .await
         .map_err(|err| {
-            deep_learning_error(
-                "dlupdate",
-                format!("dlupdate: function-handle evaluation failed: {err}"),
-            )
+            crate::build_runtime_error(format!(
+                "dlupdate: function-handle evaluation failed: {err}"
+            ))
+            .with_builtin("dlupdate")
+            .with_identifier("RunMat:deepLearning:InvalidInput")
+            .with_source(err)
+            .build()
         })?;
     normalize_dlupdate_outputs(result, requested_outputs)
 }
 
 fn normalize_dlupdate_outputs(value: Value, requested_outputs: usize) -> BuiltinResult<Vec<Value>> {
+    if requested_outputs == 0 {
+        return Ok(Vec::new());
+    }
     match value {
         Value::OutputList(values) if values.len() == requested_outputs => Ok(values),
         Value::OutputList(values) => Err(deep_learning_error(
@@ -1068,25 +1069,42 @@ fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpdateGpuEval>
         ));
     }
 
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(parameters) else {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(parameters) else {
         return Ok(None);
     };
-    let Some(gradient_provider) = runmat_accelerate_api::provider_for_handle(gradient) else {
+    let Some(gradient_provider) = gpu_helpers::exact_provider_for_handle(gradient) else {
         return Ok(None);
     };
     if !runmat_accelerate_api::same_provider_instance(gradient_provider, provider) {
         return Ok(None);
     }
     if average_grad.is_some_and(|handle| {
-        runmat_accelerate_api::provider_for_handle(handle).is_none_or(|state_provider| {
+        gpu_helpers::exact_provider_for_handle(handle).is_none_or(|state_provider| {
             !runmat_accelerate_api::same_provider_instance(state_provider, provider)
         })
     }) || average_sq_grad.is_some_and(|handle| {
-        runmat_accelerate_api::provider_for_handle(handle).is_none_or(|state_provider| {
+        gpu_helpers::exact_provider_for_handle(handle).is_none_or(|state_provider| {
             !runmat_accelerate_api::same_provider_instance(state_provider, provider)
         })
     }) {
         return Ok(None);
+    }
+
+    let precision = runmat_accelerate_api::handle_precision(parameters);
+    if precision.is_none()
+        || [Some(gradient), average_grad, average_sq_grad]
+            .into_iter()
+            .flatten()
+            .any(|handle| {
+                runmat_accelerate_api::handle_is_logical(handle)
+                    || runmat_accelerate_api::handle_precision(handle) != precision
+            })
+        || runmat_accelerate_api::handle_is_logical(parameters)
+    {
+        return Err(deep_learning_error(
+            "adamupdate",
+            "adamupdate: resident optimizer tensors must have matching real single or double storage",
+        ));
     }
 
     let iteration = positive_iteration(&args[4])?;
@@ -1103,13 +1121,87 @@ fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpdateGpuEval>
     };
 
     match provider.adam_update(&request) {
-        Ok(result) => Ok(Some(AdamUpdateGpuEval::from_provider(result))),
+        Ok(result) => {
+            validate_adam_gpu_result(&result, &request, provider)?;
+            Ok(Some(AdamUpdateGpuEval::from_provider(result)))
+        }
         Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => Ok(None),
-        Err(err) => Err(deep_learning_error(
-            "adamupdate",
-            format!("adamupdate: {err}"),
-        )),
+        Err(err) => Err(adam_provider_error(err)),
     }
+}
+
+fn adam_provider_error(error: anyhow::Error) -> crate::RuntimeError {
+    let source = ProviderExecutionError::from(error);
+    crate::runtime_error::with_provider_execution_source(
+        deep_learning_error("adamupdate", format!("adamupdate: {source}")),
+        source,
+    )
+}
+
+/// Validate the complete provider result before any view is published into
+/// runtime residency. The owned result is dropped as a unit on failure, so
+/// physical leases—not a second ad hoc release protocol—perform cleanup.
+fn validate_adam_gpu_result(
+    result: &ProviderAdamUpdateResult,
+    request: &ProviderAdamUpdateRequest<'_>,
+    provider: &dyn AccelProvider,
+) -> BuiltinResult<()> {
+    let outputs = [
+        &result.parameters,
+        &result.average_grad,
+        &result.average_sq_grad,
+    ];
+    let inputs = [
+        Some(request.parameters),
+        Some(request.gradient),
+        request.average_grad,
+        request.average_sq_grad,
+    ];
+    let expected_precision = runmat_accelerate_api::handle_precision(request.parameters);
+    for output in outputs {
+        if output.shape() != request.parameters.shape()
+            || runmat_accelerate_api::handle_storage(output) != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(output)
+            || runmat_accelerate_api::handle_precision(output) != expected_precision
+            || gpu_helpers::exact_provider_for_handle(output)
+                .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
+        {
+            return Err(deep_learning_error(
+                "adamupdate",
+                "adamupdate: provider returned an optimizer tensor with the wrong owner, shape, or numeric class",
+            ));
+        }
+        output
+            .allocation_lease()
+            .validate_live()
+            .map_err(|source| {
+                crate::build_runtime_error("adamupdate: provider returned a retired allocation")
+                    .with_builtin("adamupdate")
+                    .with_identifier("RunMat:deepLearning:InvalidInput")
+                    .with_source(source)
+                    .build()
+            })?;
+        if inputs
+            .iter()
+            .flatten()
+            .any(|input| output.allocation_identity() == input.allocation_identity())
+        {
+            return Err(deep_learning_error(
+                "adamupdate",
+                "adamupdate: provider returned an alias of a borrowed optimizer input",
+            ));
+        }
+    }
+    if outputs[0].allocation_identity() == outputs[1].allocation_identity()
+        || outputs[0].allocation_identity() == outputs[2].allocation_identity()
+        || outputs[1].allocation_identity() == outputs[2].allocation_identity()
+    {
+        return Err(deep_learning_error(
+            "adamupdate",
+            "adamupdate: provider returned aliased optimizer outputs",
+        ));
+    }
+    Ok(())
 }
 
 enum GpuOptimizerState<'a> {
@@ -1436,6 +1528,67 @@ mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{IntValue, IntegerStorage};
+    use std::error::Error;
+
+    #[test]
+    fn adam_operational_provider_error_retains_cause_without_gather_retry() {
+        let error = adam_provider_error(anyhow::anyhow!(
+            "unsupported-looking device allocation failed"
+        ));
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert!(error.source().is_some());
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    }
+
+    #[test]
+    fn adam_provider_result_admission_rejects_borrowed_alias_before_publication() {
+        test_support::with_test_provider(|provider| {
+            let shape = [1usize, 1usize];
+            let parameter = provider
+                .upload(&HostTensorView {
+                    data: &[1.0],
+                    shape: &shape,
+                })
+                .expect("parameter");
+            let gradient = provider
+                .upload(&HostTensorView {
+                    data: &[0.1],
+                    shape: &shape,
+                })
+                .expect("gradient");
+            let request = ProviderAdamUpdateRequest {
+                parameters: &parameter,
+                gradient: &gradient,
+                average_grad: None,
+                average_sq_grad: None,
+                iteration: 1,
+                learn_rate: 0.001,
+                gradient_decay_factor: 0.9,
+                squared_gradient_decay_factor: 0.999,
+                epsilon: 1.0e-8,
+            };
+            let result = ProviderAdamUpdateResult {
+                parameters: parameter.clone(),
+                average_grad: provider
+                    .upload(&HostTensorView {
+                        data: &[0.0],
+                        shape: &shape,
+                    })
+                    .expect("moment"),
+                average_sq_grad: provider
+                    .upload(&HostTensorView {
+                        data: &[0.0],
+                        shape: &shape,
+                    })
+                    .expect("squared moment"),
+            };
+            let err = validate_adam_gpu_result(&result, &request, provider)
+                .expect_err("borrowed parameter alias must reject");
+            assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+            drop(result);
+            assert!(parameter.allocation_lease().validate_live().is_ok());
+        });
+    }
 
     fn assert_close(actual: f64, expected: f64) {
         assert!(
