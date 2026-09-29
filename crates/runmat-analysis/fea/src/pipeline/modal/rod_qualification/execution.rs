@@ -1,6 +1,6 @@
 //! Cold typed-object execution/recovery, not a driver-crash or distributed-solve claim.
 use super::{
-    field_error, policy, rod_model, slab_mesh, ComputeBackend, FormulationRequirement,
+    field_error, policy, rod_mesh, rod_model, ComputeBackend, FormulationRequirement,
     SolverMeshArtifact, WAVE_SPEED,
 };
 use crate::{
@@ -24,7 +24,16 @@ use runmat_meshing_core::{CanonicalMeshingContract, StableDigest};
 
 #[test]
 fn solid_rod_harmonic_cold_workload_execution_and_field_recovery_preserve_physics() {
-    let mesh = slab_mesh(8);
+    cold_execution(false);
+}
+
+#[test]
+fn solid_rod_tet10_harmonic_cold_workload_execution_and_field_recovery_preserve_physics() {
+    cold_execution(true);
+}
+
+fn cold_execution(quadratic: bool) {
+    let mesh = rod_mesh(if quadratic { 4 } else { 8 }, quadratic);
     let k = 1.0;
     let f = k * WAVE_SPEED / std::f64::consts::TAU;
     let workload = StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
@@ -65,7 +74,10 @@ fn solid_rod_harmonic_cold_workload_execution_and_field_recovery_preserve_physic
             .unwrap();
     assert_eq!(imported, cold);
     let displacement = imported.sample().displacement();
-    assert!(field_error(&mesh, k, displacement.real(), displacement.imaginary()) < 0.005);
+    assert!(
+        field_error(&mesh, k, displacement.real(), displacement.imaginary())
+            < if quadratic { 0.0005 } else { 0.005 }
+    );
     let topology =
         StructuralRecoveredFieldTopology::derive(cold_workload.model(), Some(&cold_mesh)).unwrap();
     let recovery = FieldRecoveryRequest::new(
@@ -79,6 +91,29 @@ fn solid_rod_harmonic_cold_workload_execution_and_field_recovery_preserve_physic
         recover_structural_frequency_entry_fields(&cold_workload, &cold_mesh, &recovery, &imported)
             .unwrap();
     assert!(!fields.fields().is_empty());
+    let recovered_displacement = fields
+        .fields()
+        .iter()
+        .find(|field| {
+            field.definition().quantity() == runmat_analysis_core::ObservationQuantity::Displacement
+        })
+        .unwrap();
+    let interleaved = recovered_displacement.as_host_f64().unwrap();
+    assert_eq!(interleaved.len(), displacement.real().len() * 2);
+    let recovered_real = interleaved
+        .chunks_exact(2)
+        .map(|v| v[0])
+        .collect::<Vec<_>>();
+    let recovered_imaginary = interleaved
+        .chunks_exact(2)
+        .map(|v| v[1])
+        .collect::<Vec<_>>();
+    assert_eq!(recovered_real, displacement.real());
+    assert_eq!(recovered_imaginary, displacement.imaginary());
+    assert!(
+        field_error(&mesh, k, &recovered_real, &recovered_imaginary)
+            < if quadratic { 0.0005 } else { 0.005 }
+    );
     assert_eq!(
         RecoveredFieldArtifact::from_canonical_bytes(&fields.canonical_bytes().unwrap()).unwrap(),
         fields

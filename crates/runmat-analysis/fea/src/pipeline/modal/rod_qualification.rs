@@ -30,7 +30,7 @@ use crate::{
         evaluate_harmonic_physical_state, solve_direct_harmonic, solve_modal_harmonic,
         DirectHarmonicPolicy, ModalHarmonicLoad, ModalReducedSystem,
     },
-    topology::test_meshes::slab_mesh,
+    topology::test_meshes::{quadratic_slab_mesh, slab_mesh},
     ComputeBackend, ModalSolveOptions,
 };
 
@@ -168,11 +168,23 @@ fn field_error(mesh: &SolverMeshArtifact, k: f64, real: &[f64], imaginary: &[f64
 
 #[test]
 fn solid_rod_harmonic_face_traction_converges_to_independent_continuum() {
+    harmonic_continuum(false);
+}
+
+#[test]
+fn solid_rod_tet10_harmonic_face_traction_converges_to_independent_continuum() {
+    harmonic_continuum(true);
+}
+
+fn harmonic_continuum(quadratic: bool) {
     let wave_numbers = [0.5, 1.0, 2.0]; // Both sides of first resonance pi/2, never exactly at it.
     let mut previous = [f64::INFINITY; 3];
     let mut previous_reaction = [f64::INFINITY; 3];
-    for cells in [2, 4, 8] {
-        let mesh = slab_mesh(cells);
+    let refinements = if quadratic { [1, 2, 4] } else { [2, 4, 8] };
+    let reduction = if quadratic { 6.0 } else { 2.5 };
+    let finest_bound = if quadratic { 0.002 } else { 0.02 };
+    for cells in refinements {
+        let mesh = rod_mesh(cells, quadratic);
         let model = rod_model(&mesh, &wave_numbers);
         for (case, k) in wave_numbers.into_iter().enumerate() {
             let assembly = assemble(&model, &mesh, k);
@@ -205,15 +217,17 @@ fn solid_rod_harmonic_face_traction_converges_to_independent_continuum() {
                 &response.displacement_real,
                 &response.displacement_imaginary,
             );
-            eprintln!("rod cells={cells}, k={k}, complex field error={error}");
+            eprintln!(
+                "rod quadratic={quadratic}, cells={cells}, k={k}, complex field error={error}"
+            );
             assert!(
-                error < previous[case] / 2.5,
+                error < previous[case] / reduction,
                 "cells={cells}, k={k}, error={error}, prior={}",
                 previous[case]
             );
             previous[case] = error;
-            if cells == 8 {
-                assert!(error < 0.02);
+            if cells == refinements[2] {
+                assert!(error < finest_bound);
             }
             let physical = evaluate_harmonic_physical_state(
                 &assembly.real,
@@ -239,11 +253,11 @@ fn solid_rod_harmonic_face_traction_converges_to_independent_continuum() {
                 let expected = -phase / k.cos();
                 reaction_error = reaction_error.max((actual / expected - 1.0).abs());
             }
-            eprintln!("rod cells={cells}, k={k}, support reaction error={reaction_error}");
-            assert!(reaction_error < previous_reaction[case] / 2.5);
+            eprintln!("rod quadratic={quadratic}, cells={cells}, k={k}, support reaction error={reaction_error}");
+            assert!(reaction_error < previous_reaction[case] / reduction);
             previous_reaction[case] = reaction_error;
-            if cells == 8 {
-                assert!(reaction_error < 0.02);
+            if cells == refinements[2] {
+                assert!(reaction_error < finest_bound);
             }
             let input_power = 0.5
                 * omega
@@ -273,9 +287,27 @@ fn modal_model(model: &AnalysisModel) -> AnalysisModel {
 
 #[test]
 fn solid_rod_modal_frequency_and_retained_response_have_independent_evidence() {
+    modal_continuum(false);
+}
+
+#[test]
+fn solid_rod_tet10_modal_frequency_and_retained_response_have_independent_evidence() {
+    modal_continuum(true);
+}
+
+fn rod_mesh(cells: usize, quadratic: bool) -> SolverMeshArtifact {
+    if quadratic {
+        quadratic_slab_mesh(cells)
+    } else {
+        slab_mesh(cells)
+    }
+}
+
+fn modal_continuum(quadratic: bool) {
     let mut previous_frequency_error = f64::INFINITY;
-    for cells in [2, 4, 8] {
-        let mesh = slab_mesh(cells);
+    let refinements = if quadratic { [1, 2, 4] } else { [2, 4, 8] };
+    for cells in refinements {
+        let mesh = rod_mesh(cells, quadratic);
         let model = rod_model(&mesh, &[1.0]);
         let modal = super::run_modal_with_options(
             &modal_model(&model),
@@ -290,16 +322,16 @@ fn solid_rod_modal_frequency_and_retained_response_have_independent_evidence() {
         .unwrap();
         let expected_hz = WAVE_SPEED / 4.0;
         let error = (modal.frequencies_hz()[0] / expected_hz - 1.0).abs();
-        eprintln!("rod cells={cells}, fundamental frequency error={error}");
-        assert!(error < previous_frequency_error / 3.0);
+        eprintln!("rod quadratic={quadratic}, cells={cells}, fundamental frequency error={error}");
+        assert!(error < previous_frequency_error / if quadratic { 6.0 } else { 3.0 });
         previous_frequency_error = error;
-        if cells == 8 {
-            assert!(error < 0.002);
+        if cells == refinements[2] {
+            assert!(error < if quadratic { 0.0002 } else { 0.002 });
         }
     }
 
     // On one fixed physical mesh, isolate truncation from spatial discretization.
-    let mesh = slab_mesh(2);
+    let mesh = rod_mesh(if quadratic { 1 } else { 2 }, quadratic);
     let model = rod_model(&mesh, &[1.0]);
     let assembly = assemble(&model, &mesh, 1.0);
     let direct = solve_direct_harmonic(
@@ -311,7 +343,7 @@ fn solid_rod_modal_frequency_and_retained_response_have_independent_evidence() {
     .unwrap();
     let mut prior = f64::INFINITY;
     for requested in [1, 8, 18] {
-        // 18 axial free DOFs on this 27-node mesh.
+        // Both coarse meshes have 27 nodes and 18 axial free DOFs.
         let modal = super::run_modal_with_options(
             &modal_model(&model),
             ComputeBackend::Cpu,
@@ -359,7 +391,7 @@ fn solid_rod_modal_frequency_and_retained_response_have_independent_evidence() {
                 .sum::<f64>()
                 .sqrt();
         eprintln!(
-            "rod retained={}, direct/modal difference={difference}",
+            "rod quadratic={quadratic}, retained={}, direct/modal difference={difference}",
             reduced.mode_count()
         );
         assert!(difference < prior);
