@@ -95,6 +95,8 @@ fn duration_diagnostics_match_each_public_operation_and_predicate_is_total() {
                 DurationErrorKind::InvalidArgument,
                 DurationErrorKind::InvalidFormat,
                 DurationErrorKind::InvalidIndex,
+                DurationErrorKind::InvalidObject,
+                DurationErrorKind::Internal,
             ][..],
         ),
         (
@@ -148,6 +150,27 @@ fn duration_diagnostics_match_each_public_operation_and_predicate_is_total() {
             );
         }
     }
+}
+
+#[test]
+fn assignment_descriptor_covers_transitive_duration_read_and_text_format_errors() {
+    let errors = DURATION_SUBSASGN_DESCRIPTOR.errors;
+    for kind in [
+        DurationErrorKind::InvalidObject,
+        DurationErrorKind::Internal,
+    ] {
+        assert!(errors
+            .iter()
+            .any(|error| error.identifier == Some(kind.identifier())));
+    }
+    let format = errors
+        .iter()
+        .find(|error| error.identifier == Some(DurationErrorKind::InvalidFormat.identifier()))
+        .expect("Format diagnostic");
+    assert_eq!(
+        format.when,
+        "A textual Format option or property names an unsupported display format."
+    );
 }
 
 #[test]

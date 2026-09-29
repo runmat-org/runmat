@@ -31,7 +31,7 @@ impl DurationErrorKind {
 const fn descriptor(kind: DurationErrorKind) -> BuiltinErrorDescriptor {
     match kind {
         DurationErrorKind::InvalidArgument => BuiltinErrorDescriptor { code: "RM.DURATION.INVALID_ARGUMENT", identifier: Some(kind.identifier()), when: "An input is not a supported real numeric, logical, or duration value, or a constructor form is invalid.", message: "duration: invalid argument" },
-        DurationErrorKind::InvalidFormat => BuiltinErrorDescriptor { code: "RM.DURATION.INVALID_FORMAT", identifier: Some(kind.identifier()), when: "A Format option or property is not a supported scalar text or display format.", message: "duration: invalid Format" },
+        DurationErrorKind::InvalidFormat => BuiltinErrorDescriptor { code: "RM.DURATION.INVALID_FORMAT", identifier: Some(kind.identifier()), when: "A textual Format option or property names an unsupported display format.", message: "duration: invalid Format" },
         DurationErrorKind::ShapeMismatch => BuiltinErrorDescriptor { code: "RM.DURATION.SHAPE_MISMATCH", identifier: Some(kind.identifier()), when: "Component or operand shapes cannot be combined.", message: "duration: incompatible sizes" },
         DurationErrorKind::InvalidIndex => BuiltinErrorDescriptor { code: "RM.DURATION.INVALID_INDEX", identifier: Some(kind.identifier()), when: "A duration index path or member selector is unsupported.", message: "duration: invalid index" },
         DurationErrorKind::InvalidObject => BuiltinErrorDescriptor { code: "RM.DURATION.INVALID_OBJECT", identifier: Some(kind.identifier()), when: "A duration receiver has invalid or missing internal day storage.", message: "duration: invalid object" },
@@ -62,6 +62,8 @@ pub const SUBSASGN_ERRORS: &[BuiltinErrorDescriptor] = &[
     descriptor(DurationErrorKind::InvalidArgument),
     descriptor(DurationErrorKind::InvalidFormat),
     descriptor(DurationErrorKind::InvalidIndex),
+    descriptor(DurationErrorKind::InvalidObject),
+    descriptor(DurationErrorKind::Internal),
 ];
 pub const OPERATOR_ERRORS: &[BuiltinErrorDescriptor] = &[
     descriptor(DurationErrorKind::InvalidArgument),
