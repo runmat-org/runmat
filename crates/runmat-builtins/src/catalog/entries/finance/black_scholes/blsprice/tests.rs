@@ -52,7 +52,7 @@ fn scalar_broadcast_and_output_count_are_sound() {
 }
 
 #[test]
-fn resident_result_does_not_claim_host_double_or_specific_precision() {
+fn resident_result_keeps_known_double_class_without_claiming_placement() {
     let mut resident = real(ShapeFact::from(vec![Some(3), Some(1)]));
     resident.residency = ResidencyFact::Unknown;
     let args = vec![
@@ -68,12 +68,78 @@ fn resident_result_does_not_claim_host_double_or_specific_precision() {
         "{:?}",
         inferred.diagnostics
     );
-    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(
+        inferred.outputs[0].numeric().map(|numeric| numeric.class),
+        Some(NumericClass::Double)
+    );
     assert_eq!(
         inferred.outputs[0].shape,
         ShapeFact::from(vec![Some(3), Some(1)])
     );
     assert_eq!(inferred.outputs[0].residency, ResidencyFact::Unknown);
+}
+
+#[test]
+fn single_arrays_and_scalar_double_controls_select_single_independent_of_residency() {
+    let mut single = real(ShapeFact::from(vec![Some(3), Some(1)]));
+    single.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    });
+    single.residency = ResidencyFact::Device { provider: None };
+    let scalar = real(ShapeFact::Scalar);
+    let mut args = vec![
+        single,
+        scalar.clone(),
+        scalar.clone(),
+        scalar.clone(),
+        scalar.clone(),
+    ];
+    let selected = crate::infer_catalog_call(&BLSPRICE_CATALOG_ENTRY, &request(args.clone(), 2));
+    assert!(
+        selected.diagnostics.is_empty(),
+        "{:?}",
+        selected.diagnostics
+    );
+    assert!(selected
+        .outputs
+        .iter()
+        .all(|value| value.numeric().map(|numeric| numeric.class) == Some(NumericClass::Single)));
+    assert!(selected
+        .outputs
+        .iter()
+        .all(|value| value.residency == ResidencyFact::Unknown));
+    args[1] = real(ShapeFact::from(vec![Some(3), Some(1)]));
+    let mixed = crate::infer_catalog_call(&BLSPRICE_CATALOG_ENTRY, &request(args, 1));
+    assert_eq!(
+        mixed.outputs[0].numeric().map(|numeric| numeric.class),
+        Some(NumericClass::Double)
+    );
+}
+
+#[test]
+fn unresolved_double_geometry_does_not_claim_single() {
+    let mut single = real(ShapeFact::from(vec![Some(3), Some(1)]));
+    single.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    });
+    let mut scalar = real(ShapeFact::Unknown);
+    scalar.residency = ResidencyFact::Unknown;
+    let result = crate::infer_catalog_call(
+        &BLSPRICE_CATALOG_ENTRY,
+        &request(
+            vec![
+                single,
+                scalar.clone(),
+                scalar.clone(),
+                scalar.clone(),
+                scalar,
+            ],
+            1,
+        ),
+    );
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
 }
 
 #[test]

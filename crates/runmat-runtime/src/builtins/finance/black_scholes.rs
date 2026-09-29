@@ -119,17 +119,19 @@ async fn blsprice_builtin(
     let raw_values = vec![price, strike, rate, time, volatility, yield_value];
     admit_nondouble_pricing_inputs(BLSPRICE, &BLSPRICE_NONDOUBLE_EXTENSION, raw_values.iter())?;
     admission::preflight_numeric_shapes(BLSPRICE, raw_values.iter())?;
+    let result_class = precision::select(&raw_values);
+    precision::preflight_host_scalars(&raw_values, result_class)?;
     if raw_values
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)))
     {
-        if let Some(eval) = try_blsprice_gpu(&raw_values).await? {
+        if let Some(eval) = try_blsprice_gpu(&raw_values, result_class).await? {
             return eval.output(requested_outputs);
         }
     }
 
     let values = gather_values(BLSPRICE, raw_values).await?;
-    let inputs = BroadcastInputs::from_values(BLSPRICE, values)?;
+    let inputs = BroadcastInputs::from_values(BLSPRICE, values, result_class)?;
     let mut call = Vec::with_capacity(inputs.len);
     let mut put = Vec::with_capacity(inputs.len);
     for idx in 0..inputs.len {
@@ -146,8 +148,8 @@ async fn blsprice_builtin(
         put.push(result.put);
     }
 
-    let call = output_value(call, inputs.shape.clone(), BLSPRICE)?;
-    let put = output_value(put, inputs.shape, BLSPRICE)?;
+    let call = output_value(call, inputs.shape.clone(), result_class, BLSPRICE)?;
+    let put = output_value(put, inputs.shape, result_class, BLSPRICE)?;
     match requested_outputs {
         Some(1) => Ok(Value::OutputList(vec![call])),
         Some(2) => Ok(Value::OutputList(vec![call, put])),
@@ -202,10 +204,22 @@ struct BroadcastInputs {
 }
 
 impl BroadcastInputs {
-    fn from_values(builtin: &'static str, values: Vec<Value>) -> BuiltinResult<Self> {
+    fn from_values(
+        builtin: &'static str,
+        values: Vec<Value>,
+        class: precision::PricingClass,
+    ) -> BuiltinResult<Self> {
         let mut inputs = values
             .into_iter()
-            .map(|value| numeric_input(builtin, value))
+            .map(|value| {
+                let mut input = numeric_input(builtin, value)?;
+                if class == precision::PricingClass::Single {
+                    for number in &mut input.values {
+                        *number = precision::single_input(*number)?;
+                    }
+                }
+                Ok(input)
+            })
             .collect::<BuiltinResult<Vec<_>>>()?;
         let mut shape = vec![1, 1];
         for input in &inputs {
@@ -282,6 +296,7 @@ fn numeric_input(builtin: &'static str, value: Value) -> BuiltinResult<NumericIn
 
 mod resident;
 mod admission;
+mod precision;
 use resident::try_blsprice_gpu;
 
 fn tensor_shape(shape: &[usize], rows: usize, cols: usize) -> Vec<usize> {
@@ -326,14 +341,20 @@ fn shape_len_checked(builtin: &'static str, shape: &[usize]) -> BuiltinResult<us
 fn output_value(
     values: Vec<f64>,
     shape: Vec<usize>,
+    class: precision::PricingClass,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    if values.len() == 1 {
-        Ok(Value::Num(values[0]))
-    } else {
-        Tensor::new(values, shape)
+    match class {
+        precision::PricingClass::Double if values.len() == 1 => Ok(Value::Num(values[0])),
+        precision::PricingClass::Double => Tensor::new(values, shape)
             .map(Value::Tensor)
-            .map_err(|err| error(builtin, format!("{builtin}: {err}"), &ERROR_INTERNAL))
+            .map_err(|err| error(builtin, format!("{builtin}: {err}"), &ERROR_INTERNAL)),
+        precision::PricingClass::Single => Tensor::from_f32(
+            values.into_iter().map(|value| value as f32).collect(),
+            shape,
+        )
+        .map(Value::Tensor)
+        .map_err(|err| error(builtin, format!("{builtin}: {err}"), &ERROR_INTERNAL)),
     }
 }
 

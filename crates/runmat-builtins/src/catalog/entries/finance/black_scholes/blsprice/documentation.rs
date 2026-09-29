@@ -21,14 +21,15 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "With one output, `blsprice` returns the call price; `[Call, Put]` requests both. A zero-output request produces no output. More than two outputs are rejected before pricing or provider work.",
                 "The five required inputs and optional `Yield` can be scalars or arrays with MATLAB-compatible implicit-expansion dimensions. Empty `Yield` selects zero. Invalid financial domains and NaN inputs produce elementwise NaN rather than aborting the entire array calculation.",
-                "The numerical calculation uses binary64. Numeric inputs are converted at the pricing boundary; a wide fixed-width integer can therefore round. The public compatibility target documents double inputs. Native-single, fixed-width integer, and logical pricing inputs are RunMat-only extensions, admitted before provider work; their MATLAB parity is not claimed.",
+                "Double inputs produce double call and put prices. Single inputs produce single prices unless a nonscalar double array is also present; scalar double parameters, whether represented as scalar values or 1-by-1 arrays, can accompany single inputs. With no single input the result is double. This input-class rule is independent of provider choice and is RunMat behavior, not a claim about MATLAB's undocumented output-class combinations.",
+                "Single-result pricing rounds inputs to single at the calculation boundary. A finite double scalar that would overflow to infinity or underflow to zero in single is rejected before provider work. Fixed-width integer and logical pricing inputs use the double route; a wide integer may round when it enters binary64. The public compatibility target documents double inputs. Single, fixed-width integer, and logical pricing inputs are RunMat-only extensions, admitted before provider work.",
             ],
         },
         BuiltinDocumentationSection {
             heading: "GPU and execution",
             paragraphs: &[
                 "Resident real gpuArray inputs can use the owning provider's `black_scholes_price` hook. Host scalar or tensor arguments in a mixed call become temporary inputs for that same provider. A provider without the hook uses the host pricing implementation. Resident results from a provider are checked for owner, shape, and physical precision before they are returned.",
-                "The provider hook accepts physical single or double inputs. Single is available only in RunMat compatibility mode. This is a custom provider operation, not a fused elementwise kernel. The function can suspend for provider work or fallback gathers and does not mutate its arguments.",
+                "The provider hook accepts physical single or double inputs only when its precision matches the input-derived result class. A mixed call with a nonscalar double array cannot silently narrow to a single provider; it falls back to host double pricing if that provider cannot execute double. Single is available only in RunMat compatibility mode. This is a custom provider operation, not a fused elementwise kernel. The function can suspend for fallback gathers and does not mutate its arguments.",
             ],
         },
     ],

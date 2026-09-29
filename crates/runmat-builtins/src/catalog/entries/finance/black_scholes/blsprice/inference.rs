@@ -31,6 +31,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let mut shape = ShapeFact::Scalar;
     let mut all_host = true;
+    let mut saw_single = false;
+    let mut double_forced = false;
+    let mut unknown_input = false;
+    let mut unknown_double_geometry = false;
     for (index, value) in args.iter().enumerate() {
         if !matches!(
             value.kind,
@@ -54,6 +58,23 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
         all_host &= value.residency == ResidencyFact::Host;
+        match &value.kind {
+            ValueKindFact::Numeric(numeric) if numeric.class == NumericClass::Single => {
+                saw_single = true;
+            }
+            ValueKindFact::Numeric(numeric) if numeric.class == NumericClass::Double => {
+                if value.shape.element_count() != Some(1) {
+                    if value.shape.element_count().is_some() {
+                        double_forced = true;
+                    } else {
+                        unknown_double_geometry = true;
+                    }
+                }
+            }
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical => double_forced = true,
+            ValueKindFact::Unknown => unknown_input = true,
+            _ => {}
+        }
         if index == 5 && value.shape.element_count() == Some(0) {
             continue;
         }
@@ -69,17 +90,30 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             }
         };
     }
-    let mut output = if all_host {
+    let output_class = if double_forced {
+        Some(NumericClass::Double)
+    } else if unknown_input || (saw_single && unknown_double_geometry) {
+        None
+    } else if saw_single {
+        Some(NumericClass::Single)
+    } else {
+        Some(NumericClass::Double)
+    };
+    let mut output = if let Some(class) = output_class {
         ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
+                class,
                 domain: NumericDomain::Real,
             }),
             shape.clone(),
-            if shape.element_count() == Some(1) {
-                StorageFact::Scalar
+            if all_host {
+                if class == NumericClass::Double && shape.element_count() == Some(1) {
+                    StorageFact::Scalar
+                } else {
+                    StorageFact::Dense
+                }
             } else {
-                StorageFact::Dense
+                StorageFact::Unknown
             },
         )
     } else {
@@ -88,6 +122,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         fact.shape = shape.clone();
         fact
     };
+    if all_host {
+        output.residency = ResidencyFact::Host;
+    }
     output.shape = shape;
     finish_fixed_outputs(entry, request, vec![output.clone(), output], diagnostics)
 }

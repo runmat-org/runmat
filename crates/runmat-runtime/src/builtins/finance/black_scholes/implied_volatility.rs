@@ -98,7 +98,7 @@ pub(super) async fn blsimpv_builtin(
     .await?;
     let mut numeric = values;
     let class_value = numeric.pop().expect("class value");
-    let inputs = BroadcastInputs::from_values(BLSIMPV, numeric)?;
+    let inputs = BroadcastInputs::from_values(BLSIMPV, numeric, precision::PricingClass::Double)?;
     let classes = ClassInput::from_value(class_value, &inputs.shape, inputs.len)?;
     let mut out = Vec::with_capacity(inputs.len);
     for idx in 0..inputs.len {
@@ -115,7 +115,7 @@ pub(super) async fn blsimpv_builtin(
         };
         out.push(implied_volatility(params));
     }
-    output_value(out, inputs.shape, BLSIMPV)
+    output_value(out, inputs.shape, precision::PricingClass::Double, BLSIMPV)
 }
 
 #[derive(Clone, Copy)]

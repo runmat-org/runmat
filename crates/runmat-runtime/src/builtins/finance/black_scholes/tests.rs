@@ -38,6 +38,10 @@ fn as_tensor(value: &Value) -> &Tensor {
     }
 }
 
+fn single(data: Vec<f32>, shape: Vec<usize>) -> Value {
+    Value::Tensor(Tensor::from_f32(data, shape).expect("single input"))
+}
+
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
         (actual - expected).abs() <= tolerance,
@@ -55,6 +59,7 @@ fn black_scholes_broadcast_indexing_appends_trailing_singletons() {
                 Tensor::new(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![2, 1, 3]).unwrap(),
             ),
         ],
+        precision::PricingClass::Double,
     )
     .unwrap();
     assert_eq!(inputs.shape, vec![2, 1, 3]);
@@ -323,6 +328,67 @@ fn blsprice_gpu_resident_inputs_preserve_residency() {
             assert_close(put.materialize_f64()[idx], expected.put, 1e-12);
         }
     });
+}
+
+#[test]
+fn blsprice_host_single_class_ignores_double_scalar_representation() {
+    let price = single(vec![100.0, 110.0], vec![2, 1]);
+    for strike in [Value::Num(95.0), tensor(vec![95.0], 1, 1)] {
+        let result = block_on(blsprice_builtin(
+            price.clone(),
+            strike,
+            Value::Num(0.1),
+            Value::Num(0.25),
+            Value::Num(0.5),
+            Vec::new(),
+        ))
+        .expect("single price with double scalar controls");
+        assert_eq!(as_tensor(&result).numeric_dtype(), NumericDType::F32);
+        assert_eq!(as_tensor(&result).shape, vec![2, 1]);
+    }
+
+    let all_scalar = block_on(blsprice_builtin(
+        single(vec![100.0], vec![1, 1]),
+        Value::Num(95.0),
+        Value::Num(0.1),
+        Value::Num(0.25),
+        Value::Num(0.5),
+        Vec::new(),
+    ))
+    .expect("single scalar result");
+    assert_eq!(as_tensor(&all_scalar).numeric_dtype(), NumericDType::F32);
+    assert_eq!(as_tensor(&all_scalar).shape, vec![1, 1]);
+}
+
+#[test]
+fn blsprice_nonscalar_double_array_forces_double() {
+    let result = block_on(blsprice_builtin(
+        single(vec![100.0, 110.0], vec![2, 1]),
+        tensor(vec![95.0, 95.0], 2, 1),
+        Value::Num(0.1),
+        Value::Num(0.25),
+        Value::Num(0.5),
+        Vec::new(),
+    ))
+    .expect("double array determines result precision");
+    assert_eq!(as_tensor(&result).numeric_dtype(), NumericDType::F64);
+}
+
+#[test]
+fn single_boundary_rejects_finite_double_scalar_overflow_and_underflow() {
+    let price = single(vec![100.0, 110.0], vec![2, 1]);
+    for strike in [Value::Num(1.0e100), tensor(vec![1.0e-100], 1, 1)] {
+        let failure = block_on(blsprice_builtin(
+            price.clone(),
+            strike,
+            Value::Num(0.1),
+            Value::Num(0.25),
+            Value::Num(0.5),
+            Vec::new(),
+        ))
+        .expect_err("double scalar outside single range");
+        assert_eq!(failure.identifier(), ERROR_INVALID_INPUT.identifier);
+    }
 }
 
 #[test]

@@ -47,7 +47,10 @@ fn provider_error(source: ProviderExecutionError) -> RuntimeError {
     )
 }
 
-pub(super) async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<BlsPriceGpuEval>> {
+pub(super) async fn try_blsprice_gpu(
+    values: &[Value],
+    result_class: precision::PricingClass,
+) -> BuiltinResult<Option<BlsPriceGpuEval>> {
     let borrowed: Vec<_> = values
         .iter()
         .filter_map(|value| match value {
@@ -61,6 +64,9 @@ pub(super) async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<B
     let Some(provider) = gpu_helpers::exact_provider_for_handle(anchor) else {
         return Ok(None);
     };
+    if provider.precision() != result_class.provider_precision() {
+        return Ok(None);
+    }
     let _residency: Vec<_> = borrowed
         .iter()
         .map(|handle| gpu_helpers::ResidencyRestoreGuard::new(handle))
@@ -112,7 +118,12 @@ pub(super) async fn try_blsprice_gpu(values: &[Value]) -> BuiltinResult<Option<B
                 let data = host.expect("host operand admitted above");
                 let tensor = match provider.precision() {
                     ProviderPrecision::F32 => Tensor::from_f32(
-                        data.into_iter().map(|v| v as f32).collect(),
+                        data.into_iter()
+                            .map(precision::single_input)
+                            .collect::<BuiltinResult<Vec<_>>>()?
+                            .into_iter()
+                            .map(|value| value as f32)
+                            .collect(),
                         shape.clone(),
                     ),
                     ProviderPrecision::F64 => Tensor::new(data, shape.clone()),
