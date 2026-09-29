@@ -1,4 +1,4 @@
-use super::super::graph::shared::{descriptor, param, signature};
+use super::super::shared::{descriptor, param, signature};
 use crate::*;
 
 pub const NUMNODES_DESCRIPTOR: BuiltinDescriptor = descriptor(

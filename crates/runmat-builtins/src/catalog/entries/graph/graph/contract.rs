@@ -1,4 +1,4 @@
-use super::shared::{descriptor, param, signature};
+use super::super::shared::{descriptor, param, signature};
 use crate::*;
 
 pub const GRAPH_DESCRIPTOR: BuiltinDescriptor = descriptor(

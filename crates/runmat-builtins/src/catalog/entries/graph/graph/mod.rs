@@ -3,13 +3,13 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 
 mod contract;
 mod documentation;
-pub(crate) mod shared;
-pub use contract::GRAPH_DESCRIPTOR;
-pub use shared::{
+mod inference;
+pub use super::shared::{
     DIGRAPH_CLASS, DIGRAPH_INTEGER_ADJACENCY_EXTENSION, DIGRAPH_INTEGER_WEIGHTS_EXTENSION,
     GRAPH_CLASS, GRAPH_ERROR_INTERNAL, GRAPH_ERROR_INVALID_ARGUMENT,
     GRAPH_INTEGER_ADJACENCY_EXTENSION, GRAPH_INTEGER_WEIGHTS_EXTENSION,
 };
+pub use contract::GRAPH_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GRAPH_CATALOG_ENTRY];
 
 pub const GRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -21,7 +21,7 @@ pub const GRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
-            infer as fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+            inference::infer as fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
@@ -47,12 +47,8 @@ pub const GRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &shared::GRAPH_INTEGER_EXTENSIONS,
-    integer_capabilities: &shared::GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES,
+    extensions: &super::shared::GRAPH_INTEGER_EXTENSIONS,
+    integer_capabilities: &super::shared::GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };
-
-fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    self::shared::infer_graph_call(request, entry, self::shared::GraphCallKind::Graph)
-}

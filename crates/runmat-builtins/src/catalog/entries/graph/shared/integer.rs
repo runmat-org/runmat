@@ -181,3 +181,31 @@ pub const TREE_LAYOUT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor;
     overload: BuiltinIntegerOverloadKind::StructuralParameter,
     notes: "Parent indices are decoded exactly and checked for range and cycles. MATLAB documents a parent vector without enumerating fixed-width classes; per-class parity and layout coordinates are unverified.",
 }];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_extensions_remain_distinct_from_structural_node_ids() {
+        for extension in GRAPH_INTEGER_EXTENSIONS
+            .iter()
+            .chain(DIGRAPH_INTEGER_EXTENSIONS.iter())
+        {
+            assert!(extension.validate_error_contract().is_ok());
+        }
+        assert_eq!(GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(
+            GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(
+            GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert!(GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES[2]
+            .inputs
+            .iter()
+            .all(|input| input.availability == BuiltinIntegerInputAvailability::Documented));
+    }
+}

@@ -3,6 +3,7 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 
 mod contract;
 mod documentation;
+mod inference;
 pub use contract::DIGRAPH_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DIGRAPH_CATALOG_ENTRY];
 
@@ -15,7 +16,7 @@ pub const DIGRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
-            infer as fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+            inference::infer as fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
@@ -41,16 +42,8 @@ pub const DIGRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &super::graph::shared::DIGRAPH_INTEGER_EXTENSIONS,
-    integer_capabilities: &super::graph::shared::DIGRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES,
+    extensions: &super::shared::DIGRAPH_INTEGER_EXTENSIONS,
+    integer_capabilities: &super::shared::DIGRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };
-
-fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    super::graph::shared::infer_graph_call(
-        request,
-        entry,
-        super::graph::shared::GraphCallKind::Digraph,
-    )
-}

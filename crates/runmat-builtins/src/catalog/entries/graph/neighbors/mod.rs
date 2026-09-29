@@ -3,6 +3,7 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 
 mod contract;
 mod documentation;
+mod inference;
 pub use contract::NEIGHBORS_DESCRIPTOR;
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&NEIGHBORS_CATALOG_ENTRY];
 
@@ -15,7 +16,7 @@ pub const NEIGHBORS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
-            infer as fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+            inference::infer as fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
@@ -42,15 +43,7 @@ pub const NEIGHBORS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
-    integer_capabilities: &super::graph::shared::GRAPH_NODE_INTEGER_CAPABILITIES,
+    integer_capabilities: &super::shared::GRAPH_NODE_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };
-
-fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    super::graph::shared::infer_graph_call(
-        request,
-        entry,
-        super::graph::shared::GraphCallKind::Neighbors,
-    )
-}
