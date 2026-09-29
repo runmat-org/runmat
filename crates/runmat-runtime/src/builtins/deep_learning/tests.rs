@@ -1858,7 +1858,7 @@ fn resident_padding_dimension_resolves_before_nested_sequence_download() {
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(
             provider.telemetry_snapshot().download_bytes,
-            std::mem::size_of::<f64>()
+            u64::try_from(std::mem::size_of::<f64>()).expect("scalar byte size")
         );
     });
 }

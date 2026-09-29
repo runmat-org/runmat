@@ -20,6 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Data and labels",
             paragraphs: &[
                 "Host `double`, `single`, complex, and logical values are accepted. A valid provider-resident gpuArray remains in its original provider-owned handle inside `Data`; construction does not gather it. Native integer classes are not silently widened. The optional second argument must be host text, and this implementation stores its text as both `Format` and `Labels`.",
+                "Additional constructor options are rejected. Supported arithmetic retains the dlarray wrapper and its dimension-label metadata.",
                 "The object is a value-backed wrapper. When a `dlfeval` autodiff tape is active, supported host values are recorded as tape nodes. That is an ambient runtime-state effect, not pure construction. Provider-resident Data constructs without a download outside the tape, but an active tape rejects it with `RunMat:deepLearning:Unsupported` until resident tape kernels exist.",
             ],
         },
@@ -48,7 +49,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "Does dlarray download gpuArray Data?",
-            answer: "No. Construction retains the provider handle; structural shape queries read its metadata without gathering values.",
+            answer: "Outside an active autodiff tape, construction retains the provider handle without downloading data; structural shape queries read its metadata. An active tape rejects resident Data with Unsupported until resident tape kernels are available.",
         },
         BuiltinDocumentationFaq {
             question: "Can Data contain typed integers or text?",
