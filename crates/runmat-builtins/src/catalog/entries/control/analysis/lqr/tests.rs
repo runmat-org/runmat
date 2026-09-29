@@ -138,6 +138,23 @@ fn invalid_dimensions_class_and_output_count_are_diagnosed() {
         unreachable!()
     };
     object.runtime_class = Some(standard::TRANSFER_FUNCTION.owned());
+    let mut known_other_without_runtime_class = ss();
+    let ValueKindFact::Object(ref mut other) = known_other_without_runtime_class.kind else {
+        unreachable!()
+    };
+    other.runtime_class = None;
+    other.class = Some(ClassId(7));
+    assert!(call(
+        vec![
+            known_other_without_runtime_class,
+            matrix(2, 2, NumericClass::Double),
+            matrix(1, 1, NumericClass::Double)
+        ],
+        RequestedOutputCount::Exactly(1)
+    )
+    .diagnostics
+    .iter()
+    .any(|d| d.code == "RM-CATALOG-LQR-MODEL"));
     assert!(call(
         vec![
             unsupported,

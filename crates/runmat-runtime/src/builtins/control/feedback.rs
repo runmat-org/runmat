@@ -13,7 +13,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::control::tf_model::{scalar_f64, two_models_ordered};
+use crate::builtins::control::tf_model::{
+    preflight_model_operand, scalar_f64, two_models_ordered, TF_CLASS,
+};
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "feedback";
@@ -70,6 +72,8 @@ async fn feedback_builtin(sys1: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     }
     ensure_extensions_enabled(&sys1, &rest)?;
     let sys2 = rest.first().cloned().unwrap_or(Value::Num(1.0));
+    preflight_model_operand(&sys1, BUILTIN_NAME)?;
+    preflight_model_operand(&sys2, BUILTIN_NAME)?;
     let sign = match rest.get(1) {
         Some(value) => {
             let gathered = crate::dispatcher::gather_if_needed_async(value).await?;
@@ -113,13 +117,36 @@ fn ensure_extensions_enabled(sys1: &Value, rest: &[Value]) -> BuiltinResult<()> 
     if is_logical_value(sys1) || rest.iter().any(is_logical_value) {
         ensure_extension(&LOGICAL_NUMERIC_EXTENSION)?;
     }
-    if is_resident_value(sys1) || rest.iter().any(is_resident_value) {
+    if is_resident_value(sys1)
+        || rest.iter().any(is_resident_value)
+        || std::iter::once(sys1)
+            .chain(rest.iter())
+            .any(has_consumed_resident_model_property)
+    {
         ensure_extension(&RESIDENT_NUMERIC_EXTENSION)?;
     }
     if is_single_numeric_value(sys1) || rest.iter().any(is_single_numeric_value) {
         ensure_extension(&SINGLE_NUMERIC_EXTENSION)?;
     }
     Ok(())
+}
+
+fn has_consumed_resident_model_property(value: &Value) -> bool {
+    let Value::Object(object) = value else {
+        return false;
+    };
+    object.is_class(TF_CLASS)
+        && [
+            "Numerator",
+            "Denominator",
+            "Ts",
+            "InputDelay",
+            "OutputDelay",
+            "Variable",
+        ]
+        .into_iter()
+        .filter_map(|name| object.properties.get(name))
+        .any(is_resident_value)
 }
 
 fn ensure_extension(extension: &'static BuiltinExtensionDescriptor) -> BuiltinResult<()> {
@@ -222,6 +249,47 @@ mod tests {
                 vec![Value::GpuTensor(resident)],
             ))
             .expect_err("missing property before second operand gather");
+            assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn nested_resident_coefficients_are_gated_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let model = raw_tf(Value::Num(2.0), Value::GpuTensor(allocation.handle));
+        let error = block_on(feedback_builtin(
+            Value::Object(model),
+            vec![Value::Num(1.0)],
+        ))
+        .expect_err("nested resident admission");
+        assert_eq!(
+            error.identifier(),
+            RESIDENT_NUMERIC_EXTENSION.error_identifier
+        );
+    }
+
+    #[test]
+    fn invalid_host_denominator_precedes_resident_numerator_download() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            let model = raw_tf(Value::GpuTensor(resident), Value::String("bad".into()));
+            provider.reset_telemetry();
+            let error = block_on(feedback_builtin(
+                Value::Object(model),
+                vec![Value::Num(1.0)],
+            ))
+            .expect_err("invalid denominator");
             assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });

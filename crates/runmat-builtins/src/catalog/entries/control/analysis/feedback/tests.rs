@@ -64,8 +64,15 @@ fn invalid_systems_signs_arity_and_outputs_are_diagnosed() {
         unreachable!()
     };
     object.runtime_class = Some(standard::STATE_SPACE.owned());
+    let mut unknown_runtime_but_known_other = tf();
+    let ValueKindFact::Object(ref mut other) = unknown_runtime_but_known_other.kind else {
+        unreachable!()
+    };
+    other.runtime_class = None;
+    other.class = Some(ClassId(7));
     for invalid in [
         ss,
+        unknown_runtime_but_known_other,
         ValueFact::proven(
             scalar(NumericClass::Double).kind,
             ShapeFact::from(vec![Some(2), Some(2)]),

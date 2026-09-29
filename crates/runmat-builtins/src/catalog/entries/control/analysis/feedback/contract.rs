@@ -135,6 +135,18 @@ pub const FEEDBACK_ERROR_INVALID_SIGN: BuiltinErrorDescriptor = BuiltinErrorDesc
     when: "Feedback sign is not -1 or +1.",
     message: "feedback: sign must be -1 or +1",
 };
+pub const FEEDBACK_ERROR_INVALID_SAMPLE_TIME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FEEDBACK.INVALID_SAMPLE_TIME",
+    identifier: Some("RunMat:feedback:InvalidSampleTime"),
+    when: "A transfer-function model has an invalid sample time or variable domain.",
+    message: "feedback: invalid sample time",
+};
+pub const FEEDBACK_ERROR_INVALID_VARIABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FEEDBACK.INVALID_VARIABLE",
+    identifier: Some("RunMat:feedback:InvalidVariable"),
+    when: "A transfer-function model has an invalid variable for its sample time.",
+    message: "feedback: invalid variable",
+};
 pub const FEEDBACK_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FEEDBACK.UNSUPPORTED_MODEL",
     identifier: Some("RunMat:feedback:UnsupportedModel"),
@@ -147,10 +159,12 @@ pub const FEEDBACK_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "Closed-loop assembly failed.",
     message: "feedback: internal error",
 };
-pub const FEEDBACK_ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const FEEDBACK_ERRORS: [BuiltinErrorDescriptor; 7] = [
     FEEDBACK_ERROR_INVALID_ARGUMENT,
     FEEDBACK_ERROR_INVALID_MODEL,
     FEEDBACK_ERROR_INVALID_SIGN,
+    FEEDBACK_ERROR_INVALID_SAMPLE_TIME,
+    FEEDBACK_ERROR_INVALID_VARIABLE,
     FEEDBACK_ERROR_UNSUPPORTED_MODEL,
     FEEDBACK_ERROR_INTERNAL,
 ];

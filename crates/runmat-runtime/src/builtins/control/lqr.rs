@@ -135,6 +135,36 @@ struct RealMatrix {
 }
 
 impl RealMatrix {
+    fn preflight(label: &'static str, value: &Value) -> BuiltinResult<()> {
+        match value {
+            Value::GpuTensor(handle)
+                if runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved =>
+            {
+                Err(lqr_error(
+                    &LQR_ERROR_UNSUPPORTED_INPUT,
+                    format!("{label} must contain real numeric values"),
+                ))
+            }
+            Value::GpuTensor(_) => Ok(()),
+            Value::Tensor(tensor) => Self::validate_tensor(label, tensor),
+            Value::Num(value) if value.is_finite() => Ok(()),
+            Value::Int(_) => Ok(()),
+            Value::Num(_) => Err(lqr_error(
+                &LQR_ERROR_UNSUPPORTED_INPUT,
+                format!("{label} must contain finite real values"),
+            )),
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(lqr_error(
+                &LQR_ERROR_UNSUPPORTED_INPUT,
+                format!("{label} must contain real numeric values"),
+            )),
+            other => Err(lqr_error(
+                &LQR_ERROR_UNSUPPORTED_INPUT,
+                format!("{label} must be a real numeric matrix, got {other:?}"),
+            )),
+        }
+    }
+
     async fn parse(label: &'static str, value: Value) -> BuiltinResult<Self> {
         if matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
             || matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_storage(handle) == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
@@ -155,6 +185,10 @@ impl RealMatrix {
                     ),
                 )
             })?;
+        Self::parse_host(label, gathered)
+    }
+
+    fn parse_host(label: &'static str, gathered: Value) -> BuiltinResult<Self> {
         let tensor = match gathered {
             Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor).map_err(|err| {
                 lqr_error(
@@ -191,6 +225,14 @@ impl RealMatrix {
     }
 
     fn from_tensor(label: &'static str, tensor: Tensor) -> BuiltinResult<Self> {
+        Self::validate_tensor(label, &tensor)?;
+        let values = tensor::tensor_values_f64_cow(&tensor);
+        Ok(Self {
+            matrix: DMatrix::from_column_slice(tensor.rows, tensor.cols, &values),
+        })
+    }
+
+    fn validate_tensor(label: &'static str, tensor: &Tensor) -> BuiltinResult<()> {
         if tensor.shape.len() > 2 {
             return Err(lqr_error(
                 &LQR_ERROR_INVALID_DIMENSIONS,
@@ -204,9 +246,7 @@ impl RealMatrix {
                 format!("{label} must contain finite real values"),
             ));
         }
-        Ok(Self {
-            matrix: DMatrix::from_column_slice(tensor.rows, tensor.cols, &values),
-        })
+        Ok(())
     }
 
     fn rows(&self) -> usize {
@@ -260,6 +300,12 @@ impl LqrRequest {
                 "lqr(A,B,Q,R,N) accepts at most five inputs",
             ));
         }
+        for (label, value) in [("A", &a), ("B", b), ("Q", q), ("R", r)] {
+            RealMatrix::preflight(label, value)?;
+        }
+        if let [n] = tail {
+            RealMatrix::preflight("N", n)?;
+        }
         Ok(Self {
             a: RealMatrix::parse("A", a).await?,
             b: RealMatrix::parse("B", b.clone()).await?,
@@ -300,6 +346,12 @@ impl LqrRequest {
             .properties
             .get("B")
             .ok_or_else(|| lqr_error(&LQR_ERROR_INVALID_MODEL, "ss object missing B property"))?;
+        for (label, value) in [("A", a_value), ("B", b_value), ("Q", q), ("R", r)] {
+            RealMatrix::preflight(label, value)?;
+        }
+        if let [n] = tail {
+            RealMatrix::preflight("N", n)?;
+        }
         Ok(Self {
             a: RealMatrix::parse("A", a_value.clone()).await?,
             b: RealMatrix::parse("B", b_value.clone()).await?,
@@ -950,6 +1002,27 @@ mod tests {
             ))
             .expect_err("missing B");
             assert_eq!(error.identifier(), LQR_ERROR_INVALID_MODEL.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn invalid_host_weight_precedes_resident_state_matrix_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let a = Tensor::new(vec![0.0, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &a).unwrap();
+            provider.reset_telemetry();
+            let error = block_on(lqr_builtin(
+                Value::GpuTensor(resident),
+                vec![
+                    tensor(vec![0.0, 1.0], 2, 1),
+                    Value::String("bad".into()),
+                    Value::Num(1.0),
+                ],
+            ))
+            .expect_err("invalid Q");
+            assert_eq!(error.identifier(), LQR_ERROR_UNSUPPORTED_INPUT.identifier);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
     }

@@ -78,11 +78,10 @@ fn infer_object_inputs(
     let ValueKindFact::Object(object) = &first.kind else {
         return (None, None);
     };
-    if object
-        .runtime_class
-        .as_ref()
-        .is_some_and(|class| class != &standard::STATE_SPACE.owned())
-        || first.shape.element_count().is_some_and(|count| count != 1)
+    if match object.runtime_class.as_ref() {
+        Some(class) => class != &standard::STATE_SPACE.owned(),
+        None => object.class.is_some(),
+    } || first.shape.element_count().is_some_and(|count| count != 1)
         || matches!(first.residency, ResidencyFact::Remote { .. })
     {
         diagnostics.push(error(

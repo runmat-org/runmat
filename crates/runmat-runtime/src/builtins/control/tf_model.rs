@@ -1,4 +1,7 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
+mod admission;
+use admission::preflight_host_model_properties;
+pub use admission::preflight_ss_host_properties;
 use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
@@ -17,6 +20,34 @@ pub const SS_CLASS: runmat_types::StaticClassIdentity =
 pub const DEFAULT_CONTINUOUS_VARIABLE: &str = "s";
 pub const DEFAULT_DISCRETE_VARIABLE: &str = "z";
 pub const EPS: f64 = 1.0e-12;
+
+#[derive(Clone, Copy)]
+enum ArithmeticOperation {
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    Feedback,
+}
+
+impl ArithmeticOperation {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Plus => "plus",
+            Self::Minus => "minus",
+            Self::Multiply => "mtimes",
+            Self::Divide => "mrdivide",
+            Self::Feedback => "feedback",
+        }
+    }
+
+    fn error(self, tf_identifier: &'static str) -> (&'static str, &'static str) {
+        match self {
+            Self::Feedback => ("feedback", "RunMat:feedback:UnsupportedModel"),
+            _ => ("tf", tf_identifier),
+        }
+    }
+}
 
 static TF_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(TF_CLASS);
@@ -217,6 +248,7 @@ impl TfModel {
         for name in REQUIRED.iter().copied() {
             property(&object, name, builtin)?;
         }
+        preflight_host_model_properties(&object, builtin)?;
         for name in REQUIRED.iter().copied().chain(["Variable"]) {
             if let Some(value) = object.properties.get(name) {
                 let gathered = dispatcher::gather_if_needed_async(value).await?;
@@ -352,7 +384,7 @@ impl TfModel {
     }
 
     pub fn add(&self, rhs: &Self) -> BuiltinResult<Self> {
-        self.ensure_arithmetic_compatible(rhs, "plus")?;
+        self.ensure_arithmetic_compatible(rhs, ArithmeticOperation::Plus)?;
         let numerator = poly_add(
             &poly_mul(&self.numerator, &rhs.denominator),
             &poly_mul(&rhs.numerator, &self.denominator),
@@ -362,7 +394,7 @@ impl TfModel {
     }
 
     pub fn sub(&self, rhs: &Self) -> BuiltinResult<Self> {
-        self.ensure_arithmetic_compatible(rhs, "minus")?;
+        self.ensure_arithmetic_compatible(rhs, ArithmeticOperation::Minus)?;
         let numerator = poly_sub(
             &poly_mul(&self.numerator, &rhs.denominator),
             &poly_mul(&rhs.numerator, &self.denominator),
@@ -379,7 +411,7 @@ impl TfModel {
     }
 
     pub fn mul(&self, rhs: &Self) -> BuiltinResult<Self> {
-        self.ensure_arithmetic_compatible(rhs, "mtimes")?;
+        self.ensure_arithmetic_compatible(rhs, ArithmeticOperation::Multiply)?;
         self.with_new_coefficients(
             poly_mul(&self.numerator, &rhs.numerator),
             poly_mul(&self.denominator, &rhs.denominator),
@@ -387,7 +419,7 @@ impl TfModel {
     }
 
     pub fn div(&self, rhs: &Self) -> BuiltinResult<Self> {
-        self.ensure_arithmetic_compatible(rhs, "mrdivide")?;
+        self.ensure_arithmetic_compatible(rhs, ArithmeticOperation::Divide)?;
         if all_zero(&rhs.numerator) {
             return Err(control_error(
                 "tf",
@@ -486,7 +518,7 @@ impl TfModel {
                 "feedback: sign must be -1 or +1",
             ));
         }
-        self.ensure_arithmetic_compatible(rhs, "feedback")?;
+        self.ensure_arithmetic_compatible(rhs, ArithmeticOperation::Feedback)?;
         let numerator = poly_mul(&self.numerator, &rhs.denominator);
         let base_denominator = poly_mul(&self.denominator, &rhs.denominator);
         let loop_numerator = poly_mul(&self.numerator, &rhs.numerator);
@@ -498,30 +530,40 @@ impl TfModel {
         self.with_new_coefficients(numerator, denominator)
     }
 
-    fn ensure_arithmetic_compatible(&self, rhs: &Self, op: &'static str) -> BuiltinResult<()> {
-        if (self.sample_time - rhs.sample_time).abs() > EPS {
+    fn ensure_arithmetic_compatible(
+        &self,
+        rhs: &Self,
+        op: ArithmeticOperation,
+    ) -> BuiltinResult<()> {
+        let name = op.name();
+        if self.sample_time != rhs.sample_time {
+            let (builtin, identifier) = op.error("RunMat:tf:SampleTimeMismatch");
             return Err(control_error(
-                "tf",
-                "RunMat:tf:SampleTimeMismatch",
-                format!("tf.{op}: sample times must match"),
+                builtin,
+                identifier,
+                format!("{builtin}.{name}: sample times must match"),
             ));
         }
         if self.variable != rhs.variable {
+            let (builtin, identifier) = op.error("RunMat:tf:VariableMismatch");
             return Err(control_error(
-                "tf",
-                "RunMat:tf:VariableMismatch",
-                format!("tf.{op}: transfer-function variables must match"),
+                builtin,
+                identifier,
+                format!("{builtin}.{name}: transfer-function variables must match"),
             ));
         }
-        if self.input_delay.abs() > EPS
-            || self.output_delay.abs() > EPS
-            || rhs.input_delay.abs() > EPS
-            || rhs.output_delay.abs() > EPS
+        if self.input_delay != 0.0
+            || self.output_delay != 0.0
+            || rhs.input_delay != 0.0
+            || rhs.output_delay != 0.0
         {
+            let (builtin, identifier) = op.error("RunMat:tf:UnsupportedDelay");
             return Err(control_error(
-                "tf",
-                "RunMat:tf:UnsupportedDelay",
-                format!("tf.{op}: input and output delays are not supported in arithmetic"),
+                builtin,
+                identifier,
+                format!(
+                    "{builtin}.{name}: input and output delays are not supported in arithmetic"
+                ),
             ));
         }
         Ok(())
@@ -657,6 +699,8 @@ pub async fn two_models_ordered(
     rhs: Value,
     builtin: &'static str,
 ) -> BuiltinResult<(TfModel, TfModel)> {
+    preflight_model_operand(&lhs, builtin)?;
+    preflight_model_operand(&rhs, builtin)?;
     // Parse object operands before preparing the other operand. Gathering the
     // pair here would recursively download unrelated model properties, and
     // could touch the second provider before the first model is validated.
@@ -684,6 +728,32 @@ pub async fn two_models_ordered(
                 TfModel::scalar(scalar_complex(&right, builtin)?, options)?,
             ))
         }
+    }
+}
+
+pub fn preflight_model_operand(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
+    match value {
+        Value::Object(object) => {
+            if !object.is_class(TF_CLASS) {
+                return Err(control_error(
+                    builtin,
+                    unsupported_model_identifier(builtin),
+                    format!("{builtin}: unsupported model class '{}'", object.class_name),
+                ));
+            }
+            for name in [
+                "Numerator",
+                "Denominator",
+                "Ts",
+                "InputDelay",
+                "OutputDelay",
+            ] {
+                property(object, name, builtin)?;
+            }
+            preflight_host_model_properties(object, builtin)
+        }
+        Value::GpuTensor(_) => Ok(()),
+        value => scalar_complex(value, builtin).map(|_| ()),
     }
 }
 
@@ -751,8 +821,8 @@ pub fn validate_variable(variable: &str, builtin: &'static str) -> BuiltinResult
         "s" | "p" | "z" | "q" | "z^-1" | "q^-1" => Ok(variable.to_string()),
         _ => Err(control_error(
             builtin,
-            "RunMat:tf:InvalidVariable",
-            "tf: invalid Variable option: must be one of 's', 'p', 'z', 'q', 'z^-1', or 'q^-1'",
+            invalid_variable_identifier(builtin),
+            format!("{builtin}: invalid Variable option: must be one of 's', 'p', 'z', 'q', 'z^-1', or 'q^-1'"),
         )),
     }
 }
@@ -770,7 +840,7 @@ pub fn validate_variable_domain(
     if discrete_variable && sample_time != -1.0 && sample_time <= 0.0 {
         return Err(control_error(
             builtin,
-            "RunMat:tf:InvalidSampleTime",
+            invalid_sample_time_identifier(builtin),
             format!(
                 "{builtin}: discrete transfer-function variables require a positive sample time"
             ),
@@ -779,7 +849,7 @@ pub fn validate_variable_domain(
     if !discrete_variable && sample_time != 0.0 {
         return Err(control_error(
             builtin,
-            "RunMat:tf:InvalidVariable",
+            invalid_variable_identifier(builtin),
             format!("{builtin}: continuous transfer-function variables require Ts = 0"),
         ));
     }
@@ -872,6 +942,7 @@ pub async fn gather_ss_properties(
             ));
         }
     }
+    preflight_ss_host_properties(&object, required, builtin)?;
     for &name in required {
         let value = object.properties.get(name).expect("preflight checked property");
         let gathered = dispatcher::gather_if_needed_async(value).await?;
@@ -895,18 +966,11 @@ pub async fn ss_poles_from_object_async(
             ));
         }
     }
+    preflight_ss_host_properties(object, &["A", "Ts"], builtin)?;
     let a_resident = matches!(object.properties.get("A"), Some(Value::GpuTensor(_)));
     let ts_resident = matches!(object.properties.get("Ts"), Some(Value::GpuTensor(_)));
     if !a_resident && !ts_resident {
         return ss_poles_from_object(object, builtin);
-    }
-    // Validate host values before reading a resident peer, so malformed
-    // local metadata keeps its model error and does not download.
-    if ts_resident && !a_resident {
-        ss_state_matrix_property(object, "A", builtin)?;
-    }
-    if a_resident && !ts_resident {
-        validate_sample_time(scalar_property(object, "Ts", builtin)?, builtin)?;
     }
     let mut consumed = ObjectInstance::new(object.class_name.clone());
     for name in ["A", "Ts"] {
@@ -1004,7 +1068,7 @@ pub fn polynomial_roots(
     }
     let degree = trimmed.len() - 1;
     let leading = trimmed[0];
-    if leading.norm() <= EPS {
+    if leading.re == 0.0 && leading.im == 0.0 {
         return Err(control_error(
             builtin,
             invalid_model_identifier(builtin),
@@ -1128,7 +1192,7 @@ fn coefficients_from_property(
 
 fn coefficient_value(coeffs: &[Complex64], builtin: &'static str) -> BuiltinResult<Value> {
     let len = coeffs.len();
-    if coeffs.iter().all(|coeff| coeff.im.abs() <= EPS) {
+    if coeffs.iter().all(|coeff| coeff.im == 0.0) {
         let data = coeffs.iter().map(|coeff| coeff.re).collect::<Vec<_>>();
         let tensor = Tensor::new(data, vec![1, len]).map_err(|err| {
             control_error(
@@ -1246,7 +1310,7 @@ fn ensure_vector_shape(label: &str, shape: &[usize], builtin: &'static str) -> B
 fn trim_leading_complex_zeros(coeffs: Vec<Complex64>) -> Vec<Complex64> {
     let first_nonzero = coeffs
         .iter()
-        .position(|value| value.norm() > EPS)
+        .position(|value| value.re != 0.0 || value.im != 0.0)
         .unwrap_or(coeffs.len());
     let trimmed = coeffs[first_nonzero..].to_vec();
     if trimmed.is_empty() {
@@ -1257,7 +1321,9 @@ fn trim_leading_complex_zeros(coeffs: Vec<Complex64>) -> Vec<Complex64> {
 }
 
 fn all_zero(coeffs: &[Complex64]) -> bool {
-    coeffs.iter().all(|coeff| coeff.norm() <= EPS)
+    coeffs
+        .iter()
+        .all(|coeff| coeff.re == 0.0 && coeff.im == 0.0)
 }
 
 fn poly_add(lhs: &[Complex64], rhs: &[Complex64]) -> Vec<Complex64> {
@@ -1326,6 +1392,7 @@ fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
 fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
     match builtin {
         "feedback" => "RunMat:feedback:InvalidSampleTime",
+        "lqr" => "RunMat:lqr:InvalidModel",
         "stepinfo" => "RunMat:stepinfo:InvalidArgument",
         "dcgain" => "RunMat:dcgain:InvalidModel",
         "pole" => "RunMat:pole:InvalidModel",
@@ -1335,6 +1402,13 @@ fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
         "pzmap" => "RunMat:pzmap:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
         _ => "RunMat:tf:InvalidSampleTime",
+    }
+}
+
+fn invalid_variable_identifier(builtin: &str) -> &'static str {
+    match builtin {
+        "feedback" => "RunMat:feedback:InvalidVariable",
+        _ => "RunMat:tf:InvalidVariable",
     }
 }
 
@@ -1392,6 +1466,96 @@ mod tests {
     fn poisoned_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn tiny_nonzero_coefficients_and_imaginary_parts_survive_model_roundtrip() {
+        let tiny = 1.0e-14;
+        let model = TfModel::new(
+            vec![Complex64::new(0.0, tiny), Complex64::new(tiny, 0.0)],
+            vec![Complex64::new(tiny, 0.0), Complex64::new(1.0, 0.0)],
+            TfOptions::default(),
+        )
+        .expect("tiny coefficients are nonzero");
+        let Value::Object(object) = model.to_value("feedback").expect("serialize") else {
+            panic!("model object")
+        };
+        let Value::ComplexTensor(numerator) = object.properties.get("Numerator").unwrap() else {
+            panic!("complex numerator")
+        };
+        assert_eq!(numerator.shape, vec![1, 2]);
+        assert_eq!(
+            tensor::complex_tensor_value_complex64(numerator, 0).im,
+            tiny
+        );
+        let restored = TfModel::from_value(Value::Object(object), "feedback").expect("roundtrip");
+        assert_eq!(restored.numerator[0].im, tiny);
+        assert_eq!(restored.denominator[0].re, tiny);
+    }
+
+    #[test]
+    fn scaled_polynomial_roots_do_not_treat_tiny_leading_coefficient_as_zero() {
+        let scale = 1.0e-14;
+        let roots = polynomial_roots(
+            &[
+                Complex64::new(scale, 0.0),
+                Complex64::new(3.0 * scale, 0.0),
+                Complex64::new(2.0 * scale, 0.0),
+            ],
+            "pole",
+        )
+        .expect("nonzero leading coefficient");
+        assert_eq!(roots.len(), 2);
+        assert!(roots
+            .iter()
+            .any(|root| (*root - Complex64::new(-1.0, 0.0)).norm() < 1.0e-9));
+        assert!(roots
+            .iter()
+            .any(|root| (*root - Complex64::new(-2.0, 0.0)).norm() < 1.0e-9));
+    }
+
+    #[test]
+    fn feedback_reports_its_own_structural_compatibility_errors() {
+        let lhs = TfModel::scalar(Complex64::new(1.0, 0.0), TfOptions::default()).unwrap();
+        let mut rhs = lhs.clone();
+        rhs.sample_time = 1.0e-14;
+        assert_eq!(
+            lhs.feedback(&rhs, -1.0).unwrap_err().identifier(),
+            Some("RunMat:feedback:UnsupportedModel")
+        );
+        rhs.sample_time = 0.0;
+        rhs.variable = "p".into();
+        assert_eq!(
+            lhs.feedback(&rhs, -1.0).unwrap_err().identifier(),
+            Some("RunMat:feedback:UnsupportedModel")
+        );
+        rhs.variable = "s".into();
+        rhs.input_delay = 1.0e-14;
+        assert_eq!(
+            lhs.feedback(&rhs, -1.0).unwrap_err().identifier(),
+            Some("RunMat:feedback:UnsupportedModel")
+        );
+    }
+
+    #[test]
+    fn ss_host_sample_time_is_rejected_before_resident_state_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &a).unwrap();
+            let mut object = ObjectInstance::new(SS_CLASS.to_string());
+            object
+                .properties
+                .insert("A".into(), Value::GpuTensor(resident));
+            object
+                .properties
+                .insert("Ts".into(), Value::String("bad".into()));
+            provider.reset_telemetry();
+            let error =
+                block_on(ss_poles_from_object_async(&object, "pole")).expect_err("invalid Ts");
+            assert_eq!(error.identifier(), Some("RunMat:pole:InvalidArgument"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
     }
 
     fn poisoned_complex_integer_tensor(

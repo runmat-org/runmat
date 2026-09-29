@@ -21,10 +21,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     for (index, system) in args.iter().take(2).enumerate() {
         let valid = match &system.kind {
             ValueKindFact::Unknown => true,
-            ValueKindFact::Object(object) => object
-                .runtime_class
-                .as_ref()
-                .is_none_or(|class| class == &standard::TRANSFER_FUNCTION.owned()),
+            ValueKindFact::Object(object) => match object.runtime_class.as_ref() {
+                Some(class) => class == &standard::TRANSFER_FUNCTION.owned(),
+                None => object.class.is_none(),
+            },
             ValueKindFact::Numeric(_) | ValueKindFact::Logical => true,
             _ => false,
         };
