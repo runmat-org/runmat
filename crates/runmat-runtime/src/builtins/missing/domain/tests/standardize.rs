@@ -65,6 +65,33 @@ fn standardize_missing_documented_integer_indicator_needs_no_extension() {
 }
 
 #[test]
+fn standardize_missing_wide_integer_indicators_do_not_round_into_false_matches() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let represented = (1_u64 << 53) as f64;
+    for marker in [
+        Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+        Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap(),
+        ),
+    ] {
+        let result = block_on(standardize_missing_builtin(
+            tensor(vec![represented], vec![1, 1]),
+            vec![marker],
+        ))
+        .expect("documented integer marker");
+        assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![represented]));
+    }
+
+    let aligned = Value::Int(IntValue::U64(1_u64 << 54));
+    let result = block_on(standardize_missing_builtin(
+        tensor(vec![(1_u64 << 54) as f64], vec![1, 1]),
+        vec![aligned],
+    ))
+    .expect("exact wide marker");
+    assert!(matches!(result, Value::Tensor(t) if t.materialize_f64()[0].is_nan()));
+}
+
+#[test]
 fn standardize_missing_explicit_gpu_indicator_is_gated_before_provider_access() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()

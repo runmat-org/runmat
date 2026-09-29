@@ -2,8 +2,25 @@ use super::numeric::char_rows;
 use super::*;
 
 pub(super) struct IndicatorSet {
-    numeric: Vec<f64>,
+    numeric: Vec<NumericIndicator>,
     text: Vec<String>,
+}
+
+pub(super) enum NumericIndicator {
+    Floating(f64),
+    Integer(IntValue),
+}
+
+impl NumericIndicator {
+    fn matches(&self, value: f64) -> bool {
+        match self {
+            Self::Floating(marker) => numeric_indicator_matches(value, *marker),
+            Self::Integer(marker) => {
+                crate::builtins::common::validation::integer_is_exact_f64(marker)
+                    && value == marker.to_f64()
+            }
+        }
+    }
 }
 
 pub(super) fn indicator_set(value: &Value) -> BuiltinResult<IndicatorSet> {
@@ -17,12 +34,27 @@ pub(super) fn indicator_set(value: &Value) -> BuiltinResult<IndicatorSet> {
 
 pub(super) fn collect_indicators(value: &Value, set: &mut IndicatorSet) -> BuiltinResult<()> {
     match value {
-        Value::Num(n) => set.numeric.push(*n),
-        Value::Int(i) => set.numeric.push(i.to_f64()),
+        Value::Num(n) => set.numeric.push(NumericIndicator::Floating(*n)),
+        Value::Int(i) => set.numeric.push(NumericIndicator::Integer(i.clone())),
         Value::String(s) => set.text.push(s.clone()),
         Value::StringArray(array) => set.text.extend(array.data.iter().cloned()),
         Value::CharArray(array) => set.text.extend(char_rows(array)),
-        Value::Tensor(tensor) => set.numeric.extend(tensor_utils::tensor_values_f64(tensor)),
+        Value::Tensor(tensor) => {
+            if let Some(storage) = tensor.integer_storage() {
+                for index in 0..storage.len() {
+                    let marker = storage.value_at(index).ok_or_else(|| {
+                        internal_error("standardizeMissing: integer indicator storage mismatch")
+                    })?;
+                    set.numeric.push(NumericIndicator::Integer(marker));
+                }
+            } else {
+                set.numeric.extend(
+                    tensor_utils::tensor_values_f64(tensor)
+                        .into_iter()
+                        .map(NumericIndicator::Floating),
+                );
+            }
+        }
         Value::Cell(cell) => {
             for item in &cell.data {
                 collect_indicators(item, set)?;
@@ -51,7 +83,7 @@ pub(super) fn standardize_missing_value(
                 if indicators
                     .numeric
                     .iter()
-                    .any(|marker| numeric_indicator_matches(*value, *marker))
+                    .any(|marker| marker.matches(*value))
                 {
                     *value = f64::NAN;
                 }
