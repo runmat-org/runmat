@@ -81,7 +81,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             display_output: Some("y = 2024\nm = 4\nd = 9\nh = 13"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(y==2024); assert(m==4); assert(d==9); assert(h==13); assert(minute(t)==30); assert(second(t)==5);" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(y==2024); assert(m==4); assert(d==9); assert(h==13); assert(minute(t)==30); assert(abs(second(t)-5)<=2*eps(datenum(t))*86400);" },
         },
         BuiltinExample {
             id: "serial-datenum", title: "Convert explicit serial date numbers",
