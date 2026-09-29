@@ -10,6 +10,10 @@ use super::{
     DIGRAPH_CLASS, GRAPH_CLASS, NUM_NODES_PROPERTY,
 };
 use crate::builtins::table::{table_replace_variables_like, table_variables, value_row_count};
+use runmat_builtins::{
+    DIGRAPH_INTEGER_ADJACENCY_EXTENSION, DIGRAPH_INTEGER_WEIGHTS_EXTENSION,
+    GRAPH_INTEGER_ADJACENCY_EXTENSION, GRAPH_INTEGER_WEIGHTS_EXTENSION,
+};
 
 fn admit_constructor_integer_forms(
     args: &[Value],

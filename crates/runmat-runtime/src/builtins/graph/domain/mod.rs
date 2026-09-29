@@ -5,16 +5,13 @@ use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::sync::OnceLock;
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, DIGRAPH_CLASS, DIGRAPH_INTEGER_ADJACENCY_EXTENSION,
-    DIGRAPH_INTEGER_WEIGHTS_EXTENSION, GRAPH_CLASS, GRAPH_ERROR_INTERNAL,
-    GRAPH_ERROR_INVALID_ARGUMENT, GRAPH_INTEGER_ADJACENCY_EXTENSION,
-    GRAPH_INTEGER_WEIGHTS_EXTENSION,
+    BuiltinErrorDescriptor, DIGRAPH_CLASS, GRAPH_CLASS, GRAPH_ERROR_INTERNAL,
+    GRAPH_ERROR_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::table::{table_from_columns, table_variables};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NUM_NODES_PROPERTY: &str = "NumNodes";
