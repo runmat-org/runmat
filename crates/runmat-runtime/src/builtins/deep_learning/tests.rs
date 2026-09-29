@@ -1492,6 +1492,132 @@ fn combvec_reads_typed_integer_storage_exactly() {
 }
 
 #[test]
+fn combvec_typed_integer_form_obeys_compatibility_profile() {
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(combvec_builtin(vec![Value::Int(IntValue::U8(2))]))
+        .expect_err("typed integer input is a RunMat extension");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:CombvecIntegerInputExtension")
+    );
+}
+
+#[test]
+fn sequence_host_errors_precede_provider_downloads() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let values = [1.0, 2.0];
+        let shape = [1usize, 2usize];
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("resident input");
+        provider.reset_telemetry();
+        let invalid = block_on(combvec_builtin(vec![
+            Value::GpuTensor(resident.clone()),
+            Value::String("not numeric".into()),
+        ]))
+        .expect_err("invalid later host input");
+        assert_eq!(
+            invalid.identifier(),
+            Some("RunMat:deepLearning:InvalidInput")
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let bad_sequences =
+            Value::Cell(CellArray::new(vec![Value::String("bad".into())], 1, 1).unwrap());
+        let invalid = block_on(padsequences_builtin(
+            bad_sequences,
+            vec![Value::GpuTensor(resident.clone())],
+        ))
+        .expect_err("invalid host sequence before resident dimension");
+        assert_eq!(
+            invalid.identifier(),
+            Some("RunMat:deepLearning:InvalidInput")
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let sequences = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap());
+        let invalid = block_on(padsequences_builtin(
+            sequences,
+            vec![
+                Value::GpuTensor(resident),
+                Value::String("NoSuchOption".into()),
+                Value::Num(1.0),
+            ],
+        ))
+        .expect_err("invalid option before resident dimension");
+        assert_eq!(
+            invalid.identifier(),
+            Some("RunMat:deepLearning:InvalidInput")
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn sequence_resident_operands_gather_once_and_return_host_results() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let values = [1.0, 2.0];
+        let shape = [1usize, 2usize];
+        let columns = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("resident matrix");
+        provider.reset_telemetry();
+        let result = block_on(combvec_builtin(vec![
+            Value::GpuTensor(columns),
+            Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
+        ]))
+        .expect("host Cartesian result");
+        let Value::Tensor(result) = result else {
+            panic!("host tensor expected")
+        };
+        assert_eq!(result.shape, vec![2, 4]);
+        assert_eq!(
+            result.materialize_f64(),
+            vec![1.0, 10.0, 2.0, 10.0, 1.0, 20.0, 2.0, 20.0]
+        );
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+
+        let dimension = [2.0];
+        let scalar_shape = [1usize, 1usize];
+        let resident_dim = provider
+            .upload(&HostTensorView {
+                data: &dimension,
+                shape: &scalar_shape,
+            })
+            .expect("resident dimension");
+        let sequences = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                    Value::Num(3.0),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        );
+        provider.reset_telemetry();
+        let result = block_on(padsequences_builtin(
+            sequences,
+            vec![Value::GpuTensor(resident_dim)],
+        ))
+        .expect("host padding result");
+        let Value::Tensor(result) = result else {
+            panic!("host tensor expected")
+        };
+        assert_eq!(result.shape, vec![1, 2, 2]);
+        assert_eq!(result.materialize_f64(), vec![1.0, 2.0, 3.0, 0.0]);
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+    });
+}
+
+#[test]
 fn padsequences_defaults_to_uniform_right_padding() {
     let seqs = Value::Cell(
         CellArray::new(
@@ -1516,7 +1642,7 @@ fn padsequences_defaults_to_uniform_right_padding() {
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![1, 2, 1, 2]);
+    assert_eq!(tensor.shape, vec![1, 2, 2]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, -1.0]);
 }
 
@@ -1545,8 +1671,9 @@ fn padsequences_reads_typed_integer_storage_exactly() {
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![1, 2, 1, 2]);
+    assert_eq!(tensor.shape, vec![1, 2, 2]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, -1.0]);
+    assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
 }
 
 #[test]
@@ -1583,6 +1710,90 @@ fn padsequences_left_truncation_keeps_tail_for_cell_output() {
         panic!("expected tensor");
     };
     assert_eq!(first.materialize_f64(), vec![2.0, 3.0]);
+}
+
+#[test]
+fn padsequences_preserves_wide_integer_class_and_returns_logical_mask() {
+    let wide = (1_u64 << 53) + 1;
+    let sequences = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(vec![wide, u64::MAX]), vec![1, 2])
+                        .unwrap(),
+                ),
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1]).unwrap(),
+                ),
+            ],
+            1,
+            2,
+        )
+        .unwrap(),
+    );
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let output = block_on(padsequences_builtin(
+        sequences.clone(),
+        vec![Value::Int(IntValue::U8(2))],
+    ))
+    .unwrap();
+    let Value::OutputList(outputs) = output else {
+        panic!("two outputs expected")
+    };
+    let [Value::Tensor(data), Value::LogicalArray(mask)] = outputs.as_slice() else {
+        panic!("typed data and logical mask expected")
+    };
+    assert_eq!(data.shape, vec![1, 2, 2]);
+    assert_eq!(data.host_buffer().numeric_dtype(), NumericDType::U64);
+    assert_eq!(
+        data.numeric_value_at(0),
+        Some(runmat_value::NumericScalar::U64(wide))
+    );
+    assert_eq!(
+        data.numeric_value_at(1),
+        Some(runmat_value::NumericScalar::U64(u64::MAX))
+    );
+    assert_eq!(
+        data.numeric_value_at(2),
+        Some(runmat_value::NumericScalar::U64(7))
+    );
+    assert_eq!(
+        data.numeric_value_at(3),
+        Some(runmat_value::NumericScalar::U64(0))
+    );
+    assert_eq!(mask.shape, data.shape);
+    assert_eq!(mask.data.as_slice(), &[1, 1, 1, 0]);
+    drop(_guard);
+
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let output = block_on(padsequences_builtin(
+        sequences,
+        vec![
+            Value::Num(2.0),
+            Value::String("UniformOutput".into()),
+            Value::Bool(false),
+        ],
+    ))
+    .unwrap();
+    let Value::OutputList(outputs) = output else {
+        panic!("two cell outputs expected")
+    };
+    let [Value::Cell(data), Value::Cell(mask)] = outputs.as_slice() else {
+        panic!("cell data and masks expected")
+    };
+    assert_eq!(data.shape, vec![1, 2]);
+    assert_eq!(mask.shape, data.shape);
+    let Value::Tensor(second) = &data.data[1] else {
+        panic!("typed sequence expected")
+    };
+    assert_eq!(
+        second.numeric_value_at(0),
+        Some(runmat_value::NumericScalar::U64(7))
+    );
+    let Value::LogicalArray(second_mask) = &mask.data[1] else {
+        panic!("logical sequence mask expected")
+    };
+    assert_eq!(second_mask.data.as_slice(), &[1, 0]);
 }
 
 #[test]
