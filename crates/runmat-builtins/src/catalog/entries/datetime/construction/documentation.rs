@@ -62,7 +62,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "components", title: "Construct a scalar from calendar components",
             program: "t = datetime(2024,4,9,13,30,0);",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("09-Apr-2024 13:30:00"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isdatetime(t)); assert(year(t)==2024); assert(month(t)==4); assert(day(t)==9); assert(hour(t)==13); assert(minute(t)==30);" },
@@ -70,7 +70,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "text-array", title: "Parse two text dates",
             program: "t = datetime([\"2024-04-09 13:30:00\"; \"2024-04-10 08:15:00\"]);",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("09-Apr-2024 13:30:00\n10-Apr-2024 08:15:00"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(year(t),[2024;2024])); assert(isequal(day(t),[9;10])); assert(isequal(hour(t),[13;8]));" },
@@ -78,23 +78,23 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "extract-components", title: "Extract calendar and clock components",
             program: "t = datetime(2024,4,9,13,30,5); y = year(t); m = month(t); d = day(t); h = hour(t);",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("y = 2024\nm = 4\nd = 9\nh = 13"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(y==2024); assert(m==4); assert(d==9); assert(h==13); assert(minute(t)==30); assert(second(t)==5);" },
         },
         BuiltinExample {
             id: "serial-datenum", title: "Convert explicit serial date numbers",
-            program: "serials = [datenum(2024,4,9); datenum(2024,4,10)]; t = datetime(serials,'ConvertFrom','datenum');",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            program: "serials = [739351; 739352]; t = datetime(serials,'ConvertFrom','datenum');",
+            display_output: Some("09-Apr-2024 00:00:00\n10-Apr-2024 00:00:00"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(datenum(t),serials)); assert(isequal(day(t),[9;10]));" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(datenum(t),serials)); assert(isequal(year(t),[2024;2024])); assert(isequal(month(t),[4;4])); assert(isequal(day(t),[9;10]));" },
         },
         BuiltinExample {
             id: "display-format", title: "Change display format without changing the date",
             program: "t = datetime(2024,4,9,13,30,0); before = datenum(t); t.Format = 'yyyy-MM-dd HH:mm:ss';",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("2024-04-09 13:30:00"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(datenum(t)==before); assert(strcmp(t.Format,'yyyy-MM-dd HH:mm:ss'));" },
@@ -102,7 +102,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "month-end", title: "Add a calendar month at month end",
             program: "t = datetime(2024,1,31,'Format','yyyy-MM-dd'); shifted = t + calmonths(1);",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("2024-02-29"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(year(shifted)==2024); assert(month(shifted)==2); assert(day(shifted)==29);" },
@@ -110,7 +110,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "day-arithmetic", title: "Shift a date and subtract two datetimes",
             program: "t0 = datetime(2024,4,9); t1 = t0 + 7; delta = t1 - t0;",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("delta = 7"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(day(t1)==16); assert(delta==7);" },
@@ -118,7 +118,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "serial-helpers", title: "Use serial-date conversion helpers",
             program: "n = datenum(2024,4,9); v = datevec(n); s = datestr(n,'yyyy-MM-dd');",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("2024-04-09"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(v(1)==2024); assert(v(2)==4); assert(v(3)==9); assert(strcmp(s,'2024-04-09'));" },
