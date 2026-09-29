@@ -1,6 +1,7 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
 mod admission;
 mod numerics;
+mod power;
 #[cfg(test)]
 mod boundary_tests;
 use admission::preflight_host_model_properties;
@@ -455,6 +456,14 @@ impl TfModel {
     }
 
     pub fn powi(&self, exponent: i64) -> BuiltinResult<Self> {
+        if exponent < 0 && all_zero(&self.numerator) {
+            return Err(control_error(
+                "tf",
+                "RunMat:tf:DivideByZero",
+                "tf: cannot divide by a zero transfer function",
+            ));
+        }
+        power::preflight_power_capacity(self, exponent)?;
         let one = Self::scalar(
             Complex64::new(1.0, 0.0),
             TfOptions {

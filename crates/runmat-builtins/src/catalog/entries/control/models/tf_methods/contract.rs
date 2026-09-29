@@ -50,7 +50,14 @@ const POWER_INPUTS: [BuiltinParamDescriptor; 2] = [
 
 // The model parser and polynomial arithmetic report these stable identifiers.
 // Methods do not expose a fabricated, catch-all OperatorError identifier.
-const ERRORS: [BuiltinErrorDescriptor; 13] = [
+pub const TF_METHOD_ERROR_COEFFICIENT_CAPACITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TF.COEFFICIENT_CAPACITY",
+    identifier: Some("RunMat:tf:CoefficientCapacity"),
+    when: "A transfer-function power requires more polynomial coefficients than a host vector can represent.",
+    message: "tf: power coefficient array exceeds host capacity",
+};
+
+const ERRORS: [BuiltinErrorDescriptor; 14] = [
     BuiltinErrorDescriptor {
         code: "RM.TF.INVALID_ARGUMENT",
         identifier: Some("RunMat:tf:InvalidArgument"),
@@ -123,6 +130,7 @@ const ERRORS: [BuiltinErrorDescriptor; 13] = [
         when: "Power exponent is nonintegral, nonfinite, or outside the signed 64-bit range.",
         message: "tf: invalid exponent",
     },
+    TF_METHOD_ERROR_COEFFICIENT_CAPACITY,
     BuiltinErrorDescriptor {
         code: "RM.TF.INTERNAL",
         identifier: Some("RunMat:tf:Internal"),

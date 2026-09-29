@@ -77,6 +77,16 @@ fn all_twelve_are_method_only_with_distinct_contracts_and_examples() {
 }
 
 #[test]
+fn power_capacity_error_is_canonical_for_both_power_spellings() {
+    for entry in [&TF_POWER_CATALOG_ENTRY, &TF_MPOWER_CATALOG_ENTRY] {
+        assert!(entry.descriptor.errors.iter().any(|error| {
+            error.code == TF_METHOD_ERROR_COEFFICIENT_CAPACITY.code
+                && error.identifier == TF_METHOD_ERROR_COEFFICIENT_CAPACITY.identifier
+        }));
+    }
+}
+
+#[test]
 fn real_model_binary_and_unary_results_have_host_tf_property_schema() {
     for entry in [
         &TF_PLUS_CATALOG_ENTRY,
