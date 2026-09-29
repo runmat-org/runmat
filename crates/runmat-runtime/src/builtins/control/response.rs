@@ -3,11 +3,13 @@
 //! Transfer-function structure belongs to `tf_model`; this boundary checks
 //! exact integer conversion and gathers only properties that the simulator
 //! consumes. Time grids and response equations remain with each operation.
+use crate::builtins::common::tensor::complex_tensor_values_complex64;
+use crate::builtins::common::validation::native_integer_value_is_exact_f64;
 use crate::builtins::control::tf_model::{
     preflight_model_operand, scalar_f64, RealTfModel, TfModel,
 };
 use crate::{build_runtime_error, dispatcher, BuiltinResult};
-use runmat_value::{NumericScalar, Value};
+use runmat_value::Value;
 
 #[derive(Clone, Copy)]
 pub(crate) enum ResponseKind {
@@ -27,6 +29,13 @@ impl ResponseKind {
         match self {
             Self::Step => "RunMat:step:InvalidModel",
             Self::Impulse => "RunMat:impulse:InvalidArgument",
+        }
+    }
+
+    fn unsupported_model_error(self) -> &'static str {
+        match self {
+            Self::Step => "RunMat:step:UnsupportedModel",
+            Self::Impulse => "RunMat:impulse:UnsupportedModel",
         }
     }
 }
@@ -58,6 +67,9 @@ pub(crate) async fn parse_real_model(
         if matches!(value, Value::GpuTensor(_)) {
             let gathered = dispatcher::gather_if_needed_async(value).await?;
             ensure_exact_integer(&gathered, name, kind)?;
+            if matches!(name, "Numerator" | "Denominator") {
+                preflight_real_coefficients(&gathered, name, kind)?;
+            }
             object.properties.insert(name.into(), gathered);
         }
     }
@@ -93,6 +105,9 @@ pub(crate) fn preflight_response_model_operand(
             .filter(|value| !matches!(value, Value::GpuTensor(_)))
         {
             ensure_exact_integer(value, name, kind)?;
+            if matches!(name, "Numerator" | "Denominator") {
+                preflight_real_coefficients(value, name, kind)?;
+            }
         }
     }
     for name in ["InputDelay", "OutputDelay"] {
@@ -106,10 +121,7 @@ pub(crate) fn preflight_response_model_operand(
                     "{builtin}: transfer functions with input or output delays are not supported"
                 ))
                 .with_builtin(builtin)
-                .with_identifier(match kind {
-                    ResponseKind::Step => "RunMat:step:UnsupportedModel",
-                    ResponseKind::Impulse => "RunMat:impulse:UnsupportedModel",
-                })
+                .with_identifier(kind.unsupported_model_error())
                 .build());
             }
         }
@@ -118,20 +130,7 @@ pub(crate) fn preflight_response_model_operand(
 }
 
 fn ensure_exact_integer(value: &Value, name: &str, kind: ResponseKind) -> BuiltinResult<()> {
-    let exact = match value {
-        Value::Int(value) => value.to_i128().unsigned_abs() <= (1_u128 << 53),
-        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            (0..tensor.len()).all(|index| tensor.numeric_value_at(index).is_some_and(exact_scalar))
-        }
-        Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => (0..tensor.len())
-            .all(|index| {
-                tensor
-                    .numeric_value_at(index)
-                    .is_some_and(|(real, imaginary)| exact_scalar(real) && exact_scalar(imaginary))
-            }),
-        _ => true,
-    };
-    if exact {
+    if native_integer_value_is_exact_f64(value) {
         Ok(())
     } else {
         Err(build_runtime_error(format!(
@@ -144,8 +143,23 @@ fn ensure_exact_integer(value: &Value, name: &str, kind: ResponseKind) -> Builti
     }
 }
 
-fn exact_scalar(value: NumericScalar) -> bool {
-    value
-        .into_int_value()
-        .is_none_or(|integer| integer.to_i128().unsigned_abs() <= (1_u128 << 53))
+fn preflight_real_coefficients(value: &Value, name: &str, kind: ResponseKind) -> BuiltinResult<()> {
+    let nonreal = match value {
+        Value::Complex(_, imaginary) => *imaginary != 0.0,
+        Value::ComplexTensor(tensor) => complex_tensor_values_complex64(tensor)
+            .iter()
+            .any(|coefficient| coefficient.im != 0.0),
+        _ => false,
+    };
+    if nonreal {
+        Err(build_runtime_error(format!(
+            "{}: complex tf {name} coefficients are not supported",
+            kind.name()
+        ))
+        .with_builtin(kind.name())
+        .with_identifier(kind.unsupported_model_error())
+        .build())
+    } else {
+        Ok(())
+    }
 }

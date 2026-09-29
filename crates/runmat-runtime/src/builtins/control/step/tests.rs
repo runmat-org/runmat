@@ -412,3 +412,56 @@ fn invalid_statement_style_is_rejected_before_model_download() {
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }
+
+#[test]
+fn exactly_representable_wide_integer_coefficients_are_admitted() {
+    let exact = 1_u64 << 63;
+    let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
+        unreachable!()
+    };
+    model.properties.insert(
+        "Numerator".into(),
+        integer_tensor(IntegerStorage::U64(vec![exact]), vec![1, 1]),
+    );
+    model.properties.insert(
+        "Denominator".into(),
+        integer_tensor(IntegerStorage::U64(vec![exact, exact]), vec![1, 2]),
+    );
+    let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+    let y = tensor_data(
+        run_step(Value::Object(model.clone()), vec![time]).expect("exact wide integer"),
+    );
+    assert!((y[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5);
+
+    model.properties.insert(
+        "Numerator".into(),
+        integer_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
+    );
+    let error = run_step(Value::Object(model), Vec::new()).expect_err("inexact wide integer");
+    assert_eq!(error.identifier(), STEP_ERROR_INVALID_MODEL.identifier);
+    assert!(error.message().contains("exactly representable"));
+}
+
+#[test]
+fn tiny_nonreal_host_coefficient_precedes_resident_sample_time_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let ts = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &ts)
+            .expect("resident sample time");
+        let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
+            unreachable!()
+        };
+        model
+            .properties
+            .insert("Ts".into(), Value::GpuTensor(resident));
+        model.properties.insert(
+            "Numerator".into(),
+            Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 1.0e-20)], vec![1, 1]).unwrap()),
+        );
+        provider.reset_telemetry();
+        let error =
+            run_step(Value::Object(model), Vec::new()).expect_err("nonreal host coefficient");
+        assert_eq!(error.identifier(), STEP_ERROR_UNSUPPORTED_MODEL.identifier);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}

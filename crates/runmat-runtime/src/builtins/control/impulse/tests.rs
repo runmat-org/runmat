@@ -454,3 +454,50 @@ fn tiny_nonzero_imaginary_coefficient_is_rejected() {
         IMPULSE_ERROR_UNSUPPORTED_MODEL.identifier
     );
 }
+
+#[test]
+fn resident_wide_integer_coefficient_uses_exact_binary64_boundary() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let exact =
+            Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1]).unwrap();
+        let exact_handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &exact)
+            .expect("exact resident integer");
+        let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
+            unreachable!()
+        };
+        model
+            .properties
+            .insert("Numerator".into(), Value::GpuTensor(exact_handle));
+        model.properties.insert(
+            "Denominator".into(),
+            integer_tensor(
+                IntegerStorage::U64(vec![1_u64 << 63, 1_u64 << 63]),
+                vec![1, 2],
+            ),
+        );
+        let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+        provider.reset_telemetry();
+        let y = tensor_data(
+            run_impulse(Value::Object(model.clone()), vec![time]).expect("exact resident integer"),
+        );
+        assert!((y[1] - (-1.0_f64).exp()).abs() < 1.0e-8);
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+
+        let inexact =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap();
+        let inexact_handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &inexact)
+                .expect("inexact resident integer");
+        model
+            .properties
+            .insert("Numerator".into(), Value::GpuTensor(inexact_handle));
+        let error =
+            run_impulse(Value::Object(model), Vec::new()).expect_err("inexact resident integer");
+        assert_eq!(
+            error.identifier(),
+            IMPULSE_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(error.message().contains("exactly representable"));
+    });
+}
