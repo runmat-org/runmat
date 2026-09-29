@@ -29,6 +29,27 @@ fn tf_constructs_object_through_vm_dispatch() {
 }
 
 #[test]
+fn compiled_ss_integer_precision_boundary_reports_owning_identifiers() {
+    for (source, identifier) in [
+        (
+            "wide=uint64(9007199254740992)+uint64(1); S=ss(wide,1,1,1);",
+            "RunMat:ss:InvalidMatrix",
+        ),
+        (
+            "wide=uint64(9007199254740992)+uint64(1); S=ss(1,1,1,1,wide);",
+            "RunMat:ss:InvalidSampleTime",
+        ),
+    ] {
+        let error = execute_source(source).expect_err("inexact integer ss input");
+        assert_eq!(error.identifier(), Some(identifier), "{source}: {error}");
+    }
+    execute_source(
+        "wide=uint64(9007199254740992); S=ss(wide,1,1,1,wide); assert(S.A==double(wide)); assert(S.Ts==double(wide));",
+    )
+    .expect("exact wide integer ss inputs");
+}
+
+#[test]
 fn tf_variable_control_workflow_runs_through_vm_dispatch() {
     let program = r#"
         s = tf('s');

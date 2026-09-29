@@ -1,6 +1,29 @@
 use super::*;
 use runmat_types::*;
 
+#[test]
+fn precision_boundary_errors_are_canonical_and_distinct_from_extensions() {
+    let errors = SS_DESCRIPTOR.errors;
+    for expected in [
+        SS_ERROR_INVALID_MATRIX.identifier,
+        SS_ERROR_INVALID_SAMPLE_TIME.identifier,
+    ] {
+        assert!(errors.iter().any(|error| error.identifier == expected));
+    }
+    assert_eq!(
+        SS_ERROR_INVALID_MATRIX.identifier,
+        Some("RunMat:ss:InvalidMatrix")
+    );
+    assert_eq!(
+        SS_ERROR_INVALID_SAMPLE_TIME.identifier,
+        Some("RunMat:ss:InvalidSampleTime")
+    );
+    assert_ne!(
+        SS_ERROR_INVALID_MATRIX.identifier,
+        SS_INTEGER_MATRIX_EXTENSION.error_identifier
+    );
+}
+
 fn numeric(rows: usize, columns: usize) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {

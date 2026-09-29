@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, SS_ERROR_INTERNAL, SS_ERROR_INVALID_ARGUMENT,
-    SS_ERROR_INVALID_DIMENSIONS, SS_ERROR_INVALID_OPTION, SS_ERROR_INVALID_SAMPLE_TIME,
-    SS_ERROR_UNSUPPORTED_INPUT, SS_EXPLICIT_GPU_EXTENSION, SS_INTEGER_MATRIX_EXTENSION,
-    SS_INTEGER_SAMPLE_TIME_EXTENSION,
+    SS_ERROR_INVALID_DIMENSIONS, SS_ERROR_INVALID_MATRIX, SS_ERROR_INVALID_OPTION,
+    SS_ERROR_INVALID_SAMPLE_TIME, SS_ERROR_UNSUPPORTED_INPUT, SS_EXPLICIT_GPU_EXTENSION,
+    SS_INTEGER_MATRIX_EXTENSION, SS_INTEGER_SAMPLE_TIME_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, ObjectInstance, Tensor, Value};
@@ -204,10 +204,10 @@ pub(crate) async fn ss_builtin(
 
 async fn admitted_matrix(value: &Value, role: &str) -> BuiltinResult<Value> {
     let gathered = dispatcher::gather_if_needed_async(value).await?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+    ensure_ss_integer_boundary(
         &gathered,
         &SS_INTEGER_MATRIX_EXTENSION,
-        BUILTIN_NAME,
+        &SS_ERROR_INVALID_MATRIX,
         role,
     )
     .await?;
@@ -236,21 +236,51 @@ async fn resolve_matrix(
 }
 
 async fn admitted_sample_time(value: &Value) -> BuiltinResult<f64> {
-    if crate::builtins::common::validation::value_has_native_integer_class(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &SS_INTEGER_SAMPLE_TIME_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
+    admit_ss_integer_extension(value, &SS_INTEGER_SAMPLE_TIME_EXTENSION)?;
     let gathered = dispatcher::gather_if_needed_async(value).await?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+    ensure_ss_integer_boundary(
         &gathered,
         &SS_INTEGER_SAMPLE_TIME_EXTENSION,
-        BUILTIN_NAME,
+        &SS_ERROR_INVALID_SAMPLE_TIME,
         "sample-time",
     )
     .await?;
     parse_sample_time(&gathered)
+}
+
+fn admit_ss_integer_extension(
+    value: &Value,
+    extension: &'static runmat_builtins::BuiltinExtensionDescriptor,
+) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+    }
+    Ok(())
+}
+
+async fn ensure_ss_integer_boundary(
+    value: &Value,
+    extension: &'static runmat_builtins::BuiltinExtensionDescriptor,
+    error: &'static BuiltinErrorDescriptor,
+    role: &str,
+) -> BuiltinResult<()> {
+    admit_ss_integer_extension(value, extension)?;
+    if crate::builtins::common::validation::value_has_native_integer_class(value)
+        && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(value)
+            .await?
+    {
+        let identifier = error
+            .identifier
+            .expect("ss precision error has an identifier");
+        return Err(build_runtime_error(format!(
+            "ss: integer {role} values must be exactly representable as double"
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(identifier)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    Ok(())
 }
 
 struct SsAdmittedOptions<'a> {
@@ -639,6 +669,46 @@ mod tests {
         )
         .expect_err("inexact typed-integer ss matrices must not round silently");
         assert!(error.message().contains("exactly representable as double"));
+        assert_eq!(error.identifier(), SS_ERROR_INVALID_MATRIX.identifier);
+    }
+
+    #[test]
+    fn ss_rejects_inexact_integer_sample_time_with_owning_identifier() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let error = run_ss(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+            vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+        )
+        .expect_err("inexact integer sample time must not round silently");
+        assert!(error.message().contains("exactly representable as double"));
+        assert_eq!(error.identifier(), SS_ERROR_INVALID_SAMPLE_TIME.identifier);
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    }
+
+    #[test]
+    fn ss_accepts_exact_wide_integer_matrix_and_sample_time() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let exactly_representable = 1_u64 << 53;
+        let sys = run_ss(
+            Value::Int(IntValue::U64(exactly_representable)),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::Num(4.0),
+            vec![Value::Int(IntValue::U64(exactly_representable))],
+        )
+        .expect("exact wide integer values are permitted");
+        assert_tensor(
+            property(&sys, "A"),
+            &[1, 1],
+            &[exactly_representable as f64],
+        );
+        assert_eq!(
+            property(&sys, "Ts"),
+            &Value::Num(exactly_representable as f64)
+        );
     }
 
     #[test]
@@ -865,6 +935,52 @@ mod tests {
                 vec![Value::Num(-1.0)],
             )
             .expect_err("invalid host sample time");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_SAMPLE_TIME.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_inexact_host_integer_matrix_preflights_before_resident_matrix() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+                Value::Num(1.0),
+                Value::Num(1.0),
+                vec![],
+            )
+            .expect_err("inexact host B preflights before A download");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_MATRIX.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_inexact_host_integer_sample_time_preflights_before_resident_matrix() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+                vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+            )
+            .expect_err("inexact host Ts preflights before A download");
             assert_eq!(error.identifier(), SS_ERROR_INVALID_SAMPLE_TIME.identifier);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });

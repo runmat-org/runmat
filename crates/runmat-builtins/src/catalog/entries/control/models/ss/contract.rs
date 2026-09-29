@@ -107,8 +107,14 @@ pub const SS_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescript
 pub const SS_ERROR_INVALID_SAMPLE_TIME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SS.INVALID_SAMPLE_TIME",
     identifier: Some("RunMat:ss:InvalidSampleTime"),
-    when: "Sample time is not a finite non-negative scalar.",
+    when: "Sample time is not a finite non-negative scalar, or an integer sample time cannot be represented exactly as double.",
     message: "ss: sample time must be a finite non-negative scalar",
+};
+pub const SS_ERROR_INVALID_MATRIX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SS.INVALID_MATRIX",
+    identifier: Some("RunMat:ss:InvalidMatrix"),
+    when: "An integer matrix value cannot cross the double-valued state-space boundary exactly.",
+    message: "ss: invalid state-space matrix value",
 };
 pub const SS_ERROR_INVALID_DIMENSIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SS.INVALID_DIMENSIONS",
@@ -128,10 +134,11 @@ pub const SS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Internal tensor/object construction failed.",
     message: "ss: internal error",
 };
-const SS_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const SS_ERRORS: [BuiltinErrorDescriptor; 7] = [
     SS_ERROR_INVALID_ARGUMENT,
     SS_ERROR_INVALID_OPTION,
     SS_ERROR_INVALID_SAMPLE_TIME,
+    SS_ERROR_INVALID_MATRIX,
     SS_ERROR_INVALID_DIMENSIONS,
     SS_ERROR_UNSUPPORTED_INPUT,
     SS_ERROR_INTERNAL,
