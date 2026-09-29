@@ -12,7 +12,7 @@ use crate::BuiltinResult;
 
 use super::{
     deep_learning_error, gather_args, layer_object, numeric_vector, parse_name_values,
-    positive_usize, scalar_text,
+    positive_usize, scalar_text, tensor_value,
 };
 
 // Structural layer dimensions are exposed as double-valued metadata. Admit
