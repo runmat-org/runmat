@@ -19,11 +19,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let output = request.arguments.first().map_or_else(
         || ValueFact::unknown(DynamicReason::RuntimeValue),
         |input| match &input.kind {
-            ValueKindFact::String => ValueFact::proven(
-                ValueKindFact::String,
-                input.shape.clone(),
-                input.storage.clone(),
-            ),
+            ValueKindFact::String => {
+                ValueFact::proven(ValueKindFact::String, input.shape.clone(), input.storage)
+            }
             ValueKindFact::Character => ValueFact::proven(
                 ValueKindFact::Character,
                 input.shape.known_dims().map_or(ShapeFact::Unknown, |dims| {
@@ -52,7 +50,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                         elements_complete: false,
                     }),
                     input.shape.clone(),
-                    input.storage.clone(),
+                    input.storage,
                 )
             }
             ValueKindFact::Unknown => ValueFact::unknown(DynamicReason::RuntimeValue),

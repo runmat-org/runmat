@@ -81,10 +81,7 @@ fn inferred_dims(literals: &[Option<&LiteralValue>]) -> ShapeFact {
             None => return ShapeFact::Unknown,
         }
     } else {
-        literals
-            .iter()
-            .map(|v| v.and_then(|v| dimension(v)))
-            .collect()
+        literals.iter().map(|v| v.and_then(dimension)).collect()
     };
     if dims.is_empty() {
         return ShapeFact::from(vec![Some(0), Some(0)]);

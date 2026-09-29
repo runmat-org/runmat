@@ -17,18 +17,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(input) = request.arguments.first() {
-        let valid = match &input.kind {
-            ValueKindFact::Unknown => true,
-            ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Single | NumericClass::Double,
-                ..
-            }) => true,
-            ValueKindFact::Numeric(NumericFact {
-                domain: NumericDomain::Real,
-                ..
-            }) => true,
-            _ => false,
-        };
+        let valid = matches!(
+            &input.kind,
+            ValueKindFact::Unknown
+                | ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Single | NumericClass::Double,
+                    ..
+                })
+                | ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                })
+        );
         if !valid {
             diagnostics.push(argument_error(
                 "RM-CATALOG-SCATTERPLOT-SAMPLES",

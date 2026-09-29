@@ -97,10 +97,7 @@ fn inferred_empty_shape(literals: &[Option<&LiteralValue>]) -> ShapeFact {
             None => return ShapeFact::Unknown,
         }
     } else {
-        literals
-            .iter()
-            .map(|v| v.and_then(|v| dimension(v)))
-            .collect()
+        literals.iter().map(|v| v.and_then(dimension)).collect()
     };
     if dims.len() < 2 {
         dims.resize(2, Some(0));

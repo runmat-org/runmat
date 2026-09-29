@@ -1,12 +1,12 @@
 mod documentation;
-pub(super) const ENTRY: crate::BuiltinCatalogEntry = super::entry(
-    crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
-    "array2timetable",
-    "table",
-    documentation::DOCUMENTATION,
-    &super::ARRAY2TIMETABLE_DESCRIPTOR,
-    super::inference::array2timetable,
-    &super::ARRAY2TIMETABLE_EXTENSIONS,
-    &super::ARRAY2TIMETABLE_INTEGER_CAPABILITIES,
-    false,
-);
+pub(super) const ENTRY: crate::BuiltinCatalogEntry = super::entry(super::EntryDefinition {
+    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
+    name: "array2timetable",
+    category: "table",
+    documentation: documentation::DOCUMENTATION,
+    descriptor: &super::ARRAY2TIMETABLE_DESCRIPTOR,
+    inference: super::inference::array2timetable,
+    extensions: &super::ARRAY2TIMETABLE_EXTENSIONS,
+    integer_capabilities: &super::ARRAY2TIMETABLE_INTEGER_CAPABILITIES,
+    filesystem_read: false,
+});

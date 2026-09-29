@@ -92,7 +92,7 @@ fn count_literal(request: &CallRequest) -> Option<usize> {
                 && number >= 1.0
                 && number.fract() == 0.0
                 && number < usize::MAX as f64)
-                .then(|| number as usize)
+                .then_some(number as usize)
         }),
     }
 }

@@ -86,24 +86,24 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         1
     } else {
         let mut end = 1;
-        for index in 1..args.len().min(3) {
+        for (index, argument) in args.iter().enumerate().take(3).skip(1) {
             if matches!(
-                args[index].kind,
+                argument.kind,
                 ValueKindFact::String | ValueKindFact::Character
             ) {
                 break;
             }
-            if matches!(args[index].kind, ValueKindFact::Unknown) {
+            if matches!(argument.kind, ValueKindFact::Unknown) {
                 break;
             }
-            if index == 1 && !real_vector(&args[index]) {
+            if index == 1 && !real_vector(argument) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-STEPINFO-TIME",
                     "t must be a real numeric vector",
                     index,
                 ));
             }
-            if index == 2 && !real_scalar(&args[index]) {
+            if index == 2 && !real_scalar(argument) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-STEPINFO-FINAL",
                     "yfinal must be a real scalar",

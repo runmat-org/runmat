@@ -151,7 +151,7 @@ pub(in crate::catalog::entries::strings::transform) fn infer_insert(
             shape,
             storage,
             ..
-        }) => ValueFact::proven(ValueKindFact::String, shape.clone(), storage.clone()),
+        }) => ValueFact::proven(ValueKindFact::String, shape.clone(), *storage),
         Some(ValueFact {
             kind: ValueKindFact::Character,
             shape,
@@ -175,7 +175,7 @@ pub(in crate::catalog::entries::strings::transform) fn infer_insert(
                 elements_complete: false,
             }),
             shape.clone(),
-            storage.clone(),
+            *storage,
         ),
         _ => ValueFact::unknown(DynamicReason::RuntimeValue),
     };

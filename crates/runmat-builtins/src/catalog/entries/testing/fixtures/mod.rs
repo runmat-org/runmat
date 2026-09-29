@@ -145,7 +145,7 @@ const LINK: BuiltinLinkContract = BuiltinLinkContract {
     artifact_dependencies: &[],
 };
 
-const fn entry(
+struct EntryDefinition {
     name: &'static str,
     docs: BuiltinDocumentation,
     descriptor: &'static BuiltinDescriptor,
@@ -155,7 +155,20 @@ const fn entry(
     async_behavior: BuiltinAsyncBehavior,
     environment_effect: Option<BuiltinEnvironmentEffect>,
     purity: BuiltinPurity,
-) -> BuiltinCatalogEntry {
+}
+
+const fn entry(definition: EntryDefinition) -> BuiltinCatalogEntry {
+    let EntryDefinition {
+        name,
+        docs,
+        descriptor,
+        infer,
+        effects,
+        capabilities,
+        async_behavior,
+        environment_effect,
+        purity,
+    } = definition;
     BuiltinCatalogEntry {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name },
@@ -184,34 +197,34 @@ const fn entry(
     }
 }
 
-pub const PATH_FIXTURE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    "matlab.unittest.fixtures.PathFixture",
-    documentation::PATH_FIXTURE,
-    &PATH_FIXTURE_DESCRIPTOR,
-    inference::path_fixture,
-    &[EffectKind::MaySuspend, EffectKind::MayThrow],
-    &[],
-    BuiltinAsyncBehavior::MaySuspend,
-    None,
-    BuiltinPurity::Pure,
-);
-pub const TEMPORARY_FOLDER_FIXTURE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    "matlab.unittest.fixtures.TemporaryFolderFixture",
-    documentation::TEMPORARY_FOLDER_FIXTURE,
-    &TEMPORARY_FOLDER_FIXTURE_DESCRIPTOR,
-    inference::temporary_folder_fixture,
-    &[EffectKind::MaySuspend, EffectKind::MayThrow],
-    &[],
-    BuiltinAsyncBehavior::MaySuspend,
-    None,
-    BuiltinPurity::Pure,
-);
-pub const APPLY_FIXTURE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    "matlab.unittest.TestCase.applyFixture",
-    documentation::APPLY_FIXTURE,
-    &APPLY_FIXTURE_DESCRIPTOR,
-    inference::apply_fixture,
-    &[
+pub const PATH_FIXTURE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    name: "matlab.unittest.fixtures.PathFixture",
+    docs: documentation::PATH_FIXTURE,
+    descriptor: &PATH_FIXTURE_DESCRIPTOR,
+    infer: inference::path_fixture,
+    effects: &[EffectKind::MaySuspend, EffectKind::MayThrow],
+    capabilities: &[],
+    async_behavior: BuiltinAsyncBehavior::MaySuspend,
+    environment_effect: None,
+    purity: BuiltinPurity::Pure,
+});
+pub const TEMPORARY_FOLDER_FIXTURE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    name: "matlab.unittest.fixtures.TemporaryFolderFixture",
+    docs: documentation::TEMPORARY_FOLDER_FIXTURE,
+    descriptor: &TEMPORARY_FOLDER_FIXTURE_DESCRIPTOR,
+    infer: inference::temporary_folder_fixture,
+    effects: &[EffectKind::MaySuspend, EffectKind::MayThrow],
+    capabilities: &[],
+    async_behavior: BuiltinAsyncBehavior::MaySuspend,
+    environment_effect: None,
+    purity: BuiltinPurity::Pure,
+});
+pub const APPLY_FIXTURE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    name: "matlab.unittest.TestCase.applyFixture",
+    docs: documentation::APPLY_FIXTURE,
+    descriptor: &APPLY_FIXTURE_DESCRIPTOR,
+    infer: inference::apply_fixture,
+    effects: &[
         EffectKind::EnvironmentRead,
         EffectKind::EnvironmentWrite,
         EffectKind::FilesystemRead,
@@ -219,26 +232,26 @@ pub const APPLY_FIXTURE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
         EffectKind::MaySuspend,
         EffectKind::MayThrow,
     ],
-    &[CapabilityRequirement::Filesystem],
-    BuiltinAsyncBehavior::MaySuspend,
-    Some(BuiltinEnvironmentEffect::PathMutation),
-    BuiltinPurity::Impure,
-);
-pub const ADD_TEARDOWN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    "matlab.unittest.TestCase.addTeardown",
-    documentation::ADD_TEARDOWN,
-    &ADD_TEARDOWN_DESCRIPTOR,
-    inference::add_teardown,
-    &[
+    capabilities: &[CapabilityRequirement::Filesystem],
+    async_behavior: BuiltinAsyncBehavior::MaySuspend,
+    environment_effect: Some(BuiltinEnvironmentEffect::PathMutation),
+    purity: BuiltinPurity::Impure,
+});
+pub const ADD_TEARDOWN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    name: "matlab.unittest.TestCase.addTeardown",
+    docs: documentation::ADD_TEARDOWN,
+    descriptor: &ADD_TEARDOWN_DESCRIPTOR,
+    infer: inference::add_teardown,
+    effects: &[
         EffectKind::HostCallback,
         EffectKind::MayThrow,
         EffectKind::Unknown,
     ],
-    &[],
-    BuiltinAsyncBehavior::NeverSuspends,
-    None,
-    BuiltinPurity::Impure,
-);
+    capabilities: &[],
+    async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+    environment_effect: None,
+    purity: BuiltinPurity::Impure,
+});
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &PATH_FIXTURE_CATALOG_ENTRY,

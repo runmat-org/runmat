@@ -203,7 +203,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     elements_complete: false,
                 }),
                 text_shape,
-                input.map_or(StorageFact::Unknown, |value| value.storage.clone()),
+                input.map_or(StorageFact::Unknown, |value| value.storage),
             )
         }
         _ => ValueFact::unknown(DynamicReason::RuntimeValue),

@@ -141,9 +141,9 @@ fn validate_exponent(
         ));
     }
     let invalid = match literal {
-        Some(LiteralValue::Integer { text, .. }) => text.parse::<i128>().map_or(false, |value| {
-            value < i64::MIN as i128 || value > i64::MAX as i128
-        }),
+        Some(LiteralValue::Integer { text, .. }) => text
+            .parse::<i128>()
+            .is_ok_and(|value| value < i64::MIN as i128 || value > i64::MAX as i128),
         Some(LiteralValue::Number(value)) => invalid_float_exponent(*value),
         Some(LiteralValue::Real { text, .. }) => {
             text.parse::<f64>().is_ok_and(invalid_float_exponent)

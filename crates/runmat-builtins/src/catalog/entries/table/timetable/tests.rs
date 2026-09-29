@@ -16,7 +16,11 @@ fn unknown() -> ValueFact {
 #[test]
 fn all_five_bindings_infer_the_correct_host_object_class() {
     for (entry, arguments, class) in [
-        (&timetable::ENTRY, vec![], runmat_types::standard::TIMETABLE),
+        (
+            &constructor::ENTRY,
+            vec![],
+            runmat_types::standard::TIMETABLE,
+        ),
         (
             &array2timetable::ENTRY,
             vec![unknown()],

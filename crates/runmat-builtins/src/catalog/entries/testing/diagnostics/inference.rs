@@ -166,20 +166,19 @@ pub(super) fn log(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInf
             0,
         ));
     }
-    if request.arguments.len() == 3 {
-        if !verbosity(&request.arguments[1])
+    if request.arguments.len() == 3
+        && (!verbosity(&request.arguments[1])
             || request
                 .literals
                 .literal_args
                 .get(1)
-                .is_some_and(|literal| !verbosity_literal_valid(literal))
-        {
-            diagnostics.push(argument_error(
-                "RM-TESTING-LOG-VERBOSITY",
-                "verbosity must be an integer from 1 to 4 or a supported name",
-                1,
-            ));
-        }
+                .is_some_and(|literal| !verbosity_literal_valid(literal)))
+    {
+        diagnostics.push(argument_error(
+            "RM-TESTING-LOG-VERBOSITY",
+            "verbosity must be an integer from 1 to 4 or a supported name",
+            1,
+        ));
     }
     if let Some(diagnostic) = request.arguments.last() {
         if !is_diagnostic(diagnostic) {

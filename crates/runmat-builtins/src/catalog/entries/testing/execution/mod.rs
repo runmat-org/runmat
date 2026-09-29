@@ -151,7 +151,7 @@ const LINK: BuiltinLinkContract = BuiltinLinkContract {
     artifact_dependencies: &[],
 };
 
-const fn entry(
+struct EntryDefinition {
     name: &'static str,
     docs: BuiltinDocumentation,
     descriptor: &'static BuiltinDescriptor,
@@ -160,7 +160,19 @@ const fn entry(
     purity: BuiltinPurity,
     effects: &'static [EffectKind],
     capabilities: &'static [CapabilityRequirement],
-) -> BuiltinCatalogEntry {
+}
+
+const fn entry(definition: EntryDefinition) -> BuiltinCatalogEntry {
+    let EntryDefinition {
+        name,
+        docs,
+        descriptor,
+        infer,
+        async_behavior,
+        purity,
+        effects,
+        capabilities,
+    } = definition;
     BuiltinCatalogEntry {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name },
@@ -189,44 +201,44 @@ const fn entry(
     }
 }
 
-pub const FUNCTIONTESTS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    "functiontests",
-    documentation::FUNCTIONTESTS,
-    &FUNCTIONTESTS_DESCRIPTOR,
-    inference::functiontests,
-    BuiltinAsyncBehavior::NeverSuspends,
-    BuiltinPurity::Pure,
-    &[EffectKind::EnvironmentRead, EffectKind::MayThrow],
-    &[],
-);
-pub const WITH_TEXT_OUTPUT_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    "matlab.unittest.TestRunner.withTextOutput",
-    documentation::WITH_TEXT_OUTPUT,
-    &WITH_TEXT_OUTPUT_DESCRIPTOR,
-    inference::with_text_output,
-    BuiltinAsyncBehavior::MaySuspend,
-    BuiltinPurity::Pure,
-    &[EffectKind::MaySuspend, EffectKind::MayThrow],
-    &[],
-);
-pub const ADD_PLUGIN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    "matlab.unittest.TestRunner.addPlugin",
-    documentation::ADD_PLUGIN,
-    &ADD_PLUGIN_DESCRIPTOR,
-    inference::add_plugin,
-    BuiltinAsyncBehavior::NeverSuspends,
-    BuiltinPurity::Impure,
-    &[EffectKind::EnvironmentWrite, EffectKind::MayThrow],
-    &[],
-);
-pub const TEST_RUNNER_RUN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    "matlab.unittest.TestRunner.run",
-    documentation::RUN,
-    &TEST_RUNNER_RUN_DESCRIPTOR,
-    inference::run,
-    BuiltinAsyncBehavior::MaySuspend,
-    BuiltinPurity::Impure,
-    &[
+pub const FUNCTIONTESTS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    name: "functiontests",
+    docs: documentation::FUNCTIONTESTS,
+    descriptor: &FUNCTIONTESTS_DESCRIPTOR,
+    infer: inference::functiontests,
+    async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+    purity: BuiltinPurity::Pure,
+    effects: &[EffectKind::EnvironmentRead, EffectKind::MayThrow],
+    capabilities: &[],
+});
+pub const WITH_TEXT_OUTPUT_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    name: "matlab.unittest.TestRunner.withTextOutput",
+    docs: documentation::WITH_TEXT_OUTPUT,
+    descriptor: &WITH_TEXT_OUTPUT_DESCRIPTOR,
+    infer: inference::with_text_output,
+    async_behavior: BuiltinAsyncBehavior::MaySuspend,
+    purity: BuiltinPurity::Pure,
+    effects: &[EffectKind::MaySuspend, EffectKind::MayThrow],
+    capabilities: &[],
+});
+pub const ADD_PLUGIN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    name: "matlab.unittest.TestRunner.addPlugin",
+    docs: documentation::ADD_PLUGIN,
+    descriptor: &ADD_PLUGIN_DESCRIPTOR,
+    infer: inference::add_plugin,
+    async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+    purity: BuiltinPurity::Impure,
+    effects: &[EffectKind::EnvironmentWrite, EffectKind::MayThrow],
+    capabilities: &[],
+});
+pub const TEST_RUNNER_RUN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    name: "matlab.unittest.TestRunner.run",
+    docs: documentation::RUN,
+    descriptor: &TEST_RUNNER_RUN_DESCRIPTOR,
+    infer: inference::run,
+    async_behavior: BuiltinAsyncBehavior::MaySuspend,
+    purity: BuiltinPurity::Impure,
+    effects: &[
         EffectKind::EnvironmentRead,
         EffectKind::FilesystemRead,
         EffectKind::HostCallback,
@@ -234,8 +246,8 @@ pub const TEST_RUNNER_RUN_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
         EffectKind::MayThrow,
         EffectKind::Unknown,
     ],
-    &[CapabilityRequirement::Filesystem],
-);
+    capabilities: &[CapabilityRequirement::Filesystem],
+});
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &FUNCTIONTESTS_CATALOG_ENTRY,

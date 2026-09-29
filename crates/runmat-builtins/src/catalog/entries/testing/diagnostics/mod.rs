@@ -145,7 +145,7 @@ const LINK: BuiltinLinkContract = BuiltinLinkContract {
     artifact_dependencies: &[],
 };
 
-const fn entry(
+struct EntryDefinition {
     provenance: BuiltinCatalogProvenance,
     name: &'static str,
     category: &'static str,
@@ -154,7 +154,19 @@ const fn entry(
     infer: fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
     effects: &'static [EffectKind],
     purity: BuiltinPurity,
-) -> BuiltinCatalogEntry {
+}
+
+const fn entry(definition: EntryDefinition) -> BuiltinCatalogEntry {
+    let EntryDefinition {
+        provenance,
+        name,
+        category,
+        docs,
+        descriptor,
+        infer,
+        effects,
+        purity,
+    } = definition;
     BuiltinCatalogEntry {
         provenance,
         identity: BuiltinCatalogIdentity { name },
@@ -183,36 +195,36 @@ const fn entry(
     }
 }
 
-pub const TEST_CASE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    BuiltinCatalogProvenance::new(file!(), module_path!()),
-    "matlab.unittest.TestCase",
-    "testing",
-    documentation::TEST_CASE,
-    &TEST_CASE_DESCRIPTOR,
-    inference::test_case,
-    &[EffectKind::MayThrow],
-    BuiltinPurity::Pure,
-);
-pub const STRING_DIAGNOSTIC_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    BuiltinCatalogProvenance::new(file!(), module_path!()),
-    "matlab.unittest.diagnostics.StringDiagnostic",
-    "testing/diagnostics",
-    documentation::STRING_DIAGNOSTIC,
-    &STRING_DIAGNOSTIC_DESCRIPTOR,
-    inference::string_diagnostic,
-    &[EffectKind::MayThrow],
-    BuiltinPurity::Pure,
-);
-pub const TEST_CASE_LOG_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
-    BuiltinCatalogProvenance::new(file!(), module_path!()),
-    "matlab.unittest.TestCase.log",
-    "testing/diagnostics",
-    documentation::LOG,
-    &TEST_CASE_LOG_DESCRIPTOR,
-    inference::log,
-    &[EffectKind::EnvironmentWrite, EffectKind::MayThrow],
-    BuiltinPurity::Impure,
-);
+pub const TEST_CASE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    name: "matlab.unittest.TestCase",
+    category: "testing",
+    docs: documentation::TEST_CASE,
+    descriptor: &TEST_CASE_DESCRIPTOR,
+    infer: inference::test_case,
+    effects: &[EffectKind::MayThrow],
+    purity: BuiltinPurity::Pure,
+});
+pub const STRING_DIAGNOSTIC_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    name: "matlab.unittest.diagnostics.StringDiagnostic",
+    category: "testing/diagnostics",
+    docs: documentation::STRING_DIAGNOSTIC,
+    descriptor: &STRING_DIAGNOSTIC_DESCRIPTOR,
+    infer: inference::string_diagnostic,
+    effects: &[EffectKind::MayThrow],
+    purity: BuiltinPurity::Pure,
+});
+pub const TEST_CASE_LOG_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    name: "matlab.unittest.TestCase.log",
+    category: "testing/diagnostics",
+    docs: documentation::LOG,
+    descriptor: &TEST_CASE_LOG_DESCRIPTOR,
+    infer: inference::log,
+    effects: &[EffectKind::EnvironmentWrite, EffectKind::MayThrow],
+    purity: BuiltinPurity::Impure,
+});
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &TEST_CASE_CATALOG_ENTRY,

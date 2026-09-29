@@ -8,7 +8,8 @@ mod inference;
 mod integer;
 mod readtimetable;
 mod table2timetable;
-mod timetable;
+#[path = "timetable/mod.rs"]
+mod constructor;
 mod timetable2table;
 #[cfg(test)]
 mod tests;
@@ -18,14 +19,14 @@ pub use extensions::*;
 pub use integer::*;
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
-    &timetable::ENTRY,
+    &constructor::ENTRY,
     &array2timetable::ENTRY,
     &table2timetable::ENTRY,
     &timetable2table::ENTRY,
     &readtimetable::ENTRY,
 ];
 
-const fn entry(
+struct EntryDefinition {
     provenance: BuiltinCatalogProvenance,
     name: &'static str,
     category: &'static str,
@@ -35,7 +36,20 @@ const fn entry(
     extensions: &'static [BuiltinExtensionDescriptor],
     integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
     filesystem_read: bool,
-) -> BuiltinCatalogEntry {
+}
+
+const fn entry(definition: EntryDefinition) -> BuiltinCatalogEntry {
+    let EntryDefinition {
+        provenance,
+        name,
+        category,
+        documentation,
+        descriptor,
+        inference,
+        extensions,
+        integer_capabilities,
+        filesystem_read,
+    } = definition;
     BuiltinCatalogEntry {
         provenance,
         identity: BuiltinCatalogIdentity { name },
