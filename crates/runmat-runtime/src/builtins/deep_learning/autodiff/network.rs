@@ -40,7 +40,7 @@ pub(super) enum ActivationKind {
     Softmax,
 }
 
-pub(super) fn record_network_forward(
+pub(in crate::builtins::deep_learning) fn record_network_forward(
     network: &ObjectInstance,
     input: &Value,
     function: &'static str,

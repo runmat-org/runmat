@@ -1,6 +1,7 @@
 use super::*;
 mod input;
-pub(super) use input::{annotate_dlarray_value, annotate_tree, prepare_tape_inputs};
+use input::prepare_tape_inputs;
+pub(in crate::builtins::deep_learning) use input::{annotate_dlarray_value, annotate_tree};
 
 pub(super) const AD_NODE_PROPERTY: &str = "__runmat_ad_node";
 pub(super) const AD_TAPE_PROPERTY: &str = "__runmat_ad_tape";
@@ -146,11 +147,11 @@ pub(super) enum NodeKind {
     },
 }
 
-pub(super) fn tape_is_active() -> bool {
+pub(in crate::builtins::deep_learning) fn tape_is_active() -> bool {
     active_tape().is_some()
 }
 
-pub(super) async fn with_tape_context(
+pub(in crate::builtins::deep_learning) async fn with_tape_context(
     function: Value,
     args: &[Value],
     requested_outputs: usize,
@@ -166,7 +167,7 @@ pub(super) async fn with_tape_context(
     .await
 }
 
-pub(super) fn dlarray_node_id(value: &Value) -> Option<usize> {
+pub(in crate::builtins::deep_learning) fn dlarray_node_id(value: &Value) -> Option<usize> {
     let Value::Object(object) = value else {
         return None;
     };

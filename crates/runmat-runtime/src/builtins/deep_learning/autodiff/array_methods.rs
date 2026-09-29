@@ -5,7 +5,7 @@ use super::*;
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
-pub(super) fn dlarray_plus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+pub(crate) fn dlarray_plus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     dlarray_binary(
         lhs,
         rhs,
@@ -32,7 +32,7 @@ pub(super) fn dlarray_plus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Valu
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
-pub(super) fn dlarray_minus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+pub(crate) fn dlarray_minus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     dlarray_binary(
         lhs,
         rhs,
@@ -59,7 +59,7 @@ pub(super) fn dlarray_minus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Val
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
-pub(super) fn dlarray_times_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+pub(crate) fn dlarray_times_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     dlarray_binary(lhs, rhs, "times", |a, b| a * b, record_multiply)
 }
 
@@ -88,7 +88,7 @@ fn record_multiply(lhs: &Payload, rhs: &Payload, out: Tensor) -> BuiltinResult<O
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
-pub(super) fn dlarray_rdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+pub(crate) fn dlarray_rdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     dlarray_binary(
         lhs,
         rhs,
@@ -174,7 +174,7 @@ fn method_shape_error(function: &'static str, source: crate::RuntimeError) -> cr
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
-pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+pub(crate) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     super::super::errors::admit_single_output(
         "mtimes",
         &runmat_builtins::DLARRAY_METHOD_INVALID_INPUT,
@@ -239,7 +239,7 @@ pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
-pub(super) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     super::super::errors::admit_single_output(
         "sum",
         &runmat_builtins::DLARRAY_METHOD_INVALID_INPUT,

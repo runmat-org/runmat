@@ -1,5 +1,7 @@
+use super::tape::{Tape, TapeActivation, TapeFuture};
 use super::*;
 use runmat_value::{IntValue, IntegerStorage, StructArray};
+use std::collections::HashMap;
 
 #[test]
 fn suspended_and_dropped_callback_futures_do_not_publish_their_tapes() {

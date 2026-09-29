@@ -5,7 +5,7 @@ pub(super) fn prepare_tape_inputs(values: Vec<Value>) -> BuiltinResult<Vec<Value
     values.into_iter().map(annotate_tree).collect()
 }
 
-pub(super) fn annotate_tree(value: Value) -> BuiltinResult<Value> {
+pub(in crate::builtins::deep_learning) fn annotate_tree(value: Value) -> BuiltinResult<Value> {
     if !tape_is_active() {
         return Ok(value);
     }
@@ -50,7 +50,9 @@ pub(super) fn annotate_tree(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-pub(super) fn annotate_dlarray_value(value: Value) -> BuiltinResult<Value> {
+pub(in crate::builtins::deep_learning) fn annotate_dlarray_value(
+    value: Value,
+) -> BuiltinResult<Value> {
     if !tape_is_active() {
         return Ok(value);
     }

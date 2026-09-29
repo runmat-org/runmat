@@ -6,7 +6,7 @@ use std::collections::HashMap;
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::gradient"
 )]
-pub(super) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(deep_learning_error(
             "dlgradient",

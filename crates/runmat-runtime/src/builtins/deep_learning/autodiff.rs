@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -21,8 +20,8 @@ use super::{deep_learning_error, model, unsupported_error};
 pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity = super::DLARRAY_CLASS;
 mod tape;
 use tape::{
-    active_tape, push_binary_node, push_node, value_for_node, Node, NodeKind, Tape, TapeActivation,
-    TapeFuture, AD_NODE_PROPERTY, AD_TAPE_PROPERTY,
+    active_tape, push_binary_node, push_node, value_for_node, Node, NodeKind, AD_NODE_PROPERTY,
+    AD_TAPE_PROPERTY,
 };
 pub(super) use tape::{
     annotate_dlarray_value, annotate_tree, dlarray_node_id, tape_is_active, with_tape_context,
@@ -33,10 +32,10 @@ use value::{
     floating_binary_dtype, floating_tensor_from_f64, floating_tensor_values, node_dtype,
     result_metadata_owner, wrap_result, Payload,
 };
-mod gradient;
+pub(crate) mod gradient;
 pub(super) use gradient::dlgradient_builtin;
 
-mod array_methods;
+pub(crate) mod array_methods;
 pub(super) use array_methods::{
     dlarray_minus_builtin, dlarray_mtimes_builtin, dlarray_plus_builtin, dlarray_rdivide_builtin,
     dlarray_sum_builtin, dlarray_times_builtin,

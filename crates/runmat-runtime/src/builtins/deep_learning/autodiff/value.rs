@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn dlarray_format_and_labels(value: &Value) -> (Value, Value) {
+pub(in crate::builtins::deep_learning) fn dlarray_format_and_labels(
+    value: &Value,
+) -> (Value, Value) {
     let Value::Object(object) = value else {
         return (Value::String(String::new()), Value::String(String::new()));
     };
@@ -18,7 +20,10 @@ pub(super) fn dlarray_format_and_labels(value: &Value) -> (Value, Value) {
     )
 }
 
-pub(super) fn dlarray_data(value: &Value, function: &'static str) -> BuiltinResult<Value> {
+pub(in crate::builtins::deep_learning) fn dlarray_data(
+    value: &Value,
+    function: &'static str,
+) -> BuiltinResult<Value> {
     match value {
         Value::Object(object) if object.class_name == DLARRAY_CLASS => {
             object.properties.get("Data").cloned().ok_or_else(|| {
@@ -29,7 +34,7 @@ pub(super) fn dlarray_data(value: &Value, function: &'static str) -> BuiltinResu
     }
 }
 
-pub(super) fn host_tensor_from_value(
+pub(in crate::builtins::deep_learning) fn host_tensor_from_value(
     value: &Value,
     function: &'static str,
     label: &str,

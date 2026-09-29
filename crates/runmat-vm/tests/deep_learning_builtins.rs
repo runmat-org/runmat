@@ -36,6 +36,31 @@ fn compiled_dlfeval_forwards_callback_requested_outputs() {
 }
 
 #[test]
+fn compiled_nested_dlfeval_restores_outer_tape() {
+    execute_source(
+        r#"
+        X = dlarray(single([1 2]));
+        [loss, outerGradient, innerGradient] = dlfeval(@outerLoss, X);
+        assert(isequal(loss.Data, single(5)));
+        assert(isequal(outerGradient.Data, single([2 4])));
+        assert(isequal(innerGradient.Data, single(6)));
+        function [loss, outerGradient, innerGradient] = outerLoss(X)
+            Y = dlarray(single(3));
+            [innerValue, innerGradient] = dlfeval(@innerLoss, Y);
+            assert(isequal(innerValue.Data, single(9)));
+            loss = sum(X .* X, 'all');
+            outerGradient = dlgradient(loss, X);
+        end
+        function [loss, gradient] = innerLoss(Y)
+            loss = sum(Y .* Y, 'all');
+            gradient = dlgradient(loss, Y);
+        end
+        "#,
+    )
+    .expect("nested compiled callbacks restore separate autodiff tapes");
+}
+
+#[test]
 fn compiled_layer_constructors_preserve_sizes_options_and_defaults() {
     execute_source(
         r#"
