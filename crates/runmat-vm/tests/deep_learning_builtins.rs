@@ -4,6 +4,38 @@ mod test_helpers;
 use test_helpers::execute_source;
 
 #[test]
+fn compiled_dlfeval_traces_public_named_callback_and_preserves_single_gradient() {
+    execute_source(
+        r#"
+        X = dlarray(single([1 2 3]));
+        [loss, gradients] = dlfeval(@squareLoss, X);
+        assert(strcmp(class(loss.Data), 'single'));
+        assert(strcmp(class(gradients.Data), 'single'));
+        assert(isequal(loss.Data, single(14)));
+        assert(isequal(gradients.Data, single([2 4 6])));
+        function [loss, gradients] = squareLoss(X)
+            squared = X .* X;
+            loss = sum(squared, 'all');
+            gradients = dlgradient(loss, X);
+        end
+        "#,
+    )
+    .expect("compiled public dlfeval callback and repeated Single gradient");
+}
+
+#[test]
+fn compiled_dlfeval_forwards_callback_requested_outputs() {
+    execute_source(
+        r#"
+        [left, right] = dlfeval(@deal, uint16(7), single(2));
+        assert(strcmp(class(left), 'uint16') && left == uint16(7));
+        assert(strcmp(class(right), 'single') && right == single(2));
+        "#,
+    )
+    .expect("compiled callback forwards output count and typed values");
+}
+
+#[test]
 fn compiled_layer_constructors_preserve_sizes_options_and_defaults() {
     execute_source(
         r#"
