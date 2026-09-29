@@ -40,17 +40,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[BuiltinExample {
         id: "feed-forward-file",
         title: "Write a supported feed-forward network",
-        program: "layers = {featureInputLayer(2, 'Name', 'input'), fullyConnectedLayer(2, 'Name', 'dense'), reluLayer('Name', 'relu')};\nnet = dlnetwork(layers);\nexportONNXNetwork(net, 'model.onnx', 'OpsetVersion', 14);\nassert(isfile('model.onnx'));",
+        program: "layers = {featureInputLayer(2, 'Name', 'input'), fullyConnectedLayer(2, 'Name', 'dense'), reluLayer('Name', 'relu')};\nnet = dlnetwork(layers);\nexportONNXNetwork(net, 'models/model.onnx', 'OpsetVersion', 14);\nassert(isfile('models/model.onnx'));",
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
             id: BuiltinExampleFixtureId { local_name: "onnx-export" },
             root: BuiltinFilesystemRoot::IsolatedWorkspace,
-            entries: &[],
+            entries: &[BuiltinFilesystemEntry::Directory { relative_path: "models" }],
         }),
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(isfile('model.onnx'));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(isfile('models/model.onnx'));" },
     }],
     example_exemption: None,
     faqs: &[BuiltinDocumentationFaq {
