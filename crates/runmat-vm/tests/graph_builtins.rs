@@ -99,6 +99,26 @@ fn compiled_graph_options_parallel_edges_and_empty_forms_keep_documented_behavio
 }
 
 #[test]
+fn compiled_logical_adjacency_works_without_runmat_extensions() {
+    let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    execute_source(
+        r#"
+        G = graph(logical([0 1; 1 0]));
+        assert(numnodes(G) == 2 && numedges(G) == 1);
+        A = adjacency(G);
+        assert(isequal(A, [0 1; 1 0]));
+        D = digraph(logical([0 1; 0 0]));
+        B = adjacency(D);
+        assert(B(1,2) == 1 && B(2,1) == 0);
+        upper = graph(logical([0 1; 0 0]), 'upper');
+        U = adjacency(upper);
+        assert(U(1,2) == 1);
+        "#,
+    )
+    .expect("compiled logical graph and digraph adjacency in MATLAB mode");
+}
+
+#[test]
 fn compiled_integer_nodes_are_structural_but_integer_weight_data_is_mode_gated() {
     let _matlab = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     execute_source(

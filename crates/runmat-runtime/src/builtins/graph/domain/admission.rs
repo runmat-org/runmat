@@ -2,8 +2,7 @@
 
 use super::construction::{graph_data, is_adjacency_form, node_tokens};
 use super::parsing::{
-    node_index_from_tensor, node_index_from_value, node_indices_from_value, parse_string_vector,
-    positive_integer_scalar, weights_from_value,
+    node_index_from_tensor, parse_string_vector, positive_integer_scalar, weights_from_value,
 };
 use super::{
     gather_if_needed_async, graph_error, BuiltinResult, GraphData, ObjectInstance, Value,
@@ -13,6 +12,12 @@ use crate::builtins::table::{table_replace_variables_like, table_variables, valu
 use runmat_builtins::{
     DIGRAPH_INTEGER_ADJACENCY_EXTENSION, DIGRAPH_INTEGER_WEIGHTS_EXTENSION,
     GRAPH_INTEGER_ADJACENCY_EXTENSION, GRAPH_INTEGER_WEIGHTS_EXTENSION,
+};
+
+mod nodes;
+pub(super) use nodes::{
+    admit_distance_selectors, admit_scalar_selectors, resolve_distance_selectors,
+    resolve_scalar_selectors,
 };
 
 fn admit_constructor_integer_forms(
@@ -133,6 +138,13 @@ pub(super) async fn constructor_arguments(
     if args.len() == 1 || is_adjacency_form(&args) {
         if let Some(Value::Tensor(matrix)) = args.first() {
             if matrix.shape.len() != 2 || matrix.rows != matrix.cols {
+                return Err(graph_error(
+                    name,
+                    format!("{name}: adjacency matrix must be square"),
+                ));
+            }
+        } else if let Some(Value::LogicalArray(array)) = args.first() {
+            if array.shape.len() != 2 || array.shape[0] != array.shape[1] {
                 return Err(graph_error(
                     name,
                     format!("{name}: adjacency matrix must be square"),
@@ -344,52 +356,6 @@ async fn gather_table_columns(
         );
     }
     Ok(())
-}
-
-pub(super) async fn node_indices(
-    graph: &GraphData,
-    values: Vec<Value>,
-    name: &'static str,
-) -> BuiltinResult<Vec<usize>> {
-    for value in values.iter().filter(|value| is_host_value(value)) {
-        node_index_from_value(graph, value, name)?;
-    }
-    let mut nodes = Vec::with_capacity(values.len());
-    for value in values {
-        let gathered = gather_if_needed_async(&value).await?;
-        nodes.push(node_index_from_value(graph, &gathered, name)?);
-    }
-    Ok(nodes)
-}
-
-pub(super) async fn distance_node_lists(
-    graph: &GraphData,
-    values: Vec<Value>,
-) -> BuiltinResult<(Vec<usize>, Vec<usize>)> {
-    if values.len() > 2 {
-        return Err(graph_error(
-            "distances",
-            "distances: expected at most source and target node lists",
-        ));
-    }
-    for value in values.iter().filter(|value| is_host_value(value)) {
-        node_indices_from_value(graph, value, "distances")?;
-    }
-    let mut gathered = Vec::with_capacity(values.len());
-    for value in values {
-        gathered.push(gather_if_needed_async(&value).await?);
-    }
-    let sources = gathered
-        .first()
-        .map(|value| node_indices_from_value(graph, value, "distances"))
-        .transpose()?
-        .unwrap_or_else(|| (0..graph.node_count).collect());
-    let targets = gathered
-        .get(1)
-        .map(|value| node_indices_from_value(graph, value, "distances"))
-        .transpose()?
-        .unwrap_or_else(|| (0..graph.node_count).collect());
-    Ok((sources, targets))
 }
 
 fn is_host_value(value: &Value) -> bool {

@@ -8,7 +8,7 @@ use super::parsing::{node_index_from_f64, numeric_vector};
 use super::{GRAPH_CLASS, NUM_NODES_PROPERTY};
 use crate::builtins::table::{table_from_columns, table_replace_variables_like, table_variables};
 use futures::executor::block_on;
-use runmat_value::{IntegerStorage, ObjectInstance, StringArray, Tensor, Value};
+use runmat_value::{IntegerStorage, LogicalArray, ObjectInstance, StringArray, Tensor, Value};
 
 fn numeric(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("tensor"))
@@ -48,6 +48,50 @@ fn graph_constructor_builds_edges_nodes_and_adjacency() {
         tensor_data(adjacency),
         vec![0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0]
     );
+}
+
+#[test]
+fn logical_adjacency_is_documented_input_in_both_compatibility_modes() {
+    let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+    let undirected = Value::LogicalArray(
+        LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).expect("logical adjacency"),
+    );
+    let graph = block_on(graph_builtin(vec![undirected])).expect("logical graph");
+    assert_eq!(
+        tensor_data(block_on(adjacency_builtin(graph)).expect("adjacency")),
+        vec![0.0, 1.0, 1.0, 0.0],
+    );
+
+    let directed = Value::LogicalArray(
+        LogicalArray::new(vec![0, 0, 1, 0], vec![2, 2]).expect("logical adjacency"),
+    );
+    let graph = block_on(digraph_builtin(vec![directed.clone()])).expect("logical digraph");
+    assert_eq!(
+        tensor_data(block_on(adjacency_builtin(graph)).expect("adjacency")),
+        vec![0.0, 0.0, 1.0, 0.0],
+    );
+    let lower = block_on(graph_builtin(vec![
+        directed.clone(),
+        Value::String("lower".into()),
+    ]))
+    .expect("logical lower triangle");
+    assert_eq!(block_on(numedges_builtin(lower)).unwrap(), Value::Num(0.0));
+    let upper = block_on(graph_builtin(vec![
+        directed.clone(),
+        Value::String("upper".into()),
+    ]))
+    .expect("logical upper triangle");
+    assert_eq!(
+        tensor_data(block_on(adjacency_builtin(upper)).expect("adjacency")),
+        vec![0.0, 1.0, 1.0, 0.0],
+    );
+    let error = block_on(graph_builtin(vec![
+        directed,
+        Value::String("upper".into()),
+        Value::String("extra".into()),
+    ]))
+    .expect_err("adjacency accepts at most one option");
+    assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
 }
 
 #[test]
@@ -771,5 +815,64 @@ fn host_weight_length_uses_resident_endnode_shape_before_download() {
             .expect_err("host Weight length disagrees with resident EndNodes row count");
         assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn invalid_host_node_controls_precede_resident_graph_downloads() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let graph = block_on(graph_builtin(vec![
+            numeric(vec![1.0], 1, 1),
+            numeric(vec![2.0], 1, 1),
+        ]))
+        .expect("graph");
+        let Value::Object(mut object) = graph else {
+            panic!("expected graph object");
+        };
+        let endpoints = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("endpoints");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &endpoints)
+            .expect("resident endpoints");
+        let Value::Object(edges) = object.properties.get("Edges").unwrap() else {
+            panic!("expected Edges table");
+        };
+        let mut vars = table_variables(edges).expect("edge variables");
+        vars.fields
+            .insert("EndNodes".into(), Value::GpuTensor(resident));
+        object.properties.insert(
+            "Edges".into(),
+            table_replace_variables_like(edges, vars).expect("table replacement"),
+        );
+        let graph = Value::Object(object);
+        let invalid = numeric(vec![1.5], 1, 1);
+        provider.reset_telemetry();
+        for result in [
+            block_on(neighbors_builtin(graph.clone(), invalid.clone())),
+            block_on(findedge_builtin(
+                graph.clone(),
+                Value::Num(1.0),
+                invalid.clone(),
+            )),
+            block_on(shortestpath_builtin(
+                graph.clone(),
+                invalid.clone(),
+                Value::Num(2.0),
+            )),
+            block_on(bfsearch_builtin(graph.clone(), invalid.clone())),
+            block_on(dfsearch_builtin(graph.clone(), invalid.clone())),
+            block_on(distances_builtin(graph.clone(), vec![invalid.clone()])),
+            block_on(distances_builtin(
+                graph.clone(),
+                vec![Value::Num(1.0), Value::Num(2.0), Value::Num(1.0)],
+            )),
+        ] {
+            let error = result.expect_err("invalid host control or arity");
+            assert!(error.identifier().is_some());
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        }
+        assert_eq!(
+            tensor_data(block_on(neighbors_builtin(graph, Value::Num(1.0))).unwrap()),
+            vec![2.0],
+        );
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
     });
 }

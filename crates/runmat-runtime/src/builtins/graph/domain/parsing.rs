@@ -220,66 +220,6 @@ pub(super) fn positive_integer_scalar(value: &Value, name: &'static str) -> Buil
     Ok(values[0])
 }
 
-pub(super) fn node_index_from_value(
-    graph: &GraphData,
-    value: &Value,
-    name: &'static str,
-) -> BuiltinResult<usize> {
-    match value {
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-            let labels = parse_string_vector(value).map_err(|err| graph_error(name, err))?;
-            if labels.len() != 1 {
-                return Err(graph_error(name, format!("{name}: expected one node")));
-            }
-            let Some(names) = &graph.node_names else {
-                return Err(graph_error(
-                    name,
-                    format!("{name}: string node references require named graph nodes"),
-                ));
-            };
-            names
-                .iter()
-                .position(|candidate| candidate == &labels[0])
-                .ok_or_else(|| graph_error(name, format!("{name}: unknown node '{}'", labels[0])))
-        }
-        _ => {
-            let idx = positive_integer_scalar(value, name)?;
-            node_index_from_one_based(idx, graph.node_count, name)
-        }
-    }
-}
-
-pub(super) fn node_indices_from_value(
-    graph: &GraphData,
-    value: &Value,
-    name: &'static str,
-) -> BuiltinResult<Vec<usize>> {
-    match value {
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-            let labels = parse_string_vector(value).map_err(|err| graph_error(name, err))?;
-            let Some(names) = &graph.node_names else {
-                return Err(graph_error(
-                    name,
-                    format!("{name}: string node references require named graph nodes"),
-                ));
-            };
-            labels
-                .into_iter()
-                .map(|label| {
-                    names
-                        .iter()
-                        .position(|candidate| candidate == &label)
-                        .ok_or_else(|| graph_error(name, format!("{name}: unknown node '{label}'")))
-                })
-                .collect()
-        }
-        _ => numeric_vector(value, name)?
-            .into_iter()
-            .map(|idx| node_index_from_one_based(idx, graph.node_count, name))
-            .collect(),
-    }
-}
-
 pub(super) fn node_index_from_tensor(
     tensor: &Tensor,
     index: usize,

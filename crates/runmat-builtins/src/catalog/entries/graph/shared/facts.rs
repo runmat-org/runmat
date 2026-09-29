@@ -255,8 +255,10 @@ fn possibly_square_adjacency(value: &ValueFact) -> bool {
 }
 
 fn proven_square_adjacency(value: &ValueFact) -> bool {
-    matches!(value.kind, ValueKindFact::Numeric(_))
-        && value.storage == StorageFact::Dense
+    matches!(
+        value.kind,
+        ValueKindFact::Numeric(_) | ValueKindFact::Logical
+    ) && value.storage == StorageFact::Dense
         && value.shape.known_dims().is_some_and(|dims| {
             dims.len() == 2
                 && matches!((dims[0], dims[1]), (Some(rows), Some(cols)) if rows == cols)

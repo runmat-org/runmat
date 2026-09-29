@@ -9,7 +9,11 @@ pub const OUTDEGREE_DESCRIPTOR: BuiltinDescriptor = descriptor(
             BuiltinParamType::Any,
             "Graph or digraph object.",
         )],
-        &[param("d", BuiltinParamType::NumericScalar, "Graph result.")],
+        &[param(
+            "d",
+            BuiltinParamType::NumericArray,
+            "One double out-degree per node, in an n-by-1 column vector.",
+        )],
     )],
     BuiltinOutputMode::Fixed,
 );

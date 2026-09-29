@@ -22,3 +22,42 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         diagnostics,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_types::{
+        LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact,
+        ValueKindFact,
+    };
+
+    #[test]
+    fn proven_logical_adjacency_with_two_options_is_invalid_arity() {
+        let adjacency = ValueFact::proven(
+            ValueKindFact::Logical,
+            ShapeFact::from(vec![Some(2), Some(2)]),
+            StorageFact::Dense,
+        );
+        let option = ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::Scalar,
+            StorageFact::Scalar,
+        );
+        let inference = crate::infer_catalog_call(
+            &super::super::DIGRAPH_CATALOG_ENTRY,
+            &CallRequest {
+                arguments: vec![
+                    adjacency,
+                    option,
+                    ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+                ],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+            },
+        );
+        assert!(inference
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-GRAPH-ARITY"));
+    }
+}

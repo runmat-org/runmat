@@ -66,4 +66,27 @@ mod tests {
         let wrong = infer_arguments(vec![text.clone(), text]);
         assert!(wrong.diagnostics.is_empty(), "{:?}", wrong.diagnostics);
     }
+
+    #[test]
+    fn proven_logical_adjacency_with_two_options_is_invalid_arity() {
+        let adjacency = ValueFact::proven(
+            ValueKindFact::Logical,
+            ShapeFact::from(vec![Some(2), Some(2)]),
+            StorageFact::Dense,
+        );
+        let option = ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::Scalar,
+            StorageFact::Scalar,
+        );
+        let result = infer_arguments(vec![
+            adjacency,
+            option,
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+        ]);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-GRAPH-ARITY"));
+    }
 }

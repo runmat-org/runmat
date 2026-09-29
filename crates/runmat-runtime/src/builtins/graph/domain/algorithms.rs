@@ -1,4 +1,4 @@
-use super::admission::{graph_data_async, node_indices};
+use super::admission::{admit_scalar_selectors, graph_data_async, resolve_scalar_selectors};
 use super::*;
 
 pub(super) fn edge_matches(edge: &Edge, source: usize, target: usize, directed: bool) -> bool {
@@ -95,8 +95,9 @@ pub(super) async fn neighbor_query(
     mode: NeighborMode,
     name: &'static str,
 ) -> BuiltinResult<Value> {
+    let selectors = admit_scalar_selectors(vec![node], name)?;
     let graph = graph_data_async(&graph, name).await?;
-    let node = node_indices(&graph, vec![node], name).await?[0];
+    let node = resolve_scalar_selectors(&graph, selectors, name).await?[0];
     let mut neighbors = neighbors_for(&graph, node, mode);
     neighbors.sort_unstable();
     neighbors.dedup();

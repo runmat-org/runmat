@@ -1,6 +1,7 @@
 use super::admission::{
-    constructor_arguments, count_as_double, distance_node_lists, graph_data_async,
-    graph_edge_count, graph_node_count, node_indices,
+    admit_distance_selectors, admit_scalar_selectors, constructor_arguments, count_as_double,
+    graph_data_async, graph_edge_count, graph_node_count, resolve_distance_selectors,
+    resolve_scalar_selectors,
 };
 use super::algorithms::{
     adjacency_lists, adjacency_tensor, degree_counts, dijkstra, edge_matches, indegree_counts,
@@ -160,8 +161,9 @@ pub(super) async fn findedge_builtin(
     source: Value,
     target: Value,
 ) -> BuiltinResult<Value> {
+    let selectors = admit_scalar_selectors(vec![source, target], "findedge")?;
     let graph = graph_data_async(&graph, "findedge").await?;
-    let nodes = node_indices(&graph, vec![source, target], "findedge").await?;
+    let nodes = resolve_scalar_selectors(&graph, selectors, "findedge").await?;
     let source = nodes[0];
     let target = nodes[1];
     for (idx, edge) in graph.edges.iter().enumerate() {
@@ -183,8 +185,9 @@ pub(super) async fn shortestpath_builtin(
     target: Value,
 ) -> BuiltinResult<Value> {
     let output_count = checked_two_output_request("shortestpath")?;
+    let selectors = admit_scalar_selectors(vec![source, target], "shortestpath")?;
     let graph = graph_data_async(&graph, "shortestpath").await?;
-    let nodes = node_indices(&graph, vec![source, target], "shortestpath").await?;
+    let nodes = resolve_scalar_selectors(&graph, selectors, "shortestpath").await?;
     let source = nodes[0];
     let target = nodes[1];
     let (distances, previous) = dijkstra(&graph, source);
@@ -205,8 +208,9 @@ pub(super) async fn shortestpath_builtin(
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn distances_builtin(graph: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let selectors = admit_distance_selectors(rest)?;
     let graph = graph_data_async(&graph, "distances").await?;
-    let (sources, targets) = distance_node_lists(&graph, rest).await?;
+    let (sources, targets) = resolve_distance_selectors(&graph, selectors).await?;
     let cells = sources
         .len()
         .checked_mul(targets.len())
@@ -296,8 +300,9 @@ pub(super) async fn toposort_builtin(graph: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn bfsearch_builtin(graph: Value, start: Value) -> BuiltinResult<Value> {
+    let selectors = admit_scalar_selectors(vec![start], "bfsearch")?;
     let graph = graph_data_async(&graph, "bfsearch").await?;
-    let start = node_indices(&graph, vec![start], "bfsearch").await?[0];
+    let start = resolve_scalar_selectors(&graph, selectors, "bfsearch").await?[0];
     let mut visited = vec![false; graph.node_count];
     let mut queue = VecDeque::from([start]);
     let mut order = Vec::new();
@@ -320,8 +325,9 @@ pub(super) async fn bfsearch_builtin(graph: Value, start: Value) -> BuiltinResul
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn dfsearch_builtin(graph: Value, start: Value) -> BuiltinResult<Value> {
+    let selectors = admit_scalar_selectors(vec![start], "dfsearch")?;
     let graph = graph_data_async(&graph, "dfsearch").await?;
-    let start = node_indices(&graph, vec![start], "dfsearch").await?[0];
+    let start = resolve_scalar_selectors(&graph, selectors, "dfsearch").await?[0];
     let adj = adjacency_lists(&graph, NeighborMode::Successors);
     let mut visited = vec![false; graph.node_count];
     let mut stack = vec![start];

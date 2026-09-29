@@ -7,7 +7,7 @@ pub const TOPOSORT_DESCRIPTOR: BuiltinDescriptor = descriptor(
         &[param(
             "G",
             BuiltinParamType::Any,
-            "Graph or digraph object.",
+            "Directed acyclic digraph object.",
         )],
         &[param("order", BuiltinParamType::Any, "Graph result.")],
     )],
