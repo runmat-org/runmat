@@ -355,6 +355,34 @@ fn analyze_network_counts_layers() {
     assert_eq!(object.properties.get("NumLayers"), Some(&Value::Num(1.0)));
 }
 
+#[test]
+fn graph_invalid_inputs_do_not_download_provider_values() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let values = [1.0, 2.0];
+        let shape = [1usize, 2usize];
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("upload fixture");
+        provider.reset_telemetry();
+        let error = block_on(layer_graph_builtin(vec![Value::GpuTensor(handle.clone())]))
+            .expect_err("numeric resident input is not a layer collection");
+        assert!(error.to_string().contains("layers must be a layer object"));
+        let error = block_on(analyze_network_builtin(Value::GpuTensor(handle.clone())))
+            .expect_err("numeric resident input is not a layer collection");
+        assert!(error.to_string().contains("expected a layer graph"));
+        let error = block_on(layer_graph_builtin(vec![
+            Value::Object(ObjectInstance::new("reluLayer".into())),
+            Value::GpuTensor(handle),
+        ]))
+        .expect_err("invalid arity precedes provider access");
+        assert!(error.to_string().contains("expected zero inputs or one"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
 fn feature_network_layers() -> Value {
     let input = block_on(feature_input_layer_builtin(
         Value::Num(2.0),
