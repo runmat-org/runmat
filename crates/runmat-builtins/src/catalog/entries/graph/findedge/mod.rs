@@ -42,7 +42,7 @@ pub const FINDEDGE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
     extensions: &[],
-    integer_capabilities: &[],
+    integer_capabilities: &super::graph::shared::GRAPH_ENDPOINT_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };

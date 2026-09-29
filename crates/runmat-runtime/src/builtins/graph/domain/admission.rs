@@ -11,6 +11,44 @@ use super::{
 };
 use crate::builtins::table::{table_replace_variables_like, table_variables, value_row_count};
 
+fn admit_constructor_integer_forms(
+    args: &[Value],
+    directed: bool,
+    name: &'static str,
+) -> BuiltinResult<()> {
+    let adjacency = args.len() == 1 || is_adjacency_form(args);
+    let extension = if adjacency {
+        args.first()
+            .filter(|value| {
+                crate::builtins::common::validation::value_has_native_integer_class(value)
+            })
+            .map(|_| {
+                if directed {
+                    &DIGRAPH_INTEGER_ADJACENCY_EXTENSION
+                } else {
+                    &GRAPH_INTEGER_ADJACENCY_EXTENSION
+                }
+            })
+    } else {
+        args.get(2)
+            .filter(|value| {
+                super::parsing::is_numeric_weight_arg(value)
+                    && crate::builtins::common::validation::value_has_native_integer_class(value)
+            })
+            .map(|_| {
+                if directed {
+                    &DIGRAPH_INTEGER_WEIGHTS_EXTENSION
+                } else {
+                    &GRAPH_INTEGER_WEIGHTS_EXTENSION
+                }
+            })
+    };
+    if let Some(extension) = extension {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, name)?;
+    }
+    Ok(())
+}
+
 pub(super) async fn graph_node_count(value: &Value, name: &'static str) -> BuiltinResult<usize> {
     let object = expect_graph_object(value, name)?;
     if let Some(count) = object.properties.get(NUM_NODES_PROPERTY) {
@@ -69,8 +107,10 @@ fn expect_graph_object<'a>(
 
 pub(super) async fn constructor_arguments(
     args: Vec<Value>,
+    directed: bool,
     name: &'static str,
 ) -> BuiltinResult<Vec<Value>> {
+    admit_constructor_integer_forms(&args, directed, name)?;
     if args.len() > 4 {
         return Err(graph_error(
             name,

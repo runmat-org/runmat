@@ -5,8 +5,10 @@ use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::sync::OnceLock;
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, DIGRAPH_CLASS, GRAPH_CLASS, GRAPH_ERROR_INTERNAL,
-    GRAPH_ERROR_INVALID_ARGUMENT,
+    BuiltinErrorDescriptor, DIGRAPH_CLASS, DIGRAPH_INTEGER_ADJACENCY_EXTENSION,
+    DIGRAPH_INTEGER_WEIGHTS_EXTENSION, GRAPH_CLASS, GRAPH_ERROR_INTERNAL,
+    GRAPH_ERROR_INVALID_ARGUMENT, GRAPH_INTEGER_ADJACENCY_EXTENSION,
+    GRAPH_INTEGER_WEIGHTS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, ObjectInstance, StringArray, Tensor, Value};

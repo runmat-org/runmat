@@ -21,7 +21,7 @@ pub(super) async fn graph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     construct_graph(
         GRAPH_NAME,
         false,
-        constructor_arguments(args, GRAPH_NAME).await?,
+        constructor_arguments(args, false, GRAPH_NAME).await?,
     )
 }
 
@@ -34,7 +34,7 @@ pub(super) async fn digraph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     construct_graph(
         DIGRAPH_NAME,
         true,
-        constructor_arguments(args, DIGRAPH_NAME).await?,
+        constructor_arguments(args, true, DIGRAPH_NAME).await?,
     )
 }
 

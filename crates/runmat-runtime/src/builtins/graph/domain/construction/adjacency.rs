@@ -4,11 +4,16 @@ use super::*;
 use crate::builtins::common::tensor;
 
 pub(in crate::builtins::graph::domain) fn is_adjacency_form(args: &[Value]) -> bool {
-    matches!(args.first(), Some(Value::Tensor(t)) if t.shape.len() == 2 && t.rows == t.cols)
-        && (args.len() == 1
-            || args
-                .get(1)
-                .is_some_and(|arg| parse_string_vector(arg).is_ok() || scalar_text(arg).is_some()))
+    args.first().is_some_and(|value| match value {
+        Value::Tensor(tensor) => tensor.shape.len() == 2 && tensor.rows == tensor.cols,
+        Value::GpuTensor(handle) => {
+            handle.shape().len() == 2 && handle.shape()[0] == handle.shape()[1]
+        }
+        _ => false,
+    }) && (args.len() == 1
+        || args
+            .get(1)
+            .is_some_and(|arg| parse_string_vector(arg).is_ok() || scalar_text(arg).is_some()))
 }
 
 pub(super) fn graph_from_adjacency(

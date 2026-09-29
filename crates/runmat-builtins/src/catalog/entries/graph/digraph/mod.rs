@@ -41,8 +41,8 @@ pub const DIGRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
-    integer_capabilities: &[],
+    extensions: &super::graph::shared::DIGRAPH_INTEGER_EXTENSIONS,
+    integer_capabilities: &super::graph::shared::DIGRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };

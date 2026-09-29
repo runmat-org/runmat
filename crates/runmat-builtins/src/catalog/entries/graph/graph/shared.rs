@@ -34,6 +34,15 @@ pub const GRAPH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
 pub const GRAPH_ERRORS: [BuiltinErrorDescriptor; 2] =
     [GRAPH_ERROR_INVALID_ARGUMENT, GRAPH_ERROR_INTERNAL];
 
+mod integer;
+pub use integer::{
+    DIGRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES, DIGRAPH_INTEGER_ADJACENCY_EXTENSION,
+    DIGRAPH_INTEGER_EXTENSIONS, DIGRAPH_INTEGER_WEIGHTS_EXTENSION,
+    GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES, GRAPH_ENDPOINT_INTEGER_CAPABILITIES,
+    GRAPH_INTEGER_ADJACENCY_EXTENSION, GRAPH_INTEGER_EXTENSIONS, GRAPH_INTEGER_WEIGHTS_EXTENSION,
+    GRAPH_NODE_INTEGER_CAPABILITIES, GRAPH_NODE_LIST_INTEGER_CAPABILITIES,
+    GRAPH_START_INTEGER_CAPABILITIES, TREE_LAYOUT_INTEGER_CAPABILITIES,
+};
 pub const fn param(
     name: &'static str,
     ty: BuiltinParamType,
@@ -391,6 +400,7 @@ fn proven_square_adjacency(value: &ValueFact) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BuiltinIntegerInputAvailability;
     use runmat_types::{LiteralContext, OutputSelection, RequestedOutputCount, ValueKindFact};
 
     fn infer(
@@ -512,5 +522,28 @@ mod tests {
             1,
         );
         assert!(wrong.diagnostics.is_empty(), "{:?}", wrong.diagnostics);
+    }
+
+    #[test]
+    fn integer_graph_forms_separate_data_extensions_from_structural_node_ids() {
+        for extension in GRAPH_INTEGER_EXTENSIONS
+            .iter()
+            .chain(DIGRAPH_INTEGER_EXTENSIONS.iter())
+        {
+            assert!(extension.validate_error_contract().is_ok());
+        }
+        assert_eq!(GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(
+            GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES[0].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(
+            GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert!(GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES[2]
+            .inputs
+            .iter()
+            .all(|input| input.availability == BuiltinIntegerInputAvailability::Documented));
     }
 }

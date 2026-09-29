@@ -3,7 +3,12 @@ use super::*;
 pub(super) fn is_numeric_weight_arg(value: &Value) -> bool {
     matches!(
         value,
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Tensor(_) | Value::LogicalArray(_)
+        Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::Tensor(_)
+            | Value::LogicalArray(_)
+            | Value::GpuTensor(_)
     )
 }
 

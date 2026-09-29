@@ -107,6 +107,7 @@ fn undirected_self_loop_counts_twice_across_degree_queries() {
 
 #[test]
 fn graph_constructor_accepts_typed_integer_node_vectors() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let graph = block_on(graph_builtin(vec![
         int_numeric(IntegerStorage::I16(vec![1, 2, 3]), 3, 1),
         int_numeric(IntegerStorage::U16(vec![2, 3, 1]), 3, 1),
@@ -125,6 +126,7 @@ fn graph_constructor_accepts_typed_integer_node_vectors() {
 
 #[test]
 fn graph_adjacency_reads_typed_integer_storage_exactly() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let graph = block_on(graph_builtin(vec![int_numeric(
         IntegerStorage::I16(vec![0, 2, 0, 0, 0, 3, 4, 0, 0]),
         3,
@@ -140,6 +142,7 @@ fn graph_adjacency_reads_typed_integer_storage_exactly() {
 
 #[test]
 fn digraph_adjacency_reads_typed_integer_storage_exactly() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let graph = block_on(digraph_builtin(vec![int_numeric(
         IntegerStorage::I16(vec![0, 2, 0, 0, 0, 3, 4, 0, 0]),
         3,
@@ -155,6 +158,7 @@ fn digraph_adjacency_reads_typed_integer_storage_exactly() {
 
 #[test]
 fn graph_adjacency_triangle_modes_read_typed_integer_storage_exactly() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let upper = block_on(graph_builtin(vec![
         int_numeric(IntegerStorage::I16(vec![0, 9, 0, 2, 0, 8, 4, 3, 0]), 3, 3),
         Value::String("upper".into()),
@@ -174,6 +178,130 @@ fn graph_adjacency_triangle_modes_read_typed_integer_storage_exactly() {
         tensor_data(block_on(adjacency_builtin(lower)).unwrap()),
         vec![0.0, 2.0, 4.0, 2.0, 0.0, 3.0, 4.0, 3.0, 0.0]
     );
+}
+
+#[test]
+fn integer_graph_data_forms_are_gated_but_node_indices_remain_structural() {
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let endpoints = vec![
+        int_numeric(IntegerStorage::I16(vec![1]), 1, 1),
+        int_numeric(IntegerStorage::U16(vec![2]), 1, 1),
+    ];
+    let graph =
+        block_on(graph_builtin(endpoints.clone())).expect("integer node pairs remain structural");
+    assert_eq!(
+        tensor_data(
+            block_on(neighbors_builtin(
+                graph.clone(),
+                int_numeric(IntegerStorage::I64(vec![1]), 1, 1),
+            ))
+            .expect("integer node selector")
+        ),
+        vec![2.0],
+    );
+    assert!(block_on(neighbors_builtin(
+        graph,
+        int_numeric(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1, 1),
+    ))
+    .is_err());
+    let typed_adjacency = int_numeric(IntegerStorage::U16(vec![0, 2, 2, 0]), 2, 2);
+    let error = block_on(graph_builtin(vec![typed_adjacency.clone()]))
+        .expect_err("typed adjacency requires RunMat mode");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:GraphIntegerAdjacencyExtension")
+    );
+    let error = block_on(digraph_builtin(vec![typed_adjacency.clone()]))
+        .expect_err("typed digraph adjacency requires RunMat mode");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:DigraphIntegerAdjacencyExtension")
+    );
+    let weighted = [
+        endpoints,
+        vec![int_numeric(IntegerStorage::U64(vec![2]), 1, 1)],
+    ]
+    .concat();
+    let error = block_on(graph_builtin(weighted.clone()))
+        .expect_err("typed edge weight requires RunMat mode");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:GraphIntegerWeightsExtension")
+    );
+    let error = block_on(digraph_builtin(weighted.clone()))
+        .expect_err("typed directed edge weight requires RunMat mode");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:DigraphIntegerWeightsExtension")
+    );
+    drop(_strict);
+
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    assert!(block_on(graph_builtin(vec![typed_adjacency])).is_ok());
+    assert!(block_on(graph_builtin(weighted)).is_ok());
+}
+
+#[test]
+fn resident_integer_adjacency_gate_precedes_owner_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let matrix = Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 1, 0]), vec![2, 2])
+            .expect("typed adjacency");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix)
+            .expect("resident adjacency");
+        provider.reset_telemetry();
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(graph_builtin(vec![Value::GpuTensor(resident.clone())]))
+            .expect_err("compatibility gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:GraphIntegerAdjacencyExtension")
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        drop(_strict);
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let graph = block_on(graph_builtin(vec![Value::GpuTensor(resident)]))
+            .expect("RunMat integer adjacency");
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(graph)).expect("adjacency")),
+            vec![0.0, 1.0, 1.0, 0.0]
+        );
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+    });
+}
+
+#[test]
+fn resident_integer_edge_weight_gate_precedes_owner_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let weight = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63]), vec![1, 1])
+            .expect("typed weight");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &weight)
+            .expect("resident weight");
+        let endpoints = vec![numeric(vec![1.0], 1, 1), numeric(vec![2.0], 1, 1)];
+        provider.reset_telemetry();
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(graph_builtin(
+            [endpoints.clone(), vec![Value::GpuTensor(resident.clone())]].concat(),
+        ))
+        .expect_err("compatibility gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:GraphIntegerWeightsExtension")
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        drop(_strict);
+
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let graph = block_on(graph_builtin(
+            [endpoints, vec![Value::GpuTensor(resident)]].concat(),
+        ))
+        .expect("RunMat integer weight");
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(graph)).expect("adjacency")),
+            vec![0.0, (1_u64 << 63) as f64, (1_u64 << 63) as f64, 0.0]
+        );
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+    });
 }
 
 #[test]
@@ -384,6 +512,7 @@ fn graph_node_index_rejects_unrepresentable_double_boundary_before_cast() {
 
 #[test]
 fn graph_rejects_nonfinite_negative_and_inexact_adjacency_weights() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for weight in [f64::NAN, f64::INFINITY, -1.0] {
         assert!(block_on(graph_builtin(vec![numeric(vec![weight], 1, 1)])).is_err());
     }
@@ -391,6 +520,22 @@ fn graph_rejects_nonfinite_negative_and_inexact_adjacency_weights() {
     assert!(block_on(graph_builtin(vec![inexact])).is_err());
     let exact_wide = int_numeric(IntegerStorage::U64(vec![1_u64 << 63]), 1, 1);
     assert!(block_on(graph_builtin(vec![exact_wide])).is_ok());
+
+    let endpoints = [numeric(vec![1.0], 1, 1), numeric(vec![2.0], 1, 1)];
+    let inexact_weight = int_numeric(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1, 1);
+    assert!(block_on(graph_builtin(vec![
+        endpoints[0].clone(),
+        endpoints[1].clone(),
+        inexact_weight,
+    ]))
+    .is_err());
+    let exact_weight = int_numeric(IntegerStorage::U64(vec![1_u64 << 63]), 1, 1);
+    assert!(block_on(graph_builtin(vec![
+        endpoints[0].clone(),
+        endpoints[1].clone(),
+        exact_weight,
+    ]))
+    .is_ok());
 }
 
 #[test]

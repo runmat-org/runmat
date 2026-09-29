@@ -5,7 +5,11 @@ mod contract;
 mod documentation;
 pub(crate) mod shared;
 pub use contract::GRAPH_DESCRIPTOR;
-pub use shared::{DIGRAPH_CLASS, GRAPH_CLASS, GRAPH_ERROR_INTERNAL, GRAPH_ERROR_INVALID_ARGUMENT};
+pub use shared::{
+    DIGRAPH_CLASS, DIGRAPH_INTEGER_ADJACENCY_EXTENSION, DIGRAPH_INTEGER_WEIGHTS_EXTENSION,
+    GRAPH_CLASS, GRAPH_ERROR_INTERNAL, GRAPH_ERROR_INVALID_ARGUMENT,
+    GRAPH_INTEGER_ADJACENCY_EXTENSION, GRAPH_INTEGER_WEIGHTS_EXTENSION,
+};
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GRAPH_CATALOG_ENTRY];
 
 pub const GRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -43,8 +47,8 @@ pub const GRAPH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         artifact_dependencies: &[],
     },
     bindings: &REQUIRED_DEFAULT_BINDING,
-    extensions: &[],
-    integer_capabilities: &[],
+    extensions: &shared::GRAPH_INTEGER_EXTENSIONS,
+    integer_capabilities: &shared::GRAPH_CONSTRUCTOR_INTEGER_CAPABILITIES,
     integer_audit: None,
     suppress_auto_output: false,
 };
