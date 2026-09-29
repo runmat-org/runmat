@@ -75,6 +75,68 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
 }
 
 #[test]
+fn stepinfo_model_forms_execute_through_compiled_vm_calls() {
+    let program = r#"
+        H = tf(1, [1 1]);
+        info = stepinfo(H);
+        [y, t] = step(H);
+        sampled = stepinfo(y, t, dcgain(H));
+        assert(abs(info.SteadyStateValue - 1) < 1e-12);
+        assert(abs(info.SteadyStateValue - sampled.SteadyStateValue) < 1e-12);
+        assert(abs(info.RiseTime - sampled.RiseTime) < 1e-10);
+        assert(info.Overshoot == 0);
+
+        S = ss(-1, 1, 1, 0);
+        ss_info = stepinfo(S);
+        assert(abs(ss_info.SteadyStateValue - 1) < 1e-12);
+        assert(ss_info.Overshoot == 0);
+    "#;
+    execute_source(program).expect("compiled tf and ss model-form stepinfo calls");
+}
+
+#[test]
+fn tf_wide_integer_gain_rounds_only_at_model_arithmetic_boundary_in_vm() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let program = r#"
+        wide = uint64(9007199254740992) + uint64(1);
+        assert(wide ~= uint64(9007199254740992));
+        H = tf(0, 1);
+        left = wide + H;
+        right = H + wide;
+        ln = left.Numerator;
+        rn = right.Numerator;
+        assert(isa(ln, 'double') && isa(rn, 'double'));
+        assert(ln(1) == 9007199254740992);
+        assert(rn(1) == 9007199254740992);
+    "#;
+    execute_source(program).expect("compiled scalar model arithmetic admits rounded wide gain");
+}
+
+#[test]
+fn tf_constructor_rejects_inexact_integer_coefficients_through_vm() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    for source in [
+        "wide = uint64(9007199254740992) + uint64(1); H = tf(wide, 1);",
+        "wide = uint64(9007199254740992) + uint64(1); H = tf(1, [wide uint64(1)]);",
+    ] {
+        let error = execute_source(source).expect_err("inexact coefficient must be rejected");
+        assert!(
+            error.message().contains("exactly representable"),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn tf_minimum_signed_integer_power_is_a_vm_error_not_an_overflow() {
+    let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let error = execute_source("H = tf(1, [1 1]); P = H ^ intmin('int64');")
+        .expect_err("minimum signed power magnitude cannot be represented");
+    assert_eq!(error.identifier(), Some("RunMat:tf:InvalidExponent"));
+    assert!(error.message().contains("exponent magnitude is too large"));
+}
+
+#[test]
 fn lqr_matrix_and_state_space_forms_run_through_vm_dispatch() {
     let program = r#"
         A = [0 1; 0 0];
