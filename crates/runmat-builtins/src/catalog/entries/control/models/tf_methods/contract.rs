@@ -57,6 +57,26 @@ pub const TF_METHOD_ERROR_COEFFICIENT_CAPACITY: BuiltinErrorDescriptor = Builtin
     message: "tf: power coefficient array exceeds host capacity",
 };
 
+// This ordered vocabulary owns each diagnostic once. An operator descriptor
+// selects only the cases reachable through its parser and arithmetic path.
+#[repr(usize)]
+enum ErrorKind {
+    InvalidArgument,
+    InvalidModel,
+    UnsupportedModel,
+    InvalidCoefficients,
+    DenominatorInvalid,
+    InvalidSampleTime,
+    InvalidVariable,
+    SampleTimeMismatch,
+    VariableMismatch,
+    UnsupportedDelay,
+    DivideByZero,
+    InvalidExponent,
+    CoefficientCapacity,
+    Internal,
+}
+
 const ERRORS: [BuiltinErrorDescriptor; 14] = [
     BuiltinErrorDescriptor {
         code: "RM.TF.INVALID_ARGUMENT",
@@ -139,8 +159,73 @@ const ERRORS: [BuiltinErrorDescriptor; 14] = [
     },
 ];
 
+const fn error(kind: ErrorKind) -> BuiltinErrorDescriptor {
+    let source = &ERRORS[kind as usize];
+    BuiltinErrorDescriptor {
+        code: source.code,
+        identifier: source.identifier,
+        when: source.when,
+        message: source.message,
+    }
+}
+
+macro_rules! errors {
+    ($($kind:ident),+ $(,)?) => { &[$(error(ErrorKind::$kind)),+] };
+}
+
+const UNARY_ERRORS: &[BuiltinErrorDescriptor] = errors!(
+    InvalidArgument,
+    InvalidModel,
+    UnsupportedModel,
+    InvalidCoefficients,
+    InvalidSampleTime,
+    InvalidVariable,
+    Internal,
+);
+const BINARY_ERRORS: &[BuiltinErrorDescriptor] = errors!(
+    InvalidArgument,
+    InvalidModel,
+    UnsupportedModel,
+    InvalidCoefficients,
+    DenominatorInvalid,
+    InvalidSampleTime,
+    InvalidVariable,
+    SampleTimeMismatch,
+    VariableMismatch,
+    UnsupportedDelay,
+    Internal,
+);
+const DIVISION_ERRORS: &[BuiltinErrorDescriptor] = errors!(
+    InvalidArgument,
+    InvalidModel,
+    UnsupportedModel,
+    InvalidCoefficients,
+    DenominatorInvalid,
+    InvalidSampleTime,
+    InvalidVariable,
+    SampleTimeMismatch,
+    VariableMismatch,
+    UnsupportedDelay,
+    DivideByZero,
+    Internal,
+);
+const POWER_ERRORS: &[BuiltinErrorDescriptor] = errors!(
+    InvalidArgument,
+    InvalidModel,
+    UnsupportedModel,
+    InvalidCoefficients,
+    DenominatorInvalid,
+    InvalidSampleTime,
+    InvalidVariable,
+    UnsupportedDelay,
+    DivideByZero,
+    InvalidExponent,
+    CoefficientCapacity,
+    Internal,
+);
+
 macro_rules! descriptor {
-    ($name:ident, $label:literal, $inputs:ident) => {
+    ($name:ident, $label:literal, $inputs:ident, $errors:ident) => {
         pub const $name: BuiltinDescriptor = BuiltinDescriptor {
             signatures: &[BuiltinSignatureDescriptor {
                 label: $label,
@@ -149,50 +234,82 @@ macro_rules! descriptor {
             }],
             output_mode: BuiltinOutputMode::Fixed,
             completion_policy: BuiltinCompletionPolicy::MethodOnly,
-            errors: &ERRORS,
+            errors: $errors,
         };
     };
 }
 
-descriptor!(PLUS_DESCRIPTOR, "sys = tf.plus(lhs, rhs)", BINARY_INPUTS);
-descriptor!(MINUS_DESCRIPTOR, "sys = tf.minus(lhs, rhs)", BINARY_INPUTS);
-descriptor!(UPLUS_DESCRIPTOR, "sys = tf.uplus(sys)", UNARY_INPUTS);
-descriptor!(UMINUS_DESCRIPTOR, "sys = tf.uminus(sys)", UNARY_INPUTS);
-descriptor!(TIMES_DESCRIPTOR, "sys = tf.times(lhs, rhs)", BINARY_INPUTS);
+descriptor!(
+    PLUS_DESCRIPTOR,
+    "sys = tf.plus(lhs, rhs)",
+    BINARY_INPUTS,
+    BINARY_ERRORS
+);
+descriptor!(
+    MINUS_DESCRIPTOR,
+    "sys = tf.minus(lhs, rhs)",
+    BINARY_INPUTS,
+    BINARY_ERRORS
+);
+descriptor!(
+    UPLUS_DESCRIPTOR,
+    "sys = tf.uplus(sys)",
+    UNARY_INPUTS,
+    UNARY_ERRORS
+);
+descriptor!(
+    UMINUS_DESCRIPTOR,
+    "sys = tf.uminus(sys)",
+    UNARY_INPUTS,
+    UNARY_ERRORS
+);
+descriptor!(
+    TIMES_DESCRIPTOR,
+    "sys = tf.times(lhs, rhs)",
+    BINARY_INPUTS,
+    BINARY_ERRORS
+);
 descriptor!(
     MTIMES_DESCRIPTOR,
     "sys = tf.mtimes(lhs, rhs)",
-    BINARY_INPUTS
+    BINARY_INPUTS,
+    BINARY_ERRORS
 );
 descriptor!(
     RDIVIDE_DESCRIPTOR,
     "sys = tf.rdivide(lhs, rhs)",
-    BINARY_INPUTS
+    BINARY_INPUTS,
+    DIVISION_ERRORS
 );
 descriptor!(
     MRDIVIDE_DESCRIPTOR,
     "sys = tf.mrdivide(lhs, rhs)",
-    BINARY_INPUTS
+    BINARY_INPUTS,
+    DIVISION_ERRORS
 );
 descriptor!(
     LDIVIDE_DESCRIPTOR,
     "sys = tf.ldivide(lhs, rhs)",
-    BINARY_INPUTS
+    BINARY_INPUTS,
+    DIVISION_ERRORS
 );
 descriptor!(
     MLDIVIDE_DESCRIPTOR,
     "sys = tf.mldivide(lhs, rhs)",
-    BINARY_INPUTS
+    BINARY_INPUTS,
+    DIVISION_ERRORS
 );
 descriptor!(
     POWER_DESCRIPTOR,
     "sys = tf.power(sys, exponent)",
-    POWER_INPUTS
+    POWER_INPUTS,
+    POWER_ERRORS
 );
 descriptor!(
     MPOWER_DESCRIPTOR,
     "sys = tf.mpower(sys, exponent)",
-    POWER_INPUTS
+    POWER_INPUTS,
+    POWER_ERRORS
 );
 
 const INTEGER_GAIN_INPUTS: [BuiltinIntegerInputCapability; 2] = [

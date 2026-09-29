@@ -87,6 +87,58 @@ fn power_capacity_error_is_canonical_for_both_power_spellings() {
 }
 
 #[test]
+fn each_tf_method_advertises_only_its_reachable_diagnostic_family() {
+    const COMMON: &[&str] = &[
+        "RunMat:tf:InvalidArgument",
+        "RunMat:tf:InvalidModel",
+        "RunMat:tf:UnsupportedModel",
+        "RunMat:tf:InvalidCoefficients",
+        "RunMat:tf:InvalidSampleTime",
+        "RunMat:tf:InvalidVariable",
+        "RunMat:tf:Internal",
+    ];
+    const BINARY: &[&str] = &[
+        "RunMat:tf:DenominatorInvalid",
+        "RunMat:tf:SampleTimeMismatch",
+        "RunMat:tf:VariableMismatch",
+        "RunMat:tf:UnsupportedDelay",
+    ];
+    const DIVISION: &[&str] = &["RunMat:tf:DivideByZero"];
+    const POWER: &[&str] = &[
+        "RunMat:tf:DenominatorInvalid",
+        "RunMat:tf:UnsupportedDelay",
+        "RunMat:tf:DivideByZero",
+        "RunMat:tf:InvalidExponent",
+        "RunMat:tf:CoefficientCapacity",
+    ];
+
+    for entry in ENTRIES {
+        let mut expected = COMMON.to_vec();
+        match entry.identity.name {
+            "tf.uplus" | "tf.uminus" => {}
+            "tf.plus" | "tf.minus" | "tf.times" | "tf.mtimes" => {
+                expected.extend_from_slice(BINARY);
+            }
+            "tf.rdivide" | "tf.mrdivide" | "tf.ldivide" | "tf.mldivide" => {
+                expected.extend_from_slice(BINARY);
+                expected.extend_from_slice(DIVISION);
+            }
+            "tf.power" | "tf.mpower" => expected.extend_from_slice(POWER),
+            other => panic!("unclassified tf method {other}"),
+        }
+        expected.sort_unstable();
+        let mut actual = entry
+            .descriptor
+            .errors
+            .iter()
+            .map(|error| error.identifier.expect("stable tf identifier"))
+            .collect::<Vec<_>>();
+        actual.sort_unstable();
+        assert_eq!(actual, expected, "{}", entry.identity.name);
+    }
+}
+
+#[test]
 fn real_model_binary_and_unary_results_have_host_tf_property_schema() {
     for entry in [
         &TF_PLUS_CATALOG_ENTRY,
