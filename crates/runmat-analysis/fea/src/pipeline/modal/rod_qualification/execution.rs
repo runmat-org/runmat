@@ -24,20 +24,41 @@ use runmat_meshing_core::{CanonicalMeshingContract, StableDigest};
 
 #[test]
 fn solid_rod_harmonic_cold_workload_execution_and_field_recovery_preserve_physics() {
-    cold_execution(false);
+    cold_execution(false, false);
 }
 
 #[test]
 fn solid_rod_tet10_harmonic_cold_workload_execution_and_field_recovery_preserve_physics() {
-    cold_execution(true);
+    cold_execution(true, false);
 }
 
-fn cold_execution(quadratic: bool) {
+#[test]
+fn damped_solid_rod_harmonic_cold_execution_and_recovery_preserve_phase() {
+    cold_execution(false, true);
+}
+
+#[test]
+fn damped_solid_rod_tet10_harmonic_cold_execution_and_recovery_preserve_phase() {
+    cold_execution(true, true);
+}
+
+fn cold_execution(quadratic: bool, damped: bool) {
     let mesh = rod_mesh(if quadratic { 4 } else { 8 }, quadratic);
     let k = 1.0;
     let f = k * WAVE_SPEED / std::f64::consts::TAU;
+    let mut model = rod_model(&mesh, &[k]);
+    if damped {
+        super::damped::add_damping(&mut model);
+    }
+    let error = |real: &[f64], imaginary: &[f64]| {
+        if damped {
+            super::damped::field_error(&mesh, k, real, imaginary)
+        } else {
+            field_error(&mesh, k, real, imaginary)
+        }
+    };
     let workload = StructuralFrequencyWorkload::new(StructuralFrequencyWorkloadInput {
-        model: rod_model(&mesh, &[k]),
+        model,
         step_id: runmat_analysis_core::ProcedureStepId("rod_response".into()),
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
@@ -75,7 +96,7 @@ fn cold_execution(quadratic: bool) {
     assert_eq!(imported, cold);
     let displacement = imported.sample().displacement();
     assert!(
-        field_error(&mesh, k, displacement.real(), displacement.imaginary())
+        error(displacement.real(), displacement.imaginary())
             < if quadratic { 0.0005 } else { 0.005 }
     );
     let topology =
@@ -110,10 +131,7 @@ fn cold_execution(quadratic: bool) {
         .collect::<Vec<_>>();
     assert_eq!(recovered_real, displacement.real());
     assert_eq!(recovered_imaginary, displacement.imaginary());
-    assert!(
-        field_error(&mesh, k, &recovered_real, &recovered_imaginary)
-            < if quadratic { 0.0005 } else { 0.005 }
-    );
+    assert!(error(&recovered_real, &recovered_imaginary) < if quadratic { 0.0005 } else { 0.005 });
     assert_eq!(
         RecoveredFieldArtifact::from_canonical_bytes(&fields.canonical_bytes().unwrap()).unwrap(),
         fields

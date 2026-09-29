@@ -114,10 +114,53 @@ Geometry substitution preserves every node ID and constraint target while moving
 an interior node and resealing a valid mesh; it must fail on the admitted identity,
 not because a target disappeared. Source substitution must likewise fail on identity.
 
+## Damped continuum extension
+
+The new Rayleigh case uses `alpha=0.8 s^-1`, `beta=0.002 s`, and the same
+physical rod/complex end traction. The mass-proportional body drag and
+stiffness-proportional viscous stress follow the
+[Abaqus material damping definition](https://docs.software.vt.edu/abaqusv2025/English/SIMACAEGSARefMap/simagsa-c-ovwmatdamping.htm).
+The following continuum solution is derived here from that constitutive law
+and the rod equation; it is not a solver-to-solver reference:
+
+```
+Ec = E*(1+i*omega*beta)
+q^2 = rho*(omega^2-i*omega*alpha)/Ec
+U(x) = T*sin(q*x)/(Ec*q*cos(q))
+R_left = -T/cos(q)
+P_in = omega/2 * Im(T*conj(U(1)))
+P_loss = omega^2/2 * integral[alpha*rho*|U|^2 + beta*E*|U'|^2] dx
+```
+
+The reference evaluates sine/cosine by their entire series in `q^2`, avoiding
+branch-dependent complex square roots. Independent Simpson integration of the
+continuum loss must agree with analytic boundary power. The FE case compares
+complex nodal displacement and support reaction, checks spatial refinement,
+and requires positive FE loss and agreement with input power. Frequencies
+include `k={0.5,pi/2,2}`: damping permits a bounded response at the undamped
+resonance. Cold typed execution/recovery cases extend both Tet4 and Tet10 at
+`k=1`, preserving damping in workload serialization and recovered phase.
+Both cold cases pass. Initial Tet4 2/4/8 resonance field errors are
+45.15398%, 14.30231%, and 3.81678%: convergent but above the pre-set 3% bound.
+The test extends Tet4 refinement to 16 cells, preserving the frequency and bound.
+The 64-vector/4096-iteration policy did not converge at the finer resonance;
+the continuum case uses an explicit 256-vector/8192-iteration policy with the
+same `1e-10` residual target. All three focused tests pass. Finest Tet4 complex
+field errors at `k={0.5,pi/2,2}` are 0.007790%, 0.97310%, and 0.39216%;
+finest Tet10 errors are 0.0024519%, 0.041160%, and 0.040291%.
+Tet4/Tet10 field errors decrease by at least 2.5/5 per refinement, respectively;
+finest field and reaction bounds are 3%/0.3%. FE input/loss power agreement is
+required within `1e-8`; continuum boundary/volume power agrees within `1e-9`.
+Finest FE versus continuum input-power bounds are 5%/0.5%. Cold recovery retains
+the original 0.5%/0.05% field bounds at `k=1`.
+Production defaults are unchanged; the larger Krylov workspace is not measured
+or formally admitted. This is numerical and cold-object evidence, not a
+process-restart or production qualification claim.
+
 ## Gate decision
 
-The envelope remains experimental. Curved Tet10 continuum/recovery,
-damped continuum references, authored source-language and generated-input
+The envelope remains experimental. Curved Tet10 continuum/recovery (including damping),
+authored source-language and generated-input
 equivalence, formal resource/accuracy admission, matching solver-specific
 restart/replacement evidence, supported accelerator/distributed execution, and
 the blocking release lane remain separate obligations. Existing checkpoint

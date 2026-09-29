@@ -38,6 +38,7 @@ const YOUNGS: f64 = 100.0;
 const WAVE_SPEED: f64 = 10.0;
 const PHASOR: [f64; 2] = [1.0, 0.4];
 
+mod damped;
 mod execution;
 
 fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {
@@ -151,10 +152,19 @@ fn reference(x: f64, k: f64) -> [f64; 2] {
 }
 
 fn field_error(mesh: &SolverMeshArtifact, k: f64, real: &[f64], imaginary: &[f64]) -> f64 {
+    field_error_with(mesh, real, imaginary, |x| reference(x, k))
+}
+
+fn field_error_with(
+    mesh: &SolverMeshArtifact,
+    real: &[f64],
+    imaginary: &[f64],
+    reference: impl Fn(f64) -> [f64; 2],
+) -> f64 {
     let mut error = 0.0;
     let mut norm = 0.0;
     for (index, node) in mesh.topology.nodes.iter().enumerate() {
-        let expected = reference(node.coordinates_m[0], k);
+        let expected = reference(node.coordinates_m[0]);
         error +=
             (real[3 * index] - expected[0]).powi(2) + (imaginary[3 * index] - expected[1]).powi(2);
         norm += expected[0].powi(2) + expected[1].powi(2);
