@@ -95,3 +95,14 @@ fn state_matrix_dimension_proves_pole_column_length() {
         ShapeFact::from(vec![Some(1), Some(1)])
     );
 }
+
+#[test]
+fn known_non_model_class_without_runtime_identity_is_rejected() {
+    let mut value = model(standard::TRANSFER_FUNCTION, "Denominator", 2);
+    let ValueKindFact::Object(object) = &mut value.kind else {
+        unreachable!()
+    };
+    object.class = Some(ClassId(7));
+    object.runtime_class = None;
+    assert!(!call(vec![value], 1).diagnostics.is_empty());
+}

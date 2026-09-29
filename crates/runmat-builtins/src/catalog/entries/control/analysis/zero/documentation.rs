@@ -17,7 +17,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample { id: "static", title: "Static gain", program: "z = zero(tf(5, 2));", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(z), [0 1]));" } },
     ],
     example_exemption: None,
-    faqs: &[BuiltinDocumentationFaq { question: "Is zero the same as zeros?", answer: "No. zero analyzes a control model; zeros creates a numeric array." }],
+    faqs: &[
+        BuiltinDocumentationFaq { question: "Does zero cancel pole-zero pairs?", answer: "No. It returns roots of the stored numerator polynomial for the supplied transfer-function model." },
+        BuiltinDocumentationFaq { question: "Is zero the same as zeros?", answer: "No. zero analyzes a control model; zeros creates a numeric array." },
+    ],
     links: &[
         BuiltinDocumentationLink { label: "tf", target: BuiltinDocumentationLinkTarget::Builtin("tf") },
         BuiltinDocumentationLink { label: "pole", target: BuiltinDocumentationLinkTarget::Builtin("pole") },

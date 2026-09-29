@@ -18,11 +18,12 @@ use crate::builtins::common::{
     },
     tensor,
 };
-use crate::builtins::control::model_polynomial::{clean_coefficients, ss_object_to_tf_async};
+use crate::builtins::control::model_polynomial::ss_object_to_tf_async;
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::tf_model::{
     poly_eval, polynomial_roots, TfModel, EPS, SS_CLASS, TF_CLASS,
 };
+use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "rlocus";
@@ -105,11 +106,11 @@ async fn rlocus_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
 
-    let model = DynamicModel::from_value_async(sys).await?;
     let gains = match rest.first() {
         Some(value) => Some(parse_gain_arg(value).await?),
         None => None,
     };
+    let model = DynamicModel::from_value_async(sys).await?;
     let eval = RootLocus::compute(&model.tf, gains)?;
 
     if crate::output_context::requested_output_count() == Some(0)
@@ -155,6 +156,13 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
                         &RLOCUS_ERROR_INVALID_ARGUMENT,
                     ));
                 }
+                parse_line_style_args(
+                    std::slice::from_ref(&arg),
+                    &LineStyleParseOptions::generic(BUILTIN_NAME),
+                )
+                .map_err(|err| {
+                    rlocus_error(err.message().to_string(), &RLOCUS_ERROR_INVALID_ARGUMENT)
+                })?;
                 *style = Some(arg);
                 continue;
             }
@@ -263,7 +271,7 @@ fn real_gain_vector(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Num(n) => vec![n],
         Value::Int(i) => vec![i.to_f64()],
         Value::Bool(b) => vec![if b { 1.0 } else { 0.0 }],
-        Value::Complex(re, im) if im.abs() <= EPS => vec![re],
+        Value::Complex(re, im) if im == 0.0 => vec![re],
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape)?;
             tensor::tensor_values_f64(&tensor)
@@ -274,7 +282,7 @@ fn real_gain_vector(value: Value) -> BuiltinResult<Vec<f64>> {
                 .materialize_f64()
                 .into_iter()
                 .map(|(re, im)| {
-                    if im.abs() <= EPS {
+                    if im == 0.0 {
                         Ok(re)
                     } else {
                         Err(rlocus_error(
@@ -463,7 +471,7 @@ impl RootLocus {
 }
 
 fn ensure_supported_model(model: &TfModel) -> BuiltinResult<()> {
-    if model.input_delay.abs() > EPS || model.output_delay.abs() > EPS {
+    if model.input_delay != 0.0 || model.output_delay != 0.0 {
         return Err(rlocus_error(
             "rlocus: transfer functions with input or output delays are not supported",
             &RLOCUS_ERROR_UNSUPPORTED_MODEL,
@@ -609,7 +617,7 @@ fn poly_mul(left: &[Complex64], right: &[Complex64]) -> Vec<Complex64> {
             out[i + j] += *lhs * *rhs;
         }
     }
-    clean_coefficients(out)
+    out
 }
 
 fn poly_sub(left: &[Complex64], right: &[Complex64]) -> Vec<Complex64> {
@@ -623,7 +631,7 @@ fn poly_sub(left: &[Complex64], right: &[Complex64]) -> Vec<Complex64> {
     for (idx, coeff) in right.iter().enumerate() {
         out[right_offset + idx] -= *coeff;
     }
-    clean_coefficients(out)
+    out
 }
 
 fn sort_roots(mut roots: Vec<Complex64>) -> Vec<Complex64> {
@@ -750,6 +758,47 @@ fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+
+    #[test]
+    fn invalid_gain_or_style_rejects_before_model_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let den = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &den).unwrap();
+            let mut model = ObjectInstance::new(TF_CLASS.to_string());
+            model.properties.insert("Numerator".into(), Value::Num(1.0));
+            model
+                .properties
+                .insert("Denominator".into(), Value::GpuTensor(resident));
+            for name in ["Ts", "InputDelay", "OutputDelay"] {
+                model.properties.insert(name.into(), Value::Num(0.0));
+            }
+            provider.reset_telemetry();
+            let error = block_on(rlocus_builtin(
+                Value::Object(model.clone()),
+                vec![Value::from("not-a-gain")],
+            ))
+            .expect_err("invalid gain");
+            assert_eq!(error.identifier(), Some("RunMat:rlocus:InvalidArgument"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            provider.reset_telemetry();
+            let error = block_on(plot_root_locus_statement(
+                Value::Object(model),
+                vec![Value::from("not-a-style")],
+            ))
+            .expect_err("invalid style");
+            assert_eq!(error.identifier(), Some("RunMat:rlocus:InvalidArgument"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn tiny_nonzero_imaginary_gain_is_not_real() {
+        let error = real_gain_vector(Value::Complex(1.0, 1.0e-14))
+            .expect_err("complex gain must not be rounded to real");
+        assert_eq!(error.identifier(), Some("RunMat:rlocus:InvalidArgument"));
+    }
 
     #[test]
     fn unrelated_resident_model_property_is_not_downloaded() {

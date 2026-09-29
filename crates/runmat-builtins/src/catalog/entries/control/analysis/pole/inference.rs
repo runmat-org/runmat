@@ -62,7 +62,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     };
                     true
                 }
-                None => true,
+                None => object.class.is_none(),
                 Some(_) => false,
             },
             _ => false,

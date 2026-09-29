@@ -43,7 +43,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                         .and_then(|v| (v.shape.element_count() == Some(1)).then_some(0));
                     true
                 }
-                None => true,
+                None => object.class.is_none(),
                 Some(_) => false,
             },
             _ => false,

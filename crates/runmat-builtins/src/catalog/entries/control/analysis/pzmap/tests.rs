@@ -92,3 +92,27 @@ fn invalid_class_arity_and_output_count_are_diagnosed() {
     .iter()
     .any(|diagnostic| diagnostic.code == "RM-CATALOG-PZMAP-PLOT-STYLE"));
 }
+
+#[test]
+fn known_other_class_and_dynamic_output_count_are_handled_soundly() {
+    let mut other = model();
+    let ValueKindFact::Object(object) = &mut other.kind else {
+        unreachable!()
+    };
+    object.class = Some(ClassId(8));
+    object.runtime_class = None;
+    assert!(!call(vec![other], 1).diagnostics.is_empty());
+
+    let result = crate::infer_catalog_call(
+        &PZMAP_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![model(), model()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::CurrentFunctionNargout),
+        },
+    );
+    assert!(!result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-PZMAP-ARITY"));
+}

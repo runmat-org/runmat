@@ -22,6 +22,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "tf", target: BuiltinDocumentationLinkTarget::Builtin("tf") },
         BuiltinDocumentationLink { label: "ss", target: BuiltinDocumentationLinkTarget::Builtin("ss") },
         BuiltinDocumentationLink { label: "zero", target: BuiltinDocumentationLinkTarget::Builtin("zero") },
+        BuiltinDocumentationLink { label: "roots", target: BuiltinDocumentationLinkTarget::Builtin("roots") },
+        BuiltinDocumentationLink { label: "isstable", target: BuiltinDocumentationLinkTarget::Builtin("isstable") },
         SOURCE,
     ],
     media: &[],

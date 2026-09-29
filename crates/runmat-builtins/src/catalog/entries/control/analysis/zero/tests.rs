@@ -80,3 +80,14 @@ fn invalid_model_and_output_count_are_diagnosed() {
             .is_empty()
     );
 }
+
+#[test]
+fn known_non_model_class_without_runtime_identity_is_rejected() {
+    let mut value = model(standard::TRANSFER_FUNCTION, "Numerator", 2);
+    let ValueKindFact::Object(object) = &mut value.kind else {
+        unreachable!()
+    };
+    object.class = Some(ClassId(7));
+    object.runtime_class = None;
+    assert!(!call(vec![value], 1).diagnostics.is_empty());
+}

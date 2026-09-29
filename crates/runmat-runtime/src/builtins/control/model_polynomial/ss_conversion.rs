@@ -1,12 +1,11 @@
 //! State-space to SISO transfer-function conversion for control analysis.
-use super::coefficients::clean_coefficients;
 use crate::builtins::common::tensor;
 use crate::builtins::control::tf_model::{
-    control_error, gather_ss_properties, internal_identifier, invalid_model_identifier, poly_eval,
-    scalar_f64, unsupported_model_identifier, TfModel, EPS,
+    control_error, gather_ss_properties, internal_identifier, invalid_model_identifier, scalar_f64,
+    unsupported_model_identifier, TfModel,
 };
 use crate::{BuiltinResult, RuntimeError};
-use nalgebra::{DMatrix, DVector};
+use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_value::{ObjectInstance, Value};
 
@@ -44,12 +43,27 @@ pub(crate) async fn ss_object_to_tf_async(
     object: ObjectInstance,
     builtin: &'static str,
 ) -> BuiltinResult<TfModel> {
-    let gathered = gather_ss_properties(
-        object,
-        &["A", "B", "C", "D", "Ts", "InputDelay", "OutputDelay"],
-        builtin,
-    )
-    .await?;
+    const REQUIRED: [&str; 7] = ["A", "B", "C", "D", "Ts", "InputDelay", "OutputDelay"];
+    for name in REQUIRED {
+        if !object.properties.contains_key(name) {
+            return Err(conversion_error(
+                format!("model object is missing {name} property"),
+                ConversionErrorKind::InvalidModel,
+            )
+            .into_runtime(builtin));
+        }
+    }
+    // An unsupported host delay is a model-admission error, not a reason to
+    // download otherwise valid resident state matrices.
+    for name in ["InputDelay", "OutputDelay"] {
+        if let Some(value) = object.properties.get(name) {
+            if !matches!(value, Value::GpuTensor(_)) {
+                ensure_zero_delay_value(value, name)
+                    .map_err(|error| error.into_runtime(builtin))?;
+            }
+        }
+    }
+    let gathered = gather_ss_properties(object, &REQUIRED, builtin).await?;
     ss_object_to_tf(&gathered, builtin).map_err(|error| error.into_runtime(builtin))
 }
 
@@ -71,9 +85,9 @@ fn ss_object_to_tf(object: &ObjectInstance, builtin: &'static str) -> Conversion
 
     let denominator = characteristic_polynomial_from_matrix(&a)?;
     let numerator = state_space_numerator(&a, &b, &c, d[(0, 0)], &denominator)?;
-    let numerator = trim_leading_complex_zeros(clean_coefficients(numerator));
-    let denominator = trim_leading_complex_zeros(clean_coefficients(denominator));
-    if denominator.is_empty() || denominator[0].norm() <= EPS {
+    let numerator = trim_leading_complex_zeros(numerator);
+    let denominator = trim_leading_complex_zeros(denominator);
+    if denominator.is_empty() || denominator[0] == Complex64::new(0.0, 0.0) {
         return Err(conversion_error(
             "ss model produced an invalid denominator polynomial",
             ConversionErrorKind::Internal,
@@ -185,8 +199,15 @@ fn scalar_property(
 }
 
 fn ensure_zero_delay_property(object: &ObjectInstance, name: &str) -> ConversionResult<()> {
-    let values = numeric_values(property(object, name)?, name)?;
-    if values.iter().any(|value| value.norm() > EPS) {
+    ensure_zero_delay_value(property(object, name)?, name)
+}
+
+fn ensure_zero_delay_value(value: &Value, name: &str) -> ConversionResult<()> {
+    let values = numeric_values(value, name)?;
+    if values
+        .iter()
+        .any(|value| *value != Complex64::new(0.0, 0.0))
+    {
         return Err(conversion_error(
             "ss models with input or output delays are not supported",
             ConversionErrorKind::UnsupportedModel,
@@ -255,8 +276,59 @@ mod tests {
                     vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)]
                 );
                 assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+
+                let mut delayed = ObjectInstance::new("ss".to_string());
+                delayed
+                    .properties
+                    .insert("A".into(), Value::GpuTensor(resident_state.clone()));
+                for (name, value) in [
+                    ("B", 1.0),
+                    ("C", 1.0),
+                    ("D", 0.0),
+                    ("Ts", 0.0),
+                    ("InputDelay", 1.0e-14),
+                    ("OutputDelay", 0.0),
+                ] {
+                    delayed.properties.insert(name.into(), Value::Num(value));
+                }
+                provider.reset_telemetry();
+                let error = block_on(ss_object_to_tf_async(delayed, builtin))
+                    .expect_err("any nonzero delay is unsupported");
+                assert_eq!(
+                    error.identifier(),
+                    Some(if builtin == "pzmap" {
+                        "RunMat:pzmap:UnsupportedModel"
+                    } else {
+                        "RunMat:rlocus:UnsupportedModel"
+                    })
+                );
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             }
         });
+    }
+
+    #[test]
+    fn state_space_numerator_retains_small_real_and_complex_gains() {
+        let mut object = ObjectInstance::new("ss".to_string());
+        for (name, value) in [
+            ("A", Value::Num(-1.0)),
+            ("B", Value::Num(1.0e-7)),
+            ("C", Value::Complex(0.0, 1.0e-7)),
+            ("D", Value::Num(0.0)),
+            ("Ts", Value::Num(0.0)),
+            ("InputDelay", Value::Num(0.0)),
+            ("OutputDelay", Value::Num(0.0)),
+        ] {
+            object.properties.insert(name.into(), value);
+        }
+        let model = ss_object_to_tf(&object, "pzmap").expect("small nonzero gain");
+        assert_eq!(
+            model.denominator,
+            vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)]
+        );
+        assert_eq!(model.numerator.len(), 1);
+        assert_eq!(model.numerator[0].re, 0.0);
+        assert!((model.numerator[0].im - 1.0e-14).abs() < 1.0e-28);
     }
 
     #[test]
@@ -430,7 +502,6 @@ fn characteristic_polynomial_from_matrix(
         }
         b = next;
     }
-    let coeffs = clean_coefficients(coeffs);
     ensure_finite_coefficients("ss characteristic polynomial", &coeffs)?;
     Ok(coeffs)
 }
@@ -447,84 +518,32 @@ fn state_space_numerator(
         return Ok(vec![d]);
     }
 
-    let mut points = Vec::with_capacity(degree + 1);
-    let mut values = Vec::with_capacity(degree + 1);
-    for point in interpolation_candidates(degree) {
-        let Some(response) = state_space_response_at(a, b, c, d, point) else {
-            continue;
-        };
-        points.push(point);
-        values.push(response * poly_eval(denominator, point));
-        if points.len() == degree + 1 {
-            break;
+    // Let H(s) = D + C(sI-A)^-1B. The denominator is
+    // s^n+d1*s^(n-1)+...+dn. Its numerator coefficients are D*di plus
+    // the convolution of d0..d(i-1) with the Markov parameters C*A^(k-1)*B.
+    // This avoids interpolating at arbitrary points and, crucially, does not
+    // erase a small but genuine B/C gain with an absolute cleanup threshold.
+    let mut coeffs = denominator
+        .iter()
+        .map(|coefficient| d * *coefficient)
+        .collect::<Vec<_>>();
+    let mut state = b.clone();
+    for k in 1..=degree {
+        let markov = (c * &state)[(0, 0)];
+        for i in k..=degree {
+            coeffs[i] += denominator[i - k] * markov;
+        }
+        if k < degree {
+            state = a * state;
         }
     }
-    if points.len() != degree + 1 {
-        return Err(conversion_error(
-            "failed to find enough nonsingular interpolation points for ss model",
-            ConversionErrorKind::Internal,
-        ));
-    }
-
-    let mut vandermonde = DMatrix::<Complex64>::zeros(degree + 1, degree + 1);
-    for (row, point) in points.iter().enumerate() {
-        for col in 0..=degree {
-            vandermonde[(row, col)] = point.powu((degree - col) as u32);
-        }
-    }
-    let rhs = DVector::<Complex64>::from_vec(values);
-    let coeffs = vandermonde.lu().solve(&rhs).ok_or_else(|| {
-        conversion_error(
-            "failed to solve ss numerator interpolation system",
-            ConversionErrorKind::Internal,
-        )
-    })?;
-    let coeffs = clean_coefficients(coeffs.iter().copied().collect());
     ensure_finite_coefficients("ss numerator polynomial", &coeffs)?;
     Ok(coeffs)
-}
-
-fn interpolation_candidates(degree: usize) -> Vec<Complex64> {
-    let needed = degree + 1;
-    let mut points = Vec::with_capacity(needed * 6);
-    for radius_idx in 0..4 {
-        let radius = 0.75 + radius_idx as f64;
-        for idx in 0..needed {
-            let angle = std::f64::consts::TAU * ((idx as f64 + 0.37) / needed as f64);
-            points.push(Complex64::from_polar(radius, angle));
-        }
-    }
-    for idx in 1..=(needed * 2) {
-        let value = idx as f64;
-        points.push(Complex64::new(value, 0.0));
-        points.push(Complex64::new(-value, 0.0));
-    }
-    points
-}
-
-fn state_space_response_at(
-    a: &DMatrix<Complex64>,
-    b: &DMatrix<Complex64>,
-    c: &DMatrix<Complex64>,
-    d: Complex64,
-    point: Complex64,
-) -> Option<Complex64> {
-    let n = a.nrows();
-    if n == 0 {
-        return Some(d);
-    }
-    let mut system = -a.clone();
-    for idx in 0..n {
-        system[(idx, idx)] += point;
-    }
-    let state = system.lu().solve(b)?;
-    let output = c * state;
-    Some(d + output[(0, 0)])
 }
 fn trim_leading_complex_zeros(coeffs: Vec<Complex64>) -> Vec<Complex64> {
     let first_nonzero = coeffs
         .iter()
-        .position(|value| value.norm() > EPS)
+        .position(|value| *value != Complex64::new(0.0, 0.0))
         .unwrap_or(coeffs.len());
     coeffs[first_nonzero..].to_vec()
 }

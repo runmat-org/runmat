@@ -8,8 +8,13 @@ use runmat_types::{
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let plot = request.outputs.requested.known_count() == Some(0);
+    let data_form = request
+        .outputs
+        .requested
+        .known_count()
+        .is_some_and(|count| count > 0);
     let mut diagnostics = Vec::new();
-    if request.arguments.is_empty() || (!plot && request.arguments.len() != 1) {
+    if request.arguments.is_empty() || (data_form && request.arguments.len() != 1) {
         diagnostics.push(argument_error(
             "RM-CATALOG-PZMAP-ARITY",
             "output forms require one model; plot form accepts models and styles",
@@ -82,6 +87,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                             _ => None,
                         });
                 }
+                None if object.class.is_some() => diagnostics.push(argument_error(
+                    "RM-CATALOG-PZMAP-MODEL",
+                    "sys must be a tf or ss object",
+                    0,
+                )),
                 None => {}
                 Some(_) => diagnostics.push(argument_error(
                     "RM-CATALOG-PZMAP-MODEL",
@@ -123,7 +133,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     if object.runtime_class.as_ref().is_some_and(|class| {
                         class != &standard::TRANSFER_FUNCTION.owned()
                             && class != &standard::STATE_SPACE.owned()
-                    }) {
+                    }) || (object.runtime_class.is_none() && object.class.is_some())
+                    {
                         diagnostics.push(argument_error(
                             "RM-CATALOG-PZMAP-PLOT-ARG",
                             "plot model must be tf or ss",

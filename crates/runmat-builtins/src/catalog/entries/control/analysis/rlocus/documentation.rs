@@ -29,6 +29,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "What equation does rlocus solve?", answer: "For each gain k, it finds the roots of the negative-unity-feedback characteristic polynomial den(sys)+k*num(sys)." },
+        BuiltinDocumentationFaq { question: "Does rlocus support state-space or MIMO models?", answer: "It supports SISO ss models by converting their state-space matrices to control polynomials. MIMO models and model arrays remain unsupported." },
         BuiltinDocumentationFaq { question: "Does it run on the GPU?", answer: "No. Resident inputs can gather, then model conversion, roots and plotting run on the host." },
     ],
     links: &[

@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::control::model_polynomial::ss_object_to_tf_async;
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
-use crate::builtins::control::tf_model::{output_complex_column, TfModel, EPS, SS_CLASS, TF_CLASS};
+use crate::builtins::control::tf_model::{output_complex_column, TfModel, SS_CLASS, TF_CLASS};
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::{BuiltinResult, RuntimeError};
 
@@ -111,6 +111,13 @@ async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> Bui
                         &PZMAP_ERROR_INVALID_ARGUMENT,
                     ));
                 }
+                parse_line_style_args(
+                    std::slice::from_ref(&arg),
+                    &LineStyleParseOptions::generic(BUILTIN_NAME),
+                )
+                .map_err(|err| {
+                    pzmap_error(err.message().to_string(), &PZMAP_ERROR_INVALID_ARGUMENT)
+                })?;
                 *style = Some(arg);
                 continue;
             }
@@ -175,7 +182,7 @@ impl PoleZeroMap {
                 ));
             }
         };
-        if model.input_delay.abs() > EPS || model.output_delay.abs() > EPS {
+        if model.input_delay != 0.0 || model.output_delay != 0.0 {
             return Err(pzmap_error(
                 "pzmap: transfer functions with input or output delays are not supported",
                 &PZMAP_ERROR_UNSUPPORTED_MODEL,
@@ -323,6 +330,31 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::ObjectInstance;
+
+    #[test]
+    fn invalid_style_rejects_before_model_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let den = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &den).unwrap();
+            let mut model = ObjectInstance::new(TF_CLASS.to_string());
+            model.properties.insert("Numerator".into(), Value::Num(1.0));
+            model
+                .properties
+                .insert("Denominator".into(), Value::GpuTensor(resident));
+            for name in ["Ts", "InputDelay", "OutputDelay"] {
+                model.properties.insert(name.into(), Value::Num(0.0));
+            }
+            provider.reset_telemetry();
+            let error = block_on(plot_pole_zero_map_statement(
+                Value::Object(model),
+                vec![Value::from("not-a-style")],
+            ))
+            .expect_err("invalid style");
+            assert_eq!(error.identifier(), Some("RunMat:pzmap:InvalidArgument"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
 
     #[test]
     fn unrelated_resident_property_is_not_downloaded_for_data_form() {
