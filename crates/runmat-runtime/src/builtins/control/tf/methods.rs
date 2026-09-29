@@ -272,6 +272,21 @@ mod tests {
     }
 
     #[test]
+    fn unary_and_power_bindings_reject_numeric_receivers() {
+        for result in [
+            block_on(tf_uplus(Value::Num(2.0))),
+            block_on(tf_uminus(Value::Num(2.0))),
+            block_on(tf_power(Value::Num(2.0), Value::Num(3.0))),
+            block_on(tf_mpower(Value::Num(2.0), Value::Num(3.0))),
+        ] {
+            assert_eq!(
+                result.unwrap_err().identifier(),
+                Some("RunMat:tf:InvalidModel")
+            );
+        }
+    }
+
+    #[test]
     fn invalid_host_gain_and_exponent_preflight_before_resident_download() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let resident = crate::builtins::common::gpu_helpers::upload_tensor(
