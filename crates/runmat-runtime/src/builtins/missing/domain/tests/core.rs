@@ -48,6 +48,14 @@ fn missing_constructs_scalar_and_arrays() {
 }
 
 #[test]
+fn missing_rejects_dangling_like_control() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let error = block_on(missing_builtin(vec![Value::Num(2.0), Value::from("like")]))
+        .expect_err("a like keyword needs a prototype");
+    assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
+}
+
+#[test]
 fn missing_runmat_shape_extension_reads_every_integer_class_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let cases = [

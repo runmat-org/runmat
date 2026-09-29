@@ -8,14 +8,7 @@ use super::*;
 
 #[runtime_builtin(
     name = "missing",
-    category = "missing",
-    summary = "Create MATLAB missing string scalars or arrays.",
-    keywords = "missing,string,missing values",
-    accel = "cpu",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::MISSING_DESCRIPTOR),
-    extensions(crate::builtins::missing::MISSING_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::MISSING_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

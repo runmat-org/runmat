@@ -29,6 +29,11 @@ pub(super) fn parse_size_args(args: &[Value]) -> BuiltinResult<Vec<usize>> {
             .map(|text| text.eq_ignore_ascii_case("like"))
             .unwrap_or(false)
         {
+            if idx + 1 >= args.len() {
+                return Err(invalid_argument(
+                    "missing: 'like' requires a prototype value",
+                ));
+            }
             idx += 2;
             continue;
         }

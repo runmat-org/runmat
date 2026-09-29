@@ -25,20 +25,6 @@ const VALUE_AND_MASK_OUTPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Logical mask of entries, rows, or columns that were filled or removed.",
     },
 ];
-const VALUE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value.",
-}];
-const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Size, method, dimension, or option arguments.",
-}];
 const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
@@ -56,18 +42,6 @@ const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const MISSING_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "missing",
-        inputs: &[],
-        outputs: &VALUE_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "missing(sz)",
-        inputs: &VARIADIC_INPUTS,
-        outputs: &VALUE_OUTPUT,
-    },
-];
 pub(in crate::builtins::missing::domain) const FILLMISSING_SIGNATURES:
     [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "B = fillmissing(A, method, ...)",
@@ -116,14 +90,6 @@ pub(in crate::builtins::missing::domain) const MISSING_ERRORS: [BuiltinErrorDesc
     MISSING_ERROR_UNSUPPORTED_TYPE,
     MISSING_ERROR_INTERNAL,
 ];
-
-pub(in crate::builtins::missing::domain) const MISSING_SHAPED_ARRAY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "missing-shaped-array",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "missing(size...) is a RunMat convenience; the documented MATLAB missing function accepts no input arguments",
-    error_identifier: Some("RunMat:compatibility:MissingShapedArrayExtension"),
-};
-pub const MISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [MISSING_SHAPED_ARRAY_EXTENSION];
 
 pub(in crate::builtins::missing::domain) const STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION:
     BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
@@ -204,22 +170,6 @@ pub const STANDARDIZE_MISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDes
     },
 ];
 
-const MISSING_INTEGER_SIZE_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "size arguments",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Every native integer size is read exactly and checked against nonnegative platform allocation limits; the entire shaped-array syntax is a RunMat-only convenience.",
-    }];
-pub const MISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor { form: "missing(integer_size, ...)", inputs: &MISSING_INTEGER_SIZE_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "MATLAB-compatible modes reject every argument before provider access because public missing has only a zero-argument syntax. RunMat mode gathers admitted automatic or explicit size controls through their exact owner and creates a host string array." }];
-
-descriptor!(
-    MISSING_DESCRIPTOR,
-    MISSING_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
 pub(in crate::builtins::missing::domain) fn any_type(
     _args: &[Type],
     _ctx: &ResolveContext,
