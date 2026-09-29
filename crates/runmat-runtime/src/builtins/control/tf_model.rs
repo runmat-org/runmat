@@ -1,5 +1,7 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
 mod admission;
+#[cfg(test)]
+mod boundary_tests;
 use admission::preflight_host_model_properties;
 pub use admission::preflight_ss_host_properties;
 use runmat_types::MemberAccess;
@@ -366,7 +368,7 @@ impl TfModel {
                 "tf: denominator coefficients cannot be empty",
             )
         })?;
-        if leading.norm() <= EPS {
+        if leading.re == 0.0 && leading.im == 0.0 {
             return Err(control_error(
                 "tf",
                 "RunMat:tf:DenominatorInvalid",
@@ -485,8 +487,8 @@ impl TfModel {
         };
         let num = poly_eval(&self.numerator, point);
         let den = poly_eval(&self.denominator, point);
-        if den.norm() <= EPS {
-            if num.norm() <= EPS {
+        if den == Complex64::new(0.0, 0.0) {
+            if num == Complex64::new(0.0, 0.0) {
                 Ok(Complex64::new(f64::NAN, f64::NAN))
             } else {
                 // Direct division by a zero complex denominator produces a spurious NaN
@@ -590,7 +592,7 @@ impl TfModel {
 impl RealTfModel {
     pub fn normalized(&self, builtin: &'static str) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
         let den = trim_leading_real_zeros(self.denominator.clone());
-        if den.is_empty() || den[0].abs() <= EPS {
+        if den.is_empty() || den[0] == 0.0 {
             return Err(control_error(
                 builtin,
                 invalid_model_identifier(builtin),
@@ -606,7 +608,7 @@ impl RealTfModel {
     }
 
     pub fn ensure_zero_delays(&self, builtin: &'static str) -> BuiltinResult<()> {
-        if self.input_delay.abs() > EPS || self.output_delay.abs() > EPS {
+        if self.input_delay != 0.0 || self.output_delay != 0.0 {
             return Err(control_error(
                 builtin,
                 unsupported_model_identifier(builtin),
@@ -1108,7 +1110,7 @@ pub fn poly_eval(coeffs: &[Complex64], x: Complex64) -> Complex64 {
 fn first_nonzero_local_polynomial_coefficient(coeffs: &[Complex64], point: Complex64) -> Complex64 {
     // Synthetic division by (x - point) removes one zero at the evaluation point per pass.
     let mut quotient = coeffs.to_vec();
-    while quotient.len() > 1 && poly_eval(&quotient, point).norm() <= EPS {
+    while quotient.len() > 1 && poly_eval(&quotient, point) == Complex64::new(0.0, 0.0) {
         let mut reduced = Vec::with_capacity(quotient.len() - 1);
         let mut synthetic = quotient[0];
         reduced.push(synthetic);
@@ -1142,7 +1144,7 @@ fn complex_infinity_in_direction(direction: Complex64) -> Complex64 {
         return Complex64::new(f64::NAN, f64::NAN);
     }
     let component = |value: f64| {
-        if value.abs() <= EPS * scale {
+        if value == 0.0 {
             0.0
         } else {
             f64::INFINITY.copysign(value)
@@ -1154,7 +1156,7 @@ fn complex_infinity_in_direction(direction: Complex64) -> Complex64 {
 pub fn trim_leading_real_zeros(coeffs: Vec<f64>) -> Vec<f64> {
     let first_nonzero = coeffs
         .iter()
-        .position(|value| value.abs() > EPS)
+        .position(|value| *value != 0.0)
         .unwrap_or(coeffs.len());
     if first_nonzero == coeffs.len() {
         return vec![0.0];
@@ -1289,7 +1291,7 @@ fn real_coefficients(
 ) -> BuiltinResult<Vec<f64>> {
     let mut out = Vec::with_capacity(coeffs.len());
     for coeff in coeffs {
-        if coeff.im.abs() > EPS {
+        if coeff.im != 0.0 {
             return Err(control_error(
                 builtin,
                 unsupported_model_identifier(builtin),
@@ -1368,6 +1370,8 @@ fn poly_mul(lhs: &[Complex64], rhs: &[Complex64]) -> Vec<Complex64> {
 
 fn invalid_argument_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "step" => "RunMat:step:InvalidArgument",
+        "impulse" => "RunMat:impulse:InvalidArgument",
         "feedback" => "RunMat:feedback:InvalidArgument",
         "stepinfo" => "RunMat:stepinfo:InvalidArgument",
         "dcgain" => "RunMat:dcgain:InvalidArgument",
@@ -1383,6 +1387,8 @@ fn invalid_argument_identifier(builtin: &str) -> &'static str {
 
 fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "step" => "RunMat:step:InvalidModel",
+        "impulse" => "RunMat:impulse:InvalidModel",
         "feedback" => "RunMat:feedback:InvalidModel",
         "stepinfo" => "RunMat:stepinfo:InvalidData",
         "dcgain" => "RunMat:dcgain:InvalidModel",
@@ -1398,6 +1404,8 @@ fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
 
 fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "step" => "RunMat:step:InvalidModel",
+        "impulse" => "RunMat:impulse:InvalidModel",
         "feedback" => "RunMat:feedback:InvalidSampleTime",
         "lqr" => "RunMat:lqr:InvalidModel",
         "stepinfo" => "RunMat:stepinfo:InvalidArgument",
@@ -1414,6 +1422,8 @@ fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
 
 fn invalid_variable_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "step" => "RunMat:step:InvalidModel",
+        "impulse" => "RunMat:impulse:InvalidModel",
         "feedback" => "RunMat:feedback:InvalidVariable",
         _ => "RunMat:tf:InvalidVariable",
     }
@@ -1421,6 +1431,8 @@ fn invalid_variable_identifier(builtin: &str) -> &'static str {
 
 pub(crate) fn invalid_model_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "step" => "RunMat:step:InvalidModel",
+        "impulse" => "RunMat:impulse:InvalidModel",
         "feedback" => "RunMat:feedback:InvalidModel",
         "stepinfo" => "RunMat:stepinfo:InvalidSystem",
         "dcgain" => "RunMat:dcgain:InvalidModel",
@@ -1436,6 +1448,8 @@ pub(crate) fn invalid_model_identifier(builtin: &str) -> &'static str {
 
 pub(crate) fn unsupported_model_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "step" => "RunMat:step:UnsupportedModel",
+        "impulse" => "RunMat:impulse:UnsupportedModel",
         "feedback" => "RunMat:feedback:UnsupportedModel",
         "stepinfo" => "RunMat:stepinfo:UnsupportedModel",
         "dcgain" => "RunMat:dcgain:UnsupportedModel",
@@ -1451,6 +1465,8 @@ pub(crate) fn unsupported_model_identifier(builtin: &str) -> &'static str {
 
 pub(crate) fn internal_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "step" => "RunMat:step:Internal",
+        "impulse" => "RunMat:impulse:Internal",
         "feedback" => "RunMat:feedback:Internal",
         "stepinfo" => "RunMat:stepinfo:Internal",
         "dcgain" => "RunMat:dcgain:Internal",
