@@ -49,7 +49,30 @@ fn immutable_declarations_round_trip_without_runtime_state() {
         is_abstract: false,
         properties: Vec::new(),
         methods: Vec::new(),
+        array_shape: None,
     };
+    let encoded = serde_json::to_vec(&declaration).unwrap();
+    let decoded: ExternalClassDeclaration = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(decoded, declaration);
+}
+
+#[test]
+fn legacy_class_declarations_default_to_scalar_object_geometry() {
+    let legacy = serde_json::json!({
+        "name": ["example", "Widget"], "parent": null, "kind": "Value",
+        "is_sealed": false, "is_abstract": false, "properties": [], "methods": []
+    });
+    let mut declaration: ExternalClassDeclaration = serde_json::from_value(legacy).unwrap();
+    assert_eq!(declaration.array_shape, None);
+    assert!(serde_json::to_value(&declaration)
+        .unwrap()
+        .get("array_shape")
+        .is_none());
+    declaration.array_shape = Some(runmat_types::ClassArrayShape::ConsistentProperties {
+        primary: "data".into(),
+        others: vec!["mask".into()],
+        payload: runmat_types::ClassArrayPayload::NumericOrLogical,
+    });
     let encoded = serde_json::to_vec(&declaration).unwrap();
     let decoded: ExternalClassDeclaration = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(decoded, declaration);

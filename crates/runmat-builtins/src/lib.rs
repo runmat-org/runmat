@@ -1,7 +1,11 @@
 pub use inventory;
 mod class_declarations;
 mod legacy_index;
-pub use class_declarations::{standard_class_declaration, standard_class_is_subclass};
+pub use class_declarations::{
+    standard_class_array_shape, standard_class_declaration, standard_class_is_subclass,
+    CALENDAR_DAYS_PROPERTY, CALENDAR_MONTHS_PROPERTY, DATETIME_SERIAL_PROPERTY,
+    DLARRAY_DATA_PROPERTY, DURATION_DAYS_PROPERTY,
+};
 pub use legacy_index::with_builtin_functions_by_exact_name;
 pub mod catalog;
 pub use self::catalog::*;

@@ -4,7 +4,7 @@
 pub(super) const BUILTIN_NAME: &str = "duration";
 pub(super) const DURATION_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::standard::DURATION;
-pub(super) const DAYS_FIELD: &str = "__days";
+pub(super) const DAYS_FIELD: &str = runmat_builtins::DURATION_DAYS_PROPERTY;
 pub(super) const FORMAT_FIELD: &str = "Format";
 pub(crate) const DEFAULT_DURATION_FORMAT: &str = "hh:mm:ss";
 pub(super) const SECONDS_PER_DAY: f64 = 86_400.0;

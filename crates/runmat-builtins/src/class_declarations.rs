@@ -4,10 +4,27 @@ use runmat_types::{
     StaticMethodName, SymbolName,
 };
 
+mod arrays;
+pub use arrays::{
+    CALENDAR_DAYS_PROPERTY, CALENDAR_MONTHS_PROPERTY, DATETIME_SERIAL_PROPERTY,
+    DLARRAY_DATA_PROPERTY, DURATION_DAYS_PROPERTY,
+};
+
+/// Borrow the immutable shape protocol without rebuilding class/member
+/// declarations on each runtime structural query.
+pub fn standard_class_array_shape(
+    identity: &ClassIdentity,
+) -> Option<&'static runmat_types::ClassArrayShape> {
+    arrays::shape(identity)
+}
+
 /// Return immutable standard-library class metadata used during composition.
 /// Mutable runtime registrations and static property values are intentionally
 /// not visible through this interface.
 pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalClassDeclaration> {
+    if let Some(declaration) = arrays::declaration(identity) {
+        return Some(declaration);
+    }
     if identity.is(standard::STRING) {
         return Some(ExternalClassDeclaration {
             name: identity.qualified_name(),
@@ -26,6 +43,7 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
                 callable: CallableIdentity::Builtin(BuiltinId("string.empty".into())),
                 implicit_class_argument: None,
             }],
+            array_shape: None,
         });
     }
     if identity.is(standard::GPU_ARRAY) {
@@ -53,6 +71,7 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
                     StaticMethodName::new("underlyingType"),
                 ),
             ],
+            array_shape: None,
         });
     }
     let primitives = [
@@ -117,6 +136,7 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
             is_abstract: false,
             properties: Vec::new(),
             methods,
+            array_shape: None,
         });
     }
     let (parent, kind) = if identity.is(standard::HANDLE) {
@@ -147,6 +167,7 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
         is_abstract: false,
         properties: Vec::new(),
         methods,
+        array_shape: None,
     })
 }
 

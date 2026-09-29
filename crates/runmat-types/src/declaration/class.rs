@@ -60,6 +60,32 @@ pub struct ExternalClassDeclaration {
     pub is_abstract: bool,
     pub properties: Vec<ExternalPropertyDeclaration>,
     pub methods: Vec<ExternalMethodDeclaration>,
+    /// Structural metadata for a value-backed array wrapper. This does not
+    /// admit numerical operations or invoke user getters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub array_shape: Option<ClassArrayShape>,
+}
+
+/// Array geometry supplied by stored properties, independently of the scalar
+/// object container. Parallel payloads must describe the same array.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClassArrayShape {
+    Property {
+        property: MemberName,
+        payload: ClassArrayPayload,
+    },
+    ConsistentProperties {
+        primary: MemberName,
+        others: Vec<MemberName>,
+        payload: ClassArrayPayload,
+    },
+}
+
+/// Structural storage admission, not an operation's dtype/value policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClassArrayPayload {
+    RealNumeric,
+    NumericOrLogical,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -28,11 +28,34 @@ fn compiled_duration_scalar_expansion_and_nd_shape_survive_unit_extraction() {
         input = reshape([1 2 3 4], 2, 1, 2);
         elapsed = duration(input, 15, 0);
         extracted = hours(elapsed);
+        assert(isequal(size(elapsed), [2 1 2]));
+        assert(numel(elapsed) == 4);
+        assert(ndims(elapsed) == 3);
         assert(isequal(size(extracted), [2 1 2]));
         assert(all(abs(extracted(:) - (input(:) + 0.25)) < 1e-12));
         "#,
     )
     .expect("compiled N-D duration construction and extraction");
+}
+
+#[test]
+fn compiled_object_backed_array_shape_queries_follow_payloads() {
+    execute_source(
+        r#"
+        row = duration([1 2],15,0);
+        assert(isequal(size(row), [1 2])); assert(isrow(row));
+        assert(isvector(row)); assert(~iscolumn(row));
+        assert(~isscalar(row)); assert(length(row) == 2);
+        empty = hours(zeros(0,3));
+        assert(isequal(size(empty), [0 3])); assert(isempty(empty)); assert(numel(empty) == 0);
+        dates = datetime([2024 2025],4,9);
+        assert(isequal(size(dates), [1 2])); assert(numel(dates) == 2);
+        data = dlarray(reshape(1:6,2,3));
+        assert(isequal(size(data), [2 3])); assert(numel(data) == 6);
+        assert(ismatrix(data)); assert(~isscalar(data));
+    "#,
+    )
+    .expect("compiled shape metadata reads array payloads, not scalar object wrappers");
 }
 
 #[test]

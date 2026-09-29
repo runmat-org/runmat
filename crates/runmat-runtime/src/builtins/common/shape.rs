@@ -3,6 +3,12 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::tensor as tensor_utils;
 use crate::RuntimeError;
 
+mod object;
+pub(crate) use object::array_payload_storage_matches;
+#[cfg(test)]
+#[path = "shape/object_tests.rs"]
+mod object_tests;
+
 /// Return true if a shape should be treated as a scalar.
 pub fn is_scalar_shape(shape: &[usize]) -> bool {
     shape.is_empty()
@@ -59,6 +65,12 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
         Value::StructArray(array) => normalize_shape(array.shape()),
         Value::ObjectArray(array) => normalize_shape(array.shape()),
         Value::GpuTensor(handle) => normalize_shape(handle.shape()),
+        Value::Object(object) => {
+            match runmat_builtins::standard_class_array_shape(&object.class_name) {
+                Some(declaration) => object::dimensions(object, declaration).await?,
+                None => canonical_scalar_shape(),
+            }
+        }
         _ => vec![1, 1],
     };
     Ok(dims)
@@ -83,6 +95,14 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
             .iter()
             .copied()
             .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
+        Value::Object(_) => value_dimensions(value)
+            .await?
+            .into_iter()
+            .try_fold(1usize, |count, dimension| count.checked_mul(dimension))
+            .ok_or_else(|| {
+                crate::build_runtime_error("array element count exceeds the structural range")
+                    .build()
+            })?,
         _ => 1,
     };
     Ok(numel)

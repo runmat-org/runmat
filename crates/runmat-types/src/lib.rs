@@ -13,12 +13,12 @@ pub mod version;
 
 pub use contract::*;
 pub use declaration::{
-    ClassDeclaration, ClassKind, EnumerationDeclaration, EventDeclaration,
-    ExternalClassDeclaration, ExternalMethodDeclaration, ExternalPropertyDeclaration,
-    FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
-    FunctionArgValidationLiteral, FunctionArgValidator, InheritanceDeclaration, MemberAccess,
-    MethodAttributes, MethodDeclaration, PropertyAttributes, PropertyDeclaration,
-    SemanticAttribute,
+    ClassArrayPayload, ClassArrayShape, ClassDeclaration, ClassKind, EnumerationDeclaration,
+    EventDeclaration, ExternalClassDeclaration, ExternalMethodDeclaration,
+    ExternalPropertyDeclaration, FunctionArgDefaultValue, FunctionArgDim,
+    FunctionArgRangeInclusivity, FunctionArgSizeSpec, FunctionArgValidationLiteral,
+    FunctionArgValidator, InheritanceDeclaration, MemberAccess, MethodAttributes,
+    MethodDeclaration, PropertyAttributes, PropertyDeclaration, SemanticAttribute,
 };
 pub use fact::*;
 pub use identity::*;

@@ -221,6 +221,7 @@ pub mod standard {
     pub const DICTIONARY: StaticClassIdentity = StaticClassIdentity::new("dictionary");
     pub const DATETIME: StaticClassIdentity = StaticClassIdentity::new("datetime");
     pub const DURATION: StaticClassIdentity = StaticClassIdentity::new("duration");
+    pub const DL_ARRAY: StaticClassIdentity = StaticClassIdentity::new("dlarray");
     pub const CALENDAR_DURATION: StaticClassIdentity = StaticClassIdentity::new("calendarDuration");
     pub const TRANSFER_FUNCTION: StaticClassIdentity = StaticClassIdentity::new("tf");
     pub const STATE_SPACE: StaticClassIdentity = StaticClassIdentity::new("ss");
