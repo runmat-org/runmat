@@ -19,13 +19,13 @@ use super::{deep_learning_error, model, unsupported_error};
 
 pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity = super::DLARRAY_CLASS;
 mod tape;
+#[cfg(test)]
+use tape::annotate_tree;
 use tape::{
     active_tape, push_binary_node, push_node, value_for_node, Node, NodeKind, AD_NODE_PROPERTY,
     AD_TAPE_PROPERTY,
 };
-pub(super) use tape::{
-    annotate_dlarray_value, annotate_tree, dlarray_node_id, tape_is_active, with_tape_context,
-};
+pub(super) use tape::{annotate_dlarray_value, dlarray_node_id, tape_is_active, with_tape_context};
 mod value;
 pub(super) use value::{dlarray_data, dlarray_format_and_labels, host_tensor_from_value};
 use value::{
@@ -33,9 +33,11 @@ use value::{
     result_metadata_owner, wrap_result, Payload,
 };
 pub(crate) mod gradient;
+#[cfg(test)]
 pub(super) use gradient::dlgradient_builtin;
 
 pub(crate) mod array_methods;
+#[cfg(test)]
 pub(super) use array_methods::{
     dlarray_minus_builtin, dlarray_mtimes_builtin, dlarray_plus_builtin, dlarray_rdivide_builtin,
     dlarray_sum_builtin, dlarray_times_builtin,

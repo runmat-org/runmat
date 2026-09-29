@@ -56,6 +56,7 @@ fn excess_outputs_reject_before_provider_download() {
 
 #[test]
 fn malformed_host_control_rejects_before_resident_prediction_download() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let prediction = provider
             .upload(&HostTensorView {
@@ -80,6 +81,7 @@ fn malformed_host_control_rejects_before_resident_prediction_download() {
 
 #[test]
 fn invalid_host_target_rejects_before_provider_execution() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let prediction = provider
             .upload(&HostTensorView {

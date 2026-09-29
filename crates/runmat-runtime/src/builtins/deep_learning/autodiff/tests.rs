@@ -70,17 +70,13 @@ fn traced_node_ids_are_exact_and_belong_only_to_the_active_tape() {
     assert_eq!(outer.borrow().nodes.len(), 1);
 
     let mut forged = traced;
-    let Value::Object(object) = &mut forged else {
-        panic!("dlarray")
-    };
-    object
-        .properties
-        .insert(AD_NODE_PROPERTY.into(), Value::Num(0.0));
-    assert_eq!(dlarray_node_id(&forged), None);
-    object
-        .properties
-        .insert(AD_NODE_PROPERTY.into(), Value::Int(IntValue::U64(u64::MAX)));
-    assert_eq!(dlarray_node_id(&forged), None);
+    for id in [Value::Num(0.0), Value::Int(IntValue::U64(u64::MAX))] {
+        let Value::Object(object) = &mut forged else {
+            panic!("dlarray")
+        };
+        object.properties.insert(AD_NODE_PROPERTY.into(), id);
+        assert_eq!(dlarray_node_id(&forged), None);
+    }
 }
 
 fn wrapped(data: Value) -> Value {
@@ -105,8 +101,8 @@ fn annotation_and_gradient_preserve_typed_struct_array_shape_and_schema() {
     let input =
         Value::StructArray(StructArray::new(vec![element(1.0), element(2.0)], vec![2, 1]).unwrap());
     let annotated = annotate_tree(input).expect("annotate structure array");
-    let gradient =
-        gradient_tree_for_target(&annotated, &HashMap::new()).expect("gradient structure array");
+    let gradient = super::gradient::gradient_tree_for_target(&annotated, &HashMap::new())
+        .expect("gradient structure array");
 
     let Value::StructArray(gradient) = gradient else {
         panic!("expected typed structure array");

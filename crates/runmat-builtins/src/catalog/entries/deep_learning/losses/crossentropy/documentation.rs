@@ -3,7 +3,7 @@ use crate::*;
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "RunMat cross-entropy implementation",
     target: BuiltinDocumentationLinkTarget::Source(
-        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/losses.rs",
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/losses/mod.rs",
     ),
 };
 
@@ -20,7 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Loss, weights, and formats",
             paragraphs: &[
                 "Predictions are clipped inside the open unit interval before logarithms. Targets must be probabilities in [0,1]. An optional third positional argument or `Weights` name-value option supplies scalar, full prediction-sized, channel-sized, or observation-sized weights. A full-size logical or binary numeric `Mask` excludes selected terms.",
-                "Options are `ClassificationMode`, `TargetCategories`, `Reduction`, `NormalizationFactor`, `DataFormat`, `WeightsFormat`, `Weights`, and `Mask`. The mode accepts single-label/exclusive and multi-label/independent aliases. `DataFormat` and `WeightsFormat` use the supported `S`, `C`, `B`, `T`, and `U` labels; `WeightsFormat` maps weight axes by label. Normalization accepts `all-elements`, `batch-size`, `mask-included`, `none`, or a positive scalar. The default is batch-size when a format is present and all-elements otherwise.",
+                "Options are `ClassificationMode`, `TargetCategories`, `Reduction`, `NormalizationFactor`, `DataFormat`, `WeightsFormat`, `Weights`, and `Mask`. The mode accepts single-label/exclusive and multi-label/independent aliases. Reduction accepts `sum` and `none`; `none` preserves the prediction shape. `DataFormat` and `WeightsFormat` use the supported `S`, `C`, `B`, `T`, and `U` labels; `WeightsFormat` maps weight axes by label. Normalization accepts `all-elements`, `batch-size`, `mask-included`, `none`, or a positive scalar. The default is batch-size when a format is present and all-elements otherwise.",
                 "A host `dlarray` prediction produces an unformatted host `dlarray` scalar or array. Plain host numeric predictions produce a numeric result. A pair of plain numeric prediction and target arrays is a RunMat extension: MATLAB's `dlarray` crossentropy reference requires a `dlarray` target when predictions are numeric. Native integer host arrays are also a RunMat extension and are converted for floating-point loss arithmetic; wide integer values can round.",
             ],
         },
@@ -92,7 +92,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             label: "Host, weighted, and provider-resident loss forms",
             location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs",
         }],
-        notes: &["Provider and browser forms require integrated execution qualification; this catalog record does not assert hardware speed or universal provider availability."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

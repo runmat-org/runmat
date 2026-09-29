@@ -3,17 +3,20 @@
 
 mod adamupdate;
 mod dlarray;
+mod dlfeval;
 mod dlupdate;
 mod training_options;
 
 pub use self::adamupdate::*;
 pub use self::dlarray::*;
+pub use self::dlfeval::*;
 pub use self::dlupdate::*;
 pub use self::training_options::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(adamupdate::ENTRIES.iter().copied());
     values.extend(dlarray::ENTRIES.iter().copied());
+    values.extend(dlfeval::ENTRIES.iter().copied());
     values.extend(dlupdate::ENTRIES.iter().copied());
     values.extend(training_options::ENTRIES.iter().copied());
 }

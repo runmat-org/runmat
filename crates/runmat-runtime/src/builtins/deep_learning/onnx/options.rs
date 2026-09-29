@@ -76,7 +76,10 @@ pub(super) fn validate_option(key: &str, value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
-pub(super) fn integer_scalar(value: &Value, label: &str) -> BuiltinResult<i64> {
+pub(in crate::builtins::deep_learning) fn integer_scalar(
+    value: &Value,
+    label: &str,
+) -> BuiltinResult<i64> {
     positive_i64(value, EXPORT_ONNX, label)
 }
 

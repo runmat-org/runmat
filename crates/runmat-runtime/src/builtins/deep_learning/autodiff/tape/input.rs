@@ -103,7 +103,7 @@ fn annotate_network_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
         };
         if !layer_object
             .class_name
-            .is(super::FULLY_CONNECTED_LAYER_CLASS)
+            .is(runmat_builtins::FULLY_CONNECTED_LAYER_CLASS)
         {
             continue;
         }

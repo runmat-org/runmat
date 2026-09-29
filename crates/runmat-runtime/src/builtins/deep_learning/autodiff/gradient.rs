@@ -51,7 +51,7 @@ pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
 mod backward;
 use backward::backward;
 
-fn gradient_tree_for_target(
+pub(super) fn gradient_tree_for_target(
     target: &Value,
     gradients: &HashMap<usize, Tensor>,
 ) -> BuiltinResult<Value> {
@@ -75,7 +75,7 @@ fn gradient_tree_for_target(
                 )?
             };
             let (format, labels) = dlarray_format_and_labels(target);
-            Ok(super::object_with_identity(
+            Ok(super::super::object_with_identity(
                 DLARRAY_CLASS,
                 vec![
                     ("Data", Value::Tensor(tensor)),

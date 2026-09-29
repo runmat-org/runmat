@@ -123,7 +123,7 @@ fn matching_node(values: &[&Value], depth: usize) -> BuiltinResult<()> {
             Ok(())
         }
         Value::Object(network) if model::is_deep_learning_network_object(network) => {
-            let mut learnables = Vec::with_capacity(values.len());
+            let mut peers = Vec::with_capacity(values.len());
             for value in values {
                 let Value::Object(other) = value else {
                     return Err(structure_mismatch());
@@ -133,10 +133,16 @@ fn matching_node(values: &[&Value], depth: usize) -> BuiltinResult<()> {
                 {
                     return Err(structure_mismatch());
                 }
-                learnables.push(other.properties.get("Learnables").ok_or_else(|| {
-                    deep_learning_error("dlupdate", "dlupdate: dlnetwork is missing Learnables")
-                })?);
+                peers.push(other);
             }
+            let learnables = peers
+                .iter()
+                .map(|other| {
+                    other.properties.get("Learnables").ok_or_else(|| {
+                        deep_learning_error("dlupdate", "dlupdate: dlnetwork is missing Learnables")
+                    })
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
             matching_node(&learnables, depth + 1)
         }
         Value::Object(table) if crate::builtins::table::is_tabular_object(table) => {

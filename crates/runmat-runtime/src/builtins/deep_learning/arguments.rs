@@ -145,30 +145,6 @@ pub(in crate::builtins) fn positive_usize(
     }
 }
 
-pub(in crate::builtins) fn nonnegative_usize(
-    value: &Value,
-    function: &'static str,
-    label: &str,
-) -> Option<usize> {
-    match value {
-        Value::Int(value) => value.try_to_usize(),
-        Value::Tensor(tensor) if crate::builtins::common::tensor::is_scalar_tensor(tensor) => {
-            if let Some(value) = tensor
-                .integer_storage()
-                .and_then(|storage| storage.value_at(0))
-            {
-                return value.try_to_usize();
-            }
-            nonnegative_usize_from_f64(crate::builtins::common::tensor::tensor_value_f64(tensor, 0))
-        }
-        Value::Num(n) => nonnegative_usize_from_f64(*n),
-        _ => {
-            let _ = (function, label);
-            None
-        }
-    }
-}
-
 pub(super) fn positive_usize_from_f64(
     n: f64,
     function: &'static str,
@@ -186,18 +162,6 @@ pub(super) fn positive_usize_from_f64(
         ));
     }
     Ok(n as usize)
-}
-
-pub(super) fn nonnegative_usize_from_f64(n: f64) -> Option<usize> {
-    if n.is_finite()
-        && n >= 0.0
-        && n.fract() == 0.0
-        && (n < usize::MAX as f64 || (usize::BITS < 64 && n == usize::MAX as f64))
-    {
-        Some(n as usize)
-    } else {
-        None
-    }
 }
 
 pub(in crate::builtins) fn numeric_vector(

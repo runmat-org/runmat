@@ -21,14 +21,11 @@ pub(crate) mod training;
 mod tests;
 
 pub(super) use self::arguments::{
-    logical_scalar, nonnegative_usize, numeric_scalar, numeric_values, numeric_vector, object,
-    object_with_identity, positive_i64, positive_usize, scalar_text, string_array, tensor_value,
-    text_or_missing,
+    logical_scalar, numeric_scalar, numeric_values, numeric_vector, object, object_with_identity,
+    positive_i64, positive_usize, scalar_text, string_array, tensor_value, text_or_missing,
 };
 pub(super) use self::class_registration::ensure_dlarray_class_registered;
-pub use self::contracts::{
-    ARRAY_DESCRIPTOR, DLFEVAL_DESCRIPTOR, DLGRADIENT_DESCRIPTOR, OBJECT_DESCRIPTOR,
-};
+pub use self::contracts::{ARRAY_DESCRIPTOR, OBJECT_DESCRIPTOR};
 pub(super) use self::contracts::{
     CLASSIFICATION_OUTPUT_LAYER_CLASS, DLARRAY_CLASS, ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS,
     FULLY_CONNECTED_LAYER_CLASS, LAYER_GRAPH_CLASS, MAX_COMBVEC_COLUMNS, MAX_PAD_ELEMENTS,

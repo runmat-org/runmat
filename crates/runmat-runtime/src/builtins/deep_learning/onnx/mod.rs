@@ -31,6 +31,7 @@ use encode::{encode_initializer, put_varint};
 use graph::build_export_graph;
 #[cfg(test)]
 use graph::{merge_export_dtype, tensor_to_row_major_2d};
+#[cfg(test)]
 pub(super) use options::integer_scalar;
 use options::{parse_export_options, validate_option};
 use types::*;

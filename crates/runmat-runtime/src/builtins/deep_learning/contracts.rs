@@ -74,7 +74,6 @@ pub(super) const ARRAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSig
     outputs: &OUT_ARRAY,
 }];
 
-
 pub const OBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &OBJECT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

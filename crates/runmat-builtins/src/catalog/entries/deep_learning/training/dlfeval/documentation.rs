@@ -77,7 +77,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             label: "Function handles, requested outputs, typed gradients, and resident rejection",
             location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs",
         }],
-        notes: &["The prior sidecar's `@modelLoss, net, X, T` example was schematic: it did not define those values or its callback. The executable example here supplies its callback and checks both returned values. Product standalone-example, native, JIT/AOT, and browser execution remain integrated qualification gates."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

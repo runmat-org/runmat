@@ -1,8 +1,8 @@
 //! Deep-learning training entrypoints.
 
 use super::{
-    any_type, autodiff, deep_learning_error, ensure_dlarray_class_registered, object,
-    object_with_identity, parse_name_values, scalar_text, text_or_missing,
+    autodiff, deep_learning_error, ensure_dlarray_class_registered, object, object_with_identity,
+    parse_name_values, scalar_text, text_or_missing,
 };
 use crate::BuiltinResult;
 use runmat_macros::runtime_builtin;

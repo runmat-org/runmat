@@ -1,7 +1,9 @@
 use super::*;
 mod input;
+pub(in crate::builtins::deep_learning) use input::annotate_dlarray_value;
+#[cfg(test)]
+pub(super) use input::annotate_tree;
 use input::prepare_tape_inputs;
-pub(in crate::builtins::deep_learning) use input::{annotate_dlarray_value, annotate_tree};
 
 pub(super) const AD_NODE_PROPERTY: &str = "__runmat_ad_node";
 pub(super) const AD_TAPE_PROPERTY: &str = "__runmat_ad_tape";

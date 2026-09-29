@@ -52,7 +52,7 @@ pub(in crate::builtins::deep_learning) fn record_network_forward(
         .properties
         .get("Layers")
         .cloned()
-        .map(|value| super::layers_from_value(value, function))
+        .map(|value| super::super::layers_from_value(value, function))
         .transpose()?
         .unwrap_or_default();
     model::validate_forward_layers(&layers, function)?;
@@ -94,7 +94,7 @@ pub(in crate::builtins::deep_learning) fn record_network_forward(
                 let alpha = layer
                     .properties
                     .get("Alpha")
-                    .map(|value| super::numeric_values(value, function, "Alpha"))
+                    .map(|value| super::super::numeric_values(value, function, "Alpha"))
                     .transpose()?
                     .and_then(|values| values.first().copied())
                     .unwrap_or(1.0);

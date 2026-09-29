@@ -73,7 +73,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             label: "Traced scalar and network learnables gradients",
             location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs",
         }],
-        notes: &["The example uses supported elementwise multiplication instead of assuming an unimplemented autodiff power rule. Native, JIT, AOT, WASM, and standalone-example execution remain integrated qualification gates."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

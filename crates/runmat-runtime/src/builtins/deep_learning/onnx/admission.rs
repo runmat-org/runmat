@@ -258,14 +258,14 @@ mod tests {
 
     fn network(weights: Value, output_size: Value) -> Value {
         let input = super::super::super::object(
-            "featureInputLayer",
+            runmat_builtins::FEATURE_INPUT_LAYER_CLASS.display_name(),
             [
                 ("InputSize", Value::Num(2.0)),
                 ("Name", Value::String("input".into())),
             ],
         );
         let dense = super::super::super::object(
-            "fullyConnectedLayer",
+            runmat_builtins::FULLY_CONNECTED_LAYER_CLASS.display_name(),
             [
                 ("OutputSize", output_size),
                 ("Weights", weights),
@@ -277,7 +277,7 @@ mod tests {
             ],
         );
         super::super::super::object(
-            "dlnetwork",
+            model::DLNETWORK_CLASS.display_name(),
             [(
                 "Layers",
                 Value::Cell(CellArray::new(vec![input, dense], 2, 1).unwrap()),

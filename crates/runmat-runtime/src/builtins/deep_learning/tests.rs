@@ -1068,6 +1068,7 @@ fn export_onnx_network_writes_supported_feedforward_graph() {
 
 #[test]
 fn export_onnx_options_read_typed_integer_storage_exactly() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("typed-options.onnx");
@@ -2354,6 +2355,7 @@ fn discarded_training_options_still_validate_solver_and_pairs() {
 
 #[test]
 fn crossentropy_computes_mean_loss() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
@@ -2368,6 +2370,7 @@ fn crossentropy_computes_mean_loss() {
 
 #[test]
 fn crossentropy_gpu_inputs_use_provider_for_scalar_reduction() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let shape = [1usize, 2usize];
         let predictions = provider
@@ -2400,6 +2403,7 @@ fn crossentropy_gpu_inputs_use_provider_for_scalar_reduction() {
 
 #[test]
 fn crossentropy_gpu_reduction_none_returns_resident_losses() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let shape = [1usize, 2usize];
         let predictions = provider
@@ -2439,6 +2443,7 @@ fn crossentropy_gpu_reduction_none_returns_resident_losses() {
 
 #[test]
 fn crossentropy_gpu_supports_host_weights_without_gathering_predictions() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let shape = [2usize, 2usize];
         let predictions = provider
@@ -2476,6 +2481,7 @@ fn crossentropy_gpu_supports_host_weights_without_gathering_predictions() {
 
 #[test]
 fn crossentropy_gpu_supports_host_mask_for_unreduced_losses() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let shape = [1usize, 2usize];
         let predictions = provider
@@ -2517,6 +2523,7 @@ fn crossentropy_gpu_supports_host_mask_for_unreduced_losses() {
 
 #[test]
 fn crossentropy_gpu_supports_resident_weights_and_mask_without_downloads() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let shape = [1usize, 2usize];
         let predictions = provider
@@ -2567,6 +2574,7 @@ fn crossentropy_gpu_supports_resident_weights_and_mask_without_downloads() {
 
 #[test]
 fn crossentropy_supports_dataformat_class_weights_and_batch_normalization() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
@@ -2589,6 +2597,7 @@ fn crossentropy_supports_dataformat_class_weights_and_batch_normalization() {
 
 #[test]
 fn crossentropy_supports_weights_name_value_and_weights_format_mapping() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
@@ -2630,6 +2639,7 @@ fn crossentropy_supports_weights_name_value_and_weights_format_mapping() {
 
 #[test]
 fn crossentropy_remaps_full_size_formatted_weights() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.25, 0.75], vec![2, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
@@ -2667,6 +2677,7 @@ fn crossentropy_remaps_full_size_formatted_weights() {
 
 #[test]
 fn crossentropy_supports_multilabel_reduction_none_and_mask_normalization() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let unreduced = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
@@ -2704,6 +2715,7 @@ fn crossentropy_supports_multilabel_reduction_none_and_mask_normalization() {
 
 #[test]
 fn crossentropy_unreduced_output_preserves_native_single_storage() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::from_f32(vec![0.8, 0.2], vec![1, 2]).unwrap()),
         Value::Tensor(Tensor::from_f32(vec![1.0, 0.0], vec![1, 2]).unwrap()),
@@ -2727,6 +2739,7 @@ fn crossentropy_unreduced_output_preserves_native_single_storage() {
 
 #[test]
 fn crossentropy_mask_reads_typed_integer_storage_exactly() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let masked = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
@@ -2746,6 +2759,7 @@ fn crossentropy_mask_reads_typed_integer_storage_exactly() {
 
 #[test]
 fn crossentropy_payloads_read_typed_integer_storage_as_double_loss_inputs() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(crossentropy_builtin(
         poisoned_int_tensor(IntegerStorage::U8(vec![1, 0]), vec![1, 2], 0.5),
         poisoned_int_tensor(IntegerStorage::U8(vec![1, 0]), vec![1, 2], 0.5),
@@ -2766,6 +2780,7 @@ fn crossentropy_payloads_read_typed_integer_storage_as_double_loss_inputs() {
 
 #[test]
 fn crossentropy_rejects_incompatible_shapes_masks_and_formats() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let err = block_on(crossentropy_builtin(
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap()),
@@ -3409,6 +3424,7 @@ fn dlupdate_discarded_result_still_invokes_callback_and_retains_failure_source()
 
 #[test]
 fn dlarray_and_crossentropy_reject_unsupported_forms() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let err = block_on(dlarray_builtin(
         Value::Num(1.0),
         vec![Value::String("CB".into()), Value::String("Extra".into())],
