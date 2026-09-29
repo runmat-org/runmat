@@ -7,6 +7,8 @@ mod inference;
 #[cfg(test)]
 mod tests;
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&SS_CATALOG_ENTRY];
+
 pub use contract::{
     SS_DESCRIPTOR, SS_ERROR_INTERNAL, SS_ERROR_INVALID_ARGUMENT, SS_ERROR_INVALID_DIMENSIONS,
     SS_ERROR_INVALID_OPTION, SS_ERROR_INVALID_SAMPLE_TIME, SS_ERROR_UNSUPPORTED_INPUT,

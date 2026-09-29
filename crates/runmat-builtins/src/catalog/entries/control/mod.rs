@@ -9,5 +9,5 @@ pub use self::models::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(analysis::ENTRIES.iter().copied());
-    values.extend(models::ENTRIES.iter().copied());
+    models::extend_entries(values);
 }
