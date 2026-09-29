@@ -25,13 +25,19 @@ fn operand_data(value: &ValueFact) -> Option<(&ValueFact, bool)> {
                 .map(|data| (data, true))
         }
         ValueKindFact::Object(object) if object.runtime_class.is_none() => Some((value, false)),
-        ValueKindFact::Numeric(_) | ValueKindFact::Unknown => Some((value, false)),
+        ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown => {
+            Some((value, false))
+        }
         _ => None,
     }
 }
 
 fn known_floating_class(value: &ValueFact) -> Option<NumericClass> {
-    value.numeric().map(|number| number.class)
+    match &value.kind {
+        ValueKindFact::Logical => Some(NumericClass::Double),
+        ValueKindFact::Numeric(number) => Some(number.class),
+        _ => None,
+    }
 }
 
 fn result_class(left: &ValueFact, right: &ValueFact) -> Option<NumericClass> {
@@ -186,7 +192,18 @@ pub(super) fn sum(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInf
                         0,
                     ));
                 }
-                let mut result_data = data.clone();
+                let mut result_data = if matches!(&data.kind, ValueKindFact::Logical) {
+                    ValueFact::proven(
+                        ValueKindFact::Numeric(NumericFact {
+                            class: NumericClass::Double,
+                            domain: NumericDomain::Real,
+                        }),
+                        ShapeFact::Scalar,
+                        StorageFact::Dense,
+                    )
+                } else {
+                    data.clone()
+                };
                 result_data.shape = ShapeFact::Scalar;
                 let owner = request.arguments.first().and_then(|fact| match &fact.kind {
                     ValueKindFact::Object(object) => Some(object),

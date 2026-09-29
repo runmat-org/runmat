@@ -11,7 +11,11 @@ macro_rules! array_method_entry {
             contract: BuiltinContractDeclaration {
                 maturity: BuiltinContractMaturity::Incomplete,
                 inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
-                    $inference as fn(&runmat_types::CallRequest, &BuiltinCatalogEntry) -> runmat_types::CallInference,
+                    $inference
+                        as fn(
+                            &runmat_types::CallRequest,
+                            &BuiltinCatalogEntry,
+                        ) -> runmat_types::CallInference,
                 )),
                 compatibility: BuiltinCompatibility::Matlab,
                 async_behavior: BuiltinAsyncBehavior::NeverSuspends,
@@ -62,7 +66,7 @@ macro_rules! array_method_documentation {
             sections: &[
                 BuiltinDocumentationSection {
                     heading: "Values and precision",
-                    paragraphs: &["This host method returns a dlarray. Real double and single Data are supported; native integer and complex Data require a different supported operation or an explicit conversion. A single operand makes the floating result single, regardless of operand order; otherwise the result is double. The dlarray operand supplies Format and Labels when paired with an ordinary numeric operand."],
+                    paragraphs: &["This host method returns a dlarray. Real double and single Data are supported. Logical Data are read as 0/1 double data at this arithmetic boundary; native integer and complex Data are not admitted. A single operand makes the floating result single, regardless of operand order; otherwise the result is double. The dlarray operand supplies Format and Labels when paired with an ordinary numeric operand."],
                 },
                 BuiltinDocumentationSection {
                     heading: "Tracing and placement",

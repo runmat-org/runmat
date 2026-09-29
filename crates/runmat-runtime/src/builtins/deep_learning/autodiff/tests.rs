@@ -237,6 +237,27 @@ fn mixed_floating_arithmetic_is_symmetric_and_keeps_dlarray_metadata() {
 }
 
 #[test]
+fn logical_dlarray_math_uses_explicit_double_boundary() {
+    let input = wrapped(Value::Bool(true));
+    let Value::Object(added) = dlarray_plus_builtin(input.clone(), Value::Num(2.0)).unwrap() else {
+        panic!("dlarray output")
+    };
+    let Some(Value::Tensor(data)) = added.properties.get("Data") else {
+        panic!("numeric data")
+    };
+    assert_eq!(data.numeric_dtype(), NumericDType::F64);
+    assert_eq!(data.materialize_f64(), [3.0]);
+    let Value::Object(summed) = dlarray_sum_builtin(input, vec![]).unwrap() else {
+        panic!("dlarray output")
+    };
+    let Some(Value::Tensor(data)) = summed.properties.get("Data") else {
+        panic!("numeric data")
+    };
+    assert_eq!(data.numeric_dtype(), NumericDType::F64);
+    assert_eq!(data.materialize_f64(), [1.0]);
+}
+
+#[test]
 fn arithmetic_rejects_mutated_native_integer_data_without_rounding() {
     let large = u64::MAX;
     let integer_data = wrapped(Value::Tensor(

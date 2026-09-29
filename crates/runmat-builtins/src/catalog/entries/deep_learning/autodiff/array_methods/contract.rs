@@ -22,7 +22,7 @@ const SUM_INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Host dlarray of differentiable double or single data.",
+        description: "Host dlarray with double, single, or logical data; logical data convert to double for arithmetic.",
     },
     BuiltinParamDescriptor {
         name: "all",
@@ -104,7 +104,7 @@ const INTEGER_OPERAND: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInput
     classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Rejected,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "Native integer payloads are rejected before any f64 arithmetic conversion; explicit double or single conversion is required.",
+    notes: "Native integer payloads are rejected before any f64 arithmetic conversion; explicit double or single conversion is required. Logical payloads are admitted separately as 0/1 double data.",
 }];
 pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {

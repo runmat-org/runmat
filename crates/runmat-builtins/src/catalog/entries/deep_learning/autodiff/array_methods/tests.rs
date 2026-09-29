@@ -128,3 +128,24 @@ fn known_integer_data_rejected_statically() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-DL-ARRAY-CLASS"));
 }
+
+#[test]
+fn logical_inputs_convert_to_double_at_arithmetic_boundary() {
+    let logical = dlarray(ValueFact::proven(
+        ValueKindFact::Logical,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    ));
+    let scalar = numeric(NumericClass::Double, ShapeFact::Scalar);
+    let added = infer(&DLARRAY_PLUS_CATALOG_ENTRY, vec![logical.clone(), scalar]);
+    assert_eq!(
+        output_data(&added).numeric().unwrap().class,
+        NumericClass::Double
+    );
+    let summed = infer(&DLARRAY_SUM_CATALOG_ENTRY, vec![logical]);
+    assert_eq!(
+        output_data(&summed).numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(output_data(&summed).shape, ShapeFact::Scalar);
+}

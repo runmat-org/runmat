@@ -28,7 +28,19 @@ fn gradient_for_target(target: &ValueFact) -> ValueFact {
     }
     let mut properties = BTreeMap::new();
     if let Some(data) = object.properties.get(crate::DLARRAY_DATA_PROPERTY) {
-        properties.insert(crate::DLARRAY_DATA_PROPERTY.into(), data.clone());
+        let gradient_data = if matches!(&data.kind, ValueKindFact::Logical) {
+            ValueFact::proven(
+                ValueKindFact::Numeric(runmat_types::NumericFact {
+                    class: NumericClass::Double,
+                    domain: runmat_types::NumericDomain::Real,
+                }),
+                data.shape.clone(),
+                StorageFact::Dense,
+            )
+        } else {
+            data.clone()
+        };
+        properties.insert(crate::DLARRAY_DATA_PROPERTY.into(), gradient_data);
     }
     for name in ["Format", "Labels"] {
         if let Some(value) = object.properties.get(name) {
@@ -98,6 +110,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 if let Some(data) = object.properties.get(crate::DLARRAY_DATA_PROPERTY) {
                     if data.numeric().is_some_and(|number| {
                         !matches!(number.class, NumericClass::Double | NumericClass::Single)
+                            || number.domain != runmat_types::NumericDomain::Real
                     }) {
                         diagnostics.push(argument_error(
                             "RM-DL-DLGRADIENT-CLASS",

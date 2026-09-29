@@ -69,3 +69,40 @@ fn gradient_rejects_excess_outputs_and_known_non_dlarray_loss() {
         .iter()
         .any(|diag| diag.code == "RM-DL-DLGRADIENT-LOSS"));
 }
+
+#[test]
+fn logical_target_gradient_is_double_and_complex_data_is_not_admitted() {
+    let loss = dlarray(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    })));
+    let logical = dlarray(ValueFact::proven(
+        ValueKindFact::Logical,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    ));
+    let request = CallRequest {
+        arguments: vec![loss.clone(), logical],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let result = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request);
+    let ValueKindFact::Object(object) = &result.outputs[0].kind else {
+        panic!("dlarray")
+    };
+    let gradient = &object.properties[crate::DLARRAY_DATA_PROPERTY];
+    assert_eq!(gradient.numeric().unwrap().class, NumericClass::Double);
+    let complex = dlarray(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Complex,
+    })));
+    let request = CallRequest {
+        arguments: vec![loss, complex],
+        ..request
+    };
+    let result = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-CLASS"));
+}

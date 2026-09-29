@@ -26,7 +26,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Traced inputs and outputs",
             paragraphs: &[
                 "Call `dlgradient` from a `dlfeval` callback. The loss must be a scalar dlarray produced on that callback's tape; a separate dlarray constructed outside the traced calculation is not a substitute. Request no more gradient outputs than supplied targets. A target can be a traced dlarray, supported dlnetwork learnables, or a structure/table/cell tree containing traced dlarray leaves.",
-                "The current host tape records dlarray plus, minus, elementwise times and rdivide, matrix mtimes, scalar `sum(..., 'all')`, and supported dlnetwork forward chains of fully connected, ReLU, ELU, and softmax layers. The gradient retains each target dlarray's double or single class, geometry, Format, and Labels.",
+                "The current host tape records dlarray plus, minus, elementwise times and rdivide, matrix mtimes, scalar `sum(..., 'all')`, and supported dlnetwork forward chains of fully connected, ReLU, ELU, and softmax layers. A real double or single target keeps its class, geometry, Format, and Labels. Logical Data are admitted through the arithmetic 0/1-to-double boundary and produce double gradients.",
             ],
         },
         BuiltinDocumentationSection {
