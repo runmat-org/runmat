@@ -4,7 +4,8 @@ use runmat_value::Value;
 
 use super::{resolve_single, SubscriptReadRequest};
 use crate::object::indexing::{
-    ObjectIndexKind, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptOrigin,
+    ObjectIndexComponent, ObjectIndexKind, ObjectIndexSelector, ObjectSubscript,
+    ObjectSubscriptOrigin,
 };
 use crate::runtime_error::semantic_error;
 use crate::sequence::ValueSequence;
@@ -16,7 +17,7 @@ pub(super) async fn try_execute(
     request: &SubscriptReadRequest,
     caller_function_name: Option<&str>,
 ) -> Result<Option<ValueSequence>, RuntimeError> {
-    let Some((member, arguments)) = prefix(steps)? else {
+    let Some((member, components)) = prefix(steps) else {
         return Ok(None);
     };
     steps.pop_front();
@@ -36,6 +37,7 @@ pub(super) async fn try_execute(
         &runmat_types::MethodName::from(member.0.as_str()),
         &request.access,
     )? {
+        let arguments = call_arguments(components)?;
         let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
         call_arguments.push(base);
         call_arguments.extend(arguments);
@@ -56,6 +58,7 @@ pub(super) async fn try_execute(
         .await?;
         let member_value = resolve_single(member_sequence)?;
         if is_callable_value(&member_value) {
+            let arguments = call_arguments(components)?;
             let resolver = RuntimeFunctionResolver;
             crate::call::descriptor::execute_callable_descriptor(
                 crate::call::descriptor::CallableDescriptor::from_feval_value(
@@ -67,9 +70,8 @@ pub(super) async fn try_execute(
             )
             .await?
         } else {
-            let step = ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-                components: arguments.into_iter().map(Into::into).collect(),
-            });
+            let step =
+                ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components });
             ValueSequence::single(
                 super::read_default_step(member_value, &step, caller_function_name).await?,
             )
@@ -81,33 +83,38 @@ pub(super) async fn try_execute(
 
 fn prefix(
     steps: &VecDeque<ObjectSubscript>,
-) -> Result<Option<(runmat_types::MemberName, Vec<Value>)>, RuntimeError> {
+) -> Option<(runmat_types::MemberName, Vec<ObjectIndexComponent>)> {
     let (Some(member_step), Some(paren_step)) = (steps.front(), steps.get(1)) else {
-        return Ok(None);
+        return None;
     };
     let (ObjectIndexSelector::Member(member), ObjectIndexSelector::IndexValues { components }) =
         (member_step.selector(), paren_step.selector())
     else {
-        return Ok(None);
+        return None;
     };
     if member_step.kind() != ObjectIndexKind::Member
         || paren_step.kind() != ObjectIndexKind::Paren
         || member_step.origin() != ObjectSubscriptOrigin::DottedInvokeMember
         || paren_step.origin() != ObjectSubscriptOrigin::DottedInvokeArguments
     {
-        return Ok(None);
+        return None;
     }
-    let values = components
-        .iter()
+    Some((member.clone(), components.clone()))
+}
+
+// The syntax is ambiguous until member resolution: `obj.data(:)` indexes a
+// stored array, whereas a resolved method/function requires value arguments.
+fn call_arguments(components: Vec<ObjectIndexComponent>) -> Result<Vec<Value>, RuntimeError> {
+    components
+        .into_iter()
         .map(|component| match component {
-            crate::object::indexing::ObjectIndexComponent::Value(value) => Ok(value.clone()),
-            crate::object::indexing::ObjectIndexComponent::Colon => Err(semantic_error(
+            ObjectIndexComponent::Value(value) => Ok(value),
+            ObjectIndexComponent::Colon => Err(semantic_error(
                 "InvalidDottedInvokeArgument",
                 "colon is not a standalone dotted-invocation argument",
             )),
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Some((member.clone(), values)))
+        .collect()
 }
 
 struct RuntimeFunctionResolver;

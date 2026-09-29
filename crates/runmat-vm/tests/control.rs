@@ -29,6 +29,20 @@ fn tf_constructs_object_through_vm_dispatch() {
 }
 
 #[test]
+fn compiled_model_property_indexing_retains_colon_selectors() {
+    execute_source(
+        r#"
+        G = ss([0 1; -2 -3], [0;1], [1 0], 0);
+        assert(isequal(G.A(:), [0;-2;1;-3]));
+        assert(isequal(G.A(:,2), [1;-3]));
+        holder = struct('model', G);
+        assert(isequal(holder.model.A(:), [0;-2;1;-3]));
+        "#,
+    )
+    .expect("property indexing resolves selectors after distinguishing stored values from calls");
+}
+
+#[test]
 fn compiled_ss_integer_precision_boundary_reports_owning_identifiers() {
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for (source, identifier) in [
