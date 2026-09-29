@@ -405,17 +405,29 @@ fn accumulate_parent(grads: &mut HashMap<usize, Tensor>, id: Option<usize>, grad
         .entry(id)
         .and_modify(|existing| {
             for index in 0..tensor::tensor_element_len(existing) {
-                let current = floating_scalar_f64(
-                    existing
-                        .numeric_value_at(index)
-                        .expect("gradient index remains valid"),
-                );
-                let increment = floating_scalar_f64(
-                    grad.numeric_value_at(index)
-                        .expect("gradient index remains valid"),
-                );
+                let current = existing
+                    .numeric_value_at(index)
+                    .expect("gradient index remains valid");
+                let increment = grad
+                    .numeric_value_at(index)
+                    .expect("gradient index remains valid");
+                let sum = match (current, increment) {
+                    (NumericScalar::F32(current), NumericScalar::F32(increment)) => {
+                        NumericScalar::F32(current + increment)
+                    }
+                    (NumericScalar::F32(current), NumericScalar::F64(increment)) => {
+                        NumericScalar::F32(current + increment as f32)
+                    }
+                    (NumericScalar::F64(current), NumericScalar::F32(increment)) => {
+                        NumericScalar::F64(current + f64::from(increment))
+                    }
+                    (NumericScalar::F64(current), NumericScalar::F64(increment)) => {
+                        NumericScalar::F64(current + increment)
+                    }
+                    _ => unreachable!("the host autodiff tape records floating gradients only"),
+                };
                 existing
-                    .set_numeric_assignment_at(index, NumericScalar::F64(current + increment))
+                    .set_numeric_assignment_at(index, sum)
                     .expect("same-shape floating gradient accumulation remains valid");
             }
         })

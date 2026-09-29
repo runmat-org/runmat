@@ -60,30 +60,27 @@ pub(super) fn dlarray_minus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Val
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_times_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    dlarray_binary(
-        lhs,
-        rhs,
-        "times",
-        |a, b| a * b,
-        |lhs, rhs, out| {
-            let (lhs_values, rhs_values, _) =
-                tensor::binary_numeric_tensors(&lhs.tensor, &rhs.tensor, "dlarray.times", "times")?;
-            if !tape_is_active() || (lhs.node.is_none() && rhs.node.is_none()) {
-                return Ok(None);
-            }
-            Ok(Some(push_node(
-                out,
-                NodeKind::Mul {
-                    lhs: lhs.node,
-                    rhs: rhs.node,
-                    lhs_data: lhs_values,
-                    rhs_data: rhs_values,
-                    lhs_shape: lhs.tensor.shape.clone(),
-                    rhs_shape: rhs.tensor.shape.clone(),
-                },
-            )?))
+    dlarray_binary(lhs, rhs, "times", |a, b| a * b, record_multiply)
+}
+
+fn record_multiply(lhs: &Payload, rhs: &Payload, out: Tensor) -> BuiltinResult<Option<usize>> {
+    if !tape_is_active() || (lhs.node.is_none() && rhs.node.is_none()) {
+        return Ok(None);
+    }
+    let (lhs_values, rhs_values, _) =
+        tensor::binary_numeric_tensors(&lhs.tensor, &rhs.tensor, "dlarray.times", "times")
+            .map_err(|error| method_shape_error("times", error))?;
+    Ok(Some(push_node(
+        out,
+        NodeKind::Mul {
+            lhs: lhs.node,
+            rhs: rhs.node,
+            lhs_data: lhs_values,
+            rhs_data: rhs_values,
+            lhs_shape: lhs.tensor.shape.clone(),
+            rhs_shape: rhs.tensor.shape.clone(),
         },
-    )
+    )?))
 }
 
 #[runtime_builtin(
@@ -103,7 +100,8 @@ pub(super) fn dlarray_rdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<V
                 &rhs.tensor,
                 "dlarray.rdivide",
                 "rdivide",
-            )?;
+            )
+            .map_err(|error| method_shape_error("rdivide", error))?;
             if !tape_is_active() || (lhs.node.is_none() && rhs.node.is_none()) {
                 return Ok(None);
             }
@@ -135,8 +133,19 @@ fn dlarray_binary(
     )?;
     let lhs = Payload::parse(lhs, function)?;
     let rhs = Payload::parse(rhs, function)?;
+    dlarray_binary_payloads(&lhs, &rhs, function, op, record)
+}
+
+fn dlarray_binary_payloads(
+    lhs: &Payload,
+    rhs: &Payload,
+    function: &'static str,
+    op: impl Fn(f64, f64) -> f64,
+    record: impl FnOnce(&Payload, &Payload, Tensor) -> BuiltinResult<Option<usize>>,
+) -> BuiltinResult<Value> {
     let (lhs_values, rhs_values, shape) =
-        tensor::binary_numeric_tensors(&lhs.tensor, &rhs.tensor, function, function)?;
+        tensor::binary_numeric_tensors(&lhs.tensor, &rhs.tensor, function, function)
+            .map_err(|error| method_shape_error(function, error))?;
     let data = lhs_values
         .iter()
         .zip(&rhs_values)
@@ -145,8 +154,19 @@ fn dlarray_binary(
     let dtype = floating_binary_dtype(lhs.dtype, rhs.dtype);
     let out = Tensor::new_with_dtype(data, shape, dtype)
         .map_err(|err| deep_learning_error(function, err))?;
-    let node = record(&lhs, &rhs, out.clone())?;
-    Ok(wrap_result(result_metadata_owner(&lhs, &rhs), out, node))
+    let node = record(lhs, rhs, out.clone())?;
+    Ok(wrap_result(result_metadata_owner(lhs, rhs), out, node))
+}
+
+fn method_shape_error(function: &'static str, source: crate::RuntimeError) -> crate::RuntimeError {
+    let message = source.message().to_owned();
+    let mut error = crate::build_runtime_error(message)
+        .with_builtin(function)
+        .with_source(source);
+    if let Some(identifier) = runmat_builtins::DLARRAY_METHOD_INVALID_INPUT.identifier {
+        error = error.with_identifier(identifier);
+    }
+    error.build()
 }
 
 #[runtime_builtin(
@@ -161,6 +181,28 @@ pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     )?;
     let lhs = Payload::parse(lhs, "mtimes")?;
     let rhs = Payload::parse(rhs, "mtimes")?;
+    if tensor::tensor_element_len(&lhs.tensor) == 1 || tensor::tensor_element_len(&rhs.tensor) == 1
+    {
+        return dlarray_binary_payloads(&lhs, &rhs, "mtimes", |a, b| a * b, record_multiply);
+    }
+    if lhs
+        .tensor
+        .shape
+        .iter()
+        .skip(2)
+        .any(|dimension| *dimension != 1)
+        || rhs
+            .tensor
+            .shape
+            .iter()
+            .skip(2)
+            .any(|dimension| *dimension != 1)
+    {
+        return Err(deep_learning_error(
+            "mtimes",
+            "mtimes: matrix multiplication requires two-dimensional operands",
+        ));
+    }
     let computed = crate::builtins::common::linalg::matmul_real(&lhs.tensor, &rhs.tensor)
         .map_err(|err| deep_learning_error("mtimes", err))?;
     let dtype = floating_binary_dtype(lhs.dtype, rhs.dtype);

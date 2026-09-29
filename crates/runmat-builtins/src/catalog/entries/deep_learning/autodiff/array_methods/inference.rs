@@ -58,6 +58,8 @@ fn output_shape(left: &ShapeFact, right: &ShapeFact, geometry: BinaryGeometry) -
             left.clone()
         }
         BinaryGeometry::Elementwise => ShapeFact::Unknown,
+        BinaryGeometry::Matrix if left.element_count() == Some(1) => right.clone(),
+        BinaryGeometry::Matrix if right.element_count() == Some(1) => left.clone(),
         BinaryGeometry::Matrix => {
             let (Some(a), Some(b)) = (left.known_dims(), right.known_dims()) else {
                 return ShapeFact::Unknown;
@@ -66,6 +68,41 @@ fn output_shape(left: &ShapeFact, right: &ShapeFact, geometry: BinaryGeometry) -
                 return ShapeFact::Unknown;
             }
             ShapeFact::from(vec![a[0], b[1]])
+        }
+    }
+}
+
+fn known_incompatible(left: &ShapeFact, right: &ShapeFact, geometry: BinaryGeometry) -> bool {
+    match geometry {
+        BinaryGeometry::Elementwise => {
+            if left.element_count() == Some(1) || right.element_count() == Some(1) {
+                return false;
+            }
+            let (Some(left), Some(right)) = (left.known_dims(), right.known_dims()) else {
+                return false;
+            };
+            left.iter().all(Option::is_some)
+                && right.iter().all(Option::is_some)
+                && !ShapeFact::from(left).is_proven_equivalent(&ShapeFact::from(right))
+        }
+        BinaryGeometry::Matrix => {
+            if left.element_count() == Some(1) || right.element_count() == Some(1) {
+                return false;
+            }
+            let (Some(left), Some(right)) = (left.known_dims(), right.known_dims()) else {
+                return false;
+            };
+            left.get(2..)
+                .is_some_and(|tail| tail.iter().any(|dim| dim.is_some_and(|n| n != 1)))
+                || right
+                    .get(2..)
+                    .is_some_and(|tail| tail.iter().any(|dim| dim.is_some_and(|n| n != 1)))
+                || left
+                    .get(1)
+                    .copied()
+                    .flatten()
+                    .zip(right.first().copied().flatten())
+                    .is_some_and(|(a, b)| a != b)
         }
     }
 }
@@ -132,6 +169,13 @@ pub(super) fn binary(
         }
     }
     let result = if let [Some((left, left_dl)), Some((right, right_dl))] = parsed.as_slice() {
+        if known_incompatible(&left.shape, &right.shape, geometry) {
+            diagnostics.push(argument_error(
+                "RM-DL-ARRAY-SHAPE",
+                "dlarray operands have incompatible shapes for this method",
+                1,
+            ));
+        }
         let shape = output_shape(&left.shape, &right.shape, geometry);
         let data = result_class(left, right).map_or_else(
             || ValueFact::unknown(DynamicReason::RuntimeValue),

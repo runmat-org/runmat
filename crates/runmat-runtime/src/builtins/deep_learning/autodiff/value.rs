@@ -148,17 +148,6 @@ pub(super) fn floating_tensor_from_f64(
     }
 }
 
-pub(super) fn floating_scalar_f64(value: NumericScalar) -> f64 {
-    match value {
-        NumericScalar::F64(value) => value,
-        NumericScalar::F32(value) => f64::from(value),
-        value => panic!(
-            "automatic differentiation gradient unexpectedly used {} storage",
-            value.class_name()
-        ),
-    }
-}
-
 pub(super) fn node_dtype(
     nodes: &[Node],
     id: Option<usize>,

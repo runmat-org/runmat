@@ -188,3 +188,64 @@ fn sum_diagnoses_known_unsupported_selector() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-DL-SUM-SELECTOR"));
 }
+
+#[test]
+fn known_incompatible_shapes_diagnose_but_unknown_dimensions_remain_dynamic() {
+    let left = dlarray(numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+    ));
+    let right = numeric(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(2), Some(1)]),
+    );
+    let elementwise = infer(&DLARRAY_PLUS_CATALOG_ENTRY, vec![left, right]);
+    assert!(elementwise
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-ARRAY-SHAPE"));
+
+    let left = dlarray(numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(2), Some(3)]),
+    ));
+    let right = numeric(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(4), Some(2)]),
+    );
+    let matrix = infer(&DLARRAY_MTIMES_CATALOG_ENTRY, vec![left, right]);
+    assert!(matrix
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-ARRAY-SHAPE"));
+
+    let left = dlarray(numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(2), None]),
+    ));
+    let right = numeric(NumericClass::Double, ShapeFact::from(vec![None, Some(4)]));
+    let dynamic = infer(&DLARRAY_MTIMES_CATALOG_ENTRY, vec![left, right]);
+    assert!(!dynamic
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-ARRAY-SHAPE"));
+    assert_eq!(
+        output_data(&dynamic).shape,
+        ShapeFact::from(vec![Some(2), Some(4)])
+    );
+
+    let scalar = numeric(NumericClass::Double, ShapeFact::Scalar);
+    let array = dlarray(numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(2), Some(3)]),
+    ));
+    let scaled = infer(&DLARRAY_MTIMES_CATALOG_ENTRY, vec![scalar, array]);
+    assert!(!scaled
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-ARRAY-SHAPE"));
+    assert_eq!(
+        output_data(&scaled).shape,
+        ShapeFact::from(vec![Some(2), Some(3)])
+    );
+}

@@ -281,6 +281,83 @@ fn method_output_arity_preflights_before_resident_operand_access() {
 }
 
 #[test]
+fn repeated_single_target_gradients_accumulate_without_class_mismatch() {
+    let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+    let input = annotate_dlarray_value(wrapped(Value::Tensor(
+        Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+    )))
+    .unwrap();
+    let product = dlarray_times_builtin(input.clone(), input.clone()).unwrap();
+    let loss = dlarray_sum_builtin(product, vec![Value::String("all".into())]).unwrap();
+    let Value::Object(gradient) =
+        futures::executor::block_on(dlgradient_builtin(loss, vec![input]))
+            .expect("repeated single gradient")
+    else {
+        panic!("dlarray gradient")
+    };
+    let Some(Value::Tensor(data)) = gradient.properties.get("Data") else {
+        panic!("gradient Data")
+    };
+    assert_eq!(data.numeric_dtype(), NumericDType::F32);
+    assert_eq!(data.materialize_f64(), [2.0, 4.0]);
+}
+
+#[test]
+fn matrix_method_supports_scalar_multiplication_but_rejects_nd_matrices() {
+    let mut right = ObjectInstance::new(DLARRAY_CLASS.to_string());
+    right.properties.insert(
+        "Data".into(),
+        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+    );
+    right
+        .properties
+        .insert("Format".into(), Value::String("CB".into()));
+    let Value::Object(result) =
+        dlarray_mtimes_builtin(Value::Num(3.0), Value::Object(right)).unwrap()
+    else {
+        panic!("dlarray result")
+    };
+    assert_eq!(
+        result.properties.get("Format"),
+        Some(&Value::String("CB".into()))
+    );
+    let Some(Value::Tensor(data)) = result.properties.get("Data") else {
+        panic!("result Data")
+    };
+    assert_eq!(data.numeric_dtype(), NumericDType::F32);
+    assert_eq!(data.shape, vec![1, 2]);
+    assert_eq!(data.materialize_f64(), [3.0, 6.0]);
+
+    let nd = wrapped(Value::Tensor(
+        Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap(),
+    ));
+    let matrix = wrapped(Value::Tensor(
+        Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap(),
+    ));
+    let error = dlarray_mtimes_builtin(nd, matrix).expect_err("N-D matrix is not 2-D");
+    assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+}
+
+#[test]
+fn incompatible_elementwise_shapes_keep_owning_error_and_source() {
+    let left = wrapped(Value::Tensor(
+        Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+    ));
+    let right = wrapped(Value::Tensor(
+        Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap(),
+    ));
+    for error in [
+        dlarray_plus_builtin(left.clone(), right.clone()),
+        dlarray_times_builtin(left.clone(), right.clone()),
+        dlarray_rdivide_builtin(left.clone(), right.clone()),
+    ] {
+        let error = error.expect_err("shape mismatch");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert!(error.source.is_some(), "retain the tensor shape failure");
+    }
+}
+
+#[test]
 fn arithmetic_rejects_mutated_native_integer_data_without_rounding() {
     let large = u64::MAX;
     let integer_data = wrapped(Value::Tensor(
