@@ -86,6 +86,41 @@ fn analysis_uses_known_graph_layer_shape_without_guessing_unknown_contents() {
         analysis.properties["LayerNames"].shape,
         ShapeFact::from(vec![None, Some(1)])
     );
+
+    let open_graph = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(StaticClassIdentity::new("nnet.cnn.LayerGraph").owned()),
+            properties: BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: Some(false),
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    let result = call(&ANALYZE_NETWORK_CATALOG_ENTRY, vec![open_graph.clone()]);
+    let ValueKindFact::Object(analysis) = &result.outputs[0].kind else {
+        panic!("analysis object fact expected")
+    };
+    assert_eq!(
+        analysis.properties["LayerNames"].shape,
+        ShapeFact::from(vec![None, Some(1)])
+    );
+
+    let mut bad_graph = open_graph;
+    let ValueKindFact::Object(object) = &mut bad_graph.kind else {
+        unreachable!()
+    };
+    object.properties.insert(
+        "Layers".into(),
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+    );
+    assert!(!call(&ANALYZE_NETWORK_CATALOG_ENTRY, vec![bad_graph])
+        .diagnostics
+        .is_empty());
 }
 
 #[test]
@@ -106,4 +141,24 @@ fn invalid_numeric_input_and_arity_are_diagnosed() {
             entry.identity.name
         );
     }
+    let numeric_cell = ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }))),
+            elements: Vec::new(),
+            elements_complete: false,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Dense,
+    );
+    assert!(
+        !call(&LAYER_GRAPH_CATALOG_ENTRY, vec![numeric_cell.clone()])
+            .diagnostics
+            .is_empty()
+    );
+    assert!(!call(&ANALYZE_NETWORK_CATALOG_ENTRY, vec![numeric_cell])
+        .diagnostics
+        .is_empty());
 }

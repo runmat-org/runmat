@@ -14,15 +14,11 @@ const NETWORK_ANALYSIS: StaticClassIdentity = StaticClassIdentity::new("nnet.cnn
 fn layer_count(value: &ValueFact) -> Result<Option<usize>, ()> {
     match &value.kind {
         ValueKindFact::Unknown => Ok(None),
-        ValueKindFact::Object(object)
-            if object.runtime_class.as_ref() == Some(&LAYER_GRAPH.owned()) =>
-        {
-            // layerGraph(layers) treats its argument as a single layer object;
-            // analyzeNetwork instead reads a graph's Layers property.
-            Ok(Some(1))
-        }
+        // layerGraph(layers) treats any object as one layer; analyzeNetwork
+        // handles its layer-graph class separately before this helper.
         ValueKindFact::Object(_) => Ok(Some(1)),
-        ValueKindFact::Cell(_) => Ok(value.shape.element_count()),
+        ValueKindFact::Cell(cell) if cell_layers_possible(cell) => Ok(value.shape.element_count()),
+        ValueKindFact::Cell(_) => Err(()),
         _ => Err(()),
     }
 }
@@ -30,14 +26,21 @@ fn layer_count(value: &ValueFact) -> Result<Option<usize>, ()> {
 fn analysis_count(value: &ValueFact) -> Result<Option<usize>, ()> {
     if let ValueKindFact::Object(object) = &value.kind {
         if object.runtime_class.as_ref() == Some(&LAYER_GRAPH.owned()) {
-            return Ok(object
-                .properties
-                .get("Layers")
-                .map(|layers| layers.shape.element_count())
-                .unwrap_or(Some(0)));
+            return match object.properties.get("Layers") {
+                Some(layers) => layer_count(layers),
+                None if object.properties_complete => Ok(Some(0)),
+                None => Ok(None),
+            };
         }
     }
     layer_count(value)
+}
+
+fn cell_layers_possible(cell: &CellFact) -> bool {
+    fn possible(kind: &ValueKindFact) -> bool {
+        matches!(kind, ValueKindFact::Unknown | ValueKindFact::Object(_))
+    }
+    possible(&cell.element.kind) && cell.elements.iter().all(|element| possible(&element.kind))
 }
 
 fn column(count: Option<usize>) -> ShapeFact {
