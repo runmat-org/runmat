@@ -1,0 +1,84 @@
+//! Host SISO frequency response and output materialization.
+
+use super::*;
+use crate::builtins::control::tf_model::poly_eval;
+use num_complex::Complex64;
+
+pub(super) struct NyquistResponse {
+    pub(super) re: Vec<f64>,
+    pub(super) im: Vec<f64>,
+    pub(super) w: Vec<f64>,
+    pub(super) mirror_negative_frequency: bool,
+}
+
+impl NyquistResponse {
+    pub(super) fn re_value(&self) -> BuiltinResult<Value> {
+        column_tensor(self.re.clone())
+    }
+    pub(super) fn im_value(&self) -> BuiltinResult<Value> {
+        column_tensor(self.im.clone())
+    }
+    fn w_value(&self) -> BuiltinResult<Value> {
+        column_tensor(self.w.clone())
+    }
+    pub(super) fn outputs(&self, count: usize) -> BuiltinResult<Vec<Value>> {
+        let mut values = Vec::with_capacity(count);
+        if count >= 1 {
+            values.push(self.re_value()?);
+        }
+        if count >= 2 {
+            values.push(self.im_value()?);
+        }
+        if count >= 3 {
+            values.push(self.w_value()?);
+        }
+        Ok(values)
+    }
+}
+
+pub(super) fn evaluate(model: &TfModel, w: Vec<f64>) -> BuiltinResult<NyquistResponse> {
+    let mut re = Vec::with_capacity(w.len());
+    let mut im = Vec::with_capacity(w.len());
+    for &frequency in &w {
+        let point = if model.is_discrete() {
+            let phase = frequency * model.sample_time;
+            if !phase.is_finite() {
+                return Err(control_error(
+                    BUILTIN_NAME,
+                    "RunMat:nyquist:InvalidArgument",
+                    "nyquist: frequency and sample time overflow the phase range",
+                ));
+            }
+            Complex64::new(phase.cos(), phase.sin())
+        } else {
+            Complex64::new(0.0, frequency)
+        };
+        if poly_eval(&model.denominator, point) == Complex64::new(0.0, 0.0) {
+            return Err(control_error(
+                BUILTIN_NAME,
+                "RunMat:nyquist:InvalidArgument",
+                "nyquist: frequency response is singular at a requested frequency",
+            ));
+        }
+        let value = model.frequency_response(point);
+        if !value.re.is_finite() || !value.im.is_finite() {
+            return Err(control_error(
+                BUILTIN_NAME,
+                "RunMat:nyquist:InvalidModel",
+                "nyquist: finite frequency response cannot be represented at a requested frequency",
+            ));
+        }
+        re.push(value.re);
+        im.push(value.im);
+    }
+    Ok(NyquistResponse {
+        re,
+        im,
+        w,
+        mirror_negative_frequency: model
+            .numerator
+            .iter()
+            .chain(&model.denominator)
+            .all(|value| value.im == 0.0),
+    })
+}
