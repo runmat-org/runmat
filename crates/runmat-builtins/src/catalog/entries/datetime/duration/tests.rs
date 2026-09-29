@@ -58,6 +58,37 @@ fn duration_inventory_is_exact_and_all_examples_have_assertions() {
 }
 
 #[test]
+fn constructor_documents_short_form_and_retains_visible_legacy_examples() {
+    let short_form = DURATION_DESCRIPTOR
+        .signatures
+        .iter()
+        .find(|signature| signature.label == "t = duration(hours)")
+        .expect("one-component RunMat form");
+    assert_eq!(short_form.inputs.len(), 1);
+    assert_eq!(short_form.inputs[0].name, "hours");
+    assert_eq!(short_form.outputs.len(), 1);
+    assert!(DURATION_EXTENSIONS
+        .iter()
+        .any(|extension| extension.id == "duration-short-component-form"));
+
+    let examples = DURATION_CATALOG_ENTRY.documentation.examples;
+    for (id, visible_statement) in [
+        ("components", "t = duration(1,30,45)\n"),
+        ("broadcast", "t = duration([1 2],15,0)\n"),
+        ("format", "disp(t)"),
+        ("datetime", "t1 = t0 + duration(1,30,0)"),
+        ("units", "h = hours(d)"),
+    ] {
+        let example = examples
+            .iter()
+            .find(|example| example.id == id)
+            .expect("preserved legacy example");
+        assert!(example.program.contains(visible_statement), "{id}");
+        assert!(example.display_output.is_some(), "{id}");
+    }
+}
+
+#[test]
 fn constructor_and_units_prove_shapes_without_guessing_unknown_class() {
     let built =
         crate::infer_catalog_call(&DURATION_CATALOG_ENTRY, &call(vec![number(shape(4, 3))], 1));
