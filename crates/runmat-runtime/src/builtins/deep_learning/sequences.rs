@@ -1,18 +1,15 @@
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    CellArray, LogicalArray, NumericDType, NumericScalar, NumericStorage, Tensor, Value,
-};
+use runmat_value::{LogicalArray, NumericScalar, NumericStorage, Tensor, Value};
 
-use crate::{builtins::common::tensor, gather_if_needed_async, BuiltinResult};
+use crate::{builtins::common::tensor, BuiltinResult};
 
 use super::{
-    deep_learning_error, logical_scalar, numeric_scalar, parse_name_values, positive_usize,
-    scalar_text, tensor_value, MAX_COMBVEC_COLUMNS, MAX_PAD_ELEMENTS,
+    deep_learning_error, logical_scalar, numeric_scalar, positive_usize, scalar_text,
+    MAX_PAD_ELEMENTS,
 };
 
 #[runtime_builtin(
     name = "combvec",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::sequences"
 )]
@@ -139,7 +136,6 @@ pub(super) async fn combvec_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "padsequences",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::sequences"
 )]

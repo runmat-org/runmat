@@ -1,11 +1,11 @@
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::{gather_if_needed_async, BuiltinResult};
+use crate::BuiltinResult;
 
 use super::{
-    deep_learning_error, gather_args, layer_object, numeric_scalar, numeric_vector,
-    parse_name_values, positive_usize, scalar_text, tensor_value,
+    deep_learning_error, gather_args, layer_object, numeric_vector, parse_name_values,
+    positive_usize, scalar_text,
 };
 
 // Structural layer dimensions are exposed as double-valued metadata. Admit
@@ -72,7 +72,6 @@ fn is_numeric_scalar(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "fullyConnectedLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -92,7 +91,6 @@ pub(super) async fn fully_connected_layer_builtin(
 
 #[runtime_builtin(
     name = "featureInputLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -125,7 +123,6 @@ pub(super) async fn feature_input_layer_builtin(
 
 #[runtime_builtin(
     name = "sequenceInputLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -152,7 +149,6 @@ pub(super) async fn sequence_input_layer_builtin(
 
 #[runtime_builtin(
     name = "reluLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -168,7 +164,6 @@ pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "eluLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -198,7 +193,6 @@ pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> 
 
 #[runtime_builtin(
     name = "softmaxLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -214,7 +208,6 @@ pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Val
 
 #[runtime_builtin(
     name = "classificationLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -230,7 +223,6 @@ pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinRes
 
 #[runtime_builtin(
     name = "regressionLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -246,7 +238,6 @@ pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<
 
 #[runtime_builtin(
     name = "layerNormalizationLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -262,7 +253,6 @@ pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> Built
 
 #[runtime_builtin(
     name = "globalAveragePooling1dLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -280,7 +270,6 @@ pub(super) async fn global_average_pooling_1d_layer_builtin(
 
 #[runtime_builtin(
     name = "lstmLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -300,7 +289,6 @@ pub(super) async fn lstm_layer_builtin(
 
 #[runtime_builtin(
     name = "bilstmLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
@@ -340,7 +328,6 @@ pub(super) async fn recurrent_layer(
 
 #[runtime_builtin(
     name = "convolution1dLayer",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]

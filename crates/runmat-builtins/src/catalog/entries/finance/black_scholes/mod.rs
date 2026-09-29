@@ -7,6 +7,11 @@ mod contract;
 
 pub use self::blsimpv::*;
 pub use self::blsprice::*;
+pub use self::contract::{
+    BLACK_SCHOLES_ERROR_INTERNAL, BLACK_SCHOLES_ERROR_INVALID_ARGUMENT,
+    BLACK_SCHOLES_ERROR_INVALID_INPUT, BLSIMPV_DESCRIPTOR, BLSIMPV_NONDOUBLE_EXTENSION,
+    BLSPRICE_DESCRIPTOR, BLSPRICE_NONDOUBLE_EXTENSION,
+};
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(blsimpv::ENTRIES.iter().copied());
