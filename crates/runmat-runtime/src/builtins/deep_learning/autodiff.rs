@@ -13,8 +13,7 @@ use crate::BuiltinResult;
 use super::layer_identity::ForwardLayerKind;
 use super::{any_type, deep_learning_error, gather_args, model, unsupported_error};
 
-pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("dlarray");
+pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity = super::DLARRAY_CLASS;
 const AD_NODE_PROPERTY: &str = "__runmat_ad_node";
 
 thread_local! {
@@ -902,11 +901,23 @@ struct Payload {
 
 impl Payload {
     fn parse(value: Value, function: &'static str) -> BuiltinResult<Self> {
+        let data = dlarray_data(&value, function)?;
+        if crate::builtins::common::validation::value_has_native_integer_class(&data) {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: native integer dlarray operands require explicit double or single conversion"),
+            ));
+        }
         let node = dlarray_node_id(&value);
         let (format, labels) = dlarray_format_and_labels(&value);
-        let data = dlarray_data(&value, function)?;
         let tensor = host_tensor_from_value(&data, function, "operand")?;
         let dtype = tensor.numeric_dtype();
+        if !matches!(dtype, NumericDType::F64 | NumericDType::F32) {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: dlarray arithmetic requires double or single data"),
+            ));
+        }
         Ok(Self {
             tensor,
             node,
@@ -1158,8 +1169,14 @@ fn dlarray_binary(
 pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     let lhs = Payload::parse(lhs, "mtimes")?;
     let rhs = Payload::parse(rhs, "mtimes")?;
-    let out = crate::builtins::common::linalg::matmul_real(&lhs.tensor, &rhs.tensor)
+    let computed = crate::builtins::common::linalg::matmul_real(&lhs.tensor, &rhs.tensor)
         .map_err(|err| deep_learning_error("mtimes", err))?;
+    let out = floating_tensor_from_f64(
+        computed.materialize_f64().to_vec(),
+        computed.shape,
+        lhs.dtype,
+        "mtimes",
+    )?;
     let node = if tape_is_active() && (lhs.node.is_some() || rhs.node.is_some()) {
         Some(push_node(
             out.clone(),
@@ -1498,12 +1515,16 @@ fn matmul_grad_rhs(grad: &Tensor, lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<T
 #[cfg(test)]
 mod struct_array_tests {
     use super::*;
-    use runmat_value::StructArray;
+    use runmat_value::{IntValue, IntegerStorage, StructArray};
+
+    fn wrapped(data: Value) -> Value {
+        let mut object = ObjectInstance::new(DLARRAY_CLASS.to_string());
+        object.properties.insert("Data".into(), data);
+        Value::Object(object)
+    }
 
     fn dlarray(value: f64) -> Value {
-        let mut object = ObjectInstance::new(DLARRAY_CLASS.to_string());
-        object.properties.insert("Data".into(), Value::Num(value));
-        Value::Object(object)
+        wrapped(Value::Num(value))
     }
 
     fn element(value: f64) -> StructValue {
@@ -1573,5 +1594,44 @@ mod struct_array_tests {
             assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
+    }
+
+    #[test]
+    fn single_matrix_product_retains_owning_input_precision() {
+        let left = wrapped(Value::Tensor(
+            Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+        ));
+        let right = wrapped(Value::Tensor(
+            Tensor::from_f32(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap(),
+        ));
+        let result = dlarray_mtimes_builtin(left, right).expect("single matrix product");
+        let Value::Object(result) = result else {
+            panic!("dlarray result")
+        };
+        let Value::Tensor(data) = result.properties.get("Data").unwrap() else {
+            panic!("tensor result")
+        };
+        assert_eq!(data.shape, vec![2, 2]);
+        assert_eq!(
+            data.clone().into_numeric_storage().unwrap(),
+            NumericStorage::F32(vec![23.0, 34.0, 31.0, 46.0])
+        );
+    }
+
+    #[test]
+    fn arithmetic_rejects_mutated_native_integer_data_without_rounding() {
+        let large = u64::MAX;
+        let integer_data = wrapped(Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap(),
+        ));
+        for result in [
+            dlarray_plus_builtin(integer_data.clone(), dlarray(1.0)),
+            dlarray_mtimes_builtin(integer_data.clone(), dlarray(1.0)),
+            dlarray_sum_builtin(integer_data, vec![Value::String("all".into())]),
+            dlarray_times_builtin(wrapped(Value::Int(IntValue::U64(large))), dlarray(1.0)),
+        ] {
+            let error = result.expect_err("integer payload must not widen to double");
+            assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        }
     }
 }
