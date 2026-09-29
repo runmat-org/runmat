@@ -34,7 +34,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[BuiltinExample {
         id: "adam-options",
         title: "Create Adam options",
-        program: "opts = trainingOptions('adam', 'MaxEpochs', 5, 'Verbose', false); fprintf('%s %d\n', opts.SolverName, opts.MaxEpochs);",
+        program: "opts = trainingOptions('adam', 'MaxEpochs', 5, 'Verbose', false); fprintf('%s %d\\n', opts.SolverName, opts.MaxEpochs);",
         display_output: Some("adam 5"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,

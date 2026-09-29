@@ -35,7 +35,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[BuiltinExample {
         id: "labeled-shape",
         title: "Wrap and inspect an array",
-        program: "X = dlarray(ones(3,4), 'CB'); fprintf('%d %d\n', size(X,1), size(X,2));",
+        program: "X = dlarray(ones(3,4), 'CB'); fprintf('%d %d\\n', size(X,1), size(X,2));",
         display_output: Some("3 4"),
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
