@@ -3,7 +3,7 @@ use crate::*;
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Runtime parameter-tree traversal",
     target: BuiltinDocumentationLinkTarget::Source(
-        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/training.rs",
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/training/dlupdate/mod.rs",
     ),
 };
 
@@ -72,7 +72,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             label: "Parameter-tree reconstruction and callback output forwarding",
             location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs",
         }],
-        notes: &["The catalog describes the implemented in-memory traversal; full toolbox parity and callback/provider combinations still require integrated qualification."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

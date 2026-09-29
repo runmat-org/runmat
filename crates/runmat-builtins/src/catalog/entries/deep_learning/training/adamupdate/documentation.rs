@@ -3,7 +3,7 @@ use crate::*;
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Runtime Adam update",
     target: BuiltinDocumentationLinkTarget::Source(
-        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/training.rs",
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/training/adam/mod.rs",
     ),
 };
 
@@ -71,9 +71,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         verification: &[BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,
             label: "Host precision and provider-owned Adam updates",
-            location: "crates/runmat-runtime/src/builtins/deep_learning/training.rs",
+            location: "crates/runmat-runtime/src/builtins/deep_learning/training/adam/tests.rs",
         }],
-        notes: &["Provider fallback and exact input-control admission require integrated runtime gates."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

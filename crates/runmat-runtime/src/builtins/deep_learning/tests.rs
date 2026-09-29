@@ -3039,6 +3039,7 @@ fn adamupdate_accepts_zero_decay_and_rejects_integer_tensor_state() {
 
 #[test]
 fn adamupdate_hyperparameters_read_typed_integer_storage_exactly() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(adamupdate_builtin(vec![
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
@@ -3095,6 +3096,7 @@ fn adamupdate_known_host_errors_precede_mixed_residency_download() {
 
 #[test]
 fn adamupdate_typed_iteration_is_an_explicit_runmat_extension() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let args = vec![
         Value::Num(2.0),
         Value::Num(1.0),

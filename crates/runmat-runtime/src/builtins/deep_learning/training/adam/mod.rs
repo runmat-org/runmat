@@ -25,7 +25,9 @@ use provider::*;
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
-pub(super) async fn adamupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(in crate::builtins::deep_learning) async fn adamupdate_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     if args
         .iter()
         .take(4)

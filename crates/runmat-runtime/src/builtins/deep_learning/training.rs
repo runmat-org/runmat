@@ -10,7 +10,13 @@ use runmat_value::Value;
 
 mod adam;
 mod dlupdate;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use adam::__runmat_wasm_register_builtin_adamupdate_builtin;
+#[cfg(test)]
 pub(super) use adam::adamupdate_builtin;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use dlupdate::__runmat_wasm_register_builtin_dlupdate_builtin;
+#[cfg(test)]
 pub(super) use dlupdate::dlupdate_builtin;
 
 #[runtime_builtin(

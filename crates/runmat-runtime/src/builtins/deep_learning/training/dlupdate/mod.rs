@@ -17,11 +17,12 @@ const DLUPDATE_MAX_DEPTH: usize = 256;
 
 #[runtime_builtin(
     name = "dlupdate",
-    execution_stack = "process",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
-pub(super) async fn dlupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(in crate::builtins::deep_learning) async fn dlupdate_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let Some((function, rest)) = args.split_first() else {
         return Err(deep_learning_error(
             "dlupdate",
