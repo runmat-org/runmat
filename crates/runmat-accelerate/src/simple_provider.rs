@@ -4505,6 +4505,24 @@ impl AccelProvider for InProcessProvider {
         &self,
         request: &ProviderAdamUpdateRequest<'_>,
     ) -> Result<ProviderAdamUpdateResult> {
+        // The optimizer below reads the legacy F64 registry and allocates F64
+        // results. Native single inputs live in a separate typed registry; let
+        // the runtime use its precision-preserving host path for that class.
+        if [
+            Some(request.parameters),
+            Some(request.gradient),
+            request.average_grad,
+            request.average_sq_grad,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|handle| {
+            runmat_accelerate_api::handle_precision(handle) != Some(ProviderPrecision::F64)
+        }) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "adam_update requires native double storage",
+            ));
+        }
         let parameters_entry_shape = request.parameters.shape().to_vec();
         let parameter_len = product(&parameters_entry_shape);
         ensure!(
@@ -11233,6 +11251,49 @@ mod tests {
             &result.average_sq_grad,
             &[0.00001, 0.00004, 0.00009],
             &shape,
+        );
+    }
+
+    #[test]
+    fn adam_update_single_storage_requests_typed_fallback_without_provider_effects() {
+        let provider = InProcessProvider::new();
+        let shape = [1, 2];
+        let parameters = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.0, 2.0]),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("single parameters upload");
+        let gradient = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[0.1, -0.2]),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("single gradient upload");
+        let telemetry_before = provider.telemetry_snapshot();
+        let error = provider
+            .adam_update(&ProviderAdamUpdateRequest {
+                parameters: &parameters,
+                gradient: &gradient,
+                average_grad: None,
+                average_sq_grad: None,
+                iteration: 1,
+                learn_rate: 0.01,
+                gradient_decay_factor: 0.9,
+                squared_gradient_decay_factor: 0.999,
+                epsilon: 1.0e-8,
+            })
+            .expect_err("the F64-only provider must not widen single storage");
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &error
+        ));
+        let telemetry_after = provider.telemetry_snapshot();
+        assert_eq!(telemetry_after.upload_bytes, telemetry_before.upload_bytes);
+        assert_eq!(
+            telemetry_after.download_bytes,
+            telemetry_before.download_bytes
         );
     }
 

@@ -1,7 +1,9 @@
 use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
-use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate_api::{
+    GpuTensorStorage, HostNumericDataView, HostNumericTensorView, HostTensorView,
+};
 use runmat_value::{IntValue, IntegerStorage};
 use std::error::Error;
 
@@ -172,6 +174,51 @@ fn adamupdate_gpu_inputs_return_resident_outputs() {
         assert_close(avg_sq.materialize_f64()[0], 0.00001);
         assert_close(avg_sq.materialize_f64()[1], 0.00004);
         assert_close(avg_sq.materialize_f64()[2], 0.00009);
+    });
+}
+
+#[test]
+fn adamupdate_single_resident_inputs_fall_back_without_widening_class() {
+    test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let parameters = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.0, 2.0]),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("single parameters");
+        let gradient = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[0.1, -0.2]),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("single gradient");
+        let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty state");
+
+        provider.reset_telemetry();
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let result = block_on(adamupdate_builtin(vec![
+            Value::GpuTensor(parameters),
+            Value::GpuTensor(gradient),
+            Value::Tensor(empty.clone()),
+            Value::Tensor(empty),
+            Value::Num(1.0),
+        ]))
+        .expect("single storage host fallback");
+        let Value::OutputList(values) = result else {
+            panic!("expected three optimizer outputs");
+        };
+        assert_eq!(values.len(), 3);
+        for value in values {
+            let Value::Tensor(tensor) = value else {
+                panic!("the fallback returns host tensors");
+            };
+            assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+            assert_eq!(tensor.shape, shape);
+        }
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
     });
 }
 
