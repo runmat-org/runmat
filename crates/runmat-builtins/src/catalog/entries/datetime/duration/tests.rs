@@ -189,11 +189,11 @@ fn constructor_documents_short_form_and_retains_visible_legacy_examples() {
 
     let examples = DURATION_CATALOG_ENTRY.documentation.examples;
     for (id, visible_statement) in [
-        ("components", "t = duration(1,30,45)\n"),
-        ("broadcast", "t = duration([1 2],15,0)\n"),
+        ("components", "disp(t)"),
+        ("broadcast", "disp(t)"),
         ("format", "disp(t)"),
-        ("datetime", "t1 = t0 + duration(1,30,0)"),
-        ("units", "h = hours(d)"),
+        ("datetime", "disp(t1)"),
+        ("units", "fprintf('h = %g"),
     ] {
         let example = examples
             .iter()

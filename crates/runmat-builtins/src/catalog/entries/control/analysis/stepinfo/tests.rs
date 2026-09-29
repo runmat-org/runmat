@@ -43,8 +43,16 @@ fn threshold_signature_and_visible_examples_are_preserved() {
     assert_eq!(signature.inputs.len(), 3);
     assert_eq!(signature.outputs.len(), 1);
     for (id, visible, output) in [
-        ("feedback", "info.Overshoot", "ans = 0"),
-        ("exponential-samples", "info.SteadyStateValue", "ans = 1"),
+        (
+            "feedback",
+            "fprintf('ans = %g\\n', info.Overshoot);",
+            "ans = 0",
+        ),
+        (
+            "exponential-samples",
+            "fprintf('ans = %g\\n', info.SteadyStateValue);",
+            "ans = 1",
+        ),
     ] {
         let example = STEPINFO_CATALOG_ENTRY
             .documentation
