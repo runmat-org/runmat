@@ -74,6 +74,19 @@ fn step_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"[y,t] = step(sys)"));
     assert!(labels.contains(&"[y,t] = step(sys, tFinal)"));
     assert!(labels.contains(&"[y,t] = step(sys, t)"));
+    for label in [
+        "step(sys)",
+        "step(sys, tFinal)",
+        "step(sys, t)",
+        "step(sys1, style1, sys2, style2, tFinal)",
+    ] {
+        let signature = STEP_DESCRIPTOR
+            .signatures
+            .iter()
+            .find(|signature| signature.label == label)
+            .expect("statement plotting signature");
+        assert!(signature.outputs.is_empty());
+    }
 }
 
 #[test]

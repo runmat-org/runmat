@@ -105,7 +105,22 @@ const IMPULSE_INPUTS_SYS_TIME: [BuiltinParamDescriptor; 2] = [
         description: "Final time scalar or explicit time vector.",
     },
 ];
-const IMPULSE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+const IMPULSE_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+    BuiltinSignatureDescriptor {
+        label: "impulse(sys)",
+        inputs: &IMPULSE_INPUTS_SYS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "impulse(sys, tFinal)",
+        inputs: &IMPULSE_INPUTS_SYS_TIME,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "impulse(sys, t)",
+        inputs: &IMPULSE_INPUTS_SYS_TIME,
+        outputs: &[],
+    },
     BuiltinSignatureDescriptor {
         label: "y = impulse(sys)",
         inputs: &IMPULSE_INPUTS_SYS,
@@ -167,18 +182,25 @@ pub const IMPULSE_ERROR_DISCRETE_LIMIT: BuiltinErrorDescriptor = BuiltinErrorDes
     when: "Discrete simulation would exceed platform or configured sample limits.",
     message: "impulse: discrete simulation limit exceeded",
 };
+pub const IMPULSE_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMPULSE.PLOT_FAILED",
+    identifier: Some("RunMat:impulse:PlotFailed"),
+    when: "Statement-form plotting failed for reasons other than known nonfatal setup conditions.",
+    message: "impulse: plotting failed",
+};
 pub const IMPULSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.IMPULSE.INTERNAL",
     identifier: Some("RunMat:impulse:Internal"),
     when: "Internal response assembly failed.",
     message: "impulse: internal error",
 };
-const IMPULSE_ERRORS: [BuiltinErrorDescriptor; 6] = [
+const IMPULSE_ERRORS: [BuiltinErrorDescriptor; 7] = [
     IMPULSE_ERROR_INVALID_ARGUMENT,
     IMPULSE_ERROR_INVALID_MODEL,
     IMPULSE_ERROR_INVALID_TIME,
     IMPULSE_ERROR_UNSUPPORTED_MODEL,
     IMPULSE_ERROR_DISCRETE_LIMIT,
+    IMPULSE_ERROR_PLOT_FAILED,
     IMPULSE_ERROR_INTERNAL,
 ];
 pub const IMPULSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {

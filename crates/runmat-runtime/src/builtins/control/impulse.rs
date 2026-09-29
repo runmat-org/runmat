@@ -3,8 +3,8 @@
 use runmat_builtins::{
     BuiltinErrorDescriptor, IMPULSE_ERROR_DISCRETE_LIMIT, IMPULSE_ERROR_INTERNAL,
     IMPULSE_ERROR_INVALID_ARGUMENT, IMPULSE_ERROR_INVALID_MODEL, IMPULSE_ERROR_INVALID_TIME,
-    IMPULSE_ERROR_UNSUPPORTED_MODEL, IMPULSE_INTEGER_EXTENSION, IMPULSE_LOGICAL_EXTENSION,
-    IMPULSE_RESIDENT_EXTENSION, IMPULSE_SINGLE_EXTENSION,
+    IMPULSE_ERROR_PLOT_FAILED, IMPULSE_ERROR_UNSUPPORTED_MODEL, IMPULSE_INTEGER_EXTENSION,
+    IMPULSE_LOGICAL_EXTENSION, IMPULSE_RESIDENT_EXTENSION, IMPULSE_SINGLE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Value};
@@ -209,9 +209,25 @@ async fn emit_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<()> {
         if is_nonfatal_plot_setup_error(&err) {
             return Ok(());
         }
-        return Err(err);
+        return Err(impulse_plot_error(err));
     }
     Ok(())
+}
+
+fn impulse_plot_error(source: RuntimeError) -> RuntimeError {
+    build_runtime_error(format!(
+        "{}: {}",
+        IMPULSE_ERROR_PLOT_FAILED.message,
+        source.message()
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_identifier(
+        IMPULSE_ERROR_PLOT_FAILED
+            .identifier
+            .expect("plot failure has a stable identifier"),
+    )
+    .with_source(source)
+    .build()
 }
 
 #[derive(Clone, Debug)]

@@ -46,7 +46,64 @@ const STEP_INPUTS_SYS_TIME: [BuiltinParamDescriptor; 2] = [
         description: "Final time scalar or explicit time vector.",
     },
 ];
-const STEP_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+const STEP_INPUTS_MULTI_PLOT: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "sys1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First SISO tf model.",
+    },
+    BuiltinParamDescriptor {
+        name: "style1",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Plot style for the first model.",
+    },
+    BuiltinParamDescriptor {
+        name: "sys2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second SISO tf model.",
+    },
+    BuiltinParamDescriptor {
+        name: "style2",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Plot style for the second model.",
+    },
+    BuiltinParamDescriptor {
+        name: "tFinal",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Shared final time for the plotted models.",
+    },
+];
+const STEP_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "step(sys)",
+        inputs: &STEP_INPUTS_SYS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "step(sys, tFinal)",
+        inputs: &STEP_INPUTS_SYS_TIME,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "step(sys, t)",
+        inputs: &STEP_INPUTS_SYS_TIME,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "step(sys1, style1, sys2, style2, tFinal)",
+        inputs: &STEP_INPUTS_MULTI_PLOT,
+        outputs: &[],
+    },
     BuiltinSignatureDescriptor {
         label: "y = step(sys)",
         inputs: &STEP_INPUTS_SYS,

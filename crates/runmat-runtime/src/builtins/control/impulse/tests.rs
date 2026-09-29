@@ -66,6 +66,28 @@ fn impulse_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"[y,t] = impulse(sys)"));
     assert!(labels.contains(&"[y,t] = impulse(sys, tFinal)"));
     assert!(labels.contains(&"[y,t] = impulse(sys, t)"));
+    for label in ["impulse(sys)", "impulse(sys, tFinal)", "impulse(sys, t)"] {
+        let signature = IMPULSE_DESCRIPTOR
+            .signatures
+            .iter()
+            .find(|signature| signature.label == label)
+            .expect("statement plotting signature");
+        assert!(signature.outputs.is_empty());
+    }
+}
+
+#[test]
+fn fatal_plot_error_has_impulse_identifier_and_retains_source() {
+    use std::error::Error;
+
+    let source = build_runtime_error("plot: rendering failed")
+        .with_builtin("plot")
+        .with_identifier("RunMat:plot:RenderFailed")
+        .build();
+    let wrapped = impulse_plot_error(source);
+    assert_eq!(wrapped.identifier(), Some("RunMat:impulse:PlotFailed"));
+    assert!(wrapped.message().contains("rendering failed"));
+    assert!(wrapped.source().is_some());
 }
 
 #[test]

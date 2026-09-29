@@ -4,6 +4,14 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Runtime implementation",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/impulse.rs"),
 };
+const SOLVER_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Impulse response solver",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/impulse/solver.rs"),
+};
+const TIME_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Impulse time grids",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/impulse/time.rs"),
+};
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
@@ -40,9 +48,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "plot", target: BuiltinDocumentationLinkTarget::Builtin("plot") },
         BuiltinDocumentationLink { label: "stem", target: BuiltinDocumentationLinkTarget::Builtin("stem") },
         SOURCE,
+        SOLVER_SOURCE,
+        TIME_SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, SOLVER_SOURCE, TIME_SOURCE], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Impulse response, time, compatibility and admission", location: "crates/runmat-runtime/src/builtins/control/impulse.rs" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM tf/impulse workflow", location: "crates/runmat-vm/tests/control.rs" },
     ], notes: &["The simulator supports a bounded real strictly proper SISO tf subset; browser and provider execution require integrated qualification."] },

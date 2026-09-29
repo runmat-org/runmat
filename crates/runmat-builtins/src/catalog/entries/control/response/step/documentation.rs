@@ -4,6 +4,14 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Runtime implementation",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/step.rs"),
 };
+const SOLVER_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Step response solver",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/response/step/solver.rs"),
+};
+const TIME_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Step time grids",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/response/step/time.rs"),
+};
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
@@ -43,9 +51,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "plot", target: BuiltinDocumentationLinkTarget::Builtin("plot") },
         BuiltinDocumentationLink { label: "stepinfo", target: BuiltinDocumentationLinkTarget::Builtin("stepinfo") },
         SOURCE,
+        SOLVER_SOURCE,
+        TIME_SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, SOLVER_SOURCE, TIME_SOURCE], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Step response, time, compatibility and admission", location: "crates/runmat-runtime/src/builtins/control/step.rs" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM tf/step workflow", location: "crates/runmat-vm/tests/control.rs" },
     ], notes: &["The simulator supports a bounded real SISO tf subset; browser and provider execution require integrated qualification."] },
