@@ -149,3 +149,42 @@ fn logical_inputs_convert_to_double_at_arithmetic_boundary() {
     );
     assert_eq!(output_data(&summed).shape, ShapeFact::Scalar);
 }
+
+#[test]
+fn arithmetic_declares_ambient_tape_mutation() {
+    for entry in [
+        &DLARRAY_PLUS_CATALOG_ENTRY,
+        &DLARRAY_MINUS_CATALOG_ENTRY,
+        &DLARRAY_TIMES_CATALOG_ENTRY,
+        &DLARRAY_RDIVIDE_CATALOG_ENTRY,
+        &DLARRAY_MTIMES_CATALOG_ENTRY,
+        &DLARRAY_SUM_CATALOG_ENTRY,
+    ] {
+        assert_eq!(entry.contract.purity, crate::BuiltinPurity::Impure);
+        assert!(entry
+            .contract
+            .effects
+            .contains(&runmat_types::EffectKind::EnvironmentWrite));
+    }
+}
+
+#[test]
+fn sum_diagnoses_known_unsupported_selector() {
+    let input = dlarray(numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(2), Some(2)]),
+    ));
+    let request = runmat_types::CallRequest {
+        arguments: vec![input, ValueFact::scalar(ValueKindFact::String)],
+        literals: LiteralContext::new(vec![
+            runmat_types::LiteralValue::Unknown,
+            runmat_types::LiteralValue::String("rows".into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let result = crate::infer_catalog_call(&DLARRAY_SUM_CATALOG_ENTRY, &request);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-SUM-SELECTOR"));
+}

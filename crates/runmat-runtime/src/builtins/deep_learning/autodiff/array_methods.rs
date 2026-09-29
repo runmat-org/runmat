@@ -129,6 +129,10 @@ fn dlarray_binary(
     op: impl Fn(f64, f64) -> f64,
     record: impl FnOnce(&Payload, &Payload, Tensor) -> BuiltinResult<Option<usize>>,
 ) -> BuiltinResult<Value> {
+    super::super::errors::admit_single_output(
+        function,
+        &runmat_builtins::DLARRAY_METHOD_INVALID_INPUT,
+    )?;
     let lhs = Payload::parse(lhs, function)?;
     let rhs = Payload::parse(rhs, function)?;
     let (lhs_values, rhs_values, shape) =
@@ -151,6 +155,10 @@ fn dlarray_binary(
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    super::super::errors::admit_single_output(
+        "mtimes",
+        &runmat_builtins::DLARRAY_METHOD_INVALID_INPUT,
+    )?;
     let lhs = Payload::parse(lhs, "mtimes")?;
     let rhs = Payload::parse(rhs, "mtimes")?;
     let computed = crate::builtins::common::linalg::matmul_real(&lhs.tensor, &rhs.tensor)
@@ -190,6 +198,10 @@ pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::super::errors::admit_single_output(
+        "sum",
+        &runmat_builtins::DLARRAY_METHOD_INVALID_INPUT,
+    )?;
     if rest
         .iter()
         .any(|value| !matches!(value, Value::String(text) if text.eq_ignore_ascii_case("all")))

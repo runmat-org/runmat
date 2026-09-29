@@ -60,7 +60,6 @@ impl<F> Drop for TapeFuture<F> {
     }
 }
 
-#[derive(Clone)]
 pub(super) struct Tape {
     pub(super) id: u64,
     pub(super) nodes: Vec<Node>,
@@ -80,13 +79,11 @@ impl Tape {
     }
 }
 
-#[derive(Clone)]
 pub(super) struct Node {
     pub(super) value: Tensor,
     pub(super) kind: NodeKind,
 }
 
-#[derive(Clone)]
 pub(super) enum NodeKind {
     Leaf,
     Add {
@@ -170,12 +167,16 @@ pub(super) async fn with_tape_context(
 }
 
 pub(super) fn dlarray_node_id(value: &Value) -> Option<usize> {
-    let tape = active_tape()?;
-    let tape = tape.borrow();
-    let tape_id = tape.id;
     let Value::Object(object) = value else {
         return None;
     };
+    dlarray_object_node_id(object)
+}
+
+pub(super) fn dlarray_object_node_id(object: &ObjectInstance) -> Option<usize> {
+    let tape = active_tape()?;
+    let tape = tape.borrow();
+    let tape_id = tape.id;
     if object.class_name != DLARRAY_CLASS {
         return None;
     }

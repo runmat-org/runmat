@@ -258,6 +258,29 @@ fn logical_dlarray_math_uses_explicit_double_boundary() {
 }
 
 #[test]
+fn method_output_arity_preflights_before_resident_operand_access() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[1.0],
+                shape: &[1, 1],
+            })
+            .expect("resident operand");
+        provider.reset_telemetry();
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        for result in [
+            dlarray_plus_builtin(wrapped(Value::GpuTensor(resident.clone())), Value::Num(1.0)),
+            dlarray_mtimes_builtin(wrapped(Value::GpuTensor(resident.clone())), Value::Num(1.0)),
+            dlarray_sum_builtin(wrapped(Value::GpuTensor(resident)), vec![]),
+        ] {
+            let error = result.expect_err("one-output method");
+            assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        }
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
 fn arithmetic_rejects_mutated_native_integer_data_without_rounding() {
     let large = u64::MAX;
     let integer_data = wrapped(Value::Tensor(

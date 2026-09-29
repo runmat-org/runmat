@@ -175,6 +175,29 @@ pub(super) fn sum(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInf
             0,
         ));
     }
+    if let Some(selector) = request.arguments.get(1) {
+        if !matches!(
+            &selector.kind,
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+        ) {
+            diagnostics.push(argument_error(
+                "RM-DL-SUM-SELECTOR",
+                "dlarray.sum accepts only the optional 'all' selector",
+                1,
+            ));
+        }
+        if request
+            .literals
+            .literal_string_at(1)
+            .is_some_and(|literal| literal != "all")
+        {
+            diagnostics.push(argument_error(
+                "RM-DL-SUM-SELECTOR",
+                "dlarray.sum accepts only the optional 'all' selector",
+                1,
+            ));
+        }
+    }
     let result = request
         .arguments
         .first()

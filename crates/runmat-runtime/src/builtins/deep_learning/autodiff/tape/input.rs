@@ -1,4 +1,5 @@
 use super::super::*;
+use super::dlarray_object_node_id;
 
 pub(super) fn prepare_tape_inputs(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     values.into_iter().map(annotate_tree).collect()
@@ -63,14 +64,14 @@ pub(super) fn annotate_dlarray_value(value: Value) -> BuiltinResult<Value> {
 }
 
 fn annotate_dlarray_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
-    if dlarray_node_id(&Value::Object(object.clone())).is_some() {
+    if dlarray_object_node_id(object).is_some() {
         return Ok(());
     }
-    let data =
-        object.properties.get("Data").cloned().ok_or_else(|| {
-            deep_learning_error("dlarray", "dlarray: traced object is missing Data")
-        })?;
-    let tensor = host_tensor_from_value(&data, "dlarray", "Data")?;
+    let data = object
+        .properties
+        .get("Data")
+        .ok_or_else(|| deep_learning_error("dlarray", "dlarray: traced object is missing Data"))?;
+    let tensor = host_tensor_from_value(data, "dlarray", "Data")?;
     let node = push_node(tensor, NodeKind::Leaf)?;
     let tape_id = active_tape()
         .expect("node insertion requires active tape")

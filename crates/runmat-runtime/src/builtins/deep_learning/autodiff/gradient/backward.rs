@@ -40,7 +40,11 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
             "dlgradient: no active automatic differentiation tape",
         )
     })?;
-    let nodes = tape.borrow().nodes.clone();
+    // The reverse pass invokes only local tensor arithmetic. Borrowing the
+    // graph for this synchronous traversal avoids copying every recorded
+    // activation and operand payload before computing gradients.
+    let tape_guard = tape.borrow();
+    let nodes = &tape_guard.nodes;
     let mut grads: HashMap<usize, Tensor> = HashMap::new();
     let loss_dtype = nodes
         .get(loss_node)

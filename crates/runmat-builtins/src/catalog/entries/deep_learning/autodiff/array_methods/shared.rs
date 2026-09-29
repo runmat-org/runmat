@@ -25,6 +25,7 @@ macro_rules! array_method_entry {
                 environment_effect: None,
                 effects: &[
                     runmat_types::EffectKind::EnvironmentRead,
+                    runmat_types::EffectKind::EnvironmentWrite,
                     runmat_types::EffectKind::MayThrow,
                 ],
                 capabilities: &[],
