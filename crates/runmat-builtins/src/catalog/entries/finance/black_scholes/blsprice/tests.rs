@@ -143,6 +143,102 @@ fn unresolved_double_geometry_does_not_claim_single() {
 }
 
 #[test]
+fn known_empty_host_yield_normalizes_before_class_and_type_inference() {
+    let mut single = real(ShapeFact::from(vec![Some(2), Some(1)]));
+    single.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    });
+    let required = vec![
+        single,
+        real(ShapeFact::Scalar),
+        real(ShapeFact::Scalar),
+        real(ShapeFact::Scalar),
+        real(ShapeFact::Scalar),
+    ];
+    let empty = ShapeFact::from(vec![Some(0), Some(0)]);
+    let empty_cell = ValueKindFact::Cell(CellFact {
+        element: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+        elements: Vec::new(),
+        elements_complete: true,
+    });
+    for kind in [
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ValueKindFact::String,
+        empty_cell,
+    ] {
+        let mut args = required.clone();
+        args.push(ValueFact::proven(kind, empty.clone(), StorageFact::Dense));
+        let inferred = crate::infer_catalog_call(&BLSPRICE_CATALOG_ENTRY, &request(args, 1));
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+        assert_eq!(
+            inferred.outputs[0].numeric().map(|numeric| numeric.class),
+            Some(NumericClass::Single)
+        );
+        assert_eq!(
+            inferred.outputs[0].shape,
+            ShapeFact::from(vec![Some(2), Some(1)])
+        );
+    }
+}
+
+#[test]
+fn potentially_empty_text_yield_has_conservative_class_without_a_false_error() {
+    let mut single = real(ShapeFact::from(vec![Some(2), Some(1)]));
+    single.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    });
+    let mut args = vec![single];
+    args.extend((0..4).map(|_| real(ShapeFact::Scalar)));
+    args.push(ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Unknown,
+        StorageFact::Dense,
+    ));
+    let inferred = crate::infer_catalog_call(&BLSPRICE_CATALOG_ENTRY, &request(args, 1));
+    assert!(
+        inferred.diagnostics.is_empty(),
+        "{:?}",
+        inferred.diagnostics
+    );
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn unknown_host_empty_yield_does_not_infer_an_empty_price_result() {
+    let mut single = real(ShapeFact::from(vec![Some(2), Some(1)]));
+    single.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    });
+    let mut args = vec![single];
+    args.extend((0..4).map(|_| real(ShapeFact::Scalar)));
+    let mut yield_value = ValueFact::unknown(DynamicReason::RuntimeValue);
+    yield_value.shape = ShapeFact::from(vec![Some(0), Some(0)]);
+    yield_value.residency = ResidencyFact::Host;
+    args.push(yield_value);
+    let inferred = crate::infer_catalog_call(&BLSPRICE_CATALOG_ENTRY, &request(args, 1));
+    assert!(
+        inferred.diagnostics.is_empty(),
+        "{:?}",
+        inferred.diagnostics
+    );
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(
+        inferred.outputs[0].shape,
+        ShapeFact::from(vec![Some(2), Some(1)])
+    );
+}
+
+#[test]
 fn legacy_visible_examples_and_provider_contract_are_present() {
     assert_eq!(BLSPRICE_CATALOG_ENTRY.documentation.examples.len(), 2);
     for example in BLSPRICE_CATALOG_ENTRY.documentation.examples {

@@ -2,7 +2,7 @@ use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_builtins::BLSIMPV_NONDOUBLE_EXTENSION;
-use runmat_value::IntegerStorage;
+use runmat_value::{CellArray, IntegerStorage, StringArray};
 
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new_2d(data, rows, cols).unwrap())
@@ -445,6 +445,43 @@ fn blsprice_empty_yield_uses_default_zero_yield() {
     ))
     .unwrap();
     assert!((as_scalar(&with_empty_yield) - as_scalar(&without_yield)).abs() < 1e-12);
+}
+
+#[test]
+fn blsprice_single_with_empty_yield_keeps_single_for_numeric_cell_and_string_arrays() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let price = single(vec![100.0, 110.0], vec![2, 1]);
+    let no_yield = block_on(blsprice_builtin(
+        price.clone(),
+        Value::Num(95.0),
+        Value::Num(0.10),
+        Value::Num(0.25),
+        Value::Num(0.50),
+        Vec::new(),
+    ))
+    .expect("default yield");
+    for yield_value in [
+        empty_numeric(),
+        Value::Cell(CellArray::new(Vec::new(), 0, 0).expect("empty cell")),
+        Value::StringArray(StringArray::new(Vec::new(), vec![0, 0]).expect("empty string array")),
+    ] {
+        let result = block_on(blsprice_builtin(
+            price.clone(),
+            Value::Num(95.0),
+            Value::Num(0.10),
+            Value::Num(0.25),
+            Value::Num(0.50),
+            vec![yield_value],
+        ))
+        .expect("empty yield uses default");
+        let result = as_tensor(&result);
+        assert_eq!(result.numeric_dtype(), NumericDType::F32);
+        assert_eq!(result.shape, vec![2, 1]);
+        assert_eq!(
+            result.materialize_f64(),
+            as_tensor(&no_yield).materialize_f64()
+        );
+    }
 }
 
 #[test]

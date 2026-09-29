@@ -36,6 +36,37 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut unknown_input = false;
     let mut unknown_double_geometry = false;
     for (index, value) in args.iter().enumerate() {
+        // At runtime a known-empty host Yield array is replaced with the
+        // default double scalar before class, type, and shape admission.
+        if index == 5 && value.residency == ResidencyFact::Host {
+            let empty_array_kind = matches!(
+                value.kind,
+                ValueKindFact::Numeric(_)
+                    | ValueKindFact::Logical
+                    | ValueKindFact::Character
+                    | ValueKindFact::String
+                    | ValueKindFact::Cell(_)
+            );
+            if empty_array_kind && value.shape.element_count() == Some(0) {
+                continue;
+            }
+            if value.kind == ValueKindFact::Unknown && value.shape.element_count() == Some(0) {
+                // Accepted empty array kinds normalize to scalar Yield, but
+                // the unresolved kind is not itself a precision proof.
+                unknown_input = true;
+                continue;
+            }
+            if matches!(
+                value.kind,
+                ValueKindFact::Character | ValueKindFact::String | ValueKindFact::Cell(_)
+            ) && value.shape.element_count().is_none()
+            {
+                // This value can be accepted only when runtime proves it is
+                // empty. Its class therefore cannot be used to prove a result.
+                unknown_input = true;
+                continue;
+            }
+        }
         if !matches!(
             value.kind,
             ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
@@ -74,9 +105,6 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ValueKindFact::Numeric(_) | ValueKindFact::Logical => double_forced = true,
             ValueKindFact::Unknown => unknown_input = true,
             _ => {}
-        }
-        if index == 5 && value.shape.element_count() == Some(0) {
-            continue;
         }
         shape = match broadcast_shape(&shape, &value.shape) {
             Ok(next) => next,
@@ -117,14 +145,16 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             },
         )
     } else {
-        // The provider may return single or double; fallback may materialize on host.
+        // Input class or scalar geometry is unresolved at compile time.
         let mut fact = ValueFact::unknown(DynamicReason::RuntimeValue);
         fact.shape = shape.clone();
         fact
     };
-    if all_host {
-        output.residency = ResidencyFact::Host;
-    }
+    output.residency = if all_host {
+        ResidencyFact::Host
+    } else {
+        ResidencyFact::Unknown
+    };
     output.shape = shape;
     finish_fixed_outputs(entry, request, vec![output.clone(), output], diagnostics)
 }
