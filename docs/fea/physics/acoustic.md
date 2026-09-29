@@ -6,9 +6,14 @@ rigid wall, radiation condition, or impedance. RunMat does not infer those condi
 names or from an enclosed-looking volume.
 
 The `.fea` language checks static, modal, transient, harmonic, and nonlinear acoustic procedure
-contracts. The numerical library contains an experimental **reduced acoustic Helmholtz graph**
-component, but the public typed `.fea` executor does not connect acoustic studies end to end. It is
-not a tetrahedral acoustic FE formulation and must not be presented as one.
+contracts. The Rust numerical library now has an experimental canonical Tet4/Tet10 harmonic
+entry, `physics::acoustic::solve_canonical_harmonic`, with exact pressure, normal-velocity,
+rigid-wall and positive real impedance boundaries. The public typed `.fea` executor does not
+connect that entry end to end. The older **reduced acoustic Helmholtz graph** remains separately
+identified as a proxy; it is not the canonical FE formulation. Neither route is production qualified.
+
+The [canonical acoustic qualification record](../qualification/canonical-acoustic.md) states
+the independent references, supported library envelope and outstanding gates.
 
 ## What acoustic equation is represented?
 

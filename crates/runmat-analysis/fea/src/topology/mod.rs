@@ -9,6 +9,8 @@ mod identity;
 mod point_location;
 pub(crate) mod quadrature;
 mod resources;
+#[cfg(test)]
+pub(crate) mod test_meshes;
 
 pub use contract::{
     AnalysisProjection, AnalysisProjectionError, AnalysisProjectionPolicy,

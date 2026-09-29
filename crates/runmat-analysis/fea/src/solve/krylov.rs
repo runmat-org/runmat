@@ -1,16 +1,16 @@
-//! Small matrix-free Krylov authority shared by indefinite structural solve domains.
+//! Matrix-free Krylov authority shared by indefinite finite-element solve domains.
 
 use crate::{algebra::ScopedSpmvError, planning::resource::LocalExecutionPlan};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct GmresPolicy {
+pub(crate) struct GmresPolicy {
     pub relative_tolerance: f64,
     pub restart: usize,
     pub maximum_iterations: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct GmresResult {
+pub(crate) struct GmresResult {
     pub solution: Vec<f64>,
     pub iterations: u32,
     pub residual_norm: f64,
@@ -19,7 +19,7 @@ pub(super) struct GmresResult {
     pub breakdown: bool,
 }
 
-pub(super) fn restarted_gmres<E>(
+pub(crate) fn restarted_gmres<E>(
     right_hand_side: &[f64],
     initial: &[f64],
     policy: GmresPolicy,

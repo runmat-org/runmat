@@ -1,14 +1,20 @@
-//! Experimental reduced acoustic formulation.
+//! Experimental canonical and reduced acoustic formulations.
 //!
-//! This module owns the existing graph-domain proxy while the production finite-element
-//! Helmholtz formulation is completed. Runtime may admit and present this formulation, but it
-//! must not own or reproduce its numerical behavior.
+//! The canonical library entry uses physical Tet4/Tet10 operators and exact boundaries.
+//! The graph-domain proxy remains separately named for its existing callers. Neither has
+//! production qualification; runtime must not own or reproduce their numerical behavior.
 
+mod canonical;
 mod domain;
 mod linear;
 mod medium;
 mod recovery;
 mod reduced;
+
+pub use canonical::{
+    solve_canonical_harmonic, AcousticHarmonicError, AcousticHarmonicPolicy,
+    CanonicalAcousticResponse,
+};
 
 pub use reduced::solve_reduced_harmonic;
 

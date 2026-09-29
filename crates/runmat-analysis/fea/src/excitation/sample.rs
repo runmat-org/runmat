@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisModel, Direction, HeatFlux, PhysicalSignal, PrescribedValue, ProcedureStep, Signal,
-    SignalExtrapolation, SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate,
+    AnalysisModel, Direction, HeatFlux, PhysicalSignal, PrescribedValue, Pressure, ProcedureStep,
+    Signal, SignalExtrapolation, SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate,
     SignalRepresentation, SignalSampleApproach, SignalValue, TabulatedSignalDomain, Temperature,
 };
 
@@ -263,6 +263,23 @@ pub(crate) fn sample_prescribed_heat_flux(
             _ => None,
         },
         |heat_flux| heat_flux.watts_per_square_meter,
+    )
+}
+
+pub(crate) fn sample_prescribed_pressure(
+    value: &PrescribedValue<Pressure>,
+    signals: &[PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ComplexScalar, RealizationError> {
+    sample_prescribed_scalar(
+        value,
+        signals,
+        sample,
+        |signal| match signal {
+            PhysicalSignal::Pressure(signal) => Some(signal),
+            _ => None,
+        },
+        |pressure| pressure.pascals,
     )
 }
 

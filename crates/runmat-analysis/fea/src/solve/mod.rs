@@ -3,7 +3,7 @@ mod affine;
 pub mod backend;
 pub mod buckling;
 pub mod dynamics;
-mod krylov;
+pub(crate) mod krylov;
 pub mod linear;
 pub mod modal;
 mod multiplier;

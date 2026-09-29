@@ -1,0 +1,472 @@
+use super::*;
+use crate::fixtures::{fixture_model, replace_fixture_excitations, FixtureId};
+use crate::topology::test_meshes::slab_mesh;
+use runmat_analysis_core::{
+    AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
+    BoundaryOperator, MaterialAcousticModel, PrescribedValue, Pressure, ProcedureStep,
+    RegionTarget, SpecificAcousticImpedance,
+};
+use runmat_analysis_core::{
+    AnalysisExcitation, CoordinateFrame, ExcitationAction, ExcitationCase,
+    ExcitationCaseActivation, ExcitationCaseId, ExcitationDistribution, ExcitationId,
+    ExcitationKinematics, ExcitationTarget, PhysicalSignal, ProjectionRequirement,
+    PropertyRegionTarget, Signal, SignalApproximationEvidence, SignalExtrapolation, SignalId,
+    SignalInterpolation, SignalKnot, SignalOrdinate, SignalPrecision, SignalProvenance,
+    SignalRepresentation, SignalShape, SignalValue, TabulatedSignal, TabulatedSignalDomain,
+    Velocity,
+};
+use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+
+fn complex_signal<Q: Clone>(real: Q, imaginary: Q) -> Signal<Q> {
+    Signal {
+        signal_id: SignalId("drive".into()),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Tabulated(TabulatedSignal {
+            domain: TabulatedSignalDomain::FrequencyHertz,
+            knots: [0.01, 1.0]
+                .into_iter()
+                .map(|f| {
+                    SignalKnot::continuous(
+                        f,
+                        SignalOrdinate::Complex {
+                            real: SignalValue::Scalar(real.clone()),
+                            imaginary: SignalValue::Scalar(imaginary.clone()),
+                        },
+                    )
+                })
+                .collect(),
+            interpolation: SignalInterpolation::Linear,
+            extrapolation: SignalExtrapolation::Reject,
+        }),
+        precision: SignalPrecision::Complex64,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 2,
+        },
+        provenance: SignalProvenance::Authored,
+    }
+}
+
+fn velocity_source(model: &mut AnalysisModel, real: f64, imaginary: f64) {
+    model.signals.push(PhysicalSignal::Velocity(complex_signal(
+        Velocity::new(real),
+        Velocity::new(imaginary),
+    )));
+    model
+        .excitations
+        .push(ExcitationAction::NormalVelocity(AnalysisExcitation {
+            excitation_id: ExcitationId("speaker".into()),
+            target: ExcitationTarget::Region(RegionTarget::boundary("slab_left")),
+            frame: CoordinateFrame::BoundaryNormalTangent,
+            direction: None,
+            distribution: ExcitationDistribution::UniformKinematic,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("drive".into()),
+            active_step_ids: Vec::new(),
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1e-10,
+            },
+        }));
+    model.excitation_cases.push(ExcitationCase {
+        case_id: ExcitationCaseId("speaker".into()),
+        action_ids: vec![ExcitationId("speaker".into())],
+        activation: ExcitationCaseActivation::Always,
+    });
+}
+
+#[test]
+fn matched_duct_pressure_and_velocity_sources_converge_to_independent_traveling_wave() {
+    // p=(1+0.4i) exp(-ikx), v_x=p/(rho*c); left outward v_n=-v_x.
+    // Unit-area matched termination absorbs |p|²/(2 rho c)=1.16/12 W.
+    let frequency = 0.2;
+    let k = std::f64::consts::TAU * frequency / 2.0;
+    for velocity in [false, true] {
+        let mut errors = Vec::new();
+        for cells in [2, 4, 8] {
+            let mesh = slab_mesh(cells);
+            let mut model = model();
+            model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+            if velocity {
+                velocity_source(&mut model, -1.0 / 6.0, -0.4 / 6.0);
+            } else {
+                model.signals.push(PhysicalSignal::Pressure(complex_signal(
+                    Pressure::new(1.0),
+                    Pressure::new(0.4),
+                )));
+                model
+                    .constraints
+                    .push(AnalysisConstraint::Acoustic(AcousticConstraint {
+                        constraint_id: "left_pressure".into(),
+                        kind: AcousticConstraintKind::PrescribedPressure {
+                            target: RegionTarget::boundary("slab_left"),
+                            value: PrescribedValue::Signal(SignalId("drive".into())),
+                        },
+                    }));
+            }
+            model.boundaries.push(AnalysisBoundary {
+                boundary_id: "matched".into(),
+                target: RegionTarget::boundary("slab_right"),
+                operator: BoundaryOperator::AcousticImpedance {
+                    impedance: SpecificAcousticImpedance::new(6.0),
+                },
+            });
+            let result = solve_canonical_harmonic(
+                &model,
+                &mesh,
+                "acoustic",
+                Frequency::new(frequency),
+                AcousticHarmonicPolicy {
+                    relative_tolerance: 1e-11,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut squared = 0.0;
+            for (node, pressure) in result.projection.nodes.iter().zip(&result.pressure_pa) {
+                let phase = k * node.coordinates_m[0];
+                let real = phase.cos() + 0.4 * phase.sin();
+                let imaginary = 0.4 * phase.cos() - phase.sin();
+                squared +=
+                    (pressure.real - real).powi(2) + (pressure.imaginary - imaginary).powi(2);
+            }
+            let error = (squared / result.pressure_pa.len() as f64).sqrt();
+            errors.push(error);
+            assert!(
+                result.power_relative_error < 1e-8,
+                "power closure {}",
+                result.power_relative_error
+            );
+            assert!((result.mean_impedance_loss_w - 1.16 / 12.0).abs() < 0.01);
+            if velocity {
+                assert_eq!(result.source_evidence.len(), 1);
+                assert!(result.source_evidence[0].accepted);
+            }
+            if cells == 8 {
+                assert!(error < 0.004, "velocity={velocity}: error={error}");
+                let mut error_velocity = 0.0;
+                for (element, value) in result
+                    .projection
+                    .elements
+                    .iter()
+                    .zip(&result.element_velocity_m_per_s)
+                {
+                    let phase = k * element.centroid_m[0];
+                    error_velocity += (value.real[0] - (phase.cos() + 0.4 * phase.sin()) / 6.0)
+                        .powi(2)
+                        + (value.imaginary[0] - (0.4 * phase.cos() - phase.sin()) / 6.0).powi(2)
+                        + value.real[1].powi(2)
+                        + value.real[2].powi(2)
+                        + value.imaginary[1].powi(2)
+                        + value.imaginary[2].powi(2);
+                }
+                assert!((error_velocity / result.projection.elements.len() as f64).sqrt() < 0.01);
+            }
+        }
+        assert!(
+            errors.windows(2).all(|pair| pair[0] / pair[1] > 3.0),
+            "velocity={velocity}: {errors:?}"
+        );
+    }
+}
+
+fn model() -> AnalysisModel {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    replace_fixture_excitations(&mut model, Vec::new());
+    model.constraints.clear();
+    model.boundaries.clear();
+    model.materials[0].acoustic = Some(MaterialAcousticModel {
+        speed_of_sound_m_per_s: 2.0,
+        damping_ratio: 0.0,
+    });
+    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    let step = ProcedureStep::experimental(
+        "acoustic",
+        PhysicsFamily::Acoustic,
+        AnalysisProcedure::HarmonicResponse,
+        runmat_analysis_core::SolutionSpace::Direct,
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![0.1, 0.2]),
+        Vec::new(),
+    );
+    model.sequence.steps = vec![step];
+    model
+}
+
+#[test]
+fn canonical_tet4_operators_match_exact_integrals() {
+    let model = model();
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let properties = crate::properties::compile_solid_property_map(&model, &mesh).unwrap();
+    let assembly = AcousticAssembly::assemble(projection, &properties, 1.0).unwrap();
+    let gradients = [
+        [-1.0, -1.0, -1.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ];
+    for i in 0..4 {
+        for j in 0..4 {
+            let k = gradients[i]
+                .iter()
+                .zip(gradients[j])
+                .map(|(a, b)| a * b)
+                .sum::<f64>()
+                / 18.0;
+            let m = if i == j { 1.0 / 60.0 } else { 1.0 / 120.0 } / 12.0;
+            assert!((assembly.stiffness.get(i, j) - k).abs() < 1e-13);
+            assert!((assembly.mass.get(i, j) - m).abs() < 1e-13);
+        }
+    }
+}
+
+fn prescribe(model: &mut AnalysisModel, target: RegionTarget, value: f64) {
+    model
+        .constraints
+        .push(AnalysisConstraint::Acoustic(AcousticConstraint {
+            constraint_id: "pressure".into(),
+            kind: AcousticConstraintKind::PrescribedPressure {
+                target,
+                value: PrescribedValue::Constant(Pressure::new(value)),
+            },
+        }));
+}
+
+#[test]
+fn prescribed_pressure_and_impedance_solve_close_power() {
+    let mut model = model();
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let pressure_face = projection
+        .boundary_faces
+        .iter()
+        .find(|face| !face.node_indices.contains(&0))
+        .unwrap();
+    let target = RegionTarget::boundary(&pressure_face.provenance[0].source_topology_id);
+    prescribe(&mut model, target, 1.0);
+    let impedance_face = projection
+        .boundary_faces
+        .iter()
+        .find(|face| face.node_indices.contains(&0))
+        .unwrap();
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "termination".into(),
+        target: RegionTarget::boundary(&impedance_face.provenance[0].source_topology_id),
+        operator: BoundaryOperator::AcousticImpedance {
+            impedance: SpecificAcousticImpedance::new(6.0),
+        },
+    });
+    let result = solve_canonical_harmonic(
+        &model,
+        &mesh,
+        "acoustic",
+        Frequency::new(0.1),
+        AcousticHarmonicPolicy::default(),
+    )
+    .unwrap();
+    assert!(result.relative_residual < 1e-9);
+    assert!(result.mean_input_power_w > 0.0);
+    assert!(result.power_relative_error < 1e-9);
+    assert!(result
+        .pressure_pa
+        .iter()
+        .skip(1)
+        .all(|p| p.real == 1.0 && p.imaginary == 0.0));
+}
+
+#[test]
+fn canonical_acoustics_rejects_invalid_frequency_and_material_attenuation() {
+    let mut model = model();
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    assert!(matches!(
+        solve_canonical_harmonic(
+            &model,
+            &mesh,
+            "acoustic",
+            Frequency::new(0.0),
+            AcousticHarmonicPolicy::default()
+        ),
+        Err(AcousticHarmonicError::InvalidInput(_))
+    ));
+    model.materials[0].acoustic.as_mut().unwrap().damping_ratio = 0.01;
+    assert!(matches!(
+        solve_canonical_harmonic(
+            &model,
+            &mesh,
+            "acoustic",
+            Frequency::new(0.1),
+            AcousticHarmonicPolicy::default()
+        ),
+        Err(AcousticHarmonicError::Unsupported(_))
+    ));
+}
+
+#[test]
+fn rigid_duct_converges_to_independent_standing_wave_without_artificial_loss() {
+    let k = std::f64::consts::TAU * 0.2 / 2.0;
+    let mut errors = Vec::new();
+    for cells in [2, 4, 8] {
+        let mesh = slab_mesh(cells);
+        let mut model = model();
+        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+        prescribe(&mut model, RegionTarget::boundary("slab_left"), 1.0);
+        model.boundaries.push(AnalysisBoundary {
+            boundary_id: "rigid".into(),
+            target: RegionTarget::boundary("slab_right"),
+            operator: BoundaryOperator::AcousticRigidWall,
+        });
+        let result = solve_canonical_harmonic(
+            &model,
+            &mesh,
+            "acoustic",
+            Frequency::new(0.2),
+            AcousticHarmonicPolicy {
+                relative_tolerance: 1e-11,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let error = (result
+            .projection
+            .nodes
+            .iter()
+            .zip(&result.pressure_pa)
+            .map(|(node, p)| {
+                (p.real - (k * (1.0 - node.coordinates_m[0])).cos() / k.cos()).powi(2)
+                    + p.imaginary.powi(2)
+            })
+            .sum::<f64>()
+            / result.pressure_pa.len() as f64)
+            .sqrt();
+        errors.push(error);
+        assert!(result.mean_impedance_loss_w.abs() < 1e-14);
+        assert!(result.mean_input_power_w.abs() < 1e-12);
+        assert!(result.power_relative_error < 1e-9);
+    }
+    assert!(
+        errors.windows(2).all(|pair| pair[0] / pair[1] > 3.0),
+        "{errors:?}"
+    );
+    assert!(errors[2] < 0.004);
+}
+
+#[test]
+fn straight_and_curved_tet10_preserve_integrals_and_affine_velocity_recovery() {
+    for warp in [0.0, 0.1, 0.2] {
+        let model = model();
+        let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+        mesh.topology.nodes[4].coordinates_m[0] += warp;
+        mesh.seal_canonical_digest().unwrap();
+        let projection = AnalysisProjection::derive(&mesh).unwrap();
+        let properties = crate::properties::compile_solid_property_map(&model, &mesh).unwrap();
+        let mut assembly = AcousticAssembly::assemble(projection, &properties, 1.0).unwrap();
+        let size = assembly.projection.nodes.len();
+        let total_mass = (0..size)
+            .flat_map(|i| (0..size).map(move |j| (i, j)))
+            .map(|(i, j)| assembly.mass.get(i, j))
+            .sum::<f64>();
+        assert!((total_mass - 1.0 / 72.0).abs() < 1e-12);
+        for i in 0..size {
+            assert!(
+                (0..size)
+                    .map(|j| assembly.stiffness.get(i, j))
+                    .sum::<f64>()
+                    .abs()
+                    < 1e-11
+            );
+        }
+        for (i, node) in assembly.projection.nodes.iter().enumerate() {
+            let [x, y, z] = node.coordinates_m;
+            assembly.prescribed[i] = Some(crate::excitation::ProjectionScalar {
+                real: 1.0 + 2.0 * x + 3.0 * y - 4.0 * z,
+                imaginary: 0.0,
+            });
+        }
+        let result = super::response::solve(
+            assembly,
+            1.0 / std::f64::consts::TAU,
+            AcousticHarmonicPolicy::default(),
+        )
+        .unwrap();
+        let velocity = &result.element_velocity_m_per_s[0];
+        assert!(velocity.real.iter().all(|v| v.abs() < 1e-12));
+        for (actual, expected) in velocity.imaginary.iter().zip([2.0 / 3.0, 1.0, -4.0 / 3.0]) {
+            assert!((actual - expected).abs() < 1e-10);
+        }
+    }
+}
+
+#[test]
+fn boundaries_fail_closed_on_missing_targets_overlap_and_radiation() {
+    let mesh = slab_mesh(2);
+    let mut model = model();
+    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "wall".into(),
+        target: RegionTarget::boundary("not_a_face"),
+        operator: BoundaryOperator::AcousticRigidWall,
+    });
+    let solve = |model: &AnalysisModel| {
+        solve_canonical_harmonic(
+            model,
+            &mesh,
+            "acoustic",
+            Frequency::new(0.2),
+            AcousticHarmonicPolicy::default(),
+        )
+    };
+    assert!(matches!(
+        solve(&model),
+        Err(AcousticHarmonicError::Boundary(_))
+    ));
+    model.boundaries[0].target = RegionTarget::boundary("slab_right");
+    model.boundaries.push(model.boundaries[0].clone());
+    assert!(matches!(
+        solve(&model),
+        Err(AcousticHarmonicError::Boundary(_))
+    ));
+    model.boundaries.pop();
+    model.boundaries[0].operator = BoundaryOperator::AcousticRadiation;
+    assert!(matches!(
+        solve(&model),
+        Err(AcousticHarmonicError::Unsupported(_))
+    ));
+}
+
+#[test]
+fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
+    let mesh = slab_mesh(2);
+    let mut model = model();
+    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    velocity_source(&mut model, -1.0, 0.0);
+    let mut signal = complex_signal(Pressure::new(1.0), Pressure::new(0.0));
+    signal.signal_id = SignalId("pressure_drive".into());
+    model.signals.push(PhysicalSignal::Pressure(signal));
+    let mut action = model.excitations[0].excitation().clone();
+    action.excitation_id = ExcitationId("pressure".into());
+    action.signal_id = SignalId("pressure_drive".into());
+    model
+        .excitations
+        .push(ExcitationAction::AcousticPressure(action));
+    model.excitation_cases[0]
+        .action_ids
+        .push(ExcitationId("pressure".into()));
+    for _ in 0..2 {
+        assert!(matches!(
+            solve_canonical_harmonic(
+                &model,
+                &mesh,
+                "acoustic",
+                Frequency::new(0.2),
+                AcousticHarmonicPolicy::default()
+            ),
+            Err(AcousticHarmonicError::Boundary(_))
+        ));
+        model.excitations.reverse();
+    }
+}
