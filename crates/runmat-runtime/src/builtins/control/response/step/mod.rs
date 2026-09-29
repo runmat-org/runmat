@@ -103,13 +103,24 @@ impl SimulationError {
     }
 }
 
-/// `time` is host-owned and already admitted by the caller. This function
-/// performs no downloads, compatibility checks, or graphics side effects.
+/// Parse host-owned time after the caller has completed compatibility and
+/// residency admission. Grid alignment depends on the admitted model.
+pub(crate) fn admit_time(
+    value: Option<&Value>,
+    sample_time: f64,
+    caller: StepSimulationCaller,
+) -> BuiltinResult<TimeSpec> {
+    TimeSpec::parse(value, sample_time).map_err(|error| error.into_runtime(caller))
+}
+
+/// This typed simulation boundary performs no downloads, compatibility
+/// checks, raw-value parsing, or graphics side effects.
 pub(crate) fn simulate(
     model: &RealTfModel,
-    time: Option<&Value>,
+    time: TimeSpec,
     caller: StepSimulationCaller,
 ) -> BuiltinResult<StepResponse> {
+    model.ensure_zero_delays(caller.name())?;
     let result = (|| {
         if model.sample_time < 0.0 {
             return Err(simulation_error(
@@ -123,7 +134,6 @@ pub(crate) fn simulate(
                 "improper transfer functions are not supported yet",
             ));
         }
-        let time = TimeSpec::parse(time, model.sample_time)?;
         solver::evaluate_step(model, time, caller)
     })();
     result.map_err(|error| error.into_runtime(caller))

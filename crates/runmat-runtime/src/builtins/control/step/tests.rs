@@ -91,7 +91,7 @@ fn first_order_continuous_response_matches_closed_form_for_explicit_time() {
 
 #[test]
 fn shared_step_simulation_matches_builtin_and_keeps_stepinfo_error_ownership() {
-    use crate::builtins::control::response::step::{simulate, StepSimulationCaller};
+    use crate::builtins::control::response::step::{admit_time, simulate, StepSimulationCaller};
     use crate::builtins::control::response::{parse_admitted_model, ResponseKind};
 
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
@@ -99,20 +99,34 @@ fn shared_step_simulation_matches_builtin_and_keeps_stepinfo_error_ownership() {
         .expect("one model admission");
     assert_eq!(parsed.model.dc_gain().expect("dc gain").re, 1.0);
     let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
-    let shared = simulate(&parsed.real, Some(&time), StepSimulationCaller::StepInfo)
-        .expect("shared response");
+    let time_spec = admit_time(
+        Some(&time),
+        parsed.real.sample_time,
+        StepSimulationCaller::StepInfo,
+    )
+    .expect("time admission");
+    let shared =
+        simulate(&parsed.real, time_spec, StepSimulationCaller::StepInfo).expect("shared response");
     let direct = tensor_data(run_step(sys, vec![time]).expect("step response"));
     assert_eq!(shared.y, direct);
     assert_eq!(shared.t, vec![0.0, 1.0]);
 
     let bad_time = Value::Num(-1.0);
-    let error = simulate(
-        &parsed.real,
+    let error = admit_time(
         Some(&bad_time),
+        parsed.real.sample_time,
         StepSimulationCaller::StepInfo,
     )
     .expect_err("invalid stepinfo time");
     assert_eq!(error.identifier(), Some("RunMat:stepinfo:InvalidData"));
+
+    let mut delayed = parsed.real.clone();
+    delayed.input_delay = 0.25;
+    let automatic = admit_time(None, delayed.sample_time, StepSimulationCaller::StepInfo)
+        .expect("automatic time");
+    let error = simulate(&delayed, automatic, StepSimulationCaller::StepInfo)
+        .expect_err("shared simulation must reject delay");
+    assert_eq!(error.identifier(), Some("RunMat:stepinfo:UnsupportedModel"));
 }
 
 #[test]

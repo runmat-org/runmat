@@ -16,7 +16,7 @@ use crate::builtins::common::validation::{
 };
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::response::step::{
-    preflight_host_time, simulate, StepResponse, StepSimulationCaller, DEFAULT_SAMPLES,
+    admit_time, preflight_host_time, simulate, StepResponse, StepSimulationCaller, DEFAULT_SAMPLES,
 };
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
@@ -100,7 +100,12 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
     let model = parse_real_model(sys, ResponseKind::Step).await?;
     let time_host = gather_step_time(rest.first()).await?;
-    let eval = simulate(&model, time_host.as_ref(), StepSimulationCaller::Step)?;
+    let time = admit_time(
+        time_host.as_ref(),
+        model.sample_time,
+        StepSimulationCaller::Step,
+    )?;
+    let eval = simulate(&model, time, StepSimulationCaller::Step)?;
 
     if crate::output_context::requested_output_count() == Some(0)
         && crate::output_count::current_output_count().is_none()
@@ -188,10 +193,12 @@ async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> Bui
     let gathered_time = gather_step_time(time_arg.as_ref()).await?;
     let mut responses = Vec::with_capacity(models.len());
     for (model, style) in models {
-        responses.push((
-            simulate(&model, gathered_time.as_ref(), StepSimulationCaller::Step)?,
-            style,
-        ));
+        let time = admit_time(
+            gathered_time.as_ref(),
+            model.sample_time,
+            StepSimulationCaller::Step,
+        )?;
+        responses.push((simulate(&model, time, StepSimulationCaller::Step)?, style));
     }
 
     let mut first = true;
