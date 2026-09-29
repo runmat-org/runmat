@@ -36,44 +36,29 @@ const X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "N-by-3 matrix of hour, minute, and second components.",
 }];
+const fn component(name: &'static str, description: &'static str) -> BuiltinParamDescriptor {
+    BuiltinParamDescriptor {
+        name,
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description,
+    }
+}
 const HM: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "hours",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Hours.",
-    },
-    BuiltinParamDescriptor {
-        name: "minutes",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Minutes.",
-    },
+    component("hours", "Hours."),
+    component("minutes", "Minutes."),
 ];
 const HMS: [BuiltinParamDescriptor; 3] = [
-    HM[0],
-    HM[1],
-    BuiltinParamDescriptor {
-        name: "seconds",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Seconds.",
-    },
+    component("hours", "Hours."),
+    component("minutes", "Minutes."),
+    component("seconds", "Seconds."),
 ];
 const HMSM: [BuiltinParamDescriptor; 4] = [
-    HMS[0],
-    HMS[1],
-    HMS[2],
-    BuiltinParamDescriptor {
-        name: "milliseconds",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Milliseconds.",
-    },
+    component("hours", "Hours."),
+    component("minutes", "Minutes."),
+    component("seconds", "Seconds."),
+    component("milliseconds", "Milliseconds."),
 ];
 const VARARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",

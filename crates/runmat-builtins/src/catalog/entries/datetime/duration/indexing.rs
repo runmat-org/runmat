@@ -9,25 +9,22 @@ const OUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Indexed duration or Format property; assignment returns the updated duration.",
 }];
+const fn index_input(name: &'static str, description: &'static str) -> BuiltinParamDescriptor {
+    BuiltinParamDescriptor {
+        name,
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description,
+    }
+}
 const SUBREF_INPUT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Duration receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Standard substruct-compatible index path.",
-    },
+    index_input("obj", "Duration receiver."),
+    index_input("S", "Standard substruct-compatible index path."),
 ];
 const SUBASGN_INPUT: [BuiltinParamDescriptor; 3] = [
-    SUBREF_INPUT[0],
-    SUBREF_INPUT[1],
+    index_input("obj", "Duration receiver."),
+    index_input("S", "Standard substruct-compatible index path."),
     BuiltinParamDescriptor {
         name: "rhs",
         ty: BuiltinParamType::Any,

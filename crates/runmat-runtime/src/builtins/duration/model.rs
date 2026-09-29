@@ -110,6 +110,35 @@ pub(super) fn validate_duration_operand(value: &Value, numeric_allowed: bool) ->
     }
 }
 
+fn operand_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
+    match value {
+        Value::Object(object) if object.is_class(DURATION_CLASS) => {
+            match object.properties.get(DAYS_FIELD) {
+                Some(Value::Tensor(tensor)) => Ok(tensor.shape.clone()),
+                Some(Value::Num(_)) => Ok(vec![1, 1]),
+                Some(Value::GpuTensor(handle)) => Ok(handle.shape().to_vec()),
+                _ => Err(duration_error("duration: invalid internal day storage")),
+            }
+        }
+        Value::Tensor(tensor) => Ok(tensor.shape.clone()),
+        Value::LogicalArray(array) => Ok(array.shape.clone()),
+        Value::GpuTensor(handle) => Ok(handle.shape().to_vec()),
+        _ => Ok(vec![1, 1]),
+    }
+}
+
+pub(super) fn preflight_operand_shapes(lhs: &Value, rhs: &Value, op: &str) -> BuiltinResult<()> {
+    let left = operand_shape(lhs)?;
+    let right = if crate::builtins::datetime::is_datetime_object(rhs) {
+        crate::builtins::datetime::serials_from_datetime_value(rhs)?.shape
+    } else {
+        operand_shape(rhs)?
+    };
+    crate::builtins::common::broadcast::BroadcastPlan::new(&left, &right)
+        .map_err(|err| duration_error(format!("duration.{op}: {err}")))?;
+    Ok(())
+}
+
 pub(super) async fn duration_days_operand(
     value: &Value,
     numeric_allowed: bool,
@@ -398,6 +427,9 @@ pub(super) fn build_from_components(
 pub(super) fn is_public_duration_matrix(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor.shape.len() <= 2 && tensor.cols() == 3,
+        Value::LogicalArray(array) => {
+            array.shape.len() <= 2 && array.shape.get(1).copied().unwrap_or(1) == 3
+        }
         Value::GpuTensor(handle) => {
             handle.shape().len() <= 2 && handle.shape().get(1).copied().unwrap_or(1) == 3
         }
@@ -406,8 +438,10 @@ pub(super) fn is_public_duration_matrix(value: &Value) -> bool {
 }
 
 pub(super) fn is_numeric_duration_input(value: &Value) -> bool {
-    matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
-        || matches!(value, Value::GpuTensor(handle) if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real)
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Tensor(_) | Value::LogicalArray(_)
+    ) || matches!(value, Value::GpuTensor(handle) if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real)
 }
 
 pub(super) fn build_from_matrix(value: Value, format: Option<String>) -> BuiltinResult<Value> {

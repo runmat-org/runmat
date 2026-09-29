@@ -6,8 +6,14 @@ pub(super) async fn compare_duration(
     op: &str,
     cmp: impl Fn(f64, f64) -> bool,
 ) -> BuiltinResult<Value> {
+    if !is_duration_object(&lhs) && !is_duration_object(&rhs) {
+        return Err(duration_error(format!(
+            "duration.{op}: at least one operand must be a duration"
+        )));
+    }
     validate_duration_operand(&lhs, true)?;
     validate_duration_operand(&rhs, true)?;
+    preflight_operand_shapes(&lhs, &rhs, op)?;
     let lhs_days = duration_days_operand(&lhs, true).await?;
     let rhs_days = duration_days_operand(&rhs, true).await?;
     let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_days)
@@ -89,6 +95,7 @@ pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
         for value in raw_positional {
             let shape = match value {
                 Value::Tensor(tensor) => tensor.shape.as_slice(),
+                Value::LogicalArray(array) => array.shape.as_slice(),
                 Value::GpuTensor(handle) => handle.shape(),
                 _ => continue,
             };
@@ -229,6 +236,11 @@ pub(super) async fn duration_read_step(
                     "duration.subsref: receiver must be a duration object",
                 ));
             };
+            if !object.is_class(DURATION_CLASS) {
+                return Err(duration_error(
+                    "duration.subsref: receiver must be a duration object",
+                ));
+            }
             let field = scalar_text(&step.selector_value()?, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => Ok(Value::String(format_for_object(&object))),
@@ -281,6 +293,11 @@ pub(super) async fn duration_write_step(
             "duration.subsasgn: receiver must be a duration object",
         ));
     };
+    if !object.is_class(DURATION_CLASS) {
+        return Err(duration_error(
+            "duration.subsasgn: receiver must be a duration object",
+        ));
+    }
     match step.kind() {
         crate::object::indexing::ObjectIndexKind::Member => {
             let field = scalar_text(&payload, "field selector")?;
@@ -373,6 +390,7 @@ pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
         validate_duration_operand(&rhs, true)?;
         None
     };
+    preflight_operand_shapes(&lhs, &rhs, "plus")?;
     let lhs_days = duration_days_operand(&lhs, false).await?;
     if let Some(rhs_serials) = rhs_serials {
         let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_serials)?;
@@ -407,6 +425,7 @@ pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
 pub(super) async fn duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     validate_duration_operand(&lhs, false)?;
     validate_duration_operand(&rhs, true)?;
+    preflight_operand_shapes(&lhs, &rhs, "minus")?;
     let lhs_days = duration_days_operand(&lhs, false).await?;
     let rhs_days = duration_days_operand(&rhs, true).await?;
     let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_days)?;

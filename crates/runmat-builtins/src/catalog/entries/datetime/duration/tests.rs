@@ -140,3 +140,15 @@ fn comparison_result_is_logical_and_broadcasted() {
     assert_eq!(inferred.outputs[0].shape, shape(2, 3));
     assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Logical));
 }
+
+#[test]
+fn comparison_method_rejects_two_known_numeric_operands() {
+    let inferred = operators::infer_comparison(
+        &call(vec![number(shape(1, 1)), number(shape(1, 1))], 1),
+        &DURATION_EQ_CATALOG_ENTRY,
+    );
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DURATION-OP-RECEIVER"));
+}

@@ -145,6 +145,18 @@ fn infer_comparison(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             0,
         ));
     }
+    if request.arguments.len() == 2
+        && request
+            .arguments
+            .iter()
+            .all(|value| facts::duration_class(value) == Some(false))
+    {
+        diagnostics.push(argument_error(
+            "RM-DURATION-OP-RECEIVER",
+            "at least one comparison operand must be a duration",
+            0,
+        ));
+    }
     for (index, value) in request.arguments.iter().enumerate() {
         if facts::duration_class(value) == Some(false) && !facts::real_numeric_or_logical(value) {
             diagnostics.push(argument_error(
