@@ -673,6 +673,7 @@ fn logical_component_shape_conflict_precedes_resident_download() {
 
 #[test]
 fn operator_shape_conflicts_precede_resident_download_and_valid_input_gathers_once() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let resident = crate::builtins::common::gpu_helpers::upload_tensor(
             provider,
@@ -687,6 +688,7 @@ fn operator_shape_conflicts_precede_resident_download_and_valid_input_gathers_on
         object
             .properties
             .insert(DAYS_FIELD.into(), Value::GpuTensor(resident));
+        provider.reset_telemetry();
         let bad = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         for result in [
             futures::executor::block_on(duration_plus(lhs.clone(), bad.clone())),
