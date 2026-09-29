@@ -2,9 +2,12 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod analysis;
+mod models;
 
 pub use self::analysis::*;
+pub use self::models::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(analysis::ENTRIES.iter().copied());
+    values.extend(models::ENTRIES.iter().copied());
 }

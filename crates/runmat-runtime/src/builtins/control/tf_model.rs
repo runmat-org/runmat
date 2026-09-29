@@ -944,7 +944,10 @@ pub async fn gather_ss_properties(
     }
     preflight_ss_host_properties(&object, required, builtin)?;
     for &name in required {
-        let value = object.properties.get(name).expect("preflight checked property");
+        let value = object
+            .properties
+            .get(name)
+            .expect("preflight checked property");
         let gathered = dispatcher::gather_if_needed_async(value).await?;
         object.properties.insert(name.to_string(), gathered);
     }

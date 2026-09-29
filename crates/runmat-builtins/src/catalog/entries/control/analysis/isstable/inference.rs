@@ -16,10 +16,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     if let Some(input) = request.arguments.first() {
         let valid_model = match &input.kind {
             ValueKindFact::Unknown => true,
-            ValueKindFact::Object(object) => object
-                .runtime_class
-                .as_ref()
-                .is_none_or(|class| class == &standard::TRANSFER_FUNCTION.owned()),
+            ValueKindFact::Object(object) => match object.runtime_class.as_ref() {
+                Some(class) => class == &standard::TRANSFER_FUNCTION.owned(),
+                None => object.class.is_none(),
+            },
             _ => false,
         };
         if !valid_model

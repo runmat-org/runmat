@@ -28,7 +28,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     mode_count = static_gain_mode_count(object);
                     true
                 }
-                None => true,
+                None => object.class.is_none(),
                 Some(_) => false,
             },
             _ => false,
