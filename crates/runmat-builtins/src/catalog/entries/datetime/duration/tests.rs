@@ -23,6 +23,9 @@ fn number(shape: ShapeFact) -> ValueFact {
         StorageFact::Dense,
     )
 }
+fn logical(shape: ShapeFact) -> ValueFact {
+    ValueFact::proven(ValueKindFact::Logical, shape, StorageFact::Dense)
+}
 fn shape(rows: usize, cols: usize) -> ShapeFact {
     ShapeFact::Shaped {
         dims: vec![DimensionFact::Known(rows), DimensionFact::Known(cols)],
@@ -110,6 +113,70 @@ fn constructor_format_pair_does_not_corrupt_component_inference() {
     let two_outputs =
         crate::infer_catalog_call(&DURATION_CATALOG_ENTRY, &call(vec![number(shape(2, 3))], 2));
     assert!(!two_outputs.diagnostics.is_empty());
+}
+
+#[test]
+fn logical_constructor_inputs_match_runtime_admission() {
+    for inputs in [
+        vec![logical(shape(2, 3))],
+        vec![
+            logical(shape(1, 2)),
+            number(ShapeFact::Scalar),
+            number(ShapeFact::Scalar),
+        ],
+        vec![
+            logical(ShapeFact::Scalar),
+            number(ShapeFact::Scalar),
+            number(ShapeFact::Scalar),
+        ],
+    ] {
+        let inferred = crate::infer_catalog_call(&DURATION_CATALOG_ENTRY, &call(inputs, 1));
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
+        );
+        assert_eq!(facts::duration_class(&inferred.outputs[0]), Some(true));
+    }
+}
+
+#[test]
+fn constructor_known_shape_conflict_is_diagnosed_without_guessing_unknown_extents() {
+    let conflict = crate::infer_catalog_call(
+        &DURATION_CATALOG_ENTRY,
+        &call(
+            vec![
+                number(shape(2, 1)),
+                number(shape(3, 1)),
+                number(ShapeFact::Scalar),
+            ],
+            1,
+        ),
+    );
+    assert!(conflict
+        .diagnostics
+        .iter()
+        .any(|diagnostic| { diagnostic.code == "RM-DURATION-COMPONENT-SHAPE" }));
+
+    let uncertain = ShapeFact::Shaped {
+        dims: vec![DimensionFact::Unknown, DimensionFact::Known(1)],
+    };
+    let dynamic = crate::infer_catalog_call(
+        &DURATION_CATALOG_ENTRY,
+        &call(
+            vec![
+                number(shape(2, 1)),
+                number(uncertain),
+                number(ShapeFact::Scalar),
+            ],
+            1,
+        ),
+    );
+    assert!(!dynamic
+        .diagnostics
+        .iter()
+        .any(|diagnostic| { diagnostic.code == "RM-DURATION-COMPONENT-SHAPE" }));
+    assert_eq!(dynamic.outputs[0].shape, ShapeFact::Unknown);
 }
 
 #[test]

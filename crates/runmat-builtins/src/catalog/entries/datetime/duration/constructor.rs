@@ -119,13 +119,13 @@ const TESTS: &[BuiltinEvidenceReference] = &[BuiltinEvidenceReference {
 }];
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("duration"), slug: Some("duration"),
-    summary: "Create fixed elapsed-time arrays from numeric components or a three-column matrix.",
-    description: "`duration(H,MI,S)` and `duration(H,MI,S,MS)` construct host duration arrays; `duration(X)` interprets each row of an N-by-3 numeric matrix as hours, minutes, and seconds. The elapsed value is stored as binary64 days. The Format property changes rendering, not arithmetic or comparisons.",
+    summary: "Create fixed elapsed-time arrays from real numeric or logical components or a three-column matrix.",
+    description: "`duration(H,MI,S)` and `duration(H,MI,S,MS)` construct host duration arrays; `duration(X)` interprets each row of an N-by-3 real numeric or logical matrix as hours, minutes, and seconds. Logical values count as zero or one. The elapsed value is stored as binary64 days. The Format property changes rendering, not arithmetic or comparisons.",
     keywords: &["duration", "elapsed time", "time span", "Format", "MATLAB compatibility"],
     related: &["datetime", "calendarDuration", "days", "hours", "string", "char", "disp"],
     sections: &[
         BuiltinDocumentationSection { heading: "Numeric construction", paragraphs: &[
-            "All eight fixed-width integer classes are accepted in numeric forms, with conversion at the binary64 day-count boundary. Scalar components expand to the shape of non-scalars; non-scalars must have identical shape. Empty and N-D shapes are retained. NaN and positive/negative infinity components remain nonfinite elapsed values and render as NaN, Inf, and -Inf.",
+            "All eight fixed-width integer classes and logical values are accepted in component forms, with conversion at the binary64 day-count boundary. Scalar components expand to the shape of non-scalars; non-scalars must have identical shape. Empty and N-D shapes are retained. NaN and positive/negative infinity components remain nonfinite elapsed values and render as NaN, Inf, and -Inf.",
             "An N-by-3 matrix makes an N-by-1 array. The one- and two-component conveniences are RunMat-only forms. Text parsing forms are not implemented. Supported display formats are hh:mm:ss, hh:mm, mm:ss, s, and ss.",
         ]},
         BuiltinDocumentationSection { heading: "Methods and placement", paragraphs: &[
@@ -209,10 +209,12 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
             _ => input.shape.clone(),
         };
     } else {
+        let mut first_non_scalar: Option<&ShapeFact> = None;
         for (index, input) in request.arguments[..count].iter().enumerate() {
             if !matches!(
                 input.kind,
                 ValueKindFact::Unknown
+                    | ValueKindFact::Logical
                     | ValueKindFact::Numeric(runmat_types::NumericFact {
                         domain: NumericDomain::Real,
                         ..
@@ -220,15 +222,34 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
             ) {
                 diagnostics.push(argument_error(
                     "RM-DURATION-INPUT",
-                    "expected real numeric component",
+                    "expected real numeric or logical component",
                     index,
                 ));
             }
             if input.shape.element_count() != Some(1) {
-                if shape == ShapeFact::Scalar {
+                if let Some(first) = first_non_scalar {
+                    let known_shape = |shape: &ShapeFact| {
+                        shape
+                            .known_dims()
+                            .and_then(|dims| dims.into_iter().collect::<Option<Vec<_>>>())
+                    };
+                    if let (Some(left), Some(right)) =
+                        (known_shape(first), known_shape(&input.shape))
+                    {
+                        if left != right {
+                            diagnostics.push(argument_error(
+                                "RM-DURATION-COMPONENT-SHAPE",
+                                "non-scalar duration components must have matching sizes",
+                                index,
+                            ));
+                        }
+                    }
+                    if shape != input.shape {
+                        shape = ShapeFact::Unknown;
+                    }
+                } else {
+                    first_non_scalar = Some(&input.shape);
                     shape = input.shape.clone();
-                } else if shape != input.shape {
-                    shape = ShapeFact::Unknown;
                 }
             }
         }
@@ -237,6 +258,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
         && !matches!(
             request.arguments[0].kind,
             ValueKindFact::Unknown
+                | ValueKindFact::Logical
                 | ValueKindFact::Numeric(runmat_types::NumericFact {
                     domain: NumericDomain::Real,
                     ..
@@ -245,7 +267,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     {
         diagnostics.push(argument_error(
             "RM-DURATION-INPUT",
-            "expected a real numeric three-column matrix",
+            "expected a real numeric or logical three-column matrix",
             0,
         ));
     }
