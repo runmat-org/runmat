@@ -1909,7 +1909,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Read a single scalar at linear index from a device tensor, returning it as f64.
     fn read_scalar(&self, _h: &GpuTensorHandle, _linear_index: usize) -> anyhow::Result<f64> {
-        Err(anyhow::anyhow!("read_scalar not supported by provider"))
+        Err(unsupported_provider_operation(
+            "read_scalar not supported by provider",
+        ))
     }
 
     /// Allocate a zero-initialised tensor with the provided shape on the device.
@@ -2071,8 +2073,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &self,
         _request: &ProviderCrossentropyRequest<'_>,
     ) -> anyhow::Result<ProviderCrossentropyResult> {
-        Err(anyhow::anyhow!(
-            "crossentropy_terms not supported by provider"
+        Err(unsupported_provider_operation(
+            "crossentropy_terms not supported by provider",
         ))
     }
 
