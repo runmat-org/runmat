@@ -20,7 +20,7 @@ use runmat_value::{
     summary = "Test helper for dlarray autodiff.",
     keywords = "test,dlgradient",
     type_resolver(super::any_type),
-    descriptor(crate::builtins::deep_learning::DLFEVAL_DESCRIPTOR),
+    descriptor(runmat_builtins::DLFEVAL_DESCRIPTOR),
     builtin_path = "crate::builtins::deep_learning::tests"
 )]
 async fn deep_learning_square_grad_helper(x: Value) -> crate::BuiltinResult<Value> {
@@ -37,7 +37,7 @@ async fn deep_learning_square_grad_helper(x: Value) -> crate::BuiltinResult<Valu
     summary = "Test helper for dlnetwork autodiff.",
     keywords = "test,dlnetwork,dlgradient",
     type_resolver(super::any_type),
-    descriptor(crate::builtins::deep_learning::DLFEVAL_DESCRIPTOR),
+    descriptor(runmat_builtins::DLFEVAL_DESCRIPTOR),
     builtin_path = "crate::builtins::deep_learning::tests"
 )]
 async fn deep_learning_network_grad_helper(net: Value, x: Value) -> crate::BuiltinResult<Value> {
@@ -3145,6 +3145,26 @@ fn dlfeval_rejects_missing_or_non_callable_function() {
 
     let err = block_on(dlfeval_builtin(vec![Value::String("@plus".into())])).unwrap_err();
     assert!(err.to_string().contains("expected a function handle"));
+}
+
+#[test]
+fn dlfeval_invalid_handle_preflights_before_resident_argument_access() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &[1.0],
+                shape: &[1, 1],
+            })
+            .expect("resident callback argument");
+        provider.reset_telemetry();
+        let error = block_on(dlfeval_builtin(vec![
+            Value::String("plus".into()),
+            Value::GpuTensor(resident),
+        ]))
+        .expect_err("text is not a function handle");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
 }
 
 #[test]

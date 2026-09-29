@@ -119,18 +119,15 @@ fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
 #[runtime_builtin(
     name = "dlfeval",
     execution_stack = "process",
-    category = "deep_learning",
-    summary = "Evaluate a function handle in Deep Learning compatibility context.",
-    keywords = "dlfeval,deep learning,autodiff,function evaluation",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::DLFEVAL_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let Some((function, rest)) = args.split_first() else {
-        return Err(deep_learning_error(
+        return Err(super::errors::descriptor_error(
             "dlfeval",
             "dlfeval: expected a function handle followed by input arguments",
+            &runmat_builtins::DLFEVAL_INVALID_FUNCTION,
         ));
     };
     if !matches!(
@@ -141,9 +138,10 @@ pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             | Value::BoundFunctionHandle { .. }
             | Value::Closure(_)
     ) {
-        return Err(deep_learning_error(
+        return Err(super::errors::descriptor_error(
             "dlfeval",
             format!("dlfeval: expected a function handle, got {function:?}"),
+            &runmat_builtins::DLFEVAL_INVALID_FUNCTION,
         ));
     }
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
