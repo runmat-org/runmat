@@ -88,13 +88,7 @@ pub(super) fn ismissing_resident_integer(
 
 #[runtime_builtin(
     name = "anymissing",
-    category = "missing",
-    summary = "Return true when an input contains at least one missing value.",
-    keywords = "anymissing,missing,NaN,string,table",
-    accel = "cpu",
-    type_resolver(logical_type),
-    descriptor(crate::builtins::missing::ANYMISSING_DESCRIPTOR),
-    integer_capabilities(crate::builtins::missing::ANYMISSING_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn anymissing_builtin(value: Value) -> BuiltinResult<Value> {

@@ -80,11 +80,6 @@ const ONE_VALUE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     inputs: &VALUE_INPUT,
     outputs: &LOGICAL_OUTPUT,
 }];
-const ANYMISSING_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "TF = anymissing(A)",
-    inputs: &VALUE_INPUT,
-    outputs: &LOGICAL_OUTPUT,
-}];
 pub(in crate::builtins::missing::domain) const FILLMISSING_SIGNATURES:
     [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "B = fillmissing(A, method, ...)",
@@ -270,32 +265,6 @@ pub const ISMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1
         overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
         notes: "Returns a same-shaped all-false logical mask. Interactive resident input is a separately gated RunMat extension; admitted resident integers are validated from owner and class metadata without reading the payload and preserve this CPU builtin's host logical output policy.",
     }];
-descriptor!(
-    ANYMISSING_DESCRIPTOR,
-    ANYMISSING_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-
-const ANYMISSING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight built-in integer classes have no standard missing value.",
-    }];
-pub const ANYMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "TF = anymissing(integer_A)",
-        inputs: &ANYMISSING_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer scalars and arrays return logical false because integer classes have no default missing representation; resident inputs gather without floating conversion.",
-    }];
-
 pub(in crate::builtins::missing::domain) fn logical_type(
     _args: &[Type],
     _ctx: &ResolveContext,
