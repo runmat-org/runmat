@@ -38,25 +38,25 @@ impl MeshingCancellationSignal for AttemptCancellation {
 pub(super) struct RemoteMeshingHost {
     kernel: Arc<dyn MeshingStageKernel>,
     limits: crate::NativeMeshingHostLimits,
-    #[cfg(test)]
+    #[cfg(all(test, feature = "occt-native"))]
     held_attempt: Option<HeldWorkloadAttempt>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "occt-native"))]
 #[derive(Clone, Copy)]
 pub(super) enum HeldAttemptUntil {
     UntilWorkerLoss,
     UntilCancellation,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "occt-native"))]
 #[derive(Clone, Copy)]
 pub(super) enum HeldAttemptTarget {
     Analysis(runmat_analysis_fea::execution::AnalysisWorkKind),
     ExactMeshingAdmission,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "occt-native"))]
 #[derive(Clone, Copy)]
 pub(super) struct HeldWorkloadAttempt {
     pub(super) target: HeldAttemptTarget,
@@ -72,12 +72,12 @@ impl RemoteMeshingHost {
         Self {
             kernel,
             limits,
-            #[cfg(test)]
+            #[cfg(all(test, feature = "occt-native"))]
             held_attempt: None,
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "occt-native"))]
     pub(super) fn hold_attempt(mut self, attempt: HeldWorkloadAttempt) -> Self {
         self.held_attempt = Some(attempt);
         self
@@ -93,7 +93,7 @@ pub(super) async fn execute(
     cancellation: Arc<AttemptCancellation>,
     progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
 ) -> ProgramExecutionResponse {
-    #[cfg(test)]
+    #[cfg(all(test, feature = "occt-native"))]
     if let Some(held) = meshing_host.as_ref().and_then(|host| host.held_attempt) {
         let matches_target = match held.target {
             HeldAttemptTarget::Analysis(kind) => {

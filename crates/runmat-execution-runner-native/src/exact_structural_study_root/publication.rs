@@ -54,9 +54,9 @@ mod specialized_publication_import;
 mod tests;
 mod thermal_prefix;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "occt-native"))]
 mod substitution_tests;
-#[cfg(test)]
+#[cfg(all(test, feature = "occt-native"))]
 pub(crate) use substitution_tests::assert_foreign_thermal_substitution_rejected;
 
 use inventory::*;

@@ -7,7 +7,7 @@ mod contract;
 mod publication;
 mod region_resolution;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "occt-native"))]
 pub(crate) use publication::assert_foreign_thermal_substitution_rejected;
 
 pub(crate) use contract::structural_workload_inventory_digest;

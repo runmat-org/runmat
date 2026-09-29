@@ -12,6 +12,10 @@ mod preparation;
 #[cfg(all(test, feature = "occt-native"))]
 mod tests;
 
+#[cfg(test)]
+#[path = "tests/thermal_signals.rs"]
+mod thermal_signals;
+
 pub use geometry::MaterializedFeaGeometry;
 pub use preparation::{checked_fea_artifact_access, PreparedFeaStudy};
 

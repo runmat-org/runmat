@@ -111,7 +111,7 @@ pub(crate) async fn run_remote_meshing_worker_relay_cached(
     .await
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "occt-native"))]
 pub(crate) async fn run_remote_meshing_worker_relay_with_held_attempt(
     request: RemoteWorkerRelayRequest<'_>,
     kernel: Arc<dyn MeshingStageKernel>,

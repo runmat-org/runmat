@@ -965,7 +965,7 @@ impl RunMatSession {
                 project_symbol_aliases,
             )
         };
-        let (lowering, mut mir, mut analysis, mut bytecode) = {
+        let (lowering, mut mir, mut bytecode) = {
             let _span = info_span!("runtime.lower").entered();
             // WASM registrations are explicit rather than inventory-backed. Install
             // them before analysis so the retained catalog revision is identical to
@@ -1008,9 +1008,6 @@ impl RunMatSession {
                     .mir
                     .expect("canonical frontend returned no MIR without an error"),
                 frontend
-                    .facts
-                    .expect("canonical frontend returned no facts without an error"),
-                frontend
                     .bytecode
                     .expect("canonical frontend returned no bytecode without an error"),
             )
@@ -1029,11 +1026,50 @@ impl RunMatSession {
             )?);
         }
         bytecode.source_id = Some(source_id);
-        for function in bytecode.function_registry.functions.values_mut() {
-            function.source_id = companion_function_source_ids
-                .get(&function.display_name)
-                .copied()
-                .or(Some(source_id));
+        // Frontend source IDs are compilation-local. Bind both retained MIR and
+        // VM functions to the session source pool before source-dependent analysis.
+        // Nested/anonymous functions inherit their lexical owner's source, not
+        // the primary file (nor a same-named companion's source).
+        let mut function_source_ids = HashMap::new();
+        for id in mir.functions.keys() {
+            let mut owner = *id;
+            let mut visited = HashSet::new();
+            let source = loop {
+                let metadata = mir
+                    .functions
+                    .get(&owner)
+                    .filter(|_| visited.insert(owner))
+                    .ok_or_else(|| {
+                        RunError::Runtime(
+                            build_runtime_error("invalid lexical function source ownership")
+                                .with_identifier("RunMat:ExecutableSourceIdentity")
+                                .build(),
+                        )
+                    })?;
+                if let Some(parent) = metadata.parent {
+                    owner = parent;
+                } else {
+                    break companion_function_source_ids
+                        .get(&metadata.name.0)
+                        .copied()
+                        .unwrap_or(source_id);
+                }
+            };
+            function_source_ids.insert(*id, source);
+        }
+        for (id, metadata) in &mut mir.functions {
+            metadata.source = u32::try_from(function_source_ids[id].0)
+                .map(runmat_types::ProgramSourceId)
+                .map_err(|_| {
+                    RunError::Runtime(
+                        build_runtime_error("function source identity exceeds the portable schema")
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build(),
+                    )
+                })?;
+        }
+        for (id, function) in &mut bytecode.function_registry.functions {
+            function.source_id = function_source_ids.get(id).copied();
         }
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
         let (
@@ -1052,7 +1088,6 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
-            analysis = runmat_mir::analysis::analyze_assembly(&mir);
             if let Some(layout) = &mut bytecode.layout {
                 runmat_vm::remap_layout_function_ids(layout, &function_id_remap).map_err(
                     |error| {
@@ -1067,6 +1102,7 @@ impl RunMatSession {
                 )?;
             }
         }
+        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
         Ok(PreparedExecution {
             ast,
             lowering,
@@ -1644,6 +1680,77 @@ fn remap_semantic_function_end_expr(
 mod source_discovery_tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn successive_primary_functions_and_nested_companions_keep_source_ownership() {
+        let _provider_guard = runmat_filesystem::provider_override_lock();
+        let temp = tempfile::TempDir::new().unwrap();
+        fs::write(
+            temp.path().join("helper.m"),
+            "function y = helper(x)\ny = inner(x);\nfunction z = inner(v)\nz = v + 1;\nend\nend\n",
+        )
+        .unwrap();
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        for name in ["alpha", "beta"] {
+            let path = temp.path().join(format!("{name}.m"));
+            let text =
+                format!("function y = {name}(x)\narguments\nx double\nend\ny = helper(x);\nend\n");
+            fs::write(&path, &text).unwrap();
+            let unit = futures::executor::block_on(session.compile_executable_unit(
+                crate::ExecutableSource::new("source-attribution", path.to_str().unwrap(), text),
+                None,
+            ))
+            .unwrap();
+            unit.primary_function_interface(name).unwrap();
+            assert!(
+                unit.primary_function_interface("helper").is_err(),
+                "companion must not qualify as a primary-file function"
+            );
+            let primary = unit
+                .source_map()
+                .entries()
+                .iter()
+                .find(|entry| entry.relative_path == path.to_str().unwrap())
+                .unwrap();
+            let helper = unit
+                .mir()
+                .functions
+                .values()
+                .find(|metadata| metadata.name.0 == "helper")
+                .unwrap();
+            assert_ne!(helper.source.0 as usize, primary.source_id);
+            let helper_source = unit
+                .source_map()
+                .entries()
+                .iter()
+                .find(|entry| entry.source_id == helper.source.0 as usize)
+                .unwrap();
+            assert!(helper_source.relative_path.ends_with("helper.m"));
+            assert!(unit
+                .mir()
+                .functions
+                .values()
+                .any(|metadata| metadata.parent.is_some()));
+            for (id, metadata) in &unit.mir().functions {
+                if let Some(parent) = metadata.parent {
+                    assert_eq!(metadata.source, unit.mir().functions[&parent].source);
+                }
+                if metadata.name.0 == name {
+                    assert_eq!(metadata.source.0 as usize, primary.source_id);
+                }
+                if let Some(function) = unit.bytecode().function_registry.get(*id) {
+                    assert_eq!(function.source_id.unwrap().0, metadata.source.0 as usize);
+                }
+            }
+            for region in &unit.analysis().regions {
+                let function = runmat_hir::FunctionId(region.contract.id.function.0 as usize);
+                assert_eq!(
+                    region.contract.source,
+                    unit.mir().functions[&function].source
+                );
+            }
+        }
+    }
 
     fn discovered_function_names(discovery: &CompanionSourceDiscovery) -> HashSet<String> {
         discovery
