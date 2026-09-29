@@ -164,12 +164,16 @@ pub(in crate::builtins::table) fn is_tabular_class(object: &ObjectInstance) -> b
 }
 
 pub fn table_variables(object: &ObjectInstance) -> BuiltinResult<StructValue> {
+    Ok(table_variables_ref(object)?.cloned().unwrap_or_default())
+}
+
+pub(crate) fn table_variables_ref(object: &ObjectInstance) -> BuiltinResult<Option<&StructValue>> {
     match object.properties.get(TABLE_VARIABLES_FIELD) {
-        Some(Value::Struct(st)) => Ok(st.clone()),
+        Some(Value::Struct(st)) => Ok(Some(st)),
         Some(other) => Err(invalid_variable(format!(
             "table: invalid internal variable storage {other:?}"
         ))),
-        None => Ok(StructValue::new()),
+        None => Ok(None),
     }
 }
 

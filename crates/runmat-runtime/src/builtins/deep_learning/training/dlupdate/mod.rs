@@ -8,6 +8,7 @@ use runmat_value::{CellArray, ObjectInstance, StructArray, StructValue, Value};
 mod callback;
 mod containers;
 mod learnables;
+mod preflight;
 
 use callback::*;
 use containers::*;
@@ -44,6 +45,7 @@ pub(in crate::builtins::deep_learning) async fn dlupdate_builtin(
 
     let trees = rest.to_vec();
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
+    preflight::matching_trees(rest)?;
     let outputs = dlupdate_node(function, &trees, requested_outputs, 0).await?;
     if requested_outputs == 0 {
         Ok(Value::OutputList(Vec::new()))
@@ -141,7 +143,10 @@ fn is_leaf_object(object: &ObjectInstance) -> bool {
 fn is_tree_container(value: &Value) -> bool {
     match value {
         Value::Struct(_) | Value::StructArray(_) | Value::Cell(_) => true,
-        Value::Object(object) => crate::builtins::table::is_tabular_object(object),
+        Value::Object(object) => {
+            crate::builtins::table::is_tabular_object(object)
+                || model::is_deep_learning_network_object(object)
+        }
         _ => false,
     }
 }

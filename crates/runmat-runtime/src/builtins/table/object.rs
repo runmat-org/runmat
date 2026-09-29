@@ -23,6 +23,7 @@ pub(crate) use rows::{select_rows, selected_row_names, value_row_count};
 pub(super) use selectors::one_based_to_zero;
 pub(crate) use selectors::parse_variable_selector_for_object;
 pub(crate) use structure::table_from_columns_like;
+pub(crate) use structure::table_variables_ref;
 pub(super) use structure::{
     into_table_object, into_timetable_object, is_tabular_class, table_from_columns_with_class,
     table_from_columns_with_properties, table_object,
