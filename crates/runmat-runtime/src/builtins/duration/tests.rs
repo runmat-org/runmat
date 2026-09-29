@@ -75,6 +75,64 @@ fn duration_builds_from_components() {
 }
 
 #[test]
+fn typed_duration_diagnostics_preserve_messages_and_context() {
+    let invalid = futures::executor::block_on(duration_builtin(vec![Value::String("bad".into())]))
+        .expect_err("text is not a numeric duration component");
+    assert_eq!(
+        invalid.identifier(),
+        Some(DurationErrorKind::InvalidArgument.identifier())
+    );
+    assert!(invalid.message().contains("expected a numeric"));
+
+    let invalid_format = futures::executor::block_on(duration_builtin(vec![
+        Value::Num(1.0),
+        Value::Num(2.0),
+        Value::Num(3.0),
+        Value::String("Format".into()),
+        Value::String("bogus".into()),
+    ]))
+    .expect_err("unsupported Format value");
+    assert_eq!(
+        invalid_format.identifier(),
+        Some(DurationErrorKind::InvalidFormat.identifier())
+    );
+    assert!(invalid_format
+        .message()
+        .contains("unsupported Format value"));
+
+    let lhs = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let rhs = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+    let mismatch = futures::executor::block_on(duration_builtin(vec![lhs, rhs, Value::Num(0.0)]))
+        .expect_err("incompatible components");
+    assert_eq!(
+        mismatch.identifier(),
+        Some(DurationErrorKind::ShapeMismatch.identifier())
+    );
+    assert!(mismatch.message().contains("matching sizes"));
+}
+
+#[test]
+fn delegated_duration_failure_retains_identifier_cause_and_retry_policy() {
+    let source = crate::build_runtime_error("index must be positive")
+        .with_identifier("RunMat:index:InvalidIndex")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build();
+    let wrapped = duration_error_from(
+        DurationErrorKind::InvalidIndex,
+        "duration.subsref: ",
+        source,
+    );
+    assert_eq!(wrapped.identifier(), Some("RunMat:index:InvalidIndex"));
+    assert_eq!(
+        wrapped.message(),
+        "duration.subsref: index must be positive"
+    );
+    assert_eq!(wrapped.context.builtin.as_deref(), Some("duration"));
+    assert_eq!(wrapped.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    assert!(wrapped.source.is_some());
+}
+
+#[test]
 fn duration_formats_arrays() {
     let hours = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
     let minutes = Value::Tensor(Tensor::new(vec![15.0, 45.0], vec![1, 2]).unwrap());

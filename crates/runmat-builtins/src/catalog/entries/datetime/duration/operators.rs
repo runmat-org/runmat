@@ -33,7 +33,7 @@ pub const DURATION_BINARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     }],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[],
+    errors: errors::OPERATOR_ERRORS,
 };
 const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [constructor::DURATION_GPU_INPUT_EXTENSION];
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Duration operators", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/duration/builtins.rs") };

@@ -21,7 +21,7 @@ macro_rules! descriptor {
             }],
             output_mode: BuiltinOutputMode::Fixed,
             completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &[],
+            errors: errors::UNIT_ERRORS,
         };
     };
 }

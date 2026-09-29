@@ -1,5 +1,6 @@
 mod builtins;
 mod display;
+mod error;
 mod metadata;
 mod model;
 mod prelude;
@@ -7,6 +8,7 @@ mod prelude;
 pub use display::{
     duration_char_array, duration_display_text, duration_string_array, duration_summary,
 };
+use error::*;
 pub(crate) use metadata::DEFAULT_DURATION_FORMAT;
 use metadata::*;
 pub use model::is_duration_object;
@@ -16,6 +18,7 @@ pub(crate) use model::{
     duration_tensor_from_duration_value,
 };
 use prelude::*;
+use runmat_builtins::DurationErrorKind;
 pub use runmat_builtins::{
     DURATION_BINARY_DESCRIPTOR, DURATION_DESCRIPTOR, DURATION_INTEGER_CAPABILITIES,
     DURATION_SUBSASGN_DESCRIPTOR, DURATION_SUBSREF_DESCRIPTOR,

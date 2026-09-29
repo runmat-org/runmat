@@ -82,3 +82,24 @@ fn compiled_duration_short_form_reports_compatibility_identifier() {
         Some("RunMat:compatibility:DurationShortComponentFormExtension")
     );
 }
+
+#[test]
+fn compiled_duration_rejections_report_canonical_identifiers() {
+    for (source, identifier) in [
+        (
+            "elapsed = duration('bad');",
+            "RunMat:duration:InvalidArgument",
+        ),
+        (
+            "elapsed = duration(1,2,3,'Format','bogus');",
+            "RunMat:duration:InvalidFormat",
+        ),
+        (
+            "elapsed = duration([1 2],[1 2 3],0);",
+            "RunMat:duration:ShapeMismatch",
+        ),
+    ] {
+        let error = execute_source(source).expect_err("invalid duration source");
+        assert_eq!(error.identifier(), Some(identifier), "{source}: {error}");
+    }
+}

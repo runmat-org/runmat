@@ -106,7 +106,7 @@ pub const DURATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     ],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+    errors: errors::CONSTRUCTOR_ERRORS,
 };
 
 const INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {

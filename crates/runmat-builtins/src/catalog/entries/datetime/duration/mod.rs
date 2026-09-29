@@ -4,6 +4,7 @@
 
 mod constructor;
 mod contract;
+mod errors;
 mod facts;
 mod indexing;
 mod operators;
@@ -14,6 +15,7 @@ mod tests;
 
 use crate::*;
 use contract::entry;
+pub use errors::DurationErrorKind;
 
 pub use constructor::{
     DURATION_CATALOG_ENTRY, DURATION_DESCRIPTOR, DURATION_EXTENSIONS, DURATION_GPU_INPUT_EXTENSION,

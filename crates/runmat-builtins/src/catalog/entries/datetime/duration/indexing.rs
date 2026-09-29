@@ -41,7 +41,7 @@ pub const DURATION_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     }],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[],
+    errors: errors::SUBREF_ERRORS,
 };
 pub const DURATION_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -51,7 +51,7 @@ pub const DURATION_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     }],
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[],
+    errors: errors::SUBSASGN_ERRORS,
 };
 const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink { label: "Duration indexing", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/duration/builtins.rs") };
 const TESTS: &[BuiltinEvidenceReference] = &[BuiltinEvidenceReference {

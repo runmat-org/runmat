@@ -60,9 +60,10 @@ pub(super) fn format_duration_value(days: f64, format: &str) -> BuiltinResult<St
             format!("{sign}{text}")
         }
         other => {
-            return Err(duration_error(format!(
-                "duration: unsupported Format value '{other}'"
-            )))
+            return Err(duration_error(
+                DurationErrorKind::InvalidFormat,
+                format!("duration: unsupported Format value '{other}'"),
+            ))
         }
     };
 
@@ -84,7 +85,7 @@ pub fn duration_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
         strings.push(format_duration_value(*value, &format)?);
     }
     let array = StringArray::new(strings, days.shape.clone())
-        .map_err(|err| duration_error(format!("duration: {err}")))?;
+        .map_err(|err| duration_error(DurationErrorKind::Internal, format!("duration: {err}")))?;
     Ok(Some(array))
 }
 
@@ -163,6 +164,6 @@ pub fn duration_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
         }
     }
     let out = CharArray::new(data, rows, width)
-        .map_err(|err| duration_error(format!("duration: {err}")))?;
+        .map_err(|err| duration_error(DurationErrorKind::Internal, format!("duration: {err}")))?;
     Ok(Some(out))
 }

@@ -58,6 +58,99 @@ fn duration_inventory_is_exact_and_all_examples_have_assertions() {
 }
 
 #[test]
+fn duration_diagnostics_match_each_public_operation_and_predicate_is_total() {
+    use runmat_types::EffectKind;
+
+    let expected = [
+        (
+            "duration",
+            &[
+                DurationErrorKind::InvalidArgument,
+                DurationErrorKind::InvalidFormat,
+                DurationErrorKind::ShapeMismatch,
+                DurationErrorKind::Internal,
+            ][..],
+        ),
+        (
+            "days",
+            &[
+                DurationErrorKind::InvalidArgument,
+                DurationErrorKind::InvalidObject,
+                DurationErrorKind::OutOfRange,
+                DurationErrorKind::Internal,
+            ][..],
+        ),
+        (
+            "duration.subsref",
+            &[
+                DurationErrorKind::InvalidArgument,
+                DurationErrorKind::InvalidIndex,
+                DurationErrorKind::InvalidObject,
+                DurationErrorKind::Internal,
+            ][..],
+        ),
+        (
+            "duration.subsasgn",
+            &[
+                DurationErrorKind::InvalidArgument,
+                DurationErrorKind::InvalidFormat,
+                DurationErrorKind::InvalidIndex,
+            ][..],
+        ),
+        (
+            "duration.plus",
+            &[
+                DurationErrorKind::InvalidArgument,
+                DurationErrorKind::InvalidObject,
+                DurationErrorKind::ShapeMismatch,
+                DurationErrorKind::Internal,
+            ][..],
+        ),
+    ];
+    for (name, kinds) in expected {
+        let entry = ENTRIES
+            .iter()
+            .find(|entry| entry.identity.name == name)
+            .unwrap();
+        let identifiers = entry
+            .descriptor
+            .errors
+            .iter()
+            .map(|error| error.identifier.unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            identifiers,
+            kinds
+                .iter()
+                .map(|kind| kind.identifier())
+                .collect::<Vec<_>>(),
+            "{name}"
+        );
+        assert!(
+            entry.contract.effects.contains(&EffectKind::MayThrow),
+            "{name}"
+        );
+    }
+    for entry in ENTRIES {
+        if entry.identity.name == "isduration" {
+            assert!(entry.descriptor.errors.is_empty());
+            assert!(!entry.contract.effects.contains(&EffectKind::MayThrow));
+        } else {
+            assert!(
+                !entry.descriptor.errors.is_empty(),
+                "{}",
+                entry.identity.name
+            );
+            assert!(
+                entry.contract.effects.contains(&EffectKind::MayThrow),
+                "{}",
+                entry.identity.name
+            );
+        }
+    }
+}
+
+#[test]
 fn constructor_documents_short_form_and_retains_visible_legacy_examples() {
     let short_form = DURATION_DESCRIPTOR
         .signatures

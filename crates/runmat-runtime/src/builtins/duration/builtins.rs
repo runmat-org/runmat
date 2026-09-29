@@ -7,17 +7,23 @@ pub(super) async fn compare_duration(
     cmp: impl Fn(f64, f64) -> bool,
 ) -> BuiltinResult<Value> {
     if !is_duration_object(&lhs) && !is_duration_object(&rhs) {
-        return Err(duration_error(format!(
-            "duration.{op}: at least one operand must be a duration"
-        )));
+        return Err(duration_error(
+            DurationErrorKind::InvalidArgument,
+            format!("duration.{op}: at least one operand must be a duration"),
+        ));
     }
     validate_duration_operand(&lhs, true)?;
     validate_duration_operand(&rhs, true)?;
     preflight_operand_shapes(&lhs, &rhs, op)?;
     let lhs_days = duration_days_operand(&lhs, true).await?;
     let rhs_days = duration_days_operand(&rhs, true).await?;
-    let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_days)
-        .map_err(|err| duration_error(format!("duration.{op}: {}", err.message())))?;
+    let (left, right, shape) = broadcast_duration_days(&lhs_days, &rhs_days).map_err(|err| {
+        duration_error_from(
+            DurationErrorKind::ShapeMismatch,
+            &format!("duration.{op}: "),
+            err,
+        )
+    })?;
     let out = left
         .iter()
         .zip(right.iter())
@@ -27,8 +33,9 @@ pub(super) async fn compare_duration(
         Ok(Value::Bool(out[0] != 0))
     } else {
         Ok(Value::LogicalArray(
-            runmat_value::LogicalArray::new(out, shape)
-                .map_err(|err| duration_error(format!("duration: {err}")))?,
+            runmat_value::LogicalArray::new(out, shape).map_err(|err| {
+                duration_error(DurationErrorKind::Internal, format!("duration: {err}"))
+            })?,
         ))
     }
 }
@@ -39,6 +46,7 @@ pub(super) async fn duration_indexing(
 ) -> BuiltinResult<Value> {
     let Value::Object(object) = obj else {
         return Err(duration_error(
+            DurationErrorKind::InvalidArgument,
             "duration.subsref: receiver must be a duration object",
         ));
     };
@@ -47,7 +55,10 @@ pub(super) async fn duration_indexing(
 
     let crate::object::indexing::ObjectIndexSelector::IndexValues { components } = step.selector()
     else {
-        return Err(duration_error("duration.subsref: invalid index selector"));
+        return Err(duration_error(
+            DurationErrorKind::InvalidIndex,
+            "duration.subsref: invalid index selector",
+        ));
     };
     if components.is_empty() {
         return duration_object_from_days_tensor(days, format);
@@ -65,11 +76,17 @@ pub(super) async fn duration_indexing(
     let selectors =
         crate::indexing::selectors::build_component_selectors(components, &days.shape, false)
             .await
-            .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
+            .map_err(|err| {
+                duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
+            })?;
     let plan = crate::indexing::plan::build_index_plan(&selectors, components.len(), &days.shape)
-        .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
-    let indexed = crate::indexing::value::read_with_plan(Value::Tensor(days), &plan)
-        .map_err(|err| duration_error(format!("duration.subsref: {}", err.message())))?;
+        .map_err(|err| {
+        duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
+    })?;
+    let indexed =
+        crate::indexing::value::read_with_plan(Value::Tensor(days), &plan).map_err(|err| {
+            duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
+        })?;
     let indexed_days = tensor_from_numeric(indexed, "duration index")?;
     duration_object_from_days_tensor(indexed_days, format)
 }
@@ -87,6 +104,7 @@ pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
         || !raw_positional.iter().all(is_numeric_duration_input)
     {
         return Err(duration_error(
+            DurationErrorKind::InvalidArgument,
             "duration: expected a numeric three-column matrix or H/MI/S[/MS] components",
         ));
     }
@@ -102,13 +120,19 @@ pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             let count = shape
                 .iter()
                 .try_fold(1usize, |count, dim| count.checked_mul(*dim))
-                .ok_or_else(|| duration_error("duration: component shape is too large"))?;
+                .ok_or_else(|| {
+                    duration_error(
+                        DurationErrorKind::ShapeMismatch,
+                        "duration: component shape is too large",
+                    )
+                })?;
             if count == 1 {
                 continue;
             }
             if let Some(existing) = component_shape {
                 if existing != shape {
                     return Err(duration_error(
+                        DurationErrorKind::ShapeMismatch,
                         "duration: non-scalar component inputs must have matching sizes",
                     ));
                 }
@@ -146,6 +170,7 @@ pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             build_from_components(positional, format)
         }
         _ => Err(duration_error(
+            DurationErrorKind::InvalidArgument,
             "duration: unsupported argument pattern; use X or H/MI/S/MS numeric inputs",
         )),
     }
@@ -233,23 +258,27 @@ pub(super) async fn duration_read_step(
         crate::object::indexing::ObjectIndexKind::Member => {
             let Value::Object(object) = obj else {
                 return Err(duration_error(
+                    DurationErrorKind::InvalidArgument,
                     "duration.subsref: receiver must be a duration object",
                 ));
             };
             if !object.is_class(DURATION_CLASS) {
                 return Err(duration_error(
+                    DurationErrorKind::InvalidArgument,
                     "duration.subsref: receiver must be a duration object",
                 ));
             }
             let field = scalar_text(&step.selector_value()?, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => Ok(Value::String(format_for_object(&object))),
-                _ => Err(duration_error(format!(
-                    "duration.subsref: unsupported duration property '{field}'"
-                ))),
+                _ => Err(duration_error(
+                    DurationErrorKind::InvalidIndex,
+                    format!("duration.subsref: unsupported duration property '{field}'"),
+                )),
             }
         }
         crate::object::indexing::ObjectIndexKind::Brace => Err(duration_error(
+            DurationErrorKind::InvalidIndex,
             "duration.subsref: brace indexing is not supported",
         )),
     }
@@ -272,9 +301,12 @@ pub(super) async fn duration_subsasgn(
         vec![rhs],
         duration_read_step,
         |obj, step, mut values| async move {
-            let rhs = values
-                .pop()
-                .ok_or_else(|| duration_error("duration.subsasgn: assignment value is missing"))?;
+            let rhs = values.pop().ok_or_else(|| {
+                duration_error(
+                    DurationErrorKind::InvalidArgument,
+                    "duration.subsasgn: assignment value is missing",
+                )
+            })?;
             duration_write_step(obj, step, rhs).await
         },
         None,
@@ -290,11 +322,13 @@ pub(super) async fn duration_write_step(
     let payload = step.selector_value()?;
     let Value::Object(mut object) = obj else {
         return Err(duration_error(
+            DurationErrorKind::InvalidArgument,
             "duration.subsasgn: receiver must be a duration object",
         ));
     };
     if !object.is_class(DURATION_CLASS) {
         return Err(duration_error(
+            DurationErrorKind::InvalidArgument,
             "duration.subsasgn: receiver must be a duration object",
         ));
     }
@@ -310,12 +344,14 @@ pub(super) async fn duration_write_step(
                         .insert(FORMAT_FIELD.to_string(), Value::String(text));
                     Ok(Value::Object(object))
                 }
-                _ => Err(duration_error(format!(
-                    "duration.subsasgn: unsupported duration property '{field}'"
-                ))),
+                _ => Err(duration_error(
+                    DurationErrorKind::InvalidIndex,
+                    format!("duration.subsasgn: unsupported duration property '{field}'"),
+                )),
             }
         }
         _ => Err(duration_error(
+            DurationErrorKind::InvalidIndex,
             "duration.subsasgn: only member assignment is supported",
         )),
     }
@@ -399,8 +435,8 @@ pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
             .zip(right.iter())
             .map(|(a, b)| a + b)
             .collect::<Vec<_>>();
-        let tensor =
-            Tensor::new(serials, shape).map_err(|err| duration_error(format!("plus: {err}")))?;
+        let tensor = Tensor::new(serials, shape)
+            .map_err(|err| duration_error(DurationErrorKind::Internal, format!("plus: {err}")))?;
         return crate::builtins::datetime::datetime_object_from_serial_tensor(
             tensor,
             crate::builtins::datetime::datetime_format_from_value(&rhs),

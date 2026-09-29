@@ -1,11 +1,5 @@
 use super::*;
 
-pub(super) fn duration_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
-
 pub(super) fn ensure_duration_class_registered() {
     DURATION_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
@@ -65,11 +59,9 @@ pub fn is_duration_object(value: &Value) -> bool {
 pub(super) async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for arg in args {
-        out.push(
-            gather_if_needed_async(arg)
-                .await
-                .map_err(|err| duration_error(format!("duration: {}", err.message())))?,
-        );
+        out.push(gather_if_needed_async(arg).await.map_err(|err| {
+            duration_error_from(DurationErrorKind::InvalidArgument, "duration: ", err)
+        })?);
     }
     Ok(out)
 }
@@ -85,8 +77,14 @@ pub(super) fn validate_duration_operand(value: &Value, numeric_allowed: bool) ->
                 {
                     Ok(())
                 }
-                Some(_) => Err(duration_error("duration: invalid internal day storage")),
-                None => Err(duration_error("duration: missing internal day storage")),
+                Some(_) => Err(duration_error(
+                    DurationErrorKind::InvalidObject,
+                    "duration: invalid internal day storage",
+                )),
+                None => Err(duration_error(
+                    DurationErrorKind::InvalidObject,
+                    "duration: missing internal day storage",
+                )),
             }
         }
         Value::Num(_)
@@ -105,6 +103,7 @@ pub(super) fn validate_duration_operand(value: &Value, numeric_allowed: bool) ->
             Ok(())
         }
         _ => Err(duration_error(
+            DurationErrorKind::InvalidArgument,
             "duration: expected a duration or real numeric value",
         )),
     }
@@ -117,7 +116,10 @@ fn operand_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
                 Some(Value::Tensor(tensor)) => Ok(tensor.shape.clone()),
                 Some(Value::Num(_)) => Ok(vec![1, 1]),
                 Some(Value::GpuTensor(handle)) => Ok(handle.shape().to_vec()),
-                _ => Err(duration_error("duration: invalid internal day storage")),
+                _ => Err(duration_error(
+                    DurationErrorKind::InvalidObject,
+                    "duration: invalid internal day storage",
+                )),
             }
         }
         Value::Tensor(tensor) => Ok(tensor.shape.clone()),
@@ -134,8 +136,12 @@ pub(super) fn preflight_operand_shapes(lhs: &Value, rhs: &Value, op: &str) -> Bu
     } else {
         operand_shape(rhs)?
     };
-    crate::builtins::common::broadcast::BroadcastPlan::new(&left, &right)
-        .map_err(|err| duration_error(format!("duration.{op}: {err}")))?;
+    crate::builtins::common::broadcast::BroadcastPlan::new(&left, &right).map_err(|err| {
+        duration_error(
+            DurationErrorKind::ShapeMismatch,
+            format!("duration.{op}: {err}"),
+        )
+    })?;
     Ok(())
 }
 
@@ -158,7 +164,10 @@ pub(super) async fn duration_days_operand(
                 let gathered = gather_if_needed_async(days).await?;
                 match gathered {
                     Value::Tensor(tensor) => Ok(tensor),
-                    _ => Err(duration_error("duration: invalid gathered day storage")),
+                    _ => Err(duration_error(
+                        DurationErrorKind::InvalidObject,
+                        "duration: invalid gathered day storage",
+                    )),
                 }
             } else {
                 duration_tensor_from_duration_value(value)
@@ -181,7 +190,7 @@ pub(super) fn broadcast_duration_days(
     rhs: &Tensor,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
     let plan = crate::builtins::common::broadcast::BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(duration_error)?;
+        .map_err(|err| duration_error(DurationErrorKind::ShapeMismatch, err))?;
     let lhs_values = tensor::tensor_values_f64_cow(lhs);
     let rhs_values = tensor::tensor_values_f64_cow(rhs);
     let mut left = Vec::with_capacity(plan.len());
@@ -198,9 +207,10 @@ pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String>
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        _ => Err(duration_error(format!(
-            "duration: {context} must be a string scalar or character vector"
-        ))),
+        _ => Err(duration_error(
+            DurationErrorKind::InvalidArgument,
+            format!("duration: {context} must be a string scalar or character vector"),
+        )),
     }
 }
 
@@ -208,9 +218,10 @@ pub(super) fn validate_duration_format(format: &str) -> BuiltinResult<()> {
     if matches!(format, "hh:mm:ss" | "hh:mm" | "mm:ss" | "s" | "ss") {
         Ok(())
     } else {
-        Err(duration_error(format!(
-            "duration: unsupported Format value '{format}'"
-        )))
+        Err(duration_error(
+            DurationErrorKind::InvalidFormat,
+            format!("duration: unsupported Format value '{format}'"),
+        ))
     }
 }
 
@@ -236,8 +247,12 @@ pub(super) fn parse_trailing_format(args: &[Value]) -> BuiltinResult<(usize, Opt
 }
 
 pub(super) fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<Tensor> {
-    tensor::value_into_tensor_for(context, value)
-        .map_err(|message| duration_error(format!("duration: {message}")))
+    tensor::value_into_tensor_for(context, value).map_err(|message| {
+        duration_error(
+            DurationErrorKind::InvalidArgument,
+            format!("duration: {message}"),
+        )
+    })
 }
 
 pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
@@ -248,7 +263,8 @@ pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Ten
         tensor.shape.clone()
     };
     let values = tensor::tensor_into_values_f64(tensor);
-    Tensor::new(values, shape).map_err(|err| duration_error(format!("duration: {err}")))
+    Tensor::new(values, shape)
+        .map_err(|err| duration_error(DurationErrorKind::Internal, format!("duration: {err}")))
 }
 
 pub(super) fn format_for_object(obj: &ObjectInstance) -> String {
@@ -265,15 +281,23 @@ pub(crate) fn duration_tensor_from_duration_value(value: &Value) -> BuiltinResul
         Value::Object(obj) if obj.is_class(DURATION_CLASS) => {
             match obj.properties.get(DAYS_FIELD) {
                 Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
-                Some(Value::Num(value)) => Tensor::new(vec![*value], vec![1, 1])
-                    .map_err(|err| duration_error(format!("duration: {err}"))),
-                Some(other) => Err(duration_error(format!(
-                    "duration: invalid internal day storage {other:?}"
-                ))),
-                None => Err(duration_error("duration: missing internal day storage")),
+                Some(Value::Num(value)) => Tensor::new(vec![*value], vec![1, 1]).map_err(|err| {
+                    duration_error(DurationErrorKind::Internal, format!("duration: {err}"))
+                }),
+                Some(other) => Err(duration_error(
+                    DurationErrorKind::InvalidObject,
+                    format!("duration: invalid internal day storage {other:?}"),
+                )),
+                None => Err(duration_error(
+                    DurationErrorKind::InvalidObject,
+                    "duration: missing internal day storage",
+                )),
             }
         }
-        _ => Err(duration_error("duration: expected a duration value")),
+        _ => Err(duration_error(
+            DurationErrorKind::InvalidArgument,
+            "duration: expected a duration value",
+        )),
     }
 }
 
@@ -304,8 +328,8 @@ pub(super) fn duration_object_from_days(
     shape: Vec<usize>,
     format: impl Into<String>,
 ) -> BuiltinResult<Value> {
-    let tensor =
-        Tensor::new(days, shape).map_err(|err| duration_error(format!("duration: {err}")))?;
+    let tensor = Tensor::new(days, shape)
+        .map_err(|err| duration_error(DurationErrorKind::Internal, format!("duration: {err}")))?;
     duration_object_from_days_tensor(tensor, format)
 }
 
@@ -325,8 +349,9 @@ pub(super) async fn duration_unit_value(
             Ok(Value::Num(data[0]))
         } else {
             Ok(Value::Tensor(
-                Tensor::new(data, days.shape.clone())
-                    .map_err(|err| duration_error(format!("{unit_name}: {err}")))?,
+                Tensor::new(data, days.shape.clone()).map_err(|err| {
+                    duration_error(DurationErrorKind::Internal, format!("{unit_name}: {err}"))
+                })?,
             ))
         };
     }
@@ -338,9 +363,10 @@ pub(super) async fn duration_unit_value(
         .map(|value| {
             let days = value * days_per_unit;
             if value.is_finite() && !days.is_finite() {
-                Err(duration_error(format!(
-                    "{unit_name}: resulting duration is outside supported range"
-                )))
+                Err(duration_error(
+                    DurationErrorKind::OutOfRange,
+                    format!("{unit_name}: resulting duration is outside supported range"),
+                ))
             } else {
                 Ok(days)
             }
@@ -362,6 +388,7 @@ pub(super) fn broadcast_component_data(
             if let Some(existing) = &target_shape {
                 if existing != &shape {
                     return Err(duration_error(
+                        DurationErrorKind::ShapeMismatch,
                         "duration: non-scalar component inputs must have matching sizes",
                     ));
                 }
@@ -383,10 +410,13 @@ pub(super) fn broadcast_component_data(
         } else if values.len() == target_len && array.shape == target_shape {
             broadcasted.push(values.to_vec());
         } else {
-            return Err(duration_error(format!(
-                "duration: {} input size does not match the other components",
-                labels[idx]
-            )));
+            return Err(duration_error(
+                DurationErrorKind::ShapeMismatch,
+                format!(
+                    "duration: {} input size does not match the other components",
+                    labels[idx]
+                ),
+            ));
         }
     }
 
@@ -448,6 +478,7 @@ pub(super) fn build_from_matrix(value: Value, format: Option<String>) -> Builtin
     let matrix = component_tensor(value, "X")?;
     if matrix.shape.len() > 2 || matrix.cols() != 3 {
         return Err(duration_error(
+            DurationErrorKind::InvalidArgument,
             "duration: X must be a numeric matrix with exactly three columns",
         ));
     }
