@@ -146,6 +146,7 @@ pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> Builtin
             "rmmissing",
         )?;
     }
+    let options = RemoveOptions::parse(&rest)?;
     let source = match &value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -159,7 +160,6 @@ pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> Builtin
     } else {
         value
     };
-    let options = RemoveOptions::parse(&rest)?;
     let (result, removed) = remove_missing_value(value, options)?;
     let (result, removed) = if let Some(source) = source.as_ref() {
         (
@@ -208,10 +208,10 @@ pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> Built
             "fillmissing",
         )?;
     }
+    let options = FillOptions::parse(&rest)?;
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| invalid_argument(format!("fillmissing: failed to gather input: {err}")))?;
-    let options = FillOptions::parse(&rest)?;
     let (result, mask) = fill_missing_value(value, &options)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),

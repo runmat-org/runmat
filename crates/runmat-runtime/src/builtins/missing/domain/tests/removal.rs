@@ -17,6 +17,26 @@ fn rmmissing_removes_rows_and_columns() {
 }
 
 #[test]
+fn rmmissing_rejects_invalid_options_before_resident_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let error = block_on(rmmissing_builtin(
+        Value::GpuTensor(allocation.handle.clone()),
+        vec![Value::from("not-a-removal-option")],
+    ))
+    .expect_err("invalid options must be admitted before provider work");
+    assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
 fn rmmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
     let expected = IntegerStorage::U64(vec![1, u64::MAX, 3, 4]);
     let input = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer tensor");
