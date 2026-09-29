@@ -72,7 +72,7 @@ pub const TRAINING_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 const INTEGER_CONTROLS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "MaxEpochs, MiniBatchSize, and other numeric training options",
+    name: "MaxEpochs and MiniBatchSize",
     classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,

@@ -6,7 +6,7 @@ use super::super::super::{deep_learning_error, numeric_scalar, scalar_text};
 
 // Metadata growth is charged against the same bounded work budget as the
 // padded result. Shape copies and strides must not become an unbounded
-// allocation merely because paddingDim names a distant singleton axis.
+// allocation when paddingDim names a distant singleton axis.
 const MAX_PAD_METADATA_BYTES: usize = super::super::super::MAX_PAD_ELEMENTS;
 
 pub(super) fn admit_padding_rank(

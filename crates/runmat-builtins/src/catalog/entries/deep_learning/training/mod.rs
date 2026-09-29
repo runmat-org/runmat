@@ -2,9 +2,12 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod dlarray;
+mod training_options;
 
 pub use self::dlarray::*;
+pub use self::training_options::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(dlarray::ENTRIES.iter().copied());
+    values.extend(training_options::ENTRIES.iter().copied());
 }

@@ -101,7 +101,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             continue;
         };
         if let Some(value) = request.arguments.get(index + 1) {
-            properties.insert(super::canonical_training_option_name(name), value.clone());
+            properties.insert(super::canonical_training_option_name(&name), value.clone());
         }
     }
     if !complete {

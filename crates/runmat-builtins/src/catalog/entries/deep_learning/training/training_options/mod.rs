@@ -14,6 +14,8 @@ pub use contract::{
     TRAINING_OPTIONS_INVALID_INPUT,
 };
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&TRAINING_OPTIONS_CATALOG_ENTRY];
+
 pub const TRAINING_OPTIONS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity {
