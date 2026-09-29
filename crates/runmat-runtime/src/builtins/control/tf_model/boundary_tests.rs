@@ -83,3 +83,71 @@ fn coefficient_normalization_preserves_nonzero_scale_below_solver_tolerances() {
         assert_eq!(den, vec![1.0, 2.0]);
     }
 }
+
+#[test]
+fn coefficient_normalization_rejects_unrepresentable_finite_ratios() {
+    let model = TfModel::new(
+        vec![Complex64::new(1.0, 0.0)],
+        vec![Complex64::new(1e-320, 0.0), Complex64::new(0.0, 0.0)],
+        TfOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        model.normalized().unwrap_err().identifier(),
+        Some("RunMat:tf:InvalidCoefficients")
+    );
+    for builtin in ["step", "impulse"] {
+        assert_eq!(
+            model
+                .to_real(builtin)
+                .unwrap()
+                .normalized(builtin)
+                .unwrap_err()
+                .identifier(),
+            Some(invalid_model_identifier(builtin))
+        );
+    }
+}
+
+#[test]
+fn complex_normalization_avoids_intermediate_squared_norm_extremes() {
+    for scale in [1e300, 1e-300] {
+        let model = TfModel::new(
+            vec![Complex64::new(2.0 * scale, -2.0 * scale)],
+            vec![Complex64::new(scale, scale)],
+            TfOptions::default(),
+        )
+        .unwrap();
+        let normalized = model.normalized().expect("representable complex ratio");
+        assert_eq!(normalized.denominator, vec![Complex64::new(1.0, 0.0)]);
+        assert!((normalized.numerator[0] - Complex64::new(0.0, -2.0)).norm() < 1e-14);
+    }
+}
+
+#[test]
+fn dc_gain_exact_pole_direction_survives_extreme_scale_ratio() {
+    let model = TfModel::new(
+        vec![Complex64::new(1e-320, -1e-320)],
+        vec![Complex64::new(1e300, 0.0), Complex64::new(0.0, 0.0)],
+        TfOptions::default(),
+    )
+    .unwrap();
+    let gain = model.dc_gain().expect("exact pole direction");
+    assert!(gain.re.is_infinite() && gain.re.is_sign_positive());
+    assert!(gain.im.is_infinite() && gain.im.is_sign_negative());
+}
+
+#[test]
+fn dc_gain_nonzero_denominator_uses_representable_complex_ratio() {
+    for scale in [1e300, 1e-300] {
+        let model = TfModel::new(
+            vec![Complex64::new(scale, -scale)],
+            vec![Complex64::new(scale, scale)],
+            TfOptions::default(),
+        )
+        .unwrap();
+        let gain = model.dc_gain().expect("finite complex gain");
+        assert!(gain.re.abs() < 1e-14);
+        assert!((gain.im + 1.0).abs() < 1e-14);
+    }
+}

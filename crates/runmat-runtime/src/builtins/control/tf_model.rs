@@ -1,9 +1,11 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
 mod admission;
+mod numerics;
 #[cfg(test)]
 mod boundary_tests;
 use admission::preflight_host_model_properties;
 pub use admission::preflight_ss_host_properties;
+use numerics::{finite_complex_ratio, finite_complex_ratio_direction};
 use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
@@ -376,12 +378,29 @@ impl TfModel {
             ));
         }
         let mut out = self.clone();
-        out.numerator = out.numerator.iter().map(|value| *value / leading).collect();
+        out.numerator = out
+            .numerator
+            .iter()
+            .map(|value| finite_complex_ratio(*value, leading))
+            .collect();
         out.denominator = out
             .denominator
             .iter()
-            .map(|value| *value / leading)
+            .map(|value| finite_complex_ratio(*value, leading))
             .collect();
+        if out
+            .numerator
+            .iter()
+            .chain(&out.denominator)
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(control_error(
+                "tf",
+                "RunMat:tf:InvalidCoefficients",
+                "tf: coefficient normalization exceeds the finite numeric range",
+            ));
+        }
+        out.denominator[0] = Complex64::new(1.0, 0.0);
         Ok(out)
     }
 
@@ -496,10 +515,12 @@ impl TfModel {
                 // signed/complex-axis direction of the positive-real approach to the DC point.
                 let local_denominator =
                     first_nonzero_local_polynomial_coefficient(&self.denominator, point);
-                Ok(complex_infinity_in_direction(num / local_denominator))
+                Ok(complex_infinity_in_direction(
+                    finite_complex_ratio_direction(num, local_denominator),
+                ))
             }
         } else {
-            Ok(num / den)
+            Ok(finite_complex_ratio(num, den))
         }
     }
 
@@ -601,10 +622,21 @@ impl RealTfModel {
         }
         let num = trim_leading_real_zeros(self.numerator.clone());
         let leading = den[0];
-        Ok((
-            num.iter().map(|value| value / leading).collect(),
-            den.iter().map(|value| value / leading).collect(),
-        ))
+        let normalized_num: Vec<f64> = num.iter().map(|value| value / leading).collect();
+        let mut normalized_den: Vec<f64> = den.iter().map(|value| value / leading).collect();
+        if normalized_num
+            .iter()
+            .chain(&normalized_den)
+            .any(|value| !value.is_finite())
+        {
+            return Err(control_error(
+                builtin,
+                invalid_model_identifier(builtin),
+                format!("{builtin}: coefficient normalization exceeds the finite numeric range"),
+            ));
+        }
+        normalized_den[0] = 1.0;
+        Ok((normalized_num, normalized_den))
     }
 
     pub fn ensure_zero_delays(&self, builtin: &'static str) -> BuiltinResult<()> {
