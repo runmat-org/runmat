@@ -263,24 +263,30 @@ fn preflight_graph_host_fields(object: &ObjectInstance, name: &'static str) -> B
     if let Some(Value::Object(edges)) = object.properties.get("Edges") {
         let vars = table_variables(edges)
             .map_err(|error| graph_error(name, format!("{name}: invalid Edges table: {error}")))?;
-        let endpoints = vars
-            .fields
-            .get("EndNodes")
-            .filter(|value| is_host_value(value));
-        if let Some(value) = endpoints {
-            match value {
-                Value::Tensor(tensor) if tensor.shape.len() == 2 && tensor.cols == 2 => {
-                    for index in 0..super::tensor::tensor_element_len(tensor) {
-                        node_index_from_tensor(tensor, index, count.unwrap_or(usize::MAX), name)?;
-                    }
-                }
-                Value::StringArray(array) if array.shape.len() == 2 && array.cols == 2 => {}
-                _ => {
-                    return Err(graph_error(
-                        name,
-                        format!("{name}: Edges.EndNodes must be an m-by-2 numeric or string array"),
-                    ))
-                }
+        let endpoints = vars.fields.get("EndNodes");
+        let endpoint_rows = match endpoints {
+            Some(Value::Tensor(tensor)) if tensor.shape.len() == 2 && tensor.cols == 2 => {
+                Some(tensor.rows)
+            }
+            Some(Value::StringArray(array)) if array.shape.len() == 2 && array.cols == 2 => {
+                Some(array.rows)
+            }
+            Some(Value::GpuTensor(handle))
+                if handle.shape().len() == 2 && handle.shape()[1] == 2 =>
+            {
+                Some(handle.shape()[0])
+            }
+            Some(_) => {
+                return Err(graph_error(
+                    name,
+                    format!("{name}: Edges.EndNodes must be an m-by-2 numeric or string array"),
+                ))
+            }
+            None => None,
+        };
+        if let Some(Value::Tensor(tensor)) = endpoints {
+            for index in 0..super::tensor::tensor_element_len(tensor) {
+                node_index_from_tensor(tensor, index, count.unwrap_or(usize::MAX), name)?;
             }
         }
         if let Some(value) = vars
@@ -288,12 +294,7 @@ fn preflight_graph_host_fields(object: &ObjectInstance, name: &'static str) -> B
             .get("Weight")
             .filter(|value| is_host_value(value))
         {
-            let expected = endpoints.and_then(|value| match value {
-                Value::Tensor(tensor) => Some(tensor.rows),
-                Value::StringArray(array) => Some(array.rows),
-                _ => None,
-            });
-            if let Some(expected) = expected {
+            if let Some(expected) = endpoint_rows {
                 weights_from_value(value, expected, name)?;
             } else {
                 let weights = super::parsing::numeric_f64_vector(value, name)?;

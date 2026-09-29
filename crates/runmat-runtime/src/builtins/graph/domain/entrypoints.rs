@@ -12,6 +12,27 @@ use super::parsing::numeric_vector;
 use super::tree_layout::tree_coordinates;
 use super::*;
 
+#[derive(Clone, Copy)]
+enum TwoOutputRequest {
+    Discarded,
+    Single,
+    Pair,
+    Default,
+}
+
+fn checked_two_output_request(name: &'static str) -> BuiltinResult<TwoOutputRequest> {
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(TwoOutputRequest::Discarded),
+        Some(1) => Ok(TwoOutputRequest::Single),
+        Some(2) => Ok(TwoOutputRequest::Pair),
+        None => Ok(TwoOutputRequest::Default),
+        Some(_) => Err(graph_error(
+            name,
+            format!("{name}: too many output arguments; maximum is 2"),
+        )),
+    }
+}
+
 #[runtime_builtin(
     name = "graph",
     binding_variant = "default",
@@ -161,6 +182,7 @@ pub(super) async fn shortestpath_builtin(
     source: Value,
     target: Value,
 ) -> BuiltinResult<Value> {
+    let output_count = checked_two_output_request("shortestpath")?;
     let graph = graph_data_async(&graph, "shortestpath").await?;
     let nodes = node_indices(&graph, vec![source, target], "shortestpath").await?;
     let source = nodes[0];
@@ -169,15 +191,11 @@ pub(super) async fn shortestpath_builtin(
     let path = reconstruct_path(source, target, &previous);
     let path_value = node_list_value(&graph, &path, "shortestpath")?;
     let distance = distances[target];
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![path_value])),
-        Some(2) => Ok(Value::OutputList(vec![path_value, Value::Num(distance)])),
-        Some(_) => Err(graph_error(
-            "shortestpath",
-            "shortestpath: too many output arguments; maximum is 2",
-        )),
-        None => Ok(path_value),
+    match output_count {
+        TwoOutputRequest::Discarded => Ok(Value::OutputList(Vec::new())),
+        TwoOutputRequest::Single => Ok(Value::OutputList(vec![path_value])),
+        TwoOutputRequest::Pair => Ok(Value::OutputList(vec![path_value, Value::Num(distance)])),
+        TwoOutputRequest::Default => Ok(path_value),
     }
 }
 
@@ -329,26 +347,17 @@ pub(super) async fn dfsearch_builtin(graph: Value, start: Value) -> BuiltinResul
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn treelayout_builtin(parents: Value) -> BuiltinResult<Value> {
+    let output_count = checked_two_output_request("treelayout")?;
     let parents = gather_if_needed_async(&parents).await?;
     let parents = numeric_vector(&parents, "treelayout")?;
-    if parents.is_empty() {
-        return Ok(Value::OutputList(vec![
-            tensor_value(Vec::new(), vec![1, 0], "treelayout")?,
-            tensor_value(Vec::new(), vec![1, 0], "treelayout")?,
-        ]));
-    }
     let n = parents.len();
     let (x, y) = tree_coordinates(&parents)?;
     let x_value = tensor_value(x, vec![1, n], "treelayout")?;
     let y_value = tensor_value(y, vec![1, n], "treelayout")?;
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![x_value])),
-        Some(2) => Ok(Value::OutputList(vec![x_value, y_value])),
-        Some(_) => Err(graph_error(
-            "treelayout",
-            "treelayout: too many output arguments; maximum is 2",
-        )),
-        None => Ok(x_value),
+    match output_count {
+        TwoOutputRequest::Discarded => Ok(Value::OutputList(Vec::new())),
+        TwoOutputRequest::Single => Ok(Value::OutputList(vec![x_value])),
+        TwoOutputRequest::Pair => Ok(Value::OutputList(vec![x_value, y_value])),
+        TwoOutputRequest::Default => Ok(x_value),
     }
 }

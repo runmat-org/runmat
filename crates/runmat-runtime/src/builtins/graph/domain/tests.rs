@@ -459,6 +459,64 @@ fn treelayout_returns_single_or_pair_by_output_count() {
 }
 
 #[test]
+fn empty_treelayout_obeys_requested_output_count() {
+    let empty = numeric(Vec::new(), 1, 0);
+    let assert_empty_row = |value: &Value| {
+        let Value::Tensor(tensor) = value else {
+            panic!("expected empty tensor, got {value:?}");
+        };
+        assert_eq!(tensor.shape, vec![1, 0]);
+        assert!(tensor.materialize_f64().is_empty());
+    };
+
+    assert_empty_row(&block_on(treelayout_builtin(empty.clone())).expect("default output"));
+    for (count, expected) in [(0, 0), (1, 1), (2, 2)] {
+        let _outputs = crate::output_count::push_output_count(Some(count));
+        let Value::OutputList(values) =
+            block_on(treelayout_builtin(empty.clone())).expect("empty tree outputs")
+        else {
+            panic!("expected output list");
+        };
+        assert_eq!(values.len(), expected);
+        for value in &values {
+            assert_empty_row(value);
+        }
+    }
+    let _outputs = crate::output_count::push_output_count(Some(3));
+    let error = block_on(treelayout_builtin(empty)).expect_err("too many outputs");
+    assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
+}
+
+#[test]
+fn impossible_graph_output_counts_precede_resident_downloads() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let source = Tensor::new(vec![1.0], vec![1, 1]).expect("source");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+            .expect("resident control");
+        let graph = block_on(graph_builtin(vec![
+            numeric(vec![1.0], 1, 1),
+            numeric(vec![2.0], 1, 1),
+        ]))
+        .expect("graph");
+        provider.reset_telemetry();
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let error = block_on(treelayout_builtin(Value::GpuTensor(resident.clone())))
+            .expect_err("invalid tree output request");
+        assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let error = block_on(shortestpath_builtin(
+            graph,
+            Value::GpuTensor(resident),
+            Value::Num(2.0),
+        ))
+        .expect_err("invalid path output request");
+        assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
 fn treelayout_accepts_typed_integer_parent_vector() {
     let result = block_on(treelayout_builtin(int_numeric(
         IntegerStorage::I16(vec![0, 1, 1, 2]),
@@ -676,6 +734,41 @@ fn malformed_host_graph_property_precedes_nested_download() {
             .insert(NUM_NODES_PROPERTY.into(), Value::String("invalid".into()));
         provider.reset_telemetry();
         let error = block_on(adjacency_builtin(Value::Object(object))).expect_err("invalid count");
+        assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn host_weight_length_uses_resident_endnode_shape_before_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let graph = block_on(graph_builtin(vec![
+            numeric(vec![1.0, 2.0], 2, 1),
+            numeric(vec![2.0, 3.0], 2, 1),
+            numeric(vec![2.0, 3.0], 2, 1),
+        ]))
+        .expect("weighted graph");
+        let Value::Object(mut graph) = graph else {
+            panic!("expected graph object");
+        };
+        let endpoints = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("one edge");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &endpoints)
+            .expect("resident endpoints");
+        let Some(Value::Object(edges)) = graph.properties.get_mut("Edges") else {
+            panic!("expected Edges table");
+        };
+        // Deliberately forge an inconsistent table: public table construction
+        // correctly refuses unequal column heights, but graph admission must
+        // still diagnose a malformed object before touching the provider.
+        let Some(Value::Struct(variables)) = edges.properties.get_mut("__table_variables") else {
+            panic!("expected table variables");
+        };
+        variables
+            .fields
+            .insert("EndNodes".into(), Value::GpuTensor(resident));
+        provider.reset_telemetry();
+        let error = block_on(adjacency_builtin(Value::Object(graph)))
+            .expect_err("host Weight length disagrees with resident EndNodes row count");
         assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
