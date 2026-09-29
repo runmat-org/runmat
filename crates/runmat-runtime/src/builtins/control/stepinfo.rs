@@ -5,7 +5,7 @@ mod metrics;
 #[cfg(test)]
 mod tests;
 
-use runmat_builtins::{STEPINFO_DESCRIPTOR, STEPINFO_EXTENSIONS, STEPINFO_INTEGER_CAPABILITIES};
+use runmat_builtins::STEPINFO_EXTENSIONS;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -54,12 +54,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "stepinfo",
-    category = "control",
-    summary = "Compute step-response metrics from SISO models or sampled responses.",
-    keywords = "stepinfo,step response,rise time,settling time,overshoot,control system",
-    descriptor(crate::builtins::control::stepinfo::STEPINFO_DESCRIPTOR),
-    extensions(crate::builtins::control::stepinfo::STEPINFO_EXTENSIONS),
-    integer_capabilities(crate::builtins::control::stepinfo::STEPINFO_INTEGER_CAPABILITIES),
     binding_variant = "default",
     builtin_path = "crate::builtins::control::stepinfo"
 )]
