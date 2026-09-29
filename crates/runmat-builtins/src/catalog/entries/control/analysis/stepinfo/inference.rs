@@ -70,7 +70,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             | ValueKindFact::Logical => vector(input),
             _ => false,
         };
-        if !allowed || matches!(input.residency, ResidencyFact::Remote { .. }) {
+        if !allowed
+            || (is_model && input.shape.element_count().is_some_and(|count| count != 1))
+            || matches!(input.residency, ResidencyFact::Remote { .. })
+        {
             diagnostics.push(argument_error(
                 "RM-CATALOG-STEPINFO-INPUT",
                 "input must be a scalar tf model or real numeric response vector",
@@ -153,6 +156,17 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     index,
                 ));
             }
+        }
+        if request
+            .literals
+            .numeric_at(index + 1)
+            .is_some_and(|value| !value.is_finite() || value <= 0.0 || value >= 1.0)
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-STEPINFO-THRESHOLD",
+                "SettlingTimeThreshold must lie strictly between zero and one",
+                index + 1,
+            ));
         }
         if !matches!(args[index + 1].kind, ValueKindFact::Unknown) && !real_scalar(&args[index + 1])
         {

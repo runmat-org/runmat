@@ -76,3 +76,24 @@ fn known_invalid_forms_are_diagnosed_without_rejecting_unknowns() {
             .is_empty()
     );
 }
+
+#[test]
+fn known_threshold_option_value_is_checked() {
+    let threshold = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let mut call = request(
+        vec![model(), ValueFact::scalar(ValueKindFact::String), threshold],
+        1,
+    );
+    call.literals = LiteralContext::new(vec![
+        LiteralValue::Unknown,
+        LiteralValue::String("SettlingTimeThreshold".into()),
+        LiteralValue::Number(2.0),
+    ]);
+    assert!(crate::infer_catalog_call(&STEPINFO_CATALOG_ENTRY, &call)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-STEPINFO-THRESHOLD"));
+}
