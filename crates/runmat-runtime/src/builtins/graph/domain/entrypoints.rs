@@ -1,131 +1,110 @@
-use super::algorithms::{
-    adjacency_lists, adjacency_tensor, assign_tree_positions, degree_counts, dijkstra,
-    edge_matches, indegree_counts, neighbor_query, neighbors_for, node_list_value,
-    node_metric_value, outdegree_counts, reconstruct_path, tensor_value, NeighborMode,
+use super::admission::{
+    constructor_arguments, count_as_double, distance_node_lists, graph_data_async,
+    graph_edge_count, graph_node_count, node_indices,
 };
-use super::construction::{construct_graph, graph_data};
-use super::parsing::{node_index_from_value, node_indices_from_value, numeric_vector};
+use super::algorithms::{
+    adjacency_lists, adjacency_tensor, degree_counts, dijkstra, edge_matches, indegree_counts,
+    neighbor_query, neighbors_for, node_list_value, node_metric_value, outdegree_counts,
+    reconstruct_path, tensor_value, zeroed_f64, NeighborMode,
+};
+use super::construction::construct_graph;
+use super::parsing::numeric_vector;
+use super::tree_layout::tree_coordinates;
 use super::*;
 
 #[runtime_builtin(
     name = "graph",
-    category = "graph",
-    summary = "Create an undirected graph object.",
-    keywords = "graph,edges,nodes,network",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::GRAPH_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn graph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    construct_graph(GRAPH_NAME, false, gather_values(args).await?)
+    construct_graph(
+        GRAPH_NAME,
+        false,
+        constructor_arguments(args, GRAPH_NAME).await?,
+    )
 }
 
 #[runtime_builtin(
     name = "digraph",
-    category = "graph",
-    summary = "Create a directed graph object.",
-    keywords = "digraph,directed graph,edges,nodes,network",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::DIGRAPH_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn digraph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    construct_graph(DIGRAPH_NAME, true, gather_values(args).await?)
+    construct_graph(
+        DIGRAPH_NAME,
+        true,
+        constructor_arguments(args, DIGRAPH_NAME).await?,
+    )
 }
 
 #[runtime_builtin(
     name = "numnodes",
-    category = "graph",
-    summary = "Return the number of nodes in a graph.",
-    keywords = "numnodes,graph,nodes",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_UNARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn numnodes_builtin(graph: Value) -> BuiltinResult<Value> {
-    Ok(Value::Num(
-        graph_data(&graph, "numnodes")?.node_count as f64,
-    ))
+    Ok(Value::Num(count_as_double(
+        graph_node_count(&graph, "numnodes").await?,
+        "numnodes",
+    )?))
 }
 
 #[runtime_builtin(
     name = "numedges",
-    category = "graph",
-    summary = "Return the number of edges in a graph.",
-    keywords = "numedges,graph,edges",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_UNARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn numedges_builtin(graph: Value) -> BuiltinResult<Value> {
-    Ok(Value::Num(
-        graph_data(&graph, "numedges")?.edges.len() as f64
-    ))
+    Ok(Value::Num(count_as_double(
+        graph_edge_count(&graph, "numedges")?,
+        "numedges",
+    )?))
 }
 
 #[runtime_builtin(
     name = "adjacency",
-    category = "graph",
-    summary = "Return a dense adjacency matrix for a graph.",
-    keywords = "adjacency,graph,matrix",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_UNARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn adjacency_builtin(graph: Value) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "adjacency")?;
+    let graph = graph_data_async(&graph, "adjacency").await?;
     Ok(Value::Tensor(adjacency_tensor(&graph, "adjacency")?))
 }
 
 #[runtime_builtin(
     name = "degree",
-    category = "graph",
-    summary = "Return graph node degree counts.",
-    keywords = "degree,graph,nodes",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_UNARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn degree_builtin(graph: Value) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "degree")?;
+    let graph = graph_data_async(&graph, "degree").await?;
     node_metric_value(degree_counts(&graph), "degree")
 }
 
 #[runtime_builtin(
     name = "indegree",
-    category = "graph",
-    summary = "Return node indegree counts.",
-    keywords = "indegree,digraph,graph,nodes",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_UNARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn indegree_builtin(graph: Value) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "indegree")?;
+    let graph = graph_data_async(&graph, "indegree").await?;
     node_metric_value(indegree_counts(&graph), "indegree")
 }
 
 #[runtime_builtin(
     name = "outdegree",
-    category = "graph",
-    summary = "Return node outdegree counts.",
-    keywords = "outdegree,digraph,graph,nodes",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_UNARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn outdegree_builtin(graph: Value) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "outdegree")?;
+    let graph = graph_data_async(&graph, "outdegree").await?;
     node_metric_value(outdegree_counts(&graph), "outdegree")
 }
 
 #[runtime_builtin(
     name = "neighbors",
-    category = "graph",
-    summary = "Return neighboring graph nodes.",
-    keywords = "neighbors,graph,nodes",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn neighbors_builtin(graph: Value, node: Value) -> BuiltinResult<Value> {
@@ -134,11 +113,7 @@ pub(super) async fn neighbors_builtin(graph: Value, node: Value) -> BuiltinResul
 
 #[runtime_builtin(
     name = "successors",
-    category = "graph",
-    summary = "Return successor nodes in a directed graph.",
-    keywords = "successors,digraph,graph,nodes",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn successors_builtin(graph: Value, node: Value) -> BuiltinResult<Value> {
@@ -147,11 +122,7 @@ pub(super) async fn successors_builtin(graph: Value, node: Value) -> BuiltinResu
 
 #[runtime_builtin(
     name = "predecessors",
-    category = "graph",
-    summary = "Return predecessor nodes in a directed graph.",
-    keywords = "predecessors,digraph,graph,nodes",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn predecessors_builtin(graph: Value, node: Value) -> BuiltinResult<Value> {
@@ -160,11 +131,7 @@ pub(super) async fn predecessors_builtin(graph: Value, node: Value) -> BuiltinRe
 
 #[runtime_builtin(
     name = "findedge",
-    category = "graph",
-    summary = "Find edge indices between graph nodes.",
-    keywords = "findedge,graph,edges",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn findedge_builtin(
@@ -172,9 +139,10 @@ pub(super) async fn findedge_builtin(
     source: Value,
     target: Value,
 ) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "findedge")?;
-    let source = node_index_from_value(&graph, &source, "findedge")?;
-    let target = node_index_from_value(&graph, &target, "findedge")?;
+    let graph = graph_data_async(&graph, "findedge").await?;
+    let nodes = node_indices(&graph, vec![source, target], "findedge").await?;
+    let source = nodes[0];
+    let target = nodes[1];
     for (idx, edge) in graph.edges.iter().enumerate() {
         if edge_matches(edge, source, target, graph.directed) {
             return Ok(Value::Num((idx + 1) as f64));
@@ -185,11 +153,7 @@ pub(super) async fn findedge_builtin(
 
 #[runtime_builtin(
     name = "shortestpath",
-    category = "graph",
-    summary = "Compute a shortest path between graph nodes.",
-    keywords = "shortestpath,graph,path,dijkstra",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn shortestpath_builtin(
@@ -197,9 +161,10 @@ pub(super) async fn shortestpath_builtin(
     source: Value,
     target: Value,
 ) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "shortestpath")?;
-    let source = node_index_from_value(&graph, &source, "shortestpath")?;
-    let target = node_index_from_value(&graph, &target, "shortestpath")?;
+    let graph = graph_data_async(&graph, "shortestpath").await?;
+    let nodes = node_indices(&graph, vec![source, target], "shortestpath").await?;
+    let source = nodes[0];
+    let target = nodes[1];
     let (distances, previous) = dijkstra(&graph, source);
     let path = reconstruct_path(source, target, &previous);
     let path_value = node_list_value(&graph, &path, "shortestpath")?;
@@ -218,25 +183,17 @@ pub(super) async fn shortestpath_builtin(
 
 #[runtime_builtin(
     name = "distances",
-    category = "graph",
-    summary = "Compute shortest-path distances between graph nodes.",
-    keywords = "distances,graph,dijkstra",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn distances_builtin(graph: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "distances")?;
-    let rest = gather_values(rest).await?;
-    let sources = match rest.first() {
-        Some(value) => node_indices_from_value(&graph, value, "distances")?,
-        None => (0..graph.node_count).collect(),
-    };
-    let targets = match rest.get(1) {
-        Some(value) => node_indices_from_value(&graph, value, "distances")?,
-        None => (0..graph.node_count).collect(),
-    };
-    let mut data = vec![0.0; sources.len() * targets.len()];
+    let graph = graph_data_async(&graph, "distances").await?;
+    let (sources, targets) = distance_node_lists(&graph, rest).await?;
+    let cells = sources
+        .len()
+        .checked_mul(targets.len())
+        .ok_or_else(|| graph_error("distances", "distances: result dimensions overflow"))?;
+    let mut data = zeroed_f64(cells, "distances")?;
     for (source_row, source) in sources.iter().copied().enumerate() {
         let (distances, _) = dijkstra(&graph, source);
         for (target_col, target) in targets.iter().copied().enumerate() {
@@ -248,15 +205,11 @@ pub(super) async fn distances_builtin(graph: Value, rest: Vec<Value>) -> Builtin
 
 #[runtime_builtin(
     name = "conncomp",
-    category = "graph",
-    summary = "Return weak connected components for graph nodes.",
-    keywords = "conncomp,graph,components",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_UNARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn conncomp_builtin(graph: Value) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "conncomp")?;
+    let graph = graph_data_async(&graph, "conncomp").await?;
     let mut bins = vec![0.0; graph.node_count];
     let mut component = 0usize;
     for start in 0..graph.node_count {
@@ -280,15 +233,11 @@ pub(super) async fn conncomp_builtin(graph: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "toposort",
-    category = "graph",
-    summary = "Return a topological ordering of a directed acyclic graph.",
-    keywords = "toposort,digraph,directed acyclic graph",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::GRAPH_UNARY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn toposort_builtin(graph: Value) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "toposort")?;
+    let graph = graph_data_async(&graph, "toposort").await?;
     if !graph.directed {
         return Err(graph_error(
             "toposort",
@@ -296,9 +245,10 @@ pub(super) async fn toposort_builtin(graph: Value) -> BuiltinResult<Value> {
         ));
     }
     let mut indegree = vec![0usize; graph.node_count];
-    let adj = adjacency_lists(&graph, NeighborMode::Successors);
+    let mut adj = vec![Vec::new(); graph.node_count];
     for edge in &graph.edges {
         indegree[edge.target] += 1;
+        adj[edge.source].push(edge.target);
     }
     let mut queue = VecDeque::new();
     for (idx, degree) in indegree.iter().copied().enumerate() {
@@ -324,16 +274,12 @@ pub(super) async fn toposort_builtin(graph: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "bfsearch",
-    category = "graph",
-    summary = "Return breadth-first search node order.",
-    keywords = "bfsearch,graph,breadth first search",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn bfsearch_builtin(graph: Value, start: Value) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "bfsearch")?;
-    let start = node_index_from_value(&graph, &start, "bfsearch")?;
+    let graph = graph_data_async(&graph, "bfsearch").await?;
+    let start = node_indices(&graph, vec![start], "bfsearch").await?[0];
     let mut visited = vec![false; graph.node_count];
     let mut queue = VecDeque::from([start]);
     let mut order = Vec::new();
@@ -352,16 +298,12 @@ pub(super) async fn bfsearch_builtin(graph: Value, start: Value) -> BuiltinResul
 
 #[runtime_builtin(
     name = "dfsearch",
-    category = "graph",
-    summary = "Return depth-first search node order.",
-    keywords = "dfsearch,graph,depth first search",
-    type_resolver(any_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn dfsearch_builtin(graph: Value, start: Value) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, "dfsearch")?;
-    let start = node_index_from_value(&graph, &start, "dfsearch")?;
+    let graph = graph_data_async(&graph, "dfsearch").await?;
+    let start = node_indices(&graph, vec![start], "dfsearch").await?[0];
     let adj = adjacency_lists(&graph, NeighborMode::Successors);
     let mut visited = vec![false; graph.node_count];
     let mut stack = vec![start];
@@ -383,11 +325,7 @@ pub(super) async fn dfsearch_builtin(graph: Value, start: Value) -> BuiltinResul
 
 #[runtime_builtin(
     name = "treelayout",
-    category = "graph",
-    summary = "Compute simple tree-layout coordinates from a parent vector.",
-    keywords = "treelayout,tree,layout,graph",
-    type_resolver(numeric_type),
-    descriptor(crate::builtins::graph::GRAPH_QUERY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
 pub(super) async fn treelayout_builtin(parents: Value) -> BuiltinResult<Value> {
@@ -400,26 +338,7 @@ pub(super) async fn treelayout_builtin(parents: Value) -> BuiltinResult<Value> {
         ]));
     }
     let n = parents.len();
-    let mut children = vec![Vec::<usize>::new(); n];
-    let mut roots = Vec::new();
-    for (idx, parent) in parents.iter().copied().enumerate() {
-        if parent == 0 {
-            roots.push(idx);
-        } else if parent <= n {
-            children[parent - 1].push(idx);
-        } else {
-            return Err(graph_error(
-                "treelayout",
-                "treelayout: parent indices must be zero or valid one-based node ids",
-            ));
-        }
-    }
-    let mut x = vec![0.0; n];
-    let mut y = vec![0.0; n];
-    let mut leaf_cursor = 1.0;
-    for root in roots {
-        assign_tree_positions(root, 0.0, &children, &mut leaf_cursor, &mut x, &mut y);
-    }
+    let (x, y) = tree_coordinates(&parents)?;
     let x_value = tensor_value(x, vec![1, n], "treelayout")?;
     let y_value = tensor_value(y, vec![1, n], "treelayout")?;
     match crate::output_count::current_output_count() {

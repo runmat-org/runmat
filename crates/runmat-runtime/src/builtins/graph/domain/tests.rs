@@ -1,11 +1,12 @@
 use super::entrypoints::{
-    adjacency_builtin, digraph_builtin, distances_builtin, graph_builtin, indegree_builtin,
-    numedges_builtin, numnodes_builtin, outdegree_builtin, predecessors_builtin,
-    shortestpath_builtin, successors_builtin, treelayout_builtin,
+    adjacency_builtin, bfsearch_builtin, conncomp_builtin, degree_builtin, dfsearch_builtin,
+    digraph_builtin, distances_builtin, findedge_builtin, graph_builtin, indegree_builtin,
+    neighbors_builtin, numedges_builtin, numnodes_builtin, outdegree_builtin, predecessors_builtin,
+    shortestpath_builtin, successors_builtin, toposort_builtin, treelayout_builtin,
 };
 use super::parsing::{node_index_from_f64, numeric_vector};
 use super::{GRAPH_CLASS, NUM_NODES_PROPERTY};
-use crate::builtins::table::table_from_columns;
+use crate::builtins::table::{table_from_columns, table_replace_variables_like, table_variables};
 use futures::executor::block_on;
 use runmat_value::{IntegerStorage, ObjectInstance, StringArray, Tensor, Value};
 
@@ -47,6 +48,61 @@ fn graph_constructor_builds_edges_nodes_and_adjacency() {
         tensor_data(adjacency),
         vec![0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0]
     );
+}
+
+#[test]
+fn traversal_and_component_families_have_concrete_results() {
+    let graph = block_on(graph_builtin(vec![
+        numeric(vec![1.0, 2.0, 4.0], 3, 1),
+        numeric(vec![2.0, 3.0, 5.0], 3, 1),
+    ]))
+    .expect("graph");
+    assert_eq!(
+        tensor_data(block_on(degree_builtin(graph.clone())).unwrap()),
+        vec![1.0, 2.0, 1.0, 1.0, 1.0],
+    );
+    assert_eq!(
+        tensor_data(block_on(conncomp_builtin(graph.clone())).unwrap()),
+        vec![1.0, 1.0, 1.0, 2.0, 2.0],
+    );
+    assert_eq!(
+        tensor_data(block_on(neighbors_builtin(graph.clone(), Value::Num(2.0))).unwrap()),
+        vec![1.0, 3.0],
+    );
+    assert_eq!(
+        tensor_data(block_on(bfsearch_builtin(graph.clone(), Value::Num(1.0))).unwrap()),
+        vec![1.0, 2.0, 3.0],
+    );
+    assert_eq!(
+        tensor_data(block_on(dfsearch_builtin(graph.clone(), Value::Num(1.0))).unwrap()),
+        vec![1.0, 2.0, 3.0],
+    );
+    assert_eq!(
+        block_on(findedge_builtin(
+            graph.clone(),
+            Value::Num(2.0),
+            Value::Num(3.0)
+        ))
+        .unwrap(),
+        Value::Num(2.0),
+    );
+    assert_eq!(
+        block_on(findedge_builtin(graph, Value::Num(1.0), Value::Num(5.0))).unwrap(),
+        Value::Num(0.0),
+    );
+}
+
+#[test]
+fn undirected_self_loop_counts_twice_across_degree_queries() {
+    let graph =
+        block_on(graph_builtin(vec![Value::Num(1.0), Value::Num(1.0)])).expect("self-loop graph");
+    for result in [
+        block_on(degree_builtin(graph.clone())),
+        block_on(indegree_builtin(graph.clone())),
+        block_on(outdegree_builtin(graph)),
+    ] {
+        assert_eq!(tensor_data(result.expect("degree")), vec![2.0]);
+    }
 }
 
 #[test]
@@ -223,6 +279,41 @@ fn undirected_adjacency_constructor_accepts_lower_triangle() {
 }
 
 #[test]
+fn undirected_asymmetric_adjacency_uses_upper_then_lower_fallback() {
+    let graph = block_on(graph_builtin(vec![numeric(vec![0.0, 5.0, 7.0, 0.0], 2, 2)]))
+        .expect("asymmetric graph");
+    assert_eq!(
+        tensor_data(block_on(adjacency_builtin(graph)).expect("adjacency")),
+        vec![0.0, 7.0, 7.0, 0.0]
+    );
+
+    let fallback = block_on(graph_builtin(vec![numeric(vec![0.0, 5.0, 0.0, 0.0], 2, 2)]))
+        .expect("lower fallback");
+    assert_eq!(
+        tensor_data(block_on(adjacency_builtin(fallback)).expect("adjacency")),
+        vec![0.0, 5.0, 5.0, 0.0]
+    );
+}
+
+#[test]
+fn adjacency_sums_parallel_edge_weights_in_dense_result() {
+    let graph = block_on(graph_builtin(vec![
+        numeric(vec![1.0, 1.0], 2, 1),
+        numeric(vec![2.0, 2.0], 2, 1),
+        numeric(vec![2.0, 3.0], 2, 1),
+    ]))
+    .expect("parallel weighted edges");
+    assert_eq!(
+        block_on(numedges_builtin(graph.clone())).unwrap(),
+        Value::Num(2.0)
+    );
+    assert_eq!(
+        tensor_data(block_on(adjacency_builtin(graph)).expect("adjacency")),
+        vec![0.0, 5.0, 5.0, 0.0]
+    );
+}
+
+#[test]
 fn treelayout_returns_single_or_pair_by_output_count() {
     let result =
         block_on(treelayout_builtin(numeric(vec![0.0, 1.0, 1.0, 2.0], 1, 4))).expect("treelayout");
@@ -289,4 +380,158 @@ fn graph_node_index_rejects_unrepresentable_double_boundary_before_cast() {
 
     assert!(node_index_from_f64(boundary, usize::MAX, "graph").is_err());
     assert!(node_index_from_f64(1.5, 3, "graph").is_err());
+}
+
+#[test]
+fn graph_rejects_nonfinite_negative_and_inexact_adjacency_weights() {
+    for weight in [f64::NAN, f64::INFINITY, -1.0] {
+        assert!(block_on(graph_builtin(vec![numeric(vec![weight], 1, 1)])).is_err());
+    }
+    let inexact = int_numeric(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1, 1);
+    assert!(block_on(graph_builtin(vec![inexact])).is_err());
+    let exact_wide = int_numeric(IntegerStorage::U64(vec![1_u64 << 63]), 1, 1);
+    assert!(block_on(graph_builtin(vec![exact_wide])).is_ok());
+}
+
+#[test]
+fn graph_rejects_fractional_node_ids_and_mismatched_weight_lengths() {
+    assert!(block_on(graph_builtin(vec![
+        numeric(vec![1.5], 1, 1),
+        numeric(vec![2.0], 1, 1),
+    ]))
+    .is_err());
+    assert!(block_on(graph_builtin(vec![
+        numeric(vec![1.0, 2.0], 2, 1),
+        numeric(vec![2.0, 3.0], 2, 1),
+        numeric(vec![1.0], 1, 1),
+    ]))
+    .is_err());
+    let nd = Value::Tensor(Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap());
+    assert!(block_on(graph_builtin(vec![nd.clone()])).is_err());
+    assert!(block_on(graph_builtin(vec![nd, numeric(vec![1.0; 8], 8, 1)])).is_err());
+    assert!(block_on(graph_builtin(vec![
+        numeric(vec![0.0, 1.0, 1.0, 0.0], 2, 2),
+        Value::String("upper".into()),
+        Value::String("ignored".into()),
+    ]))
+    .is_err());
+}
+
+#[test]
+fn topological_order_counts_parallel_edges_without_false_cycle() {
+    let graph = block_on(digraph_builtin(vec![
+        numeric(vec![1.0, 1.0], 2, 1),
+        numeric(vec![2.0, 2.0], 2, 1),
+    ]))
+    .expect("parallel edges");
+    assert_eq!(
+        tensor_data(block_on(toposort_builtin(graph)).expect("acyclic graph")),
+        vec![1.0, 2.0],
+    );
+}
+
+#[test]
+fn malformed_host_controls_precede_provider_downloads() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let source = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+            .expect("resident source");
+        provider.reset_telemetry();
+        let error = block_on(graph_builtin(vec![
+            Value::GpuTensor(resident),
+            numeric(vec![1.5], 1, 1),
+        ]))
+        .expect_err("fractional endpoint");
+        assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let source = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
+            .expect("resident source");
+        provider.reset_telemetry();
+        let error = block_on(graph_builtin(vec![
+            Value::GpuTensor(resident),
+            numeric(vec![2.0], 1, 1),
+            Value::Num(-1.0),
+        ]))
+        .expect_err("negative host weight");
+        assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn graph_gathers_only_consumed_nested_table_values() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let graph = block_on(graph_builtin(vec![
+            numeric(vec![1.0], 1, 1),
+            numeric(vec![2.0], 1, 1),
+        ]))
+        .expect("graph");
+        let Value::Object(mut object) = graph else {
+            unreachable!()
+        };
+        let endpoints = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("endpoints");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &endpoints)
+            .expect("resident endpoints");
+        object
+            .properties
+            .insert("Unrelated".into(), Value::GpuTensor(resident.clone()));
+        provider.reset_telemetry();
+        assert_eq!(
+            block_on(numedges_builtin(Value::Object(object.clone()))).unwrap(),
+            Value::Num(1.0),
+        );
+        assert_eq!(
+            block_on(numnodes_builtin(Value::Object(object.clone()))).unwrap(),
+            Value::Num(2.0),
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let Value::Object(edges) = object.properties.get("Edges").unwrap() else {
+            unreachable!()
+        };
+        let mut vars = table_variables(edges).expect("edge variables");
+        vars.fields
+            .insert("EndNodes".into(), Value::GpuTensor(resident));
+        let replacement = table_replace_variables_like(edges, vars).expect("table replacement");
+        object.properties.insert("Edges".into(), replacement);
+        provider.reset_telemetry();
+        assert_eq!(
+            tensor_data(block_on(adjacency_builtin(Value::Object(object))).expect("adjacency")),
+            vec![0.0, 1.0, 1.0, 0.0],
+        );
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+    });
+}
+
+#[test]
+fn malformed_host_graph_property_precedes_nested_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let graph = block_on(graph_builtin(vec![
+            numeric(vec![1.0], 1, 1),
+            numeric(vec![2.0], 1, 1),
+        ]))
+        .expect("graph");
+        let Value::Object(mut object) = graph else {
+            unreachable!()
+        };
+        let endpoints = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("endpoints");
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &endpoints)
+            .expect("resident endpoints");
+        let Value::Object(edges) = object.properties.get("Edges").unwrap() else {
+            unreachable!()
+        };
+        let mut vars = table_variables(edges).expect("edge variables");
+        vars.fields
+            .insert("EndNodes".into(), Value::GpuTensor(resident));
+        let replacement = table_replace_variables_like(edges, vars).expect("table replacement");
+        object.properties.insert("Edges".into(), replacement);
+        object
+            .properties
+            .insert(NUM_NODES_PROPERTY.into(), Value::String("invalid".into()));
+        provider.reset_telemetry();
+        let error = block_on(adjacency_builtin(Value::Object(object))).expect_err("invalid count");
+        assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
 }

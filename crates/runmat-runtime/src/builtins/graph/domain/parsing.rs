@@ -1,11 +1,10 @@
 use super::*;
 
-pub(super) fn looks_like_weights(value: &Value, expected_len: usize) -> bool {
-    match value {
-        Value::Num(_) | Value::Int(_) => expected_len == 1,
-        Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == expected_len,
-        _ => false,
-    }
+pub(super) fn is_numeric_weight_arg(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Tensor(_) | Value::LogicalArray(_)
+    )
 }
 
 pub(super) fn weights_from_value(
@@ -32,6 +31,22 @@ pub(super) fn weights_from_value(
 }
 
 pub(super) fn numeric_vector(value: &Value, name: &'static str) -> BuiltinResult<Vec<usize>> {
+    if let Value::Tensor(tensor) = value {
+        if !is_vector_shape(&tensor.shape) {
+            return Err(graph_error(
+                name,
+                format!("{name}: expected a vector of node indices"),
+            ));
+        }
+    }
+    if let Value::LogicalArray(array) = value {
+        if !is_vector_shape(&array.shape) {
+            return Err(graph_error(
+                name,
+                format!("{name}: expected a vector of node indices"),
+            ));
+        }
+    }
     if let Some(values) = exact_integer_vector(value, name) {
         return values;
     }
@@ -41,7 +56,7 @@ pub(super) fn numeric_vector(value: &Value, name: &'static str) -> BuiltinResult
         .map(|value| {
             if !value.is_finite()
                 || value < 0.0
-                || value.fract().abs() > 1e-9
+                || value.fract() != 0.0
                 || value > usize::MAX as f64
                 || (usize::BITS == 64 && value == usize::MAX as f64)
             {
@@ -57,6 +72,28 @@ pub(super) fn numeric_vector(value: &Value, name: &'static str) -> BuiltinResult
 }
 
 pub(super) fn numeric_f64_vector(value: &Value, name: &'static str) -> BuiltinResult<Vec<f64>> {
+    if let Value::Tensor(tensor) = value {
+        if !is_vector_shape(&tensor.shape) {
+            return Err(graph_error(
+                name,
+                format!("{name}: expected a numeric vector"),
+            ));
+        }
+    }
+    if let Value::LogicalArray(array) = value {
+        if !is_vector_shape(&array.shape) {
+            return Err(graph_error(
+                name,
+                format!("{name}: expected a numeric vector"),
+            ));
+        }
+    }
+    if !crate::builtins::common::validation::native_integer_value_is_exact_f64(value) {
+        return Err(graph_error(
+            name,
+            format!("{name}: integer values cannot be represented exactly as graph weights"),
+        ));
+    }
     match value {
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
@@ -121,7 +158,7 @@ pub(super) fn parse_node_names(
 pub(super) fn parse_string_vector(value: &Value) -> Result<Vec<String>, String> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) if is_vector_shape(&array.shape) => Ok(array.data.clone()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
         Value::CharArray(chars) => Ok((0..chars.rows)
             .map(|row| {
@@ -132,7 +169,7 @@ pub(super) fn parse_string_vector(value: &Value) -> Result<Vec<String>, String> 
                     .to_string()
             })
             .collect()),
-        Value::Cell(cell) => cell
+        Value::Cell(cell) if is_vector_shape(&cell.shape) => cell
             .data
             .iter()
             .map(|entry| {
@@ -145,6 +182,10 @@ pub(super) fn parse_string_vector(value: &Value) -> Result<Vec<String>, String> 
             "expected string, character, or cellstr vector, got {other:?}"
         )),
     }
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    shape.len() <= 2 && (shape.len() < 2 || shape[0] <= 1 || shape[1] <= 1)
 }
 
 pub(super) fn scalar_text(value: &Value) -> Option<String> {
@@ -270,7 +311,7 @@ pub(super) fn node_index_from_f64(
 ) -> BuiltinResult<usize> {
     if !value.is_finite()
         || value < 1.0
-        || value.fract().abs() > 1e-9
+        || value.fract() != 0.0
         || value > usize::MAX as f64
         || (usize::BITS == 64 && value == usize::MAX as f64)
     {

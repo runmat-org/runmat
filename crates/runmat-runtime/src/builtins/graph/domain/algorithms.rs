@@ -1,5 +1,4 @@
-use super::construction::graph_data;
-use super::parsing::node_index_from_value;
+use super::admission::{graph_data_async, node_indices};
 use super::*;
 
 pub(super) fn edge_matches(edge: &Edge, source: usize, target: usize, directed: bool) -> bool {
@@ -9,7 +8,10 @@ pub(super) fn edge_matches(edge: &Edge, source: usize, target: usize, directed: 
 
 pub(super) fn adjacency_tensor(graph: &GraphData, name: &'static str) -> BuiltinResult<Tensor> {
     let n = graph.node_count;
-    let mut data = vec![0.0; n * n];
+    let cells = n
+        .checked_mul(n)
+        .ok_or_else(|| graph_error(name, format!("{name}: adjacency dimensions overflow")))?;
+    let mut data = zeroed_f64(cells, name)?;
     for edge in &graph.edges {
         data[edge.source + edge.target * n] += edge.weight;
         if !graph.directed && edge.source != edge.target {
@@ -65,8 +67,10 @@ pub(super) fn outdegree_counts(graph: &GraphData) -> Vec<f64> {
 pub(super) fn degree_counts_undirected(graph: &GraphData) -> Vec<f64> {
     let mut counts = vec![0.0; graph.node_count];
     for edge in &graph.edges {
-        counts[edge.source] += 1.0;
-        if edge.source != edge.target {
+        if edge.source == edge.target {
+            counts[edge.source] += 2.0;
+        } else {
+            counts[edge.source] += 1.0;
             counts[edge.target] += 1.0;
         }
     }
@@ -91,9 +95,8 @@ pub(super) async fn neighbor_query(
     mode: NeighborMode,
     name: &'static str,
 ) -> BuiltinResult<Value> {
-    let graph = graph_data(&graph, name)?;
-    let node = gather_if_needed_async(&node).await?;
-    let node = node_index_from_value(&graph, &node, name)?;
+    let graph = graph_data_async(&graph, name).await?;
+    let node = node_indices(&graph, vec![node], name).await?[0];
     let mut neighbors = neighbors_for(&graph, node, mode);
     neighbors.sort_unstable();
     neighbors.dedup();
@@ -228,28 +231,6 @@ pub(super) fn node_list_value(
     }
 }
 
-pub(super) fn assign_tree_positions(
-    node: usize,
-    depth: f64,
-    children: &[Vec<usize>],
-    leaf_cursor: &mut f64,
-    x: &mut [f64],
-    y: &mut [f64],
-) {
-    y[node] = -depth;
-    if children[node].is_empty() {
-        x[node] = *leaf_cursor;
-        *leaf_cursor += 1.0;
-        return;
-    }
-    for &child in &children[node] {
-        assign_tree_positions(child, depth + 1.0, children, leaf_cursor, x, y);
-    }
-    let first = children[node].first().copied().unwrap();
-    let last = children[node].last().copied().unwrap();
-    x[node] = (x[first] + x[last]) / 2.0;
-}
-
 pub(super) fn tensor_value(
     data: Vec<f64>,
     shape: Vec<usize>,
@@ -268,4 +249,12 @@ pub(super) fn tensor_value_raw(
     Ok(Value::Tensor(
         Tensor::new(data, shape).map_err(|err| internal_error(name, err))?,
     ))
+}
+
+pub(super) fn zeroed_f64(len: usize, name: &'static str) -> BuiltinResult<Vec<f64>> {
+    let mut data = Vec::new();
+    data.try_reserve_exact(len)
+        .map_err(|error| graph_error(name, format!("{name}: result allocation failed: {error}")))?;
+    data.resize(len, 0.0);
+    Ok(data)
 }
