@@ -1,28 +1,100 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::task::{Context, Poll};
 
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, NumericDType, NumericScalar, NumericStorage, ObjectInstance, StructValue, Tensor,
-    Value,
+    CellArray, IntValue, NumericDType, NumericScalar, NumericStorage, ObjectInstance, StructValue,
+    Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
 use super::layer_identity::ForwardLayerKind;
-use super::{any_type, deep_learning_error, gather_args, model, unsupported_error};
+use super::{any_type, deep_learning_error, model, unsupported_error};
 
 pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity = super::DLARRAY_CLASS;
 const AD_NODE_PROPERTY: &str = "__runmat_ad_node";
+const AD_TAPE_PROPERTY: &str = "__runmat_ad_tape";
+static NEXT_TAPE_ID: AtomicU64 = AtomicU64::new(1);
 
-thread_local! {
-    static ACTIVE_TAPE: RefCell<Option<Tape>> = const { RefCell::new(None) };
+runmat_thread_local::runmat_thread_local! {
+    // Only installed for a callback future's poll or destruction. A suspended
+    // callback never leaves its tape active for another execution on the thread.
+    static ACTIVE_TAPES: RefCell<Vec<Rc<RefCell<Tape>>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn active_tape() -> Option<Rc<RefCell<Tape>>> {
+    ACTIVE_TAPES.with(|slot| slot.borrow().last().cloned())
+}
+
+struct TapeActivation(Rc<RefCell<Tape>>);
+
+impl TapeActivation {
+    fn enter(tape: Rc<RefCell<Tape>>) -> Self {
+        ACTIVE_TAPES.with(|slot| slot.borrow_mut().push(tape.clone()));
+        Self(tape)
+    }
+}
+
+impl Drop for TapeActivation {
+    fn drop(&mut self) {
+        ACTIVE_TAPES.with(|slot| {
+            let popped = slot.borrow_mut().pop();
+            debug_assert!(popped.is_some_and(|tape| Rc::ptr_eq(&tape, &self.0)));
+        });
+    }
+}
+
+struct TapeFuture<F> {
+    tape: Rc<RefCell<Tape>>,
+    future: Option<Pin<Box<F>>>,
+}
+
+impl<F: Future> Future for TapeFuture<F> {
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.as_mut().get_mut();
+        let _activation = TapeActivation::enter(this.tape.clone());
+        this.future
+            .as_mut()
+            .expect("tape future is live while polled")
+            .as_mut()
+            .poll(context)
+    }
+}
+
+impl<F> Drop for TapeFuture<F> {
+    fn drop(&mut self) {
+        let _activation = TapeActivation::enter(self.tape.clone());
+        self.future.take();
+    }
 }
 
 #[derive(Clone)]
 struct Tape {
+    id: u64,
     nodes: Vec<Node>,
+}
+
+impl Tape {
+    fn new() -> Self {
+        let id = NEXT_TAPE_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .expect("automatic differentiation tape identity space exhausted");
+        Self {
+            id,
+            nodes: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -95,7 +167,7 @@ enum NodeKind {
 }
 
 pub(super) fn tape_is_active() -> bool {
-    ACTIVE_TAPE.with(|slot| slot.borrow().is_some())
+    active_tape().is_some()
 }
 
 pub(super) async fn with_tape_context(
@@ -103,19 +175,15 @@ pub(super) async fn with_tape_context(
     args: &[Value],
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
-    ACTIVE_TAPE.with(|slot| {
-        *slot.borrow_mut() = Some(Tape { nodes: Vec::new() });
-    });
-    let prepared = match prepare_tape_inputs(args.to_vec()) {
-        Ok(args) => args,
-        Err(err) => {
-            ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = None);
-            return Err(err);
-        }
-    };
-    let result = crate::call_feval_async_with_outputs(function, &prepared, requested_outputs).await;
-    ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = None);
-    result
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    TapeFuture {
+        tape,
+        future: Some(Box::pin(async move {
+            let prepared = prepare_tape_inputs(args.to_vec())?;
+            crate::call_feval_async_with_outputs(function, &prepared, requested_outputs).await
+        })),
+    }
+    .await
 }
 
 pub(super) fn prepare_tape_inputs(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
@@ -181,7 +249,7 @@ pub(super) fn annotate_dlarray_value(value: Value) -> BuiltinResult<Value> {
 }
 
 fn annotate_dlarray_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
-    if object.properties.contains_key(AD_NODE_PROPERTY) {
+    if dlarray_node_id(&Value::Object(object.clone())).is_some() {
         return Ok(());
     }
     let data =
@@ -190,9 +258,20 @@ fn annotate_dlarray_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
         })?;
     let tensor = host_tensor_from_value(&data, "dlarray", "Data")?;
     let node = push_node(tensor, NodeKind::Leaf)?;
-    object
-        .properties
-        .insert(AD_NODE_PROPERTY.to_string(), Value::Num(node as f64));
+    let tape_id = active_tape()
+        .expect("node insertion requires active tape")
+        .borrow()
+        .id;
+    object.properties.insert(
+        AD_NODE_PROPERTY.to_string(),
+        Value::Int(IntValue::U64(
+            u64::try_from(node).expect("node index fits u64"),
+        )),
+    );
+    object.properties.insert(
+        AD_TAPE_PROPERTY.to_string(),
+        Value::Int(IntValue::U64(tape_id)),
+    );
     Ok(())
 }
 
@@ -248,16 +327,26 @@ fn annotate_network_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
 }
 
 pub(super) fn dlarray_node_id(value: &Value) -> Option<usize> {
+    let tape = active_tape()?;
+    let tape = tape.borrow();
+    let tape_id = tape.id;
     let Value::Object(object) = value else {
         return None;
     };
     if object.class_name != DLARRAY_CLASS {
         return None;
     }
-    object
+    if object.properties.get(AD_TAPE_PROPERTY) != Some(&Value::Int(IntValue::U64(tape_id))) {
+        return None;
+    }
+    let id = object
         .properties
         .get(AD_NODE_PROPERTY)
-        .and_then(|value| super::nonnegative_usize(value, "dlarray", AD_NODE_PROPERTY))
+        .and_then(|value| match value {
+            Value::Int(IntValue::U64(id)) => usize::try_from(*id).ok(),
+            _ => None,
+        })?;
+    (id < tape.nodes.len()).then_some(id)
 }
 
 pub(super) fn dlarray_format_and_labels(value: &Value) -> (Value, Value) {
@@ -311,34 +400,27 @@ pub(super) fn host_tensor_from_value(
 }
 
 fn push_node(value: Tensor, kind: NodeKind) -> BuiltinResult<usize> {
-    ACTIVE_TAPE.with(|slot| {
-        let mut tape = slot.borrow_mut();
-        let Some(tape) = tape.as_mut() else {
-            return Err(deep_learning_error(
-                "dlgradient",
-                "dlgradient: no active automatic differentiation tape; call it inside dlfeval",
-            ));
-        };
-        let id = tape.nodes.len();
-        tape.nodes.push(Node { value, kind });
-        Ok(id)
-    })
+    let tape = active_tape().ok_or_else(|| {
+        deep_learning_error(
+            "dlgradient",
+            "dlgradient: no active automatic differentiation tape; call it inside dlfeval",
+        )
+    })?;
+    let mut tape = tape.borrow_mut();
+    let id = tape.nodes.len();
+    tape.nodes.push(Node { value, kind });
+    Ok(id)
 }
 
 fn value_for_node(id: usize) -> BuiltinResult<Tensor> {
-    ACTIVE_TAPE.with(|slot| {
-        let tape = slot.borrow();
-        let Some(tape) = tape.as_ref() else {
-            return Err(deep_learning_error(
-                "dlgradient",
-                "dlgradient: no active automatic differentiation tape",
-            ));
-        };
-        tape.nodes
-            .get(id)
-            .map(|node| node.value.clone())
-            .ok_or_else(|| deep_learning_error("dlgradient", "dlgradient: invalid tape node"))
-    })
+    let tape = active_tape().ok_or_else(|| {
+        deep_learning_error(
+            "dlgradient",
+            "dlgradient: no active automatic differentiation tape",
+        )
+    })?;
+    let value = tape.borrow().nodes.get(id).map(|node| node.value.clone());
+    value.ok_or_else(|| deep_learning_error("dlgradient", "dlgradient: invalid tape node"))
 }
 
 fn push_binary_node(
@@ -371,11 +453,20 @@ fn push_binary_node(
     builtin_path = "crate::builtins::deep_learning::autodiff"
 )]
 pub(super) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let targets = gather_args(rest).await?;
-    if targets.is_empty() {
+    if rest.is_empty() {
         return Err(deep_learning_error(
             "dlgradient",
             "dlgradient: expected at least one dlarray, learnables, or dlnetwork target",
+        ));
+    }
+    let requested = crate::output_count::current_output_count().unwrap_or(1);
+    if requested > rest.len() {
+        return Err(deep_learning_error(
+            "dlgradient",
+            format!(
+                "dlgradient: requested {requested} outputs for {} gradient targets",
+                rest.len()
+            ),
         ));
     }
     let loss = annotate_dlarray_value(loss)?;
@@ -393,34 +484,25 @@ pub(super) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
         ));
     }
     let gradients = backward(loss_node)?;
-    let mut outputs = Vec::with_capacity(targets.len());
-    for target in targets {
-        outputs.push(gradient_tree_for_target(&target, &gradients)?);
+    let mut outputs = Vec::with_capacity(requested);
+    for target in rest.iter().take(requested) {
+        outputs.push(gradient_tree_for_target(target, &gradients)?);
     }
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(n) if n > 1 => Ok(Value::OutputList(
-            (0..n)
-                .map(|idx| outputs.get(idx).cloned().unwrap_or(Value::Num(f64::NAN)))
-                .collect(),
-        )),
-        _ if outputs.len() == 1 => Ok(outputs.remove(0)),
-        _ => Ok(Value::OutputList(outputs)),
+    if requested == 1 {
+        Ok(outputs.remove(0))
+    } else {
+        Ok(Value::OutputList(outputs))
     }
 }
 
 fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
-    let nodes = ACTIVE_TAPE.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .map(|tape| tape.nodes.clone())
-            .ok_or_else(|| {
-                deep_learning_error(
-                    "dlgradient",
-                    "dlgradient: no active automatic differentiation tape",
-                )
-            })
+    let tape = active_tape().ok_or_else(|| {
+        deep_learning_error(
+            "dlgradient",
+            "dlgradient: no active automatic differentiation tape",
+        )
     })?;
+    let nodes = tape.borrow().nodes.clone();
     let mut grads: HashMap<usize, Tensor> = HashMap::new();
     let loss_dtype = nodes
         .get(loss_node)
@@ -991,8 +1073,20 @@ fn wrap_result(payload: &Payload, tensor: Tensor, node: Option<usize>) -> Value 
     out.properties
         .insert("Labels".to_string(), payload.labels.clone());
     if let Some(id) = node {
-        out.properties
-            .insert(AD_NODE_PROPERTY.to_string(), Value::Num(id as f64));
+        out.properties.insert(
+            AD_NODE_PROPERTY.to_string(),
+            Value::Int(IntValue::U64(
+                u64::try_from(id).expect("node index fits u64"),
+            )),
+        );
+        let tape_id = active_tape()
+            .expect("recorded output requires active tape")
+            .borrow()
+            .id;
+        out.properties.insert(
+            AD_TAPE_PROPERTY.to_string(),
+            Value::Int(IntValue::U64(tape_id)),
+        );
     }
     Value::Object(out)
 }
@@ -1171,12 +1265,18 @@ pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     let rhs = Payload::parse(rhs, "mtimes")?;
     let computed = crate::builtins::common::linalg::matmul_real(&lhs.tensor, &rhs.tensor)
         .map_err(|err| deep_learning_error("mtimes", err))?;
-    let out = floating_tensor_from_f64(
-        computed.materialize_f64().to_vec(),
-        computed.shape,
-        lhs.dtype,
-        "mtimes",
-    )?;
+    let out = if lhs.dtype == NumericDType::F64 {
+        computed
+    } else {
+        let shape = computed.shape.clone();
+        let NumericStorage::F64(values) = computed
+            .into_numeric_storage()
+            .map_err(|err| deep_learning_error("mtimes", err))?
+        else {
+            unreachable!("real matrix multiplication returns double storage")
+        };
+        floating_tensor_from_f64(values, shape, lhs.dtype, "mtimes")?
+    };
     let node = if tape_is_active() && (lhs.node.is_some() || rhs.node.is_some()) {
         Some(push_node(
             out.clone(),
@@ -1517,6 +1617,86 @@ mod struct_array_tests {
     use super::*;
     use runmat_value::{IntValue, IntegerStorage, StructArray};
 
+    #[test]
+    fn suspended_and_dropped_callback_futures_do_not_publish_their_tapes() {
+        let first_tape = Rc::new(RefCell::new(Tape::new()));
+        let second_tape = Rc::new(RefCell::new(Tape::new()));
+        let make_future = |tape: Rc<RefCell<Tape>>| TapeFuture {
+            tape,
+            future: Some(Box::pin(async {
+                assert!(tape_is_active());
+                push_node(Tensor::new(vec![1.0], vec![1, 1]).unwrap(), NodeKind::Leaf).unwrap();
+                futures::future::pending::<()>().await;
+            })),
+        };
+        let mut first = Box::pin(make_future(first_tape.clone()));
+        let mut second = Box::pin(make_future(second_tape.clone()));
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        assert!(first.as_mut().poll(&mut context).is_pending());
+        assert!(!tape_is_active());
+        assert!(second.as_mut().poll(&mut context).is_pending());
+        assert!(!tape_is_active());
+        assert_eq!(first_tape.borrow().nodes.len(), 1);
+        assert_eq!(second_tape.borrow().nodes.len(), 1);
+        drop(first);
+        drop(second);
+        assert!(!tape_is_active());
+    }
+
+    #[test]
+    fn nested_tape_activation_restores_the_outer_graph() {
+        let outer = Rc::new(RefCell::new(Tape::new()));
+        let inner = Rc::new(RefCell::new(Tape::new()));
+        let _outer = TapeActivation::enter(outer.clone());
+        push_node(Tensor::new(vec![1.0], vec![1, 1]).unwrap(), NodeKind::Leaf).unwrap();
+        {
+            let _inner = TapeActivation::enter(inner.clone());
+            push_node(Tensor::new(vec![2.0], vec![1, 1]).unwrap(), NodeKind::Leaf).unwrap();
+        }
+        push_node(Tensor::new(vec![3.0], vec![1, 1]).unwrap(), NodeKind::Leaf).unwrap();
+        assert_eq!(outer.borrow().nodes.len(), 2);
+        assert_eq!(inner.borrow().nodes.len(), 1);
+    }
+
+    #[test]
+    fn traced_node_ids_are_exact_and_belong_only_to_the_active_tape() {
+        let outer = Rc::new(RefCell::new(Tape::new()));
+        let inner = Rc::new(RefCell::new(Tape::new()));
+        let _outer = TapeActivation::enter(outer.clone());
+        let traced = annotate_dlarray_value(dlarray(4.0)).expect("outer traced value");
+        assert_eq!(dlarray_node_id(&traced), Some(0));
+        let Value::Object(object) = &traced else {
+            panic!("dlarray")
+        };
+        assert_eq!(
+            object.properties.get(AD_NODE_PROPERTY),
+            Some(&Value::Int(IntValue::U64(0)))
+        );
+        {
+            let _inner = TapeActivation::enter(inner.clone());
+            assert_eq!(dlarray_node_id(&traced), None);
+            let retraced = annotate_dlarray_value(traced.clone()).expect("inner leaf");
+            assert_eq!(dlarray_node_id(&retraced), Some(0));
+            assert_eq!(inner.borrow().nodes.len(), 1);
+        }
+        assert_eq!(dlarray_node_id(&traced), Some(0));
+        assert_eq!(outer.borrow().nodes.len(), 1);
+
+        let mut forged = traced;
+        let Value::Object(object) = &mut forged else {
+            panic!("dlarray")
+        };
+        object
+            .properties
+            .insert(AD_NODE_PROPERTY.into(), Value::Num(0.0));
+        assert_eq!(dlarray_node_id(&forged), None);
+        object
+            .properties
+            .insert(AD_NODE_PROPERTY.into(), Value::Int(IntValue::U64(u64::MAX)));
+        assert_eq!(dlarray_node_id(&forged), None);
+    }
+
     fn wrapped(data: Value) -> Value {
         let mut object = ObjectInstance::new(DLARRAY_CLASS.to_string());
         object.properties.insert("Data".into(), data);
@@ -1535,14 +1715,13 @@ mod struct_array_tests {
 
     #[test]
     fn annotation_and_gradient_preserve_typed_struct_array_shape_and_schema() {
-        ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = Some(Tape { nodes: Vec::new() }));
+        let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
         let input = Value::StructArray(
             StructArray::new(vec![element(1.0), element(2.0)], vec![2, 1]).unwrap(),
         );
         let annotated = annotate_tree(input).expect("annotate structure array");
         let gradient = gradient_tree_for_target(&annotated, &HashMap::new())
             .expect("gradient structure array");
-        ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = None);
 
         let Value::StructArray(gradient) = gradient else {
             panic!("expected typed structure array");
@@ -1575,14 +1754,15 @@ mod struct_array_tests {
                     shape: &[1, 1],
                 })
                 .expect("resident data");
-            ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = Some(Tape { nodes: Vec::new() }));
+            let tape = Rc::new(RefCell::new(Tape::new()));
+            let _activation = TapeActivation::enter(tape.clone());
             let host = futures::executor::block_on(super::super::training::dlarray_builtin(
                 Value::Num(2.0),
                 vec![],
             ))
             .expect("host dlarray is tape-tracked");
             assert!(matches!(host, Value::Object(_)));
-            ACTIVE_TAPE.with(|slot| assert_eq!(slot.borrow().as_ref().unwrap().nodes.len(), 1));
+            assert_eq!(tape.borrow().nodes.len(), 1);
 
             provider.reset_telemetry();
             let error = futures::executor::block_on(super::super::training::dlarray_builtin(
@@ -1590,7 +1770,6 @@ mod struct_array_tests {
                 vec![],
             ))
             .expect_err("resident autodiff needs a tape kernel");
-            ACTIVE_TAPE.with(|slot| *slot.borrow_mut() = None);
             assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
@@ -1633,5 +1812,46 @@ mod struct_array_tests {
             let error = result.expect_err("integer payload must not widen to double");
             assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         }
+    }
+
+    #[test]
+    fn gradient_output_arity_rejects_before_nested_provider_access() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .expect("resident target");
+            let nested =
+                Value::Cell(CellArray::new(vec![Value::GpuTensor(resident)], 1, 1).unwrap());
+            provider.reset_telemetry();
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let error = futures::executor::block_on(dlgradient_builtin(dlarray(1.0), vec![nested]))
+                .expect_err("one target cannot provide two outputs");
+            assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn gradient_nested_resident_target_rejects_without_gather() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let resident = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .expect("resident target");
+            let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+            let loss = annotate_dlarray_value(dlarray(1.0)).expect("traced loss");
+            let nested =
+                Value::Cell(CellArray::new(vec![Value::GpuTensor(resident)], 1, 1).unwrap());
+            provider.reset_telemetry();
+            let error = futures::executor::block_on(dlgradient_builtin(loss, vec![nested]))
+                .expect_err("untraced resident target");
+            assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
     }
 }

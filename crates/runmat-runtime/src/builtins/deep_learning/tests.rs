@@ -56,35 +56,6 @@ fn cleared_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     Value::Tensor(tensor)
 }
 
-#[test]
-fn dlarray_node_ids_preserve_typed_integer_bounds() {
-    let node_id = |value| {
-        let mut object = ObjectInstance::new("dlarray".to_string());
-        object
-            .properties
-            .insert("__runmat_ad_node".to_string(), value);
-        super::autodiff::dlarray_node_id(&Value::Object(object))
-    };
-
-    assert_eq!(node_id(Value::Int(IntValue::U16(7))), Some(7));
-    assert_eq!(node_id(Value::Num(7.0)), Some(7));
-    assert_eq!(node_id(Value::Int(IntValue::I8(-1))), None);
-    assert_eq!(
-        node_id(Value::Int(IntValue::U64(u64::MAX))),
-        Some(usize::MAX)
-    );
-    assert_eq!(node_id(Value::Num(7.5)), None);
-    assert_eq!(node_id(Value::Num(f64::INFINITY)), None);
-
-    let boundary = node_id(Value::Num(usize::MAX as f64));
-    if usize::BITS == 64 {
-        assert_eq!(boundary, None);
-    } else {
-        assert_eq!(boundary, Some(usize::MAX));
-    }
-    assert_eq!(node_id(Value::Num((usize::MAX as f64) + 1.0)), None);
-}
-
 fn layer_name(value: &Value) -> String {
     let Value::Object(object) = value else {
         panic!("expected object");
