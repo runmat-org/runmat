@@ -38,7 +38,7 @@ const OPTIONAL_ALPHA: [BuiltinParamDescriptor; 2] = [
 pub const LAYER_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.INVALID_INPUT",
     identifier: Some("RunMat:deepLearning:InvalidInput"),
-    when: "A required layer size, numeric alpha, or name-value option is invalid.",
+    when: "A required layer size, numeric alpha, or name-value option is invalid, or more than one output is requested.",
     message: "deep learning layer received invalid input",
 };
 const ERRORS: [BuiltinErrorDescriptor; 1] = [LAYER_INVALID_INPUT];

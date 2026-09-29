@@ -38,3 +38,19 @@ pub(super) fn descriptor_error(
     }
     builder.build()
 }
+
+pub(super) fn admit_single_output(
+    function: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    if let Some(requested) = crate::output_count::current_output_count() {
+        if requested > 1 {
+            return Err(descriptor_error(
+                function,
+                format!("{function}: requested {requested} outputs, but at most one is supported"),
+                descriptor,
+            ));
+        }
+    }
+    Ok(())
+}

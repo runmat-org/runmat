@@ -80,7 +80,7 @@ const PADSEQUENCES_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
 pub const SEQUENCE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.INVALID_INPUT",
     identifier: Some("RunMat:deepLearning:InvalidInput"),
-    when: "Argument count, numeric data, sequence shape, option name/value, or output capacity is invalid.",
+    when: "Argument count, numeric data, sequence shape, option name/value, requested output count, or output capacity is invalid.",
     message: "deep learning builtin received invalid input",
 };
 const ERRORS: [BuiltinErrorDescriptor; 1] = [SEQUENCE_INVALID_INPUT];

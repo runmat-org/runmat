@@ -89,27 +89,26 @@ fn canonical_training_option(name: &str) -> String {
 #[runtime_builtin(
     name = "dlarray",
     category = "deep_learning",
-    summary = "Create a dlarray compatibility object around numeric or gpuArray data.",
-    keywords = "dlarray,deep learning,array,labels",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::OBJECT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_dlarray_class_registered();
+    super::errors::admit_single_output("dlarray", &runmat_builtins::DLARRAY_INVALID_INPUT)?;
     validate_dlarray_data(&data)?;
-    let gathered = gather_args(rest).await?;
-    if gathered.len() > 1 {
+    if rest.len() > 1 {
         return Err(deep_learning_error(
             "dlarray",
             "dlarray: only the optional dimension-label format argument is supported",
         ));
     }
-    let format = text_or_missing(gathered.first(), "", "dlarray")?;
+    // Format is host text, so a non-text resident value must fail without
+    // downloading it. Data itself remains in its original owner/residency.
+    let format = text_or_missing(rest.first(), "", "dlarray")?;
+    ensure_dlarray_class_registered();
     autodiff::annotate_dlarray_value(object(
-        "dlarray",
+        runmat_types::standard::DL_ARRAY.display_name(),
         vec![
-            ("Data", data),
+            (runmat_builtins::DLARRAY_DATA_PROPERTY, data),
             ("Format", Value::String(format.clone())),
             ("Labels", Value::String(format)),
         ],
@@ -117,9 +116,16 @@ pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinRes
 }
 
 fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
-    if matches!(data, Value::Int(_))
-        || matches!(data, Value::Tensor(tensor) if tensor.integer_storage().is_some())
-    {
+    if !crate::builtins::common::shape::array_payload_storage_matches(
+        data,
+        runmat_types::ClassArrayPayload::NumericOrLogical,
+    ) {
+        return Err(deep_learning_error(
+            "dlarray",
+            "dlarray: Data must be a numeric or logical scalar, array, sparse array, or gpuArray",
+        ));
+    }
+    if crate::builtins::common::validation::value_has_native_integer_class(data) {
         return Err(deep_learning_error(
             "dlarray",
             "dlarray: integer data is not supported; use double, single, logical, or gpuArray data",

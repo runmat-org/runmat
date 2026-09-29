@@ -1698,6 +1698,110 @@ fn sequence_host_errors_precede_provider_downloads() {
 }
 
 #[test]
+fn padsequences_selectively_gathers_nested_resident_numeric_sequences() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let resident = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F32(&[1.25, 2.5]),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("single sequence upload");
+        provider.reset_telemetry();
+        let sequences =
+            Value::Cell(CellArray::new(vec![Value::GpuTensor(resident.clone())], 1, 1).unwrap());
+        let output = block_on(padsequences_builtin(sequences, vec![Value::Num(2.0)]))
+            .expect("resident single sequence should pad on host");
+        let Value::Tensor(output) = output else {
+            panic!("expected stacked tensor")
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.shape, vec![1, 2, 1]);
+        assert_eq!(output.materialize_f64(), vec![1.25, 2.5]);
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+
+        let wide = (1_u64 << 53) + 1;
+        let resident_wide = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::U64(&[wide]),
+                shape: &[1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("wide integer sequence upload");
+        let sequences =
+            Value::Cell(CellArray::new(vec![Value::GpuTensor(resident_wide)], 1, 1).unwrap());
+        let output = block_on(padsequences_builtin(sequences, vec![Value::Num(2.0)]))
+            .expect("resident integer sequence should retain native class");
+        let Value::Tensor(output) = output else {
+            panic!("expected stacked tensor")
+        };
+        assert_eq!(output.numeric_dtype(), NumericDType::U64);
+        assert_eq!(
+            output
+                .integer_storage()
+                .and_then(|storage| storage.value_at(0)),
+            Some(IntValue::U64(wide))
+        );
+    });
+}
+
+#[test]
+fn padsequences_nested_resident_preflight_rejects_later_host_errors_without_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &shape,
+            })
+            .unwrap();
+        let bad_cell = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::GpuTensor(resident.clone()),
+                    Value::String("invalid".into()),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        );
+        provider.reset_telemetry();
+        let error = block_on(padsequences_builtin(bad_cell, vec![Value::Num(2.0)]))
+            .expect_err("later host cell is invalid");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let valid_cell =
+            Value::Cell(CellArray::new(vec![Value::GpuTensor(resident.clone())], 1, 1).unwrap());
+        let error = block_on(padsequences_builtin(
+            valid_cell,
+            vec![Value::String("bad dim".into())],
+        ))
+        .expect_err("host padding dimension is invalid");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let mismatched = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::GpuTensor(resident),
+                    Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap()),
+                ],
+                1,
+                2,
+            )
+            .unwrap(),
+        );
+        let error = block_on(padsequences_builtin(mismatched, vec![Value::Num(2.0)]))
+            .expect_err("known non-padding shape mismatch");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
 fn sequence_resident_operands_gather_once_and_return_host_results() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let values = [1.0, 2.0];
@@ -2006,6 +2110,97 @@ fn dlarray_preserves_gpu_array_residency() {
             object.properties.get("Format"),
             Some(&Value::String("CB".into()))
         );
+    });
+}
+
+#[test]
+fn dlarray_rejects_non_numeric_payloads_and_format_without_download() {
+    for data in [
+        Value::String("not numeric".into()),
+        Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+        object("Example", vec![("Data", Value::Num(1.0))]),
+    ] {
+        let error = block_on(dlarray_builtin(data, vec![])).expect_err("invalid Data storage");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+    }
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let values = [1.0, 2.0];
+        let shape = [1usize, 2usize];
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let error = block_on(dlarray_builtin(
+            Value::GpuTensor(resident.clone()),
+            vec![Value::Num(12.0)],
+        ))
+        .expect_err("numeric Format rejects before any Data access");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let wrapped = block_on(dlarray_builtin(
+            Value::GpuTensor(resident.clone()),
+            vec![Value::String("CB".into())],
+        ))
+        .unwrap();
+        let Value::Object(wrapped) = wrapped else {
+            panic!("expected dlarray")
+        };
+        let Value::GpuTensor(data) = &wrapped.properties[runmat_builtins::DLARRAY_DATA_PROPERTY]
+        else {
+            panic!("expected resident Data")
+        };
+        assert_eq!(data.allocation_identity(), resident.allocation_identity());
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn fixed_output_deep_learning_bindings_admit_discard_and_reject_extra_outputs() {
+    for (name, args) in [
+        ("fullyConnectedLayer", vec![Value::Num(2.0)]),
+        ("layerGraph", vec![]),
+        (
+            "analyzeNetwork",
+            vec![Value::Cell(CellArray::new(vec![], 0, 0).unwrap())],
+        ),
+        ("combvec", vec![Value::Num(1.0)]),
+        ("dlarray", vec![Value::Num(1.0)]),
+    ] {
+        block_on(crate::call_builtin_async_with_outputs(name, &args, 0))
+            .unwrap_or_else(|error| panic!("{name} discard invocation failed: {error}"));
+        let error = block_on(crate::call_builtin_async_with_outputs(name, &args, 2))
+            .expect_err("fixed-output binding must reject a second output");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:deepLearning:InvalidInput"),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn fixed_output_rejection_precedes_resident_input_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 2],
+            })
+            .expect("resident array");
+        for (name, args) in [
+            ("combvec", vec![Value::GpuTensor(resident.clone())]),
+            ("dlarray", vec![Value::GpuTensor(resident.clone())]),
+        ] {
+            provider.reset_telemetry();
+            let error = block_on(crate::call_builtin_async_with_outputs(name, &args, 2))
+                .expect_err("second output must reject before provider work");
+            assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0, "{name}");
+        }
     });
 }
 

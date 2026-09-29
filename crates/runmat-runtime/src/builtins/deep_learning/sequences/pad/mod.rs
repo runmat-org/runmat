@@ -1,0 +1,265 @@
+use runmat_macros::runtime_builtin;
+use runmat_value::{CellArray, LogicalArray, NumericDType, NumericStorage, Tensor, Value};
+
+use crate::{gather_if_needed_async, BuiltinResult};
+
+use super::super::{deep_learning_error, parse_name_values, positive_usize};
+
+mod admission;
+mod execution;
+mod options;
+
+use admission::{
+    preflight_uniform_shapes, validate_pad_option, validate_resident_pad_option,
+    validate_resident_padding_dim, validate_resident_sequence, SequenceInput,
+};
+use execution::{check_pad_elements, checked_numel, non_padding_dims_match, pad_sequence};
+pub(super) use options::SequenceLength;
+use options::{numeric_pad_value, parse_bool, PadOptions, PaddingDirection};
+
+#[runtime_builtin(
+    name = "padsequences",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::deep_learning::sequences"
+)]
+pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
+    sequences: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
+    if requested_outputs > 2 {
+        return Err(deep_learning_error(
+            "padsequences",
+            "padsequences: at most two outputs are supported",
+        ));
+    }
+    if rest.is_empty() {
+        return Err(deep_learning_error(
+            "padsequences",
+            "padsequences: expected padding dimension as the second argument",
+        ));
+    }
+    let Value::Cell(cell) = sequences else {
+        return Err(deep_learning_error(
+            "padsequences",
+            "padsequences: expected a cell array of numeric sequences",
+        ));
+    };
+    let mut parsed = parse_name_values(rest[1..].to_vec(), "padsequences")?;
+    for (name, value) in &parsed {
+        if !matches!(
+            name.as_str(),
+            "paddingvalue" | "paddingdirection" | "direction" | "length" | "uniformoutput"
+        ) {
+            return Err(deep_learning_error(
+                "padsequences",
+                format!("padsequences: unsupported option '{name}'"),
+            ));
+        }
+        if matches!(value, Value::GpuTensor(_)) {
+            validate_resident_pad_option(name, value)?;
+            continue;
+        }
+        validate_pad_option(name, value)?;
+    }
+    // Admit every host element and resident descriptor before the first
+    // download. A malformed later host sequence must not download an earlier
+    // provider-owned element.
+    let mut prepared = Vec::with_capacity(cell.data.len());
+    for item in &cell.data {
+        prepared.push(match item {
+            Value::GpuTensor(handle) => {
+                validate_resident_sequence(handle)?;
+                None
+            }
+            _ => Some(SequenceInput::from_value(item)?),
+        });
+    }
+    let host_dim = if matches!(rest[0], Value::GpuTensor(_)) {
+        validate_resident_padding_dim(&rest[0])?;
+        None
+    } else {
+        Some(positive_usize(&rest[0], "padsequences", "paddingDim")? - 1)
+    };
+    if let Some(dim) = host_dim {
+        preflight_uniform_shapes(&cell.data, &prepared, &parsed, dim)?;
+    }
+    let padding_dim = match host_dim {
+        Some(dim) => dim,
+        None => {
+            positive_usize(
+                &gather_if_needed_async(&rest[0]).await?,
+                "padsequences",
+                "paddingDim",
+            )? - 1
+        }
+    };
+    let mut seqs = Vec::with_capacity(prepared.len());
+    for (parsed, item) in prepared.into_iter().zip(&cell.data) {
+        seqs.push(match parsed {
+            Some(sequence) => sequence,
+            None => SequenceInput::from_value(&gather_if_needed_async(item).await?)?,
+        });
+    }
+    let dtype = seqs
+        .first()
+        .map_or(NumericDType::F64, |seq| seq.data.numeric_dtype());
+    let dtype = if seqs.iter().all(|seq| seq.data.numeric_dtype() == dtype) {
+        dtype
+    } else {
+        // Retain the existing mixed-class RunMat form as a double result.
+        NumericDType::F64
+    };
+    for seq in &mut seqs {
+        while seq.shape.len() <= padding_dim {
+            seq.shape.push(1);
+        }
+    }
+    for value in parsed.values_mut() {
+        if matches!(value, Value::GpuTensor(_)) {
+            *value = gather_if_needed_async(value).await?;
+        }
+    }
+    let mut options = PadOptions::default();
+    if let Some(value) = parsed.remove("paddingvalue") {
+        options.padding_value = numeric_pad_value(&value)?;
+    }
+    if let Some(value) = parsed
+        .remove("paddingdirection")
+        .or_else(|| parsed.remove("direction"))
+    {
+        options.direction = PaddingDirection::parse(&scalar_text(&value, "padsequences")?)?;
+    }
+    if let Some(value) = parsed.remove("length") {
+        options.length = SequenceLength::parse(&value)?;
+    }
+    if let Some(value) = parsed.remove("uniformoutput") {
+        options.uniform_output = parse_bool(&value, "padsequences", "UniformOutput")?;
+    }
+    if !parsed.is_empty() {
+        let first = parsed.keys().next().cloned().unwrap_or_default();
+        return Err(deep_learning_error(
+            "padsequences",
+            format!("padsequences: unsupported option '{first}'"),
+        ));
+    }
+    let max_rank = seqs
+        .iter()
+        .map(|seq| seq.shape.len())
+        .max()
+        .unwrap_or(padding_dim + 1)
+        .max(padding_dim + 1);
+    for seq in &mut seqs {
+        while seq.shape.len() < max_rank {
+            seq.shape.push(1);
+        }
+    }
+    let target_len = match options.length {
+        SequenceLength::Longest => seqs
+            .iter()
+            .map(|seq| seq.shape[padding_dim])
+            .max()
+            .unwrap_or(0),
+        SequenceLength::Shortest => seqs
+            .iter()
+            .map(|seq| seq.shape[padding_dim])
+            .min()
+            .unwrap_or(0),
+        SequenceLength::Fixed(len) => len,
+    };
+    let mut padded = Vec::with_capacity(seqs.len());
+    for seq in &seqs {
+        padded.push(pad_sequence(
+            seq,
+            padding_dim,
+            target_len,
+            options,
+            requested_outputs == 2,
+        )?);
+    }
+    if !options.uniform_output {
+        let mut cells = Vec::with_capacity(padded.len());
+        let mut masks = Vec::with_capacity(padded.len());
+        for (tensor, mask) in padded {
+            cells.push(Value::Tensor(tensor));
+            if let Some(mask) = mask {
+                masks.push(Value::LogicalArray(mask));
+            }
+        }
+        let output = CellArray::new_with_shape(cells, cell.shape.clone())
+            .map(Value::Cell)
+            .map_err(|err| deep_learning_error("padsequences", err))?;
+        if requested_outputs == 2 {
+            let mask = CellArray::new_with_shape(masks, cell.shape)
+                .map(Value::Cell)
+                .map_err(|err| deep_learning_error("padsequences", err))?;
+            return Ok(Value::OutputList(vec![output, mask]));
+        }
+        return Ok(if requested_outputs == 0 {
+            Value::OutputList(Vec::new())
+        } else {
+            output
+        });
+    }
+    let Some(first) = padded.first() else {
+        let output = Value::Tensor(
+            Tensor::from_numeric_storage(NumericStorage::zeros(dtype, 0), vec![0, 0])
+                .map_err(|err| deep_learning_error("padsequences", err))?,
+        );
+        return Ok(match requested_outputs {
+            0 => Value::OutputList(Vec::new()),
+            2 => Value::OutputList(vec![
+                output,
+                Value::LogicalArray(
+                    LogicalArray::new(Vec::new(), vec![0, 0])
+                        .map_err(|err| deep_learning_error("padsequences", err))?,
+                ),
+            ]),
+            _ => output,
+        });
+    };
+    for seq in &padded[1..] {
+        if !non_padding_dims_match(&first.0.shape, &seq.0.shape, padding_dim) {
+            return Err(deep_learning_error(
+                "padsequences",
+                "padsequences: non-padding dimensions must match when UniformOutput is true",
+            ));
+        }
+    }
+    let mut output_shape = first.0.shape.clone();
+    output_shape.push(padded.len());
+    let block_len = checked_numel(&first.0.shape, "padsequences")?;
+    let total = block_len.checked_mul(padded.len()).ok_or_else(|| {
+        deep_learning_error("padsequences", "padsequences: output size overflows usize")
+    })?;
+    check_pad_elements(total)?;
+    let mut output =
+        Tensor::from_numeric_storage(NumericStorage::zeros(dtype, total), output_shape.clone())
+            .map_err(|err| deep_learning_error("padsequences", err))?;
+    let mut mask_data = (requested_outputs == 2).then(|| Vec::with_capacity(total));
+    for (block, (seq, mask)) in padded.into_iter().enumerate() {
+        for index in 0..block_len {
+            let value = seq.numeric_value_at(index).ok_or_else(|| {
+                deep_learning_error("padsequences", "padsequences: padded index out of bounds")
+            })?;
+            output
+                .set_numeric_assignment_at(block * block_len + index, value)
+                .map_err(|err| deep_learning_error("padsequences", err))?;
+        }
+        if let (Some(data), Some(mask)) = (&mut mask_data, mask) {
+            data.extend_from_slice(mask.data.as_slice());
+        }
+    }
+    let output = Value::Tensor(output);
+    Ok(match requested_outputs {
+        0 => Value::OutputList(Vec::new()),
+        2 => Value::OutputList(vec![
+            output,
+            Value::LogicalArray(
+                LogicalArray::new(mask_data.unwrap_or_default(), output_shape)
+                    .map_err(|err| deep_learning_error("padsequences", err))?,
+            ),
+        ]),
+        _ => output,
+    })
+}

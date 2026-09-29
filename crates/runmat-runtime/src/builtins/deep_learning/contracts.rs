@@ -6,7 +6,7 @@ use runmat_builtins::{
 pub(in crate::builtins) const MAX_COMBVEC_COLUMNS: usize = 1_000_000;
 pub(in crate::builtins) const MAX_PAD_ELEMENTS: usize = 10_000_000;
 pub(in crate::builtins) const DLARRAY_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("dlarray");
+    runmat_types::standard::DL_ARRAY;
 pub(in crate::builtins) const LAYER_GRAPH_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("nnet.cnn.LayerGraph");
 pub(in crate::builtins) use runmat_builtins::{

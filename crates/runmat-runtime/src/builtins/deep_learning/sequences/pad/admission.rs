@@ -1,0 +1,183 @@
+use runmat_value::{NumericScalar, NumericStorage, Tensor, Value};
+
+use crate::BuiltinResult;
+
+use super::super::super::{deep_learning_error, numeric_scalar, scalar_text};
+use super::{
+    execution::non_padding_dims_match,
+    options::{parse_bool, PaddingDirection, SequenceLength},
+};
+
+pub(super) fn validate_pad_option(name: &str, value: &Value) -> BuiltinResult<()> {
+    match name {
+        "paddingvalue" => {
+            numeric_scalar(value, "padsequences", "PaddingValue")?;
+        }
+        "paddingdirection" | "direction" => {
+            PaddingDirection::parse(&scalar_text(value, "padsequences")?)?;
+        }
+        "length" => {
+            SequenceLength::parse(value)?;
+        }
+        "uniformoutput" => {
+            parse_bool(value, "padsequences", "UniformOutput")?;
+        }
+        _ => unreachable!("option name admitted by caller"),
+    }
+    Ok(())
+}
+
+pub(super) fn validate_resident_padding_dim(value: &Value) -> BuiltinResult<()> {
+    let Value::GpuTensor(handle) = value else {
+        unreachable!()
+    };
+    if handle.shape().iter().all(|dimension| *dimension == 1)
+        && runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+        && !runmat_accelerate_api::handle_is_logical(handle)
+    {
+        Ok(())
+    } else {
+        Err(deep_learning_error(
+            "padsequences",
+            "padsequences: paddingDim must be a positive numeric scalar",
+        ))
+    }
+}
+
+pub(super) fn validate_resident_sequence(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<()> {
+    if runmat_accelerate_api::handle_storage(handle)
+        != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_is_logical(handle)
+    {
+        return Err(deep_learning_error(
+            "padsequences",
+            "padsequences: sequence cells must contain real numeric data",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn preflight_uniform_shapes(
+    values: &[Value],
+    prepared: &[Option<SequenceInput>],
+    options: &std::collections::BTreeMap<String, Value>,
+    padding_dim: usize,
+) -> BuiltinResult<()> {
+    let uniform = match options.get("uniformoutput") {
+        None => true,
+        Some(Value::GpuTensor(_)) => return Ok(()),
+        Some(value) => parse_bool(value, "padsequences", "UniformOutput")?,
+    };
+    if !uniform {
+        return Ok(());
+    }
+    let mut shapes = values
+        .iter()
+        .zip(prepared)
+        .map(|(value, parsed)| match parsed {
+            Some(sequence) => sequence.shape.clone(),
+            None => match value {
+                Value::GpuTensor(handle) => handle.shape().to_vec(),
+                _ => unreachable!("resident sequence admitted above"),
+            },
+        })
+        .collect::<Vec<_>>();
+    let rank = shapes
+        .iter()
+        .map(Vec::len)
+        .max()
+        .unwrap_or(0)
+        .max(padding_dim + 1);
+    for shape in &mut shapes {
+        shape.resize(rank, 1);
+    }
+    if let Some(first) = shapes.first() {
+        for shape in &shapes[1..] {
+            if !non_padding_dims_match(first, shape, padding_dim) {
+                return Err(deep_learning_error(
+                    "padsequences",
+                    "padsequences: non-padding dimensions must match when UniformOutput is true",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_resident_pad_option(name: &str, value: &Value) -> BuiltinResult<()> {
+    let Value::GpuTensor(handle) = value else {
+        unreachable!()
+    };
+    let numeric_scalar = handle.shape().iter().all(|dimension| *dimension == 1)
+        && runmat_accelerate_api::handle_storage(handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real;
+    let accepted = match name {
+        "paddingvalue" | "length" => {
+            numeric_scalar && !runmat_accelerate_api::handle_is_logical(handle)
+        }
+        "uniformoutput" => numeric_scalar,
+        // A numeric device buffer cannot be a text direction token.
+        "paddingdirection" | "direction" => false,
+        _ => unreachable!("option name admitted by caller"),
+    };
+    if accepted {
+        Ok(())
+    } else {
+        Err(deep_learning_error(
+            "padsequences",
+            format!("padsequences: {name} has an invalid resident type or shape"),
+        ))
+    }
+}
+
+pub(super) struct SequenceInput {
+    pub(super) data: Tensor,
+    pub(super) shape: Vec<usize>,
+}
+
+impl SequenceInput {
+    pub(super) fn from_value(value: &Value) -> BuiltinResult<Self> {
+        let (data, shape) = match value {
+            Value::Num(n) if n.is_finite() => (
+                Tensor::new(vec![*n], vec![1, 1])
+                    .map_err(|err| deep_learning_error("padsequences", err))?,
+                vec![1, 1],
+            ),
+            Value::Int(i) => {
+                let mut storage = NumericStorage::zeros(i.numeric_dtype(), 1);
+                storage
+                    .set_value(0, NumericScalar::from(i.clone()))
+                    .map_err(|err| deep_learning_error("padsequences", err))?;
+                (
+                    Tensor::from_numeric_storage(storage, vec![1, 1])
+                        .map_err(|err| deep_learning_error("padsequences", err))?,
+                    vec![1, 1],
+                )
+            }
+            Value::Tensor(t) => {
+                for index in 0..t.host_buffer().len() {
+                    if !t
+                        .numeric_value_at(index)
+                        .is_some_and(NumericScalar::is_finite)
+                    {
+                        return Err(deep_learning_error(
+                            "padsequences",
+                            "padsequences: sequence values must be finite",
+                        ));
+                    }
+                }
+                (t.clone(), t.shape.clone())
+            }
+            other => {
+                return Err(deep_learning_error(
+                    "padsequences",
+                    format!("padsequences: sequences must contain numeric arrays, got {other:?}"),
+                ));
+            }
+        };
+        Ok(Self { data, shape })
+    }
+}

@@ -49,7 +49,7 @@ const ANALYZE_NETWORK_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
 pub const GRAPH_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.INVALID_INPUT",
     identifier: Some("RunMat:deepLearning:InvalidInput"),
-    when: "The input count, layer collection, graph metadata, or a contained layer is invalid.",
+    when: "The input count, layer collection, graph metadata, or a contained layer is invalid, or more than one output is requested.",
     message: "deep learning builtin received invalid input",
 };
 const GRAPH_ERRORS: [BuiltinErrorDescriptor; 1] = [GRAPH_INVALID_INPUT];

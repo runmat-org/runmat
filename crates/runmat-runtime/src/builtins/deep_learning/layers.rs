@@ -86,6 +86,10 @@ pub(super) async fn fully_connected_layer_builtin(
     output_size: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    super::errors::admit_single_output(
+        "fullyConnectedLayer",
+        &runmat_builtins::LAYER_INVALID_INPUT,
+    )?;
     let output_size = metadata_size(&output_size, "fullyConnectedLayer", "outputSize")?;
     layer_object(
         FULLY_CONNECTED_LAYER_CLASS,
@@ -105,6 +109,7 @@ pub(super) async fn feature_input_layer_builtin(
     input_size: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("featureInputLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     let input_size = metadata_sizes(&input_size, "featureInputLayer", "inputSize")?;
     if input_size.len() > 1 {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -137,6 +142,10 @@ pub(super) async fn sequence_input_layer_builtin(
     input_size: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    super::errors::admit_single_output(
+        "sequenceInputLayer",
+        &runmat_builtins::LAYER_INVALID_INPUT,
+    )?;
     let input_size = metadata_sizes(&input_size, "sequenceInputLayer", "inputSize")?;
     layer_object(
         SEQUENCE_INPUT_LAYER_CLASS,
@@ -160,6 +169,7 @@ pub(super) async fn sequence_input_layer_builtin(
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("reluLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     layer_object(
         RELU_LAYER_CLASS,
         "ReLU",
@@ -175,6 +185,7 @@ pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value>
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("eluLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     let mut args = rest;
     let leading_alpha = args.first().is_some_and(is_numeric_scalar);
     if leading_alpha {
@@ -204,6 +215,7 @@ pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> 
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("softmaxLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     layer_object(
         SOFTMAX_LAYER_CLASS,
         "Softmax",
@@ -219,6 +231,10 @@ pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Val
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::errors::admit_single_output(
+        "classificationLayer",
+        &runmat_builtins::LAYER_INVALID_INPUT,
+    )?;
     layer_object(
         CLASSIFICATION_OUTPUT_LAYER_CLASS,
         "Classification Output",
@@ -234,6 +250,7 @@ pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinRes
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("regressionLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     layer_object(
         REGRESSION_OUTPUT_LAYER_CLASS,
         "Regression Output",
@@ -249,6 +266,10 @@ pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::errors::admit_single_output(
+        "layerNormalizationLayer",
+        &runmat_builtins::LAYER_INVALID_INPUT,
+    )?;
     layer_object(
         LAYER_NORMALIZATION_LAYER_CLASS,
         "Layer Normalization",
@@ -266,6 +287,10 @@ pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> Built
 pub(super) async fn global_average_pooling_1d_layer_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    super::errors::admit_single_output(
+        "globalAveragePooling1dLayer",
+        &runmat_builtins::LAYER_INVALID_INPUT,
+    )?;
     layer_object(
         GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS,
         "Global Average Pooling 1D",
@@ -284,6 +309,7 @@ pub(super) async fn lstm_layer_builtin(
     num_hidden_units: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("lstmLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     recurrent_layer(
         "lstmLayer",
         LSTM_LAYER_CLASS,
@@ -303,6 +329,7 @@ pub(super) async fn bilstm_layer_builtin(
     num_hidden_units: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("bilstmLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     recurrent_layer(
         "bilstmLayer",
         BILSTM_LAYER_CLASS,
@@ -343,6 +370,10 @@ pub(super) async fn convolution_1d_layer_builtin(
     num_filters: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    super::errors::admit_single_output(
+        "convolution1dLayer",
+        &runmat_builtins::LAYER_INVALID_INPUT,
+    )?;
     let filter_size = metadata_size(&filter_size, "convolution1dLayer", "filterSize")?;
     let num_filters = metadata_size(&num_filters, "convolution1dLayer", "numFilters")?;
     layer_object(

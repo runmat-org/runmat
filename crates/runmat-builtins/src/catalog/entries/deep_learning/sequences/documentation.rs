@@ -1,9 +1,15 @@
 use crate::*;
 
-const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
-    label: "Runtime sequence implementation",
+const COMBVEC_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Runtime combvec implementation",
     target: BuiltinDocumentationLinkTarget::Source(
-        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/sequences.rs",
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/sequences/combvec.rs",
+    ),
+};
+const PAD_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Runtime padsequences implementation",
+    target: BuiltinDocumentationLinkTarget::Source(
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/sequences/pad/mod.rs",
     ),
 };
 
@@ -33,10 +39,10 @@ pub(super) const COMBVEC: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Which input varies fastest?", answer: "The first input varies fastest. Its first column is paired with the first column of every later input before that later input advances." },
         BuiltinDocumentationFaq { question: "Does combvec keep integer storage?", answer: "No. Its result is a double matrix; input integers are converted at the Cartesian output boundary." },
     ],
-    links: &[SOURCE, BuiltinDocumentationLink { label: "padsequences", target: BuiltinDocumentationLinkTarget::Builtin("padsequences") }],
+    links: &[COMBVEC_SOURCE, BuiltinDocumentationLink { label: "padsequences", target: BuiltinDocumentationLinkTarget::Builtin("padsequences") }],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[COMBVEC_SOURCE],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Column combination order and integer input", location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs" }],
         notes: &["Host output and resident gather behavior need integrated native/browser qualification."],
     },
@@ -58,7 +64,7 @@ pub(super) const PADSEQUENCES: BuiltinDocumentation = BuiltinDocumentation {
             "Sequences must be finite real numeric scalars or arrays. The requested dimension is a positive integer. For uniform output, all non-padding dimensions must match. The implementation rejects more than 10,000,000 elements in an output sequence or stacked tensor.",
         ] },
         BuiltinDocumentationSection { heading: "Placement", paragraphs: &[
-            "Padding currently materializes host typed tensors. It does not run a resident GPU padding kernel. Invalid host options and invalid sequence elements are rejected before any required provider download; shape agreement is checked before stacking the result. A second output is a logical mask with the same tensor or cell-container shape as the padded data.",
+            "Padding currently materializes host typed tensors. It does not run a resident GPU padding kernel. Resident numeric elements inside the input cell are selectively gathered from their owning provider after host options, host elements, and known shape compatibility have been checked. Homogeneous input classes survive that transfer. A second output is a logical mask with the same tensor or cell-container shape as the padded data.",
         ] },
     ],
     examples: &[
@@ -73,10 +79,10 @@ pub(super) const PADSEQUENCES: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Does padsequences preserve integer arrays?", answer: "Yes for a cell collection with one numeric class. Mixed-class collections produce double when stacked; with UniformOutput=false each cell retains its original class. The optional mask is logical." },
         BuiltinDocumentationFaq { question: "Are symmetric padding and categorical arrays supported?", answer: "No. This implementation accepts finite real numeric arrays and constant numeric padding; symmetric reflection and categorical sequence forms are not implemented." },
     ],
-    links: &[SOURCE, BuiltinDocumentationLink { label: "sequenceInputLayer", target: BuiltinDocumentationLinkTarget::Builtin("sequenceInputLayer") }],
+    links: &[PAD_SOURCE, BuiltinDocumentationLink { label: "sequenceInputLayer", target: BuiltinDocumentationLinkTarget::Builtin("sequenceInputLayer") }],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[PAD_SOURCE],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Uniform and cell padding behavior", location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs" }],
         notes: &["Native/browser and provider behavior require integrated qualification; GPU sequence padding is not implemented."],
     },

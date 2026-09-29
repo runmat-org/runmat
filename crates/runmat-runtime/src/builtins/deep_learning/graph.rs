@@ -15,6 +15,7 @@ fn graph_error(function: &'static str, message: impl Into<String>) -> RuntimeErr
     builtin_path = "crate::builtins::deep_learning::graph"
 )]
 pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("layerGraph", &runmat_builtins::GRAPH_INVALID_INPUT)?;
     if args.len() > 1 {
         return Err(graph_error(
             "layerGraph",
@@ -58,6 +59,7 @@ pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value
     builtin_path = "crate::builtins::deep_learning::graph"
 )]
 pub(super) async fn analyze_network_builtin(network: Value) -> BuiltinResult<Value> {
+    super::errors::admit_single_output("analyzeNetwork", &runmat_builtins::GRAPH_INVALID_INPUT)?;
     let layers = match &network {
         Value::Object(object) if object.class_name.is(super::LAYER_GRAPH_CLASS) => object
             .properties
