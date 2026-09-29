@@ -10,7 +10,7 @@ use runmat_types::{
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     let args = &request.arguments;
-    if args.len() < 5 || (args.len() - 5) % 2 != 0 {
+    if args.len() < 5 || !(args.len() - 5).is_multiple_of(2) {
         diagnostics.push(argument_error(
             "RM-CATALOG-BLSIMPV-ARITY",
             "blsimpv expects five inputs and name-value pairs",

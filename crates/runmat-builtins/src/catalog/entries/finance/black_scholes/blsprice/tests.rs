@@ -239,6 +239,66 @@ fn unknown_host_empty_yield_does_not_infer_an_empty_price_result() {
 }
 
 #[test]
+fn unknown_size_integer_or_logical_yield_keeps_precision_conditional_on_emptiness() {
+    let mut single = real(ShapeFact::from(vec![Some(2), Some(1)]));
+    single.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    });
+    for kind in [
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }),
+        ValueKindFact::Logical,
+    ] {
+        let mut args = vec![single.clone()];
+        args.extend((0..4).map(|_| real(ShapeFact::Scalar)));
+        args.push(ValueFact::proven(
+            kind,
+            ShapeFact::Unknown,
+            StorageFact::Dense,
+        ));
+        let inferred = crate::infer_catalog_call(&BLSPRICE_CATALOG_ENTRY, &request(args, 1));
+        assert!(inferred.diagnostics.is_empty());
+        assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+        assert_eq!(inferred.outputs[0].shape, ShapeFact::Unknown);
+    }
+}
+
+#[test]
+fn empty_complex_or_sparse_yield_does_not_bypass_input_admission() {
+    for (numeric, storage) in [
+        (
+            NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Complex,
+            },
+            StorageFact::Dense,
+        ),
+        (
+            NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            },
+            StorageFact::Sparse,
+        ),
+    ] {
+        let mut args = (0..5).map(|_| real(ShapeFact::Scalar)).collect::<Vec<_>>();
+        args.push(ValueFact::proven(
+            ValueKindFact::Numeric(numeric),
+            ShapeFact::from(vec![Some(0), Some(0)]),
+            storage,
+        ));
+        let inferred = crate::infer_catalog_call(&BLSPRICE_CATALOG_ENTRY, &request(args, 1));
+        assert!(inferred
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-BLSPRICE-INPUT"));
+    }
+}
+
+#[test]
 fn legacy_visible_examples_and_provider_contract_are_present() {
     assert_eq!(BLSPRICE_CATALOG_ENTRY.documentation.examples.len(), 2);
     for example in BLSPRICE_CATALOG_ENTRY.documentation.examples {

@@ -8,7 +8,7 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
 macro_rules! layer_documentation {
     ($name:ident, $title:literal, $summary:literal, $description:literal, $keywords:expr,
      $program:literal, $output:literal, $assertions:literal, $detail:literal) => {
-        pub(super) const $name: BuiltinDocumentation = BuiltinDocumentation {
+        pub(in crate::catalog::entries::deep_learning::layers) const $name: BuiltinDocumentation = BuiltinDocumentation {
             authority: BuiltinDocumentationAuthority::Catalog,
             title: Some($title),
             slug: Some($title),

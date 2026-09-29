@@ -41,13 +41,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         if index == 5 && value.residency == ResidencyFact::Host {
             let empty_array_kind = matches!(
                 value.kind,
-                ValueKindFact::Numeric(_)
-                    | ValueKindFact::Logical
+                ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                }) | ValueKindFact::Logical
                     | ValueKindFact::Character
                     | ValueKindFact::String
                     | ValueKindFact::Cell(_)
             );
-            if empty_array_kind && value.shape.element_count() == Some(0) {
+            if empty_array_kind
+                && value.storage != StorageFact::Sparse
+                && value.shape.element_count() == Some(0)
+            {
                 continue;
             }
             if value.kind == ValueKindFact::Unknown && value.shape.element_count() == Some(0) {
@@ -101,6 +106,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                         unknown_double_geometry = true;
                     }
                 }
+            }
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical
+                if index == 5
+                    && value.residency == ResidencyFact::Host
+                    && value.shape.element_count().is_none() =>
+            {
+                // An empty host Yield normalizes to the default double
+                // scalar; a nonempty integer/logical Yield forces double.
+                unknown_input = true;
             }
             ValueKindFact::Numeric(_) | ValueKindFact::Logical => double_forced = true,
             ValueKindFact::Unknown => unknown_input = true,

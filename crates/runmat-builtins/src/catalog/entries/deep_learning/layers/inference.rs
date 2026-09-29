@@ -76,7 +76,7 @@ fn numeric_possible(value: &ValueFact, scalar: bool) -> bool {
                 domain: NumericDomain::Real,
                 ..
             })
-    ) && (!scalar || !value.shape.element_count().is_some_and(|n| n != 1))
+    ) && (!scalar || value.shape.element_count().is_none_or(|n| n == 1))
 }
 
 fn invalid_dimension_literal(literal: &LiteralValue) -> bool {
