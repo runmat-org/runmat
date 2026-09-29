@@ -31,6 +31,7 @@ pub enum SpatialOperatorImplementation {
     IntegratedPrescribedSolidThermoelasticLoad,
     IntegratedSolvedSolidThermoelasticLoad,
     ReducedAcousticHelmholtz,
+    AcousticGalerkinHelmholtz,
     ReducedElectromagneticPotential,
     ReducedEdgeGraphCurlCurl,
     ReducedChannelFlow,
@@ -53,6 +54,7 @@ pub enum TemporalImplementation {
     ThermalBackwardEuler,
     ElectromagneticReducedEdgeGraphHarmonicSolve,
     AcousticDomainGraphHarmonicSolve,
+    AcousticCanonicalHarmonicSolve,
     CfdReducedChannelSteadyIteration,
     CfdReducedChannelTimeStepping,
     CoupledSinglePassProfileTransfer,
@@ -72,6 +74,7 @@ pub enum ConstitutiveImplementation {
     IsotropicThermalConduction,
     ReducedFrequencyMaterialResponse,
     ReducedAcousticMedium,
+    ElementOwnedLosslessAcousticFluid,
     ReducedIncompressibleFlowClosure,
 }
 
@@ -105,6 +108,7 @@ pub enum RecoveryImplementation {
     PrescribedThermomechanicalProfileDerivedFields,
     ElementOwnedThermoelasticStressEnergy,
     AcousticDomainGraphComplexPressure,
+    AcousticSolverMeshPressureVelocityEnergy,
     ElectromagneticPotentialProfile,
     ReducedEdgeGraphFlux,
     CfdReducedChannelProfile,

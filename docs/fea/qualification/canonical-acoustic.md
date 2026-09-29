@@ -128,6 +128,28 @@ curved non-affine energy-form integration or all geometric/quadrature accuracy e
 
 ## Verification and remaining gates
 
+### Portable experimental numerical execution
+
+`execution::AcousticHarmonicWorkload` binds the authored model, explicit scheduled
+frequency, canonical formulation requirement, Krylov policy and power-balance target.
+The canonical Tet4/Tet10 realization has its own Galerkin operator, temporal, recovery
+and solver identities; it cannot be confused with the legacy domain-graph method.
+Production admission remains closed.
+
+Its portable result retains nodal complex pressure, element velocity, intensity and
+energy, ordered topology IDs, residual/power metrics and source-transfer evidence.
+Canonical decoding validates shapes, finite physical values and accepted numerical
+targets. Import against a workload and sealed mesh checks exact workload, formulation,
+mesh and projection lineage; changed sources or valid resealed geometry are rejected.
+This is compatibility validation, not proof that arbitrary imported field values solve
+the equations. Independent traveling-wave checks cover cold object round-trips on
+both Tet4 and Tet10.
+
+Complete authored acoustic-complex output declarations remain part of workload
+identity. This numerical entry returns result fields, not semantic lifecycle state
+publications. It does not establish process restart, scheduler allocation, bounded
+resource admission, native authoring integration or graph-caller migration.
+
 ```sh
 cargo test --locked -p runmat-analysis-fea --lib physics::acoustic::canonical
 cargo test --locked -p runmat-analysis-fea --lib

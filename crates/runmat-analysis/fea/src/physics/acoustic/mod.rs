@@ -10,6 +10,7 @@ mod linear;
 mod medium;
 mod recovery;
 mod reduced;
+pub(crate) use canonical::validate_input as validate_canonical_input;
 
 pub use canonical::{
     solve_canonical_harmonic, AcousticHarmonicError, AcousticHarmonicPolicy,

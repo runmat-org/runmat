@@ -43,7 +43,8 @@ impl GeometryBoundBoundary {
         let expected = match &self.boundary.operator {
             BoundaryOperator::StructuralPressure { .. } => FEA_STRUCTURAL_BOUNDARY_CLASS,
             BoundaryOperator::ThermalHeatFlux { .. }
-            | BoundaryOperator::ThermalConvection { .. } => FEA_THERMAL_BOUNDARY_CLASS,
+            | BoundaryOperator::ThermalConvection { .. }
+            | BoundaryOperator::ThermalRadiation { .. } => FEA_THERMAL_BOUNDARY_CLASS,
             BoundaryOperator::MagneticInsulation => FEA_MAGNETIC_BOUNDARY_CLASS,
             BoundaryOperator::AcousticRigidWall
             | BoundaryOperator::AcousticRadiation

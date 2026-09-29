@@ -176,6 +176,9 @@ const fn method_is_compatible(
         TemporalImplementation::AcousticDomainGraphHarmonicSolve => {
             matches!(method, SolverMethod::AcousticDomainGraphHelmholtzHarmonic)
         }
+        TemporalImplementation::AcousticCanonicalHarmonicSolve => {
+            matches!(method, SolverMethod::AcousticCanonicalHelmholtzGmres)
+        }
         TemporalImplementation::CfdReducedChannelSteadyIteration
         | TemporalImplementation::CfdReducedChannelTimeStepping => {
             matches!(method, SolverMethod::CfdVelocityPressureFiniteVolume)
@@ -217,7 +220,8 @@ const fn preconditioner_is_compatible(
         | SolverMethod::StructuralModalHarmonicDenseDirect
         | SolverMethod::StructuralModalResponseSpectrumCombination
         | SolverMethod::StructuralRandomResponseIntegration
-        | SolverMethod::AcousticDomainGraphHelmholtzHarmonic => {
+        | SolverMethod::AcousticDomainGraphHelmholtzHarmonic
+        | SolverMethod::AcousticCanonicalHelmholtzGmres => {
             matches!(preconditioner, SolverPreconditioner::None)
         }
         SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab => {

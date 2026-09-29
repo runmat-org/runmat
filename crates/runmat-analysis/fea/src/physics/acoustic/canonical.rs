@@ -27,7 +27,8 @@ use assembly::AcousticAssembly;
 
 pub use response::CanonicalAcousticResponse;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AcousticHarmonicPolicy {
     pub relative_tolerance: f64,
     pub restart: usize,
@@ -41,6 +42,28 @@ impl Default for AcousticHarmonicPolicy {
             restart: 64,
             maximum_iterations: 4096,
         }
+    }
+}
+
+impl AcousticHarmonicPolicy {
+    pub fn validate(self, frequency: Frequency) -> Result<(), AcousticHarmonicError> {
+        let frequency_hz = frequency.hertz;
+        let omega = std::f64::consts::TAU * frequency_hz;
+        if !frequency_hz.is_finite()
+            || frequency_hz <= 0.0
+            || !omega.is_finite()
+            || !(omega * omega).is_finite()
+            || !self.relative_tolerance.is_finite()
+            || self.relative_tolerance <= 0.0
+            || self.relative_tolerance >= 1.0
+            || self.restart == 0
+            || self.maximum_iterations == 0
+        {
+            return Err(AcousticHarmonicError::InvalidInput(
+                "frequency or Krylov policy".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -78,22 +101,40 @@ pub fn solve_canonical_harmonic(
     frequency: Frequency,
     policy: AcousticHarmonicPolicy,
 ) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
+    let step = validate_input(model, step_id, frequency, policy)?;
     let frequency_hz = frequency.hertz;
     let omega = std::f64::consts::TAU * frequency_hz;
-    if !frequency_hz.is_finite()
-        || frequency_hz <= 0.0
-        || !omega.is_finite()
-        || !(omega * omega).is_finite()
-        || !policy.relative_tolerance.is_finite()
-        || policy.relative_tolerance <= 0.0
-        || policy.relative_tolerance >= 1.0
-        || policy.restart == 0
-        || policy.maximum_iterations == 0
-    {
-        return Err(AcousticHarmonicError::InvalidInput(
-            "frequency or Krylov policy".into(),
+    let projection = AnalysisProjection::derive(mesh)
+        .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
+    let properties = crate::properties::compile_solid_property_map(model, mesh)
+        .map_err(|error| AcousticHarmonicError::Material(error.to_string()))?;
+    // Shared property compilation validates the sealed mesh and geometry revision.
+    // GeometryRevisionRef carries source identity rather than an authored geometry label.
+    if model.structural.is_some() || !model.connectors.is_empty() || !model.interfaces.is_empty() {
+        return Err(AcousticHarmonicError::Unsupported(
+            "explicit structural or coupled interfaces".into(),
         ));
     }
+    let sample = ExcitationSamplePoint::frequency(frequency_hz);
+    let excitations = realize_step_excitations(model, step, sample)
+        .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?;
+    let assembly = AcousticAssembly::assemble(projection, &properties, omega)?.with_boundaries(
+        model,
+        step,
+        &excitations,
+        sample,
+    )?;
+    response::solve(assembly, frequency_hz, policy)
+}
+
+pub(crate) fn validate_input<'a>(
+    model: &'a AnalysisModel,
+    step_id: &str,
+    frequency: Frequency,
+    policy: AcousticHarmonicPolicy,
+) -> Result<&'a runmat_analysis_core::ProcedureStep, AcousticHarmonicError> {
+    policy.validate(frequency)?;
+    let frequency_hz = frequency.hertz;
     let step = model
         .sequence
         .steps
@@ -132,25 +173,5 @@ pub fn solve_canonical_harmonic(
             "restart policy without restored state".into(),
         ));
     }
-    let projection = AnalysisProjection::derive(mesh)
-        .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
-    let properties = crate::properties::compile_solid_property_map(model, mesh)
-        .map_err(|error| AcousticHarmonicError::Material(error.to_string()))?;
-    // Shared property compilation validates the sealed mesh and geometry revision.
-    // GeometryRevisionRef carries source identity rather than an authored geometry label.
-    if model.structural.is_some() || !model.connectors.is_empty() || !model.interfaces.is_empty() {
-        return Err(AcousticHarmonicError::Unsupported(
-            "explicit structural or coupled interfaces".into(),
-        ));
-    }
-    let sample = ExcitationSamplePoint::frequency(frequency_hz);
-    let excitations = realize_step_excitations(model, step, sample)
-        .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?;
-    let assembly = AcousticAssembly::assemble(projection, &properties, omega)?.with_boundaries(
-        model,
-        step,
-        &excitations,
-        sample,
-    )?;
-    response::solve(assembly, frequency_hz, policy)
+    Ok(step)
 }

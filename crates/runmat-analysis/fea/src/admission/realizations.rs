@@ -190,7 +190,7 @@ fn electromagnetic_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormul
 }
 
 fn acoustic_realizations() -> Vec<ExactFormulationRealization> {
-    [
+    let mut realizations = [
         SourceImplementation::SyntheticProfileFallback,
         SourceImplementation::AcousticHashedTargetGraphProjection,
     ]
@@ -207,7 +207,25 @@ fn acoustic_realizations() -> Vec<ExactFormulationRealization> {
         coupling: CouplingImplementation::Uncoupled,
         boundary_transfers: vec![BoundaryTransferImplementation::GlobalCountProfile],
     })
-    .collect()
+    .collect::<Vec<_>>();
+    for topology in [
+        TopologyImplementation::CanonicalSolverMeshTet4,
+        TopologyImplementation::CanonicalSolverMeshTet10,
+    ] {
+        realizations.push(ExactFormulationRealization {
+            components: vec![ExactFormulationComponent {
+                spatial_operator: SpatialOperatorImplementation::AcousticGalerkinHelmholtz,
+                constitutive: ConstitutiveImplementation::ElementOwnedLosslessAcousticFluid,
+                recovery: RecoveryImplementation::AcousticSolverMeshPressureVelocityEnergy,
+                topologies: vec![topology],
+                sources: vec![SourceImplementation::CanonicalBoundaryProjection],
+            }],
+            temporals: vec![TemporalImplementation::AcousticCanonicalHarmonicSolve],
+            coupling: CouplingImplementation::Uncoupled,
+            boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
+        });
+    }
+    realizations
 }
 
 fn fluid_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
