@@ -3,11 +3,14 @@
 
 mod analysis;
 mod models;
+mod response;
 
 pub use self::analysis::*;
 pub use self::models::*;
+pub use self::response::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(analysis::ENTRIES.iter().copied());
     models::extend_entries(values);
+    values.extend(response::ENTRIES.iter().copied());
 }

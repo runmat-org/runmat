@@ -34,14 +34,14 @@ pub const IMPULSE_EXTENSIONS: [BuiltinExtensionDescriptor; 4] = [
 const IMPULSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
         name: "sys numeric metadata",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "Typed-integer coefficients and timing metadata are outside the documented dynamic-system/time surface, are gated before model parsing, and must be exactly representable at the host floating simulation boundary when the RunMat extension is enabled.",
     },
     BuiltinIntegerInputCapability {
         name: "t or tFinal",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
         notes: "The public impulse reference specifies numeric time values and shapes but no typed-integer class support, so every typed-integer time control is consistently classified as a RunMat-only extension.",

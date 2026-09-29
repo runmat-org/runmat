@@ -14,4 +14,4 @@ pub use entries::{
     TF_TIMES_CATALOG_ENTRY, TF_UMINUS_CATALOG_ENTRY, TF_UPLUS_CATALOG_ENTRY,
 };
 
-pub(super) use entries::ENTRIES;
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = entries::ENTRIES;

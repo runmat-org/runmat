@@ -1,6 +1,6 @@
 use super::*;
 use runmat_types::{
-    ClassId, DimensionFact, DynamicReason, LiteralContext, LiteralValue, NumericClass,
+    CallRequest, ClassId, DimensionFact, DynamicReason, LiteralContext, LiteralValue, NumericClass,
     NumericDomain, NumericFact, ObjectFact, OutputSelection, RequestedOutputCount, ShapeFact,
     StorageFact, ValueFact, ValueKindFact,
 };
@@ -56,14 +56,15 @@ fn duration_inventory_is_exact_and_all_examples_have_assertions() {
 
 #[test]
 fn constructor_and_units_prove_shapes_without_guessing_unknown_class() {
-    let built = constructor::infer(&call(vec![number(shape(4, 3))], 1), &DURATION_CATALOG_ENTRY);
+    let built =
+        crate::infer_catalog_call(&DURATION_CATALOG_ENTRY, &call(vec![number(shape(4, 3))], 1));
     assert!(built.diagnostics.is_empty());
     assert_eq!(built.outputs[0].shape, shape(4, 1));
     assert_eq!(facts::duration_class(&built.outputs[0]), Some(true));
 
-    let unit = units::infer(
-        &call(vec![built.outputs[0].clone()], 1),
+    let unit = crate::infer_catalog_call(
         &HOURS_CATALOG_ENTRY,
+        &call(vec![built.outputs[0].clone()], 1),
     );
     assert_eq!(unit.outputs[0].shape, shape(4, 1));
     assert!(matches!(
@@ -75,7 +76,7 @@ fn constructor_and_units_prove_shapes_without_guessing_unknown_class() {
     ));
 
     let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
-    let dynamic = units::infer(&call(vec![unknown], 1), &DAYS_CATALOG_ENTRY);
+    let dynamic = crate::infer_catalog_call(&DAYS_CATALOG_ENTRY, &call(vec![unknown], 1));
     assert!(matches!(dynamic.outputs[0].kind, ValueKindFact::Unknown));
     assert!(!dynamic.dynamic_outputs);
 }
@@ -99,7 +100,7 @@ fn constructor_format_pair_does_not_corrupt_component_inference() {
         LiteralValue::String("Format".into()),
         LiteralValue::String("hh:mm".into()),
     ]);
-    let inferred = constructor::infer(&request, &DURATION_CATALOG_ENTRY);
+    let inferred = crate::infer_catalog_call(&DURATION_CATALOG_ENTRY, &request);
     assert!(
         inferred.diagnostics.is_empty(),
         "{:?}",
@@ -107,7 +108,7 @@ fn constructor_format_pair_does_not_corrupt_component_inference() {
     );
     assert_eq!(inferred.outputs[0].shape, shape(1, 2));
     let two_outputs =
-        constructor::infer(&call(vec![number(shape(2, 3))], 2), &DURATION_CATALOG_ENTRY);
+        crate::infer_catalog_call(&DURATION_CATALOG_ENTRY, &call(vec![number(shape(2, 3))], 2));
     assert!(!two_outputs.diagnostics.is_empty());
 }
 
@@ -125,9 +126,11 @@ fn known_other_object_class_is_not_inferred_as_duration() {
         StorageFact::Opaque,
     );
     assert_eq!(facts::duration_class(&other), Some(false));
-    assert!(!units::infer(&call(vec![other], 1), &SECONDS_CATALOG_ENTRY)
-        .diagnostics
-        .is_empty());
+    assert!(
+        !crate::infer_catalog_call(&SECONDS_CATALOG_ENTRY, &call(vec![other], 1))
+            .diagnostics
+            .is_empty()
+    );
 }
 
 #[test]
@@ -135,7 +138,7 @@ fn comparison_result_is_logical_and_broadcasted() {
     let left = facts::duration(shape(2, 1));
     let right = facts::duration(shape(1, 3));
     let inferred =
-        operators::infer_comparison(&call(vec![left, right], 1), &DURATION_EQ_CATALOG_ENTRY);
+        crate::infer_catalog_call(&DURATION_EQ_CATALOG_ENTRY, &call(vec![left, right], 1));
     assert!(inferred.diagnostics.is_empty());
     assert_eq!(inferred.outputs[0].shape, shape(2, 3));
     assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Logical));
@@ -143,9 +146,9 @@ fn comparison_result_is_logical_and_broadcasted() {
 
 #[test]
 fn comparison_method_rejects_two_known_numeric_operands() {
-    let inferred = operators::infer_comparison(
-        &call(vec![number(shape(1, 1)), number(shape(1, 1))], 1),
+    let inferred = crate::infer_catalog_call(
         &DURATION_EQ_CATALOG_ENTRY,
+        &call(vec![number(shape(1, 1)), number(shape(1, 1))], 1),
     );
     assert!(inferred
         .diagnostics

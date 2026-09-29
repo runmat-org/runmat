@@ -10,13 +10,13 @@ pub(crate) enum TimeSpec {
 }
 
 impl TimeSpec {
-    pub(crate) fn preflight_host(value: Option<&Value>) -> SimulationResult<()> {
+    pub(super) fn preflight_host(value: Option<&Value>) -> SimulationResult<()> {
         if let Some(value) = value.filter(|value| !matches!(value, Value::GpuTensor(_))) {
             Self::parse(Some(value), 0.0)?;
         }
         Ok(())
     }
-    pub(crate) fn parse(value: Option<&Value>, sample_time: f64) -> SimulationResult<Self> {
+    pub(super) fn parse(value: Option<&Value>, sample_time: f64) -> SimulationResult<Self> {
         let Some(value) = value else {
             return Ok(Self::Auto);
         };

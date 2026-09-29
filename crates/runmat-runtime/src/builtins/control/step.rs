@@ -16,7 +16,7 @@ use crate::builtins::common::validation::{
 };
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::response::step::{
-    admit_time, preflight_host_time, simulate, StepResponse, StepSimulationCaller, DEFAULT_SAMPLES,
+    admit_time, preflight_host_time, simulate, StepResponse, StepSimulationCaller,
 };
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,

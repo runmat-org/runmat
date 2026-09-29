@@ -146,7 +146,7 @@ pub const STEP_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [STEP_INTEGER_TIME_
 const STEP_INTEGER_TIME_INPUTS: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "t or tFinal",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
+        classes: &ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
         notes: "The compatibility target documents positive scalar, two-element, and vector time forms without publishing native integer storage classes. RunMat conservatively gates typed integers and requires exact binary64 representation.",
