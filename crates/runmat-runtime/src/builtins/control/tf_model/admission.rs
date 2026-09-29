@@ -44,6 +44,8 @@ pub(super) fn preflight_host_model_properties(
         if let Some(value) = object.properties.get(name) {
             if name == "Ts" {
                 admit_sample_time_property(value, builtin)?;
+            } else {
+                admit_delay_property(value, name, builtin)?;
             }
         }
         if !matches!(object.properties.get(name), Some(Value::GpuTensor(_))) {
@@ -108,6 +110,27 @@ pub(super) fn admit_sample_time_property(
         "sample time",
         builtin,
     )
+}
+
+/// Delays are consumed as binary64 model metadata. Unlike coefficients and
+/// sample time, there is no separate typed-integer delay language extension;
+/// only the lossless conversion requirement applies.
+pub(super) fn admit_delay_property(
+    value: &Value,
+    name: &str,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if value_has_native_integer_class(value)
+        && !matches!(value, Value::GpuTensor(_))
+        && !native_integer_value_is_exact_f64(value)
+    {
+        return Err(control_error(
+            builtin,
+            invalid_model_identifier(builtin),
+            format!("{builtin}: {name} integer value must be exactly representable as double"),
+        ));
+    }
+    Ok(())
 }
 
 fn admit_integer_f64_boundary(

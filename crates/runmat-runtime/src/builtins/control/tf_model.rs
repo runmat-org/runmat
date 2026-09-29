@@ -6,7 +6,8 @@ mod power;
 mod boundary_tests;
 pub use admission::preflight_ss_host_properties;
 use admission::{
-    admit_coefficient_property, admit_sample_time_property, preflight_host_model_properties,
+    admit_coefficient_property, admit_delay_property, admit_sample_time_property,
+    preflight_host_model_properties,
 };
 use numerics::{finite_complex_ratio, finite_complex_ratio_direction};
 use runmat_types::MemberAccess;
@@ -293,6 +294,9 @@ impl TfModel {
         validate_coefficients("denominator", &denominator, builtin)?;
         admit_sample_time_property(property(&object, "Ts", builtin)?, builtin)?;
         let sample_time = scalar_property(&object, "Ts", builtin)?;
+        for name in ["InputDelay", "OutputDelay"] {
+            admit_delay_property(property(&object, name, builtin)?, name, builtin)?;
+        }
         let input_delay = scalar_property(&object, "InputDelay", builtin)?;
         let output_delay = scalar_property(&object, "OutputDelay", builtin)?;
         validate_sample_time(sample_time, builtin)?;

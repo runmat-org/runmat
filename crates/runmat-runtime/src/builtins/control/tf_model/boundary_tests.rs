@@ -1,5 +1,107 @@
 use super::*;
 
+fn assign_public_property(model: Value, name: &str, value: Value) -> Value {
+    futures::executor::block_on(crate::object::resolve::store_member(
+        model,
+        name.into(),
+        value,
+        false,
+        None,
+        |_, _| {},
+    ))
+    .expect("public tf property assignment")
+}
+
+#[test]
+fn mutated_tf_delays_require_exact_integer_to_double_conversion() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    for name in ["InputDelay", "OutputDelay"] {
+        let model = TfModel::scalar(Complex64::new(1.0, 0.0), TfOptions::default())
+            .unwrap()
+            .to_value("tf")
+            .unwrap();
+        let inexact = assign_public_property(
+            model.clone(),
+            name,
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+        );
+        let error = futures::executor::block_on(TfModel::from_value_async(inexact, "feedback"))
+            .expect_err("inexact delay must not round");
+        assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
+
+        let exact = assign_public_property(
+            model,
+            name,
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_992)),
+        );
+        let admitted = futures::executor::block_on(TfModel::from_value_async(exact, "feedback"))
+            .expect("exact integer delay has no invented compatibility gate");
+        let delay = if name == "InputDelay" {
+            admitted.input_delay
+        } else {
+            admitted.output_delay
+        };
+        assert_eq!(delay, 9_007_199_254_740_992.0);
+    }
+}
+
+#[test]
+fn mutated_tf_resident_delay_is_checked_after_one_gather() {
+    use runmat_accelerate_api::{AccelProvider, HostIntegerDataView, HostIntegerTensorView};
+
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        for (value, valid) in [
+            (9_007_199_254_740_992_u64, true),
+            (9_007_199_254_740_993_u64, false),
+        ] {
+            let resident = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(std::slice::from_ref(&value)),
+                    shape: &[1, 1],
+                })
+                .expect("resident integer delay");
+            let model = TfModel::scalar(Complex64::new(1.0, 0.0), TfOptions::default())
+                .unwrap()
+                .to_value("tf")
+                .unwrap();
+            let model = assign_public_property(model, "InputDelay", Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            let result = futures::executor::block_on(TfModel::from_value_async(model, "feedback"));
+            if valid {
+                assert_eq!(result.unwrap().input_delay, value as f64);
+            } else {
+                assert_eq!(
+                    result.unwrap_err().identifier(),
+                    Some("RunMat:feedback:InvalidModel")
+                );
+            }
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+        }
+
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+            provider,
+            &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+        )
+        .expect("resident numerator");
+        let model = TfModel::scalar(Complex64::new(1.0, 0.0), TfOptions::default())
+            .unwrap()
+            .to_value("tf")
+            .unwrap();
+        let model = assign_public_property(model, "Numerator", Value::GpuTensor(resident));
+        let model = assign_public_property(
+            model,
+            "OutputDelay",
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+        );
+        provider.reset_telemetry();
+        let error = futures::executor::block_on(TfModel::from_value_async(model, "feedback"))
+            .expect_err("host delay must preflight before resident coefficient");
+        assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
 #[test]
 fn frequency_response_preserves_finite_extreme_scale_ratios_and_exact_poles() {
     for coefficient in [Complex64::new(1e-320, 0.0), Complex64::new(1e300, 1e300)] {
