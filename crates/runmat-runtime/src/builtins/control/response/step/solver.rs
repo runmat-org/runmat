@@ -2,52 +2,55 @@
 use super::*;
 use nalgebra::DMatrix;
 use num_complex::Complex64;
-use runmat_value::Tensor;
 
 #[derive(Clone, Debug)]
-pub(super) struct StepEval {
-    y: Vec<f64>,
-    t: Vec<f64>,
+pub(crate) struct StepResponse {
+    pub y: Vec<f64>,
+    pub t: Vec<f64>,
 }
 
-impl StepEval {
-    pub(super) fn y_value(&self) -> BuiltinResult<Value> {
-        column_tensor(self.y.clone())
-    }
-
-    pub(super) fn t_value(&self) -> BuiltinResult<Value> {
-        column_tensor(self.t.clone())
-    }
-
-    pub(super) fn outputs(&self) -> BuiltinResult<Vec<Value>> {
-        Ok(vec![self.y_value()?, self.t_value()?])
-    }
-}
-
-pub(super) fn evaluate_step(model: &TransferFunction, time: TimeSpec) -> BuiltinResult<StepEval> {
+pub(crate) fn evaluate_step(
+    model: &RealTfModel,
+    time: TimeSpec,
+    caller: StepSimulationCaller,
+) -> SimulationResult<StepResponse> {
     if model.sample_time > 0.0 {
-        evaluate_discrete_step(model, time)
+        evaluate_discrete_step(model, time, caller)
     } else {
-        evaluate_continuous_step(model, time)
+        evaluate_continuous_step(model, time, caller)
     }
 }
 
-fn evaluate_continuous_step(model: &TransferFunction, time: TimeSpec) -> BuiltinResult<StepEval> {
-    let t = continuous_time_vector(model, time)?;
-    let (num, den) = model.normalized()?;
+fn evaluate_continuous_step(
+    model: &RealTfModel,
+    time: TimeSpec,
+    caller: StepSimulationCaller,
+) -> SimulationResult<StepResponse> {
+    let t = continuous_time_vector(model, time, caller)?;
+    let (num, den) = model
+        .normalized(caller.name())
+        .map_err(SimulationError::Model)?;
     let response = continuous_response(&num, &den, &t)?;
-    Ok(StepEval { y: response, t })
+    Ok(StepResponse { y: response, t })
 }
 
-fn continuous_time_vector(model: &TransferFunction, time: TimeSpec) -> BuiltinResult<Vec<f64>> {
+fn continuous_time_vector(
+    model: &RealTfModel,
+    time: TimeSpec,
+    caller: StepSimulationCaller,
+) -> SimulationResult<Vec<f64>> {
     match time {
-        TimeSpec::Auto => Ok(linspace(0.0, automatic_final_time(model)?, DEFAULT_SAMPLES)),
+        TimeSpec::Auto => Ok(linspace(
+            0.0,
+            automatic_final_time(model, caller)?,
+            DEFAULT_SAMPLES,
+        )),
         TimeSpec::FinalTime(final_time) => Ok(linspace(0.0, final_time, DEFAULT_SAMPLES)),
         TimeSpec::Vector(values) => Ok(values),
     }
 }
 
-fn continuous_response(num: &[f64], den: &[f64], t: &[f64]) -> BuiltinResult<Vec<f64>> {
+fn continuous_response(num: &[f64], den: &[f64], t: &[f64]) -> SimulationResult<Vec<f64>> {
     let order = den.len() - 1;
     if order == 0 {
         let gain = num.last().copied().unwrap_or(0.0) / den[0];
@@ -125,42 +128,48 @@ fn add_scaled(state: &[f64], delta: &[f64], scale: f64) -> Vec<f64> {
         .collect()
 }
 
-fn evaluate_discrete_step(model: &TransferFunction, time: TimeSpec) -> BuiltinResult<StepEval> {
+fn evaluate_discrete_step(
+    model: &RealTfModel,
+    time: TimeSpec,
+    caller: StepSimulationCaller,
+) -> SimulationResult<StepResponse> {
     let t = discrete_time_vector(model.sample_time, time)?;
     if t.len() > MAX_DISCRETE_SAMPLES {
-        return Err(step_error_with_detail(
-            &STEP_ERROR_DISCRETE_LIMIT,
+        return Err(simulation_error(
+            SimulationErrorKind::DiscreteLimit,
             format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
         ));
     }
     let sample_indices = t
         .iter()
         .map(|&value| checked_discrete_sample_index(model.sample_time, value))
-        .collect::<BuiltinResult<Vec<_>>>()?;
+        .collect::<SimulationResult<Vec<_>>>()?;
     let max_k = sample_indices.iter().copied().max().unwrap_or(0);
     let count = max_k.checked_add(1).ok_or_else(|| {
-        step_error_with_detail(
-            &STEP_ERROR_DISCRETE_LIMIT,
+        simulation_error(
+            SimulationErrorKind::DiscreteLimit,
             "discrete sample index exceeds platform limits",
         )
     })?;
-    let (num, den) = model.normalized()?;
+    let (num, den) = model
+        .normalized(caller.name())
+        .map_err(SimulationError::Model)?;
     let all_y = discrete_response(&num, &den, count)?;
     let y = sample_indices
         .into_iter()
         .map(|idx| {
             all_y.get(idx).copied().ok_or_else(|| {
-                step_error_with_detail(
-                    &STEP_ERROR_DISCRETE_LIMIT,
+                simulation_error(
+                    SimulationErrorKind::DiscreteLimit,
                     "discrete sample index exceeds response length",
                 )
             })
         })
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    Ok(StepEval { y, t })
+        .collect::<SimulationResult<Vec<_>>>()?;
+    Ok(StepResponse { y, t })
 }
 
-fn discrete_time_vector(sample_time: f64, time: TimeSpec) -> BuiltinResult<Vec<f64>> {
+fn discrete_time_vector(sample_time: f64, time: TimeSpec) -> SimulationResult<Vec<f64>> {
     match time {
         TimeSpec::Auto => Ok((0..DEFAULT_SAMPLES)
             .map(|idx| idx as f64 * sample_time)
@@ -173,41 +182,41 @@ fn discrete_time_vector(sample_time: f64, time: TimeSpec) -> BuiltinResult<Vec<f
     }
 }
 
-fn checked_discrete_sample_steps(sample_time: f64, final_time: f64) -> BuiltinResult<usize> {
+fn checked_discrete_sample_steps(sample_time: f64, final_time: f64) -> SimulationResult<usize> {
     let steps = (final_time / sample_time).floor();
     if !steps.is_finite() || steps < 0.0 || steps > usize::MAX as f64 {
-        return Err(step_error_with_detail(
-            &STEP_ERROR_DISCRETE_LIMIT,
+        return Err(simulation_error(
+            SimulationErrorKind::DiscreteLimit,
             "discrete sample count exceeds platform limits",
         ));
     }
     if steps >= MAX_DISCRETE_SAMPLES as f64 {
-        return Err(step_error_with_detail(
-            &STEP_ERROR_DISCRETE_LIMIT,
+        return Err(simulation_error(
+            SimulationErrorKind::DiscreteLimit,
             format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
         ));
     }
     Ok(steps as usize)
 }
 
-fn checked_discrete_sample_index(sample_time: f64, time: f64) -> BuiltinResult<usize> {
+fn checked_discrete_sample_index(sample_time: f64, time: f64) -> SimulationResult<usize> {
     let index = (time / sample_time).round();
     if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
-        return Err(step_error_with_detail(
-            &STEP_ERROR_DISCRETE_LIMIT,
+        return Err(simulation_error(
+            SimulationErrorKind::DiscreteLimit,
             "discrete sample index exceeds platform limits",
         ));
     }
     if index >= MAX_DISCRETE_SAMPLES as f64 {
-        return Err(step_error_with_detail(
-            &STEP_ERROR_DISCRETE_LIMIT,
+        return Err(simulation_error(
+            SimulationErrorKind::DiscreteLimit,
             format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
         ));
     }
     Ok(index as usize)
 }
 
-fn discrete_response(num: &[f64], den: &[f64], count: usize) -> BuiltinResult<Vec<f64>> {
+fn discrete_response(num: &[f64], den: &[f64], count: usize) -> SimulationResult<Vec<f64>> {
     let order = den.len() - 1;
     let mut padded_num = vec![0.0; order + 1 - num.len()];
     padded_num.extend_from_slice(num);
@@ -229,9 +238,14 @@ fn discrete_response(num: &[f64], den: &[f64], count: usize) -> BuiltinResult<Ve
     Ok(y)
 }
 
-fn automatic_final_time(model: &TransferFunction) -> BuiltinResult<f64> {
-    let (_, den) = model.normalized()?;
-    let poles = polynomial_roots(&den).unwrap_or_default();
+fn automatic_final_time(
+    model: &RealTfModel,
+    caller: StepSimulationCaller,
+) -> SimulationResult<f64> {
+    let (_, den) = model
+        .normalized(caller.name())
+        .map_err(SimulationError::Model)?;
+    let poles = polynomial_roots(&den)?;
     let slowest_decay = poles
         .iter()
         .filter_map(|pole| if pole.re < -EPS { Some(-pole.re) } else { None })
@@ -243,7 +257,7 @@ fn automatic_final_time(model: &TransferFunction) -> BuiltinResult<f64> {
     }
 }
 
-fn polynomial_roots(coeffs: &[f64]) -> BuiltinResult<Vec<Complex64>> {
+fn polynomial_roots(coeffs: &[f64]) -> SimulationResult<Vec<Complex64>> {
     let trimmed = trim_leading_zeros(coeffs.to_vec());
     if trimmed.len() <= 1 {
         return Ok(Vec::new());
@@ -261,8 +275,8 @@ fn polynomial_roots(coeffs: &[f64]) -> BuiltinResult<Vec<Complex64>> {
         companion[(0, idx - 1)] = Complex64::new(-coeff / leading, 0.0);
     }
     let eigenvalues = companion.eigenvalues().ok_or_else(|| {
-        step_error_with_detail(
-            &STEP_ERROR_INTERNAL,
+        simulation_error(
+            SimulationErrorKind::Internal,
             "failed to compute transfer-function poles",
         )
     })?;
@@ -287,15 +301,4 @@ fn linspace(start: f64, end: f64, count: usize) -> Vec<f64> {
 
 fn dot(lhs: &[f64], rhs: &[f64]) -> f64 {
     lhs.iter().zip(rhs).map(|(a, b)| a * b).sum()
-}
-
-fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
-    let rows = data.len();
-    let tensor = Tensor::new(data, vec![rows, 1]).map_err(|err| {
-        step_error_with_detail(
-            &STEP_ERROR_INTERNAL,
-            format!("failed to build response tensor: {err}"),
-        )
-    })?;
-    Ok(Value::Tensor(tensor))
 }

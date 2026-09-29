@@ -11,10 +11,13 @@ use crate::builtins::control::tf_model::{
 use crate::{build_runtime_error, dispatcher, BuiltinResult};
 use runmat_value::Value;
 
+pub(crate) mod step;
+
 #[derive(Clone, Copy)]
 pub(crate) enum ResponseKind {
     Step,
     Impulse,
+    StepInfo,
 }
 
 impl ResponseKind {
@@ -22,6 +25,7 @@ impl ResponseKind {
         match self {
             Self::Step => "step",
             Self::Impulse => "impulse",
+            Self::StepInfo => "stepinfo",
         }
     }
 
@@ -29,6 +33,7 @@ impl ResponseKind {
         match self {
             Self::Step => "RunMat:step:InvalidModel",
             Self::Impulse => "RunMat:impulse:InvalidArgument",
+            Self::StepInfo => "RunMat:stepinfo:InvalidSystem",
         }
     }
 
@@ -36,17 +41,33 @@ impl ResponseKind {
         match self {
             Self::Step => "RunMat:step:UnsupportedModel",
             Self::Impulse => "RunMat:impulse:UnsupportedModel",
+            Self::StepInfo => "RunMat:stepinfo:UnsupportedModel",
         }
     }
+}
+
+pub(crate) struct ParsedResponseModel {
+    pub model: TfModel,
+    pub real: RealTfModel,
 }
 
 pub(crate) async fn parse_real_model(
     value: Value,
     kind: ResponseKind,
 ) -> BuiltinResult<RealTfModel> {
+    Ok(parse_admitted_model(value, kind).await?.real)
+}
+
+pub(crate) async fn parse_admitted_model(
+    value: Value,
+    kind: ResponseKind,
+) -> BuiltinResult<ParsedResponseModel> {
     let builtin = kind.name();
     if !matches!(value, Value::Object(_)) {
-        return TfModel::from_value(value, builtin).and_then(|model| model.to_real(builtin));
+        let model = TfModel::from_value(value, builtin)?;
+        let real = model.to_real(builtin)?;
+        real.ensure_zero_delays(builtin)?;
+        return Ok(ParsedResponseModel { model, real });
     }
     preflight_response_model_operand(&value, kind)?;
     let Value::Object(mut object) = value else {
@@ -76,7 +97,7 @@ pub(crate) async fn parse_real_model(
     let model = TfModel::from_value_async(Value::Object(object), builtin).await?;
     let real = model.to_real(builtin)?;
     real.ensure_zero_delays(builtin)?;
-    Ok(real)
+    Ok(ParsedResponseModel { model, real })
 }
 
 /// Reject every host-known error that can invalidate a response model before

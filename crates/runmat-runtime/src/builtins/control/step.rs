@@ -1,12 +1,11 @@
 //! MATLAB-compatible `step` response builtin for RunMat.
 
 use runmat_builtins::{
-    BuiltinErrorDescriptor, STEP_ERROR_DISCRETE_LIMIT, STEP_ERROR_INTERNAL,
-    STEP_ERROR_INVALID_ARGUMENT, STEP_ERROR_INVALID_MODEL, STEP_ERROR_INVALID_TIME,
-    STEP_ERROR_PLOT_FAILED, STEP_ERROR_UNSUPPORTED_MODEL, STEP_INTEGER_TIME_EXTENSION,
+    BuiltinErrorDescriptor, STEP_ERROR_INTERNAL, STEP_ERROR_INVALID_ARGUMENT,
+    STEP_ERROR_INVALID_TIME, STEP_ERROR_PLOT_FAILED, STEP_INTEGER_TIME_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::Value;
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -16,23 +15,16 @@ use crate::builtins::common::validation::{
     native_integer_value_is_exact_f64, value_has_native_integer_class,
 };
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
+use crate::builtins::control::response::step::{
+    preflight_host_time, simulate, StepResponse, StepSimulationCaller, DEFAULT_SAMPLES,
+};
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
 };
-use crate::builtins::control::tf_model::RealTfModel;
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "step";
-const EPS: f64 = 1.0e-12;
-const DEFAULT_SAMPLES: usize = 101;
-const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
-
-mod solver;
-mod time;
-
-use solver::{evaluate_step, StepEval};
-use time::TimeSpec;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::step")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -111,10 +103,9 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         return Ok(Value::OutputList(Vec::new()));
     }
 
-    let model = TransferFunction::from_value_async(sys).await?;
+    let model = parse_real_model(sys, ResponseKind::Step).await?;
     let time_host = gather_step_time(rest.first()).await?;
-    let time = TimeSpec::parse(time_host.as_ref(), model.sample_time)?;
-    let eval = evaluate_step(&model, time)?;
+    let eval = simulate(&model, time_host.as_ref(), StepSimulationCaller::Step)?;
 
     if crate::output_context::requested_output_count() == Some(0)
         && crate::output_count::current_output_count().is_none()
@@ -197,13 +188,15 @@ async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> Bui
     }
     let mut models = Vec::with_capacity(systems.len());
     for (system, style) in systems {
-        models.push((TransferFunction::from_value_async(system).await?, style));
+        models.push((parse_real_model(system, ResponseKind::Step).await?, style));
     }
     let gathered_time = gather_step_time(time_arg.as_ref()).await?;
     let mut responses = Vec::with_capacity(models.len());
     for (model, style) in models {
-        let time = TimeSpec::parse(gathered_time.as_ref(), model.sample_time)?;
-        responses.push((evaluate_step(&model, time)?, style));
+        responses.push((
+            simulate(&model, gathered_time.as_ref(), StepSimulationCaller::Step)?,
+            style,
+        ));
     }
 
     let mut first = true;
@@ -249,7 +242,7 @@ fn preflight_step_time(value: Option<&Value>) -> BuiltinResult<()> {
             "integer time values must be exactly representable as double",
         ));
     }
-    TimeSpec::preflight_host(Some(value))
+    preflight_host_time(Some(value), StepSimulationCaller::Step)
 }
 
 async fn gather_step_time(value: Option<&Value>) -> BuiltinResult<Option<Value>> {
@@ -266,56 +259,36 @@ async fn gather_step_time(value: Option<&Value>) -> BuiltinResult<Option<Value>>
     Ok(Some(gathered))
 }
 
-#[derive(Clone, Debug)]
-struct TransferFunction {
-    numerator: Vec<f64>,
-    denominator: Vec<f64>,
-    sample_time: f64,
-}
-
-impl TransferFunction {
-    async fn from_value_async(value: Value) -> BuiltinResult<Self> {
-        let real = parse_real_model(value, ResponseKind::Step).await?;
-        if real.sample_time < 0.0 {
-            return Err(step_error_with_detail(
-                &STEP_ERROR_INVALID_MODEL,
-                "step requires a known nonnegative sample time",
-            ));
-        }
-        let numerator = real.numerator;
-        let denominator = real.denominator;
-        let sample_time = real.sample_time;
-        if numerator.len().saturating_sub(1) > denominator.len().saturating_sub(1) {
-            return Err(step_error_with_detail(
-                &STEP_ERROR_UNSUPPORTED_MODEL,
-                "improper transfer functions are not supported yet",
-            ));
-        }
-
-        Ok(Self {
-            numerator,
-            denominator,
-            sample_time,
-        })
+impl StepResponse {
+    fn y_value(&self) -> BuiltinResult<Value> {
+        column_tensor(self.y.clone())
     }
 
-    fn normalized(&self) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
-        RealTfModel {
-            numerator: self.numerator.clone(),
-            denominator: self.denominator.clone(),
-            sample_time: self.sample_time,
-            input_delay: 0.0,
-            output_delay: 0.0,
-        }
-        .normalized(BUILTIN_NAME)
+    fn t_value(&self) -> BuiltinResult<Value> {
+        column_tensor(self.t.clone())
+    }
+
+    fn outputs(&self) -> BuiltinResult<Vec<Value>> {
+        Ok(vec![self.y_value()?, self.t_value()?])
     }
 }
 
-async fn plot_response(eval: &StepEval) -> BuiltinResult<()> {
+fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
+    let rows = data.len();
+    let tensor = Tensor::new(data, vec![rows, 1]).map_err(|err| {
+        step_error_with_detail(
+            &STEP_ERROR_INTERNAL,
+            format!("failed to build response tensor: {err}"),
+        )
+    })?;
+    Ok(Value::Tensor(tensor))
+}
+
+async fn plot_response(eval: &StepResponse) -> BuiltinResult<()> {
     plot_response_with_style(eval, None).await
 }
 
-async fn plot_response_with_style(eval: &StepEval, style: Option<&Value>) -> BuiltinResult<()> {
+async fn plot_response_with_style(eval: &StepResponse, style: Option<&Value>) -> BuiltinResult<()> {
     let t = eval.t_value()?;
     let y = eval.y_value()?;
     let args = if let Some(style) = style {

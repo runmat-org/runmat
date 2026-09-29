@@ -90,6 +90,32 @@ fn first_order_continuous_response_matches_closed_form_for_explicit_time() {
 }
 
 #[test]
+fn shared_step_simulation_matches_builtin_and_keeps_stepinfo_error_ownership() {
+    use crate::builtins::control::response::step::{simulate, StepSimulationCaller};
+    use crate::builtins::control::response::{parse_admitted_model, ResponseKind};
+
+    let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+    let parsed = block_on(parse_admitted_model(sys.clone(), ResponseKind::StepInfo))
+        .expect("one model admission");
+    assert_eq!(parsed.model.dc_gain().expect("dc gain").re, 1.0);
+    let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+    let shared = simulate(&parsed.real, Some(&time), StepSimulationCaller::StepInfo)
+        .expect("shared response");
+    let direct = tensor_data(run_step(sys, vec![time]).expect("step response"));
+    assert_eq!(shared.y, direct);
+    assert_eq!(shared.t, vec![0.0, 1.0]);
+
+    let bad_time = Value::Num(-1.0);
+    let error = simulate(
+        &parsed.real,
+        Some(&bad_time),
+        StepSimulationCaller::StepInfo,
+    )
+    .expect_err("invalid stepinfo time");
+    assert_eq!(error.identifier(), Some("RunMat:stepinfo:InvalidData"));
+}
+
+#[test]
 fn multi_output_returns_y_then_time() {
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
     let _guard = crate::output_count::push_output_count(Some(2));
