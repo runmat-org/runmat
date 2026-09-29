@@ -126,6 +126,30 @@ fn invalid_dimension_option_and_sample_time_are_diagnosed() {
 }
 
 #[test]
+fn known_sparse_matrix_and_multiline_option_name_are_rejected() {
+    let mut sparse = numeric(1, 1);
+    sparse.storage = StorageFact::Sparse;
+    let mut args = vec![sparse, numeric(1, 1), numeric(1, 1), numeric(1, 1)];
+    assert!(call(args.clone(), vec![], 1)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-SS-MATRIX"));
+    args[0] = numeric(1, 1);
+    args.extend([
+        ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(2), Some(2)]),
+            StorageFact::Dense,
+        ),
+        numeric(1, 1),
+    ]);
+    assert!(call(args, vec![], 1)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-SS-OPTION"));
+}
+
+#[test]
 fn output_arity_is_fixed() {
     let args = vec![numeric(1, 1); 4];
     assert!(call(args.clone(), vec![], 0).outputs.is_empty());

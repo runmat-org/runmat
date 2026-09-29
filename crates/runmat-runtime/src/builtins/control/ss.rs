@@ -149,11 +149,20 @@ pub(crate) async fn ss_builtin(
             )?;
         }
     }
-    let options = SsOptions::parse(&rest).await?;
-    let a = RealMatrix::parse("A", admitted_matrix(&a, "A").await?)?;
-    let b = RealMatrix::parse("B", admitted_matrix(&b, "B").await?)?;
-    let c = RealMatrix::parse("C", admitted_matrix(&c, "C").await?)?;
-    let d = RealMatrix::parse("D", admitted_matrix(&d, "D").await?)?;
+    let admitted_options = SsAdmittedOptions::parse(&rest)?;
+    let host_sample_times = admitted_options.preflight_host().await?;
+    let host_a = preparse_host_matrix(&a, "A").await?;
+    let host_b = preparse_host_matrix(&b, "B").await?;
+    let host_c = preparse_host_matrix(&c, "C").await?;
+    let host_d = preparse_host_matrix(&d, "D").await?;
+    if let (Some(a), Some(b), Some(c), Some(d)) = (&host_a, &host_b, &host_c, &host_d) {
+        validate_state_space_dimensions(a, b, c, d)?;
+    }
+    let sample_time = admitted_options.resolve(host_sample_times).await?;
+    let a = resolve_matrix(host_a, &a, "A").await?;
+    let b = resolve_matrix(host_b, &b, "B").await?;
+    let c = resolve_matrix(host_c, &c, "C").await?;
+    let d = resolve_matrix(host_d, &d, "D").await?;
 
     validate_state_space_dimensions(&a, &b, &c, &d)?;
 
@@ -169,7 +178,7 @@ pub(crate) async fn ss_builtin(
     object.properties.insert("D".to_string(), d.into_value());
     object
         .properties
-        .insert("Ts".to_string(), Value::Num(options.sample_time));
+        .insert("Ts".to_string(), Value::Num(sample_time));
     object.properties.insert(
         "InputDelay".to_string(),
         zero_tensor_value(vec![input_count, 1])?,
@@ -205,6 +214,27 @@ async fn admitted_matrix(value: &Value, role: &str) -> BuiltinResult<Value> {
     Ok(gathered)
 }
 
+async fn preparse_host_matrix(value: &Value, role: &str) -> BuiltinResult<Option<RealMatrix>> {
+    if matches!(value, Value::GpuTensor(_)) {
+        return Ok(None);
+    }
+    Ok(Some(RealMatrix::parse(
+        role,
+        admitted_matrix(value, role).await?,
+    )?))
+}
+
+async fn resolve_matrix(
+    parsed_host: Option<RealMatrix>,
+    value: &Value,
+    role: &str,
+) -> BuiltinResult<RealMatrix> {
+    match parsed_host {
+        Some(matrix) => Ok(matrix),
+        None => RealMatrix::parse(role, admitted_matrix(value, role).await?),
+    }
+}
+
 async fn admitted_sample_time(value: &Value) -> BuiltinResult<f64> {
     if crate::builtins::common::validation::value_has_native_integer_class(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -223,18 +253,16 @@ async fn admitted_sample_time(value: &Value) -> BuiltinResult<f64> {
     parse_sample_time(&gathered)
 }
 
-#[derive(Clone)]
-struct SsOptions {
-    sample_time: f64,
+struct SsAdmittedOptions<'a> {
+    sample_times: Vec<&'a Value>,
 }
 
-impl SsOptions {
-    async fn parse(rest: &[Value]) -> BuiltinResult<Self> {
-        let mut options = Self { sample_time: 0.0 };
-
+impl<'a> SsAdmittedOptions<'a> {
+    fn parse(rest: &'a [Value]) -> BuiltinResult<Self> {
+        let mut sample_times = Vec::new();
         match rest {
             [] => {}
-            [sample_time] => options.sample_time = admitted_sample_time(sample_time).await?,
+            [sample_time] => sample_times.push(sample_time),
             _ => {
                 if !rest.len().is_multiple_of(2) {
                     return Err(ss_error_with_detail(
@@ -242,7 +270,6 @@ impl SsOptions {
                         "optional arguments must be name-value pairs or a scalar sample time",
                     ));
                 }
-                let mut sample_times = Vec::with_capacity(rest.len() / 2);
                 for pair in rest.chunks_exact(2) {
                     let name = scalar_text(&pair[0], "option name")?;
                     let lowered = name.trim().to_ascii_lowercase();
@@ -256,13 +283,32 @@ impl SsOptions {
                         }
                     }
                 }
-                for value in sample_times {
-                    options.sample_time = admitted_sample_time(value).await?;
-                }
             }
         }
+        Ok(Self { sample_times })
+    }
 
-        Ok(options)
+    async fn preflight_host(&self) -> BuiltinResult<Vec<Option<f64>>> {
+        let mut values = Vec::with_capacity(self.sample_times.len());
+        for value in &self.sample_times {
+            values.push(if matches!(*value, Value::GpuTensor(_)) {
+                None
+            } else {
+                Some(admitted_sample_time(value).await?)
+            });
+        }
+        Ok(values)
+    }
+
+    async fn resolve(self, preflight: Vec<Option<f64>>) -> BuiltinResult<f64> {
+        let mut sample_time = 0.0;
+        for (value, admitted) in self.sample_times.into_iter().zip(preflight) {
+            sample_time = match admitted {
+                Some(sample_time) => sample_time,
+                None => admitted_sample_time(value).await?,
+            };
+        }
+        Ok(sample_time)
     }
 }
 
@@ -756,5 +802,71 @@ mod tests {
         )
         .expect_err("nontext option name");
         assert_eq!(error.identifier(), SS_ERROR_INVALID_OPTION.identifier);
+    }
+
+    #[test]
+    fn ss_later_invalid_host_matrix_preflights_before_resident_a() {
+        test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::from("not a numeric matrix"),
+                Value::Num(1.0),
+                Value::Num(1.0),
+                vec![],
+            )
+            .expect_err("invalid B");
+            assert_eq!(error.identifier(), SS_ERROR_UNSUPPORTED_INPUT.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_all_host_dimension_error_preflights_before_resident_sample_time() {
+        test_support::with_test_provider(|provider| {
+            let sample_time = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![0.25], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::Num(1.0),
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+                Value::Num(1.0),
+                Value::Num(1.0),
+                vec![Value::GpuTensor(sample_time)],
+            )
+            .expect_err("inconsistent host dimensions");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_DIMENSIONS.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn ss_invalid_host_sample_time_preflights_before_resident_matrix() {
+        test_support::with_test_provider(|provider| {
+            let resident = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_ss(
+                Value::GpuTensor(resident),
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::Num(4.0),
+                vec![Value::Num(-1.0)],
+            )
+            .expect_err("invalid host sample time");
+            assert_eq!(error.identifier(), SS_ERROR_INVALID_SAMPLE_TIME.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
     }
 }

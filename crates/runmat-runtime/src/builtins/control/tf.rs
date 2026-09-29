@@ -7,9 +7,8 @@ use runmat_builtins::{
 use runmat_builtins::{
     DEFAULT_DISCRETE_SAMPLE_TIME_EXTENSION, EXPLICIT_GPU_INPUT_EXTENSION,
     INTEGER_COEFFICIENT_EXTENSION, INTEGER_SAMPLE_TIME_EXTENSION, LOGICAL_COEFFICIENT_EXTENSION,
-    TF_ERROR_DENOMINATOR_INVALID, TF_ERROR_INVALID_ARGUMENT, TF_ERROR_INVALID_COEFFICIENTS,
-    TF_ERROR_INVALID_OPTION, TF_ERROR_INVALID_SAMPLE_TIME, TF_ERROR_INVALID_VARIABLE,
-    VARIABLE_SHORTHAND_EXTENSION,
+    TF_ERROR_DENOMINATOR_INVALID, TF_ERROR_INVALID_ARGUMENT, TF_ERROR_INVALID_OPTION,
+    TF_ERROR_INVALID_SAMPLE_TIME, TF_ERROR_INVALID_VARIABLE, VARIABLE_SHORTHAND_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -165,11 +164,21 @@ async fn tf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         [numerator, denominator, rest @ ..] => {
             preflight_coefficient_extensions(numerator)?;
             preflight_coefficient_extensions(denominator)?;
-            let options = TfConstructorOptions::parse(rest).await?;
-            let numerator = admitted_coefficient(numerator, "numerator").await?;
-            let denominator = admitted_coefficient(denominator, "denominator").await?;
-            let numerator = parse_coefficients("numerator", numerator, "tf").await?;
-            let denominator = parse_coefficients("denominator", denominator, "tf").await?;
+            let admitted_options = TfAdmittedOptions::parse(rest)?;
+            let host_sample_times = admitted_options.preflight_host().await?;
+            let host_numerator = preparse_host_coefficients(numerator, "numerator").await?;
+            let host_denominator = preparse_host_coefficients(denominator, "denominator").await?;
+            if host_denominator.as_ref().is_some_and(|coefficients| {
+                coefficients
+                    .iter()
+                    .all(|value| value.re == 0.0 && value.im == 0.0)
+            }) {
+                return Err(tf_error(&TF_ERROR_DENOMINATOR_INVALID));
+            }
+            let options = admitted_options.resolve(host_sample_times).await?;
+            let numerator = resolve_coefficients(host_numerator, numerator, "numerator").await?;
+            let denominator =
+                resolve_coefficients(host_denominator, denominator, "denominator").await?;
             TfModel::new(
                 numerator,
                 denominator,
@@ -217,6 +226,31 @@ async fn admitted_coefficient(value: &Value, role: &str) -> BuiltinResult<Value>
     )
     .await?;
     Ok(gathered)
+}
+
+async fn preparse_host_coefficients(
+    value: &Value,
+    role: &str,
+) -> BuiltinResult<Option<Vec<num_complex::Complex64>>> {
+    if matches!(value, Value::GpuTensor(_)) {
+        return Ok(None);
+    }
+    Ok(Some(
+        parse_coefficients(role, admitted_coefficient(value, role).await?, BUILTIN_NAME).await?,
+    ))
+}
+
+async fn resolve_coefficients(
+    parsed_host: Option<Vec<num_complex::Complex64>>,
+    value: &Value,
+    role: &str,
+) -> BuiltinResult<Vec<num_complex::Complex64>> {
+    match parsed_host {
+        Some(coefficients) => Ok(coefficients),
+        None => {
+            parse_coefficients(role, admitted_coefficient(value, role).await?, BUILTIN_NAME).await
+        }
+    }
 }
 
 async fn admitted_sample_time(value: &Value) -> BuiltinResult<f64> {
@@ -268,24 +302,16 @@ enum TfOption<'a> {
     SampleTime(&'a Value),
 }
 
-impl TfConstructorOptions {
-    async fn parse(rest: &[Value]) -> BuiltinResult<Self> {
-        let mut options = Self {
-            variable: DEFAULT_VARIABLE.to_string(),
-            sample_time: 0.0,
-            variable_explicit: false,
-            sample_time_explicit: false,
-        };
+struct TfAdmittedOptions<'a> {
+    options: Vec<TfOption<'a>>,
+}
 
+impl<'a> TfAdmittedOptions<'a> {
+    fn parse(rest: &'a [Value]) -> BuiltinResult<Self> {
+        let mut options = Vec::new();
         match rest {
             [] => {}
-            [sample_time] => {
-                options.sample_time = admitted_sample_time(sample_time).await?;
-                options.sample_time_explicit = true;
-                if options.sample_time != 0.0 {
-                    options.variable = "z".to_string();
-                }
-            }
+            [sample_time] => options.push(TfOption::SampleTime(sample_time)),
             _ => {
                 if !rest.len().is_multiple_of(2) {
                     return Err(tf_error_with_detail(
@@ -293,13 +319,12 @@ impl TfConstructorOptions {
                         "optional arguments must be name-value pairs or a scalar sample time",
                     ));
                 }
-                let mut parsed = Vec::with_capacity(rest.len() / 2);
                 for pair in rest.chunks_exact(2) {
                     let name = scalar_text(&pair[0], "option name", "tf").map_err(|error| {
                         tf_error_with_detail(&TF_ERROR_INVALID_OPTION, error.message())
                     })?;
                     let lowered = name.trim().to_ascii_lowercase();
-                    parsed.push(match lowered.as_str() {
+                    options.push(match lowered.as_str() {
                         "variable" => {
                             let variable = parse_variable(&pair[1])?;
                             if !matches!(variable.as_str(), "s" | "z") {
@@ -319,22 +344,47 @@ impl TfConstructorOptions {
                         }
                     });
                 }
-                for option in parsed {
-                    match option {
-                        TfOption::Variable(variable) => {
-                            options.variable = variable;
-                            options.variable_explicit = true;
-                        }
-                        TfOption::SampleTime(value) => {
-                            options.sample_time = admitted_sample_time(value).await?;
-                            options.sample_time_explicit = true;
-                        }
-                    }
+            }
+        }
+        Ok(Self { options })
+    }
+
+    async fn preflight_host(&self) -> BuiltinResult<Vec<Option<f64>>> {
+        let mut values = Vec::with_capacity(self.options.len());
+        for option in &self.options {
+            values.push(match option {
+                TfOption::Variable(_) => None,
+                TfOption::SampleTime(value) if matches!(*value, Value::GpuTensor(_)) => None,
+                TfOption::SampleTime(value) => Some(admitted_sample_time(value).await?),
+            });
+        }
+        Ok(values)
+    }
+
+    async fn resolve(self, preflight: Vec<Option<f64>>) -> BuiltinResult<TfConstructorOptions> {
+        let mut options = TfConstructorOptions {
+            variable: DEFAULT_VARIABLE.to_string(),
+            sample_time: 0.0,
+            variable_explicit: false,
+            sample_time_explicit: false,
+        };
+        for (option, admitted) in self.options.into_iter().zip(preflight) {
+            match option {
+                TfOption::Variable(variable) => {
+                    options.variable = variable;
+                    options.variable_explicit = true;
                 }
-                if options.sample_time != 0.0 && !options.variable_explicit {
-                    options.variable = "z".to_string();
+                TfOption::SampleTime(value) => {
+                    options.sample_time = match admitted {
+                        Some(sample_time) => sample_time,
+                        None => admitted_sample_time(value).await?,
+                    };
+                    options.sample_time_explicit = true;
                 }
             }
+        }
+        if options.sample_time != 0.0 && !options.variable_explicit {
+            options.variable = "z".to_string();
         }
 
         if options.variable_explicit
@@ -581,7 +631,7 @@ async fn tf_mpower(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::TF_DESCRIPTOR;
+    use runmat_builtins::{TF_DESCRIPTOR, TF_ERROR_INVALID_COEFFICIENTS};
     use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor};
 
     fn run_tf(numerator: Value, denominator: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -841,6 +891,66 @@ mod tests {
         )
         .expect_err("nontext option name");
         assert_eq!(error.identifier(), TF_ERROR_INVALID_OPTION.identifier);
+    }
+
+    #[test]
+    fn tf_zero_host_denominator_preflights_before_resident_numerator() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let numerator = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_tf(
+                Value::GpuTensor(numerator),
+                Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+                vec![],
+            )
+            .expect_err("zero denominator");
+            assert_eq!(error.identifier(), TF_ERROR_DENOMINATOR_INVALID.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn tf_invalid_host_coefficient_preflights_before_resident_sample_time() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let sample_time = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![0.25], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_tf(
+                Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap()),
+                Value::Num(1.0),
+                vec![Value::GpuTensor(sample_time)],
+            )
+            .expect_err("matrix coefficients are unsupported");
+            assert_eq!(error.identifier(), TF_ERROR_INVALID_COEFFICIENTS.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn tf_invalid_host_sample_time_preflights_before_resident_numerator() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let numerator = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let error = run_tf(
+                Value::GpuTensor(numerator),
+                Value::Num(1.0),
+                vec![Value::Num(-2.0)],
+            )
+            .expect_err("invalid host sample time");
+            assert_eq!(error.identifier(), TF_ERROR_INVALID_SAMPLE_TIME.identifier);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
     }
 
     #[test]

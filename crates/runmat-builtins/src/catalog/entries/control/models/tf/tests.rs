@@ -160,6 +160,32 @@ fn invalid_shapes_options_and_sample_time_are_diagnosed() {
 }
 
 #[test]
+fn known_sparse_coefficients_and_multiline_shorthand_are_rejected() {
+    let mut sparse = numeric(1, 2);
+    sparse.storage = StorageFact::Sparse;
+    assert!(call(vec![sparse, numeric(1, 1)], vec![], 1)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-TF-COEFFICIENTS"));
+    let multiline = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(2), Some(2)]),
+        StorageFact::Dense,
+    );
+    assert!(call(vec![multiline], vec![], 1)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-TF-ARITY"));
+}
+
+#[test]
+fn logical_sample_time_matches_runtime_scalar_admission() {
+    let logical = ValueFact::scalar(ValueKindFact::Logical);
+    let result = call(vec![numeric(1, 1), numeric(1, 1), logical], vec![], 1);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+}
+
+#[test]
 fn output_arity_is_fixed() {
     let args = vec![numeric(1, 1), numeric(1, 1)];
     assert!(call(args.clone(), vec![], 0).outputs.is_empty());

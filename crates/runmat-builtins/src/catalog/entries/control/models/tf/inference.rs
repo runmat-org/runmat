@@ -12,14 +12,14 @@ use std::collections::BTreeMap;
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     let args = &request.arguments;
-    let text_first = args.first().is_some_and(|value| {
-        matches!(value.kind, ValueKindFact::String | ValueKindFact::Character)
-    });
+    let text_first = args
+        .first()
+        .is_some_and(|value| is_text_scalar_fact(value, false));
     let shorthand = text_first
         || (args.len() <= 2
-            && args
-                .first()
-                .is_some_and(|value| matches!(value.kind, ValueKindFact::Unknown)));
+            && args.first().is_some_and(|value| {
+                matches!(value.kind, ValueKindFact::Unknown) && is_text_scalar_fact(value, true)
+            }));
     let mut numerator = coefficient_fact(None);
     let mut denominator = coefficient_fact(None);
     if args.is_empty() {
@@ -105,6 +105,14 @@ fn coefficients(
     index: usize,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) -> Option<(Option<usize>, Option<NumericDomain>)> {
+    if value.storage == StorageFact::Sparse {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-TF-COEFFICIENTS",
+            "sparse coefficient arrays are unsupported",
+            index,
+        ));
+        return None;
+    }
     let domain = match &value.kind {
         ValueKindFact::Numeric(numeric) => Some(numeric.domain),
         ValueKindFact::Logical => Some(NumericDomain::Real),
@@ -177,10 +185,7 @@ fn validate_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagno
     }
     for (pair_index, pair) in rest.chunks_exact(2).enumerate() {
         let index = 2 + pair_index * 2;
-        if !matches!(
-            pair[0].kind,
-            ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
-        ) {
+        if !is_text_scalar_fact(&pair[0], true) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-TF-OPTION",
                 "option names must be text",
@@ -221,17 +226,28 @@ fn validate_variable(
     index: usize,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) {
-    if !matches!(
-        value.kind,
-        ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
-    ) || literal.is_some_and(|name| !is_variable(name.trim()))
-    {
+    if !is_text_scalar_fact(value, true) || literal.is_some_and(|name| !is_variable(name.trim())) {
         diagnostics.push(argument_error(
             "RM-CATALOG-TF-VARIABLE",
             "Variable must be a supported control variable",
             index,
         ));
     }
+}
+
+fn is_text_scalar_fact(value: &ValueFact, allow_unknown_kind: bool) -> bool {
+    match value.kind {
+        ValueKindFact::Unknown => allow_unknown_kind && possible_text_shape(value),
+        ValueKindFact::String => value.shape.element_count().is_none_or(|count| count == 1),
+        ValueKindFact::Character => possible_text_shape(value),
+        _ => false,
+    }
+}
+
+fn possible_text_shape(value: &ValueFact) -> bool {
+    value.shape.known_dims().is_none_or(|dims| {
+        dims.len() <= 2 && dims.first().copied().flatten().is_none_or(|rows| rows == 1)
+    })
 }
 
 fn is_variable(value: &str) -> bool {
@@ -245,9 +261,10 @@ fn validate_sample_time(
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) {
     if !matches!(value.kind, ValueKindFact::Unknown)
-        && (!value
+        && (!(value
             .numeric()
             .is_some_and(|n| n.domain == NumericDomain::Real)
+            || matches!(value.kind, ValueKindFact::Logical))
             || value.shape.element_count().is_some_and(|count| count != 1))
     {
         diagnostics.push(argument_error(

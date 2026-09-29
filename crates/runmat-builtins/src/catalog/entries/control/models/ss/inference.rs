@@ -81,6 +81,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 type MatrixDims = Option<(Option<usize>, Option<usize>)>;
 
 fn matrix_shape(value: &ValueFact) -> Option<MatrixDims> {
+    if value.storage == StorageFact::Sparse {
+        return None;
+    }
     match &value.kind {
         ValueKindFact::Unknown => {}
         ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Real => {}
@@ -138,10 +141,7 @@ fn validate_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagno
     }
     for (pair_index, pair) in rest.chunks_exact(2).enumerate() {
         let index = 4 + pair_index * 2;
-        if !matches!(
-            pair[0].kind,
-            ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
-        ) {
+        if !text_scalar_or_unknown(&pair[0]) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-SS-OPTION",
                 "option names must be text",
@@ -164,6 +164,21 @@ fn validate_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagno
             diagnostics,
         );
     }
+}
+
+fn text_scalar_or_unknown(value: &ValueFact) -> bool {
+    match value.kind {
+        ValueKindFact::Unknown => possible_text_shape(value),
+        ValueKindFact::String => value.shape.element_count().is_none_or(|count| count == 1),
+        ValueKindFact::Character => possible_text_shape(value),
+        _ => false,
+    }
+}
+
+fn possible_text_shape(value: &ValueFact) -> bool {
+    value.shape.known_dims().is_none_or(|dims| {
+        dims.len() <= 2 && dims.first().copied().flatten().is_none_or(|rows| rows == 1)
+    })
 }
 
 fn validate_sample_time(
