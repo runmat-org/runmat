@@ -86,14 +86,7 @@ pub(super) async fn anymissing_builtin(value: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "standardizeMissing",
-    category = "missing",
-    summary = "Replace user-specified missing indicators with canonical missing values.",
-    keywords = "standardizeMissing,missing,NaN,string,table",
-    accel = "cpu",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::STANDARDIZE_MISSING_DESCRIPTOR),
-    extensions(crate::builtins::missing::STANDARDIZE_MISSING_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::STANDARDIZE_MISSING_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn standardize_missing_builtin(
@@ -115,15 +108,15 @@ pub(super) async fn standardize_missing_builtin(
             "standardizeMissing",
         )?;
     }
-    let value = gather_if_needed_async(&value).await.map_err(|err| {
-        invalid_argument(format!("standardizeMissing: failed to gather input: {err}"))
-    })?;
     let indicator = gather_if_needed_async(indicator).await.map_err(|err| {
         invalid_argument(format!(
             "standardizeMissing: failed to gather indicators: {err}"
         ))
     })?;
     let indicators = indicator_set(&indicator)?;
+    let value = gather_if_needed_async(&value).await.map_err(|err| {
+        invalid_argument(format!("standardizeMissing: failed to gather input: {err}"))
+    })?;
     standardize_missing_value(value, &indicators)
 }
 

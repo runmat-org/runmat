@@ -54,12 +54,6 @@ pub(in crate::builtins::missing::domain) const RMMISSING_SIGNATURES: [BuiltinSig
     inputs: &VALUE_AND_ARGS_INPUTS,
     outputs: &VALUE_AND_MASK_OUTPUTS,
 }];
-pub(in crate::builtins::missing::domain) const STANDARDIZE_SIGNATURES:
-    [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "B = standardizeMissing(A, indicators)",
-    inputs: &VALUE_AND_ARGS_INPUTS,
-    outputs: &VALUE_OUTPUT,
-}];
 pub(in crate::builtins::missing::domain) const NANAWARE_SIGNATURES: [BuiltinSignatureDescriptor;
     1] = [BuiltinSignatureDescriptor {
     label: "B = nanmean(A, ...)",
@@ -89,85 +83,6 @@ pub(in crate::builtins::missing::domain) const MISSING_ERRORS: [BuiltinErrorDesc
     MISSING_ERROR_INVALID_ARGUMENT,
     MISSING_ERROR_UNSUPPORTED_TYPE,
     MISSING_ERROR_INTERNAL,
-];
-
-pub(in crate::builtins::missing::domain) const STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION:
-    BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "standardize-missing-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "standardizeMissing with a bare typed-integer input array is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StandardizeMissingIntegerDataExtension"),
-};
-pub(in crate::builtins::missing::domain) const STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "standardize-missing-explicit-gpu-indicator",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description:
-            "standardizeMissing with an explicitly GPU-resident indicator is a RunMat extension",
-        error_identifier: Some(
-            "RunMat:compatibility:StandardizeMissingExplicitGpuIndicatorExtension",
-        ),
-    };
-pub const STANDARDIZE_MISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION,
-    STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION,
-];
-
-const STANDARDIZE_MISSING_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target's array-input datatype table excludes integer arrays. RunMat mode treats a bare integer array as an exact no-op because integer classes have no standard missing value.",
-    }];
-const STANDARDIZE_MISSING_INTEGER_INDICATOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "indicator",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly states that single, integer, and logical indicators also match double entries of A.",
-    }];
-const STANDARDIZE_MISSING_TABLE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer table variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Table input is documented and preserves each variable datatype. Integer variables have no standard missing representation and therefore remain unchanged.",
-    }];
-pub const STANDARDIZE_MISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = standardizeMissing(integer_A, indicator)",
-        inputs: &STANDARDIZE_MISSING_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The RunMat-only bare-array form preserves class, shape, and exact storage. Compatibility admission precedes provider access; automatic residency may gather transparently after admission.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = standardizeMissing(A, integer_indicator)",
-        inputs: &STANDARDIZE_MISSING_INTEGER_INDICATOR_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer indicators are read from authoritative storage and compared in the documented target-class matching domain. Explicit gpuArray indicators are separately gated; automatic residency remains transparent.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = standardizeMissing(table_with_integer_variables, indicator)",
-        inputs: &STANDARDIZE_MISSING_TABLE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer table variables pass through with exact native storage while supported floating or textual variables are standardized independently.",
-    },
 ];
 
 pub(in crate::builtins::missing::domain) fn any_type(

@@ -119,3 +119,23 @@ fn standardize_missing_explicit_gpu_indicator_is_gated_before_provider_access() 
     allocation.handle.release().unwrap();
     assert_eq!(allocation.probe.retirements(), 1);
 }
+
+#[test]
+fn standardize_missing_rejects_host_indicator_before_resident_input_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let error = block_on(standardize_missing_builtin(
+        Value::GpuTensor(allocation.handle.clone()),
+        vec![Value::Bool(true)],
+    ))
+    .expect_err("invalid indicator must be rejected before input download");
+    assert_eq!(error.identifier(), Some("RunMat:missing:UnsupportedType"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
+}

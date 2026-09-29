@@ -115,8 +115,3 @@ descriptor!(
     RMMISSING_SIGNATURES,
     BuiltinOutputMode::ByRequestedOutputCount
 );
-descriptor!(
-    STANDARDIZE_MISSING_DESCRIPTOR,
-    STANDARDIZE_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
