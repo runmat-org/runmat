@@ -1,6 +1,10 @@
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
-    BuiltinCatalogEntry,
+    BuiltinCatalogEntry, BILSTM_LAYER_CLASS, CLASSIFICATION_OUTPUT_LAYER_CLASS,
+    CONVOLUTION_1D_LAYER_CLASS, ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS,
+    FULLY_CONNECTED_LAYER_CLASS, GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS,
+    LAYER_NORMALIZATION_LAYER_CLASS, LSTM_LAYER_CLASS, REGRESSION_OUTPUT_LAYER_CLASS,
+    RELU_LAYER_CLASS, SEQUENCE_INPUT_LAYER_CLASS, SOFTMAX_LAYER_CLASS,
 };
 use runmat_types::{
     CallInference, CallRequest, LiteralValue, NumericClass, NumericDomain, NumericFact, ObjectFact,
@@ -27,21 +31,21 @@ enum LayerKind {
 
 impl LayerKind {
     fn class(self) -> StaticClassIdentity {
-        StaticClassIdentity::new(match self {
-            Self::FullyConnected => "nnet.cnn.layer.FullyConnectedLayer",
-            Self::FeatureInput => "nnet.cnn.layer.FeatureInputLayer",
-            Self::SequenceInput => "nnet.cnn.layer.SequenceInputLayer",
-            Self::Relu => "nnet.cnn.layer.ReLULayer",
-            Self::Elu => "nnet.cnn.layer.ELULayer",
-            Self::Softmax => "nnet.cnn.layer.SoftmaxLayer",
-            Self::Classification => "nnet.cnn.layer.ClassificationOutputLayer",
-            Self::Regression => "nnet.cnn.layer.RegressionOutputLayer",
-            Self::LayerNorm => "nnet.cnn.layer.LayerNormalizationLayer",
-            Self::GlobalPool => "nnet.cnn.layer.GlobalAveragePooling1DLayer",
-            Self::Lstm => "nnet.cnn.layer.LSTMLayer",
-            Self::Bilstm => "nnet.cnn.layer.BiLSTMLayer",
-            Self::Convolution => "nnet.cnn.layer.Convolution1DLayer",
-        })
+        match self {
+            Self::FullyConnected => FULLY_CONNECTED_LAYER_CLASS,
+            Self::FeatureInput => FEATURE_INPUT_LAYER_CLASS,
+            Self::SequenceInput => SEQUENCE_INPUT_LAYER_CLASS,
+            Self::Relu => RELU_LAYER_CLASS,
+            Self::Elu => ELU_LAYER_CLASS,
+            Self::Softmax => SOFTMAX_LAYER_CLASS,
+            Self::Classification => CLASSIFICATION_OUTPUT_LAYER_CLASS,
+            Self::Regression => REGRESSION_OUTPUT_LAYER_CLASS,
+            Self::LayerNorm => LAYER_NORMALIZATION_LAYER_CLASS,
+            Self::GlobalPool => GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS,
+            Self::Lstm => LSTM_LAYER_CLASS,
+            Self::Bilstm => BILSTM_LAYER_CLASS,
+            Self::Convolution => CONVOLUTION_1D_LAYER_CLASS,
+        }
     }
 
     fn required_sizes(self) -> usize {

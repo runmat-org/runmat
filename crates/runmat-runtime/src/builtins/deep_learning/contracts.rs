@@ -9,20 +9,11 @@ pub(in crate::builtins) const DLARRAY_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("dlarray");
 pub(in crate::builtins) const LAYER_GRAPH_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("nnet.cnn.LayerGraph");
-pub(in crate::builtins) const FULLY_CONNECTED_LAYER_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.FullyConnectedLayer");
-pub(in crate::builtins) const RELU_LAYER_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.ReLULayer");
-pub(in crate::builtins) const ELU_LAYER_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.ELULayer");
-pub(in crate::builtins) const SOFTMAX_LAYER_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.SoftmaxLayer");
-pub(in crate::builtins) const FEATURE_INPUT_LAYER_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.FeatureInputLayer");
-pub(in crate::builtins) const CLASSIFICATION_OUTPUT_LAYER_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.ClassificationOutputLayer");
-pub(in crate::builtins) const REGRESSION_OUTPUT_LAYER_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.layer.RegressionOutputLayer");
+pub(in crate::builtins) use runmat_builtins::{
+    CLASSIFICATION_OUTPUT_LAYER_CLASS, ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS,
+    FULLY_CONNECTED_LAYER_CLASS, REGRESSION_OUTPUT_LAYER_CLASS, RELU_LAYER_CLASS,
+    SOFTMAX_LAYER_CLASS,
+};
 pub(in crate::builtins) const TRAINING_OPTIONS_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptions");
 

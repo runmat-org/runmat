@@ -1,3 +1,10 @@
+use runmat_builtins::{
+    BILSTM_LAYER_CLASS, CLASSIFICATION_OUTPUT_LAYER_CLASS, CONVOLUTION_1D_LAYER_CLASS,
+    ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS,
+    GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS, LAYER_NORMALIZATION_LAYER_CLASS, LSTM_LAYER_CLASS,
+    REGRESSION_OUTPUT_LAYER_CLASS, RELU_LAYER_CLASS, SEQUENCE_INPUT_LAYER_CLASS,
+    SOFTMAX_LAYER_CLASS,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -81,7 +88,7 @@ pub(super) async fn fully_connected_layer_builtin(
 ) -> BuiltinResult<Value> {
     let output_size = metadata_size(&output_size, "fullyConnectedLayer", "outputSize")?;
     layer_object(
-        "nnet.cnn.layer.FullyConnectedLayer",
+        FULLY_CONNECTED_LAYER_CLASS,
         "Fully Connected",
         vec![("OutputSize", Value::Num(output_size as f64))],
         admitted_layer_options(rest, "fullyConnectedLayer").await?,
@@ -106,7 +113,7 @@ pub(super) async fn feature_input_layer_builtin(
         )?;
     }
     layer_object(
-        "nnet.cnn.layer.FeatureInputLayer",
+        FEATURE_INPUT_LAYER_CLASS,
         "Feature Input",
         vec![(
             "InputSize",
@@ -132,7 +139,7 @@ pub(super) async fn sequence_input_layer_builtin(
 ) -> BuiltinResult<Value> {
     let input_size = metadata_sizes(&input_size, "sequenceInputLayer", "inputSize")?;
     layer_object(
-        "nnet.cnn.layer.SequenceInputLayer",
+        SEQUENCE_INPUT_LAYER_CLASS,
         "Sequence Input",
         vec![(
             "InputSize",
@@ -154,7 +161,7 @@ pub(super) async fn sequence_input_layer_builtin(
 )]
 pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     layer_object(
-        "nnet.cnn.layer.ReLULayer",
+        RELU_LAYER_CLASS,
         "ReLU",
         vec![],
         admitted_layer_options(rest, "reluLayer").await?,
@@ -183,7 +190,7 @@ pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> 
         1.0
     };
     layer_object(
-        "nnet.cnn.layer.ELULayer",
+        ELU_LAYER_CLASS,
         "ELU",
         vec![("Alpha", Value::Num(alpha))],
         admitted_layer_options(args, "eluLayer").await?,
@@ -198,7 +205,7 @@ pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> 
 )]
 pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     layer_object(
-        "nnet.cnn.layer.SoftmaxLayer",
+        SOFTMAX_LAYER_CLASS,
         "Softmax",
         vec![],
         admitted_layer_options(rest, "softmaxLayer").await?,
@@ -213,7 +220,7 @@ pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Val
 )]
 pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     layer_object(
-        "nnet.cnn.layer.ClassificationOutputLayer",
+        CLASSIFICATION_OUTPUT_LAYER_CLASS,
         "Classification Output",
         vec![("Classes", Value::String("auto".into()))],
         admitted_layer_options(rest, "classificationLayer").await?,
@@ -228,7 +235,7 @@ pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinRes
 )]
 pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     layer_object(
-        "nnet.cnn.layer.RegressionOutputLayer",
+        REGRESSION_OUTPUT_LAYER_CLASS,
         "Regression Output",
         vec![],
         admitted_layer_options(rest, "regressionLayer").await?,
@@ -243,7 +250,7 @@ pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<
 )]
 pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     layer_object(
-        "nnet.cnn.layer.LayerNormalizationLayer",
+        LAYER_NORMALIZATION_LAYER_CLASS,
         "Layer Normalization",
         vec![("Epsilon", Value::Num(1.0e-5))],
         admitted_layer_options(rest, "layerNormalizationLayer").await?,
@@ -260,7 +267,7 @@ pub(super) async fn global_average_pooling_1d_layer_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     layer_object(
-        "nnet.cnn.layer.GlobalAveragePooling1DLayer",
+        GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS,
         "Global Average Pooling 1D",
         vec![],
         admitted_layer_options(rest, "globalAveragePooling1dLayer").await?,
@@ -279,7 +286,7 @@ pub(super) async fn lstm_layer_builtin(
 ) -> BuiltinResult<Value> {
     recurrent_layer(
         "lstmLayer",
-        "nnet.cnn.layer.LSTMLayer",
+        LSTM_LAYER_CLASS,
         "LSTM",
         num_hidden_units,
         rest,
@@ -298,7 +305,7 @@ pub(super) async fn bilstm_layer_builtin(
 ) -> BuiltinResult<Value> {
     recurrent_layer(
         "bilstmLayer",
-        "nnet.cnn.layer.BiLSTMLayer",
+        BILSTM_LAYER_CLASS,
         "BiLSTM",
         num_hidden_units,
         rest,
@@ -308,7 +315,7 @@ pub(super) async fn bilstm_layer_builtin(
 
 pub(super) async fn recurrent_layer(
     function: &'static str,
-    class_name: &str,
+    class_name: runmat_types::StaticClassIdentity,
     type_name: &str,
     num_hidden_units: Value,
     rest: Vec<Value>,
@@ -339,7 +346,7 @@ pub(super) async fn convolution_1d_layer_builtin(
     let filter_size = metadata_size(&filter_size, "convolution1dLayer", "filterSize")?;
     let num_filters = metadata_size(&num_filters, "convolution1dLayer", "numFilters")?;
     layer_object(
-        "nnet.cnn.layer.Convolution1DLayer",
+        CONVOLUTION_1D_LAYER_CLASS,
         "Convolution 1D",
         vec![
             ("FilterSize", Value::Num(filter_size as f64)),
@@ -351,3 +358,7 @@ pub(super) async fn convolution_1d_layer_builtin(
         "convolution1dLayer",
     )
 }
+
+#[cfg(test)]
+#[path = "layers/identity_tests.rs"]
+mod identity_tests;

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(in crate::builtins) fn layer_object(
-    class_name: &str,
+    class_name: runmat_types::StaticClassIdentity,
     type_name: &str,
     mut properties: Vec<(&str, Value)>,
     rest: Vec<Value>,
@@ -26,7 +26,7 @@ pub(in crate::builtins) fn layer_object(
     for (key, value) in extra {
         owned_properties.push((canonical_property_name(&key), value));
     }
-    Ok(object(class_name, owned_properties))
+    Ok(object_with_identity(class_name, owned_properties))
 }
 
 pub(super) fn canonical_property_name(name: &str) -> String {

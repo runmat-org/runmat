@@ -5,10 +5,12 @@ use runmat_types::{
 };
 
 mod arrays;
+mod layers;
 pub use arrays::{
     CALENDAR_DAYS_PROPERTY, CALENDAR_MONTHS_PROPERTY, DATETIME_SERIAL_PROPERTY,
     DLARRAY_DATA_PROPERTY, DURATION_DAYS_PROPERTY,
 };
+pub use layers::*;
 
 /// Borrow the immutable shape protocol without rebuilding class/member
 /// declarations on each runtime structural query.
