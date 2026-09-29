@@ -54,7 +54,7 @@ pub(super) fn integer_exponent(value: &Value) -> BuiltinResult<i64> {
         ));
     }
     // i64::MAX rounds to 2^63 in f64. The upper bound is exclusive; the
-    // representable lower bound -2^63 is valid and handled by powi's checked negation.
+    // representable lower bound -2^63 is valid; powi uses unsigned magnitude.
     if exponent < i64::MIN as f64 || exponent >= i64::MAX as f64 {
         return Err(control_error(
             "tf",
@@ -67,10 +67,26 @@ pub(super) fn integer_exponent(value: &Value) -> BuiltinResult<i64> {
 
 async fn power(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     preflight_model_operand(&lhs, "tf")?;
-    let host_exponent = if matches!(rhs, Value::GpuTensor(_)) {
-        None
-    } else {
-        Some(integer_exponent(&rhs)?)
+    let host_exponent = match &rhs {
+        Value::GpuTensor(handle) => {
+            let scalar = handle
+                .shape()
+                .iter()
+                .try_fold(1usize, |count, &dim| count.checked_mul(dim))
+                == Some(1);
+            if !scalar
+                || handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(control_error(
+                    "tf",
+                    "RunMat:tf:InvalidExponent",
+                    "tf: exponent must be a real numeric scalar",
+                ));
+            }
+            crate::builtins::common::validation::validate_resident_metadata(&rhs)?;
+            None
+        }
+        _ => Some(integer_exponent(&rhs)?),
     };
     let sys = TfModel::from_value_async(lhs, "tf").await?;
     let exponent = match host_exponent {
@@ -195,7 +211,7 @@ pub(super) async fn tf_mpower(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::{IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn model(value: f64) -> Value {
         block_on(super::super::tf_builtin(vec![
@@ -269,6 +285,16 @@ mod tests {
             integer_exponent(&Value::Num(1.5)).unwrap_err().identifier(),
             Some("RunMat:tf:InvalidExponent")
         );
+        assert_eq!(
+            integer_exponent(&Value::Int(IntValue::I64(i64::MIN))).unwrap(),
+            i64::MIN
+        );
+        for operator in [tf_power, tf_mpower] {
+            let result = block_on(operator(model(-1.0), Value::Int(IntValue::I64(i64::MIN))))
+                .expect("minimum signed exponent");
+            assert_eq!(coefficients(&result, "Numerator"), vec![1.0]);
+            assert_eq!(coefficients(&result, "Denominator"), vec![1.0]);
+        }
     }
 
     #[test]
@@ -330,11 +356,80 @@ mod tests {
             };
             object
                 .properties
+                .insert("Numerator".into(), Value::GpuTensor(resident.clone()));
+            provider.reset_telemetry();
+            let error = block_on(tf_plus(sys, Value::Num(f64::INFINITY))).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:tf:InvalidCoefficients"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+            let mut sys = model(2.0);
+            let Value::Object(object) = &mut sys else {
+                unreachable!()
+            };
+            object
+                .properties
                 .insert("Numerator".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             let error = block_on(tf_power(sys, Value::Num(1.5))).unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:tf:InvalidExponent"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn resident_exponent_shape_is_rejected_before_model_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let numerator = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![2.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            let exponent = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap(),
+            )
+            .unwrap();
+            let mut sys = model(2.0);
+            let Value::Object(object) = &mut sys else {
+                unreachable!()
+            };
+            object
+                .properties
+                .insert("Numerator".into(), Value::GpuTensor(numerator));
+            provider.reset_telemetry();
+            for operator in [tf_power, tf_mpower] {
+                let error = block_on(operator(sys.clone(), Value::GpuTensor(exponent.clone())))
+                    .unwrap_err();
+                assert_eq!(error.identifier(), Some("RunMat:tf:InvalidExponent"));
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            }
+
+            let complex = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+                )
+                .unwrap();
+            let error = block_on(tf_power(
+                sys.clone(),
+                Value::GpuTensor(complex.handle.clone()),
+            ))
+            .unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:tf:InvalidExponent"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            complex.handle.release().unwrap();
+
+            let valid_exponent = crate::builtins::common::gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![3.0], vec![1, 1]).unwrap(),
+            )
+            .unwrap();
+            provider.reset_telemetry();
+            let result = block_on(tf_power(sys, Value::GpuTensor(valid_exponent)))
+                .expect("valid resident exponent");
+            assert_eq!(coefficients(&result, "Numerator"), vec![8.0]);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 16);
         });
     }
 

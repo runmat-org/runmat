@@ -466,16 +466,9 @@ impl TfModel {
             return Ok(one);
         }
         let mut base = self.clone();
-        let mut exp = exponent;
-        if exp < 0 {
+        let mut exp = exponent.unsigned_abs();
+        if exponent < 0 {
             base = one.div(&base)?;
-            exp = exp.checked_neg().ok_or_else(|| {
-                control_error(
-                    "tf",
-                    "RunMat:tf:InvalidExponent",
-                    "tf: exponent magnitude is too large",
-                )
-            })?;
         }
         let mut result = one;
         while exp > 0 {
@@ -800,7 +793,10 @@ pub fn preflight_model_operand(value: &Value, builtin: &'static str) -> BuiltinR
             preflight_host_model_properties(object, builtin)
         }
         Value::GpuTensor(_) => Ok(()),
-        value => scalar_complex(value, builtin).map(|_| ()),
+        value => {
+            let scalar = scalar_complex(value, builtin)?;
+            validate_coefficients("scalar gain", &[scalar], builtin)
+        }
     }
 }
 
