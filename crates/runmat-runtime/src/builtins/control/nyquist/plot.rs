@@ -1,8 +1,8 @@
 //! Nyquist presentation; absent from numeric output forms.
 
+use super::solver::NyquistResponse;
 use super::*;
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
-use solver::NyquistResponse;
 
 pub(super) async fn render(response: &NyquistResponse) -> BuiltinResult<()> {
     let mut args = vec![response.re_value()?, response.im_value()?];
