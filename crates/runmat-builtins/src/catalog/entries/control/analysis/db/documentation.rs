@@ -8,7 +8,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Convert voltage magnitude or power to decibels.",
     description: "`db(y)` and `db(y, 'voltage')` compute `20*log10(abs(y))`. `db(y, 'power')` computes `10*log10(y)` for nonnegative real power. `db(y, R)` computes `10*log10(abs(y).^2 ./ R)` for finite positive real resistance. The resistance form uses implicit expansion.",
     keywords: &["db", "decibel", "voltage", "power", "resistance", "complex"],
-    related: &["abs", "log10"],
+    related: &["abs", "log10", "tf"],
     sections: &[
         BuiltinDocumentationSection { heading: "Modes and values", paragraphs: &[
             "Voltage mode accepts real or complex numeric signal data and uses magnitude. Power mode accepts only real, nonnegative signal values; negative or complex values raise an error. Resistance must be finite, positive, and real, and may be an array broadcast-compatible with the signal. Zero signal values produce negative infinity.",
@@ -37,6 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     links: &[
         BuiltinDocumentationLink { label: "abs", target: BuiltinDocumentationLinkTarget::Builtin("abs") },
         BuiltinDocumentationLink { label: "log10", target: BuiltinDocumentationLinkTarget::Builtin("log10") },
+        BuiltinDocumentationLink { label: "tf", target: BuiltinDocumentationLinkTarget::Builtin("tf") },
         SOURCE,
     ],
     media: &[],

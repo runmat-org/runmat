@@ -462,6 +462,7 @@ fn datetime_invalid_options_precede_resident_provider_access() {
         );
         assert_eq!(allocation.probe.retirements(), 0);
     }
+    drop(resident);
     allocation.handle.release().unwrap();
     assert_eq!(allocation.probe.retirements(), 1);
 }
@@ -469,11 +470,11 @@ fn datetime_invalid_options_precede_resident_provider_access() {
 #[test]
 fn datetime_constructor_value_errors_use_catalog_invalid_input_identifier() {
     let error = futures::executor::block_on(datetime_builtin(vec![
-        Value::Num(2024.0),
+        Value::Num(2024.5),
         Value::Num(2.0),
         Value::Num(30.0),
     ]))
-    .expect_err("invalid calendar date must fail");
+    .expect_err("fractional year must fail; overflowing calendar days normalize");
     assert_eq!(
         error.identifier(),
         runmat_builtins::DATETIME_ERROR_INVALID_INPUT.identifier
@@ -538,7 +539,7 @@ fn datetime_accepts_existing_datetime_input() {
     let value = run_datetime(vec![Value::String("2024-03-14".to_string())]);
     let converted = run_datetime(vec![
         value.clone(),
-        Value::from("InputFormat"),
+        Value::from("Format"),
         Value::from("yyyy-MM-dd"),
     ]);
     assert_eq!(
@@ -922,6 +923,7 @@ fn datetime_and_duration_interoperate() {
 
 #[test]
 fn legacy_date_conversion_and_query_helpers_work() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let serial = serial_for_date(2024, 3, 14);
     let date_vector =
         futures::executor::block_on(datevec_builtin(Value::Num(serial))).expect("datevec");
@@ -1175,6 +1177,7 @@ fn legacy_date_output_counts_reject_unsupported_requests() {
 
 #[test]
 fn datenum_typed_integer_date_vector_reads_exact_storage() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let serial = serial_for_date(2024, 3, 14);
     let typed_date_vector = Tensor::new_integer(
         runmat_value::IntegerStorage::U16(vec![2024, 3, 14]),
@@ -1189,6 +1192,7 @@ fn datenum_typed_integer_date_vector_reads_exact_storage() {
 
 #[test]
 fn datenum_typed_integer_serials_read_exact_storage() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let serial = serial_for_date(2024, 3, 14).floor() as u32;
     let scalar = Tensor::new_integer(runmat_value::IntegerStorage::U32(vec![serial]), vec![1, 1])
         .expect("typed serial");
