@@ -115,6 +115,7 @@ fn blsprice_vectorizes_scalar_inputs() {
 
 #[test]
 fn blsprice_broadcast_inputs_read_typed_integer_storage_exactly() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let guard = crate::output_count::push_output_count(Some(2));
     let out = output_list(
         block_on(blsprice_builtin(
@@ -332,6 +333,7 @@ fn blsprice_gpu_resident_inputs_preserve_residency() {
 
 #[test]
 fn blsprice_host_single_class_ignores_double_scalar_representation() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let price = single(vec![100.0, 110.0], vec![2, 1]);
     for strike in [Value::Num(95.0), tensor(vec![95.0], 1, 1)] {
         let result = block_on(blsprice_builtin(
@@ -362,6 +364,7 @@ fn blsprice_host_single_class_ignores_double_scalar_representation() {
 
 #[test]
 fn blsprice_nonscalar_double_array_forces_double() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let result = block_on(blsprice_builtin(
         single(vec![100.0, 110.0], vec![2, 1]),
         tensor(vec![95.0, 95.0], 2, 1),
@@ -376,6 +379,7 @@ fn blsprice_nonscalar_double_array_forces_double() {
 
 #[test]
 fn single_boundary_rejects_finite_double_scalar_overflow_and_underflow() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let price = single(vec![100.0, 110.0], vec![2, 1]);
     for strike in [Value::Num(1.0e100), tensor(vec![1.0e-100], 1, 1)] {
         let failure = block_on(blsprice_builtin(
