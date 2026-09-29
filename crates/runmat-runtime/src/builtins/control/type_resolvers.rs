@@ -1,9 +1,5 @@
 use runmat_builtins::{ResolveContext, Type};
 
-pub fn step_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
 pub fn stepinfo_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Struct {
         known_fields: Some(vec![
@@ -19,10 +15,6 @@ pub fn stepinfo_type(_args: &[Type], _context: &ResolveContext) -> Type {
             "Undershoot".to_string(),
         ]),
     }
-}
-
-pub fn impulse_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
 }
 
 pub fn nyquist_type(_args: &[Type], _context: &ResolveContext) -> Type {
