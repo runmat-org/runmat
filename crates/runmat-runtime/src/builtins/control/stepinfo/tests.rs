@@ -138,3 +138,27 @@ fn requested_output_count_is_checked_before_admission() {
     let error = run(samples(vec![0.0, 1.0]), vec![]).expect_err("one output only");
     assert_eq!(error.identifier(), Some("RunMat:stepinfo:InvalidArgument"));
 }
+
+#[test]
+fn model_nested_residency_checks_host_options_before_owner_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let numerator = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let resident =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &numerator).unwrap();
+        let model = tf_model(Value::GpuTensor(resident), samples(vec![1.0, 1.0]));
+        provider.reset_telemetry();
+        let error = run(
+            model.clone(),
+            vec![Value::from("SettlingTimeThreshold"), Value::Num(-0.1)],
+        )
+        .expect_err("invalid host option");
+        assert!(error.message().contains("SettlingTimeThreshold"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let info = run(model, vec![]).expect("admitted nested resident model");
+        assert!((field(&info, "SteadyStateValue") - 1.0).abs() < 1e-12);
+        assert_eq!(
+            provider.telemetry_snapshot().download_bytes,
+            numerator.len() * std::mem::size_of::<f64>()
+        );
+    });
+}
