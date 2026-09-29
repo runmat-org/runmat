@@ -199,7 +199,7 @@ pub const TF_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescript
 pub const TF_ERROR_INVALID_SAMPLE_TIME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TF.INVALID_SAMPLE_TIME",
     identifier: Some("RunMat:tf:InvalidSampleTime"),
-    when: "Sample time is neither -1 nor a finite non-negative scalar.",
+    when: "Sample time is neither -1 nor a finite non-negative scalar, or an integer sample time is not exactly representable as double.",
     message: "tf: sample time must be -1 or a finite non-negative scalar",
 };
 pub const TF_ERROR_INVALID_VARIABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -211,7 +211,7 @@ pub const TF_ERROR_INVALID_VARIABLE: BuiltinErrorDescriptor = BuiltinErrorDescri
 pub const TF_ERROR_INVALID_COEFFICIENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TF.INVALID_COEFFICIENTS",
     identifier: Some("RunMat:tf:InvalidCoefficients"),
-    when: "Numerator/denominator coefficients are not valid finite vectors.",
+    when: "Numerator/denominator coefficients are not valid finite vectors, or integer coefficients are not exactly representable as double.",
     message: "tf: invalid coefficients",
 };
 pub const TF_ERROR_DENOMINATOR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

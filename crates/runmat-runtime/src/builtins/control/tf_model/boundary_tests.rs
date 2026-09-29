@@ -47,7 +47,7 @@ fn mutated_tf_delays_require_exact_integer_to_double_conversion() {
 
 #[test]
 fn mutated_tf_resident_delay_is_checked_after_one_gather() {
-    use runmat_accelerate_api::{AccelProvider, HostIntegerDataView, HostIntegerTensorView};
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
 
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     crate::builtins::common::test_support::with_test_provider(|provider| {

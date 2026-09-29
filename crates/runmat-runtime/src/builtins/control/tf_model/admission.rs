@@ -337,7 +337,7 @@ fn preflight_ss_matrix_value(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_accelerate_api::{AccelProvider, HostIntegerDataView, HostIntegerTensorView};
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor};
 
     #[test]

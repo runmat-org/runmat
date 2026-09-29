@@ -190,7 +190,7 @@ mod tests {
     use super::*;
     use crate::builtins::control::tf_model::{SS_CLASS, TF_CLASS};
     use futures::executor::block_on;
-    use runmat_accelerate_api::{AccelProvider, HostIntegerDataView, HostIntegerTensorView};
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_builtins::{BuiltinIntegerComputationDomain, FEEDBACK_INTEGER_CAPABILITIES};
     use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
