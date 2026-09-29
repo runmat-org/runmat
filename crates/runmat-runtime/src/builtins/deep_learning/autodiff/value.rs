@@ -57,10 +57,13 @@ pub(super) struct Payload {
     pub(super) format: Value,
     pub(super) labels: Value,
     pub(super) dtype: NumericDType,
+    pub(super) is_dlarray: bool,
 }
 
 impl Payload {
     pub(super) fn parse(value: Value, function: &'static str) -> BuiltinResult<Self> {
+        let is_dlarray =
+            matches!(&value, Value::Object(object) if object.class_name == DLARRAY_CLASS);
         let data = dlarray_data(&value, function)?;
         if crate::builtins::common::validation::value_has_native_integer_class(&data) {
             return Err(deep_learning_error(
@@ -84,7 +87,24 @@ impl Payload {
             format,
             labels,
             dtype,
+            is_dlarray,
         })
+    }
+}
+
+pub(super) fn floating_binary_dtype(lhs: NumericDType, rhs: NumericDType) -> NumericDType {
+    match (lhs, rhs) {
+        (NumericDType::F32, _) | (_, NumericDType::F32) => NumericDType::F32,
+        (NumericDType::F64, NumericDType::F64) => NumericDType::F64,
+        _ => unreachable!("Payload admission limits arithmetic to floating classes"),
+    }
+}
+
+pub(super) fn result_metadata_owner<'a>(lhs: &'a Payload, rhs: &'a Payload) -> &'a Payload {
+    if lhs.is_dlarray || !rhs.is_dlarray {
+        lhs
+    } else {
+        rhs
     }
 }
 

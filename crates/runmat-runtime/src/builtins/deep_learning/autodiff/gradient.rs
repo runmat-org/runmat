@@ -3,11 +3,7 @@ use std::collections::HashMap;
 
 #[runtime_builtin(
     name = "dlgradient",
-    category = "deep_learning",
-    summary = "Differentiate a traced scalar dlarray loss with respect to dlarray variables.",
-    keywords = "dlgradient,deep learning,automatic differentiation,gradient",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::DLGRADIENT_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::gradient"
 )]
 pub(super) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

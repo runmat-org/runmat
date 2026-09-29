@@ -181,6 +181,62 @@ fn single_matrix_product_retains_owning_input_precision() {
 }
 
 #[test]
+fn mixed_floating_arithmetic_is_symmetric_and_keeps_dlarray_metadata() {
+    let mut single = ObjectInstance::new(DLARRAY_CLASS.to_string());
+    single.properties.insert(
+        "Data".into(),
+        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+    );
+    single
+        .properties
+        .insert("Format".into(), Value::String("CB".into()));
+    single
+        .properties
+        .insert("Labels".into(), Value::String("CB".into()));
+    let single = Value::Object(single);
+    for output in [
+        dlarray_plus_builtin(single.clone(), Value::Num(2.0)),
+        dlarray_plus_builtin(Value::Num(2.0), single.clone()),
+        dlarray_times_builtin(single.clone(), Value::Num(2.0)),
+        dlarray_times_builtin(Value::Num(2.0), single.clone()),
+        dlarray_minus_builtin(Value::Num(3.0), single.clone()),
+        dlarray_rdivide_builtin(Value::Num(4.0), single.clone()),
+    ] {
+        let Value::Object(output) = output.expect("mixed arithmetic") else {
+            panic!("dlarray output")
+        };
+        assert_eq!(
+            output.properties.get("Format"),
+            Some(&Value::String("CB".into()))
+        );
+        assert_eq!(
+            output.properties.get("Labels"),
+            Some(&Value::String("CB".into()))
+        );
+        let Some(Value::Tensor(data)) = output.properties.get("Data") else {
+            panic!("dlarray data")
+        };
+        assert_eq!(data.numeric_dtype(), NumericDType::F32);
+        assert_eq!(data.shape, vec![1, 2]);
+    }
+    let double = wrapped(Value::Tensor(
+        Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap(),
+    ));
+    for output in [
+        dlarray_plus_builtin(single.clone(), double.clone()),
+        dlarray_plus_builtin(double, single),
+    ] {
+        let Value::Object(output) = output.expect("mixed arrays") else {
+            panic!("dlarray output")
+        };
+        let Some(Value::Tensor(data)) = output.properties.get("Data") else {
+            panic!("dlarray data")
+        };
+        assert_eq!(data.numeric_dtype(), NumericDType::F32);
+    }
+}
+
+#[test]
 fn arithmetic_rejects_mutated_native_integer_data_without_rounding() {
     let large = u64::MAX;
     let integer_data = wrapped(Value::Tensor(

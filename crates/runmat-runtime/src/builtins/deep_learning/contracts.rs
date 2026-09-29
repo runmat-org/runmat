@@ -106,29 +106,6 @@ pub(super) const DLFEVAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
         outputs: &OUT_VARARG,
     }];
 
-pub(super) const DLGRADIENT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "loss",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar traced dlarray loss.",
-    },
-    BuiltinParamDescriptor {
-        name: "targets",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Traced dlarray values, learnables, or dlnetworks to differentiate.",
-    },
-];
-
-pub(super) const DLGRADIENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "varargout = dlgradient(loss, targets...)",
-        inputs: &DLGRADIENT_INPUTS,
-        outputs: &OUT_VARARG,
-    }];
 
 pub const OBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &OBJECT_SIGNATURES,
@@ -146,13 +123,6 @@ pub const ARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 pub const DLFEVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DLFEVAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const DLGRADIENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DLGRADIENT_SIGNATURES,
     output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,

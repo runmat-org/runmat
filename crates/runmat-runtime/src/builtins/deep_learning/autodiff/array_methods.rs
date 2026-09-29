@@ -2,11 +2,7 @@ use super::*;
 
 #[runtime_builtin(
     name = "dlarray.plus",
-    category = "deep_learning",
-    summary = "Add dlarray values and record tape gradients when active.",
-    keywords = "dlarray,plus,deep learning,autodiff",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::ARRAY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_plus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -33,11 +29,7 @@ pub(super) fn dlarray_plus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Valu
 
 #[runtime_builtin(
     name = "dlarray.minus",
-    category = "deep_learning",
-    summary = "Subtract dlarray values and record tape gradients when active.",
-    keywords = "dlarray,minus,deep learning,autodiff",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::ARRAY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_minus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -64,11 +56,7 @@ pub(super) fn dlarray_minus_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Val
 
 #[runtime_builtin(
     name = "dlarray.times",
-    category = "deep_learning",
-    summary = "Multiply dlarray values elementwise and record tape gradients when active.",
-    keywords = "dlarray,times,deep learning,autodiff",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::ARRAY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_times_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -100,11 +88,7 @@ pub(super) fn dlarray_times_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Val
 
 #[runtime_builtin(
     name = "dlarray.rdivide",
-    category = "deep_learning",
-    summary = "Divide dlarray values elementwise and record tape gradients when active.",
-    keywords = "dlarray,rdivide,deep learning,autodiff",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::ARRAY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_rdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -154,19 +138,16 @@ fn dlarray_binary(
         .zip(&rhs_values)
         .map(|(a, b)| op(*a, *b))
         .collect::<Vec<_>>();
-    let out = Tensor::new_with_dtype(data, shape, lhs.dtype)
+    let dtype = floating_binary_dtype(lhs.dtype, rhs.dtype);
+    let out = Tensor::new_with_dtype(data, shape, dtype)
         .map_err(|err| deep_learning_error(function, err))?;
     let node = record(&lhs, &rhs, out.clone())?;
-    Ok(wrap_result(&lhs, out, node))
+    Ok(wrap_result(result_metadata_owner(&lhs, &rhs), out, node))
 }
 
 #[runtime_builtin(
     name = "dlarray.mtimes",
-    category = "deep_learning",
-    summary = "Matrix-multiply dlarray values and record tape gradients when active.",
-    keywords = "dlarray,mtimes,deep learning,autodiff",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::ARRAY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -174,7 +155,8 @@ pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     let rhs = Payload::parse(rhs, "mtimes")?;
     let computed = crate::builtins::common::linalg::matmul_real(&lhs.tensor, &rhs.tensor)
         .map_err(|err| deep_learning_error("mtimes", err))?;
-    let out = if lhs.dtype == NumericDType::F64 {
+    let dtype = floating_binary_dtype(lhs.dtype, rhs.dtype);
+    let out = if dtype == NumericDType::F64 {
         computed
     } else {
         let shape = computed.shape.clone();
@@ -184,7 +166,7 @@ pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
         else {
             unreachable!("real matrix multiplication returns double storage")
         };
-        floating_tensor_from_f64(values, shape, lhs.dtype, "mtimes")?
+        floating_tensor_from_f64(values, shape, dtype, "mtimes")?
     };
     let node = if tape_is_active() && (lhs.node.is_some() || rhs.node.is_some()) {
         Some(push_node(
@@ -199,16 +181,12 @@ pub(super) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     } else {
         None
     };
-    Ok(wrap_result(&lhs, out, node))
+    Ok(wrap_result(result_metadata_owner(&lhs, &rhs), out, node))
 }
 
 #[runtime_builtin(
     name = "dlarray.sum",
-    category = "deep_learning",
-    summary = "Reduce dlarray values to a scalar sum and record tape gradients when active.",
-    keywords = "dlarray,sum,deep learning,autodiff",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::ARRAY_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
 pub(super) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

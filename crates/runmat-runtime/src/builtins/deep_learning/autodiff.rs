@@ -16,7 +16,7 @@ use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
 use super::layer_identity::ForwardLayerKind;
-use super::{any_type, deep_learning_error, model, unsupported_error};
+use super::{deep_learning_error, model, unsupported_error};
 
 pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity = super::DLARRAY_CLASS;
 mod tape;
@@ -30,8 +30,8 @@ pub(super) use tape::{
 mod value;
 pub(super) use value::{dlarray_data, dlarray_format_and_labels, host_tensor_from_value};
 use value::{
-    floating_scalar_f64, floating_tensor_from_f64, floating_tensor_values, node_dtype, wrap_result,
-    Payload,
+    floating_binary_dtype, floating_scalar_f64, floating_tensor_from_f64, floating_tensor_values,
+    node_dtype, result_metadata_owner, wrap_result, Payload,
 };
 mod gradient;
 pub(super) use gradient::dlgradient_builtin;
