@@ -1,7 +1,8 @@
 //! Impulse-response time validation and grid construction.
 use super::*;
 use crate::builtins::common::tensor;
-use runmat_value::{IntValue, NumericScalar, Tensor};
+use crate::builtins::common::validation::integer_is_exact_f64;
+use runmat_value::{IntValue, Tensor};
 
 fn ensure_vector(label: &str, shape: &[usize]) -> BuiltinResult<()> {
     let non_unit = shape.iter().copied().filter(|&dim| dim > 1).count();
@@ -16,43 +17,26 @@ fn ensure_vector(label: &str, shape: &[usize]) -> BuiltinResult<()> {
 }
 
 fn exact_integer_as_f64(value: &IntValue, label: &str) -> BuiltinResult<f64> {
-    const MAX_EXACT: i128 = 1_i128 << 53;
-    let exact = match value {
-        IntValue::I8(value) => i128::from(*value),
-        IntValue::I16(value) => i128::from(*value),
-        IntValue::I32(value) => i128::from(*value),
-        IntValue::I64(value) => i128::from(*value),
-        IntValue::U8(value) => i128::from(*value),
-        IntValue::U16(value) => i128::from(*value),
-        IntValue::U32(value) => i128::from(*value),
-        IntValue::U64(value) => i128::from(*value),
-    };
-    if !(-MAX_EXACT..=MAX_EXACT).contains(&exact) {
+    if !integer_is_exact_f64(value) {
         return Err(impulse_error_with_detail(
             &IMPULSE_ERROR_INVALID_ARGUMENT,
             format!("{label} integer values must be exactly representable as double"),
         ));
     }
-    Ok(exact as f64)
+    Ok(value.to_f64())
 }
 
 fn ensure_exact_integer_tensor(tensor: &Tensor, label: &str) -> BuiltinResult<()> {
-    if tensor.integer_storage().is_none() {
-        return Ok(());
-    }
-    for index in 0..tensor.len() {
-        let value = match tensor.numeric_value_at(index) {
-            Some(NumericScalar::I8(value)) => IntValue::I8(value),
-            Some(NumericScalar::I16(value)) => IntValue::I16(value),
-            Some(NumericScalar::I32(value)) => IntValue::I32(value),
-            Some(NumericScalar::I64(value)) => IntValue::I64(value),
-            Some(NumericScalar::U8(value)) => IntValue::U8(value),
-            Some(NumericScalar::U16(value)) => IntValue::U16(value),
-            Some(NumericScalar::U32(value)) => IntValue::U32(value),
-            Some(NumericScalar::U64(value)) => IntValue::U64(value),
-            _ => continue,
-        };
-        exact_integer_as_f64(&value, label)?;
+    if tensor.integer_storage().is_some_and(|storage| {
+        storage
+            .exact_values()
+            .iter()
+            .any(|value| !integer_is_exact_f64(value))
+    }) {
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_ARGUMENT,
+            format!("{label} integer values must be exactly representable as double"),
+        ));
     }
     Ok(())
 }

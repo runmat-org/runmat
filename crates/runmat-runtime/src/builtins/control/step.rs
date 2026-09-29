@@ -12,10 +12,14 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::common::validation::{
+    native_integer_value_is_exact_f64, value_has_native_integer_class,
+};
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
 };
+use crate::builtins::control::tf_model::RealTfModel;
 use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -99,7 +103,7 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     if !is_statement_form_call() {
-        TimeSpec::preflight_host(rest.first())?;
+        preflight_step_time(rest.first())?;
         preflight_response_model_operand(&sys, ResponseKind::Step)?;
     }
     if is_statement_form_call() {
@@ -107,21 +111,8 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         return Ok(Value::OutputList(Vec::new()));
     }
 
-    if let Some(value) = rest.first() {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            value,
-            &STEP_INTEGER_TIME_EXTENSION,
-            BUILTIN_NAME,
-            "time",
-        )
-        .await?;
-    }
-
     let model = TransferFunction::from_value_async(sys).await?;
-    let time_host = match rest.first() {
-        Some(value) => Some(crate::gather_if_needed_async(value).await?),
-        None => None,
-    };
+    let time_host = gather_step_time(rest.first()).await?;
     let time = TimeSpec::parse(time_host.as_ref(), model.sample_time)?;
     let eval = evaluate_step(&model, time)?;
 
@@ -200,27 +191,15 @@ async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> Bui
     // download model or time data. Plotting starts only after every response
     // has been calculated, so a later invalid system cannot leave a partial
     // figure behind.
-    TimeSpec::preflight_host(time_arg.as_ref())?;
+    preflight_step_time(time_arg.as_ref())?;
     for (system, _) in &systems {
         preflight_response_model_operand(system, ResponseKind::Step)?;
-    }
-    if let Some(time) = &time_arg {
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            time,
-            &STEP_INTEGER_TIME_EXTENSION,
-            BUILTIN_NAME,
-            "time",
-        )
-        .await?;
     }
     let mut models = Vec::with_capacity(systems.len());
     for (system, style) in systems {
         models.push((TransferFunction::from_value_async(system).await?, style));
     }
-    let gathered_time = match time_arg {
-        Some(time) => Some(crate::gather_if_needed_async(&time).await?),
-        None => None,
-    };
+    let gathered_time = gather_step_time(time_arg.as_ref()).await?;
     let mut responses = Vec::with_capacity(models.len());
     for (model, style) in models {
         let time = TimeSpec::parse(gathered_time.as_ref(), model.sample_time)?;
@@ -252,6 +231,39 @@ fn is_plot_style_arg(value: &Value) -> bool {
         value,
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
     )
+}
+
+fn preflight_step_time(value: Option<&Value>) -> BuiltinResult<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STEP_INTEGER_TIME_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
+    if !matches!(value, Value::GpuTensor(_)) && !native_integer_value_is_exact_f64(value) {
+        return Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_TIME,
+            "integer time values must be exactly representable as double",
+        ));
+    }
+    TimeSpec::preflight_host(Some(value))
+}
+
+async fn gather_step_time(value: Option<&Value>) -> BuiltinResult<Option<Value>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let gathered = crate::gather_if_needed_async(value).await?;
+    if !native_integer_value_is_exact_f64(&gathered) {
+        return Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_TIME,
+            "integer time values must be exactly representable as double",
+        ));
+    }
+    Ok(Some(gathered))
 }
 
 #[derive(Clone, Debug)]
@@ -287,19 +299,15 @@ impl TransferFunction {
         })
     }
 
-    fn normalized(&self) -> (Vec<f64>, Vec<f64>) {
-        let leading = self.denominator[0];
-        let den = self
-            .denominator
-            .iter()
-            .map(|value| value / leading)
-            .collect::<Vec<_>>();
-        let num = self
-            .numerator
-            .iter()
-            .map(|value| value / leading)
-            .collect::<Vec<_>>();
-        (num, den)
+    fn normalized(&self) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+        RealTfModel {
+            numerator: self.numerator.clone(),
+            denominator: self.denominator.clone(),
+            sample_time: self.sample_time,
+            input_delay: 0.0,
+            output_delay: 0.0,
+        }
+        .normalized(BUILTIN_NAME)
     }
 }
 

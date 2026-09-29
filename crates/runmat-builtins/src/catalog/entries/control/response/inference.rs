@@ -77,9 +77,12 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, kind: ResponseKind)
                     indices.push(index);
                     style_seen = false;
                 }
-                ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
-                    if !time_seen =>
-                {
+                ValueKindFact::Unknown if !time_seen => {
+                    // The runtime value may be another model, a style or the
+                    // final time. No later argument order is proven invalid.
+                    style_seen = false;
+                }
+                ValueKindFact::Numeric(_) | ValueKindFact::Logical if !time_seen => {
                     check_time(arg, index, kind, &mut diagnostics);
                     time_seen = true;
                 }

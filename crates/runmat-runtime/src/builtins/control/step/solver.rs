@@ -34,14 +34,14 @@ pub(super) fn evaluate_step(model: &TransferFunction, time: TimeSpec) -> Builtin
 
 fn evaluate_continuous_step(model: &TransferFunction, time: TimeSpec) -> BuiltinResult<StepEval> {
     let t = continuous_time_vector(model, time)?;
-    let (num, den) = model.normalized();
+    let (num, den) = model.normalized()?;
     let response = continuous_response(&num, &den, &t)?;
     Ok(StepEval { y: response, t })
 }
 
 fn continuous_time_vector(model: &TransferFunction, time: TimeSpec) -> BuiltinResult<Vec<f64>> {
     match time {
-        TimeSpec::Auto => Ok(linspace(0.0, automatic_final_time(model), DEFAULT_SAMPLES)),
+        TimeSpec::Auto => Ok(linspace(0.0, automatic_final_time(model)?, DEFAULT_SAMPLES)),
         TimeSpec::FinalTime(final_time) => Ok(linspace(0.0, final_time, DEFAULT_SAMPLES)),
         TimeSpec::Vector(values) => Ok(values),
     }
@@ -144,7 +144,7 @@ fn evaluate_discrete_step(model: &TransferFunction, time: TimeSpec) -> BuiltinRe
             "discrete sample index exceeds platform limits",
         )
     })?;
-    let (num, den) = model.normalized();
+    let (num, den) = model.normalized()?;
     let all_y = discrete_response(&num, &den, count)?;
     let y = sample_indices
         .into_iter()
@@ -229,17 +229,17 @@ fn discrete_response(num: &[f64], den: &[f64], count: usize) -> BuiltinResult<Ve
     Ok(y)
 }
 
-fn automatic_final_time(model: &TransferFunction) -> f64 {
-    let (_, den) = model.normalized();
+fn automatic_final_time(model: &TransferFunction) -> BuiltinResult<f64> {
+    let (_, den) = model.normalized()?;
     let poles = polynomial_roots(&den).unwrap_or_default();
     let slowest_decay = poles
         .iter()
         .filter_map(|pole| if pole.re < -EPS { Some(-pole.re) } else { None })
         .fold(f64::INFINITY, f64::min);
     if slowest_decay.is_finite() && slowest_decay > EPS {
-        (5.0 / slowest_decay).clamp(1.0, 100.0)
+        Ok((5.0 / slowest_decay).clamp(1.0, 100.0))
     } else {
-        10.0
+        Ok(10.0)
     }
 }
 

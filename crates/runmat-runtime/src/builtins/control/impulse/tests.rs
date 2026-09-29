@@ -1,7 +1,7 @@
 use super::*;
 use futures::executor::block_on;
 use runmat_builtins::IMPULSE_DESCRIPTOR;
-use runmat_value::{CharArray, IntegerStorage, ObjectInstance, Tensor};
+use runmat_value::{CharArray, IntValue, IntegerStorage, ObjectInstance, Tensor};
 
 fn tf_object(num: Vec<f64>, den: Vec<f64>, ts: f64) -> Value {
     tf_object_with_delays(num, den, ts, 0.0, 0.0)
@@ -500,4 +500,78 @@ fn resident_wide_integer_coefficient_uses_exact_binary64_boundary() {
         );
         assert!(error.message().contains("exactly representable"));
     });
+}
+
+#[test]
+fn wide_exact_integer_time_is_accepted_but_inexact_time_is_rejected() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let exact = 1_u64 << 63;
+    let model = tf_object(vec![1.0], vec![1.0, -0.5], exact as f64);
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let Value::OutputList(values) =
+        run_impulse(model.clone(), vec![Value::Int(IntValue::U64(exact))])
+            .expect("exact wide final time")
+    else {
+        panic!("outputs")
+    };
+    assert_eq!(tensor_data(values[1].clone()), vec![0.0, exact as f64]);
+    let error = run_impulse(
+        model.clone(),
+        vec![Value::Int(IntValue::U64((1_u64 << 53) + 1))],
+    )
+    .expect_err("inexact final time");
+    assert_eq!(
+        error.identifier(),
+        IMPULSE_ERROR_INVALID_ARGUMENT.identifier
+    );
+
+    assert_eq!(
+        time_vector_from_value(integer_tensor(
+            IntegerStorage::U64(vec![0, exact]),
+            vec![1, 2]
+        ))
+        .expect("exact vector"),
+        vec![0.0, exact as f64]
+    );
+    assert!(time_vector_from_value(integer_tensor(
+        IntegerStorage::U64(vec![0, (1_u64 << 53) + 1]),
+        vec![1, 2]
+    ))
+    .is_err());
+
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let exact_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).unwrap();
+        let exact_handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &exact_tensor)
+                .expect("resident exact time");
+        provider.reset_telemetry();
+        let Value::OutputList(values) =
+            run_impulse(model.clone(), vec![Value::GpuTensor(exact_handle)])
+                .expect("resident exact time")
+        else {
+            panic!("outputs")
+        };
+        assert_eq!(tensor_data(values[1].clone()), vec![0.0, exact as f64]);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+
+        let inexact_tensor =
+            Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]).unwrap();
+        let inexact_handle =
+            crate::builtins::common::gpu_helpers::upload_tensor(provider, &inexact_tensor)
+                .expect("resident inexact time");
+        let error = run_impulse(model, vec![Value::GpuTensor(inexact_handle)])
+            .expect_err("resident inexact time");
+        assert_eq!(
+            error.identifier(),
+            IMPULSE_ERROR_INVALID_ARGUMENT.identifier
+        );
+    });
+}
+
+#[test]
+fn normalization_overflow_is_an_error_not_a_nonfinite_response() {
+    let model = tf_object(vec![1.0e308], vec![1.0e-320, 1.0e-320], 0.0);
+    let error = run_impulse(model, Vec::new()).expect_err("nonfinite normalized coefficient");
+    assert_eq!(error.identifier(), IMPULSE_ERROR_INVALID_MODEL.identifier);
 }

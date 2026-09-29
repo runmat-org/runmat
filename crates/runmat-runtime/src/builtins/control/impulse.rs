@@ -17,6 +17,7 @@ use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
 };
+use crate::builtins::control::tf_model::RealTfModel;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "impulse";
@@ -266,6 +267,17 @@ impl TfSystem {
 
     fn is_discrete(&self) -> bool {
         self.sample_time > 0.0
+    }
+
+    fn normalized(&self) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+        RealTfModel {
+            numerator: self.numerator.clone(),
+            denominator: self.denominator.clone(),
+            sample_time: self.sample_time,
+            input_delay: 0.0,
+            output_delay: 0.0,
+        }
+        .normalized(BUILTIN_NAME)
     }
 }
 

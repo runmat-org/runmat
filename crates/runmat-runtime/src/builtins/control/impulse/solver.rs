@@ -67,23 +67,7 @@ impl Realization {
                 c: vec![0.0; order],
             });
         }
-        let leading = system.denominator[0];
-        if leading == 0.0 {
-            return Err(impulse_error_with_detail(
-                &IMPULSE_ERROR_INVALID_MODEL,
-                "denominator leading coefficient must be non-zero",
-            ));
-        }
-        let denominator: Vec<f64> = system
-            .denominator
-            .iter()
-            .map(|value| *value / leading)
-            .collect();
-        let mut numerator: Vec<f64> = system
-            .numerator
-            .iter()
-            .map(|value| *value / leading)
-            .collect();
+        let (mut numerator, denominator) = system.normalized()?;
         let order = denominator.len() - 1;
         while numerator.len() < order {
             numerator.insert(0, 0.0);

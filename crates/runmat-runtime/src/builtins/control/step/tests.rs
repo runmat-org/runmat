@@ -465,3 +465,31 @@ fn tiny_nonreal_host_coefficient_precedes_resident_sample_time_download() {
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }
+
+#[test]
+fn resident_integer_time_is_downloaded_once_after_compatibility_admission() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let time = Tensor::new_integer(IntegerStorage::U64(vec![0, 1]), vec![1, 2]).unwrap();
+        let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &time)
+            .expect("resident time");
+        provider.reset_telemetry();
+        let y = tensor_data(
+            run_step(
+                tf_object(vec![1.0], vec![1.0, 1.0], 0.0),
+                vec![Value::GpuTensor(resident)],
+            )
+            .expect("step"),
+        );
+        assert!((y[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 16);
+    });
+}
+
+#[test]
+fn normalization_overflow_is_an_error_not_a_nonfinite_response() {
+    let model = tf_object(vec![1.0e308], vec![1.0e-320, 1.0e-320], 0.0);
+    let error =
+        run_step(model, vec![Value::Num(1.0)]).expect_err("nonfinite normalized coefficient");
+    assert_eq!(error.identifier(), STEP_ERROR_INVALID_MODEL.identifier);
+}

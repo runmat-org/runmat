@@ -60,3 +60,17 @@ fn known_other_class_and_excess_outputs_are_diagnosed() {
     assert!(!call(vec![other], 1).diagnostics.is_empty());
     assert!(!call(vec![model()], 3).diagnostics.is_empty());
 }
+
+#[test]
+fn unresolved_plot_role_does_not_falsely_reject_later_model() {
+    let result = call(
+        vec![
+            model(),
+            ValueFact::unknown(DynamicReason::RuntimeValue),
+            model(),
+        ],
+        0,
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert!(result.effects.0.contains(&EffectKind::UserInterface));
+}
