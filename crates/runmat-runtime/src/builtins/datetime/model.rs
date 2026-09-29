@@ -43,32 +43,7 @@ pub(super) fn ensure_datetime_class_registered() {
             },
         );
 
-        let mut methods = HashMap::new();
-        for name in [
-            OBJECT_SUBSREF_METHOD,
-            OBJECT_SUBSASGN_METHOD,
-            runmat_types::StaticMethodName::new("plus"),
-            runmat_types::StaticMethodName::new("minus"),
-            runmat_types::StaticMethodName::new("eq"),
-            runmat_types::StaticMethodName::new("ne"),
-            runmat_types::StaticMethodName::new("lt"),
-            runmat_types::StaticMethodName::new("le"),
-            runmat_types::StaticMethodName::new("gt"),
-            runmat_types::StaticMethodName::new("ge"),
-        ] {
-            methods.insert(
-                name.into(),
-                crate::class_registry::RuntimeMethod {
-                    name: name.into(),
-                    is_static: false,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: MemberAccess::Public,
-                    function_name: format!("{DATETIME_CLASS}.{name}"),
-                    implicit_class_argument: None,
-                },
-            );
-        }
+        let methods = crate::class_registry::standard_runtime_methods(DATETIME_CLASS);
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: DATETIME_CLASS.into(),
@@ -97,26 +72,7 @@ pub(super) fn ensure_calendar_duration_class_registered() {
             );
         }
 
-        let mut methods = HashMap::new();
-        for name in [
-            runmat_types::StaticMethodName::new("plus"),
-            runmat_types::StaticMethodName::new("minus"),
-            runmat_types::StaticMethodName::new("eq"),
-            runmat_types::StaticMethodName::new("ne"),
-        ] {
-            methods.insert(
-                name.into(),
-                crate::class_registry::RuntimeMethod {
-                    name: name.into(),
-                    is_static: false,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: MemberAccess::Public,
-                    function_name: format!("{CALENDAR_DURATION_CLASS}.{name}"),
-                    implicit_class_argument: None,
-                },
-            );
-        }
+        let methods = crate::class_registry::standard_runtime_methods(CALENDAR_DURATION_CLASS);
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             name: CALENDAR_DURATION_CLASS.into(),

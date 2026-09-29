@@ -3,7 +3,4 @@ pub(super) use runmat_value::{CharArray, ObjectInstance, StringArray, Tensor, Va
 pub(super) use std::collections::HashMap;
 
 pub(super) use crate::builtins::common::tensor;
-pub(super) use crate::{
-    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError,
-    OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
-};
+pub(super) use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};

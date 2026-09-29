@@ -20,6 +20,8 @@ use runmat_value::Value;
 
 mod retained;
 pub use retained::visit_static_property_retained_values;
+mod standard_methods;
+pub(crate) use standard_methods::standard_runtime_methods;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeProperty {
@@ -251,37 +253,7 @@ fn primitive_class_registry() -> HashMap<ClassIdentity, RuntimeClass> {
             },
         );
     }
-    let gpu_array = runmat_builtins::standard_class_declaration(&standard::GPU_ARRAY.owned())
-        .expect("gpuArray standard class declaration");
-    let methods = gpu_array
-        .methods
-        .into_iter()
-        .map(|method| {
-            let function_name = match method.callable {
-                runmat_types::CallableIdentity::Builtin(id) => id.0,
-                runmat_types::CallableIdentity::ExternalName(name) => name
-                    .display_name()
-                    .expect("standard class method has a qualified callable identity"),
-                identity => panic!(
-                    "standard gpuArray method '{}' has unsupported callable identity {identity:?}",
-                    method.name
-                ),
-            };
-            let name = method.name;
-            (
-                name.clone(),
-                RuntimeMethod {
-                    name,
-                    is_static: method.is_static,
-                    is_abstract: method.attributes.is_abstract,
-                    is_sealed: method.attributes.is_sealed,
-                    access: method.attributes.access,
-                    function_name,
-                    implicit_class_argument: method.implicit_class_argument,
-                },
-            )
-        })
-        .collect();
+    let methods = standard_runtime_methods(standard::GPU_ARRAY);
     registry.insert(
         standard::GPU_ARRAY.owned(),
         RuntimeClass {
