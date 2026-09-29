@@ -1,9 +1,6 @@
 //! MATLAB-compatible `tf` transfer-function constructor and SISO operator methods for RunMat.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_builtins::{
     DEFAULT_DISCRETE_SAMPLE_TIME_EXTENSION, EXPLICIT_GPU_INPUT_EXTENSION,
     INTEGER_COEFFICIENT_EXTENSION, INTEGER_SAMPLE_TIME_EXTENSION, LOGICAL_COEFFICIENT_EXTENSION,
@@ -18,74 +15,15 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::control::tf_model::{
-    control_error, is_discrete_variable, parse_coefficients, scalar_f64, scalar_text,
-    two_models_ordered, validate_sample_time, validate_variable, validate_variable_domain, TfModel,
-    TfOptions,
+    is_discrete_variable, parse_coefficients, scalar_f64, scalar_text, validate_sample_time,
+    validate_variable, validate_variable_domain, TfModel, TfOptions,
 };
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 
+mod methods;
+
 const BUILTIN_NAME: &str = "tf";
 const DEFAULT_VARIABLE: &str = "s";
-
-const TF_METHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Resulting SISO transfer-function object.",
-}];
-const TF_METHOD_INPUTS_BINARY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "lhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right operand.",
-    },
-];
-const TF_METHOD_INPUTS_UNARY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sys",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Operand.",
-}];
-const TF_METHOD_SIGNATURES_BINARY: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "sys = tf.operator(lhs, rhs)",
-    inputs: &TF_METHOD_INPUTS_BINARY,
-    outputs: &TF_METHOD_OUTPUT,
-}];
-const TF_METHOD_SIGNATURES_UNARY: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "sys = tf.operator(sys)",
-    inputs: &TF_METHOD_INPUTS_UNARY,
-    outputs: &TF_METHOD_OUTPUT,
-}];
-const TF_METHOD_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TF.OPERATOR",
-    identifier: Some("RunMat:tf:OperatorError"),
-    when: "Transfer-function operator arguments are invalid or incompatible.",
-    message: "tf operator failed",
-};
-const TF_METHOD_ERRORS: [BuiltinErrorDescriptor; 1] = [TF_METHOD_ERROR];
-pub const TF_METHOD_BINARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TF_METHOD_SIGNATURES_BINARY,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &TF_METHOD_ERRORS,
-};
-pub const TF_METHOD_UNARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TF_METHOD_SIGNATURES_UNARY,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &TF_METHOD_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::tf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -473,165 +411,9 @@ fn variable_model(value: &Value, sample_time: Option<&Value>) -> BuiltinResult<T
     }
 }
 
-async fn tf_binary(
-    lhs: Value,
-    rhs: Value,
-    op: fn(&TfModel, &TfModel) -> BuiltinResult<TfModel>,
-) -> BuiltinResult<Value> {
-    let (lhs, rhs) = two_models_ordered(lhs, rhs, "tf").await?;
-    op(&lhs, &rhs)?.to_value("tf")
-}
-
-fn parse_integer_exponent(value: &Value) -> BuiltinResult<i64> {
-    if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
-        return integer.try_to_i64().ok_or_else(|| {
-            control_error(
-                "tf",
-                "RunMat:tf:InvalidExponent",
-                "tf: exponent exceeds integer range",
-            )
-        });
-    }
-    let exponent = scalar_f64(value, "exponent", "tf")?;
-    if !exponent.is_finite() || exponent.fract().abs() > 0.0 {
-        return Err(control_error(
-            "tf",
-            "RunMat:tf:InvalidExponent",
-            "tf: transfer-function powers require an integer scalar exponent",
-        ));
-    }
-    if exponent < i64::MIN as f64 || exponent > i64::MAX as f64 {
-        return Err(control_error(
-            "tf",
-            "RunMat:tf:InvalidExponent",
-            "tf: exponent exceeds integer range",
-        ));
-    }
-    if exponent == i64::MAX as f64 {
-        return Err(control_error(
-            "tf",
-            "RunMat:tf:InvalidExponent",
-            "tf: exponent exceeds integer range",
-        ));
-    }
-    Ok(exponent as i64)
-}
-
-#[runtime_builtin(
-    name = "tf.plus",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_plus(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_binary(lhs, rhs, TfModel::add).await
-}
-
-#[runtime_builtin(
-    name = "tf.minus",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_minus(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_binary(lhs, rhs, TfModel::sub).await
-}
-
-#[runtime_builtin(
-    name = "tf.uplus",
-    descriptor(crate::builtins::control::tf::TF_METHOD_UNARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_uplus(sys: Value) -> BuiltinResult<Value> {
-    TfModel::from_value_async(sys, "tf").await?.to_value("tf")
-}
-
-#[runtime_builtin(
-    name = "tf.uminus",
-    descriptor(crate::builtins::control::tf::TF_METHOD_UNARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_uminus(sys: Value) -> BuiltinResult<Value> {
-    TfModel::from_value_async(sys, "tf")
-        .await?
-        .neg()?
-        .to_value("tf")
-}
-
-#[runtime_builtin(
-    name = "tf.times",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_times(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_binary(lhs, rhs, TfModel::mul).await
-}
-
-#[runtime_builtin(
-    name = "tf.mtimes",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_mtimes(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_binary(lhs, rhs, TfModel::mul).await
-}
-
-#[runtime_builtin(
-    name = "tf.rdivide",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_rdivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_binary(lhs, rhs, TfModel::div).await
-}
-
-#[runtime_builtin(
-    name = "tf.mrdivide",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_mrdivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_binary(lhs, rhs, TfModel::div).await
-}
-
-#[runtime_builtin(
-    name = "tf.ldivide",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_ldivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_binary(rhs, lhs, TfModel::div).await
-}
-
-#[runtime_builtin(
-    name = "tf.mldivide",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_mldivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_binary(rhs, lhs, TfModel::div).await
-}
-
-#[runtime_builtin(
-    name = "tf.power",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_power(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    let sys = TfModel::from_value_async(lhs, "tf").await?;
-    let rhs = dispatcher::gather_if_needed_async(&rhs).await?;
-    sys.powi(parse_integer_exponent(&rhs)?)?.to_value("tf")
-}
-
-#[runtime_builtin(
-    name = "tf.mpower",
-    descriptor(crate::builtins::control::tf::TF_METHOD_BINARY_DESCRIPTOR),
-    builtin_path = "crate::builtins::control::tf"
-)]
-async fn tf_mpower(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    tf_power(lhs, rhs).await
-}
-
 #[cfg(test)]
 mod tests {
+    use super::methods::*;
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::{TF_DESCRIPTOR, TF_ERROR_INVALID_COEFFICIENTS};
@@ -671,27 +453,24 @@ mod tests {
     #[test]
     fn exponent_parser_reads_typed_integer_scalar_storage_exactly() {
         assert_eq!(
-            parse_integer_exponent(&Value::Int(IntValue::I64(-3))).unwrap(),
+            integer_exponent(&Value::Int(IntValue::I64(-3))).unwrap(),
             -3
         );
 
         let exponent =
             Tensor::new_integer(IntegerStorage::I16(vec![-2]), vec![1, 1]).expect("typed exponent");
-        assert_eq!(
-            parse_integer_exponent(&Value::Tensor(exponent)).unwrap(),
-            -2
-        );
+        assert_eq!(integer_exponent(&Value::Tensor(exponent)).unwrap(), -2);
 
         let too_large =
             Tensor::new_integer(IntegerStorage::U64(vec![i64::MAX as u64 + 1]), vec![1, 1])
                 .expect("wide exponent");
-        assert!(parse_integer_exponent(&Value::Tensor(too_large)).is_err());
+        assert!(integer_exponent(&Value::Tensor(too_large)).is_err());
     }
 
     #[test]
     fn exponent_parser_rejects_unrepresentable_double_boundary() {
-        assert!(parse_integer_exponent(&Value::Num(i64::MAX as f64)).is_err());
-        assert!(parse_integer_exponent(&Value::Num((i64::MAX as f64) + 1024.0)).is_err());
+        assert!(integer_exponent(&Value::Num(i64::MAX as f64)).is_err());
+        assert!(integer_exponent(&Value::Num((i64::MAX as f64) + 1024.0)).is_err());
     }
 
     #[test]
