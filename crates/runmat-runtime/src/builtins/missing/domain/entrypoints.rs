@@ -37,14 +37,7 @@ pub(super) async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "ismissing",
-    category = "missing",
-    summary = "Return a logical mask identifying missing values.",
-    keywords = "ismissing,missing,NaN,NaT,string,table",
-    accel = "cpu",
-    type_resolver(logical_type),
-    descriptor(crate::builtins::missing::ISMISSING_DESCRIPTOR),
-    extensions(crate::builtins::missing::ISMISSING_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::ISMISSING_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn ismissing_builtin(value: Value) -> BuiltinResult<Value> {

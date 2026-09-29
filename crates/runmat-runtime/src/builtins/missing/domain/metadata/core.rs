@@ -9,13 +9,6 @@ const VALUE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Result value.",
 }];
-const LOGICAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "TF",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical missing-value mask.",
-}];
 const VALUE_AND_MASK_OUTPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "B",
@@ -75,11 +68,6 @@ const MISSING_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
         outputs: &VALUE_OUTPUT,
     },
 ];
-const ONE_VALUE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "TF = ismissing(A)",
-    inputs: &VALUE_INPUT,
-    outputs: &LOGICAL_OUTPUT,
-}];
 pub(in crate::builtins::missing::domain) const FILLMISSING_SIGNATURES:
     [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "B = fillmissing(A, method, ...)",
@@ -232,46 +220,6 @@ descriptor!(
     MISSING_SIGNATURES,
     BuiltinOutputMode::Fixed
 );
-descriptor!(
-    ISMISSING_DESCRIPTOR,
-    ONE_VALUE_SIGNATURES,
-    BuiltinOutputMode::Fixed
-);
-pub(in crate::builtins::missing::domain) const ISMISSING_RESIDENT_INPUT_EXTENSION:
-    BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ismissing-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ismissing with an interactive GPU-resident input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IsmissingResidentInputExtension"),
-};
-pub(in crate::builtins::missing) const ISMISSING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [ISMISSING_RESIDENT_INPUT_EXTENSION];
-const ISMISSING_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight fixed-width integer classes have no standard missing value.",
-    }];
-pub const ISMISSING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "TF = ismissing(integer_A)",
-        inputs: &ISMISSING_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Returns a same-shaped all-false logical mask. Interactive resident input is a separately gated RunMat extension; admitted resident integers are validated from owner and class metadata without reading the payload and preserve this CPU builtin's host logical output policy.",
-    }];
-pub(in crate::builtins::missing::domain) fn logical_type(
-    _args: &[Type],
-    _ctx: &ResolveContext,
-) -> Type {
-    Type::Logical { shape: None }
-}
-
 pub(in crate::builtins::missing::domain) fn any_type(
     _args: &[Type],
     _ctx: &ResolveContext,

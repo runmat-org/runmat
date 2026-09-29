@@ -6,11 +6,9 @@ pub(super) use cleanup::{
     FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION, FILLMISSING_INTEGER_DATA_EXTENSION,
     RMMISSING_INTEGER_DIM_EXTENSION,
 };
-pub(in crate::builtins::missing) use core::ISMISSING_EXTENSIONS;
 pub(super) use core::{
-    any_type, internal_error, invalid_argument, logical_type, unsupported_type,
-    ISMISSING_RESIDENT_INPUT_EXTENSION, MISSING_SHAPED_ARRAY_EXTENSION, MISSING_TEXT,
-    STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION,
+    any_type, internal_error, invalid_argument, unsupported_type, MISSING_SHAPED_ARRAY_EXTENSION,
+    MISSING_TEXT, STANDARDIZE_MISSING_EXPLICIT_GPU_INDICATOR_EXTENSION,
     STANDARDIZE_MISSING_INTEGER_DATA_EXTENSION,
 };
 pub(super) use nan::{
