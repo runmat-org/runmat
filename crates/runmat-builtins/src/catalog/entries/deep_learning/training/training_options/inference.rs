@@ -58,7 +58,7 @@ fn host_scalar_text(value: &ValueFact) -> bool {
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
-    if request.arguments.is_empty() || request.arguments.len() % 2 == 0 {
+    if request.arguments.is_empty() || request.arguments.len().is_multiple_of(2) {
         diagnostics.push(argument_error(
             "RM-DL-TRAININGOPTIONS-ARITY",
             "trainingOptions requires a solver followed by complete name-value pairs",
