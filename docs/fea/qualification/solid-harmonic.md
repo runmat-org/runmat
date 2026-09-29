@@ -2,7 +2,9 @@
 
 This case checks physical Tet4 and Tet10 harmonic operators, their modal projection,
 complex displacement phase, and mean power balance. It is a numerical verification
-case for Stage 4. Full formulation promotion also requires continuum convergence,
+case for Stage 4. The complementary [solid rod qualification](solid-rod-harmonic.md)
+adds Tet4 continuum face-load, modal-truncation and cold typed-object evidence.
+Full formulation promotion also requires continuum convergence,
 governed source realization, recovery, execution/restart, and release evidence.
 
 ## Geometry, material, and constraints
