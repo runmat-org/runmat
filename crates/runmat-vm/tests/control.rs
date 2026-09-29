@@ -75,7 +75,7 @@ fn tf_variable_control_workflow_runs_through_vm_dispatch() {
 }
 
 #[test]
-fn stepinfo_model_forms_execute_through_compiled_vm_calls() {
+fn stepinfo_tf_model_form_executes_through_compiled_vm_call() {
     let program = r#"
         H = tf(1, [1 1]);
         info = stepinfo(H);
@@ -85,13 +85,15 @@ fn stepinfo_model_forms_execute_through_compiled_vm_calls() {
         assert(abs(info.SteadyStateValue - sampled.SteadyStateValue) < 1e-12);
         assert(abs(info.RiseTime - sampled.RiseTime) < 1e-10);
         assert(info.Overshoot == 0);
-
-        S = ss(-1, 1, 1, 0);
-        ss_info = stepinfo(S);
-        assert(abs(ss_info.SteadyStateValue - 1) < 1e-12);
-        assert(ss_info.Overshoot == 0);
     "#;
-    execute_source(program).expect("compiled tf and ss model-form stepinfo calls");
+    execute_source(program).expect("compiled tf model-form stepinfo call");
+}
+
+#[test]
+fn stepinfo_ss_model_form_reports_owning_unsupported_model_error_in_vm() {
+    let error = execute_source("S = ss(-1, 1, 1, 0); info = stepinfo(S);")
+        .expect_err("stepinfo currently supports tf models, not ss models");
+    assert_eq!(error.identifier(), Some("RunMat:stepinfo:UnsupportedModel"));
 }
 
 #[test]
@@ -128,12 +130,28 @@ fn tf_constructor_rejects_inexact_integer_coefficients_through_vm() {
 }
 
 #[test]
-fn tf_minimum_signed_integer_power_is_a_vm_error_not_an_overflow() {
+fn tf_minimum_signed_integer_power_preserves_scalar_identity_in_vm() {
     let _runmat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    let error = execute_source("H = tf(1, [1 1]); P = H ^ intmin('int64');")
-        .expect_err("minimum signed power magnitude cannot be represented");
-    assert_eq!(error.identifier(), Some("RunMat:tf:InvalidExponent"));
-    assert!(error.message().contains("exponent magnitude is too large"));
+    let program = r#"
+        exponent = intmin('int64');
+        positive = tf(1, 1);
+        negative = tf(-1, 1);
+        p_pos = positive .^ exponent;
+        m_pos = positive ^ exponent;
+        p_neg = negative .^ exponent;
+        m_neg = negative ^ exponent;
+        assert(isa(p_pos, 'tf') && isa(m_pos, 'tf'));
+        assert(isa(p_neg, 'tf') && isa(m_neg, 'tf'));
+        pn = p_pos.Numerator; pd = p_pos.Denominator;
+        mn = m_pos.Numerator; md = m_pos.Denominator;
+        nn = p_neg.Numerator; nd = p_neg.Denominator;
+        qn = m_neg.Numerator; qd = m_neg.Denominator;
+        assert(pn(1) == 1 && pd(1) == 1);
+        assert(mn(1) == 1 && md(1) == 1);
+        assert(nn(1) == 1 && nd(1) == 1);
+        assert(qn(1) == 1 && qd(1) == 1);
+    "#;
+    execute_source(program).expect("compiled power and mpower accept exact i64 minimum");
 }
 
 #[test]
