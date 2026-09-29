@@ -498,6 +498,19 @@ impl TfModel {
         polynomial_roots(&self.numerator, "zero")
     }
 
+    /// Evaluate an admitted model at a complex frequency-domain point.
+    /// Exact denominator zeros are undefined here; DC pole direction is
+    /// handled separately by `dc_gain`.
+    pub fn frequency_response(&self, point: Complex64) -> Complex64 {
+        let numerator = poly_eval(&self.numerator, point);
+        let denominator = poly_eval(&self.denominator, point);
+        if denominator == Complex64::new(0.0, 0.0) {
+            Complex64::new(f64::NAN, f64::NAN)
+        } else {
+            finite_complex_ratio(numerator, denominator)
+        }
+    }
+
     pub fn dc_gain(&self) -> BuiltinResult<Complex64> {
         let point = if self.is_discrete() {
             Complex64::new(1.0, 0.0)
@@ -1402,6 +1415,7 @@ fn poly_mul(lhs: &[Complex64], rhs: &[Complex64]) -> Vec<Complex64> {
 
 fn invalid_argument_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "nyquist" => "RunMat:nyquist:InvalidArgument",
         "step" => "RunMat:step:InvalidArgument",
         "impulse" => "RunMat:impulse:InvalidArgument",
         "feedback" => "RunMat:feedback:InvalidArgument",
@@ -1419,6 +1433,7 @@ fn invalid_argument_identifier(builtin: &str) -> &'static str {
 
 fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "nyquist" => "RunMat:nyquist:InvalidModel",
         "step" => "RunMat:step:InvalidModel",
         "impulse" => "RunMat:impulse:InvalidModel",
         "feedback" => "RunMat:feedback:InvalidModel",
@@ -1436,6 +1451,7 @@ fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
 
 fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "nyquist" => "RunMat:nyquist:InvalidModel",
         "step" => "RunMat:step:InvalidModel",
         "impulse" => "RunMat:impulse:InvalidModel",
         "feedback" => "RunMat:feedback:InvalidSampleTime",
@@ -1454,6 +1470,8 @@ fn invalid_sample_time_identifier(builtin: &str) -> &'static str {
 
 fn invalid_variable_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "nyquist" => "RunMat:nyquist:InvalidModel",
+        "stepinfo" => "RunMat:stepinfo:InvalidSystem",
         "step" => "RunMat:step:InvalidModel",
         "impulse" => "RunMat:impulse:InvalidModel",
         "feedback" => "RunMat:feedback:InvalidVariable",
@@ -1463,6 +1481,7 @@ fn invalid_variable_identifier(builtin: &str) -> &'static str {
 
 pub(crate) fn invalid_model_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "nyquist" => "RunMat:nyquist:InvalidModel",
         "step" => "RunMat:step:InvalidModel",
         "impulse" => "RunMat:impulse:InvalidModel",
         "feedback" => "RunMat:feedback:InvalidModel",
@@ -1480,6 +1499,7 @@ pub(crate) fn invalid_model_identifier(builtin: &str) -> &'static str {
 
 pub(crate) fn unsupported_model_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "nyquist" => "RunMat:nyquist:UnsupportedModel",
         "step" => "RunMat:step:UnsupportedModel",
         "impulse" => "RunMat:impulse:UnsupportedModel",
         "feedback" => "RunMat:feedback:UnsupportedModel",
@@ -1497,6 +1517,7 @@ pub(crate) fn unsupported_model_identifier(builtin: &str) -> &'static str {
 
 pub(crate) fn internal_identifier(builtin: &str) -> &'static str {
     match builtin {
+        "nyquist" => "RunMat:nyquist:Internal",
         "step" => "RunMat:step:Internal",
         "impulse" => "RunMat:impulse:Internal",
         "feedback" => "RunMat:feedback:Internal",

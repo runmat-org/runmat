@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn frequency_response_preserves_finite_extreme_scale_ratios_and_exact_poles() {
+    for coefficient in [Complex64::new(1e-320, 0.0), Complex64::new(1e300, 1e300)] {
+        let model =
+            TfModel::new(vec![coefficient], vec![coefficient], TfOptions::default()).unwrap();
+        let response = model.frequency_response(Complex64::new(0.0, 0.0));
+        assert_eq!(response, Complex64::new(1.0, 0.0));
+    }
+    let model = TfModel::new(
+        vec![Complex64::new(1.0, 0.0)],
+        vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+        TfOptions::default(),
+    )
+    .unwrap();
+    let response = model.frequency_response(Complex64::new(0.0, 0.0));
+    assert!(response.re.is_nan() && response.im.is_nan());
+}
+
+#[test]
 fn dc_gain_distinguishes_small_finite_values_from_exact_singularities() {
     for (numerator, denominator, expected) in
         [(1.0, 1e-15, 1e15), (1e-15, 1e-15, 1.0), (1e-15, 1.0, 1e-15)]
