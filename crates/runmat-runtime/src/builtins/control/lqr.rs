@@ -239,7 +239,7 @@ impl RealMatrix {
                 format!("{label} must be a 2-D matrix, got shape {:?}", tensor.shape),
             ));
         }
-        let values = tensor::tensor_values_f64_cow(&tensor);
+        let values = tensor::tensor_values_f64_cow(tensor);
         if values.iter().any(|value| !value.is_finite()) {
             return Err(lqr_error(
                 &LQR_ERROR_UNSUPPORTED_INPUT,

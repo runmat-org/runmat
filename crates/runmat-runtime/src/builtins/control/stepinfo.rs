@@ -69,7 +69,8 @@ async fn stepinfo_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value
     let threshold = admission::gather_threshold(&request).await?;
     let (y, t, y_final) = match request.form {
         admission::Form::Model(model) => model_response(model).await?,
-        admission::Form::Samples { y, time, y_final } => {
+        admission::Form::Samples(samples) => {
+            let admission::Samples { y, time, y_final } = *samples;
             admission::gather_samples(y, time, y_final).await?
         }
     };

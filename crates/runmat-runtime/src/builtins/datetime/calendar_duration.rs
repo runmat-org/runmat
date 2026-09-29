@@ -78,8 +78,8 @@ pub(super) fn calendar_duration_unit_value(
 ) -> BuiltinResult<Value> {
     if is_calendar_duration_object(&value) {
         let (months, days) = calendar_duration_tensors_from_value(&value)?;
-        if months.len() == 0 || days.len() == 0 {
-            if months.len() != 0 || days.len() != 0 || months.shape != days.shape {
+        if months.is_empty() || days.is_empty() {
+            if !months.is_empty() || !days.is_empty() || months.shape != days.shape {
                 return Err(datetime_error(format!(
                     "{unit_name}: calendarDuration components must have matching sizes"
                 )));

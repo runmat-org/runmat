@@ -33,17 +33,16 @@ pub(super) async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             "datetime: unsupported argument pattern; use text, serial dates, or Y/M/D component inputs",
         ));
     }
-    if options.input_format.is_some() {
-        if options.convert_from.is_some()
+    if options.input_format.is_some()
+        && (options.convert_from.is_some()
             || !matches!(
                 positional_inputs,
                 [Value::String(_) | Value::StringArray(_) | Value::CharArray(_)]
-            )
-        {
-            return Err(datetime_argument_error(
-                "datetime: InputFormat requires exactly one text input",
-            ));
-        }
+            ))
+    {
+        return Err(datetime_argument_error(
+            "datetime: InputFormat requires exactly one text input",
+        ));
     }
     if options.convert_from.is_none() && matches!(positional_inputs.len(), 4 | 5) {
         crate::compatibility::ensure_builtin_extension_enabled(

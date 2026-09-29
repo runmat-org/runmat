@@ -271,7 +271,7 @@ fn real_gain_vector(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Num(n) => vec![n],
         Value::Int(i) => vec![i.to_f64()],
         Value::Bool(b) => vec![if b { 1.0 } else { 0.0 }],
-        Value::Complex(re, im) if im == 0.0 => vec![re],
+        Value::Complex(re, 0.0) => vec![re],
         Value::Tensor(tensor) => {
             ensure_vector_shape(&tensor.shape)?;
             tensor::tensor_values_f64(&tensor)

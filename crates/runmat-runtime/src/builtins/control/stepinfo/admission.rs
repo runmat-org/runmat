@@ -9,11 +9,13 @@ use crate::builtins::control::tf_model::{scalar_f64, scalar_text};
 
 pub(super) enum Form {
     Model(Value),
-    Samples {
-        y: Value,
-        time: Option<Value>,
-        y_final: Option<Value>,
-    },
+    Samples(Box<Samples>),
+}
+
+pub(super) struct Samples {
+    pub(super) y: Value,
+    pub(super) time: Option<Value>,
+    pub(super) y_final: Option<Value>,
 }
 
 pub(super) struct Request {
@@ -61,11 +63,11 @@ pub(super) fn preflight(input: Value, rest: Vec<Value>) -> BuiltinResult<Request
         if let (Some(y), Some(t)) = (host_y, host_t) {
             metrics::validate_inputs(&y, &t)?;
         }
-        Form::Samples {
+        Form::Samples(Box::new(Samples {
             y: input,
             time,
             y_final,
-        }
+        }))
     };
     if is_model && rest.first().is_some_and(|value| !is_option_name(value)) {
         return Err(error("stepinfo(sys) accepts only name-value options"));
@@ -83,7 +85,7 @@ fn host_vector(value: &Value, role: &str) -> BuiltinResult<Option<Vec<f64>>> {
 }
 
 fn parse_options(rest: &[Value], start: usize) -> BuiltinResult<Value> {
-    if (rest.len() - start) % 2 != 0 {
+    if !(rest.len() - start).is_multiple_of(2) {
         return Err(error("name-value options must come in pairs"));
     }
     let mut threshold = Value::Num(DEFAULT_SETTLING_THRESHOLD);
