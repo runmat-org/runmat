@@ -5,7 +5,14 @@ use super::{
     validate_delay, validate_sample_time, validate_variable, validate_variable_domain,
 };
 use crate::builtins::common::tensor;
+use crate::builtins::common::validation::{
+    native_integer_value_is_exact_f64, value_has_logical_class, value_has_native_integer_class,
+};
 use crate::BuiltinResult;
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, INTEGER_COEFFICIENT_EXTENSION, INTEGER_SAMPLE_TIME_EXTENSION,
+    LOGICAL_COEFFICIENT_EXTENSION, SS_INTEGER_MATRIX_EXTENSION, SS_INTEGER_SAMPLE_TIME_EXTENSION,
+};
 use runmat_value::{ObjectInstance, Value};
 
 pub(super) fn preflight_host_model_properties(
@@ -13,7 +20,15 @@ pub(super) fn preflight_host_model_properties(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     for (name, label) in [("Numerator", "numerator"), ("Denominator", "denominator")] {
-        if !matches!(object.properties.get(name), Some(Value::GpuTensor(_))) {
+        let value = object.properties.get(name).ok_or_else(|| {
+            control_error(
+                builtin,
+                invalid_model_identifier(builtin),
+                format!("{builtin}: tf object is missing {name}"),
+            )
+        })?;
+        admit_coefficient_property(value, label, builtin)?;
+        if !matches!(value, Value::GpuTensor(_)) {
             let coefficients = coefficients_from_property(object, name, builtin)?;
             validate_coefficients(label, &coefficients, builtin)?;
             if name == "Denominator" && all_zero(&coefficients) {
@@ -26,6 +41,11 @@ pub(super) fn preflight_host_model_properties(
         }
     }
     for name in ["Ts", "InputDelay", "OutputDelay"] {
+        if let Some(value) = object.properties.get(name) {
+            if name == "Ts" {
+                admit_sample_time_property(value, builtin)?;
+            }
+        }
         if !matches!(object.properties.get(name), Some(Value::GpuTensor(_))) {
             let value = scalar_property(object, name, builtin)?;
             if name == "Ts" {
@@ -52,6 +72,64 @@ pub(super) fn preflight_host_model_properties(
     Ok(())
 }
 
+/// A tf property's numeric class can change after construction through public
+/// property assignment. Check the authoritative class and integer payload each
+/// time the model is admitted, before converting coefficients to binary64.
+/// Resident 64-bit payloads are checked after their single owning gather.
+pub(super) fn admit_coefficient_property(
+    value: &Value,
+    role: &str,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    admit_integer_f64_boundary(
+        value,
+        &INTEGER_COEFFICIENT_EXTENSION,
+        super::invalid_coefficients_identifier(builtin),
+        role,
+        builtin,
+    )?;
+    if value_has_logical_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &LOGICAL_COEFFICIENT_EXTENSION,
+            builtin,
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn admit_sample_time_property(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    admit_integer_f64_boundary(
+        value,
+        &INTEGER_SAMPLE_TIME_EXTENSION,
+        super::invalid_sample_time_identifier(builtin),
+        "sample time",
+        builtin,
+    )
+}
+
+fn admit_integer_f64_boundary(
+    value: &Value,
+    extension: &'static BuiltinExtensionDescriptor,
+    identifier: &'static str,
+    role: &str,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
+        if !matches!(value, Value::GpuTensor(_)) && !native_integer_value_is_exact_f64(value) {
+            return Err(control_error(
+                builtin,
+                identifier,
+                format!("{builtin}: integer {role} values must be exactly representable as double"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Check only the state-space fields consumed by an operation; unused model
 /// properties must not affect admission or cause provider access.
 pub fn preflight_ss_host_properties(
@@ -67,6 +145,7 @@ pub fn preflight_ss_host_properties(
                 format!("{builtin}: ss object is missing {name}"),
             )
         })?;
+        admit_ss_integer_property(value, name, builtin)?;
         if matches!(value, Value::GpuTensor(_)) {
             continue;
         }
@@ -77,6 +156,35 @@ pub fn preflight_ss_host_properties(
             "B" | "C" | "D" => preflight_ss_matrix_value(value, name, builtin)?,
             _ => {}
         }
+    }
+    Ok(())
+}
+
+fn admit_ss_integer_property(
+    value: &Value,
+    name: &str,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if !value_has_native_integer_class(value) {
+        return Ok(());
+    }
+    let extension = match name {
+        "A" | "B" | "C" | "D" => Some(&SS_INTEGER_MATRIX_EXTENSION),
+        "Ts" => Some(&SS_INTEGER_SAMPLE_TIME_EXTENSION),
+        // The constructor has no delay argument. Mutated delays still cannot
+        // lose integer precision when an analysis operation consumes them.
+        "InputDelay" | "OutputDelay" => None,
+        _ => None,
+    };
+    if let Some(extension) = extension {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
+    }
+    if !matches!(value, Value::GpuTensor(_)) && !native_integer_value_is_exact_f64(value) {
+        return Err(control_error(
+            builtin,
+            invalid_model_identifier(builtin),
+            format!("{builtin}: ss {name} integer values must be exactly representable as double"),
+        ));
     }
     Ok(())
 }
@@ -205,7 +313,9 @@ fn preflight_ss_matrix_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{ComplexTensor, LogicalArray, Tensor};
+    use futures::executor::block_on;
+    use runmat_accelerate_api::{AccelProvider, HostIntegerDataView, HostIntegerTensorView};
+    use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor};
 
     #[test]
     fn generic_ss_admission_accepts_complex_logical_and_zero_delay_arrays() {
@@ -231,5 +341,111 @@ mod tests {
             )
             .expect("consumed values admitted");
         }
+    }
+
+    #[test]
+    fn consumed_ss_integer_properties_require_exact_binary64_values() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let wide = || {
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                    .unwrap(),
+            )
+        };
+        for name in ["A", "B", "C", "D", "Ts", "InputDelay", "OutputDelay"] {
+            let mut object = ObjectInstance::new("ss".to_string());
+            object.properties.insert(name.into(), wide());
+            let error = preflight_ss_host_properties(&object, &[name], "pole")
+                .expect_err("inexact consumed model property");
+            assert_eq!(error.identifier(), Some("RunMat:pole:InvalidModel"));
+        }
+        let exact = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_992]), vec![1, 1])
+                .unwrap(),
+        );
+        let mut object = ObjectInstance::new("ss".to_string());
+        object.properties.insert("A".into(), exact);
+        preflight_ss_host_properties(&object, &["A"], "pole")
+            .expect("aligned wide integer is exact");
+    }
+
+    #[test]
+    fn consumed_ss_integer_class_is_gated_before_resident_download() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let value = [1_u64];
+            let resident = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&value),
+                    shape: &[1, 1],
+                })
+                .expect("resident integer state matrix");
+            let mut object = ObjectInstance::new("ss".to_string());
+            object
+                .properties
+                .insert("A".into(), Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            let error = block_on(super::super::ss_poles_from_object_async(&object, "pole"))
+                .expect_err("integer state matrix extension disabled");
+            assert_eq!(
+                error.identifier(),
+                SS_INTEGER_MATRIX_EXTENSION.error_identifier
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn consumed_ss_resident_integer_is_checked_after_one_owning_gather() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let value = [9_007_199_254_740_993_u64];
+            let resident = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&value),
+                    shape: &[1, 1],
+                })
+                .expect("resident integer state matrix");
+            let mut object = ObjectInstance::new("ss".to_string());
+            object
+                .properties
+                .insert("A".into(), Value::GpuTensor(resident));
+            object.properties.insert("Ts".into(), Value::Num(0.0));
+            provider.reset_telemetry();
+            let error = block_on(super::super::ss_poles_from_object_async(&object, "pole"))
+                .expect_err("inexact resident state matrix");
+            assert_eq!(error.identifier(), Some("RunMat:pole:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+
+            let value = [1_u64];
+            let resident = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&value),
+                    shape: &[1, 1],
+                })
+                .expect("resident integer state matrix");
+            object
+                .properties
+                .insert("A".into(), Value::GpuTensor(resident));
+            object.properties.insert(
+                "B".into(),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                        vec![1, 1],
+                    )
+                    .unwrap(),
+                ),
+            );
+            provider.reset_telemetry();
+            let error = block_on(super::super::gather_ss_properties(
+                object,
+                &["A", "B", "Ts"],
+                "pzmap",
+            ))
+            .expect_err("host B invalid before resident A gather");
+            assert_eq!(error.identifier(), Some("RunMat:pzmap:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
     }
 }

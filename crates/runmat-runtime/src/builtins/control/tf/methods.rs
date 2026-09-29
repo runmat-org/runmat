@@ -231,6 +231,18 @@ mod tests {
         tensor.materialize_f64().clone()
     }
 
+    fn assign_numerator(model: Value, numerator: Value) -> Value {
+        block_on(crate::object::resolve::store_member(
+            model,
+            "Numerator".into(),
+            numerator,
+            false,
+            None,
+            |_, _| {},
+        ))
+        .expect("public tf coefficient property assignment")
+    }
+
     #[test]
     fn twelve_siso_bindings_preserve_operand_orientation() {
         let a = model(6.0);
@@ -315,6 +327,49 @@ mod tests {
             assert_eq!(coefficients(&result, "Numerator"), vec![expected]);
             assert_eq!(coefficients(&result, "Denominator"), vec![1.0]);
         }
+    }
+
+    #[test]
+    fn mutated_integer_coefficients_keep_constructor_exactness_in_both_orders() {
+        let wide = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        );
+        {
+            let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+            let mutated = assign_numerator(model(1.0), wide.clone());
+            for result in [
+                block_on(tf_plus(mutated.clone(), Value::Num(1.0))),
+                block_on(tf_plus(Value::Num(1.0), mutated)),
+            ] {
+                let error = result.expect_err("model coefficient cannot round as a scalar gain");
+                assert_eq!(error.identifier(), Some("RunMat:tf:InvalidCoefficients"));
+            }
+            let exact = assign_numerator(
+                model(1.0),
+                Value::Tensor(
+                    Tensor::new_integer(
+                        IntegerStorage::U64(vec![9_007_199_254_740_992]),
+                        vec![1, 1],
+                    )
+                    .unwrap(),
+                ),
+            );
+            assert_eq!(
+                coefficients(
+                    &block_on(tf_plus(exact, Value::Num(0.0))).unwrap(),
+                    "Numerator"
+                ),
+                vec![9_007_199_254_740_992.0],
+            );
+        }
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let mutated = assign_numerator(model(1.0), wide);
+        let error = block_on(tf_plus(mutated, Value::Num(1.0))).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            INTEGER_COEFFICIENT_EXTENSION.error_identifier
+        );
     }
 
     #[test]

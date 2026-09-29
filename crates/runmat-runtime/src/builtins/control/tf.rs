@@ -4,8 +4,9 @@ use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_builtins::{
     DEFAULT_DISCRETE_SAMPLE_TIME_EXTENSION, EXPLICIT_GPU_INPUT_EXTENSION,
     INTEGER_COEFFICIENT_EXTENSION, INTEGER_SAMPLE_TIME_EXTENSION, LOGICAL_COEFFICIENT_EXTENSION,
-    TF_ERROR_DENOMINATOR_INVALID, TF_ERROR_INVALID_ARGUMENT, TF_ERROR_INVALID_OPTION,
-    TF_ERROR_INVALID_SAMPLE_TIME, TF_ERROR_INVALID_VARIABLE, VARIABLE_SHORTHAND_EXTENSION,
+    TF_ERROR_DENOMINATOR_INVALID, TF_ERROR_INVALID_ARGUMENT, TF_ERROR_INVALID_COEFFICIENTS,
+    TF_ERROR_INVALID_OPTION, TF_ERROR_INVALID_SAMPLE_TIME, TF_ERROR_INVALID_VARIABLE,
+    VARIABLE_SHORTHAND_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -158,15 +159,43 @@ fn preflight_coefficient_extensions(value: &Value) -> BuiltinResult<()> {
 }
 
 async fn admitted_coefficient(value: &Value, role: &str) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTEGER_COEFFICIENT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let gathered = dispatcher::gather_if_needed_async(value).await?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+    ensure_exact_integer_boundary(
         &gathered,
         &INTEGER_COEFFICIENT_EXTENSION,
-        BUILTIN_NAME,
+        &TF_ERROR_INVALID_COEFFICIENTS,
         role,
-    )
-    .await?;
+    )?;
     Ok(gathered)
+}
+
+fn ensure_exact_integer_boundary(
+    value: &Value,
+    extension: &'static runmat_builtins::BuiltinExtensionDescriptor,
+    error: &'static BuiltinErrorDescriptor,
+    role: &str,
+) -> BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64, value_has_native_integer_class,
+    };
+    if value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
+        if !native_integer_value_is_exact_f64(value) {
+            let mut failure = tf_error_with_detail(
+                error,
+                format!("integer {role} values must be exactly representable as double"),
+            );
+            failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(failure);
+        }
+    }
+    Ok(())
 }
 
 async fn preparse_host_coefficients(
@@ -202,13 +231,12 @@ async fn admitted_sample_time(value: &Value) -> BuiltinResult<f64> {
         )?;
     }
     let gathered = dispatcher::gather_if_needed_async(value).await?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+    ensure_exact_integer_boundary(
         &gathered,
         &INTEGER_SAMPLE_TIME_EXTENSION,
-        BUILTIN_NAME,
+        &TF_ERROR_INVALID_SAMPLE_TIME,
         "sample time",
-    )
-    .await?;
+    )?;
     parse_sample_time(&gathered)
 }
 
@@ -802,6 +830,26 @@ mod tests {
         )
         .unwrap_err();
         assert!(inexact.message().contains("exactly representable"));
+        assert_eq!(
+            inexact.identifier(),
+            TF_ERROR_INVALID_COEFFICIENTS.identifier
+        );
+        assert_eq!(inexact.gpu_gather_retry, crate::GpuGatherRetry::Never);
+
+        let sample_time = run_tf(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            vec![integer_tensor(
+                IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                vec![1, 1],
+            )],
+        )
+        .unwrap_err();
+        assert_eq!(
+            sample_time.identifier(),
+            TF_ERROR_INVALID_SAMPLE_TIME.identifier
+        );
+        assert_eq!(sample_time.gpu_gather_retry, crate::GpuGatherRetry::Never);
     }
 
     #[test]

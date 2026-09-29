@@ -190,6 +190,7 @@ mod tests {
     use super::*;
     use crate::builtins::control::tf_model::{SS_CLASS, TF_CLASS};
     use futures::executor::block_on;
+    use runmat_accelerate_api::{AccelProvider, HostIntegerDataView, HostIntegerTensorView};
     use runmat_builtins::{BuiltinIntegerComputationDomain, FEEDBACK_INTEGER_CAPABILITIES};
     use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, NumericDType,
@@ -339,6 +340,96 @@ mod tests {
             panic!("expected tensor");
         };
         tensor.materialize_f64().clone()
+    }
+
+    fn assign_numerator(model: Value, numerator: Value) -> Value {
+        block_on(crate::object::resolve::store_member(
+            model,
+            "Numerator".into(),
+            numerator,
+            false,
+            None,
+            |_, _| {},
+        ))
+        .expect("public tf coefficient property assignment")
+    }
+
+    #[test]
+    fn mutated_model_coefficients_cannot_round_in_either_feedback_position() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let numerator = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![1, 1])
+                .unwrap(),
+        );
+        for (sys1, sys2) in [
+            (
+                assign_numerator(tf(vec![1.0], vec![1.0]), numerator.clone()),
+                tf(vec![1.0], vec![1.0]),
+            ),
+            (
+                tf(vec![1.0], vec![1.0]),
+                assign_numerator(tf(vec![1.0], vec![1.0]), numerator),
+            ),
+        ] {
+            let error = block_on(feedback_builtin(sys1, vec![sys2]))
+                .expect_err("model coefficient must not use scalar-gain rounding");
+            assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
+        }
+    }
+
+    #[test]
+    fn resident_mutated_coefficients_gather_once_after_host_preflight() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            for (coefficient, expected_valid) in [
+                (9_007_199_254_740_992_u64, true),
+                (9_007_199_254_740_993_u64, false),
+            ] {
+                let resident = provider
+                    .upload_integer(&HostIntegerTensorView {
+                        data: HostIntegerDataView::U64(std::slice::from_ref(&coefficient)),
+                        shape: &[1, 1],
+                    })
+                    .expect("resident integer coefficient");
+                let model = assign_numerator(tf(vec![1.0], vec![1.0]), Value::GpuTensor(resident));
+                provider.reset_telemetry();
+                let result = block_on(feedback_builtin(model, vec![Value::Num(0.0)]));
+                if expected_valid {
+                    assert_eq!(
+                        coeff(&result.expect("exact coefficient"), "Numerator"),
+                        vec![coefficient as f64]
+                    );
+                } else {
+                    assert_eq!(
+                        result.unwrap_err().identifier(),
+                        Some("RunMat:feedback:InvalidModel")
+                    );
+                }
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+            }
+
+            let resident = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&[1]),
+                    shape: &[1, 1],
+                })
+                .expect("resident coefficient");
+            let model = assign_numerator(tf(vec![1.0], vec![1.0]), Value::GpuTensor(resident));
+            let Value::Object(mut object) = model else {
+                unreachable!()
+            };
+            object
+                .properties
+                .insert("Denominator".into(), Value::from("invalid"));
+            provider.reset_telemetry();
+            let error = block_on(feedback_builtin(
+                Value::Object(object),
+                vec![Value::Num(0.0)],
+            ))
+            .expect_err("host denominator preflight");
+            assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
     }
 
     #[test]

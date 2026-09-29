@@ -4,8 +4,10 @@ mod numerics;
 mod power;
 #[cfg(test)]
 mod boundary_tests;
-use admission::preflight_host_model_properties;
 pub use admission::preflight_ss_host_properties;
+use admission::{
+    admit_coefficient_property, admit_sample_time_property, preflight_host_model_properties,
+};
 use numerics::{finite_complex_ratio, finite_complex_ratio_direction};
 use runmat_types::MemberAccess;
 
@@ -282,10 +284,14 @@ impl TfModel {
             ));
         }
 
+        for (name, role) in [("Numerator", "numerator"), ("Denominator", "denominator")] {
+            admit_coefficient_property(property(&object, name, builtin)?, role, builtin)?;
+        }
         let numerator = coefficients_from_property(&object, "Numerator", builtin)?;
         let denominator = coefficients_from_property(&object, "Denominator", builtin)?;
         validate_coefficients("numerator", &numerator, builtin)?;
         validate_coefficients("denominator", &denominator, builtin)?;
+        admit_sample_time_property(property(&object, "Ts", builtin)?, builtin)?;
         let sample_time = scalar_property(&object, "Ts", builtin)?;
         let input_delay = scalar_property(&object, "InputDelay", builtin)?;
         let output_delay = scalar_property(&object, "OutputDelay", builtin)?;
@@ -966,6 +972,7 @@ pub fn ss_poles_from_object(
     object: &ObjectInstance,
     builtin: &'static str,
 ) -> BuiltinResult<(Vec<Complex64>, f64)> {
+    preflight_ss_host_properties(object, &["A", "Ts"], builtin)?;
     let a = ss_state_matrix_property(object, "A", builtin)?;
     let sample_time = scalar_property(object, "Ts", builtin)?;
     validate_sample_time(sample_time, builtin)?;
@@ -1003,6 +1010,7 @@ pub async fn gather_ss_properties(
         let gathered = dispatcher::gather_if_needed_async(value).await?;
         object.properties.insert(name.to_string(), gathered);
     }
+    preflight_ss_host_properties(&object, required, builtin)?;
     Ok(object)
 }
 
