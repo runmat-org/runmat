@@ -11,6 +11,8 @@ mod tests;
 
 pub use contract::{DLARRAY_DESCRIPTOR, DLARRAY_INTEGER_CAPABILITIES, DLARRAY_INVALID_INPUT};
 
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DLARRAY_CATALOG_ENTRY];
+
 pub const DLARRAY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "dlarray" },

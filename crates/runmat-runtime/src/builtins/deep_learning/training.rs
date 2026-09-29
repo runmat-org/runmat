@@ -88,7 +88,6 @@ fn canonical_training_option(name: &str) -> String {
 
 #[runtime_builtin(
     name = "dlarray",
-    category = "deep_learning",
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]

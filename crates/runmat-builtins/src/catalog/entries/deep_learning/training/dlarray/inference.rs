@@ -34,7 +34,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     if let Some(format) = request.arguments.get(1) {
-        let valid = match format.kind {
+        let valid = match &format.kind {
             ValueKindFact::Unknown => true,
             ValueKindFact::String => format.shape.element_count().is_none_or(|count| count == 1),
             ValueKindFact::Character => format

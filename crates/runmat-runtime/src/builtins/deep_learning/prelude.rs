@@ -1,5 +1,4 @@
 pub(super) use runmat_builtins::{BuiltinErrorDescriptor, ResolveContext, Type};
-pub(super) use runmat_types::MemberAccess;
 pub(super) use runmat_value::{ObjectInstance, StringArray, Tensor, Value};
 pub(super) use std::collections::HashMap;
 

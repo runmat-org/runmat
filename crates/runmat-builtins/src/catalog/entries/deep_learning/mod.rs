@@ -4,13 +4,16 @@
 mod graph;
 mod layers;
 mod sequences;
+mod training;
 
 pub use self::graph::*;
 pub use self::layers::*;
 pub use self::sequences::*;
+pub use self::training::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(graph::ENTRIES.iter().copied());
     values.extend(layers::ENTRIES.iter().copied());
     values.extend(sequences::ENTRIES.iter().copied());
+    training::extend_entries(values);
 }

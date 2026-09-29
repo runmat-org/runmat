@@ -22,7 +22,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
             "The recurrence uses 0.15 for the fast EMA, 0.075 for the slow EMA, and 0.20 for the signal EMA. Its first EMA value is the first closing price. The recurrence is sequential along rows.",
-            "There is no direct GPU MACD kernel. Resident inputs gather through their owning provider, then the host recurrence produces double output. MACD is a fusion boundary, not an elementwise GPU operation; it does not mutate the input.",
+            "There is no direct GPU MACD kernel. Resident inputs gather through their owning provider. The host recurrence computes in double and restores single output for tabular inputs with single Close values; raw matrix input produces double output. MACD is a fusion boundary, not an elementwise GPU operation; it does not mutate the input.",
         ] },
     ],
     examples: &[

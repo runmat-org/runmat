@@ -3,7 +3,7 @@ use runmat_value::{CellArray, LogicalArray, NumericDType, NumericStorage, Tensor
 
 use crate::{gather_if_needed_async, BuiltinResult};
 
-use super::super::{deep_learning_error, parse_name_values, positive_usize};
+use super::super::{deep_learning_error, parse_name_values, positive_usize, scalar_text};
 
 mod admission;
 mod execution;
@@ -14,7 +14,7 @@ use admission::{
     validate_resident_padding_dim, validate_resident_sequence, SequenceInput,
 };
 use execution::{check_pad_elements, checked_numel, non_padding_dims_match, pad_sequence};
-pub(super) use options::SequenceLength;
+pub(in crate::builtins::deep_learning) use options::SequenceLength;
 use options::{numeric_pad_value, parse_bool, PadOptions, PaddingDirection};
 
 #[runtime_builtin(

@@ -10,7 +10,9 @@ use super::super::{deep_learning_error, tensor_value, MAX_COMBVEC_COLUMNS, MAX_P
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::sequences"
 )]
-pub(in crate::builtins::deep_learning) async fn combvec_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(in crate::builtins::deep_learning) async fn combvec_builtin(
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     super::super::errors::admit_single_output("combvec", &runmat_builtins::SEQUENCE_INVALID_INPUT)?;
     if args.is_empty() {
         return Err(deep_learning_error(

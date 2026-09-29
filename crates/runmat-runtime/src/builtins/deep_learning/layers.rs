@@ -8,11 +8,11 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::BuiltinResult;
+use crate::{gather_if_needed_async, BuiltinResult};
 
 use super::{
-    deep_learning_error, gather_args, layer_object, numeric_vector, parse_name_values,
-    positive_usize, scalar_text, tensor_value,
+    deep_learning_error, gather_args, layer_object, numeric_scalar, numeric_vector,
+    parse_name_values, positive_usize, scalar_text, tensor_value,
 };
 
 // Structural layer dimensions are exposed as double-valued metadata. Admit

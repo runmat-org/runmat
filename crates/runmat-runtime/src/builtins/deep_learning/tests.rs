@@ -515,7 +515,9 @@ fn graph_invalid_inputs_do_not_download_provider_values() {
             .expect_err("numeric resident input is not a layer collection");
         assert!(error.to_string().contains("expected a layer graph"));
         let error = block_on(layer_graph_builtin(vec![
-            Value::Object(ObjectInstance::new("reluLayer".into())),
+            Value::Object(ObjectInstance::new(
+                runmat_builtins::RELU_LAYER_CLASS.owned(),
+            )),
             Value::GpuTensor(handle),
         ]))
         .expect_err("invalid arity precedes provider access");
