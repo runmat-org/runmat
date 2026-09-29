@@ -149,7 +149,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
         if let Some(name) = request.literals.literal_string_at(index) {
-            if !name.eq_ignore_ascii_case("SettlingTimeThreshold") {
+            if !name.trim().eq_ignore_ascii_case("SettlingTimeThreshold") {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-STEPINFO-OPTION-NAME",
                     "unsupported option",

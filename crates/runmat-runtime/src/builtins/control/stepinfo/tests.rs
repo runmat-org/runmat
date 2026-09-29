@@ -53,6 +53,17 @@ fn sampled_forms_return_metrics_and_threshold_changes_settling_time() {
     )
     .unwrap();
     assert_eq!(field(&changed, "SettlingTime"), 2.0);
+    let padded = run(
+        samples(vec![0.0, 0.5, 0.9, 1.0]),
+        vec![
+            samples(vec![0.0, 1.0, 2.0, 3.0]),
+            Value::Num(1.0),
+            Value::from(" SettlingTimeThreshold "),
+            Value::Num(0.1),
+        ],
+    )
+    .unwrap();
+    assert_eq!(field(&padded, "SettlingTime"), 2.0);
 }
 
 #[test]

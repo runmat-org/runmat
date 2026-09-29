@@ -46,25 +46,19 @@ pub(super) fn preflight(input: Value, rest: Vec<Value>) -> BuiltinResult<Request
             index += 1;
         }
         // Validate every host-known role before downloading any other role.
-        if !matches!(input, Value::GpuTensor(_)) {
-            let _ = numeric_vector(input.clone(), "y")?;
-        }
-        if let Some(value) = time.as_ref().filter(|v| !matches!(v, Value::GpuTensor(_))) {
-            let _ = numeric_vector(value.clone(), "t")?;
-        }
+        let host_y = host_vector(&input, "y")?;
+        let host_t = time
+            .as_ref()
+            .map(|value| host_vector(value, "t"))
+            .transpose()?
+            .flatten();
         if let Some(value) = y_final
             .as_ref()
             .filter(|v| !matches!(v, Value::GpuTensor(_)))
         {
             let _ = final_scalar(value)?;
         }
-        if let (Some(y), Some(t)) = (
-            host_vector(&input, "y")?,
-            time.as_ref()
-                .map(|v| host_vector(v, "t"))
-                .transpose()?
-                .flatten(),
-        ) {
+        if let (Some(y), Some(t)) = (host_y, host_t) {
             metrics::validate_inputs(&y, &t)?;
         }
         Form::Samples {
@@ -95,7 +89,7 @@ fn parse_options(rest: &[Value], start: usize) -> BuiltinResult<Value> {
     let mut threshold = Value::Num(DEFAULT_SETTLING_THRESHOLD);
     for pair in rest[start..].chunks_exact(2) {
         let name = scalar_text(&pair[0], "option name", BUILTIN_NAME)?;
-        if !name.eq_ignore_ascii_case("SettlingTimeThreshold") {
+        if !name.trim().eq_ignore_ascii_case("SettlingTimeThreshold") {
             return Err(error(format!("unsupported option '{name}'")));
         }
         preflight_numeric_role(&pair[1], &STEPINFO_EXTENSIONS[1], "threshold")?;
