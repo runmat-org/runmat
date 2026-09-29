@@ -2061,7 +2061,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &self,
         _request: &ProviderAdamUpdateRequest<'_>,
     ) -> anyhow::Result<ProviderAdamUpdateResult> {
-        Err(anyhow::anyhow!("adam_update not supported by provider"))
+        Err(unsupported_provider_operation(
+            "adam_update not supported by provider",
+        ))
     }
 
     /// Compute per-element cross-entropy loss terms for resident prediction and target tensors.
@@ -4832,6 +4834,32 @@ mod tests {
         ] {
             assert!(is_unsupported_provider_operation(&result.unwrap_err()));
         }
+    }
+
+    #[test]
+    fn default_adam_update_is_typed_unsupported() {
+        let provider = DefaultNumericAdapterProvider;
+        let parameter = crate::test_support::handle(
+            404,
+            vec![1, 2],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+        );
+        let request = ProviderAdamUpdateRequest {
+            parameters: &parameter,
+            gradient: &parameter,
+            average_grad: None,
+            average_sq_grad: None,
+            iteration: 1,
+            learn_rate: 0.001,
+            gradient_decay_factor: 0.9,
+            squared_gradient_decay_factor: 0.999,
+            epsilon: 1.0e-8,
+        };
+        let error = provider.adam_update(&request).unwrap_err();
+        assert!(is_unsupported_provider_operation(&error));
+        let operational = anyhow::anyhow!("execution failed: unsupported device allocation");
+        assert!(!is_unsupported_provider_operation(&operational));
     }
 
     #[test]

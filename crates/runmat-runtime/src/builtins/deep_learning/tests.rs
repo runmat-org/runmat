@@ -3057,6 +3057,62 @@ fn adamupdate_hyperparameters_read_typed_integer_storage_exactly() {
 }
 
 #[test]
+fn adamupdate_known_host_errors_precede_mixed_residency_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let values = [1.0, 2.0];
+        let shape = [1usize, 2usize];
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &shape,
+            })
+            .expect("resident parameters");
+        provider.reset_telemetry();
+        let err = block_on(adamupdate_builtin(vec![
+            Value::GpuTensor(resident.clone()),
+            Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            Value::Num(1.0),
+        ]))
+        .expect_err("known shape mismatch");
+        assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let err = block_on(adamupdate_builtin(vec![
+            Value::GpuTensor(resident),
+            Value::Tensor(Tensor::new(vec![0.1, 0.2], vec![1, 2]).unwrap()),
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            Value::Num(1.0),
+            Value::Num(-1.0),
+        ]))
+        .expect_err("invalid later host control");
+        assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn adamupdate_typed_iteration_is_an_explicit_runmat_extension() {
+    let args = vec![
+        Value::Num(2.0),
+        Value::Num(1.0),
+        Value::Num(0.0),
+        Value::Num(0.0),
+        Value::Int(IntValue::U64(9_007_199_254_740_993)),
+    ];
+    let out = block_on(adamupdate_builtin(args.clone())).expect("exact wide iteration");
+    assert!(matches!(out, Value::Num(value) if value.is_finite()));
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let error = block_on(adamupdate_builtin(args)).expect_err("typed integer extension");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:AdamupdateIntegerScalarExtension")
+    );
+}
+
+#[test]
 fn dlfeval_dispatches_function_handles() {
     let out = block_on(dlfeval_builtin(vec![
         Value::FunctionHandle("plus".into()),

@@ -150,17 +150,38 @@ pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "adamupdate",
-    category = "deep_learning",
-    summary = "Update numeric parameters using the Adam optimizer rule.",
-    keywords = "adamupdate,deep learning,adam,optimizer",
-    type_resolver(any_type),
-    descriptor(crate::builtins::deep_learning::ADAMUPDATE_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(super) async fn adamupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    if args
+        .iter()
+        .take(4)
+        .any(|value| matches!(value, Value::Int(_)))
+        || args
+            .iter()
+            .skip(4)
+            .any(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::ADAMUPDATE_INTEGER_EXTENSION,
+            "adamupdate",
+        )?;
+    }
+    if let Some(requested) = crate::output_count::current_output_count() {
+        if requested > 3 {
+            return Err(deep_learning_error(
+                "adamupdate",
+                format!("adamupdate: requested {requested} outputs, but at most 3 are supported"),
+            ));
+        }
+    }
     let has_gpu_input = args
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)));
+    if has_gpu_input {
+        preflight_adam_host_operands(&args)?;
+    }
     let options = if has_gpu_input {
         match try_adamupdate_gpu(&args)? {
             Some(eval) => return eval.output(),
@@ -185,6 +206,80 @@ pub(super) async fn adamupdate_builtin(args: Vec<Value>) -> BuiltinResult<Value>
             format!("adamupdate: requested {requested} outputs, but at most 3 are supported"),
         )),
     }
+}
+
+/// Reject known host errors before a mixed-residency fallback downloads a
+/// provider-owned operand. The ordinary host parser remains the authority for
+/// materialized data; this admission uses it only for host operands and its
+/// existing scalar-control decoders.
+fn preflight_adam_host_operands(args: &[Value]) -> BuiltinResult<()> {
+    if !(5..=9).contains(&args.len()) {
+        return Err(deep_learning_error(
+            "adamupdate",
+            "adamupdate: expected 5 to 9 positional arguments",
+        ));
+    }
+    let mut shapes = [None, None, None, None];
+    for index in 0..4 {
+        match &args[index] {
+            Value::GpuTensor(handle) => {
+                shapes[index] = Some(handle.shape().to_vec());
+                if index == 0 && handle.shape().contains(&0) {
+                    return Err(deep_learning_error(
+                        "adamupdate",
+                        "adamupdate: parameters must not be empty",
+                    ));
+                }
+            }
+            host => {
+                let parsed = NumericPayload::parse(
+                    host,
+                    ["parameters", "grad", "averageGrad", "averageSqGrad"][index],
+                    index < 2,
+                )?;
+                if !parsed.data.is_empty() {
+                    shapes[index] = Some(parsed.shape);
+                }
+            }
+        }
+    }
+    if let Some(expected) = &shapes[0] {
+        for index in 1..4 {
+            if let Some(actual) = &shapes[index] {
+                if expected != actual {
+                    return Err(deep_learning_error(
+                        "adamupdate",
+                        format!(
+                            "adamupdate: {} must match parameter shape {:?}, got {:?}",
+                            ["parameters", "grad", "averageGrad", "averageSqGrad"][index],
+                            expected,
+                            actual
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    if !matches!(args[4], Value::GpuTensor(_)) {
+        positive_iteration(&args[4])?;
+    }
+    for (index, default, label) in [(5, 0.001, "learnRate"), (8, 1.0e-8, "epsilon")] {
+        if args
+            .get(index)
+            .is_some_and(|value| !matches!(value, Value::GpuTensor(_)))
+        {
+            optional_positive_scalar(args, index, default, label)?;
+        }
+    }
+    for (index, default, label) in [(6, 0.9, "gradDecay"), (7, 0.999, "sqGradDecay")] {
+        if args
+            .get(index)
+            .is_some_and(|value| !matches!(value, Value::GpuTensor(_)))
+        {
+            optional_unit_scalar(args, index, default, label)?;
+        }
+    }
+    Ok(())
 }
 
 #[runtime_builtin(
@@ -1009,7 +1104,7 @@ fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpdateGpuEval>
 
     match provider.adam_update(&request) {
         Ok(result) => Ok(Some(AdamUpdateGpuEval::from_provider(result))),
-        Err(err) if provider_is_unsupported(&err) => Ok(None),
+        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => Ok(None),
         Err(err) => Err(deep_learning_error(
             "adamupdate",
             format!("adamupdate: {err}"),
@@ -1038,11 +1133,6 @@ fn gpu_optimizer_state<'a>(
             format!("adamupdate: {label} must be a gpuArray or empty numeric array for resident gpuArray updates, got {other:?}"),
         )),
     }
-}
-
-fn provider_is_unsupported(err: &anyhow::Error) -> bool {
-    let message = err.to_string();
-    message.contains("not supported") || message.contains("unsupported")
 }
 
 fn evaluate_adamupdate(args: AdamUpdateArgs) -> BuiltinResult<AdamUpdateEval> {
