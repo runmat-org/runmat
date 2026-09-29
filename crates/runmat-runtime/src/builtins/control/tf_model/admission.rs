@@ -72,9 +72,7 @@ pub fn preflight_ss_host_properties(
         }
         match name {
             "Ts" => validate_sample_time(scalar_f64(value, name, builtin)?, builtin)?,
-            "InputDelay" | "OutputDelay" => {
-                validate_delay(scalar_f64(value, name, builtin)?, name, builtin)?;
-            }
+            "InputDelay" | "OutputDelay" => preflight_ss_delay(value, name, builtin)?,
             "A" => preflight_ss_state_matrix(value, builtin)?,
             "B" | "C" | "D" => preflight_ss_matrix_value(value, name, builtin)?,
             _ => {}
@@ -84,35 +82,66 @@ pub fn preflight_ss_host_properties(
 }
 
 fn preflight_ss_state_matrix(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
+    preflight_ss_matrix_value(value, "A", builtin)?;
     match value {
-        Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2 || tensor.rows != tensor.cols {
-                return Err(control_error(
-                    builtin,
-                    invalid_model_identifier(builtin),
-                    format!("{builtin}: ss A must be square, got {:?}", tensor.shape),
-                ));
-            }
-            if tensor::tensor_values_f64_cow(tensor)
-                .iter()
-                .any(|value| !value.is_finite())
-            {
-                return Err(control_error(
-                    builtin,
-                    unsupported_model_identifier(builtin),
-                    format!("{builtin}: ss A must contain only finite real values"),
-                ));
-            }
+        Value::Tensor(tensor) if tensor.rows != tensor.cols => {
+            return Err(control_error(
+                builtin,
+                invalid_model_identifier(builtin),
+                format!("{builtin}: ss A must be square, got {:?}", tensor.shape),
+            ));
         }
-        Value::Num(value) if value.is_finite() => {}
-        Value::Int(_) => {}
+        Value::ComplexTensor(tensor) if tensor.rows != tensor.cols => {
+            return Err(control_error(
+                builtin,
+                invalid_model_identifier(builtin),
+                format!("{builtin}: ss A must be square, got {:?}", tensor.shape),
+            ));
+        }
+        Value::LogicalArray(logical)
+            if match logical.shape.as_slice() {
+                [size] => *size != 1,
+                [rows, columns] => rows != columns,
+                _ => false,
+            } =>
+        {
+            return Err(control_error(
+                builtin,
+                invalid_model_identifier(builtin),
+                format!("{builtin}: ss A must be square, got {:?}", logical.shape),
+            ));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn preflight_ss_delay(value: &Value, name: &str, builtin: &'static str) -> BuiltinResult<()> {
+    let valid = |re: f64, im: f64| re.is_finite() && im.is_finite() && re >= 0.0 && im == 0.0;
+    let values_valid = match value {
+        Value::Tensor(tensor) => tensor::tensor_values_f64_cow(tensor)
+            .iter()
+            .all(|&re| valid(re, 0.0)),
+        Value::ComplexTensor(tensor) => tensor::complex_tensor_values_complex64(tensor)
+            .iter()
+            .all(|number| valid(number.re, number.im)),
+        Value::LogicalArray(_) | Value::Bool(_) | Value::Int(_) => true,
+        Value::Num(re) => valid(*re, 0.0),
+        Value::Complex(re, im) => valid(*re, *im),
         other => {
             return Err(control_error(
                 builtin,
                 unsupported_model_identifier(builtin),
-                format!("{builtin}: ss A must be a finite real matrix, got {other:?}"),
-            ));
+                format!("{builtin}: ss {name} must be a finite numeric delay, got {other:?}"),
+            ))
         }
+    };
+    if !values_valid {
+        return Err(control_error(
+            builtin,
+            invalid_model_identifier(builtin),
+            format!("{builtin}: ss {name} must contain finite nonnegative real values"),
+        ));
     }
     Ok(())
 }
@@ -171,4 +200,36 @@ fn preflight_ss_matrix_value(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::{ComplexTensor, LogicalArray, Tensor};
+
+    #[test]
+    fn generic_ss_admission_accepts_complex_logical_and_zero_delay_arrays() {
+        for a in [
+            Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).unwrap()),
+            Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+        ] {
+            let mut object = ObjectInstance::new("ss".to_string());
+            object.properties.insert("A".into(), a);
+            object.properties.insert("Ts".into(), Value::Num(0.0));
+            object.properties.insert(
+                "InputDelay".into(),
+                Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+            );
+            object.properties.insert(
+                "OutputDelay".into(),
+                Value::LogicalArray(LogicalArray::new(vec![0, 0], vec![2, 1]).unwrap()),
+            );
+            preflight_ss_host_properties(
+                &object,
+                &["A", "Ts", "InputDelay", "OutputDelay"],
+                "pzmap",
+            )
+            .expect("consumed values admitted");
+        }
+    }
 }

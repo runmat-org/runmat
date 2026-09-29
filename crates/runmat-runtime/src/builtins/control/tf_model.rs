@@ -972,6 +972,10 @@ pub async fn ss_poles_from_object_async(
     preflight_ss_host_properties(object, &["A", "Ts"], builtin)?;
     let a_resident = matches!(object.properties.get("A"), Some(Value::GpuTensor(_)));
     let ts_resident = matches!(object.properties.get("Ts"), Some(Value::GpuTensor(_)));
+    if !a_resident {
+        // Pole analysis accepts only real A, unlike general SS conversion.
+        ss_state_matrix_property(object, "A", builtin)?;
+    }
     if !a_resident && !ts_resident {
         return ss_poles_from_object(object, builtin);
     }
@@ -1557,6 +1561,27 @@ mod tests {
             let error =
                 block_on(ss_poles_from_object_async(&object, "pole")).expect_err("invalid Ts");
             assert_eq!(error.identifier(), Some("RunMat:pole:InvalidArgument"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        });
+    }
+
+    #[test]
+    fn pole_real_state_rule_precedes_resident_sample_time_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let ts = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+            let resident =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &ts).unwrap();
+            let mut object = ObjectInstance::new(SS_CLASS.to_string());
+            object
+                .properties
+                .insert("A".into(), Value::Complex(1.0, 1.0));
+            object
+                .properties
+                .insert("Ts".into(), Value::GpuTensor(resident));
+            provider.reset_telemetry();
+            let error = block_on(ss_poles_from_object_async(&object, "pole"))
+                .expect_err("complex A not supported by pole parser");
+            assert_eq!(error.identifier(), Some("RunMat:pole:UnsupportedModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
     }
