@@ -79,11 +79,6 @@ fn impulse_error_with_message(
 
 #[runtime_builtin(
     name = "impulse",
-    category = "control",
-    summary = "Compute or plot impulse responses.",
-    keywords = "impulse,control system,transfer function,response,tf",
-    sink = true,
-    suppress_auto_output = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::control::impulse"
 )]

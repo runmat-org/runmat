@@ -73,11 +73,6 @@ fn step_error_with_message(
 
 #[runtime_builtin(
     name = "step",
-    category = "control",
-    summary = "Compute or plot step responses of SISO transfer-function models.",
-    keywords = "step,response,control system,transfer function,tf",
-    sink = true,
-    suppress_auto_output = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::control::step"
 )]
