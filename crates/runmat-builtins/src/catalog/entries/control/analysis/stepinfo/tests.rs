@@ -32,6 +32,30 @@ fn model() -> ValueFact {
         StorageFact::Opaque,
     )
 }
+
+#[test]
+fn threshold_signature_and_visible_examples_are_preserved() {
+    let signature = STEPINFO_DESCRIPTOR
+        .signatures
+        .iter()
+        .find(|signature| signature.label == "info = stepinfo(..., 'SettlingTimeThreshold', tol)")
+        .expect("threshold name-value form");
+    assert_eq!(signature.inputs.len(), 3);
+    assert_eq!(signature.outputs.len(), 1);
+    for (id, visible, output) in [
+        ("feedback", "info.Overshoot", "ans = 0"),
+        ("exponential-samples", "info.SteadyStateValue", "ans = 1"),
+    ] {
+        let example = STEPINFO_CATALOG_ENTRY
+            .documentation
+            .examples
+            .iter()
+            .find(|example| example.id == id)
+            .expect("legacy scenario");
+        assert!(example.program.ends_with(visible), "{id}");
+        assert_eq!(example.display_output, Some(output), "{id}");
+    }
+}
 #[test]
 fn both_forms_return_typed_scalar_metric_structure() {
     for args in [vec![model()], vec![real_vector(3), real_vector(3)]] {

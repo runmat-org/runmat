@@ -42,6 +42,20 @@ fn values(value: &Value) -> Vec<f64> {
     };
     tensor.materialize_f64()
 }
+
+#[test]
+fn fatal_plot_failure_has_nyquist_identifier_and_retains_cause() {
+    use std::error::Error;
+
+    let source = crate::build_runtime_error("plot: rendering failed")
+        .with_builtin("plot")
+        .with_identifier("RunMat:plot:RenderFailed")
+        .build();
+    let wrapped = plot::plot_error(source);
+    assert_eq!(wrapped.identifier(), Some("RunMat:nyquist:PlotFailed"));
+    assert!(wrapped.message().contains("rendering failed"));
+    assert!(wrapped.source().is_some());
+}
 #[test]
 fn continuous_and_discrete_responses_preserve_exact_output_shape() {
     let w = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap());

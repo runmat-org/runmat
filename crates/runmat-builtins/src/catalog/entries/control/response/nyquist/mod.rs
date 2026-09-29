@@ -11,7 +11,9 @@ mod inference;
 #[cfg(test)]
 mod tests;
 
-pub use contract::{NYQUIST_DESCRIPTOR, NYQUIST_EXTENSIONS, NYQUIST_INTEGER_CAPABILITIES};
+pub use contract::{
+    NYQUIST_DESCRIPTOR, NYQUIST_ERROR_PLOT_FAILED, NYQUIST_EXTENSIONS, NYQUIST_INTEGER_CAPABILITIES,
+};
 
 pub const NYQUIST_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

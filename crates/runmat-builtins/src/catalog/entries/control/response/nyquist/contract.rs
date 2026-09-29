@@ -98,14 +98,21 @@ pub const NYQUIST_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinError
 pub const NYQUIST_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NYQUIST.INTERNAL",
     identifier: Some("RunMat:nyquist:Internal"),
-    when: "Response or plot materialization fails internally.",
+    when: "Numeric response or argument materialization fails internally.",
     message: "nyquist: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
+pub const NYQUIST_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NYQUIST.PLOT_FAILED",
+    identifier: Some("RunMat:nyquist:PlotFailed"),
+    when: "Statement-form plotting fails for reasons other than known nonfatal setup conditions.",
+    message: "nyquist: plotting failed",
+};
+const ERRORS: [BuiltinErrorDescriptor; 5] = [
     NYQUIST_ERROR_INVALID_ARGUMENT,
     NYQUIST_ERROR_INVALID_MODEL,
     NYQUIST_ERROR_UNSUPPORTED_MODEL,
     NYQUIST_ERROR_INTERNAL,
+    NYQUIST_ERROR_PLOT_FAILED,
 ];
 pub const NYQUIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,

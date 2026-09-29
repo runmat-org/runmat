@@ -3,6 +3,7 @@
 use super::solver::NyquistResponse;
 use super::*;
 use crate::builtins::control::plot_setup_error::is_nonfatal_plot_setup_error;
+use runmat_builtins::NYQUIST_ERROR_PLOT_FAILED;
 
 pub(super) async fn render(response: &NyquistResponse) -> BuiltinResult<()> {
     let mut args = vec![response.re_value()?, response.im_value()?];
@@ -26,11 +27,27 @@ pub(super) async fn render(response: &NyquistResponse) -> BuiltinResult<()> {
         if is_nonfatal_plot_setup_error(&error) {
             return Ok(());
         }
-        return Err(error);
+        return Err(plot_error(error));
     }
     let _ = crate::call_builtin_async("title", &[Value::from("Nyquist Diagram")]).await;
     let _ = crate::call_builtin_async("xlabel", &[Value::from("Real Axis")]).await;
     let _ = crate::call_builtin_async("ylabel", &[Value::from("Imaginary Axis")]).await;
     let _ = crate::call_builtin_async("grid", &[Value::from("on")]).await;
     Ok(())
+}
+
+pub(super) fn plot_error(source: crate::RuntimeError) -> crate::RuntimeError {
+    crate::build_runtime_error(format!(
+        "{}: {}",
+        NYQUIST_ERROR_PLOT_FAILED.message,
+        source.message()
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_identifier(
+        NYQUIST_ERROR_PLOT_FAILED
+            .identifier
+            .expect("plot failure has a stable identifier"),
+    )
+    .with_source(source)
+    .build()
 }

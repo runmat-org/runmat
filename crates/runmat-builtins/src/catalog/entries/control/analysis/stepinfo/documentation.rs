@@ -4,6 +4,14 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Runtime implementation",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/stepinfo.rs"),
 };
+const ADMISSION_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Stepinfo admission",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/stepinfo/admission.rs"),
+};
+const METRICS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Stepinfo metrics",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/stepinfo/metrics.rs"),
+};
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
@@ -23,11 +31,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ] },
     ],
     examples: &[
-        BuiltinExample { id: "model", title: "Metrics from a transfer function", program: "H = tf(1, [1 1]); info = stepinfo(H);", display_output: Some("A scalar structure with zero overshoot"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(info.SteadyStateValue - 1) < 1e-8); assert(info.Overshoot == 0);" } },
-        BuiltinExample { id: "samples", title: "Analyze supplied samples", program: "y = [0 .5 .9 1]; t = [0 1 2 3]; info = stepinfo(y, t, 1);", display_output: Some("SteadyStateValue = 1"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(info.SteadyStateValue == 1); assert(abs(info.RiseTime - 1.8) < 1e-8);" } },
-        BuiltinExample { id: "threshold", title: "Select a settling band", program: "y = [0 .5 .9 1]; t = [0 1 2 3]; info = stepinfo(y, t, 1, 'SettlingTimeThreshold', .1);", display_output: Some("SettlingTime = 2"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(info.SettlingTime == 2);" } },
-        BuiltinExample { id: "feedback", title: "Metrics of a feedback model", program: "s = tf('s'); T = feedback(2/(s + 1), 1); info = stepinfo(T);", display_output: Some("Overshoot = 0"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(info.Overshoot == 0); assert(abs(info.SteadyStateValue - 2/3) < 1e-8);" } },
-        BuiltinExample { id: "exponential-samples", title: "Metrics of a sampled exponential response", program: "t = 0:0.1:5; y = 1 - exp(-t); info = stepinfo(y, t, 1);", display_output: Some("SteadyStateValue = 1"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(info.SteadyStateValue == 1); assert(info.Overshoot == 0);" } },
+        BuiltinExample { id: "model", title: "Metrics from a transfer function", program: "H = tf(1, [1 1]); info = stepinfo(H); info.Overshoot", display_output: Some("ans = 0"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(abs(info.SteadyStateValue - 1) < 1e-8); assert(info.Overshoot == 0);" } },
+        BuiltinExample { id: "samples", title: "Analyze supplied samples", program: "y = [0 .5 .9 1]; t = [0 1 2 3]; info = stepinfo(y, t, 1); info.SteadyStateValue", display_output: Some("ans = 1"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(info.SteadyStateValue == 1); assert(abs(info.RiseTime - 1.8) < 1e-8);" } },
+        BuiltinExample { id: "threshold", title: "Select a settling band", program: "y = [0 .5 .9 1]; t = [0 1 2 3]; info = stepinfo(y, t, 1, 'SettlingTimeThreshold', .1); info.SettlingTime", display_output: Some("ans = 2"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(info.SettlingTime == 2);" } },
+        BuiltinExample { id: "feedback", title: "Metrics of a feedback model", program: "s = tf('s'); T = feedback(2/(s + 1), 1); info = stepinfo(T); info.Overshoot", display_output: Some("ans = 0"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(info.Overshoot == 0); assert(abs(info.SteadyStateValue - 2/3) < 1e-8);" } },
+        BuiltinExample { id: "exponential-samples", title: "Metrics of a sampled exponential response", program: "t = 0:0.1:5; y = 1 - exp(-t); info = stepinfo(y, t, 1); info.SteadyStateValue", display_output: Some("ans = 1"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(info.SteadyStateValue == 1); assert(info.Overshoot == 0);" } },
     ],
     example_exemption: None,
     faqs: &[
@@ -39,9 +47,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationLink { label: "dcgain", target: BuiltinDocumentationLinkTarget::Builtin("dcgain") },
         BuiltinDocumentationLink { label: "tf", target: BuiltinDocumentationLinkTarget::Builtin("tf") },
         SOURCE,
+        ADMISSION_SOURCE,
+        METRICS_SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, ADMISSION_SOURCE, METRICS_SOURCE], verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Sampled/model forms, metrics, options and integer boundaries", location: "crates/runmat-runtime/src/builtins/control/stepinfo.rs" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "VM control workflows", location: "crates/runmat-vm/tests/control.rs" },
     ], notes: &["Model-form response numerics and native/browser/provider qualification require the integrated control batch."] },

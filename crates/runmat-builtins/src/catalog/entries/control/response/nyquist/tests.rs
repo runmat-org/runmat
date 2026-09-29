@@ -1,4 +1,25 @@
 use super::*;
+
+#[test]
+fn legacy_examples_retained_printed_output_and_plot_oracle() {
+    let examples = NYQUIST_CATALOG_ENTRY.documentation.examples;
+    for (id, printed, output) in [
+        ("explicit", "fprintf(", "1.0 0.5 -0.5 2.0"),
+        ("discrete", "fprintf(", "2.0 0.0"),
+        ("plot", "fprintf(\"ok\\n\")", "ok"),
+    ] {
+        let example = examples
+            .iter()
+            .find(|example| example.id == id)
+            .expect("legacy scenario");
+        assert!(example.program.contains(printed), "{id}");
+        assert_eq!(example.display_output, Some(output), "{id}");
+    }
+    assert!(NYQUIST_DESCRIPTOR
+        .errors
+        .iter()
+        .any(|error| error.identifier == Some("RunMat:nyquist:PlotFailed")));
+}
 use runmat_types::*;
 use std::collections::BTreeMap;
 

@@ -38,7 +38,30 @@ const YFINAL: BuiltinParamDescriptor = BuiltinParamDescriptor {
 const Y_INPUT: [BuiltinParamDescriptor; 1] = [Y];
 const Y_T: [BuiltinParamDescriptor; 2] = [Y, T];
 const Y_T_FINAL: [BuiltinParamDescriptor; 3] = [Y, T, YFINAL];
-const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+const WITH_THRESHOLD: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "inputs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Model or sampled-response positional inputs.",
+    },
+    BuiltinParamDescriptor {
+        name: "SettlingTimeThreshold",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Supported settling-band option name.",
+    },
+    BuiltinParamDescriptor {
+        name: "tol",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Finite threshold strictly between zero and one.",
+    },
+];
+const SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
     BuiltinSignatureDescriptor {
         label: "info = stepinfo(sys)",
         inputs: &SYS,
@@ -57,6 +80,11 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "info = stepinfo(y,t,yfinal)",
         inputs: &Y_T_FINAL,
+        outputs: &INFO,
+    },
+    BuiltinSignatureDescriptor {
+        label: "info = stepinfo(..., 'SettlingTimeThreshold', tol)",
+        inputs: &WITH_THRESHOLD,
         outputs: &INFO,
     },
 ];
