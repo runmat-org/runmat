@@ -33,7 +33,7 @@ pub(super) async fn blsimpv_builtin(
         &BLSIMPV_NONDOUBLE_EXTENSION,
         [&price, &strike, &rate, &time, &value],
     )?;
-    if rest.len() % 2 != 0 {
+    if !rest.len().is_multiple_of(2) {
         return Err(error(
             BLSIMPV,
             "blsimpv: name-value options must appear in pairs",
