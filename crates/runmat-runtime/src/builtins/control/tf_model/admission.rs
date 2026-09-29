@@ -407,6 +407,7 @@ mod tests {
             object
                 .properties
                 .insert("A".into(), Value::GpuTensor(resident));
+            object.properties.insert("Ts".into(), Value::Num(0.0));
             provider.reset_telemetry();
             let error = block_on(super::super::ss_poles_from_object_async(&object, "pole"))
                 .expect_err("integer state matrix extension disabled");

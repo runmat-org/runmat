@@ -265,6 +265,7 @@ fn step_rejects_wide_integer_time_before_binary64_rounding() {
 
 #[test]
 fn step_sample_time_parser_reads_native_integer_storage_for_all_classes() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let storages = [
         IntegerStorage::I8(vec![1]),
         IntegerStorage::I16(vec![1]),
@@ -292,6 +293,7 @@ fn step_sample_time_parser_reads_native_integer_storage_for_all_classes() {
 
 #[test]
 fn step_tf_coefficients_read_complex_typed_integer_storage_exactly() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let tensor = poisoned_complex_integer_tensor(
         IntegerStorage::I16(vec![2, 4]),
         IntegerStorage::I16(vec![0, 0]),
@@ -309,6 +311,7 @@ fn step_tf_coefficients_read_complex_typed_integer_storage_exactly() {
 
 #[test]
 fn step_rejects_exact_nonreal_complex_typed_integer_coefficients() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let tensor = poisoned_complex_integer_tensor(
         IntegerStorage::I16(vec![2, 4]),
         IntegerStorage::I16(vec![0, 1]),
@@ -472,6 +475,7 @@ fn invalid_statement_style_is_rejected_before_model_download() {
 
 #[test]
 fn exactly_representable_wide_integer_coefficients_are_admitted() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let exact = 1_u64 << 63;
     let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
         unreachable!()
