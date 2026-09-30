@@ -1,6 +1,6 @@
 //! Dispatch each admitted layer to its owning pure numerical geometry rule.
 
-use runmat_builtins::DeepLearningAxisLabel;
+use runmat_builtins::{DeepLearningAxisLabel, DeepLearningLayerStructuralProperty as P};
 use runmat_value::{NumericDType, ObjectInstance};
 
 use super::{input::ChannelPolicy, resources::ResourceShapes};
@@ -37,10 +37,10 @@ pub(super) fn admit(
             let expected = numeric_vector(
                 layer
                     .properties
-                    .get("InputSize")
+                    .get(P::InputSize.canonical_name())
                     .ok_or_else(|| fail(function, "input layer is missing InputSize"))?,
                 function,
-                "InputSize",
+                P::InputSize.canonical_name(),
             )?;
             if expected.len() != 1 && expected.len() != 2 {
                 return Err(fail(function, "input size must have one or two dimensions"));

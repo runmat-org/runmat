@@ -203,6 +203,10 @@ mod tests {
     fn read_only_structural_properties_are_distinct_from_options() {
         use DeepLearningLayerKind as K;
         use DeepLearningLayerStructuralProperty as P;
+        for property in P::ALL {
+            assert_eq!(P::from_name(property.canonical_name()), Some(*property));
+        }
+        assert_eq!(P::from_name("inputsize"), None);
         assert!(
             P::from_name("InputSize").is_some_and(|property| property.belongs_to(K::FeatureInput))
         );

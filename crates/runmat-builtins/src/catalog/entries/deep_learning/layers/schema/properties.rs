@@ -14,17 +14,33 @@ pub enum DeepLearningLayerStructuralProperty {
 }
 
 impl DeepLearningLayerStructuralProperty {
+    pub const ALL: &'static [Self] = &[
+        Self::Type,
+        Self::InputSize,
+        Self::OutputSize,
+        Self::FilterSize,
+        Self::NumFilters,
+        Self::NumHiddenUnits,
+        Self::Alpha,
+    ];
+
+    pub const fn canonical_name(self) -> &'static str {
+        match self {
+            Self::Type => "Type",
+            Self::InputSize => "InputSize",
+            Self::OutputSize => "OutputSize",
+            Self::FilterSize => "FilterSize",
+            Self::NumFilters => "NumFilters",
+            Self::NumHiddenUnits => "NumHiddenUnits",
+            Self::Alpha => "Alpha",
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
-        Some(match name {
-            "Type" => Self::Type,
-            "InputSize" => Self::InputSize,
-            "OutputSize" => Self::OutputSize,
-            "FilterSize" => Self::FilterSize,
-            "NumFilters" => Self::NumFilters,
-            "NumHiddenUnits" => Self::NumHiddenUnits,
-            "Alpha" => Self::Alpha,
-            _ => return None,
-        })
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|property| property.canonical_name() == name)
     }
 
     pub const fn belongs_to(self, kind: DeepLearningLayerKind) -> bool {

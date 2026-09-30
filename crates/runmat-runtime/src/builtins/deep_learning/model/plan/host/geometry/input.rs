@@ -3,7 +3,7 @@
 use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
 use runmat_builtins::{
     DeepLearningAxisLabel as A, DeepLearningAxisLayout, DeepLearningInputKind,
-    DeepLearningLayerKind as K,
+    DeepLearningLayerKind as K, DeepLearningLayerStructuralProperty as P,
 };
 use runmat_value::{NumericDType, ObjectInstance, Value};
 
@@ -151,17 +151,20 @@ pub(super) fn kind(
     first_kind: K,
     function: &'static str,
 ) -> BuiltinResult<DeepLearningInputKind> {
-    let value = first.properties.get("InputSize").ok_or_else(|| {
-        fail(
-            function,
-            if first_kind == K::FeatureInput {
-                "featureInputLayer is missing InputSize"
-            } else {
-                "sequenceInputLayer is missing InputSize"
-            },
-        )
-    })?;
-    let vector = numeric_vector(value, function, "InputSize")?;
+    let value = first
+        .properties
+        .get(P::InputSize.canonical_name())
+        .ok_or_else(|| {
+            fail(
+                function,
+                if first_kind == K::FeatureInput {
+                    "featureInputLayer is missing InputSize"
+                } else {
+                    "sequenceInputLayer is missing InputSize"
+                },
+            )
+        })?;
+    let vector = numeric_vector(value, function, P::InputSize.canonical_name())?;
     Ok(match (first_kind, vector.len() == 1) {
         (K::FeatureInput, true) => DeepLearningInputKind::Feature,
         (K::FeatureInput, false) => DeepLearningInputKind::Spatial1d,

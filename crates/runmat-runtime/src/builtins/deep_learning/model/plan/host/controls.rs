@@ -1,6 +1,7 @@
 use runmat_builtins::{
     DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
-    DeepLearningLayerKind as K, DeepLearningLayerOption as O, DeepLearningNormalizationAxes,
+    DeepLearningLayerKind as K, DeepLearningLayerOption as O,
+    DeepLearningLayerStructuralProperty as P, DeepLearningNormalizationAxes,
     DeepLearningRecurrentGateActivation, DeepLearningRecurrentOutputMode,
     DeepLearningRecurrentStateActivation,
 };
@@ -170,14 +171,16 @@ pub(super) fn decode(
             .ok_or_else(|| invalid(function, O::GateActivationFunction))?;
             let hidden_size = layer
                 .properties
-                .get("NumHiddenUnits")
+                .get(P::NumHiddenUnits.canonical_name())
                 .ok_or_else(|| {
                     deep_learning_error(
                         function,
                         format!("{function}: recurrent layer is missing NumHiddenUnits"),
                     )
                 })
-                .and_then(|value| positive_usize(value, function, "NumHiddenUnits"))?;
+                .and_then(|value| {
+                    positive_usize(value, function, P::NumHiddenUnits.canonical_name())
+                })?;
             Controls::Recurrent(recurrent::RecurrentOptions {
                 hidden_size,
                 bidirectional: kind == K::Bilstm,
@@ -188,7 +191,7 @@ pub(super) fn decode(
         }
         K::LayerNormalization => {
             let epsilon = value(layer, kind, O::Epsilon)
-                .map(|v| numeric_scalar(v, function, "Epsilon"))
+                .map(|v| numeric_scalar(v, function, O::Epsilon.canonical_name()))
                 .transpose()?
                 .unwrap_or(1e-5);
             let operation = text(layer, kind, O::OperationDimension, "auto", function)?;
@@ -201,8 +204,8 @@ pub(super) fn decode(
         K::Elu => {
             let alpha = layer
                 .properties
-                .get("Alpha")
-                .map(|value| numeric_scalar(value, function, "Alpha"))
+                .get(P::Alpha.canonical_name())
+                .map(|value| numeric_scalar(value, function, P::Alpha.canonical_name()))
                 .transpose()?
                 .unwrap_or(1.0);
             Controls::Elu { alpha }
