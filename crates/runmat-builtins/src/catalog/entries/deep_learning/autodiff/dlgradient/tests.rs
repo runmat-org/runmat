@@ -141,6 +141,17 @@ fn discarded_gradient_targets_do_not_emit_admission_diagnostics() {
     };
     let result = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request);
     assert!(result.diagnostics.is_empty());
+    let dynamic = crate::infer_catalog_call(
+        &DLGRADIENT_CATALOG_ENTRY,
+        &CallRequest {
+            outputs: OutputSelection::new(RequestedOutputCount::CurrentFunctionNargout),
+            ..request.clone()
+        },
+    );
+    assert!(!dynamic
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-RESIDENCY"));
     let result = crate::infer_catalog_call(
         &DLGRADIENT_CATALOG_ENTRY,
         &CallRequest {

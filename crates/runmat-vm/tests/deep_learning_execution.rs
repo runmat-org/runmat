@@ -4,6 +4,34 @@ mod test_helpers;
 use test_helpers::execute_source;
 
 #[test]
+fn compiled_nested_gradient_targets_preserve_native_leaf_values_and_requested_prefix() {
+    execute_source(
+        r#"
+        x = dlarray(single([1 2 3]), 'CB');
+        [loss, gradients] = dlfeval(@nestedGradients, x);
+        assert(loss.Data == single(14));
+        assert(iscell(gradients) && isequal(size(gradients), [1 2]));
+        inner = gradients{1};
+        first = inner{1};
+        second = gradients{2};
+        assert(strcmp(class(first.Data), 'single'));
+        assert(strcmp(class(second.Data), 'single'));
+        assert(strcmp(first.Format, 'CB'));
+        assert(isequal(first.Data, single([2 4 6])));
+        assert(isequal(second.Data, single([2 4 6])));
+        function [loss, gradients] = nestedGradients(x)
+            loss = sum(x .* x, 'all');
+            targets = {{x}, x};
+            gradients = dlgradient(loss, targets, uint8(9));
+        end
+        "#,
+    )
+    .expect(
+        "compiled nested target traversal preserves class/format and ignores unrequested targets",
+    );
+}
+
+#[test]
 fn compiled_temporal_pooling_preserves_axes_precision_and_state_output() {
     execute_source(
         r#"

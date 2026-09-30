@@ -171,7 +171,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             .outputs
             .requested
             .known_count()
-            .is_none_or(|count| index <= count);
+            .is_some_and(|count| index <= count);
         if consumed {
             targets::check(target, index, &mut diagnostics);
         }
