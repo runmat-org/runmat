@@ -6,8 +6,8 @@ use crate::{
     BuiltinCatalogEntry,
 };
 use runmat_types::{
-    CallInference, CallRequest, LiteralValue, NumericClass, NumericDomain, NumericFact, ObjectFact,
-    ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain,
+    NumericFact, ObjectFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -54,6 +54,18 @@ fn invalid_dimension_literal(literal: &LiteralValue) -> bool {
             values.is_empty() || values.iter().any(invalid_dimension_literal)
         }
         _ => false,
+    }
+}
+
+fn invalid_nonnegative_factor_literal(literal: &LiteralValue) -> bool {
+    match literal {
+        LiteralValue::Vector(values) => values.iter().any(invalid_nonnegative_factor_literal),
+        LiteralValue::Matrix(rows) => rows
+            .iter()
+            .flatten()
+            .any(invalid_nonnegative_factor_literal),
+        _ => LiteralContext::numeric_from_literal(literal)
+            .is_some_and(|value| !value.is_finite() || value < 0.0),
     }
 }
 
@@ -205,10 +217,15 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, kind: LayerKind) ->
                     if !numeric_possible(value, false)
                         || value.shape.element_count() == Some(0)
                         || (value.shape.element_count().is_some() && !scalar && !documented_row)
+                        || request
+                            .literals
+                            .literal_args
+                            .get(index + 1)
+                            .is_some_and(invalid_nonnegative_factor_literal)
                     {
                         diagnostics.push(argument_error(
                             "RM-DL-LAYER-OPTION-VALUE",
-                            "recurrent gate factor must be a numeric scalar or a 1-by-4/1-by-8 row vector",
+                            "recurrent gate factor must contain finite nonnegative numeric values in a scalar or 1-by-4/1-by-8 row vector",
                             index + 1,
                         ));
                     }

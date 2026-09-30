@@ -11,3 +11,6 @@ pub(super) mod progress;
 pub(super) mod resources;
 pub(super) mod target;
 pub(super) mod trainer;
+
+#[cfg(test)]
+mod public_recurrent_tests;

@@ -233,6 +233,78 @@ fn recurrent_gate_factor_facts_admit_only_scalar_or_documented_row_geometry() {
 }
 
 #[test]
+fn recurrent_gate_factor_facts_reject_known_negative_or_nonfinite_values() {
+    for (entry, width) in [(&LSTM_CATALOG_ENTRY, 4), (&BILSTM_CATALOG_ENTRY, 8)] {
+        let arguments = |shape| vec![numeric(), character(), ValueFact { shape, ..numeric() }];
+        let infer_factor = |shape, literal| {
+            infer(
+                entry,
+                arguments(shape),
+                vec![
+                    LiteralValue::Number(2.0),
+                    LiteralValue::Character("InputWeightsLearnRateFactor".into()),
+                    literal,
+                ],
+            )
+        };
+        for invalid in [
+            LiteralValue::Number(-0.5),
+            LiteralValue::Number(f64::NAN),
+            LiteralValue::Number(f64::INFINITY),
+            LiteralValue::Real {
+                text: "-0.25".into(),
+                class: NumericClass::Single,
+            },
+            LiteralValue::Integer {
+                text: "-1".into(),
+                class: NumericClass::Int64,
+            },
+        ] {
+            let result = infer_factor(ShapeFact::Scalar, invalid);
+            assert!(result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-DL-LAYER-OPTION-VALUE"));
+        }
+        let mut values = vec![LiteralValue::Number(0.0); width];
+        values[width - 1] = LiteralValue::Number(f64::NEG_INFINITY);
+        let result = infer_factor(
+            ShapeFact::from(vec![Some(1), Some(width)]),
+            LiteralValue::Vector(values),
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-DL-LAYER-OPTION-VALUE"));
+        let matrix = infer_factor(
+            ShapeFact::from(vec![Some(1), Some(width)]),
+            LiteralValue::Matrix(vec![vec![LiteralValue::Number(-1.0); width]]),
+        );
+        assert!(matrix
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-DL-LAYER-OPTION-VALUE"));
+        let conservative = infer_factor(ShapeFact::Unknown, LiteralValue::Unknown);
+        assert!(
+            conservative.diagnostics.is_empty(),
+            "{:?}",
+            conservative.diagnostics
+        );
+        let valid = infer_factor(ShapeFact::Scalar, LiteralValue::Number(-0.0));
+        assert!(valid.diagnostics.is_empty(), "{:?}", valid.diagnostics);
+        let valid_row = infer_factor(
+            ShapeFact::from(vec![Some(1), Some(width)]),
+            LiteralValue::Vector(vec![LiteralValue::Number(0.25); width]),
+        );
+        assert!(
+            valid_row.diagnostics.is_empty(),
+            "{:?}",
+            valid_row.diagnostics
+        );
+    }
+}
+
+#[test]
 fn fully_connected_positional_dimension_has_a_canonical_fact() {
     let result = infer(
         &FULLY_CONNECTED_CATALOG_ENTRY,
