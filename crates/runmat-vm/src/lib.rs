@@ -25,10 +25,11 @@ pub use bytecode::{
 };
 pub use bytecode::{
     AsyncMetadata, AwaitSite, Bytecode, BytecodeCodistributedOverload, BytecodeCollectiveOp,
-    BytecodeDistributedBuildValidation, BytecodeDistributedOp, BytecodeParallelVariable,
-    BytecodeParforRegion, BytecodeRegion, BytecodeRegionBoundary, BytecodeSpmdHeader,
-    BytecodeSpmdRegion, EmitLabel, FunctionBytecode, FunctionRegistry, Instr, SpawnSite,
-    StackEffect, BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
+    BytecodeDistributedBuildValidation, BytecodeDistributedOp, BytecodeDottedInvokeArgument,
+    BytecodeParallelVariable, BytecodeParforRegion, BytecodeRegion, BytecodeRegionBoundary,
+    BytecodeSpmdHeader, BytecodeSpmdRegion, BytecodeSubscriptSelector, BytecodeSubscriptStep,
+    EmitLabel, FunctionBytecode, FunctionRegistry, Instr, SpawnSite, StackEffect,
+    BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{

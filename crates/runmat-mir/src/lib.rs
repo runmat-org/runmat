@@ -40,4 +40,4 @@ pub use stmt::*;
 pub use terminator::*;
 
 /// Portable schema for [`MirAssembly`] payloads retained in executable units.
-pub const MIR_SCHEMA_VERSION: u16 = 3;
+pub const MIR_SCHEMA_VERSION: u16 = 4;

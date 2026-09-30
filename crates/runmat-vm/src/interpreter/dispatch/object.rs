@@ -144,6 +144,17 @@ pub async fn dispatch_object(
             stack.insert(prefix_start, prepared.receiver().clone());
             Ok(true)
         }
+        crate::bytecode::Instr::FinishDottedInvokeReceiver {
+            prefix_operand_count,
+            argument_operand_count,
+        } => {
+            sequence_register.finish_dotted_invoke_receiver(
+                stack,
+                *prefix_operand_count,
+                *argument_operand_count,
+            )?;
+            Ok(true)
+        }
         crate::bytecode::Instr::ReadSubscriptPath {
             steps,
             selection,
@@ -151,12 +162,15 @@ pub async fn dispatch_object(
             to_sequence_register,
         } => {
             let values = execute_subscript_path(
+                runtime,
                 stack,
                 steps,
-                *selection,
-                *context,
-                frame_access(bytecode)?,
-                call_counts,
+                SubscriptPathReadContext {
+                    selection: *selection,
+                    indexing: *context,
+                    access: frame_access(bytecode)?,
+                    call_counts,
+                },
                 sequence_register,
             )
             .await?;
@@ -173,12 +187,15 @@ pub async fn dispatch_object(
             context,
         } => {
             let values = execute_subscript_path(
+                runtime,
                 stack,
                 steps,
-                runmat_types::SequenceUse::ExpandAll,
-                *context,
-                frame_access(bytecode)?,
-                call_counts,
+                SubscriptPathReadContext {
+                    selection: runmat_types::SequenceUse::ExpandAll,
+                    indexing: *context,
+                    access: frame_access(bytecode)?,
+                    call_counts,
+                },
                 sequence_register,
             )
             .await?;
@@ -621,35 +638,86 @@ fn frame_access(
     }
 }
 
+struct SubscriptPathReadContext<'a> {
+    selection: runmat_types::SequenceUse,
+    indexing: runmat_types::ObjectIndexingContext,
+    access: runmat_runtime::object::protocol::ObjectAccessContext,
+    call_counts: &'a [(usize, usize)],
+}
+
 async fn execute_subscript_path(
+    runtime: &runmat_runtime::context::RuntimeContext,
     stack: &mut Vec<Value>,
     steps: &[crate::bytecode::BytecodeSubscriptStep],
-    selection: runmat_types::SequenceUse,
-    indexing_context: runmat_types::ObjectIndexingContext,
-    access: runmat_runtime::object::protocol::ObjectAccessContext,
-    call_counts: &[(usize, usize)],
-    state: &super::SequenceState,
+    read: SubscriptPathReadContext<'_>,
+    state: &mut super::SequenceState,
 ) -> Result<Vec<Value>, RuntimeError> {
-    let operand_count = steps
-        .iter()
-        .map(crate::bytecode::BytecodeSubscriptStep::operand_count)
-        .sum::<usize>();
-    let start = stack.len().checked_sub(operand_count + 1).ok_or_else(|| {
-        crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
-    })?;
-    let operands = stack.split_off(start);
-    let _roots = crate::call::root_values(&operands)?;
-    let (root, path) = materialize_subscript_path(operands, steps)?;
+    let mut argument_roots = Vec::new();
+    let (root, path, _roots) =
+        if let [crate::bytecode::BytecodeSubscriptStep::DottedInvoke { member, arguments }] = steps
+        {
+            use crate::bytecode::BytecodeDottedInvokeArgument as Argument;
+            use runmat_runtime::object::indexing::{
+                ObjectIndexComponent, ObjectSubscript, ObjectSubscriptPath,
+            };
+            let mut groups = Vec::with_capacity(arguments.len());
+            for argument in arguments.iter().rev() {
+                match argument {
+                    Argument::Colon => groups.push(vec![ObjectIndexComponent::Colon]),
+                    Argument::Call(spec) => {
+                        let values = crate::call::shared::build_expanded_args_from_specs(
+                            stack,
+                            std::slice::from_ref(spec),
+                            state,
+                            runtime,
+                        )
+                        .await?;
+                        argument_roots.push(crate::call::root_values(&values)?);
+                        groups.push(
+                            values
+                                .into_iter()
+                                .map(ObjectIndexComponent::Value)
+                                .collect(),
+                        );
+                    }
+                }
+            }
+            groups.reverse();
+            let root = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "dotted invocation has no receiver",
+                )
+            })?;
+            let components = groups.into_iter().flatten().collect();
+            let path = ObjectSubscriptPath::new(
+                ObjectSubscript::dotted_invoke_components(member.clone(), components).into(),
+            )?;
+            let roots = crate::call::root_values(std::iter::once(&root))?;
+            (root, Some(path), roots)
+        } else {
+            let operand_count = steps
+                .iter()
+                .map(crate::bytecode::BytecodeSubscriptStep::operand_count)
+                .sum::<usize>();
+            let start = stack.len().checked_sub(operand_count + 1).ok_or_else(|| {
+                crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
+            })?;
+            let operands = stack.split_off(start);
+            let roots = crate::call::root_values(&operands)?;
+            let (root, path) = materialize_subscript_path(operands, steps)?;
+            (root, path, roots)
+        };
     let path = path.ok_or_else(|| {
         crate::interpreter::errors::mex(
             "RunMat:InvalidObjectSubscriptPath",
             "subscript path is empty",
         )
     })?;
-    let sequence_context = match selection {
+    let sequence_context = match read.selection {
         runmat_types::SequenceUse::SelectCurrentFunctionOutputs => {
             runmat_runtime::sequence::SequenceResolutionContext::current_function_outputs(
-                call_counts.last().map_or(1, |entry| entry.1),
+                read.call_counts.last().map_or(1, |entry| entry.1),
             )
         }
         runmat_types::SequenceUse::SelectDestinationCardinality => {
@@ -660,16 +728,16 @@ async fn execute_subscript_path(
         _ => Default::default(),
     };
     let request = runmat_runtime::object::protocol::SubscriptReadRequest {
-        sequence_use: selection,
+        sequence_use: read.selection,
         sequence_context,
-        indexing_context,
-        access,
+        indexing_context: read.indexing,
+        access: read.access,
     };
     let sequence = runmat_runtime::object::protocol::read_subscript_path_sequence_with_access(
         root, path, request,
     )
     .await?;
-    sequence.resolve(selection, sequence_context)
+    sequence.resolve(read.selection, sequence_context)
 }
 
 fn materialize_subscript_path(
@@ -709,12 +777,11 @@ fn materialize_subscript_path(
                     ObjectSubscript::braces(selector)
                 });
             }
-            Step::DottedInvoke { member, arguments } => {
-                let components = materialize_selector_components(&mut values, arguments)?;
-                runtime_steps.extend(ObjectSubscript::dotted_invoke_components(
-                    member.clone(),
-                    components,
-                ));
+            Step::DottedInvoke { .. } => {
+                return Err(crate::interpreter::errors::mex(
+                    "RunMat:SubscriptPathState",
+                    "dotted invocation arguments must be materialized by the call argument service",
+                ))
             }
         }
     }

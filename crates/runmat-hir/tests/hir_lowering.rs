@@ -1135,11 +1135,18 @@ fn lowering_emits_only_fixed_requested_output_counts() {
                 walk_expr(&chain.root);
                 for step in &chain.steps {
                     match step {
-                        runmat_hir::HirSubscriptStep::Index(indexing)
-                        | runmat_hir::HirSubscriptStep::DottedInvoke { indexing, .. } => {
+                        runmat_hir::HirSubscriptStep::Index(indexing) => {
                             for component in &indexing.components {
                                 if let IndexComponent::Expr(value)
                                 | IndexComponent::Logical(value) = component
+                                {
+                                    walk_expr(value);
+                                }
+                            }
+                        }
+                        runmat_hir::HirSubscriptStep::DottedInvoke { arguments, .. } => {
+                            for argument in arguments {
+                                if let runmat_hir::HirDottedInvokeArgument::Value(value) = argument
                                 {
                                     walk_expr(value);
                                 }

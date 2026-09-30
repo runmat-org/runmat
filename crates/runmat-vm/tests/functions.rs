@@ -4,7 +4,7 @@ mod test_helpers;
 #[path = "support/captured_arguments.rs"]
 mod captured_arguments;
 
-use captured_arguments::is_expand_all_cell_contents;
+use captured_arguments::{has_captured_cell_dotted_call, is_expand_all_cell_contents};
 
 use std::convert::TryFrom;
 use test_helpers::compile_source;
@@ -4899,18 +4899,27 @@ fn object_cell_expansion_via_subsref() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_expand_multi_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); C = {7, 3}; [a,b,c] = obj.deal(C{:}); s = b;";
+    let source = r#"
+        function [first, second] = pair(x, y)
+            first = x;
+            second = y;
+        end
+        obj = struct('deal', @pair);
+        C = {7, 3};
+        [a,b] = obj.deal(C{:});
+        s = b;
+    "#;
     let bytecode = compile_source(source).expect("compile method expand multi-output source");
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
-            if *out_count == 3 && specs.len() == 2 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[1], 0)
-    )));
+    assert!(
+        has_captured_cell_dotted_call(&bytecode.instructions, 2),
+        "{:#?}",
+        bytecode.instructions
+    );
+    assert!(!has_captured_cell_dotted_call(&bytecode.instructions, 1));
 
     let vars = interpret(&bytecode).expect("execute method expand multi-output");
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+    assert!(has_num(&vars, 7.0));
+    assert!(has_num(&vars, 3.0));
 }
 
 #[test]
@@ -4999,14 +5008,75 @@ fn expand_multi_output_uses_typed_instruction() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_expand_single_output_uses_typed_instruction() {
-    let source = "obj = new_object('Point'); C = {}; a = obj.deal(C{:});";
+    let source = r#"
+        function answer = fortytwo()
+            answer = 42;
+        end
+        obj = struct('deal', @fortytwo);
+        C = {};
+        a = obj.deal(C{:});
+    "#;
     let bytecode = compile_source(source).expect("compile method expand single-output source");
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
-            if *out_count == 1 && specs.len() == 2 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[1], 0)
-    )));
-    interpret(&bytecode).expect("execute valid method expand single-output fallback");
+    assert!(
+        has_captured_cell_dotted_call(&bytecode.instructions, 1),
+        "{:#?}",
+        bytecode.instructions
+    );
+    assert!(!has_captured_cell_dotted_call(&bytecode.instructions, 2));
+    let vars = interpret(&bytecode).expect("execute zero-argument dotted invocation");
+    assert!(has_num(&vars, 42.0));
+}
+
+#[test]
+fn method_expand_compound_segments_run_after_their_receivers() {
+    let source = r#"
+        function output = first(value)
+            output = struct('second', @(next) value + next);
+        end
+        s = struct('first', @first);
+        C = {7};
+        D = {3};
+        result = s.first(C{:}).second(D{:});
+    "#;
+    let bytecode = compile_source(source).expect("compile compound dotted invocation");
+    let segments = bytecode
+        .instructions
+        .iter()
+        .filter(|instruction| {
+            matches!(
+                instruction,
+                runmat_vm::Instr::ReadSubscriptPath { steps, .. }
+                    if matches!(steps.as_slice(),
+                        [runmat_vm::BytecodeSubscriptStep::DottedInvoke { .. }])
+            )
+        })
+        .count();
+    assert_eq!(
+        segments, 2,
+        "each invocation has its own execution boundary"
+    );
+    let values = interpret(&bytecode).expect("execute compound dotted invocation");
+    assert!(has_num(&values, 10.0));
+}
+
+#[test]
+fn method_expand_prefix_error_precedes_later_argument_error() {
+    let source = r#"
+        function output = first(value)
+            error('RunMat:FirstInvocation', 'first invocation fails');
+            output = value;
+        end
+        function output = later()
+            error('RunMat:LaterArgument', 'later argument was evaluated');
+            output = 0;
+        end
+        s = struct('first', @first);
+        C = {7};
+        result = s.first(C{:}).second(later());
+    "#;
+    let bytecode = compile_source(source).expect("compile ordered dotted invocation");
+    let error = interpret(&bytecode).expect_err("first invocation fails before later argument");
+    assert_eq!(error.identifier(), Some("RunMat:FirstInvocation"));
 }
 
 #[test]

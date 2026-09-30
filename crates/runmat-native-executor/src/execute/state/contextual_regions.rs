@@ -50,7 +50,7 @@ pub(super) struct ContextualRegionState {
 #[derive(Default)]
 struct RegionProgress {
     next_step: usize,
-    result: Option<NativeValueRef>,
+    result: Option<Vec<NativeValueRef>>,
     next_region: usize,
 }
 
@@ -86,7 +86,7 @@ impl HostState {
         Ok(())
     }
 
-    pub fn enter_contextual_region(&mut self) -> (usize, usize, Option<NativeValueRef>) {
+    pub fn enter_contextual_region(&mut self) -> (usize, usize, Option<Vec<NativeValueRef>>) {
         let ordinal = self.contextual_regions.next_region;
         self.contextual_regions.next_region += 1;
         if self.contextual_regions.regions.len() == ordinal {
@@ -97,7 +97,7 @@ impl HostState {
         }
         let progress = &self.contextual_regions.regions[ordinal];
         self.contextual_regions.next_region = progress.next_region;
-        (ordinal, progress.next_step, progress.result)
+        (ordinal, progress.next_step, progress.result.clone())
     }
 
     pub fn enter_contextual_step(&mut self, region: usize, step: usize) {
@@ -119,7 +119,7 @@ impl HostState {
         Ok(())
     }
 
-    pub fn finish_contextual_region(&mut self, region: usize, result: NativeValueRef) {
+    pub fn finish_contextual_region(&mut self, region: usize, result: Vec<NativeValueRef>) {
         self.contextual_regions.regions[region].result = Some(result);
         self.contextual_regions.regions[region].next_region = self.contextual_regions.next_region;
     }
@@ -128,7 +128,12 @@ impl HostState {
         self.contextual_regions
             .regions
             .iter()
-            .filter_map(|progress| progress.result)
+            .flat_map(|progress| {
+                progress
+                    .result
+                    .iter()
+                    .flat_map(|values| values.iter().copied())
+            })
             .chain(
                 self.contextual_regions
                     .completed_operations

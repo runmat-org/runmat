@@ -6,6 +6,15 @@ impl MirExpressionRegion {
         statements: Vec<MirStmt>,
         result: MirOperand,
     ) -> Result<Self, runmat_hir::HirError> {
+        let steps = Self::steps_from_lowered(statements)?;
+        let region = Self { steps, result };
+        region.validate().map_err(runmat_hir::HirError::new)?;
+        Ok(region)
+    }
+
+    pub(crate) fn steps_from_lowered(
+        statements: Vec<MirStmt>,
+    ) -> Result<Vec<MirExpressionStep>, runmat_hir::HirError> {
         let mut steps = Vec::with_capacity(statements.len());
         for statement in statements {
             let step = match statement.kind {
@@ -27,14 +36,12 @@ impl MirExpressionRegion {
                 },
                 _ => {
                     return Err(runmat_hir::HirError::new(
-                        "contextual index expressions must lower to a straight-line expression region",
+                        "expression preparation must lower to a straight-line region",
                     ));
                 }
             };
             steps.push(step);
         }
-        let region = Self { steps, result };
-        region.validate().map_err(runmat_hir::HirError::new)?;
-        Ok(region)
+        Ok(steps)
     }
 }

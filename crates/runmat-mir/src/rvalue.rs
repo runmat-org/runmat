@@ -138,11 +138,7 @@ impl MirRvalue {
             MirRvalue::Index { indexing, .. } => indexing.components.iter().any(|component| {
                 matches!(component, crate::MirIndexComponent::ContextualExpr(region) if region.contains_contextual_end())
             }),
-            MirRvalue::SubscriptChain(chain) => {
-                let mut found = false;
-                chain.visit_expression_regions(|region| found |= region.contains_contextual_end());
-                found
-            }
+            MirRvalue::SubscriptChain(chain) => chain.contains_contextual_end(),
             MirRvalue::Call(call) => call.args.iter().any(MirCallArg::contains_contextual_end),
             MirRvalue::Future { args, .. } => {
                 args.iter().any(MirCallArg::contains_contextual_end)
@@ -193,6 +189,57 @@ impl MirRvalue {
         }
     }
 
+    /// Visit each directly executed expression-step sequence once. Dotted
+    /// invocation arguments own preparation steps that are not ordinary
+    /// `MirExpressionRegion`s and must still be visible to static analyses.
+    pub fn visit_direct_expression_steps(
+        &self,
+        mut visitor: impl FnMut(&[crate::MirExpressionStep]),
+    ) {
+        self.visit_direct_expression_steps_dyn(&mut visitor);
+    }
+
+    pub(crate) fn visit_direct_expression_steps_dyn(
+        &self,
+        visitor: &mut dyn FnMut(&[crate::MirExpressionStep]),
+    ) {
+        match self {
+            MirRvalue::Index { indexing, .. } => {
+                indexing.visit_direct_expression_regions_dyn(&mut |region| visitor(region.steps()))
+            }
+            MirRvalue::SubscriptChain(chain) => chain.visit_direct_expression_steps_dyn(visitor),
+            MirRvalue::Call(call) => {
+                for argument in &call.args {
+                    argument.visit_direct_expression_steps_dyn(visitor);
+                }
+            }
+            MirRvalue::Future { args, .. } => {
+                for argument in args {
+                    argument.visit_direct_expression_steps_dyn(visitor);
+                }
+            }
+            MirRvalue::ShortCircuit { right_temps, .. } => {
+                for statement in right_temps {
+                    match &statement.kind {
+                        crate::MirStmtKind::Assign { value, .. }
+                        | crate::MirStmtKind::MultiAssign { value, .. }
+                        | crate::MirStmtKind::SequenceAssign { value, .. }
+                        | crate::MirStmtKind::Expr(value) => {
+                            value.visit_direct_expression_steps_dyn(visitor);
+                        }
+                        crate::MirStmtKind::CaptureSequence { source, .. } => {
+                            source.visit_direct_expression_steps_dyn(visitor);
+                        }
+                        crate::MirStmtKind::PlaceMutation(_)
+                        | crate::MirStmtKind::WorkspaceEffect { .. }
+                        | crate::MirStmtKind::EnvironmentEffect(_) => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn visit_operands(&self, mut visitor: impl FnMut(&MirOperand)) {
         visit_rvalue_operands(self, &mut visitor, true);
     }
@@ -214,7 +261,17 @@ impl MirRvalue {
     }
 
     pub fn visit_sequence_locals(&self, mut visitor: impl FnMut(&crate::MirSequenceLocalId)) {
-        visit_rvalue_sequences(self, &mut visitor);
+        visit_rvalue_sequences(self, &mut visitor, true);
+    }
+
+    /// References owned by this expression step. Nested contextual regions
+    /// are visited separately by the body validator and must not be counted
+    /// again at their enclosing statement.
+    pub(crate) fn visit_direct_sequence_locals(
+        &self,
+        mut visitor: impl FnMut(&crate::MirSequenceLocalId),
+    ) {
+        visit_rvalue_sequences(self, &mut visitor, false);
     }
 }
 
@@ -500,7 +557,11 @@ fn visit_place_operands_mut(place: &mut crate::MirPlace, visitor: &mut dyn FnMut
     }
 }
 
-fn visit_rvalue_sequences(value: &MirRvalue, visitor: &mut impl FnMut(&crate::MirSequenceLocalId)) {
+fn visit_rvalue_sequences(
+    value: &MirRvalue,
+    visitor: &mut impl FnMut(&crate::MirSequenceLocalId),
+    descend_regions: bool,
+) {
     match value {
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
@@ -511,34 +572,43 @@ fn visit_rvalue_sequences(value: &MirRvalue, visitor: &mut impl FnMut(&crate::Mi
         }
         MirRvalue::Call(call) => {
             for argument in &call.args {
-                if let MirCallArg::CapturedSequence(sequence) = argument {
+                if descend_regions {
+                    argument.visit_sequence_locals(visitor);
+                } else if let MirCallArg::CapturedSequence(sequence) = argument {
                     visitor(sequence);
                 }
             }
         }
         MirRvalue::Future { args, .. } => {
             for argument in args {
-                if let MirCallArg::CapturedSequence(sequence) = argument {
+                if descend_regions {
+                    argument.visit_sequence_locals(visitor);
+                } else if let MirCallArg::CapturedSequence(sequence) = argument {
                     visitor(sequence);
                 }
             }
         }
+        MirRvalue::SubscriptChain(chain) if descend_regions => chain.visit_sequence_locals(visitor),
         MirRvalue::ShortCircuit { right_temps, .. } => {
             for statement in right_temps {
-                visit_stmt_sequences(statement, visitor);
+                visit_stmt_sequences(statement, visitor, descend_regions);
             }
         }
         _ => {}
     }
 }
 
-fn visit_stmt_sequences(statement: &MirStmt, visitor: &mut impl FnMut(&crate::MirSequenceLocalId)) {
+fn visit_stmt_sequences(
+    statement: &MirStmt,
+    visitor: &mut impl FnMut(&crate::MirSequenceLocalId),
+    descend_regions: bool,
+) {
     match &statement.kind {
         crate::MirStmtKind::Assign { value, .. }
         | crate::MirStmtKind::Expr(value)
         | crate::MirStmtKind::MultiAssign { value, .. }
         | crate::MirStmtKind::SequenceAssign { value, .. } => {
-            visit_rvalue_sequences(value, visitor)
+            visit_rvalue_sequences(value, visitor, descend_regions)
         }
         _ => {}
     }

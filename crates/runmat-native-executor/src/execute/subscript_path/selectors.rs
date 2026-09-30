@@ -13,6 +13,16 @@ use super::super::state::HostState;
 mod receiver;
 use receiver::prepare_receiver;
 
+pub(super) fn prepare_dotted_receiver(
+    state: &mut HostState,
+    step: usize,
+    root: Value,
+    prefix: Option<ObjectSubscriptPath>,
+    access: runmat_runtime::object::protocol::ObjectAccessContext,
+) -> NativeExecutorResult<runmat_runtime::object::protocol::PreparedSubscriptReceiver> {
+    prepare_receiver(state, step, root, prefix, access)
+}
+
 pub(super) struct MaterializedSelectors {
     pub components: Vec<ObjectIndexComponent>,
     pub prepared_receiver: Option<Value>,

@@ -291,6 +291,71 @@ impl SequenceState {
         })
     }
 
+    pub(super) fn finish_dotted_invoke_receiver(
+        &mut self,
+        stack: &mut Vec<Value>,
+        prefix_operand_count: usize,
+        argument_operand_count: usize,
+    ) -> Result<(), RuntimeError> {
+        let (prepared, prefix_start, receiver_index) =
+            self.subscript_receivers.last().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "RunMat:SubscriptPathState",
+                    "dotted invocation has no prepared receiver",
+                )
+            })?;
+        let (prepared, prefix_start, receiver_index) =
+            (prepared.receiver().clone(), *prefix_start, *receiver_index);
+        let expected = prefix_start
+            .checked_add(prefix_operand_count)
+            .and_then(|index| index.checked_add(1));
+        let captured_operand_count = self
+            .captures
+            .values()
+            .filter(|window| window.start > receiver_index)
+            .try_fold(0usize, |total, window| total.checked_add(window.len));
+        if expected != Some(receiver_index)
+            || stack.len().checked_sub(receiver_index.saturating_add(1))
+                != captured_operand_count
+                    .and_then(|count| count.checked_add(argument_operand_count))
+        {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:SubscriptPathState",
+                "dotted invocation receiver or arguments moved during preparation",
+            ));
+        }
+        let removed = receiver_index - prefix_start;
+        for window in self
+            .captures
+            .values()
+            .chain(self.assignment.iter())
+            .chain(self.call_outputs.iter())
+        {
+            if window.start >= prefix_start && window.start <= receiver_index {
+                return Err(crate::interpreter::errors::mex(
+                    "RunMat:CommaSeparatedListState",
+                    "sequence window overlaps its prepared receiver",
+                ));
+            }
+        }
+        self.subscript_receivers.pop();
+        for window in self.captures.values_mut() {
+            if window.start > receiver_index {
+                window.start -= removed;
+            }
+        }
+        for window in [&mut self.assignment, &mut self.call_outputs] {
+            if let Some(window) = window.as_mut() {
+                if window.start > receiver_index {
+                    window.start -= removed;
+                }
+            }
+        }
+        stack.drain(prefix_start..=receiver_index);
+        stack.insert(prefix_start, prepared);
+        Ok(())
+    }
+
     pub(super) fn take_destination_builder(
         &mut self,
     ) -> Result<(usize, runmat_runtime::sequence::SequenceDestinationBuilder), RuntimeError> {

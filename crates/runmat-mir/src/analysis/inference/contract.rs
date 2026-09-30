@@ -129,9 +129,9 @@ pub(crate) fn rvalue_contract_with_facts(
         }
         _ => {}
     }
-    value.visit_direct_expression_regions_dyn(&mut |region| {
+    value.visit_direct_expression_steps_dyn(&mut |steps| {
         let (nested_effects, nested_capabilities) =
-            expression_region_contract(region, summaries, facts);
+            expression_steps_contract(steps, summaries, facts);
         effects.0.extend(nested_effects.0);
         capabilities.0.extend(nested_capabilities.0);
     });
@@ -145,24 +145,24 @@ fn expansion_source_contract(
 ) -> (EffectSet, CapabilitySet) {
     let mut effects = EffectSet([EffectKind::Unknown].into_iter().collect());
     let mut capabilities = CapabilitySet::default();
-    source.visit_direct_expression_regions_dyn(&mut |region| {
+    source.visit_direct_expression_steps_dyn(&mut |steps| {
         let (nested_effects, nested_capabilities) =
-            expression_region_contract(region, summaries, facts);
+            expression_steps_contract(steps, summaries, facts);
         effects.0.extend(nested_effects.0);
         capabilities.0.extend(nested_capabilities.0);
     });
     (effects, capabilities)
 }
 
-fn expression_region_contract(
-    region: &crate::MirExpressionRegion,
+fn expression_steps_contract(
+    steps: &[crate::MirExpressionStep],
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     facts: &[Option<ValueFact>],
 ) -> (EffectSet, CapabilitySet) {
     let mut nested_facts = facts.to_vec();
     let mut effects = EffectSet::default();
     let mut capabilities = CapabilitySet::default();
-    for step in region.steps() {
+    for step in steps {
         match step {
             crate::MirExpressionStep::Let { local, value, .. } => {
                 let (step_effects, step_capabilities) =
@@ -219,5 +219,46 @@ pub(crate) fn statement_contract_with_facts(
             expansion_source_contract(source, summaries, facts)
         }
         _ => statement_contract(statement, summaries),
+    }
+}
+
+#[cfg(test)]
+mod dotted_argument_tests {
+    use super::*;
+    use crate::{
+        MirCallArg, MirCallArgumentRegion, MirDottedInvokeArgument, MirExpressionStep, MirLocalId,
+        MirOperand, MirSubscriptChain, MirSubscriptStep,
+    };
+
+    #[test]
+    fn preparation_future_capability_is_visible_inside_dotted_invocation() {
+        let chain = MirSubscriptChain {
+            root: MirOperand::Local(MirLocalId(0)),
+            steps: vec![MirSubscriptStep::DottedInvoke {
+                member: runmat_hir::MemberName("invoke".to_owned()),
+                arguments: vec![MirDottedInvokeArgument::Call(MirCallArgumentRegion {
+                    steps: vec![MirExpressionStep::Let {
+                        local: MirLocalId(1),
+                        value: MirRvalue::Future {
+                            function: FunctionId(7),
+                            args: Vec::new(),
+                            syntax: runmat_hir::CallSyntax::Plain,
+                            requested_outputs: runmat_hir::RequestedOutputCount::One,
+                        },
+                        span: runmat_hir::Span::default(),
+                    }],
+                    argument: MirCallArg::Single(MirOperand::Local(MirLocalId(1))),
+                    span: runmat_hir::Span::default(),
+                })],
+            }],
+            sequence_use: runmat_types::SequenceUse::RequireSingle,
+            context: runmat_types::ObjectIndexingContext::Expression,
+        };
+        let (effects, capabilities) =
+            rvalue_contract(&MirRvalue::SubscriptChain(chain), &BTreeMap::new());
+        assert!(effects.0.contains(&EffectKind::MaySuspend));
+        assert!(capabilities
+            .0
+            .contains(&CapabilityRequirement::ParallelRuntime));
     }
 }

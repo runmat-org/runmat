@@ -51,11 +51,7 @@ impl LoweringCtx {
                 AstSubscriptStep::DottedInvoke(member, indices) => {
                     crate::HirSubscriptStep::DottedInvoke {
                         member: MemberName(member.to_owned()),
-                        indexing: self.lower_indexing_with_context(
-                            indices,
-                            IndexKind::Paren,
-                            IndexResultContext::ReadSingle,
-                        )?,
+                        arguments: self.lower_dotted_invoke_arguments(indices)?,
                     }
                 }
             });
@@ -70,6 +66,33 @@ impl LoweringCtx {
             }),
             span: expression.span(),
         }))
+    }
+
+    fn lower_dotted_invoke_arguments(
+        &mut self,
+        arguments: &[AstExpr],
+    ) -> Result<Vec<crate::HirDottedInvokeArgument>, HirError> {
+        use crate::HirDottedInvokeArgument as Arg;
+
+        let mut lowered = Vec::new();
+        for argument in arguments {
+            if matches!(argument, AstExpr::Colon(_)) {
+                lowered.push(Arg::Colon);
+            } else if let Some(offset) = ast_end_relative_offset(argument) {
+                lowered.push(Arg::End { offset });
+            } else if matches!(argument, AstExpr::NameValueArg(..)) {
+                lowered.extend(
+                    self.lower_call_arguments(std::slice::from_ref(argument))?
+                        .into_iter()
+                        .map(Arg::Value),
+                );
+            } else {
+                lowered.push(Arg::Value(
+                    self.lower_call_argument(argument, RequestedOutputCount::One)?,
+                ));
+            }
+        }
+        Ok(lowered)
     }
 
     fn collect_subscript_chain<'a>(

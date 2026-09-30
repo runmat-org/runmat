@@ -94,17 +94,7 @@ fn remap_expansion_source(
 ) -> Result<(), String> {
     match source {
         crate::MirExpansionSource::SubscriptChain(chain) => {
-            remap_operand(&mut chain.root, remap);
-            for step in &mut chain.steps {
-                match step {
-                    crate::MirSubscriptStep::Index(indexing)
-                    | crate::MirSubscriptStep::DottedInvoke { indexing, .. } => {
-                        remap_indexing(indexing, remap)?
-                    }
-                    crate::MirSubscriptStep::DynamicMember(member) => remap_operand(member, remap),
-                    crate::MirSubscriptStep::Member(_) => {}
-                }
-            }
+            remap_chain(chain, remap)?;
         }
         crate::MirExpansionSource::CellContents { base, indexing } => {
             remap_operand(base, remap);
@@ -137,6 +127,56 @@ fn remap_indexing(
             MirIndexComponent::Colon => {}
         }
     }
+    Ok(())
+}
+
+fn remap_chain(
+    chain: &mut crate::MirSubscriptChain,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
+    remap_operand(&mut chain.root, remap);
+    for step in &mut chain.steps {
+        match step {
+            crate::MirSubscriptStep::Index(indexing) => remap_indexing(indexing, remap)?,
+            crate::MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                for argument in arguments {
+                    match argument {
+                        crate::MirDottedInvokeArgument::Colon => {}
+                        crate::MirDottedInvokeArgument::Contextual(region) => {
+                            remap_region(region, remap)?;
+                        }
+                        crate::MirDottedInvokeArgument::Call(region) => {
+                            for step in &mut region.steps {
+                                match step {
+                                    crate::MirExpressionStep::Let { value, .. } => {
+                                        remap_rvalue(value, remap)?;
+                                    }
+                                    crate::MirExpressionStep::CaptureSequence {
+                                        source, ..
+                                    } => {
+                                        remap_expansion_source(source, remap)?;
+                                    }
+                                }
+                            }
+                            remap_call_arg(&mut region.argument, remap)?;
+                        }
+                    }
+                }
+            }
+            crate::MirSubscriptStep::DynamicMember(member) => remap_operand(member, remap),
+            crate::MirSubscriptStep::Member(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn remap_region(
+    region: &mut crate::MirExpressionRegion,
+    remap: &HashMap<FunctionId, FunctionId>,
+) -> Result<(), String> {
+    region.try_visit_rvalues_mut(|value| remap_rvalue(value, remap))?;
+    region.try_visit_capture_sources_mut(|source| remap_expansion_source(source, remap))?;
+    remap_operand(region.result_mut(), remap);
     Ok(())
 }
 
@@ -217,17 +257,7 @@ fn remap_rvalue(
             remap_indexing(indexing, remap)?;
         }
         MirRvalue::SubscriptChain(chain) => {
-            remap_operand(&mut chain.root, remap);
-            for step in &mut chain.steps {
-                match step {
-                    crate::MirSubscriptStep::Index(indexing)
-                    | crate::MirSubscriptStep::DottedInvoke { indexing, .. } => {
-                        remap_indexing(indexing, remap)?
-                    }
-                    crate::MirSubscriptStep::DynamicMember(member) => remap_operand(member, remap),
-                    crate::MirSubscriptStep::Member(_) => {}
-                }
-            }
+            remap_chain(chain, remap)?;
         }
         MirRvalue::Member { base, .. } => remap_operand(base, remap),
         MirRvalue::DynamicMember { base, member, .. } => {

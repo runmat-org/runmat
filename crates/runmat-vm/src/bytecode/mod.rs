@@ -8,7 +8,7 @@ mod sequence_register;
 mod subscript;
 
 /// Portable schema for serialized [`Bytecode`] payloads.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 8;
+pub const BYTECODE_SCHEMA_VERSION: u16 = 9;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
 pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 5;
 
@@ -36,4 +36,6 @@ pub use program::{
 };
 pub use region::{BytecodeRegion, BytecodeRegionBoundary};
 pub use sequence_register::validate_sequence_register_flow;
-pub use subscript::{BytecodeSubscriptSelector, BytecodeSubscriptStep};
+pub use subscript::{
+    BytecodeDottedInvokeArgument, BytecodeSubscriptSelector, BytecodeSubscriptStep,
+};

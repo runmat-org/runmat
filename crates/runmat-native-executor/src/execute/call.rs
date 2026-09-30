@@ -205,16 +205,45 @@ pub(super) fn materialize_arguments(
     state: &mut HostState,
     arguments: &[MirCallArg],
 ) -> NativeExecutorResult<Vec<Value>> {
+    let embedded = state.enter_embedded_call();
+    let result = materialize_arguments_inner(state, arguments, embedded.as_ref());
+    if let Ok(values) = &result {
+        state.cache_embedded_call(embedded.as_ref(), values);
+    }
+    let finished = state.finish_embedded_call(embedded.as_ref());
+    match (result, finished) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(values), Ok(())) => Ok(values),
+    }
+}
+
+fn materialize_arguments_inner(
+    state: &mut HostState,
+    arguments: &[MirCallArg],
+    embedded: Option<&super::state::EmbeddedOperationIdentity>,
+) -> NativeExecutorResult<Vec<Value>> {
+    if let Some(values) = super::call_suspension::take_completed(state, embedded)? {
+        return Ok(values);
+    }
     let materialized = arguments
         .iter()
         .map(|argument| materialize_argument(state, argument))
         .collect::<NativeExecutorResult<Vec<_>>>()?;
-    super::sync::complete(
-        &state.runtime,
-        runmat_runtime::call::arguments::expand_arguments(&state.runtime, materialized),
-        "call argument expansion",
+    let runtime = state.runtime.clone();
+    super::call_suspension::begin(
+        state,
+        embedded.cloned(),
+        Box::pin(async move {
+            runtime
+                .scope(runmat_runtime::call::arguments::expand_arguments(
+                    &runtime,
+                    materialized,
+                ))
+                .await
+                .map_err(Into::into)
+        }),
     )
-    .finish(state)
 }
 
 fn materialize_argument(

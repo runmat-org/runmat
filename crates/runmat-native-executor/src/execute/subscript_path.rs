@@ -8,6 +8,7 @@ use super::state::HostState;
 use crate::memory::ScopedValueRoots;
 use crate::{NativeExecutorError, NativeExecutorResult};
 mod access;
+mod arguments;
 mod end;
 mod roots;
 mod selectors;
@@ -20,6 +21,9 @@ pub(super) fn read(
     chain: &MirSubscriptChain,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
+    chain.validate().map_err(|error| {
+        NativeExecutorError::Host(format!("invalid MIR subscript chain: {error}"))
+    })?;
     let embedded = state.enter_embedded_call();
     let result = read_inner(state, chain, requested_outputs, embedded.as_ref());
     if let Ok(outputs) = &result {
@@ -75,16 +79,27 @@ fn read_inner(
                     runmat_hir::IndexKind::Brace => ObjectSubscript::braces(selector),
                 });
             }
-            MirSubscriptStep::DottedInvoke { member, indexing } => {
-                let materialized =
-                    materialize_selectors(state, step_index, &root, &steps, indexing, &access)?;
-                if let Some(receiver) = materialized.prepared_receiver {
-                    root = receiver;
-                    steps.clear();
-                }
+            MirSubscriptStep::DottedInvoke { member, arguments } => {
+                // Resolve the preceding path before evaluating this call's
+                // arguments. The cached prepared receiver survives suspension
+                // and prevents replay of earlier invocation effects.
+                let prefix = if steps.is_empty() {
+                    None
+                } else {
+                    Some(ObjectSubscriptPath::new(std::mem::take(&mut steps))?)
+                };
+                let prepared = selectors::prepare_dotted_receiver(
+                    state,
+                    step_index,
+                    root,
+                    prefix,
+                    access.clone(),
+                )?;
+                root = prepared.receiver().clone();
+                let components = arguments::materialize(state, arguments, &prepared)?;
                 steps.extend(ObjectSubscript::dotted_invoke_components(
                     member.clone(),
-                    materialized.components,
+                    components,
                 ));
             }
         }

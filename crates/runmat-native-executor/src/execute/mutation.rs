@@ -230,9 +230,7 @@ fn prepare_place_write(
 ) -> NativeExecutorResult<(PreparedPlaceWrite, Value)> {
     let mut segments = Vec::new();
     let root = flatten_place(place, &mut segments)?;
-    let root_reference = state.locals.get(root.0).copied().ok_or_else(|| {
-        NativeExecutorError::Host("assignment root local is out of bounds".into())
-    })?;
+    let root_reference = state.local_reference(root.0)?;
     let mut current = state.arena.get(root_reference)?.clone();
     let mut parents = Vec::with_capacity(segments.len());
     for segment in &segments {
@@ -314,12 +312,13 @@ pub(super) fn assign_place_to_root(
     Ok((root, updated))
 }
 
-pub(super) fn root_local_value(state: &HostState, place: &MirPlace) -> NativeExecutorResult<Value> {
+pub(super) fn root_local_value(
+    state: &mut HostState,
+    place: &MirPlace,
+) -> NativeExecutorResult<Value> {
     let mut segments = Vec::new();
     let root = flatten_place(place, &mut segments)?;
-    let reference = state.locals.get(root.0).copied().ok_or_else(|| {
-        NativeExecutorError::Host("assignment root local is out of bounds".into())
-    })?;
+    let reference = state.local_reference(root.0)?;
     state.arena.get(reference).cloned()
 }
 

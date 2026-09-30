@@ -6140,7 +6140,9 @@ y = x^[1 2; 3 4];\n",
                         arguments,
                     }] if member.0 == "method"
                         && arguments
-                            == &[crate::bytecode::BytecodeSubscriptSelector::Value]
+                            == &[crate::bytecode::BytecodeDottedInvokeArgument::Call(
+                                runmat_runtime::call::arguments::ArgumentSpec::Single,
+                            )]
                 )
         )));
     }
@@ -6152,41 +6154,24 @@ y = x^[1 2; 3 4];\n",
         fn empty(chain: &mut MirSubscriptChain) {
             chain.steps.clear();
         }
-        fn braces(chain: &mut MirSubscriptChain) {
-            let MirSubscriptStep::DottedInvoke { indexing, .. } = &mut chain.steps[0] else {
+        fn uncaptured_sequence(chain: &mut MirSubscriptChain) {
+            let MirSubscriptStep::DottedInvoke { arguments, .. } = &mut chain.steps[0] else {
                 panic!("expected dotted invocation step");
             };
-            indexing.kind = runmat_hir::IndexKind::Brace;
-        }
-        fn assignment_context(chain: &mut MirSubscriptChain) {
-            let MirSubscriptStep::DottedInvoke { indexing, .. } = &mut chain.steps[0] else {
-                panic!("expected dotted invocation step");
+            let runmat_mir::MirDottedInvokeArgument::Call(region) = &mut arguments[0] else {
+                panic!("expected call argument region");
             };
-            indexing.result_context = IndexResultContext::AssignmentTarget;
-        }
-        fn cell_plan(chain: &mut MirSubscriptChain) {
-            let MirSubscriptStep::DottedInvoke { indexing, .. } = &mut chain.steps[0] else {
-                panic!("expected dotted invocation step");
-            };
-            indexing.plan = MirIndexPlan::Cell;
-        }
-        fn expand_all(chain: &mut MirSubscriptChain) {
-            let MirSubscriptStep::DottedInvoke { indexing, .. } = &mut chain.steps[0] else {
-                panic!("expected dotted invocation step");
-            };
-            indexing.cell_expand_all = true;
+            region.argument =
+                runmat_mir::MirCallArg::CapturedSequence(runmat_mir::MirSequenceLocalId(999));
         }
 
         let cases: &[MalformedChainCase] = &[
             ("empty", empty, "RunMat:MirSubscriptChainInvalid"),
-            ("braces", braces, "RunMat:MirParenCellPlanInvalid"),
             (
-                "assignment context",
-                assignment_context,
-                "RunMat:MirIndexContextInvalid",
+                "uncaptured sequence",
+                uncaptured_sequence,
+                "RunMat:MirSubscriptChainInvalid",
             ),
-            ("cell plan", cell_plan, "RunMat:MirParenCellPlanInvalid"),
-            ("expand all", expand_all, "RunMat:MirCellExpandPlanInvalid"),
         ];
 
         for (label, mutation, expected_identifier) in cases {
@@ -6294,32 +6279,35 @@ y = x^[1 2; 3 4];\n",
     }
 
     #[test]
-    fn compile_preserves_dotted_invoke_origin_in_one_subscript_path() {
+    fn compile_preserves_dotted_invoke_origin_and_executes_before_following_member() {
         let ast = runmat_parser::parse("obj = 1; y = obj.method(2).field;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let bytecode =
             compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).expect("compile");
-        let path = bytecode
+        let paths = bytecode
             .instructions
             .iter()
-            .find_map(|instruction| match instruction {
+            .filter_map(|instruction| match instruction {
                 Instr::ReadSubscriptPath {
                     steps, selection, ..
                 } => Some((steps, selection)),
                 _ => None,
             })
-            .expect("typed path instruction");
+            .collect::<Vec<_>>();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(*paths[0].1, runmat_types::SequenceUse::RequireSingle);
+        assert_eq!(*paths[1].1, runmat_types::SequenceUse::RequireSingle);
         assert!(matches!(
-            path.0.as_slice(),
-            [
-                crate::bytecode::BytecodeSubscriptStep::DottedInvoke { member, arguments },
-                crate::bytecode::BytecodeSubscriptStep::Member(field),
-            ] if member.0 == "method"
-                && arguments == &[crate::bytecode::BytecodeSubscriptSelector::Value]
-                && field.0 == "field"
+            paths[0].0.as_slice(),
+                [crate::bytecode::BytecodeSubscriptStep::DottedInvoke { member, arguments }]
+                    if member.0 == "method"
+                        && arguments == &[crate::bytecode::BytecodeDottedInvokeArgument::Call(
+                            runmat_runtime::call::arguments::ArgumentSpec::Single,
+                        )]
         ));
-        assert_eq!(*path.1, runmat_types::SequenceUse::RequireSingle);
+        assert!(matches!(paths[1].0.as_slice(),
+            [crate::bytecode::BytecodeSubscriptStep::Member(field)] if field.0 == "field"));
     }
 
     #[test]

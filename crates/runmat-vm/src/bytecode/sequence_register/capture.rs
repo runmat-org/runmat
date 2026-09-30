@@ -42,6 +42,9 @@ pub(super) fn validate_sequence_capture_flow(instructions: &[Instr]) -> Result<(
         for slot in captured_aggregate_slots(&instructions[pc]) {
             consume(slot, pc, &mut consumed, &mut outgoing)?;
         }
+        for slot in captured_dotted_argument_slots(&instructions[pc]) {
+            consume(slot, pc, &mut consumed, &mut outgoing)?;
+        }
         let successors = normal_successors(instructions, pc)?;
         if successors.is_empty() && !outgoing.is_empty() {
             return Err(format!("captured comma-separated sequence locals {outgoing:?} remain live at function exit instruction {pc}"));
@@ -107,4 +110,84 @@ fn captured_aggregate_slots(instruction: &Instr) -> impl Iterator<Item = usize> 
         crate::bytecode::AggregateElementSpec::CapturedSequence { slot } => Some(*slot),
         crate::bytecode::AggregateElementSpec::Single => None,
     })
+}
+
+fn captured_dotted_argument_slots(instruction: &Instr) -> impl Iterator<Item = usize> + '_ {
+    let steps = match instruction {
+        Instr::ReadSubscriptPath { steps, .. } | Instr::CaptureSubscriptPath { steps, .. } => {
+            Some(steps.as_slice())
+        }
+        _ => None,
+    };
+    steps
+        .into_iter()
+        .flatten()
+        .flat_map(|step| match step {
+            crate::bytecode::BytecodeSubscriptStep::DottedInvoke { arguments, .. } => {
+                Some(arguments.as_slice())
+            }
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|argument| match argument {
+            crate::bytecode::BytecodeDottedInvokeArgument::Call(
+                ArgumentSpec::CapturedSequence { slot },
+            ) => Some(*slot),
+            crate::bytecode::BytecodeDottedInvokeArgument::Colon
+            | crate::bytecode::BytecodeDottedInvokeArgument::Call(_) => None,
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytecode::{BytecodeDottedInvokeArgument, BytecodeSubscriptStep};
+    use runmat_types::{MemberName, ObjectIndexingContext, SequenceUse};
+
+    fn capture(slot: usize) -> Instr {
+        Instr::CaptureMemberSequence {
+            member: MemberName::from("values"),
+            sequence_slot: slot,
+        }
+    }
+
+    fn invoke(slots: &[usize]) -> Instr {
+        Instr::ReadSubscriptPath {
+            steps: vec![BytecodeSubscriptStep::DottedInvoke {
+                member: MemberName::from("method"),
+                arguments: slots
+                    .iter()
+                    .map(|slot| {
+                        BytecodeDottedInvokeArgument::Call(ArgumentSpec::CapturedSequence {
+                            slot: *slot,
+                        })
+                    })
+                    .collect(),
+            }],
+            selection: SequenceUse::RequireSingle,
+            context: ObjectIndexingContext::Expression,
+            to_sequence_register: false,
+        }
+    }
+
+    #[test]
+    fn dotted_argument_consumes_each_captured_sequence_once() {
+        assert!(validate_sequence_capture_flow(&[
+            capture(1),
+            capture(2),
+            invoke(&[1, 2]),
+            Instr::Return
+        ])
+        .is_ok());
+        assert!(
+            validate_sequence_capture_flow(&[invoke(&[1]), Instr::Return])
+                .unwrap_err()
+                .contains("without a live capture")
+        );
+        assert!(
+            validate_sequence_capture_flow(&[capture(1), invoke(&[1, 1]), Instr::Return])
+                .unwrap_err()
+                .contains("more than once")
+        );
+    }
 }

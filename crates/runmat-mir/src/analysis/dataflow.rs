@@ -521,8 +521,8 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
                     }
                 }
                 MirStmtKind::CaptureSequence { source, .. } => {
-                    source.visit_direct_expression_regions_dyn(&mut |region| {
-                        diagnose_region_semantics(region, &mut diagnostics)
+                    source.visit_direct_expression_steps_dyn(&mut |steps| {
+                        diagnose_region_semantics(steps, &mut diagnostics)
                     });
                 }
                 MirStmtKind::WorkspaceEffect { effect, .. } => {
@@ -586,22 +586,22 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
         MirRvalue::Index { .. } => {}
         _ => {}
     }
-    value.visit_direct_expression_regions_dyn(&mut |region| {
-        diagnose_region_semantics(region, diagnostics)
+    value.visit_direct_expression_steps_dyn(&mut |steps| {
+        diagnose_region_semantics(steps, diagnostics)
     });
 }
 
 fn diagnose_region_semantics(
-    region: &crate::MirExpressionRegion,
+    steps: &[crate::MirExpressionStep],
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
-    for step in region.steps() {
+    for step in steps {
         match step {
             crate::MirExpressionStep::Let { value, span, .. } => {
                 diagnose_rvalue_semantics(value, *span, diagnostics)
             }
             crate::MirExpressionStep::CaptureSequence { source, .. } => {
-                source.visit_direct_expression_regions_dyn(&mut |nested| {
+                source.visit_direct_expression_steps_dyn(&mut |nested| {
                     diagnose_region_semantics(nested, diagnostics)
                 });
             }

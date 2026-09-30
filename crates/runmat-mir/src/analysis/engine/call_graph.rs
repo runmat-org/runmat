@@ -30,8 +30,17 @@ pub(crate) fn externally_reachable_functions(assembly: &MirAssembly) -> BTreeSet
 
 fn collect_escaped_handles(value: &MirRvalue, reachable: &mut BTreeSet<FunctionId>) {
     if !matches!(value, MirRvalue::ShortCircuit { .. }) {
-        value.visit_direct_expression_regions_dyn(&mut |region| {
-            region.visit_operands(|value| operand_handle(value, reachable));
+        value.visit_direct_expression_steps_dyn(&mut |steps| {
+            for step in steps {
+                match step {
+                    crate::MirExpressionStep::Let { value, .. } => {
+                        value.visit_operands(|operand| operand_handle(operand, reachable));
+                    }
+                    crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                        source.visit_operands(|operand| operand_handle(operand, reachable));
+                    }
+                }
+            }
         });
     }
     match value {
@@ -108,8 +117,8 @@ pub(crate) fn call_graph(assembly: &MirAssembly) -> BTreeMap<FunctionId, BTreeSe
 }
 
 fn collect_expansion_calls(source: &crate::MirExpansionSource, callees: &mut BTreeSet<FunctionId>) {
-    source.visit_direct_expression_regions_dyn(&mut |region| {
-        for step in region.steps() {
+    source.visit_direct_expression_steps_dyn(&mut |steps| {
+        for step in steps {
             match step {
                 crate::MirExpressionStep::Let { value, .. } => collect_calls(value, callees),
                 crate::MirExpressionStep::CaptureSequence { source, .. } => {
@@ -122,8 +131,8 @@ fn collect_expansion_calls(source: &crate::MirExpansionSource, callees: &mut BTr
 
 fn collect_calls(value: &MirRvalue, callees: &mut BTreeSet<FunctionId>) {
     if !matches!(value, MirRvalue::ShortCircuit { .. }) {
-        value.visit_direct_expression_regions_dyn(&mut |region| {
-            for step in region.steps() {
+        value.visit_direct_expression_steps_dyn(&mut |steps| {
+            for step in steps {
                 match step {
                     crate::MirExpressionStep::Let { value, .. } => collect_calls(value, callees),
                     crate::MirExpressionStep::CaptureSequence { source, .. } => {
@@ -274,5 +283,46 @@ end
         let main = by_name["main"];
         assert!(graph[&main].contains(&by_name["helper"]));
         assert!(graph[&main].contains(&by_name["consume"]));
+    }
+
+    #[test]
+    fn dotted_invocation_argument_preparation_enters_the_call_graph() {
+        let ast = runmat_parser::parse(
+            r#"
+function out = main()
+  receiver = struct('invoke', @deal);
+  out = receiver.invoke(argument());
+end
+function out = argument()
+  out = 7;
+end
+"#,
+        )
+        .expect("parse dotted invocation fixture");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower dotted invocation HIR");
+        let mir =
+            crate::lowering::lower_assembly(&hir.assembly).expect("lower dotted invocation MIR");
+        let by_name = mir
+            .functions
+            .iter()
+            .map(|(id, metadata)| (metadata.name.0.as_str(), *id))
+            .collect::<BTreeMap<_, _>>();
+        let graph = call_graph(&mir);
+        assert!(graph[&by_name["main"]].contains(&by_name["argument"]));
+        let contains_preparation_call = mir.bodies[&by_name["main"]]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .filter_map(|statement| match &statement.kind {
+                MirStmtKind::Assign { value, .. } | MirStmtKind::Expr(value) => Some(value),
+                _ => None,
+            })
+            .filter(|value| matches!(value, MirRvalue::SubscriptChain(_)))
+            .any(|value| {
+                crate::construct::rvalue_construct_inventory(value)
+                    .contains(&crate::construct::MirConstructKind::Call)
+            });
+        assert!(contains_preparation_call);
     }
 }

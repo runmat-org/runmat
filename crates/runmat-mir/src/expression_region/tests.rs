@@ -14,6 +14,33 @@ fn let_step(local: usize, value: MirRvalue) -> MirExpressionStep {
 }
 
 #[test]
+fn subscript_chain_rejects_invalid_contextual_dotted_argument() {
+    let invalid = MirExpressionRegion {
+        steps: vec![
+            let_step(1, MirRvalue::Use(MirOperand::Local(MirLocalId(2)))),
+            let_step(
+                2,
+                MirRvalue::Use(MirOperand::Constant(crate::MirConstant::Bool(true))),
+            ),
+        ],
+        result: MirOperand::Local(MirLocalId(1)),
+    };
+    let chain = crate::MirSubscriptChain {
+        root: MirOperand::Local(MirLocalId(0)),
+        steps: vec![crate::MirSubscriptStep::DottedInvoke {
+            member: runmat_hir::MemberName("method".to_owned()),
+            arguments: vec![crate::MirDottedInvokeArgument::Contextual(invalid)],
+        }],
+        sequence_use: runmat_types::SequenceUse::RequireSingle,
+        context: runmat_types::ObjectIndexingContext::Expression,
+    };
+    assert_eq!(
+        chain.validate(),
+        Err(crate::MirSubscriptChainError::InvalidDottedArgumentRegion)
+    );
+}
+
+#[test]
 fn validates_ordered_local_and_sequence_definitions() {
     let forward_local = MirExpressionRegion {
         steps: vec![

@@ -14,6 +14,9 @@ mod native_deep_learning;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_object_indexing.rs"]
 mod native_object_indexing;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_method_expansion.rs"]
+mod native_method_expansion;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};

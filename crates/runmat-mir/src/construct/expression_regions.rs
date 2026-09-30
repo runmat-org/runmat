@@ -3,11 +3,11 @@ use runmat_types::{CapabilitySet, EffectKind, EffectSet};
 use super::MirConstructKind;
 
 pub(super) fn declared_requirements(
-    region: &crate::MirExpressionRegion,
+    steps: &[crate::MirExpressionStep],
 ) -> (EffectSet, CapabilitySet) {
     let mut effects = EffectSet::default();
     let mut capabilities = CapabilitySet::default();
-    for step in region.steps() {
+    for step in steps {
         match step {
             crate::MirExpressionStep::Let { value, .. } => {
                 let (nested_effects, nested_capabilities) =
@@ -17,7 +17,7 @@ pub(super) fn declared_requirements(
             }
             crate::MirExpressionStep::CaptureSequence { source, .. } => {
                 effects.0.insert(EffectKind::Unknown);
-                source.visit_direct_expression_regions_dyn(&mut |nested| {
+                source.visit_direct_expression_steps_dyn(&mut |nested| {
                     let (nested_effects, nested_capabilities) = declared_requirements(nested);
                     effects.0.extend(nested_effects.0);
                     capabilities.0.extend(nested_capabilities.0);
@@ -28,16 +28,16 @@ pub(super) fn declared_requirements(
     (effects, capabilities)
 }
 
-pub(super) fn inventory(region: &crate::MirExpressionRegion) -> Vec<MirConstructKind> {
+pub(super) fn inventory(steps: &[crate::MirExpressionStep]) -> Vec<MirConstructKind> {
     let mut constructs = Vec::new();
-    for step in region.steps() {
+    for step in steps {
         match step {
             crate::MirExpressionStep::Let { value, .. } => {
                 constructs.extend(super::rvalue_construct_inventory(value));
             }
             crate::MirExpressionStep::CaptureSequence { source, .. } => {
                 constructs.push(MirConstructKind::CaptureSequence);
-                source.visit_direct_expression_regions_dyn(&mut |nested| {
+                source.visit_direct_expression_steps_dyn(&mut |nested| {
                     constructs.extend(inventory(nested));
                 });
             }

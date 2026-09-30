@@ -7,6 +7,12 @@ pub enum BytecodeSubscriptSelector {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BytecodeDottedInvokeArgument {
+    Colon,
+    Call(runmat_runtime::call::arguments::ArgumentSpec),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BytecodeSubscriptStep {
     Parentheses {
         selectors: Vec<BytecodeSubscriptSelector>,
@@ -18,7 +24,7 @@ pub enum BytecodeSubscriptStep {
     DynamicMember,
     DottedInvoke {
         member: runmat_types::MemberName,
-        arguments: Vec<BytecodeSubscriptSelector>,
+        arguments: Vec<BytecodeDottedInvokeArgument>,
     },
 }
 
@@ -32,8 +38,11 @@ impl BytecodeSubscriptStep {
             Self::DynamicMember => 1,
             Self::DottedInvoke { arguments, .. } => arguments
                 .iter()
-                .filter(|selector| matches!(selector, BytecodeSubscriptSelector::Value))
-                .count(),
+                .map(|argument| match argument {
+                    BytecodeDottedInvokeArgument::Colon => 0,
+                    BytecodeDottedInvokeArgument::Call(spec) => spec.stack_operand_count(),
+                })
+                .sum(),
             Self::Member(_) => 0,
         }
     }

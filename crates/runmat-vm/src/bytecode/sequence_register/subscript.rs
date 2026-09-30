@@ -18,6 +18,30 @@ pub(super) fn validate_subscript_descriptors(instructions: &[Instr]) -> Result<(
         if !matches!(instruction, Instr::BeginSubscriptEndReceiver { .. }) && steps.is_empty() {
             return Err(format!("subscript path at instruction {pc} is empty"));
         }
+        let dotted = steps.iter().any(|step| {
+            matches!(
+                step,
+                super::super::BytecodeSubscriptStep::DottedInvoke { .. }
+            )
+        });
+        if dotted
+            && (steps.len() != 1 || matches!(instruction, Instr::BeginSubscriptEndReceiver { .. }))
+        {
+            return Err(format!(
+                "dotted invocation at instruction {pc} must be its own execution segment"
+            ));
+        }
+        if dotted
+            && !matches!(
+                pc.checked_sub(1)
+                    .and_then(|previous| instructions.get(previous)),
+                Some(Instr::FinishDottedInvokeReceiver { .. })
+            )
+        {
+            return Err(format!(
+                "dotted invocation at instruction {pc} has no prepared execution segment"
+            ));
+        }
         steps.iter().try_fold(0usize, |total, step| {
             total.checked_add(step.operand_count()).ok_or_else(|| {
                 format!("subscript path operand count overflows at instruction {pc}")
@@ -27,6 +51,49 @@ pub(super) fn validate_subscript_descriptors(instructions: &[Instr]) -> Result<(
         {
             return Err(format!(
                 "subscript path at instruction {pc} writes the sequence register without destination-cardinality selection"
+            ));
+        }
+    }
+    for (pc, instruction) in instructions.iter().enumerate() {
+        let Instr::FinishDottedInvokeReceiver {
+            argument_operand_count,
+            ..
+        } = instruction
+        else {
+            continue;
+        };
+        let Some(next) = instructions.get(pc + 1) else {
+            return Err(format!(
+                "dotted invocation at instruction {pc} has no execution segment"
+            ));
+        };
+        let steps = match next {
+            Instr::ReadSubscriptPath { steps, .. } | Instr::CaptureSubscriptPath { steps, .. } => {
+                steps.as_slice()
+            }
+            _ => {
+                return Err(format!(
+                    "dotted invocation at instruction {pc} is not followed by its execution segment"
+                ))
+            }
+        };
+        let [super::super::BytecodeSubscriptStep::DottedInvoke { arguments, .. }] = steps else {
+            return Err(format!(
+                "dotted invocation at instruction {pc} has an invalid execution segment"
+            ));
+        };
+        let count = arguments.iter().try_fold(0usize, |total, argument| {
+            let width = match argument {
+                super::super::BytecodeDottedInvokeArgument::Colon => 0,
+                super::super::BytecodeDottedInvokeArgument::Call(spec) => {
+                    spec.stack_operand_count()
+                }
+            };
+            total.checked_add(width)
+        });
+        if count != Some(*argument_operand_count) {
+            return Err(format!(
+                "dotted invocation at instruction {pc} declares the wrong argument operand count"
             ));
         }
     }
@@ -131,6 +198,21 @@ fn update_end(instruction: &Instr, pc: usize, state: &mut Vec<usize>) -> Result<
             if *selector_count == 0 {
                 return Err(format!(
                     "subscript end receiver at instruction {pc} has no selector components"
+                ));
+            }
+        }
+        Instr::FinishDottedInvokeReceiver {
+            prefix_operand_count,
+            ..
+        } => {
+            let Some(expected_prefix_operands) = state.pop() else {
+                return Err(format!(
+                    "dotted invocation at instruction {pc} has no prepared receiver"
+                ));
+            };
+            if expected_prefix_operands != *prefix_operand_count {
+                return Err(format!(
+                    "dotted invocation at instruction {pc} declares {prefix_operand_count} prefix operands but prepared {expected_prefix_operands}"
                 ));
             }
         }

@@ -40,8 +40,8 @@ fn collect_expansion(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     calls: &mut Vec<CallObservation>,
 ) {
-    source.visit_direct_expression_regions_dyn(&mut |region| {
-        collect_region(region, state, summaries, calls)
+    source.visit_direct_expression_steps_dyn(&mut |steps| {
+        collect_region(steps, state, summaries, calls)
     });
 }
 
@@ -92,8 +92,8 @@ fn collect_value(
         _ => {}
     }
     if !matches!(value, MirRvalue::ShortCircuit { .. }) {
-        value.visit_direct_expression_regions_dyn(&mut |region| {
-            collect_region(region, state, summaries, calls)
+        value.visit_direct_expression_steps_dyn(&mut |steps| {
+            collect_region(steps, state, summaries, calls)
         });
     }
 }
@@ -120,13 +120,13 @@ fn collect_statement_sequence(
 }
 
 fn collect_region(
-    region: &crate::MirExpressionRegion,
+    steps: &[crate::MirExpressionStep],
     state: &FlowState,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     calls: &mut Vec<CallObservation>,
 ) {
     let mut nested = state.clone();
-    for step in region.steps() {
+    for step in steps {
         match step {
             crate::MirExpressionStep::Let { local, value, span } => {
                 collect_value(value, &nested, *span, summaries, calls);

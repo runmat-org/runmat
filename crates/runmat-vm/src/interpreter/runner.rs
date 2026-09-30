@@ -1050,6 +1050,7 @@ async fn run_interpreter_inner(
                 | Instr::BeginSubscriptEndReceiver { .. }
                 | Instr::LoadSubscriptEnd { .. }
                 | Instr::FinishSubscriptEndReceiver { .. }
+                | Instr::FinishDottedInvokeReceiver { .. }
                 | Instr::BeginOutputAssignment { .. }
                 | Instr::PrepareFixedOutputTarget
                 | Instr::PrepareDiscardOutputTarget

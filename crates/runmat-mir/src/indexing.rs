@@ -1,7 +1,10 @@
-use crate::MirOperand;
+use crate::{MirExpressionStep, MirOperand, MirSequenceLocalId};
 use runmat_hir::{IndexKind, IndexResultContext};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+mod dotted_argument;
+pub use dotted_argument::{MirCallArgumentRegion, MirDottedInvokeArgument};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirSubscriptChain {
@@ -18,7 +21,7 @@ pub enum MirSubscriptStep {
     DynamicMember(MirOperand),
     DottedInvoke {
         member: runmat_hir::MemberName,
-        indexing: MirIndexing,
+        arguments: Vec<MirDottedInvokeArgument>,
     },
 }
 
@@ -29,8 +32,7 @@ pub enum MirSubscriptChainError {
     ParenthesesWithCellPlan,
     BracesWithoutCellPlan,
     InvalidCellExpandAll,
-    DottedInvokeMustUseParentheses,
-    DottedInvokeMustReadSingle,
+    InvalidDottedArgumentRegion,
 }
 
 impl fmt::Display for MirSubscriptChainError {
@@ -45,11 +47,8 @@ impl fmt::Display for MirSubscriptChainError {
             Self::InvalidCellExpandAll => {
                 "cell expansion marker does not match an all-colon braces step"
             }
-            Self::DottedInvokeMustUseParentheses => {
-                "dotted invocation step does not use parentheses indexing"
-            }
-            Self::DottedInvokeMustReadSingle => {
-                "dotted invocation step does not have single-value read context"
+            Self::InvalidDottedArgumentRegion => {
+                "dotted invocation argument preparation is invalid"
             }
         })
     }
@@ -74,6 +73,47 @@ impl MirSubscriptStep {
 }
 
 impl MirSubscriptChain {
+    pub(crate) fn visit_sequence_locals(&self, visitor: &mut dyn FnMut(&MirSequenceLocalId)) {
+        for step in &self.steps {
+            match step {
+                MirSubscriptStep::Index(indexing) => indexing.visit_sequence_locals(visitor),
+                MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                    for argument in arguments {
+                        argument.visit_sequence_locals(visitor);
+                    }
+                }
+                MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => {}
+            }
+        }
+    }
+    pub fn visit_direct_expression_steps(&self, mut visitor: impl FnMut(&[MirExpressionStep])) {
+        self.visit_direct_expression_steps_dyn(&mut visitor);
+    }
+
+    pub(crate) fn visit_direct_expression_steps_dyn(
+        &self,
+        visitor: &mut dyn FnMut(&[MirExpressionStep]),
+    ) {
+        for step in &self.steps {
+            match step {
+                MirSubscriptStep::Index(indexing) => indexing
+                    .visit_direct_expression_regions_dyn(&mut |region| visitor(region.steps())),
+                MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                    for argument in arguments {
+                        match argument {
+                            MirDottedInvokeArgument::Colon => {}
+                            MirDottedInvokeArgument::Contextual(region) => visitor(region.steps()),
+                            MirDottedInvokeArgument::Call(region) => {
+                                region.visit_direct_preparation_steps(visitor)
+                            }
+                        }
+                    }
+                }
+                MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => {}
+            }
+        }
+    }
+
     pub fn validate(&self) -> Result<(), MirSubscriptChainError> {
         if self.steps.is_empty() {
             return Err(MirSubscriptChainError::Empty);
@@ -81,14 +121,13 @@ impl MirSubscriptChain {
         for step in &self.steps {
             match step {
                 MirSubscriptStep::Index(indexing) => validate_index_step(indexing)?,
-                MirSubscriptStep::DottedInvoke { indexing, .. } => {
-                    if indexing.kind != IndexKind::Paren {
-                        return Err(MirSubscriptChainError::DottedInvokeMustUseParentheses);
+                MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                    if arguments
+                        .iter()
+                        .any(|argument| argument.validate().is_err())
+                    {
+                        return Err(MirSubscriptChainError::InvalidDottedArgumentRegion);
                     }
-                    if indexing.result_context != IndexResultContext::ReadSingle {
-                        return Err(MirSubscriptChainError::DottedInvokeMustReadSingle);
-                    }
-                    validate_index_plan(indexing)?;
                 }
                 MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => {}
             }
@@ -98,11 +137,12 @@ impl MirSubscriptChain {
 
     pub fn contains_contextual_end(&self) -> bool {
         self.steps.iter().any(|step| match step {
-            MirSubscriptStep::Index(indexing)
-            | MirSubscriptStep::DottedInvoke { indexing, .. } => indexing
+            MirSubscriptStep::Index(indexing) => indexing
                 .components
                 .iter()
                 .any(|component| matches!(component, MirIndexComponent::ContextualExpr(region) if region.contains_contextual_end())),
+            MirSubscriptStep::DottedInvoke { arguments, .. } =>
+                arguments.iter().any(MirDottedInvokeArgument::contains_contextual_end),
             MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => false,
         })
     }
@@ -112,8 +152,10 @@ impl MirSubscriptChain {
         for step in &self.steps {
             match step {
                 MirSubscriptStep::Index(indexing) => indexing.visit_operands(&mut visitor),
-                MirSubscriptStep::DottedInvoke { indexing, .. } => {
-                    indexing.visit_operands(&mut visitor)
+                MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                    for argument in arguments {
+                        argument.visit_operands(&mut visitor);
+                    }
                 }
                 MirSubscriptStep::DynamicMember(member) => visitor(member),
                 MirSubscriptStep::Member(_) => {}
@@ -126,8 +168,10 @@ impl MirSubscriptChain {
         for step in &self.steps {
             match step {
                 MirSubscriptStep::Index(indexing) => indexing.visit_outer_operands(&mut visitor),
-                MirSubscriptStep::DottedInvoke { indexing, .. } => {
-                    indexing.visit_outer_operands(&mut visitor)
+                MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                    for argument in arguments {
+                        argument.visit_outer_operands(&mut visitor);
+                    }
                 }
                 MirSubscriptStep::DynamicMember(member) => visitor(member),
                 MirSubscriptStep::Member(_) => {}
@@ -138,9 +182,13 @@ impl MirSubscriptChain {
     pub fn visit_expression_regions(&self, mut visitor: impl FnMut(&crate::MirExpressionRegion)) {
         for step in &self.steps {
             match step {
-                MirSubscriptStep::Index(indexing)
-                | MirSubscriptStep::DottedInvoke { indexing, .. } => {
+                MirSubscriptStep::Index(indexing) => {
                     indexing.visit_expression_regions(&mut visitor)
+                }
+                MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                    for argument in arguments {
+                        argument.visit_expression_regions(&mut visitor);
+                    }
                 }
                 MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => {}
             }
@@ -153,9 +201,13 @@ impl MirSubscriptChain {
     ) {
         for step in &self.steps {
             match step {
-                MirSubscriptStep::Index(indexing)
-                | MirSubscriptStep::DottedInvoke { indexing, .. } => {
+                MirSubscriptStep::Index(indexing) => {
                     indexing.visit_direct_expression_regions_dyn(visitor)
+                }
+                MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                    for argument in arguments {
+                        argument.visit_direct_expression_regions_dyn(visitor);
+                    }
                 }
                 MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => {}
             }
@@ -167,8 +219,10 @@ impl MirSubscriptChain {
         for step in &mut self.steps {
             match step {
                 MirSubscriptStep::Index(indexing) => indexing.visit_operands_mut(&mut visitor),
-                MirSubscriptStep::DottedInvoke { indexing, .. } => {
-                    indexing.visit_operands_mut(&mut visitor)
+                MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                    for argument in arguments {
+                        argument.visit_operands_mut(&mut visitor);
+                    }
                 }
                 MirSubscriptStep::DynamicMember(member) => visitor(member),
                 MirSubscriptStep::Member(_) => {}
@@ -233,6 +287,20 @@ pub enum MirIndexComponent {
 }
 
 impl MirIndexing {
+    pub(crate) fn visit_sequence_locals(&self, visitor: &mut dyn FnMut(&MirSequenceLocalId)) {
+        for component in &self.components {
+            if let MirIndexComponent::ContextualExpr(region) = component {
+                let local_sequences = region
+                    .defined_sequences()
+                    .collect::<std::collections::BTreeSet<_>>();
+                region.visit_sequence_locals(|sequence| {
+                    if !local_sequences.contains(sequence) {
+                        visitor(sequence);
+                    }
+                });
+            }
+        }
+    }
     pub(crate) fn visit_direct_expression_regions_dyn(
         &self,
         visitor: &mut dyn FnMut(&crate::MirExpressionRegion),

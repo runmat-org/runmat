@@ -64,6 +64,37 @@ fn compile_executor(
 }
 
 #[test]
+fn specialized_product_still_rejects_mismatched_selected_entry_profile() {
+    let profile =
+        runmat_jit::tiering::RepresentationProfile::from_facts(Vec::new(), usize::MAX).unwrap();
+    let executor = GenericCompiler::compile_specialized_executor_with_resume_points(
+        fixture(),
+        None,
+        BTreeMap::new(),
+        profile,
+    )
+    .unwrap();
+    let error = executor
+        .begin_request(runmat_native_executor::NativeInvocationRequest {
+            function: ProgramFunctionId(0),
+            captures: Vec::new(),
+            arguments: vec![Value::Num(7.0)],
+            requested_outputs: 1,
+            runtime: runtime_context(),
+            deoptimization: DeoptimizationPolicy::default(),
+            osr_target: None,
+            workspace: None,
+        })
+        .err()
+        .expect("mismatched selected entry must be rejected before execution");
+    assert!(matches!(
+        error,
+        NativeExecutorError::Host(message)
+            if message == "specialized native entry representation guard failed"
+    ));
+}
+
+#[test]
 fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
     let mut dependencies = DependencyTracker::default();
     let program = DependencyKey::Program("project".into());

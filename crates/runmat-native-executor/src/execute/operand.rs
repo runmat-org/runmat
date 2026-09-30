@@ -333,9 +333,7 @@ pub(super) fn evaluate_operand(
 ) -> NativeExecutorResult<NativeValueRef> {
     match operand {
         MirOperand::Local(local) => {
-            let value = state.locals.get(local.0).copied().ok_or_else(|| {
-                NativeExecutorError::Host(format!("local {} is out of bounds", local.0))
-            })?;
+            let value = state.local_reference(local.0)?;
             if value.is_null()
                 && u32::try_from(local.0)
                     .ok()

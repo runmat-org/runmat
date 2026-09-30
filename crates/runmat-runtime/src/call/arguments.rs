@@ -13,14 +13,14 @@ pub(crate) mod roots;
 /// The descriptor is shared by bytecode and native execution. It captures only
 /// language-level expansion semantics and deliberately contains no operand-stack
 /// or instruction-decoding state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArgumentSpec {
     Single,
     Expansion(ArgumentExpansionSpec),
     CapturedSequence { slot: usize },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArgumentExpansionSpec {
     CellContents {
         num_indices: usize,

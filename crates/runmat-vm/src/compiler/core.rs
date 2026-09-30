@@ -1580,7 +1580,15 @@ impl Compiler {
         region
             .validate()
             .map_err(|message| self.compile_error(message))?;
-        for step in region.steps() {
+        self.compile_mir_expression_steps(region.steps())?;
+        self.compile_mir_operand(region.result())
+    }
+
+    fn compile_mir_expression_steps(
+        &mut self,
+        steps: &[runmat_mir::MirExpressionStep],
+    ) -> Result<(), CompileError> {
+        for step in steps {
             let statement = match step {
                 runmat_mir::MirExpressionStep::Let { local, value, span } => MirStmt {
                     kind: MirStmtKind::Assign {
@@ -1603,7 +1611,7 @@ impl Compiler {
             };
             self.compile_mir_stmt(&statement)?;
         }
-        self.compile_mir_operand(region.result())
+        Ok(())
     }
 
     fn compile_contextual_slice_components(

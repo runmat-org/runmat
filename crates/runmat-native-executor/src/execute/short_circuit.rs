@@ -16,7 +16,7 @@ pub(super) fn evaluate(
 ) -> NativeExecutorResult<Vec<NativeValueRef>> {
     let (region, next_step, completed) = state.enter_contextual_region();
     if let Some(result) = completed {
-        return Ok(vec![result]);
+        return Ok(result);
     }
     // The owning site clears region state and captured sequences on errors or
     // cancellation. Suspension retains both until the exact site is resumed.
@@ -31,7 +31,7 @@ pub(super) fn evaluate(
         };
         if skipped {
             let result = state.arena.insert(Value::Bool(truth));
-            state.finish_contextual_region(region, result);
+            state.finish_contextual_region(region, vec![result]);
             return Ok(vec![result]);
         }
     }
@@ -53,7 +53,7 @@ pub(super) fn evaluate(
     let truth = logical_truth(state, &right, "short-circuit right operand")?;
     state.finish_contextual_step(region, step, step + 1)?;
     let result = state.arena.insert(Value::Bool(truth));
-    state.finish_contextual_region(region, result);
+    state.finish_contextual_region(region, vec![result]);
     Ok(vec![result])
 }
 

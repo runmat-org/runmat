@@ -3923,12 +3923,12 @@ fn ordinary_dotted_indexing_lowers_as_one_ordered_mir_path() {
     assert!(matches!(
         chain.steps.as_slice(),
         [
-            runmat_mir::MirSubscriptStep::DottedInvoke { member: method, indexing: paren },
+            runmat_mir::MirSubscriptStep::DottedInvoke { member: method, arguments },
             runmat_mir::MirSubscriptStep::Member(field),
             runmat_mir::MirSubscriptStep::Index(brace),
         ] if method.0 == "method"
             && field.0 == "field"
-            && paren.kind == runmat_hir::IndexKind::Paren
+            && arguments.len() == 1
             && brace.kind == runmat_hir::IndexKind::Brace
     ));
     assert_eq!(

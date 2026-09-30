@@ -235,9 +235,9 @@ pub fn rvalue_declared_requirements(
         }
         _ => {}
     }
-    value.visit_direct_expression_regions_dyn(&mut |region| {
+    value.visit_direct_expression_steps_dyn(&mut |steps| {
         let (nested_effects, nested_capabilities) =
-            expression_regions::declared_requirements(region);
+            expression_regions::declared_requirements(steps);
         effects.0.extend(nested_effects.0);
         capabilities.0.extend(nested_capabilities.0);
     });
@@ -248,8 +248,8 @@ pub fn rvalue_declared_requirements(
 /// conditional statement region embedded by short-circuit MIR.
 pub fn rvalue_construct_inventory(value: &crate::MirRvalue) -> Vec<MirConstructKind> {
     let mut constructs = rvalue_construct_inventory_without_regions(value);
-    value.visit_direct_expression_regions_dyn(&mut |region| {
-        constructs.extend(expression_regions::inventory(region));
+    value.visit_direct_expression_steps_dyn(&mut |steps| {
+        constructs.extend(expression_regions::inventory(steps));
     });
     constructs
 }
@@ -317,9 +317,9 @@ pub fn statement_declared_requirements(
         }
         _ => {}
     }
-    statement.visit_statement_expression_regions_dyn(&mut |region| {
+    statement.visit_statement_expression_steps_dyn(&mut |steps| {
         let (nested_effects, nested_capabilities) =
-            expression_regions::declared_requirements(region);
+            expression_regions::declared_requirements(steps);
         effects.0.extend(nested_effects.0);
         capabilities.0.extend(nested_capabilities.0);
     });
@@ -328,8 +328,8 @@ pub fn statement_declared_requirements(
 
 pub fn statement_construct_inventory(statement: &crate::MirStmtKind) -> Vec<MirConstructKind> {
     let mut constructs = vec![statement_construct_kind(statement)];
-    statement.visit_statement_expression_regions_dyn(&mut |region| {
-        constructs.extend(expression_regions::inventory(region));
+    statement.visit_statement_expression_steps_dyn(&mut |steps| {
+        constructs.extend(expression_regions::inventory(steps));
     });
     constructs
 }

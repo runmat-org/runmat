@@ -493,12 +493,10 @@ fn execute_terminator(
                     .map(|value| state.arena.get(value_for(state, *value)?).cloned())
                     .collect::<NativeExecutorResult<Vec<_>>>()?
             } else {
-                state
-                    .function
-                    .abi
-                    .fixed_outputs
-                    .iter()
-                    .map(|local| return_local_value(state, terminator, *local))
+                let output_locals = state.function.abi.fixed_outputs.clone();
+                output_locals
+                    .into_iter()
+                    .map(|local| return_local_value(state, terminator, local))
                     .collect::<NativeExecutorResult<Vec<_>>>()?
             };
             let varargout = state
@@ -598,10 +596,13 @@ fn parallel_region_token(region: runmat_types::ParallelRegionId) -> u64 {
 }
 
 fn return_local_value(
-    state: &HostState,
+    state: &mut HostState,
     terminator: &NativeTerminator,
     local: runmat_native_codegen::NativeLocalId,
 ) -> NativeExecutorResult<runmat_value::Value> {
+    if let Some(reference) = state.declared_global_reference(local.0 as usize)? {
+        return state.arena.get(reference).cloned();
+    }
     let value = terminator
         .frame_state
         .locals

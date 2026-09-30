@@ -550,8 +550,18 @@ pub enum HirSubscriptStep {
     DynamicMember(HirExpr),
     DottedInvoke {
         member: MemberName,
-        indexing: IndexingSemantics,
+        arguments: Vec<HirDottedInvokeArgument>,
     },
+}
+
+/// A dotted invocation has call arguments, not ordinary index selectors.
+/// Receiver-relative `end` and `:` retain their source-level forms here;
+/// a Value may carry a comma-separated-list expansion request.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum HirDottedInvokeArgument {
+    Colon,
+    End { offset: isize },
+    Value(HirExpr),
 }
 
 impl HirSubscriptChain {

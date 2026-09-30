@@ -3,23 +3,21 @@ use std::collections::BTreeMap;
 use runmat_mir::MirPlace;
 use runmat_value::Value;
 
-use crate::{NativeExecutorError, NativeExecutorResult};
+use crate::NativeExecutorResult;
 
 use super::super::root_local_value;
 use crate::execute::state::HostState;
 
 pub(super) fn local_value(
-    state: &HostState,
+    state: &mut HostState,
     local: runmat_mir::MirLocalId,
 ) -> NativeExecutorResult<Value> {
-    let reference = state.locals.get(local.0).copied().ok_or_else(|| {
-        NativeExecutorError::Host("assignment root local is out of bounds".into())
-    })?;
+    let reference = state.local_reference(local.0)?;
     state.arena.get(reference).cloned()
 }
 
 pub(super) fn root_for_update(
-    state: &HostState,
+    state: &mut HostState,
     roots: &mut BTreeMap<runmat_mir::MirLocalId, Value>,
     place: &MirPlace,
 ) -> NativeExecutorResult<Value> {

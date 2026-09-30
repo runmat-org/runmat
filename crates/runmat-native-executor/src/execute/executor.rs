@@ -18,8 +18,13 @@ pub struct NativeExecutor {
     coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     pub(super) regions: Vec<runmat_types::RegionContract>,
     pub(super) compile_duration_ns: u64,
-    entry_profile: Option<crate::RepresentationProfile>,
+    entry_profile: Option<EntryRepresentationProfile>,
     optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
+}
+
+struct EntryRepresentationProfile {
+    function: ProgramFunctionId,
+    profile: crate::RepresentationProfile,
 }
 
 #[derive(Default)]
@@ -76,6 +81,7 @@ impl NativeExecutor {
             ));
         }
         let regions = assembly.requirements.regions.clone();
+        let profiled_function = assembly.executable_identity.entrypoint_function;
         let optimized_regions = if options.entry_profile.is_some() {
             crate::region::derive_plans(&assembly.functions, &regions)
         } else {
@@ -89,7 +95,12 @@ impl NativeExecutor {
             coverage_sites: options.coverage_sites,
             regions,
             compile_duration_ns: options.compile_duration_ns,
-            entry_profile: options.entry_profile,
+            entry_profile: options
+                .entry_profile
+                .map(|profile| EntryRepresentationProfile {
+                    function: profiled_function,
+                    profile,
+                }),
             optimized_regions: Arc::new(optimized_regions),
         })
     }
@@ -99,7 +110,7 @@ impl NativeExecutor {
     }
 
     pub fn entry_profile(&self) -> Option<&crate::RepresentationProfile> {
-        self.entry_profile.as_ref()
+        self.entry_profile.as_ref().map(|entry| &entry.profile)
     }
 
     pub fn optimized_region_count(&self) -> usize {
@@ -308,9 +319,11 @@ impl NativeExecutor {
         if let Some(workspace) = &workspace {
             profile_values.extend(workspace.profile_values());
         }
-        self.validate_entry_profile(&profile_values)?;
+        self.validate_entry_profile(function, &profile_values)?;
         if let Some(target) = &osr_target {
-            target.executor().validate_entry_profile(&profile_values)?;
+            target
+                .executor()
+                .validate_entry_profile(function, &profile_values)?;
         }
         let function_ir = self
             .functions
@@ -382,17 +395,27 @@ impl NativeExecutor {
         ))
     }
 
-    fn validate_entry_profile(&self, arguments: &[Value]) -> NativeExecutorResult<()> {
-        let Some(profile) = &self.entry_profile else {
+    fn validate_entry_profile(
+        &self,
+        function: ProgramFunctionId,
+        arguments: &[Value],
+    ) -> NativeExecutorResult<()> {
+        let Some(entry) = &self.entry_profile else {
             return Ok(());
         };
+        // A compiled product may contain local functions in addition to its
+        // selected entrypoint. Only the selected function was specialized for
+        // this invocation profile; its nested callees have independent inputs.
+        if function != entry.function {
+            return Ok(());
+        }
         let actual = arguments
             .iter()
             .map(runmat_runtime::value_fact::value_fact)
             .collect::<Vec<_>>();
         let actual = crate::RepresentationProfile::from_facts(actual, usize::MAX)
             .map_err(|error| NativeExecutorError::Host(error.into()))?;
-        if actual.digest != profile.digest || actual.facts != profile.facts {
+        if actual.digest != entry.profile.digest || actual.facts != entry.profile.facts {
             return Err(NativeExecutorError::Host(
                 "specialized native entry representation guard failed".into(),
             ));

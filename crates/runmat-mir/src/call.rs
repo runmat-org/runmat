@@ -70,6 +70,13 @@ pub enum MirExpansionSource {
 }
 
 impl MirCallArg {
+    pub(crate) fn visit_sequence_locals(&self, visitor: &mut dyn FnMut(&MirSequenceLocalId)) {
+        match self {
+            Self::CapturedSequence(sequence) => visitor(sequence),
+            Self::Expansion(source) => source.visit_sequence_locals(visitor),
+            Self::Single(_) => {}
+        }
+    }
     pub fn contains_contextual_end(&self) -> bool {
         matches!(self, Self::Expansion(source) if source.contains_contextual_end())
     }
@@ -114,9 +121,45 @@ impl MirCallArg {
             source.visit_direct_expression_regions_dyn(visitor);
         }
     }
+
+    pub(crate) fn visit_direct_expression_steps_dyn(
+        &self,
+        visitor: &mut dyn FnMut(&[crate::MirExpressionStep]),
+    ) {
+        if let Self::Expansion(source) = self {
+            source.visit_direct_expression_steps_dyn(visitor);
+        }
+    }
 }
 
 impl MirExpansionSource {
+    pub(crate) fn visit_sequence_locals(&self, visitor: &mut dyn FnMut(&MirSequenceLocalId)) {
+        match self {
+            Self::SubscriptChain(chain) => chain.visit_sequence_locals(visitor),
+            Self::CellContents { indexing, .. } => indexing.visit_sequence_locals(visitor),
+            Self::ReturnedOutputs(_) | Self::Member { .. } | Self::DynamicMember { .. } => {}
+        }
+    }
+    pub fn visit_direct_expression_steps(
+        &self,
+        mut visitor: impl FnMut(&[crate::MirExpressionStep]),
+    ) {
+        self.visit_direct_expression_steps_dyn(&mut visitor);
+    }
+
+    pub(crate) fn visit_direct_expression_steps_dyn(
+        &self,
+        visitor: &mut dyn FnMut(&[crate::MirExpressionStep]),
+    ) {
+        match self {
+            Self::SubscriptChain(chain) => chain.visit_direct_expression_steps_dyn(visitor),
+            Self::CellContents { indexing, .. } => {
+                indexing.visit_direct_expression_regions_dyn(&mut |region| visitor(region.steps()))
+            }
+            Self::ReturnedOutputs(_) | Self::Member { .. } | Self::DynamicMember { .. } => {}
+        }
+    }
+
     pub fn contains_contextual_end(&self) -> bool {
         match self {
             Self::SubscriptChain(chain) => chain.contains_contextual_end(),

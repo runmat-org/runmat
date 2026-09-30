@@ -220,8 +220,33 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                     crate::MirSubscriptStep::Index(indexing) => {
                         scan_indexing(body, indexing, reads_captures)
                     }
-                    crate::MirSubscriptStep::DottedInvoke { indexing, .. } => {
-                        scan_indexing(body, indexing, reads_captures)
+                    crate::MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                        for argument in arguments {
+                            match argument {
+                                crate::MirDottedInvokeArgument::Colon => {}
+                                crate::MirDottedInvokeArgument::Contextual(region) => {
+                                    scan_expression_region(body, region, reads_captures)
+                                }
+                                crate::MirDottedInvokeArgument::Call(region) => {
+                                    for step in &region.steps {
+                                        match step {
+                                            crate::MirExpressionStep::Let { value, .. } => {
+                                                scan_rvalue(body, value, reads_captures)
+                                            }
+                                            crate::MirExpressionStep::CaptureSequence {
+                                                source,
+                                                ..
+                                            } => source.visit_operands(|operand| {
+                                                scan_operand(body, operand, reads_captures)
+                                            }),
+                                        }
+                                    }
+                                    region.argument.visit_operands(|operand| {
+                                        scan_operand(body, operand, reads_captures)
+                                    });
+                                }
+                            }
+                        }
                     }
                     crate::MirSubscriptStep::DynamicMember(member) => {
                         scan_operand(body, member, reads_captures)

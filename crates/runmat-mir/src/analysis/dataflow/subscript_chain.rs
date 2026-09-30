@@ -57,7 +57,7 @@ pub(crate) fn infer(
                     terminal_use,
                 )
             }
-            MirSubscriptStep::DottedInvoke { member, indexing } => {
+            MirSubscriptStep::DottedInvoke { member, arguments } => {
                 let member_inference = runmat_types::infer_member_read(
                     &current,
                     member,
@@ -67,7 +67,7 @@ pub(crate) fn infer(
                 let (inference, call_effects, call_capabilities) =
                     dotted_invoke::infer_legacy_value(
                         &member_inference.fact,
-                        indexing,
+                        arguments,
                         terminal_use,
                         facts,
                     );
@@ -127,7 +127,7 @@ pub(crate) fn infer_sequence(
                     };
                     runmat_types::infer_member_sequence(&current, &runmat_types::MemberName(name))
                 }
-                MirSubscriptStep::DottedInvoke { member, indexing } => {
+                MirSubscriptStep::DottedInvoke { member, arguments } => {
                     let member_inference = runmat_types::infer_member_read(
                         &current,
                         member,
@@ -136,7 +136,7 @@ pub(crate) fn infer_sequence(
                     diagnostics.extend(member_inference.diagnostics);
                     let (inferred, _, _) = dotted_invoke::infer_sequence(
                         &member_inference.fact,
-                        indexing,
+                        arguments,
                         chain.sequence_use,
                         facts,
                     );
@@ -173,7 +173,7 @@ pub(crate) fn infer_sequence(
                     runmat_types::SequenceUse::RequireSingle,
                 )
             }
-            MirSubscriptStep::DottedInvoke { member, indexing } => {
+            MirSubscriptStep::DottedInvoke { member, arguments } => {
                 let member_inference = runmat_types::infer_member_read(
                     &current,
                     member,
@@ -182,7 +182,7 @@ pub(crate) fn infer_sequence(
                 diagnostics.extend(member_inference.diagnostics);
                 let (inference, _, _) = dotted_invoke::infer_legacy_value(
                     &member_inference.fact,
-                    indexing,
+                    arguments,
                     runmat_types::SequenceUse::RequireSingle,
                     facts,
                 );

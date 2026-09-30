@@ -17,7 +17,7 @@ pub(super) fn visit_outer_statement_sequences(
         | MirStmtKind::EnvironmentEffect(_) => None,
     };
     if let Some(value) = value {
-        value.visit_sequence_locals(|sequence| visitor(*sequence));
+        value.visit_direct_sequence_locals(|sequence| visitor(*sequence));
     }
 }
 

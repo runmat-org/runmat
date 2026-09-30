@@ -347,3 +347,50 @@ fn normalize_outputs(
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?
     })
 }
+
+#[cfg(test)]
+mod native_failure_tests {
+    use futures::executor::block_on;
+
+    use crate::{ExecutableSource, InvocationControl, ProcedureInvocation, RunMatSession};
+
+    const SOURCE: &str = r#"
+function output = first(value)
+    error('RunMat:FirstInvocation', 'the first invocation failed');
+    output = struct('second', @(next) value + next);
+end
+function output = later()
+    error('RunMat:LaterArgument', 'later preparation ran first');
+    output = 3;
+end
+s = struct('first', @first);
+C = {7};
+s.first(C{:}).second(later());
+"#;
+
+    #[test]
+    fn direct_native_entry_fails_before_later_dotted_argument_preparation() {
+        runmat_gc::gc_test_context(|| {
+            let mut session = RunMatSession::with_options(false, false).unwrap();
+            let unit = block_on(session.compile_executable_unit(
+                ExecutableSource::new("native-dotted-error@1", "dotted_error.m", SOURCE),
+                None,
+            ))
+            .unwrap();
+            // ForcedGenericNative bypasses the interpreter and tiering fallback.
+            // Its failure comes from the compiled native entry itself.
+            let result = block_on(session.invoke_executable(
+                &unit,
+                ProcedureInvocation::entrypoint(),
+                &InvocationControl::default().force_generic_native(),
+            ));
+            assert_eq!(
+                result.err().and_then(|error| match error {
+                    crate::RunError::Runtime(error) => error.identifier().map(str::to_owned),
+                    _ => None,
+                }),
+                Some("RunMat:FirstInvocation".to_string()),
+            );
+        });
+    }
+}

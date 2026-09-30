@@ -145,6 +145,18 @@ impl MirStmtKind {
             | MirStmtKind::EnvironmentEffect(_) => {}
         }
     }
+
+    pub(crate) fn visit_statement_expression_steps_dyn(
+        &self,
+        visitor: &mut dyn FnMut(&[crate::MirExpressionStep]),
+    ) {
+        match self {
+            MirStmtKind::CaptureSequence { source, .. } => {
+                source.visit_direct_expression_steps_dyn(visitor)
+            }
+            _ => self.visit_statement_expression_regions_dyn(&mut |region| visitor(region.steps())),
+        }
+    }
 }
 
 impl MirStmt {

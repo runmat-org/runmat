@@ -8,6 +8,17 @@ use crate::{
 use super::{Certainty, Kind, Reason, Walker};
 
 impl Walker<'_> {
+    fn region(&mut self, from: &str, region: &crate::MirExpressionRegion) {
+        for step in region.steps() {
+            match step {
+                crate::MirExpressionStep::Let { value, .. } => self.rvalue(from, value),
+                crate::MirExpressionStep::CaptureSequence { source, .. } => source
+                    .visit_operands(|operand| self.operand(from, operand, Reason::FunctionHandle)),
+            }
+        }
+        self.operand(from, region.result(), Reason::FunctionHandle);
+    }
+
     fn operand(&mut self, from: &str, operand: &MirOperand, reason: Reason) {
         if let MirOperand::FunctionHandle(identity) = operand {
             self.identity(from, identity, reason);
@@ -32,16 +43,7 @@ impl Walker<'_> {
                     self.operand(from, operand, Reason::FunctionHandle)
                 }
                 MirIndexComponent::ContextualExpr(region) => {
-                    for step in region.steps() {
-                        match step {
-                            crate::MirExpressionStep::Let { value, .. } => self.rvalue(from, value),
-                            crate::MirExpressionStep::CaptureSequence { source, .. } => {
-                                source.visit_operands(|operand| {
-                                    self.operand(from, operand, Reason::FunctionHandle)
-                                });
-                            }
-                        }
-                    }
+                    self.region(from, region);
                 }
                 MirIndexComponent::Colon => {}
             }
@@ -195,8 +197,35 @@ impl Walker<'_> {
                 for step in &chain.steps {
                     match step {
                         crate::MirSubscriptStep::Index(indexing) => self.indexing(from, indexing),
-                        crate::MirSubscriptStep::DottedInvoke { indexing, .. } => {
-                            self.indexing(from, indexing)
+                        crate::MirSubscriptStep::DottedInvoke { arguments, .. } => {
+                            for argument in arguments {
+                                match argument {
+                                    crate::MirDottedInvokeArgument::Colon => {}
+                                    crate::MirDottedInvokeArgument::Contextual(region) => {
+                                        self.region(from, region)
+                                    }
+                                    crate::MirDottedInvokeArgument::Call(region) => {
+                                        for step in &region.steps {
+                                            match step {
+                                                crate::MirExpressionStep::Let { value, .. } => {
+                                                    self.rvalue(from, value)
+                                                }
+                                                crate::MirExpressionStep::CaptureSequence {
+                                                    source,
+                                                    ..
+                                                } => source.visit_operands(|operand| {
+                                                    self.operand(
+                                                        from,
+                                                        operand,
+                                                        Reason::FunctionHandle,
+                                                    )
+                                                }),
+                                            }
+                                        }
+                                        self.call_arg(from, &region.argument);
+                                    }
+                                }
+                            }
                         }
                         crate::MirSubscriptStep::DynamicMember(member) => {
                             self.operand(from, member, Reason::FunctionHandle)

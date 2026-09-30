@@ -347,42 +347,18 @@ pub(super) fn materialize_expression_region(
     })?;
     let (ordinal, next_step, completed) = state.enter_contextual_region();
     if let Some(result) = completed {
-        return state.arena.get(result).cloned();
+        let [result] = result.as_slice() else {
+            return Err(NativeExecutorError::Host(
+                "contextual selector completed with non-scalar result".into(),
+            ));
+        };
+        return state.arena.get(*result).cloned();
     }
     state.contextual_index_extents.push(extent);
     let result = (|| {
-        for (step_index, step) in region.steps().iter().enumerate().skip(next_step) {
-            state.enter_contextual_step(ordinal, step_index);
-            match step {
-                runmat_mir::MirExpressionStep::Let { local, value, .. } => {
-                    let native_local = u32::try_from(local.0)
-                        .map(runmat_native_codegen::NativeLocalId)
-                        .map_err(|_| {
-                            NativeExecutorError::Host(
-                                "contextual selector local exceeds native schema".into(),
-                            )
-                        })?;
-                    let mut values =
-                        super::operand::evaluate_rvalue(state, value, 1, Some(native_local))?;
-                    if values.len() != 1 {
-                        return Err(NativeExecutorError::Host(
-                            "contextual selector definition did not produce one value".into(),
-                        ));
-                    }
-                    state.set_local(local.0, values.remove(0))?;
-                }
-                runmat_mir::MirExpressionStep::CaptureSequence {
-                    destination,
-                    source,
-                    ..
-                } => {
-                    super::call::capture_sequence(state, *destination, source)?;
-                }
-            }
-            state.finish_contextual_step(ordinal, step_index, step_index + 1)?;
-        }
+        execute_preparation_steps(state, ordinal, region.steps(), next_step)?;
         let result = super::operand::evaluate_operand(state, region.result())?;
-        state.finish_contextual_region(ordinal, result);
+        state.finish_contextual_region(ordinal, vec![result]);
         state.arena.get(result).cloned()
     })();
     state.contextual_index_extents.pop();
@@ -390,6 +366,45 @@ pub(super) fn materialize_expression_region(
         state.abandon_contextual_region(region.defined_sequences());
     }
     result
+}
+
+pub(super) fn execute_preparation_steps(
+    state: &mut HostState,
+    ordinal: usize,
+    steps: &[runmat_mir::MirExpressionStep],
+    next_step: usize,
+) -> NativeExecutorResult<()> {
+    for (step_index, step) in steps.iter().enumerate().skip(next_step) {
+        state.enter_contextual_step(ordinal, step_index);
+        match step {
+            runmat_mir::MirExpressionStep::Let { local, value, .. } => {
+                let native_local = u32::try_from(local.0)
+                    .map(runmat_native_codegen::NativeLocalId)
+                    .map_err(|_| {
+                        NativeExecutorError::Host(
+                            "expression preparation local exceeds native schema".into(),
+                        )
+                    })?;
+                let mut values =
+                    super::operand::evaluate_rvalue(state, value, 1, Some(native_local))?;
+                if values.len() != 1 {
+                    return Err(NativeExecutorError::Host(
+                        "expression preparation did not produce one local value".into(),
+                    ));
+                }
+                state.set_local(local.0, values.remove(0))?;
+            }
+            runmat_mir::MirExpressionStep::CaptureSequence {
+                destination,
+                source,
+                ..
+            } => {
+                super::call::capture_sequence(state, *destination, source)?;
+            }
+        }
+        state.finish_contextual_step(ordinal, step_index, step_index + 1)?;
+    }
+    Ok(())
 }
 
 fn selector_dimension_length(

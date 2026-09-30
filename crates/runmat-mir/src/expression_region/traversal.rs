@@ -94,7 +94,7 @@ impl MirExpressionRegion {
     pub fn visit_sequence_locals(&self, mut visitor: impl FnMut(&MirSequenceLocalId)) {
         for step in &self.steps {
             if let MirExpressionStep::Let { value, .. } = step {
-                value.visit_sequence_locals(&mut visitor);
+                value.visit_direct_sequence_locals(&mut visitor);
             }
         }
     }

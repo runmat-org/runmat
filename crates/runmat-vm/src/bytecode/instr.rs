@@ -386,6 +386,12 @@ pub enum Instr {
         selector_count: usize,
         prefix_operand_count: usize,
     },
+    /// Replace the prepared prefix/root with its resolved receiver while
+    /// retaining variable-width argument captures above it.
+    FinishDottedInvokeReceiver {
+        prefix_operand_count: usize,
+        argument_operand_count: usize,
+    },
     BeginOutputAssignment {
         target_count: usize,
     },
@@ -792,6 +798,15 @@ impl Instr {
                     .checked_add(1)?;
                 effect(consumed, *selector_count)
             }
+            Instr::FinishDottedInvokeReceiver {
+                prefix_operand_count,
+                argument_operand_count,
+            } => effect(
+                prefix_operand_count
+                    .checked_add(*argument_operand_count)?
+                    .checked_add(2)?,
+                argument_operand_count.checked_add(1)?,
+            ),
             Instr::BeginOutputAssignment { .. }
             | Instr::PrepareFixedOutputTarget
             | Instr::PrepareDiscardOutputTarget

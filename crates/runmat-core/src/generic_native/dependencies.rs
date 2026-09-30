@@ -73,16 +73,19 @@ fn visit_indexing(indexing: &MirIndexing, out: &mut ReferencedFunctions) {
 
 fn visit_subscript_chain(chain: &MirSubscriptChain, out: &mut ReferencedFunctions) {
     chain.visit_operands(|operand| visit_operand(operand, out));
-    chain.visit_expression_regions(|region| {
-        for step in region.steps() {
-            match step {
-                runmat_mir::MirExpressionStep::Let { value, .. } => visit_rvalue(value, out),
-                runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
-                    source.visit_operands(|operand| visit_operand(operand, out));
-                }
+    chain.visit_direct_expression_steps(|steps| visit_preparation_steps(steps, out));
+}
+
+fn visit_preparation_steps(steps: &[runmat_mir::MirExpressionStep], out: &mut ReferencedFunctions) {
+    for step in steps {
+        match step {
+            runmat_mir::MirExpressionStep::Let { value, .. } => visit_rvalue(value, out),
+            runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                source.visit_operands(|operand| visit_operand(operand, out));
+                source.visit_direct_expression_steps(|nested| visit_preparation_steps(nested, out));
             }
         }
-    });
+    }
 }
 
 fn visit_place(place: &MirPlace, out: &mut ReferencedFunctions) {

@@ -903,13 +903,11 @@ fn verify_instruction(
 
 fn rvalue_selector_arity_valid(value: &runmat_mir::MirRvalue) -> bool {
     let mut nested_valid = true;
-    value.visit_expression_regions(|region| {
-        nested_valid &= region.steps().iter().all(|step| match step {
-            runmat_mir::MirExpressionStep::Let { value, .. } => {
-                rvalue_selector_arity_valid_without_regions(value)
-            }
+    value.visit_direct_expression_steps(|steps| {
+        nested_valid &= steps.iter().all(|step| match step {
+            runmat_mir::MirExpressionStep::Let { value, .. } => rvalue_selector_arity_valid(value),
             runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
-                expansion_source_selector_arity_valid_without_regions(source)
+                expansion_source_selector_arity_valid(source)
             }
         });
     });
@@ -930,13 +928,13 @@ fn rvalue_selector_arity_valid_without_regions(value: &runmat_mir::MirRvalue) ->
 
 fn rvalue_contains_legacy_binding_place(value: &runmat_mir::MirRvalue) -> bool {
     let mut nested_legacy = false;
-    value.visit_expression_regions(|region| {
-        nested_legacy |= region.steps().iter().any(|step| match step {
+    value.visit_direct_expression_steps(|steps| {
+        nested_legacy |= steps.iter().any(|step| match step {
             runmat_mir::MirExpressionStep::Let { value, .. } => {
-                rvalue_contains_legacy_binding_place_without_regions(value)
+                rvalue_contains_legacy_binding_place(value)
             }
             runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
-                expansion_source_contains_legacy_binding_place_without_regions(source)
+                expansion_source_contains_legacy_binding_place(source)
             }
         });
     });
@@ -951,13 +949,11 @@ fn rvalue_contains_legacy_binding_place_without_regions(value: &runmat_mir::MirR
 fn expansion_source_selector_arity_valid(source: &runmat_mir::MirExpansionSource) -> bool {
     let own_valid = expansion_source_selector_arity_valid_without_regions(source);
     let mut nested_valid = true;
-    source.visit_expression_regions(|region| {
-        nested_valid &= region.steps().iter().all(|step| match step {
-            runmat_mir::MirExpressionStep::Let { value, .. } => {
-                rvalue_selector_arity_valid_without_regions(value)
-            }
+    source.visit_direct_expression_steps(|steps| {
+        nested_valid &= steps.iter().all(|step| match step {
+            runmat_mir::MirExpressionStep::Let { value, .. } => rvalue_selector_arity_valid(value),
             runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
-                expansion_source_selector_arity_valid_without_regions(source)
+                expansion_source_selector_arity_valid(source)
             }
         });
     });
@@ -972,8 +968,8 @@ fn expansion_source_selector_arity_valid_without_regions(
             .steps
             .iter()
             .filter_map(|step| match step {
-                runmat_mir::MirSubscriptStep::Index(indexing)
-                | runmat_mir::MirSubscriptStep::DottedInvoke { indexing, .. } => Some(indexing),
+                runmat_mir::MirSubscriptStep::Index(indexing) => Some(indexing),
+                runmat_mir::MirSubscriptStep::DottedInvoke { .. } => None,
                 runmat_mir::MirSubscriptStep::Member(_)
                 | runmat_mir::MirSubscriptStep::DynamicMember(_) => None,
             })
@@ -989,13 +985,13 @@ fn expansion_source_selector_arity_valid_without_regions(
 
 fn expansion_source_contains_legacy_binding_place(source: &runmat_mir::MirExpansionSource) -> bool {
     let mut contains = false;
-    source.visit_expression_regions(|region| {
-        contains |= region.steps().iter().any(|step| match step {
+    source.visit_direct_expression_steps(|steps| {
+        contains |= steps.iter().any(|step| match step {
             runmat_mir::MirExpressionStep::Let { value, .. } => {
-                rvalue_contains_legacy_binding_place_without_regions(value)
+                rvalue_contains_legacy_binding_place(value)
             }
             runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
-                expansion_source_contains_legacy_binding_place_without_regions(source)
+                expansion_source_contains_legacy_binding_place(source)
             }
         });
     });

@@ -1,15 +1,16 @@
-use crate::{MirIndexComponent, MirIndexing};
+use crate::{MirCallArg, MirDottedInvokeArgument};
+use runmat_hir::{IndexKind, IndexResultContext};
 use runmat_types::{
     DynamicReason, SequenceFactInference, ValueFact, ValueKindFact, ValueSequenceFact,
 };
 
-use super::{index_selectors, simple_operand_fact};
+use super::simple_operand_fact;
 
 /// Compatibility adapter for value-only inference callers. New sequence-aware
 /// MIR analysis must use [`infer_sequence`] and retain the sequence fact.
 pub(super) fn infer_legacy_value(
     member: &ValueFact,
-    indexing: &MirIndexing,
+    arguments: &[MirDottedInvokeArgument],
     sequence_use: runmat_types::SequenceUse,
     facts: &[Option<ValueFact>],
 ) -> (
@@ -17,7 +18,7 @@ pub(super) fn infer_legacy_value(
     runmat_types::EffectSet,
     runmat_types::CapabilitySet,
 ) {
-    let (inferred, effects, capabilities) = infer_sequence(member, indexing, sequence_use, facts);
+    let (inferred, effects, capabilities) = infer_sequence(member, arguments, sequence_use, facts);
     let fact = legacy_selected_fact(&inferred.sequence, sequence_use);
     (
         runmat_types::FactInference {
@@ -31,7 +32,7 @@ pub(super) fn infer_legacy_value(
 
 pub(super) fn infer_sequence(
     member: &ValueFact,
-    indexing: &MirIndexing,
+    arguments: &[MirDottedInvokeArgument],
     sequence_use: runmat_types::SequenceUse,
     facts: &[Option<ValueFact>],
 ) -> (
@@ -39,22 +40,58 @@ pub(super) fn infer_sequence(
     runmat_types::EffectSet,
     runmat_types::CapabilitySet,
 ) {
+    if arguments.iter().any(|argument| {
+        matches!(
+            argument,
+            MirDottedInvokeArgument::Call(region)
+                if !matches!(region.argument, MirCallArg::Single(_))
+        )
+    }) {
+        let mut effects = runmat_types::EffectSet::default();
+        effects.0.insert(runmat_types::EffectKind::Unknown);
+        effects.0.insert(runmat_types::EffectKind::MayThrow);
+        return (
+            SequenceFactInference {
+                sequence: ValueSequenceFact::dynamic(),
+                diagnostics: Vec::new(),
+            },
+            effects,
+            Default::default(),
+        );
+    }
     let ValueKindFact::Callable(callable) = &member.kind else {
+        // A non-callable member follows ordinary parentheses indexing. The
+        // expression preparation remains call-shaped; unknown expanded widths
+        // cannot be turned into a false scalar selector fact here.
         let inference = runmat_types::infer_index_sequence(
             member,
-            indexing.kind,
-            &index_selectors(indexing, facts),
-            indexing.result_context,
+            IndexKind::Paren,
+            &arguments
+                .iter()
+                .map(|argument| match argument {
+                    MirDottedInvokeArgument::Colon => runmat_types::IndexSelectorFact::Colon,
+                    MirDottedInvokeArgument::Contextual(_) | MirDottedInvokeArgument::Call(_) => {
+                        runmat_types::IndexSelectorFact::Numeric(ValueFact::unknown(
+                            DynamicReason::DynamicDispatch,
+                        ))
+                    }
+                })
+                .collect::<Vec<_>>(),
+            IndexResultContext::ReadSingle,
         );
         return (inference, Default::default(), Default::default());
     };
     let request = runmat_types::CallRequest {
-        arguments: indexing
-            .components
+        arguments: arguments
             .iter()
             .map(|component| match component {
-                MirIndexComponent::Expr(operand) => simple_operand_fact(operand, facts),
-                MirIndexComponent::Colon | MirIndexComponent::ContextualExpr(_) => {
+                MirDottedInvokeArgument::Call(region) => match &region.argument {
+                    MirCallArg::Single(operand) => simple_operand_fact(operand, facts),
+                    MirCallArg::Expansion(_) | MirCallArg::CapturedSequence(_) => {
+                        ValueFact::unknown(DynamicReason::DynamicDispatch)
+                    }
+                },
+                MirDottedInvokeArgument::Colon | MirDottedInvokeArgument::Contextual(_) => {
                     ValueFact::unknown(DynamicReason::DynamicDispatch)
                 }
             })

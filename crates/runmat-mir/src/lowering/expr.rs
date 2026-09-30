@@ -239,15 +239,43 @@ fn lower_subscript_chain(
                     await_replacements,
                 )?)
             }
-            runmat_hir::HirSubscriptStep::DottedInvoke { member, indexing } => {
+            runmat_hir::HirSubscriptStep::DottedInvoke { member, arguments } => {
                 crate::MirSubscriptStep::DottedInvoke {
                     member: member.clone(),
-                    indexing: lower_indexing_with_replacements(
-                        ctx,
-                        indexing,
-                        temps,
-                        await_replacements,
-                    )?,
+                    arguments: arguments
+                        .iter()
+                        .map(|argument| match argument {
+                            runmat_hir::HirDottedInvokeArgument::Colon => {
+                                Ok(crate::MirDottedInvokeArgument::Colon)
+                            }
+                            runmat_hir::HirDottedInvokeArgument::End { offset } => {
+                                let MirIndexComponent::ContextualExpr(region) =
+                                    lower_contextual_end(ctx, *offset)
+                                else {
+                                    unreachable!("contextual end always lowers to a region")
+                                };
+                                Ok(crate::MirDottedInvokeArgument::Contextual(region))
+                            }
+                            runmat_hir::HirDottedInvokeArgument::Value(value) => {
+                                let mut preparation = Vec::new();
+                                let argument = lower_call_arg(
+                                    ctx,
+                                    value,
+                                    &mut preparation,
+                                    await_replacements,
+                                )?;
+                                Ok(crate::MirDottedInvokeArgument::Call(
+                                    crate::MirCallArgumentRegion {
+                                        steps: crate::MirExpressionRegion::steps_from_lowered(
+                                            preparation,
+                                        )?,
+                                        argument,
+                                        span: value.span,
+                                    },
+                                ))
+                            }
+                        })
+                        .collect::<Result<_, HirError>>()?,
                 }
             }
         });
@@ -790,14 +818,22 @@ fn hir_expr_contains_end(expr: &HirExpr) -> bool {
         HirExprKind::SubscriptChain(chain) => {
             hir_expr_contains_end(&chain.root)
                 || chain.steps.iter().any(|step| match step {
-                    runmat_hir::HirSubscriptStep::Index(indexing)
-                    | runmat_hir::HirSubscriptStep::DottedInvoke { indexing, .. } => {
+                    runmat_hir::HirSubscriptStep::Index(indexing) => {
                         indexing.components.iter().any(|component| match component {
                             IndexComponent::End { .. } => true,
                             IndexComponent::Expr(expr) | IndexComponent::Logical(expr) => {
                                 hir_expr_contains_end(expr)
                             }
                             IndexComponent::Colon => false,
+                        })
+                    }
+                    runmat_hir::HirSubscriptStep::DottedInvoke { arguments, .. } => {
+                        arguments.iter().any(|argument| match argument {
+                            runmat_hir::HirDottedInvokeArgument::End { .. } => true,
+                            runmat_hir::HirDottedInvokeArgument::Value(value) => {
+                                hir_expr_contains_end(value)
+                            }
+                            runmat_hir::HirDottedInvokeArgument::Colon => false,
                         })
                     }
                     runmat_hir::HirSubscriptStep::DynamicMember(member) => {
