@@ -1,15 +1,9 @@
 //! Borrowed admission and selective host preparation before provider effects.
 use super::*;
 
-pub(super) fn gpu_backed_dlarray_handle(value: &Value) -> Option<&GpuTensorHandle> {
-    let Value::Object(object) = value else {
-        return None;
-    };
-    if !object.class_name.is(super::DLARRAY_CLASS) {
-        return None;
-    }
-    match object.properties.get("Data") {
-        Some(Value::GpuTensor(handle)) => Some(handle),
+pub(super) fn resident_input_handle(value: &Value) -> Option<&GpuTensorHandle> {
+    match forward_data(value) {
+        Value::GpuTensor(handle) => Some(handle),
         _ => None,
     }
 }

@@ -8,7 +8,7 @@ use runmat_value::Value;
 
 use super::{layout, request::*};
 use crate::builtins::deep_learning::model::{
-    admission::{forward_data, gpu_backed_dlarray_handle},
+    admission::{forward_data, resident_input_handle},
     execution::host::network::HostValue,
     gpu::{self, evaluate_network_gpu},
     plan::host::HostNetworkPlan,
@@ -37,7 +37,7 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
         )?;
     }
     let active_tape = autodiff::tape_is_active();
-    if let Some(handle) = gpu_backed_dlarray_handle(request.input) {
+    if let Some(handle) = resident_input_handle(request.input) {
         if active_tape {
             return Err(unsupported_error(
                 function,

@@ -40,7 +40,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Placement",
             paragraphs: &[
-                "Supported real, two-dimensional GPU-backed `dlarray` inputs execute through provider operations and return resident `dlarray` Data. Fully connected weights and bias already resident in the input's single/double precision stay on the provider: weights are transposed and bias is reshaped without host transfers. Host parameters are converted and uploaded; resident parameters with a different precision currently cross the host conversion boundary. Other network properties are not downloaded. Unsupported resident forms are rejected explicitly; provider-resident autodiff is not provided by this path. Plain resident numeric inputs currently gather to the host numerical path and return a host array. Provider operations can suspend; a resident result retains its provider ownership.",
+                "Supported real feature matrices execute through provider operations. Sequence and spatial inputs can use global 1-D average pooling when the provider supports the complete reduction and output-presentation route. Raw resident arrays return resident arrays; GPU-backed `dlarray` inputs retain a `dlarray` wrapper and the executed output's labels. Provider operations can suspend, and resident results retain their provider ownership and placement intent.",
+                "Fully connected weights and bias already resident in the input's single/double precision stay on the provider: weights are transposed and bias is reshaped without host transfers. Host parameters are converted and uploaded; resident parameters with a different precision currently cross the host conversion boundary. Other network properties are not downloaded. An unsupported route can gather automatically placed inputs for host execution; explicit `gpuArray` inputs report an error instead of silently gathering. Provider-resident autodiff is not provided by this path.",
             ],
         },
     ],
@@ -80,7 +81,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationFaq {
             question: "Does a GPU-backed dlarray have to gather?",
-            answer: "The supported real 2-D provider path keeps its input and output resident. Plain resident numeric arrays currently use the host path, and unsupported provider forms report an error.",
+            answer: "Supported provider routes keep raw arrays and dlarray payloads resident. Unsupported routes may gather automatically placed inputs; explicit gpuArray inputs report an error without silently gathering.",
         },
         BuiltinDocumentationFaq {
             question: "Can forward return network state as a second output?",

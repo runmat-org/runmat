@@ -8,6 +8,8 @@ use runmat_value::{CellArray, NumericDType, Tensor, Value};
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use crate::builtins::deep_learning::{layers::*, model::*, object};
 
+mod raw_inputs;
+
 fn dense_network() -> Value {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let dense = block_on(fully_connected_layer_builtin(

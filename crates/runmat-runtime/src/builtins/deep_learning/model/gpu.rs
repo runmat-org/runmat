@@ -58,7 +58,7 @@ pub(super) async fn evaluate_network_gpu(
         .ok_or_else(|| {
             unsupported_error(
                 function,
-                format!("{function}: no acceleration provider owns the GPU dlarray input"),
+                format!("{function}: no acceleration provider owns the resident input"),
             )
         })?;
     let layers = object

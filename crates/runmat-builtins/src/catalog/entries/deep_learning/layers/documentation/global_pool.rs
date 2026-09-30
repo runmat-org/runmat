@@ -9,5 +9,5 @@ layer_documentation!(
     "layer = globalAveragePooling1dLayer('Name', 'gap'); fprintf('%s\\n', layer.Name);",
     "gap",
     "assert(strcmp(layer.Name, 'gap'));",
-    "The result records a global average pooling layer; construction does not pool an input sequence."
+    "Construction records a layer without pooling an input. Pass a network containing this layer to forward or predict to average its sequence or spatial axis. Execution preserves the predictor's single/double precision and updates the output's semantic axes. Supported provider routes keep the data resident."
 );
