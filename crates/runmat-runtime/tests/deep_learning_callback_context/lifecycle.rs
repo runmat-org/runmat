@@ -227,6 +227,9 @@ fn pending_dlfeval_retains_borrowed_resident_until_result_is_released() {
             .expect("owned resident input");
         let resident = allocation.handle.clone();
         let weak_resident = resident.downgrade();
+        let identity = resident.allocation_identity();
+        let weak_allocation = resident.allocation_lease().downgrade();
+        let retirement = allocation.probe.clone();
         drop(allocation);
         let (runtime, service) = scoped_runtime();
         let weak_service = Rc::downgrade(&service);
@@ -244,20 +247,25 @@ fn pending_dlfeval_retains_borrowed_resident_until_result_is_released() {
             weak_resident.acquire().is_ok(),
             "suspended callback owns input"
         );
+        assert!(weak_allocation.acquire().is_some());
+        assert_eq!(retirement.retirements(), 0);
         let Poll::Ready(Ok(Value::GpuTensor(output))) = poll_once(&mut future) else {
             panic!("callback must publish the resident alias");
         };
         assert_eq!(calls(), vec![(id, Some(1))]);
-        assert_eq!(
-            output.allocation_identity(),
-            weak_resident.acquire().unwrap().allocation_identity()
-        );
+        // Publication may create a provenance view. The physical lease, not
+        // the original view's weak reference, owns the shared allocation.
+        assert_eq!(output.allocation_identity(), identity);
+        output.allocation_lease().validate_live().unwrap();
+        assert!(weak_allocation.acquire().is_some());
+        assert_eq!(retirement.retirements(), 0);
         drop(output);
         drop(runtime);
         drop(service);
         drop(future);
         runmat_gc::gc_collect_major().expect("collect after callback completion");
-        assert!(weak_resident.acquire().is_err(), "final lease retired");
+        assert!(weak_allocation.acquire().is_none(), "final lease retired");
+        assert_eq!(retirement.retirements(), 1);
         assert!(weak_service.upgrade().is_none(), "session service retired");
     });
 }
