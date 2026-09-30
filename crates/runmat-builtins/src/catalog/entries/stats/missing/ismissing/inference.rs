@@ -25,7 +25,7 @@ fn mask_fact(input: &ValueFact) -> ValueFact {
         }
         ValueKindFact::Object(object)
             if object.runtime_class.as_ref().is_some_and(|class| {
-                class == &standard::TABLE.owned() || class == &standard::TIMETABLE.owned()
+                class.is(standard::TABLE) || class.is(standard::TIMETABLE)
             }) =>
         {
             ValueFact::proven(
@@ -36,7 +36,7 @@ fn mask_fact(input: &ValueFact) -> ValueFact {
         }
         ValueKindFact::Object(object)
             if object.runtime_class.as_ref().is_some_and(|class| {
-                class == &standard::DATETIME.owned() || class == &standard::DURATION.owned()
+                class.is(standard::DATETIME) || class.is(standard::DURATION)
             }) =>
         {
             ValueFact::proven(

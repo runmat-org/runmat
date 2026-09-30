@@ -2,17 +2,20 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod hist;
+mod missing;
 mod ml;
 mod random;
 mod summary;
 
-pub use hist::*;
-pub use ml::*;
-pub use random::*;
-pub use summary::*;
+pub use self::hist::*;
+pub use self::missing::*;
+pub use self::ml::*;
+pub use self::random::*;
+pub use self::summary::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     hist::extend_entries(values);
+    missing::extend_entries(values);
     ml::extend_entries(values);
     random::extend_entries(values);
     summary::extend_entries(values);

@@ -1,5 +1,5 @@
 use super::super::*;
-use super::core::{FILLMISSING_SIGNATURES, RMMISSING_SIGNATURES, STANDARDIZE_SIGNATURES};
+use super::core::{FILLMISSING_SIGNATURES, RMMISSING_SIGNATURES};
 
 pub(in crate::builtins::missing::domain) const RMMISSING_INTEGER_DIM_EXTENSION:
     BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {

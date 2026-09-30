@@ -64,6 +64,7 @@ pub fn value_contains_native_integer_class(value: &Value) -> bool {
             .fields
             .values()
             .any(value_contains_native_integer_class),
+        Value::StructArray(value) => value.any_value(value_contains_native_integer_class),
         Value::Object(value) => value
             .properties
             .values()
@@ -84,6 +85,7 @@ pub fn value_contains_explicit_gpu(value: &Value) -> bool {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
         Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
+        Value::StructArray(value) => value.any_value(value_contains_explicit_gpu),
         Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
@@ -136,6 +138,14 @@ pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {
         }),
         Value::Cell(cell) => cell.data.iter().all(native_integer_value_is_exact_f64),
         Value::Struct(value) => value.fields.values().all(native_integer_value_is_exact_f64),
+        Value::StructArray(value) => {
+            !value.any_value(|child| !native_integer_value_is_exact_f64(child))
+        }
+        Value::Object(value) => value
+            .properties
+            .values()
+            .all(native_integer_value_is_exact_f64),
+        Value::Closure(value) => value.captures.iter().all(native_integer_value_is_exact_f64),
         Value::OutputList(values) => values.iter().all(native_integer_value_is_exact_f64),
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle)
             .is_none_or(|element_type| element_type.element_size() <= 4),

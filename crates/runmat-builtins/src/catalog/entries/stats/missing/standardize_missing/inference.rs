@@ -20,12 +20,12 @@ fn result_fact(input: &ValueFact) -> ValueFact {
         }
         ValueKindFact::Object(object)
             if object.runtime_class.as_ref().is_some_and(|class| {
-                class == &standard::TABLE.owned() || class == &standard::TIMETABLE.owned()
+                class.is(standard::TABLE) || class.is(standard::TIMETABLE)
             }) =>
         {
             let mut output = ValueFact::unknown(DynamicReason::RuntimeValue);
             output.kind = ValueKindFact::Object(runmat_types::ObjectFact {
-                class: object.class.clone(),
+                class: object.class,
                 runtime_class: object.runtime_class.clone(),
                 properties: Default::default(),
                 properties_complete: false,

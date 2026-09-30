@@ -3,6 +3,7 @@ mod class_shape;
 mod admission;
 mod ownership;
 mod numeric_cutover;
+mod integer_aggregate;
 mod download_lifecycle;
 mod filesystem;
 mod text_shape;
