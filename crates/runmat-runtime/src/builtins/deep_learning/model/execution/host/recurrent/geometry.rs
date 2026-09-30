@@ -1,26 +1,12 @@
 use runmat_builtins::DeepLearningAxisLabel;
+pub(in crate::builtins::deep_learning) use runmat_builtins::{
+    DeepLearningRecurrentGateActivation as GateActivation,
+    DeepLearningRecurrentOutputMode as OutputMode,
+    DeepLearningRecurrentStateActivation as Activation,
+};
 use runmat_value::{NumericDType, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::{AxisGeometryError, AxisPlan};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::builtins::deep_learning) enum Activation {
-    Tanh,
-    Softsign,
-    Relu,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::builtins::deep_learning) enum GateActivation {
-    Sigmoid,
-    HardSigmoid,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::builtins::deep_learning) enum OutputMode {
-    Sequence,
-    Last,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::builtins::deep_learning) struct RecurrentOptions {

@@ -1,5 +1,9 @@
 use super::*;
-use runmat_builtins::DeepLearningNormalizationAxes;
+use runmat_builtins::{
+    DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
+    DeepLearningNormalizationAxes, DeepLearningRecurrentGateActivation,
+    DeepLearningRecurrentOutputMode, DeepLearningRecurrentStateActivation,
+};
 
 /// Materialize only structural controls consumed on the host. Data, state,
 /// learnables and callable captures retain their existing storage and owner.
@@ -77,12 +81,12 @@ pub(in crate::builtins::deep_learning) fn validate(
         O::Name | O::Description => {
             scalar_text(value, function)?;
         }
-        O::OutputMode => text_choice(
-            value,
-            function,
-            label,
-            option.text_values_for(kind).unwrap(),
-        )?,
+        O::OutputMode => {
+            let text = scalar_text(value, function)?;
+            if DeepLearningRecurrentOutputMode::from_name(&text).is_none() {
+                return Err(invalid_value(function, label));
+            }
+        }
         O::NormalizationDimension => {
             text_choice(
                 value,
@@ -102,20 +106,16 @@ pub(in crate::builtins::deep_learning) fn validate(
             }
         }
         O::StateActivationFunction => {
-            text_choice(
-                value,
-                function,
-                label,
-                option.text_values_for(kind).unwrap(),
-            )?;
+            let text = scalar_text(value, function)?;
+            if DeepLearningRecurrentStateActivation::from_name(&text).is_none() {
+                return Err(invalid_value(function, label));
+            }
         }
         O::GateActivationFunction => {
-            text_choice(
-                value,
-                function,
-                label,
-                option.text_values_for(kind).unwrap(),
-            )?;
+            let text = scalar_text(value, function)?;
+            if DeepLearningRecurrentGateActivation::from_name(&text).is_none() {
+                return Err(invalid_value(function, label));
+            }
         }
         O::Padding => validate_padding(value, function)?,
         O::Stride | O::DilationFactor | O::MinLength => {
@@ -184,12 +184,7 @@ pub(in crate::builtins::deep_learning) fn validate(
         }
         O::PaddingValue => {
             if let Ok(text) = scalar_text(value, function) {
-                if !option
-                    .text_values_for(kind)
-                    .unwrap()
-                    .iter()
-                    .any(|allowed| text.eq_ignore_ascii_case(allowed))
-                {
+                if DeepLearningConvolutionPaddingValueMode::from_name(&text).is_none() {
                     return Err(invalid_value(function, label));
                 }
             } else {
@@ -320,12 +315,7 @@ fn recurrent_factor(
 
 fn validate_padding(value: &Value, function: &'static str) -> BuiltinResult<()> {
     if let Ok(text) = scalar_text(value, function) {
-        return if DeepLearningLayerOption::Padding
-            .text_values_for(DeepLearningLayerKind::Convolution1D)
-            .unwrap()
-            .iter()
-            .any(|allowed| text.eq_ignore_ascii_case(allowed))
-        {
+        return if DeepLearningConvolutionPaddingMode::from_name(&text).is_some() {
             Ok(())
         } else {
             Err(invalid_value(function, "Padding"))
@@ -372,3 +362,6 @@ fn validate_padding(value: &Value, function: &'static str) -> BuiltinResult<()> 
 fn valid_padding_number(value: f64) -> bool {
     value.is_finite() && value >= 0.0 && value.fract() == 0.0
 }
+
+#[cfg(test)]
+mod tests;

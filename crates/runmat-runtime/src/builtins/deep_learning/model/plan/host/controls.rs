@@ -1,5 +1,8 @@
 use runmat_builtins::{
+    DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
     DeepLearningLayerKind as K, DeepLearningLayerOption as O, DeepLearningNormalizationAxes,
+    DeepLearningRecurrentGateActivation, DeepLearningRecurrentOutputMode,
+    DeepLearningRecurrentStateActivation,
 };
 use runmat_value::{NumericScalar, ObjectInstance, Value};
 
@@ -86,56 +89,42 @@ pub(super) fn decode(
             let dilation = positive(layer, kind, O::DilationFactor, 1, function)?;
             let padding = match value(layer, kind, O::Padding) {
                 None => conv::Padding::Valid,
-                Some(value)
-                    if scalar_text(value, function)
-                        .is_ok_and(|name| name.eq_ignore_ascii_case("same")) =>
-                {
-                    conv::Padding::Same
-                }
-                Some(value)
-                    if scalar_text(value, function)
-                        .is_ok_and(|name| name.eq_ignore_ascii_case("causal")) =>
-                {
-                    conv::Padding::Causal
-                }
                 Some(value) => {
-                    let values = padding_extents(value, function)?;
-                    match values.as_slice() {
-                        [0] | [0, 0] => conv::Padding::Valid,
-                        [extent] => conv::Padding::Explicit {
-                            left: *extent,
-                            right: *extent,
-                        },
-                        [left, right] => conv::Padding::Explicit {
-                            left: *left,
-                            right: *right,
-                        },
-                        _ => return Err(invalid(function, O::Padding)),
+                    if let Ok(name) = scalar_text(value, function) {
+                        DeepLearningConvolutionPaddingMode::from_name(&name)
+                            .map(Into::into)
+                            .ok_or_else(|| invalid(function, O::Padding))?
+                    } else {
+                        let values = padding_extents(value, function)?;
+                        match values.as_slice() {
+                            [0] | [0, 0] => conv::Padding::Valid,
+                            [extent] => conv::Padding::Explicit {
+                                left: *extent,
+                                right: *extent,
+                            },
+                            [left, right] => conv::Padding::Explicit {
+                                left: *left,
+                                right: *right,
+                            },
+                            _ => return Err(invalid(function, O::Padding)),
+                        }
                     }
                 }
             };
             let padding_value = match value(layer, kind, O::PaddingValue) {
                 None => conv::PaddingValue::Constant(0.0),
-                Some(value)
-                    if scalar_text(value, function)
-                        .is_ok_and(|name| name.eq_ignore_ascii_case("replicate")) =>
-                {
-                    conv::PaddingValue::Replicate
-                }
-                Some(value)
-                    if scalar_text(value, function)
-                        .is_ok_and(|name| name.eq_ignore_ascii_case("symmetric-include-edge")) =>
-                {
-                    conv::PaddingValue::SymmetricIncludeEdge
-                }
-                Some(value)
-                    if scalar_text(value, function)
-                        .is_ok_and(|name| name.eq_ignore_ascii_case("symmetric-exclude-edge")) =>
-                {
-                    conv::PaddingValue::SymmetricExcludeEdge
-                }
                 Some(value) => {
-                    conv::PaddingValue::Constant(numeric_scalar(value, function, "PaddingValue")?)
+                    if let Ok(name) = scalar_text(value, function) {
+                        DeepLearningConvolutionPaddingValueMode::from_name(&name)
+                            .map(Into::into)
+                            .ok_or_else(|| invalid(function, O::PaddingValue))?
+                    } else {
+                        conv::PaddingValue::Constant(numeric_scalar(
+                            value,
+                            function,
+                            O::PaddingValue.canonical_name(),
+                        )?)
+                    }
                 }
             };
             Controls::Convolution(conv::ConvOptions {
@@ -155,33 +144,30 @@ pub(super) fn decode(
                     return Err(invalid(function, option));
                 }
             }
-            let output_mode = match text(layer, kind, O::OutputMode, "sequence", function)?
-                .to_ascii_lowercase()
-                .as_str()
-            {
-                "sequence" => recurrent::OutputMode::Sequence,
-                "last" => recurrent::OutputMode::Last,
-                _ => return Err(invalid(function, O::OutputMode)),
-            };
-            let state_activation =
-                match text(layer, kind, O::StateActivationFunction, "tanh", function)?
-                    .to_ascii_lowercase()
-                    .as_str()
-                {
-                    "tanh" => recurrent::Activation::Tanh,
-                    "softsign" => recurrent::Activation::Softsign,
-                    "relu" => recurrent::Activation::Relu,
-                    _ => return Err(invalid(function, O::StateActivationFunction)),
-                };
-            let gate_activation =
-                match text(layer, kind, O::GateActivationFunction, "sigmoid", function)?
-                    .to_ascii_lowercase()
-                    .as_str()
-                {
-                    "sigmoid" => recurrent::GateActivation::Sigmoid,
-                    "hard-sigmoid" => recurrent::GateActivation::HardSigmoid,
-                    _ => return Err(invalid(function, O::GateActivationFunction)),
-                };
+            let output_mode = DeepLearningRecurrentOutputMode::from_name(&text(
+                layer,
+                kind,
+                O::OutputMode,
+                DeepLearningRecurrentOutputMode::Sequence.canonical_name(),
+                function,
+            )?)
+            .ok_or_else(|| invalid(function, O::OutputMode))?;
+            let state_activation = DeepLearningRecurrentStateActivation::from_name(&text(
+                layer,
+                kind,
+                O::StateActivationFunction,
+                DeepLearningRecurrentStateActivation::Tanh.canonical_name(),
+                function,
+            )?)
+            .ok_or_else(|| invalid(function, O::StateActivationFunction))?;
+            let gate_activation = DeepLearningRecurrentGateActivation::from_name(&text(
+                layer,
+                kind,
+                O::GateActivationFunction,
+                DeepLearningRecurrentGateActivation::Sigmoid.canonical_name(),
+                function,
+            )?)
+            .ok_or_else(|| invalid(function, O::GateActivationFunction))?;
             let hidden_size = layer
                 .properties
                 .get("NumHiddenUnits")
@@ -268,7 +254,7 @@ fn padding_extents(value: &Value, function: &'static str) -> BuiltinResult<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::CONVOLUTION_1D_LAYER_CLASS;
+    use runmat_builtins::{BILSTM_LAYER_CLASS, CONVOLUTION_1D_LAYER_CLASS, LSTM_LAYER_CLASS};
 
     fn convolution(padding: Option<Value>) -> ObjectInstance {
         let mut layer = ObjectInstance::new(CONVOLUTION_1D_LAYER_CLASS.owned());
@@ -297,5 +283,116 @@ mod tests {
             admitted_padding(&convolution(Some(Value::String("same".into())))),
             conv::Padding::Same
         );
+    }
+
+    #[test]
+    fn convolution_text_modes_lower_without_changing_numeric_padding() {
+        for mode in DeepLearningConvolutionPaddingMode::ALL {
+            assert_eq!(
+                admitted_padding(&convolution(Some(Value::String(
+                    mode.canonical_name().to_ascii_uppercase()
+                )))),
+                conv::Padding::from(mode)
+            );
+        }
+        assert_eq!(
+            admitted_padding(&convolution(Some(Value::Num(2.0)))),
+            conv::Padding::Explicit { left: 2, right: 2 }
+        );
+        for mode in DeepLearningConvolutionPaddingValueMode::ALL {
+            let mut layer = convolution(None);
+            layer.properties.insert(
+                O::PaddingValue.canonical_name().into(),
+                Value::String(mode.canonical_name().to_ascii_uppercase()),
+            );
+            let Controls::Convolution(options) =
+                decode(&layer, K::Convolution1D, "forward").expect("padding-value mode must lower")
+            else {
+                panic!("convolution controls expected")
+            };
+            assert_eq!(options.padding_value, conv::PaddingValue::from(mode));
+        }
+        let mut layer = convolution(None);
+        layer
+            .properties
+            .insert(O::PaddingValue.canonical_name().into(), Value::Num(3.5));
+        let Controls::Convolution(options) =
+            decode(&layer, K::Convolution1D, "forward").expect("numeric padding value must lower")
+        else {
+            panic!("convolution controls expected")
+        };
+        assert_eq!(options.padding_value, conv::PaddingValue::Constant(3.5));
+        for option in [O::Padding, O::PaddingValue] {
+            let mut layer = convolution(None);
+            layer.properties.insert(
+                option.canonical_name().into(),
+                Value::String("invented".into()),
+            );
+            assert!(decode(&layer, K::Convolution1D, "forward").is_err());
+        }
+    }
+
+    #[test]
+    fn recurrent_modes_lower_for_both_layer_kinds() {
+        for (kind, class) in [(K::Lstm, LSTM_LAYER_CLASS), (K::Bilstm, BILSTM_LAYER_CLASS)] {
+            for mode in DeepLearningRecurrentOutputMode::ALL {
+                let mut layer = ObjectInstance::new(class.owned());
+                layer
+                    .properties
+                    .insert("NumHiddenUnits".into(), Value::Num(2.0));
+                layer.properties.insert(
+                    O::OutputMode.canonical_name().into(),
+                    Value::String(mode.canonical_name().to_ascii_uppercase()),
+                );
+                let Controls::Recurrent(options) =
+                    decode(&layer, kind, "forward").expect("output mode must lower")
+                else {
+                    panic!("recurrent controls expected")
+                };
+                assert_eq!(options.output_mode, mode);
+                for activation in DeepLearningRecurrentStateActivation::ALL {
+                    layer.properties.insert(
+                        O::StateActivationFunction.canonical_name().into(),
+                        Value::String(activation.canonical_name().to_ascii_uppercase()),
+                    );
+                    let Controls::Recurrent(options) =
+                        decode(&layer, kind, "forward").expect("state activation must lower")
+                    else {
+                        panic!("recurrent controls expected")
+                    };
+                    assert_eq!(options.state_activation, activation);
+                }
+                layer
+                    .properties
+                    .remove(O::StateActivationFunction.canonical_name());
+                for activation in DeepLearningRecurrentGateActivation::ALL {
+                    layer.properties.insert(
+                        O::GateActivationFunction.canonical_name().into(),
+                        Value::String(activation.canonical_name().to_ascii_uppercase()),
+                    );
+                    let Controls::Recurrent(options) =
+                        decode(&layer, kind, "forward").expect("gate activation must lower")
+                    else {
+                        panic!("recurrent controls expected")
+                    };
+                    assert_eq!(options.gate_activation, activation);
+                }
+                layer
+                    .properties
+                    .remove(O::GateActivationFunction.canonical_name());
+                for option in [
+                    O::OutputMode,
+                    O::StateActivationFunction,
+                    O::GateActivationFunction,
+                ] {
+                    layer.properties.insert(
+                        option.canonical_name().into(),
+                        Value::String("invented".into()),
+                    );
+                    assert!(decode(&layer, kind, "forward").is_err());
+                    layer.properties.remove(option.canonical_name());
+                }
+            }
+        }
     }
 }

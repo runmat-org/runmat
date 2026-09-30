@@ -1,4 +1,7 @@
-use runmat_builtins::DeepLearningAxisLabel;
+use runmat_builtins::{
+    DeepLearningAxisLabel, DeepLearningConvolutionPaddingMode,
+    DeepLearningConvolutionPaddingValueMode,
+};
 use runmat_value::{NumericDType, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::{AxisGeometryError, AxisPlan};
@@ -11,12 +14,35 @@ pub(in crate::builtins::deep_learning) enum Padding {
     Explicit { left: usize, right: usize },
 }
 
+impl From<DeepLearningConvolutionPaddingMode> for Padding {
+    fn from(mode: DeepLearningConvolutionPaddingMode) -> Self {
+        match mode {
+            DeepLearningConvolutionPaddingMode::Same => Self::Same,
+            DeepLearningConvolutionPaddingMode::Causal => Self::Causal,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::builtins::deep_learning) enum PaddingValue {
     Constant(f64),
     Replicate,
     SymmetricIncludeEdge,
     SymmetricExcludeEdge,
+}
+
+impl From<DeepLearningConvolutionPaddingValueMode> for PaddingValue {
+    fn from(mode: DeepLearningConvolutionPaddingValueMode) -> Self {
+        match mode {
+            DeepLearningConvolutionPaddingValueMode::Replicate => Self::Replicate,
+            DeepLearningConvolutionPaddingValueMode::SymmetricIncludeEdge => {
+                Self::SymmetricIncludeEdge
+            }
+            DeepLearningConvolutionPaddingValueMode::SymmetricExcludeEdge => {
+                Self::SymmetricExcludeEdge
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

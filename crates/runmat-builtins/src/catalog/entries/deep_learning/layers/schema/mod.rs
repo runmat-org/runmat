@@ -11,7 +11,9 @@ mod properties;
 pub use axes::*;
 pub use identity::DeepLearningLayerKind;
 pub use options::{
-    DeepLearningLayerOption, DeepLearningNormalizationAxes, LayerOptionDefault,
+    DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
+    DeepLearningLayerOption, DeepLearningNormalizationAxes, DeepLearningRecurrentGateActivation,
+    DeepLearningRecurrentOutputMode, DeepLearningRecurrentStateActivation, LayerOptionDefault,
     LayerOptionExecution,
 };
 pub use properties::DeepLearningLayerStructuralProperty;
@@ -93,6 +95,93 @@ mod tests {
         assert_eq!(
             O::Weights.execution_for(K::Convolution1D),
             LayerOptionExecution::PendingExecution
+        );
+    }
+
+    #[test]
+    fn execution_modes_round_trip_through_constructor_choices() {
+        use DeepLearningLayerKind as K;
+        use DeepLearningLayerOption as O;
+
+        for (option, names) in [
+            (O::Padding, DeepLearningConvolutionPaddingMode::NAMES),
+            (
+                O::PaddingValue,
+                DeepLearningConvolutionPaddingValueMode::NAMES,
+            ),
+        ] {
+            assert_eq!(option.text_values_for(K::Convolution1D), Some(names));
+        }
+        for mode in DeepLearningConvolutionPaddingMode::ALL {
+            assert_eq!(
+                DeepLearningConvolutionPaddingMode::from_name(
+                    &mode.canonical_name().to_ascii_uppercase()
+                ),
+                Some(mode)
+            );
+        }
+        for mode in DeepLearningConvolutionPaddingValueMode::ALL {
+            assert_eq!(
+                DeepLearningConvolutionPaddingValueMode::from_name(
+                    &mode.canonical_name().to_ascii_uppercase()
+                ),
+                Some(mode)
+            );
+        }
+        for kind in [K::Lstm, K::Bilstm] {
+            assert_eq!(
+                O::OutputMode.text_values_for(kind),
+                Some(DeepLearningRecurrentOutputMode::NAMES)
+            );
+            assert_eq!(
+                O::StateActivationFunction.text_values_for(kind),
+                Some(DeepLearningRecurrentStateActivation::NAMES)
+            );
+            assert_eq!(
+                O::GateActivationFunction.text_values_for(kind),
+                Some(DeepLearningRecurrentGateActivation::NAMES)
+            );
+        }
+        for mode in DeepLearningRecurrentOutputMode::ALL {
+            assert_eq!(
+                DeepLearningRecurrentOutputMode::from_name(
+                    &mode.canonical_name().to_ascii_uppercase()
+                ),
+                Some(mode)
+            );
+        }
+        for mode in DeepLearningRecurrentStateActivation::ALL {
+            assert_eq!(
+                DeepLearningRecurrentStateActivation::from_name(
+                    &mode.canonical_name().to_ascii_uppercase()
+                ),
+                Some(mode)
+            );
+        }
+        for mode in DeepLearningRecurrentGateActivation::ALL {
+            assert_eq!(
+                DeepLearningRecurrentGateActivation::from_name(
+                    &mode.canonical_name().to_ascii_uppercase()
+                ),
+                Some(mode)
+            );
+        }
+        assert_eq!(
+            DeepLearningConvolutionPaddingMode::from_name("unknown"),
+            None
+        );
+        assert_eq!(
+            DeepLearningConvolutionPaddingValueMode::from_name("unknown"),
+            None
+        );
+        assert_eq!(DeepLearningRecurrentOutputMode::from_name("unknown"), None);
+        assert_eq!(
+            DeepLearningRecurrentStateActivation::from_name("unknown"),
+            None
+        );
+        assert_eq!(
+            DeepLearningRecurrentGateActivation::from_name("unknown"),
+            None
         );
     }
 

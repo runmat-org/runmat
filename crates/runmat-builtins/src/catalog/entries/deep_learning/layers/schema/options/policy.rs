@@ -93,19 +93,15 @@ impl DeepLearningLayerOption {
                 Some(&["auto", "channel", "element", "all"])
             }
             O::NormalizationDimension => Some(&["auto", "channel", "all"]),
-            O::OutputMode => Some(&["sequence", "last"]),
-            O::StateActivationFunction => Some(&["tanh", "softsign", "relu"]),
-            O::GateActivationFunction => Some(&["sigmoid", "hard-sigmoid"]),
+            O::OutputMode => Some(super::DeepLearningRecurrentOutputMode::NAMES),
+            O::StateActivationFunction => Some(super::DeepLearningRecurrentStateActivation::NAMES),
+            O::GateActivationFunction => Some(super::DeepLearningRecurrentGateActivation::NAMES),
             O::OperationDimension if matches!(kind, DeepLearningLayerKind::LayerNormalization) => {
                 None
             }
             O::OperationDimension => Some(&["spatial-channel"]),
-            O::Padding => Some(&["same", "causal"]),
-            O::PaddingValue => Some(&[
-                "symmetric-include-edge",
-                "symmetric-exclude-edge",
-                "replicate",
-            ]),
+            O::Padding => Some(super::DeepLearningConvolutionPaddingMode::NAMES),
+            O::PaddingValue => Some(super::DeepLearningConvolutionPaddingValueMode::NAMES),
             O::InputSize | O::NumChannels => Some(&["auto"]),
             _ => None,
         }

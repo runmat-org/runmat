@@ -9,7 +9,14 @@ mod output;
 mod policy;
 mod recurrent;
 
+pub use convolution::{
+    DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
+};
 pub use normalization::DeepLearningNormalizationAxes;
+pub use recurrent::{
+    DeepLearningRecurrentGateActivation, DeepLearningRecurrentOutputMode,
+    DeepLearningRecurrentStateActivation,
+};
 
 use super::DeepLearningLayerKind;
 
