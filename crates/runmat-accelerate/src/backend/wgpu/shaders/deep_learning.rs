@@ -12,11 +12,6 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-var<workgroup> maxima: array<$SCALAR$, 256>;
-var<workgroup> specials: array<$SCALAR$, 256>;
-var<workgroup> special_counts: array<u32, 256>;
-var<workgroup> sums: array<$SCALAR$, 256>;
-
 fn is_special(value: $SCALAR$) -> bool {
   // x - x is NaN exactly for infinities; x != x detects NaNs.
   return value != value || (value - value) != (value - value);
@@ -24,71 +19,43 @@ fn is_special(value: $SCALAR$) -> bool {
 
 @compute @workgroup_size(256)
 fn main(@builtin(local_invocation_id) lane: vec3<u32>, @builtin(workgroup_id) group: vec3<u32>) {
-  let column = group.x + params.output_offset;
-  if (column >= params.output_count) { return; }
+  let local_column = group.x * 256u + lane.x;
+  if (local_column >= params.output_count - params.output_offset) { return; }
+  let column = params.output_offset + local_column;
   let inner = column % params.inner_stride;
   let outer = column / params.inner_stride;
   let base = inner + outer * params.inner_stride * params.pool_size;
-  var local_max: $SCALAR$ = 0.0;
-  var local_special: $SCALAR$ = 0.0;
-  var local_special_count: u32 = 0u;
-  var index = lane.x;
+  // Each invocation owns one output and follows the host sum order. A
+  // max-scaled parallel tree loses representable cancellation residuals such
+  // as [MAX, -MAX, subnormal], even though its finite range is attractive.
+  var sum: $SCALAR$ = 0.0;
+  var overflow = false;
+  var index = 0u;
   while (index < params.pool_size) {
     let value = input.data[base + index * params.inner_stride];
-    if (is_special(value)) {
-      local_special = local_special + value;
-      local_special_count = local_special_count + 1u;
-    } else {
-      local_max = max(local_max, abs(value));
+    let next = sum + value;
+    if (!is_special(sum) && !is_special(value) && is_special(next)) {
+      overflow = true;
+      break;
     }
-    index = index + 256u;
+    sum = next;
+    index = index + 1u;
   }
-  maxima[lane.x] = local_max;
-  specials[lane.x] = local_special;
-  special_counts[lane.x] = local_special_count;
-  workgroupBarrier();
-  var offset = 128u;
-  loop {
-    if (offset == 0u) { break; }
-    if (lane.x < offset) {
-      maxima[lane.x] = max(maxima[lane.x], maxima[lane.x + offset]);
-      specials[lane.x] = specials[lane.x] + specials[lane.x + offset];
-      special_counts[lane.x] = special_counts[lane.x] + special_counts[lane.x + offset];
-    }
-    workgroupBarrier();
-    offset = offset / 2u;
-  }
-  if (special_counts[0] != 0u) {
-    if (lane.x == 0u) {
-      output.data[column] = specials[0] / $SCALAR$(params.pool_size);
-    }
+  if (!overflow) {
+    output.data[column] = sum / $SCALAR$(params.pool_size);
     return;
   }
-  let scale = maxima[0];
-  if (scale == 0.0) {
-    if (lane.x == 0u) { output.data[column] = 0.0; }
-    return;
-  }
-  var local_sum: $SCALAR$ = 0.0;
-  index = lane.x;
+  // Match the host overflow branch in the input precision, without a
+  // widened mirror. This recurrence never materializes an overflowing sum.
+  var mean: $SCALAR$ = 0.0;
+  index = 0u;
   while (index < params.pool_size) {
-    local_sum = local_sum + input.data[base + index * params.inner_stride] / scale;
-    index = index + 256u;
+    let count = $SCALAR$(index + 1u);
+    let previous_weight = $SCALAR$(index) / count;
+    mean = mean * previous_weight + input.data[base + index * params.inner_stride] / count;
+    index = index + 1u;
   }
-  sums[lane.x] = local_sum;
-  workgroupBarrier();
-  offset = 128u;
-  loop {
-    if (offset == 0u) { break; }
-    if (lane.x < offset) {
-      sums[lane.x] = sums[lane.x] + sums[lane.x + offset];
-    }
-    workgroupBarrier();
-    offset = offset / 2u;
-  }
-  if (lane.x == 0u) {
-    output.data[column] = (sums[0] / $SCALAR$(params.pool_size)) * scale;
-  }
+  output.data[column] = mean;
 }
 "#;
 

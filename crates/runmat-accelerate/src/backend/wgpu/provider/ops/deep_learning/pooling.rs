@@ -20,11 +20,9 @@ impl WgpuProvider {
             input.shape() == entry.shape
                 && input.physical().element_type() == entry.element_type
                 && input.physical().storage() == entry.storage
-                && entry.storage == GpuTensorStorage::Real
-                && !entry.logical
-                && entry.integer_type().is_none()
-                && entry.precision == self.precision,
-            "deep-learning pooling input descriptor does not match a provider-owned floating buffer"
+                && entry.logical == runmat_accelerate_api::handle_is_logical(input)
+                && entry.integer_type() == runmat_accelerate_api::handle_integer_type(input),
+            "deep-learning pooling input descriptor does not match its provider-owned buffer"
         );
         let shape = input.shape();
         let axis = route.reduction.axis_zero_based;
@@ -34,9 +32,19 @@ impl WgpuProvider {
         let total = checked_shape_count(shape)?;
         ensure!(total == entry.len, "pooling input shape/storage mismatch");
         let output_count = total / pool_size;
+        let mut keep_shape = shape.to_vec();
+        keep_shape[axis] = 1;
+        let expected_source = match route.result_axis {
+            DeepLearningPool1DResultAxis::KeepSingleton => keep_shape,
+            DeepLearningPool1DResultAxis::RemoveReduced => {
+                ensure!(shape.len() > 1, "cannot remove the sole pooling axis");
+                keep_shape.remove(axis);
+                keep_shape
+            }
+        };
         ensure!(
-            checked_shape_count(&route.source_shape)? == output_count,
-            "pooling source shape does not match reduced element count"
+            route.source_shape == expected_source,
+            "pooling source shape does not match the requested reduced-axis view"
         );
         let rank = route.source_shape.len();
         ensure!(
@@ -59,6 +67,13 @@ impl WgpuProvider {
             .enumerate()
             .any(|(target, &source)| target != source);
         let stride = checked_shape_count(&shape[..axis])?;
+        if entry.storage != GpuTensorStorage::Real
+            || entry.logical
+            || entry.integer_type().is_some()
+            || entry.precision != self.precision
+        {
+            return Ok(DeepLearningPool1DCapability::UnsupportedOperation);
+        }
         if total > u32::MAX as usize
             || pool_size > u32::MAX as usize
             || stride > u32::MAX as usize
@@ -176,7 +191,7 @@ impl WgpuProvider {
                     pending,
                     &pipeline.pipeline,
                     &bind,
-                    (output_count - offset).min(chunk),
+                    (output_count - offset).min(chunk).div_ceil(256),
                 )?;
             }
             Ok(output)

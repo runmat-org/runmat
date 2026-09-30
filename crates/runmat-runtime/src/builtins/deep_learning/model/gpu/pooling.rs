@@ -3,7 +3,9 @@ use crate::builtins::common::gpu_helpers::{
     propagate_output_provenance, reject_gpu_output, unary_gpu_output_matches_shape,
     GpuOutputAliasPolicy, UnaryGpuOutputContract,
 };
-use runmat_accelerate_api::{DeepLearningPool1DRequest, DeepLearningPool1DRoute};
+use runmat_accelerate_api::{
+    DeepLearningPool1DRequest, DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
+};
 
 pub(super) fn route(
     input_axes: &AxisPlan,
@@ -38,6 +40,21 @@ pub(super) fn route(
             format!("{function}: pooled output geometry differs from admitted axes"),
         ));
     }
+    let mut kept_shape = input_axes.shape().to_vec();
+    kept_shape[axis] = 1;
+    let result_axis = if source_axes.shape() == kept_shape {
+        DeepLearningPool1DResultAxis::KeepSingleton
+    } else {
+        let mut removed_shape = kept_shape;
+        removed_shape.remove(axis);
+        if source_axes.shape() != removed_shape {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: pooled axis shape is not a supported reduction view"),
+            ));
+        }
+        DeepLearningPool1DResultAxis::RemoveReduced
+    };
     let lowering = source_axes
         .lower_to(target_axes.layout())
         .map_err(|error| {
@@ -56,6 +73,7 @@ pub(super) fn route(
         reduction: DeepLearningPool1DRequest {
             axis_zero_based: axis,
         },
+        result_axis,
         source_shape: source_axes.shape().to_vec(),
         target_shape: target_axes.shape().to_vec(),
         target_to_source: lowering.target_to_source().to_vec(),
@@ -110,6 +128,7 @@ pub(super) async fn forward(
         .enumerate()
         .any(|(target, &source)| target != source)
     {
+        let alias = presentation_alias_policy(source_axes, &planned);
         let reordered = provider
             .permute(&current, &planned.target_to_source)
             .map_err(|error| {
@@ -125,12 +144,28 @@ pub(super) async fn forward(
             provider,
             target_axes.shape(),
             precision,
-            GpuOutputAliasPolicy::AllowInput,
+            alias,
             function,
         )?;
     }
     propagate_output_provenance(&mut current, [input])?;
     Ok(Some(current))
+}
+
+fn presentation_alias_policy(
+    source_axes: &AxisPlan,
+    route: &DeepLearningPool1DRoute,
+) -> GpuOutputAliasPolicy {
+    if route
+        .target_to_source
+        .iter()
+        .enumerate()
+        .any(|(target, &source)| target != source && source_axes.shape()[source] > 1)
+    {
+        GpuOutputAliasPolicy::RequireDistinctAllocation
+    } else {
+        GpuOutputAliasPolicy::AllowInput
+    }
 }
 
 fn validate(
@@ -166,5 +201,50 @@ fn validate(
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_accelerate_api::HostTensorView;
+
+    #[test]
+    fn reshaped_alias_cannot_masquerade_as_nontrivial_gpu_permutation() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1., 2., 3., 4., 5., 6.],
+                    shape: &[2, 3],
+                })
+                .unwrap();
+            let source_axes = AxisPlan::new(
+                runmat_builtins::DeepLearningAxisLayout::parse("CB", 2).unwrap(),
+                input.shape(),
+            )
+            .unwrap();
+            let planned = DeepLearningPool1DRoute {
+                reduction: DeepLearningPool1DRequest { axis_zero_based: 0 },
+                result_axis: DeepLearningPool1DResultAxis::KeepSingleton,
+                source_shape: vec![2, 3],
+                target_shape: vec![3, 2],
+                target_to_source: vec![1, 0],
+            };
+            let alias = presentation_alias_policy(&source_axes, &planned);
+            assert_eq!(alias, GpuOutputAliasPolicy::RequireDistinctAllocation);
+            let forged = input
+                .with_view(input.view().clone().with_shape(vec![3, 2]))
+                .unwrap();
+            assert!(validate(
+                forged,
+                &input,
+                provider,
+                &[3, 2],
+                runmat_accelerate_api::handle_precision(&input),
+                alias,
+                "forward",
+            )
+            .is_err());
+        });
     }
 }

@@ -32,7 +32,8 @@ mod covariance;
 pub use covariance::CovarianceWeightDomainError;
 mod deep_learning;
 pub use deep_learning::{
-    DeepLearningPool1DCapability, DeepLearningPool1DRequest, DeepLearningPool1DRoute,
+    DeepLearningPool1DCapability, DeepLearningPool1DRequest, DeepLearningPool1DResultAxis,
+    DeepLearningPool1DRoute,
 };
 pub use provider_execution::{
     ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,

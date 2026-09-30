@@ -16,9 +16,18 @@ pub struct DeepLearningPool1DRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeepLearningPool1DRoute {
     pub reduction: DeepLearningPool1DRequest,
+    pub result_axis: DeepLearningPool1DResultAxis,
     pub source_shape: Vec<usize>,
     pub target_shape: Vec<usize>,
     pub target_to_source: Vec<usize>,
+}
+
+/// Whether the reduced physical axis survives as a singleton in the logical
+/// source result, or is removed before output presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepLearningPool1DResultAxis {
+    KeepSingleton,
+    RemoveReduced,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

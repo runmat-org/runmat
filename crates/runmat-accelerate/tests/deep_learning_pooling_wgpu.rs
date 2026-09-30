@@ -2,7 +2,8 @@
 
 use runmat_accelerate_api::{
     AccelProvider, DeepLearningPool1DCapability, DeepLearningPool1DRequest,
-    DeepLearningPool1DRoute, GpuTensorStorage, HostTensorView, ProviderPrecision,
+    DeepLearningPool1DResultAxis, DeepLearningPool1DRoute, GpuTensorStorage, HostTensorView,
+    ProviderPrecision,
 };
 
 #[tokio::test]
@@ -42,6 +43,7 @@ async fn stable_resident_global_pool_retains_precision_shape_owner_and_special_v
             reduction: DeepLearningPool1DRequest {
                 axis_zero_based: axis,
             },
+            result_axis: DeepLearningPool1DResultAxis::KeepSingleton,
             target_shape: source_shape.clone(),
             target_to_source: (0..source_shape.len()).collect(),
             source_shape,
@@ -124,6 +126,44 @@ async fn stable_resident_global_pool_retains_precision_shape_owner_and_special_v
         } else {
             assert!(actual.is_nan(), "expected NaN, got {actual}");
         }
+        output.release().unwrap();
+        input.release().unwrap();
+    }
+
+    for tiny in if single {
+        [1e-10, 1e-38]
+    } else {
+        [1e-20, 1e-320]
+    } {
+        let values = [large, -large, tiny];
+        let input = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &[3, 1],
+            })
+            .unwrap();
+        let output = provider
+            .deep_learning_global_average_pool_1d(
+                &input,
+                DeepLearningPool1DRequest { axis_zero_based: 0 },
+            )
+            .await
+            .unwrap();
+        let actual = provider.download(&output).await.unwrap().data[0];
+        let expected = if single {
+            f64::from((tiny as f32) / 3.0_f32)
+        } else {
+            tiny / 3.0
+        };
+        let ulp = if single {
+            f64::from(f32::from_bits(1))
+        } else {
+            f64::from_bits(1)
+        };
+        assert!(
+            actual > 0.0 && (actual - expected).abs() <= expected.abs() * tolerance + 4.0 * ulp,
+            "cancellation residual lost: {actual} != {expected} (input {tiny})"
+        );
         output.release().unwrap();
         input.release().unwrap();
     }
