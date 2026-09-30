@@ -84,6 +84,21 @@ fn check_literal_option(
             }
         }
         CrossentropyOptionKey::WeightsFormat => {
+            let positional = request.arguments.get(2).is_some_and(|value| {
+                matches!(
+                    value.kind,
+                    ValueKindFact::Numeric(_) | ValueKindFact::Logical
+                )
+            });
+            let named = (2..request.arguments.len())
+                .step_by(2)
+                .filter_map(|index| request.literals.literal_string_at(index))
+                .any(|name| {
+                    CrossentropyOptionKey::from_name(&name) == Some(CrossentropyOptionKey::Weights)
+                });
+            if !positional && !named {
+                return;
+            }
             // The weight shape can be positional or named, and may be dynamic.
             // Runtime validates its rank after selecting the actual weight value.
             value.is_empty()

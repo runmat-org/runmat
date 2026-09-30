@@ -110,6 +110,8 @@ mod tests {
 
     #[test]
     fn option_and_mode_names_round_trip() {
+        let names = CrossentropyOptionKey::ALL.map(|key| key.canonical_name().to_ascii_lowercase());
+        assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
         for key in CrossentropyOptionKey::ALL {
             assert_eq!(
                 CrossentropyOptionKey::from_name(key.canonical_name()),

@@ -55,7 +55,6 @@ fn literal_modes_and_nonsquare_format_use_shared_typed_admission() {
         ("DataFormat", "CB"),
         ("ClassificationMode", "other"),
         ("NormalizationFactor", "other"),
-        ("WeightsFormat", "CCU"),
     ] {
         let result = crate::infer_catalog_call(&CROSSENTROPY_CATALOG_ENTRY, &request(key, value));
         assert!(
@@ -67,6 +66,33 @@ fn literal_modes_and_nonsquare_format_use_shared_typed_admission() {
             result.diagnostics
         );
     }
+    let named_weights = CallRequest {
+        arguments: vec![
+            data.clone(),
+            data.clone(),
+            ValueFact::scalar(ValueKindFact::String),
+            numeric(
+                NumericClass::Single,
+                ShapeFact::from(vec![Some(2), Some(3)]),
+            ),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("Weights".into()),
+            LiteralValue::Unknown,
+            LiteralValue::String("WeightsFormat".into()),
+            LiteralValue::String("CCU".into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let result = crate::infer_catalog_call(&CROSSENTROPY_CATALOG_ENTRY, &named_weights);
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-CROSSENTROPY-OPTION-VALUE"));
 }
 
 fn infer(arguments: Vec<ValueFact>, outputs: usize) -> CallInference {
