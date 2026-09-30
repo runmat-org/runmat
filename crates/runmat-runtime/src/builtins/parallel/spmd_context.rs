@@ -80,13 +80,29 @@ mod tests {
     #[test]
     fn every_binding_rejects_excess_outputs_before_context_read() {
         let _guard = crate::output_count::push_output_count(Some(2));
-        let cases: [(fn() -> crate::BuiltinResult<Value>, Option<&str>); 4] = [
-            (spmd_index_builtin, SPMD_INDEX_TOO_MANY_OUTPUTS.identifier),
-            (spmd_size_builtin, SPMD_SIZE_TOO_MANY_OUTPUTS.identifier),
-            (labindex_builtin, LABINDEX_TOO_MANY_OUTPUTS.identifier),
-            (numlabs_builtin, NUMLABS_TOO_MANY_OUTPUTS.identifier),
+        struct Case {
+            read: fn() -> crate::BuiltinResult<Value>,
+            expected: Option<&'static str>,
+        }
+        let cases = [
+            Case {
+                read: spmd_index_builtin,
+                expected: SPMD_INDEX_TOO_MANY_OUTPUTS.identifier,
+            },
+            Case {
+                read: spmd_size_builtin,
+                expected: SPMD_SIZE_TOO_MANY_OUTPUTS.identifier,
+            },
+            Case {
+                read: labindex_builtin,
+                expected: LABINDEX_TOO_MANY_OUTPUTS.identifier,
+            },
+            Case {
+                read: numlabs_builtin,
+                expected: NUMLABS_TOO_MANY_OUTPUTS.identifier,
+            },
         ];
-        for (read, expected) in cases {
+        for Case { read, expected } in cases {
             assert_eq!(read().unwrap_err().identifier(), expected);
         }
     }

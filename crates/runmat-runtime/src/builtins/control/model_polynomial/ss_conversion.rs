@@ -216,6 +216,167 @@ fn ensure_zero_delay_value(value: &Value, name: &str) -> ConversionResult<()> {
     Ok(())
 }
 
+fn numeric_values(value: &Value, name: &str) -> ConversionResult<Vec<Complex64>> {
+    let values = match value {
+        Value::Num(n) => vec![Complex64::new(*n, 0.0)],
+        Value::Int(i) => vec![Complex64::new(i.to_f64(), 0.0)],
+        Value::Bool(b) => vec![Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)],
+        Value::Complex(re, im) => vec![Complex64::new(*re, *im)],
+        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor)
+            .into_iter()
+            .map(|re| Complex64::new(re, 0.0))
+            .collect(),
+        Value::ComplexTensor(tensor) => tensor::complex_tensor_values_complex64(tensor),
+        Value::LogicalArray(logical) => logical
+            .data
+            .iter()
+            .map(|&value| Complex64::new(if value == 0 { 0.0 } else { 1.0 }, 0.0))
+            .collect(),
+        other => {
+            return Err(conversion_error(
+                format!("ss {name} must be numeric, got {other:?}"),
+                ConversionErrorKind::InvalidModel,
+            ));
+        }
+    };
+    ensure_finite_coefficients(name, &values)?;
+    Ok(values)
+}
+
+fn validate_ss_dimensions(
+    a: &DMatrix<Complex64>,
+    b: &DMatrix<Complex64>,
+    c: &DMatrix<Complex64>,
+    d: &DMatrix<Complex64>,
+) -> ConversionResult<()> {
+    if a.nrows() != a.ncols() {
+        return Err(conversion_error(
+            format!("ss A must be square, got {}x{}", a.nrows(), a.ncols()),
+            ConversionErrorKind::InvalidModel,
+        ));
+    }
+    let states = a.nrows();
+    if b.nrows() != states {
+        return Err(conversion_error(
+            format!(
+                "ss B must have {states} rows to match A, got {}x{}",
+                b.nrows(),
+                b.ncols()
+            ),
+            ConversionErrorKind::InvalidModel,
+        ));
+    }
+    if c.ncols() != states {
+        return Err(conversion_error(
+            format!(
+                "ss C must have {states} columns to match A, got {}x{}",
+                c.nrows(),
+                c.ncols()
+            ),
+            ConversionErrorKind::InvalidModel,
+        ));
+    }
+    if d.nrows() != c.nrows() || d.ncols() != b.ncols() {
+        return Err(conversion_error(
+            format!(
+                "ss D must have shape {}x{} to match C outputs and B inputs, got {}x{}",
+                c.nrows(),
+                b.ncols(),
+                d.nrows(),
+                d.ncols()
+            ),
+            ConversionErrorKind::InvalidModel,
+        ));
+    }
+    if b.ncols() != 1 || c.nrows() != 1 || d.nrows() != 1 || d.ncols() != 1 {
+        return Err(conversion_error(
+            "only SISO ss models are supported",
+            ConversionErrorKind::UnsupportedModel,
+        ));
+    }
+    Ok(())
+}
+
+fn characteristic_polynomial_from_matrix(
+    a: &DMatrix<Complex64>,
+) -> ConversionResult<Vec<Complex64>> {
+    let n = a.nrows();
+    if n == 0 {
+        return Ok(vec![Complex64::new(1.0, 0.0)]);
+    }
+    let mut coeffs = Vec::with_capacity(n + 1);
+    coeffs.push(Complex64::new(1.0, 0.0));
+    let mut b = DMatrix::<Complex64>::identity(n, n);
+    for k in 1..=n {
+        let ab = a * &b;
+        let trace = (0..n).fold(Complex64::new(0.0, 0.0), |acc, idx| acc + ab[(idx, idx)]);
+        let coeff = -trace / Complex64::new(k as f64, 0.0);
+        coeffs.push(coeff);
+        let mut next = ab;
+        for idx in 0..n {
+            next[(idx, idx)] += coeff;
+        }
+        b = next;
+    }
+    ensure_finite_coefficients("ss characteristic polynomial", &coeffs)?;
+    Ok(coeffs)
+}
+
+fn state_space_numerator(
+    a: &DMatrix<Complex64>,
+    b: &DMatrix<Complex64>,
+    c: &DMatrix<Complex64>,
+    d: Complex64,
+    denominator: &[Complex64],
+) -> ConversionResult<Vec<Complex64>> {
+    let degree = a.nrows();
+    if degree == 0 {
+        return Ok(vec![d]);
+    }
+
+    // Let H(s) = D + C(sI-A)^-1B. The denominator is
+    // s^n+d1*s^(n-1)+...+dn. Its numerator coefficients are D*di plus
+    // the convolution of d0..d(i-1) with the Markov parameters C*A^(k-1)*B.
+    // This avoids interpolating at arbitrary points and, crucially, does not
+    // erase a small but genuine B/C gain with an absolute cleanup threshold.
+    let mut coeffs = denominator
+        .iter()
+        .map(|coefficient| d * *coefficient)
+        .collect::<Vec<_>>();
+    let mut state = b.clone();
+    for k in 1..=degree {
+        let markov = (c * &state)[(0, 0)];
+        for i in k..=degree {
+            coeffs[i] += denominator[i - k] * markov;
+        }
+        if k < degree {
+            state = a * state;
+        }
+    }
+    ensure_finite_coefficients("ss numerator polynomial", &coeffs)?;
+    Ok(coeffs)
+}
+fn trim_leading_complex_zeros(coeffs: Vec<Complex64>) -> Vec<Complex64> {
+    let first_nonzero = coeffs
+        .iter()
+        .position(|value| *value != Complex64::new(0.0, 0.0))
+        .unwrap_or(coeffs.len());
+    coeffs[first_nonzero..].to_vec()
+}
+
+fn ensure_finite_coefficients(label: &str, coeffs: &[Complex64]) -> ConversionResult<()> {
+    if coeffs
+        .iter()
+        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(conversion_error(
+            format!("{label} values must be finite"),
+            ConversionErrorKind::InvalidModel,
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,165 +559,4 @@ mod tests {
         assert_eq!(parsed[(0, 1)], Complex64::new(2.0, -2.0));
         assert_eq!(parsed[(1, 1)], Complex64::new(4.0, -4.0));
     }
-}
-
-fn numeric_values(value: &Value, name: &str) -> ConversionResult<Vec<Complex64>> {
-    let values = match value {
-        Value::Num(n) => vec![Complex64::new(*n, 0.0)],
-        Value::Int(i) => vec![Complex64::new(i.to_f64(), 0.0)],
-        Value::Bool(b) => vec![Complex64::new(if *b { 1.0 } else { 0.0 }, 0.0)],
-        Value::Complex(re, im) => vec![Complex64::new(*re, *im)],
-        Value::Tensor(tensor) => tensor::tensor_values_f64(tensor)
-            .into_iter()
-            .map(|re| Complex64::new(re, 0.0))
-            .collect(),
-        Value::ComplexTensor(tensor) => tensor::complex_tensor_values_complex64(tensor),
-        Value::LogicalArray(logical) => logical
-            .data
-            .iter()
-            .map(|&value| Complex64::new(if value == 0 { 0.0 } else { 1.0 }, 0.0))
-            .collect(),
-        other => {
-            return Err(conversion_error(
-                format!("ss {name} must be numeric, got {other:?}"),
-                ConversionErrorKind::InvalidModel,
-            ));
-        }
-    };
-    ensure_finite_coefficients(name, &values)?;
-    Ok(values)
-}
-
-fn validate_ss_dimensions(
-    a: &DMatrix<Complex64>,
-    b: &DMatrix<Complex64>,
-    c: &DMatrix<Complex64>,
-    d: &DMatrix<Complex64>,
-) -> ConversionResult<()> {
-    if a.nrows() != a.ncols() {
-        return Err(conversion_error(
-            format!("ss A must be square, got {}x{}", a.nrows(), a.ncols()),
-            ConversionErrorKind::InvalidModel,
-        ));
-    }
-    let states = a.nrows();
-    if b.nrows() != states {
-        return Err(conversion_error(
-            format!(
-                "ss B must have {states} rows to match A, got {}x{}",
-                b.nrows(),
-                b.ncols()
-            ),
-            ConversionErrorKind::InvalidModel,
-        ));
-    }
-    if c.ncols() != states {
-        return Err(conversion_error(
-            format!(
-                "ss C must have {states} columns to match A, got {}x{}",
-                c.nrows(),
-                c.ncols()
-            ),
-            ConversionErrorKind::InvalidModel,
-        ));
-    }
-    if d.nrows() != c.nrows() || d.ncols() != b.ncols() {
-        return Err(conversion_error(
-            format!(
-                "ss D must have shape {}x{} to match C outputs and B inputs, got {}x{}",
-                c.nrows(),
-                b.ncols(),
-                d.nrows(),
-                d.ncols()
-            ),
-            ConversionErrorKind::InvalidModel,
-        ));
-    }
-    if b.ncols() != 1 || c.nrows() != 1 || d.nrows() != 1 || d.ncols() != 1 {
-        return Err(conversion_error(
-            "only SISO ss models are supported",
-            ConversionErrorKind::UnsupportedModel,
-        ));
-    }
-    Ok(())
-}
-
-fn characteristic_polynomial_from_matrix(
-    a: &DMatrix<Complex64>,
-) -> ConversionResult<Vec<Complex64>> {
-    let n = a.nrows();
-    if n == 0 {
-        return Ok(vec![Complex64::new(1.0, 0.0)]);
-    }
-    let mut coeffs = Vec::with_capacity(n + 1);
-    coeffs.push(Complex64::new(1.0, 0.0));
-    let mut b = DMatrix::<Complex64>::identity(n, n);
-    for k in 1..=n {
-        let ab = a * &b;
-        let trace = (0..n).fold(Complex64::new(0.0, 0.0), |acc, idx| acc + ab[(idx, idx)]);
-        let coeff = -trace / Complex64::new(k as f64, 0.0);
-        coeffs.push(coeff);
-        let mut next = ab;
-        for idx in 0..n {
-            next[(idx, idx)] += coeff;
-        }
-        b = next;
-    }
-    ensure_finite_coefficients("ss characteristic polynomial", &coeffs)?;
-    Ok(coeffs)
-}
-
-fn state_space_numerator(
-    a: &DMatrix<Complex64>,
-    b: &DMatrix<Complex64>,
-    c: &DMatrix<Complex64>,
-    d: Complex64,
-    denominator: &[Complex64],
-) -> ConversionResult<Vec<Complex64>> {
-    let degree = a.nrows();
-    if degree == 0 {
-        return Ok(vec![d]);
-    }
-
-    // Let H(s) = D + C(sI-A)^-1B. The denominator is
-    // s^n+d1*s^(n-1)+...+dn. Its numerator coefficients are D*di plus
-    // the convolution of d0..d(i-1) with the Markov parameters C*A^(k-1)*B.
-    // This avoids interpolating at arbitrary points and, crucially, does not
-    // erase a small but genuine B/C gain with an absolute cleanup threshold.
-    let mut coeffs = denominator
-        .iter()
-        .map(|coefficient| d * *coefficient)
-        .collect::<Vec<_>>();
-    let mut state = b.clone();
-    for k in 1..=degree {
-        let markov = (c * &state)[(0, 0)];
-        for i in k..=degree {
-            coeffs[i] += denominator[i - k] * markov;
-        }
-        if k < degree {
-            state = a * state;
-        }
-    }
-    ensure_finite_coefficients("ss numerator polynomial", &coeffs)?;
-    Ok(coeffs)
-}
-fn trim_leading_complex_zeros(coeffs: Vec<Complex64>) -> Vec<Complex64> {
-    let first_nonzero = coeffs
-        .iter()
-        .position(|value| *value != Complex64::new(0.0, 0.0))
-        .unwrap_or(coeffs.len());
-    coeffs[first_nonzero..].to_vec()
-}
-
-fn ensure_finite_coefficients(label: &str, coeffs: &[Complex64]) -> ConversionResult<()> {
-    if coeffs
-        .iter()
-        .any(|value| !value.re.is_finite() || !value.im.is_finite())
-    {
-        return Err(conversion_error(
-            format!("{label} values must be finite"),
-            ConversionErrorKind::InvalidModel,
-        ));
-    }
-    Ok(())
 }

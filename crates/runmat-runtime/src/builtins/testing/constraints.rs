@@ -52,6 +52,19 @@ fn constraint(
     Ok(Value::Object(object))
 }
 
+fn no_args(name: &'static str, args: Vec<Value>) -> BuiltinResult<()> {
+    if args.is_empty() {
+        Ok(())
+    } else {
+        Err(
+            crate::build_runtime_error(format!("{name}: too many input arguments"))
+                .with_identifier("RunMat:Testing:InvalidConstraint")
+                .with_builtin(name)
+                .build(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,18 +105,5 @@ mod tests {
             let error = is_equal_to(args).unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidConstraint"));
         }
-    }
-}
-
-fn no_args(name: &'static str, args: Vec<Value>) -> BuiltinResult<()> {
-    if args.is_empty() {
-        Ok(())
-    } else {
-        Err(
-            crate::build_runtime_error(format!("{name}: too many input arguments"))
-                .with_identifier("RunMat:Testing:InvalidConstraint")
-                .with_builtin(name)
-                .build(),
-        )
     }
 }

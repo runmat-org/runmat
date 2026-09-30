@@ -300,7 +300,8 @@ fn zero_variance_is_finite_and_f32_adjoint_matches_finite_difference() {
 
 #[test]
 fn extreme_finite_inputs_do_not_overflow_the_mean_or_scaled_variance() {
-    for (positive, negative) in [(2.0e38_f32, -2.0e38_f32)] {
+    {
+        let (positive, negative) = (2.0e38_f32, -2.0e38_f32);
         let axes = axes("CB", &[2, 1]);
         let scale = Tensor::from_f32(vec![1., 1.], vec![2, 1]).unwrap();
         let offset = Tensor::from_f32(vec![0.25, -0.5], vec![2, 1]).unwrap();
