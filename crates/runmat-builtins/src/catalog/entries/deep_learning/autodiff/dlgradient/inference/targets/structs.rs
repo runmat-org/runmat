@@ -1,16 +1,13 @@
 //! Struct trees and the legacy scalar Learnables record.
 use super::*;
+use crate::DeepLearningParameterTableColumn as Column;
 use runmat_types::{DynamicReason, StructFact};
 use std::collections::BTreeMap;
 
-const LAYER: &str = "Layer";
-const PARAMETER: &str = "Parameter";
-const VALUE: &str = "Value";
-
 fn legacy_record(fields: &BTreeMap<String, ValueFact>) -> bool {
-    [LAYER, PARAMETER, VALUE]
+    Column::ALL
         .iter()
-        .all(|name| fields.contains_key(*name))
+        .all(|column| fields.contains_key(column.name()))
 }
 
 fn metadata_cannot_be_target(value: &ValueFact) -> bool {
@@ -31,17 +28,18 @@ fn gradient_fields(
 ) -> BTreeMap<String, ValueFact> {
     let special = legacy_scalar_possible && legacy_record(fields);
     let scalar_only_on_success = special
-        && [LAYER, PARAMETER]
-            .iter()
-            .filter_map(|name| fields.get(*name))
-            .any(metadata_cannot_be_target);
+        && fields.iter().any(|(name, value)| {
+            Column::from_name(name) != Some(Column::Value) && metadata_cannot_be_target(value)
+        });
     fields
         .iter()
         .map(|(name, fact)| {
-            let value = if special && matches!(name.as_str(), LAYER | PARAMETER) {
+            let value = if special && Column::from_name(name) != Some(Column::Value) {
                 if scalar_only_on_success {
+                    // A scalar legacy record retains every metadata field,
+                    // including fields beyond the three public table columns.
                     // The singleton StructArray route would try to
-                    // differentiate this invalid metadata leaf and fail.
+                    // differentiate an invalid metadata leaf and fail.
                     super::retained_metadata(fact)
                 } else {
                     // Value::Struct preserves metadata; a singleton
@@ -89,7 +87,7 @@ fn check_fields(
         // A scalar struct is admissible with opaque metadata. A singleton
         // struct array may fail here, but that possibility cannot justify a
         // diagnostic for a call that can succeed as a scalar record.
-        super::check(&fields[VALUE], index, diagnostics);
+        super::check(&fields[Column::Value.name()], index, diagnostics);
     } else {
         for value in fields.values() {
             super::check(value, index, diagnostics);

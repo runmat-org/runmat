@@ -1,6 +1,6 @@
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
-    BuiltinCatalogEntry, DeepLearningLayerKind,
+    BuiltinCatalogEntry, DeepLearningLayerKind, DeepLearningNetworkOption,
 };
 use runmat_types::{
     standard, CallInference, CallRequest, CellFact, DynamicReason, ObjectFact, ShapeFact,
@@ -213,12 +213,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         if request
             .literals
             .literal_string_at(index)
-            .is_some_and(|name| {
-                !matches!(
-                    name.to_ascii_lowercase().as_str(),
-                    "initialize" | "outputnames"
-                )
-            })
+            .is_some_and(|name| DeepLearningNetworkOption::from_name(&name).is_none())
         {
             diagnostics.push(argument_error(
                 "RM-DL-DLNETWORK-OPTIONS",
@@ -230,20 +225,20 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             request.literals.literal_string_at(index),
             request.arguments.get(index + 1),
         ) {
-            let admissible = match option.to_ascii_lowercase().as_str() {
-                "initialize" => {
+            let admissible = match DeepLearningNetworkOption::from_name(&option) {
+                Some(DeepLearningNetworkOption::Initialize) => {
                     matches!(
                         &value.kind,
                         ValueKindFact::Logical | ValueKindFact::Numeric(_) | ValueKindFact::Unknown
                     ) && value.shape.element_count().is_none_or(|count| count == 1)
                 }
-                "outputnames" => {
+                Some(DeepLearningNetworkOption::OutputNames) => {
                     matches!(
                         &value.kind,
                         ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
                     ) && value.shape.element_count().is_none_or(|count| count == 1)
                 }
-                _ => true,
+                None => true,
             };
             if !admissible {
                 diagnostics.push(argument_error(
@@ -277,11 +272,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ),
         ("SupportedExecution".into(), text(ShapeFact::Scalar)),
     ]);
-    if request
-        .literals
-        .literal_string_at(1)
-        .is_some_and(|name| name.eq_ignore_ascii_case("Initialize"))
-    {
+    if (1..request.arguments.len()).step_by(2).any(|index| {
+        request
+            .literals
+            .literal_string_at(index)
+            .is_some_and(|name| {
+                DeepLearningNetworkOption::from_name(&name)
+                    == Some(DeepLearningNetworkOption::Initialize)
+            })
+    }) {
         properties.insert(
             "Initialize".into(),
             ValueFact::scalar(ValueKindFact::Logical),

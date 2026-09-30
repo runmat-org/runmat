@@ -1,5 +1,6 @@
 //! Layer collection and network metadata.
 use super::*;
+use runmat_builtins::DeepLearningNetworkOption;
 
 pub(crate) fn is_deep_learning_network_object(object: &ObjectInstance) -> bool {
     object.class_name.is(DLNETWORK_CLASS)
@@ -76,7 +77,9 @@ pub(in crate::builtins) fn network_object(
     function: &'static str,
 ) -> BuiltinResult<Value> {
     let names = layer_names(&layers, function)?;
-    if let Some(requested) = remove_case_insensitive_option(&mut options, "OutputNames") {
+    if let Some(requested) =
+        remove_case_insensitive_option(&mut options, DeepLearningNetworkOption::OutputNames)
+    {
         validate_output_name(&names, &requested, function)?;
     }
     let layer_count = layers.len();
@@ -90,9 +93,10 @@ pub(in crate::builtins) fn network_object(
         .cloned()
         .map(|name| vec![name])
         .unwrap_or_default();
-    let requested_initialize = remove_case_insensitive_option(&mut options, "Initialize")
-        .map(|value| logical_scalar(&value, function, "Initialize"))
-        .transpose()?;
+    let requested_initialize =
+        remove_case_insensitive_option(&mut options, DeepLearningNetworkOption::Initialize)
+            .map(|value| logical_scalar(&value, function, "Initialize"))
+            .transpose()?;
     let initial_state = super::state::initial_with_defaults(
         &layers,
         requested_initialize.unwrap_or(true),
@@ -177,10 +181,16 @@ impl NetworkOptions {
     pub(super) fn into_properties(self) -> std::collections::BTreeMap<String, Value> {
         let mut properties = std::collections::BTreeMap::new();
         if self.explicit_initialize {
-            properties.insert("Initialize".into(), Value::Bool(self.initialize));
+            properties.insert(
+                DeepLearningNetworkOption::Initialize.name().into(),
+                Value::Bool(self.initialize),
+            );
         }
         if let Some(output_names) = self.output_names {
-            properties.insert("OutputNames".into(), output_names);
+            properties.insert(
+                DeepLearningNetworkOption::OutputNames.name().into(),
+                output_names,
+            );
         }
         properties
     }
@@ -202,22 +212,42 @@ fn validate_output_name(
 }
 
 pub(super) fn parse_network_options(rest: &[Value]) -> BuiltinResult<NetworkOptions> {
-    let mut options = parse_name_values(rest.to_vec(), "dlnetwork")?;
-    for name in options.keys() {
-        if !matches!(name.as_str(), "initialize" | "outputnames") {
-            return Err(deep_learning_error(
-                "dlnetwork",
-                format!("dlnetwork: unsupported option '{name}'"),
-            ));
+    if !rest.len().is_multiple_of(2) {
+        return Err(deep_learning_error(
+            "dlnetwork",
+            "dlnetwork: name-value options must be paired",
+        ));
+    }
+    let mut options = std::collections::BTreeMap::new();
+    let mut unknown_options = std::collections::BTreeSet::new();
+    for pair in rest.chunks_exact(2) {
+        let name = scalar_text(&pair[0], "dlnetwork")?;
+        if let Some(option) = DeepLearningNetworkOption::from_name(&name) {
+            // Repeated name-value keys retain the existing last-value-wins policy.
+            options.insert(option, pair[1].clone());
+        } else {
+            unknown_options.insert(name.to_ascii_lowercase());
         }
     }
-    let explicit_initialize = options.contains_key("initialize");
+    if let Some(name) = unknown_options.into_iter().next() {
+        return Err(deep_learning_error(
+            "dlnetwork",
+            format!("dlnetwork: unsupported option '{name}'"),
+        ));
+    }
+    let explicit_initialize = options.contains_key(&DeepLearningNetworkOption::Initialize);
     let initialize = options
-        .remove("initialize")
-        .map(|value| logical_scalar(&value, "dlnetwork", "Initialize"))
+        .remove(&DeepLearningNetworkOption::Initialize)
+        .map(|value| {
+            logical_scalar(
+                &value,
+                "dlnetwork",
+                DeepLearningNetworkOption::Initialize.name(),
+            )
+        })
         .transpose()?
         .unwrap_or(true);
-    let output_names = options.remove("outputnames");
+    let output_names = options.remove(&DeepLearningNetworkOption::OutputNames);
     Ok(NetworkOptions {
         initialize,
         explicit_initialize,
@@ -227,11 +257,11 @@ pub(super) fn parse_network_options(rest: &[Value]) -> BuiltinResult<NetworkOpti
 
 fn remove_case_insensitive_option(
     options: &mut std::collections::BTreeMap<String, Value>,
-    name: &str,
+    option: DeepLearningNetworkOption,
 ) -> Option<Value> {
     let key = options
         .keys()
-        .find(|key| key.eq_ignore_ascii_case(name))
+        .find(|key| DeepLearningNetworkOption::from_name(key) == Some(option))
         .cloned()?;
     options.remove(&key)
 }

@@ -17,7 +17,7 @@ const INITIALIZED_INPUTS: [BuiltinParamDescriptor; 3] = [
             "One supported layer object, a cell collection, or a layer-graph/network object.",
     },
     BuiltinParamDescriptor {
-        name: "Initialize",
+        name: super::DeepLearningNetworkOption::Initialize.name(),
         ty: BuiltinParamType::PropertyName,
         arity: BuiltinParamArity::Optional,
         default: None,
@@ -40,7 +40,7 @@ const OUTPUT_NAME_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "A supported sequential layer collection.",
     },
     BuiltinParamDescriptor {
-        name: "OutputNames",
+        name: super::DeepLearningNetworkOption::OutputNames.name(),
         ty: BuiltinParamType::PropertyName,
         arity: BuiltinParamArity::Required,
         default: None,

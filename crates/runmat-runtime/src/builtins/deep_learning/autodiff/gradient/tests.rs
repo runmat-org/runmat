@@ -340,3 +340,47 @@ fn ordinary_dlarray_table_keeps_recursive_gradient_behavior() {
     assert_eq!(data.numeric_dtype(), NumericDType::F32);
     assert_eq!(data.materialize_f64(), [0.0]);
 }
+
+#[test]
+fn legacy_scalar_parameter_record_preserves_extra_metadata() {
+    let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+    let traced = annotate_tree(super::super::super::object_with_identity(
+        DLARRAY_CLASS,
+        vec![
+            (
+                "Data",
+                Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+            ),
+            ("Format", Value::String(String::new())),
+            ("Labels", Value::String(String::new())),
+        ],
+    ))
+    .unwrap();
+    let mut record = StructValue::new();
+    record.insert("Layer", Value::String("custom".into()));
+    record.insert("Parameter", Value::String("Gain".into()));
+    record.insert("Value", traced);
+    record.insert("Owner", Value::Bool(true));
+    let Value::Struct(gradient) =
+        gradient_tree_for_target(&Value::Struct(record), &HashMap::new()).unwrap()
+    else {
+        panic!("legacy record gradient expected")
+    };
+    assert_eq!(
+        gradient.fields.get("Layer"),
+        Some(&Value::String("custom".into()))
+    );
+    assert_eq!(
+        gradient.fields.get("Parameter"),
+        Some(&Value::String("Gain".into()))
+    );
+    assert_eq!(gradient.fields.get("Owner"), Some(&Value::Bool(true)));
+    let Some(Value::Object(value)) = gradient.fields.get("Value") else {
+        panic!("gradient Value must be a dlarray")
+    };
+    let Some(Value::Tensor(data)) = value.properties.get("Data") else {
+        panic!("gradient Data expected")
+    };
+    assert_eq!(data.numeric_dtype(), NumericDType::F32);
+    assert_eq!(data.materialize_f64(), [0.0]);
+}

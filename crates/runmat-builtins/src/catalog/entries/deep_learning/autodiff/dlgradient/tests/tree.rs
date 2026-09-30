@@ -84,6 +84,30 @@ fn scalar_legacy_record_keeps_metadata_and_differentiates_value() {
 }
 
 #[test]
+fn scalar_legacy_record_preserves_extra_metadata_without_role_inference() {
+    let record = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        BTreeMap::from([
+            ("Layer".into(), ValueFact::scalar(ValueKindFact::String)),
+            ("Parameter".into(), ValueFact::scalar(ValueKindFact::String)),
+            ("Value".into(), single(&[2, 1])),
+            ("Owner".into(), ValueFact::scalar(ValueKindFact::Logical)),
+        ]),
+        true,
+    )));
+    let result = infer_target(record);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let ValueKindFact::Struct(output) = &result.outputs[0].kind else {
+        panic!("struct gradient")
+    };
+    assert_eq!(output.fields["Layer"].kind, ValueKindFact::String);
+    assert_eq!(output.fields["Owner"].kind, ValueKindFact::Logical);
+    assert!(matches!(
+        output.fields["Value"].kind,
+        ValueKindFact::Object(_)
+    ));
+}
+
+#[test]
 fn struct_array_retains_position_facts_and_checks_known_invalid_member() {
     let good = BTreeMap::from([("weight".into(), single(&[1, 2]))]);
     let bad = BTreeMap::from([("weight".into(), ValueFact::scalar(ValueKindFact::String))]);

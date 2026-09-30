@@ -74,7 +74,7 @@ mod core;
 mod deep_learning;
 #[path = "ops/deep_learning/pooling.rs"]
 mod deep_learning_pooling;
-#[path = "ops/deep_learning/normalization.rs"]
+#[path = "ops/deep_learning/normalization/mod.rs"]
 mod deep_learning_normalization;
 #[path = "ops/elementwise.rs"]
 mod elementwise;

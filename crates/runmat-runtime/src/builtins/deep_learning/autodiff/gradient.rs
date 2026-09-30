@@ -1,4 +1,5 @@
 use super::*;
+use runmat_builtins::DeepLearningParameterTableColumn as Column;
 use std::collections::HashMap;
 
 mod parameter_table;
@@ -117,10 +118,10 @@ pub(super) fn gradient_tree_for_target(
         Value::Struct(st) => {
             if is_learnables_struct(st) {
                 let mut out = st.clone();
-                let value = st.fields.get("Value").ok_or_else(|| {
+                let value = st.fields.get(Column::Value.name()).ok_or_else(|| {
                     deep_learning_error("dlgradient", "dlgradient: learnables tree is missing Value")
                 })?;
-                out.insert("Value", gradient_tree_for_target(value, gradients)?);
+                out.insert(Column::Value.name(), gradient_tree_for_target(value, gradients)?);
                 return Ok(Value::Struct(out));
             }
             let mut out = StructValue::new();
@@ -215,7 +216,7 @@ fn validate_host_tape_dlarray_data(value: &Value) -> BuiltinResult<()> {
 }
 
 fn is_learnables_struct(value: &StructValue) -> bool {
-    ["Layer", "Parameter", "Value"]
+    Column::ALL
         .iter()
-        .all(|field| value.fields.contains_key(*field))
+        .all(|column| value.fields.contains_key(column.name()))
 }

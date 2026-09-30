@@ -451,6 +451,36 @@ fn dlnetwork_initialize_option_reads_typed_integer_storage_exactly() {
 }
 
 #[test]
+fn dlnetwork_constructor_options_are_case_insensitive_and_last_value_wins() {
+    let relu = block_on(relu_layer_builtin(vec![
+        Value::String("Name".into()),
+        Value::String("relu".into()),
+    ]))
+    .unwrap();
+    let net = block_on(dlnetwork_builtin(vec![
+        Value::Cell(CellArray::new(vec![relu], 1, 1).unwrap()),
+        Value::String("Initialize".into()),
+        Value::Bool(false),
+        Value::String("INITIALIZE".into()),
+        Value::Bool(true),
+        Value::String("outputnames".into()),
+        Value::String("relu".into()),
+    ]))
+    .unwrap();
+    let Value::Object(object) = net else {
+        panic!("expected network object")
+    };
+    assert_eq!(
+        object.properties.get("Initialize"),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(
+        object.properties.get("Initialized"),
+        Some(&Value::Bool(true))
+    );
+}
+
+#[test]
 fn analyze_network_counts_layers() {
     let relu = block_on(relu_layer_builtin(vec![
         Value::String("Name".into()),

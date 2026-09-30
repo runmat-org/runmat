@@ -234,6 +234,34 @@ fn malformed_known_layers_and_options_are_diagnosed() {
 }
 
 #[test]
+fn constructor_option_identity_is_case_insensitive_in_static_admission() {
+    let result = infer(
+        vec![
+            layer(),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("outputnames".into()),
+            LiteralValue::String("relu".into()),
+            LiteralValue::String("INITIALIZE".into()),
+            LiteralValue::Bool(false),
+        ],
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let ValueKindFact::Object(network) = &result.outputs[0].kind else {
+        panic!("network object expected")
+    };
+    assert_eq!(
+        network.properties["Initialize"].kind,
+        ValueKindFact::Logical
+    );
+}
+
+#[test]
 fn unknown_object_identity_does_not_imply_one_layer() {
     let mut source = layer();
     let ValueKindFact::Object(object) = &mut source.kind else {
