@@ -27,6 +27,8 @@ impl<'de> Deserialize<'de> for AcousticHarmonicSolverResult {
 #[serde(deny_unknown_fields)]
 struct ResultData {
     source_workload: AnalysisWorkloadIdentity,
+    producer: super::super::StepIdentity,
+    publication_declaration: Option<runmat_analysis_core::StateOutput>,
     formulation: AnalysisRunIdentity,
     mesh_digest: StableDigest,
     projection_digest: Digest,
@@ -63,6 +65,8 @@ impl AcousticHarmonicSolverResult {
     ) -> AnalysisExecutionResult<Self> {
         let data = ResultData {
             source_workload: workload.identity()?,
+            producer: workload.producer_identity()?,
+            publication_declaration: workload.publication_declaration()?.cloned(),
             formulation,
             mesh_digest: response.projection.mesh_digest,
             projection_digest: response.projection.projection_digest,
@@ -98,6 +102,18 @@ impl AcousticHarmonicSolverResult {
     }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let d = &self.data;
+        if let Some(declaration) = &d.publication_declaration {
+            crate::execution::SemanticStatePublicationRequest::new(
+                crate::execution::SemanticStatePublicationSource::AcousticNativeFields,
+                d.producer,
+                declaration.clone(),
+                Digest::from_bytes(*d.mesh_digest.bytes()),
+                super::super::SolverResultIdentity::from_step_result(
+                    d.producer,
+                    Digest::sha256([]),
+                )?,
+            )?;
+        }
         d.solver.validate(d.frequency).map_err(invalid)?;
         validate_solver_formulation_compatibility(
             &d.formulation,
@@ -170,6 +186,8 @@ impl AcousticHarmonicSolverResult {
         let d = &self.data;
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
         if d.source_workload != workload.identity()?
+            || d.producer != workload.producer_identity()?
+            || d.publication_declaration.as_ref() != workload.publication_declaration()?
             || d.formulation != workload.formulation(mesh)?
             || d.mesh_digest != mesh.canonical_digest
             || d.projection_digest != projection.projection_digest
@@ -233,5 +251,20 @@ impl AcousticHarmonicSolverResult {
     }
     pub fn formulation(&self) -> &AnalysisRunIdentity {
         &self.data.formulation
+    }
+    pub fn producer(&self) -> super::super::StepIdentity {
+        self.data.producer
+    }
+    pub fn source_workload(&self) -> AnalysisWorkloadIdentity {
+        self.data.source_workload
+    }
+    pub fn frequency(&self) -> Frequency {
+        self.data.frequency
+    }
+    pub fn mesh_digest(&self) -> StableDigest {
+        self.data.mesh_digest
+    }
+    pub(super) fn publication_declaration(&self) -> Option<&runmat_analysis_core::StateOutput> {
+        self.data.publication_declaration.as_ref()
     }
 }

@@ -55,9 +55,11 @@ pub fn rederive_acoustic_harmonic_resource_plan(
         ));
     }
     let result_output = projected_acoustic_harmonic_output(workload, mesh, policy)?;
+    let state_profiles_output = projected_acoustic_state_profiles_output(workload, mesh, policy)?;
     let facts = PreparedAcousticResourceFacts {
         inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
         result_output,
+        state_profiles_output,
         output_set: projected_output_set_resource_facts(),
     };
     Ok(build_acoustic_resource_plan(workload, mesh, facts)?)
@@ -71,6 +73,7 @@ pub fn prepare_acoustic_harmonic_inputs(
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<PreparedAcousticHarmonicInputs> {
     let result_output = projected_acoustic_harmonic_output(workload, mesh, policy)?;
+    let state_profiles_output = projected_acoustic_state_profiles_output(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::AcousticHarmonicWorkload,
         workload.identity()?.digest(),
@@ -94,6 +97,7 @@ pub fn prepare_acoustic_harmonic_inputs(
     let facts = PreparedAcousticResourceFacts {
         inputs: prepared_input_resource_facts(&inputs)?,
         result_output,
+        state_profiles_output,
         output_set: projected_output_set_resource_facts(),
     };
     let resource_plan = build_acoustic_resource_plan(workload, mesh, facts)?;
@@ -114,4 +118,19 @@ fn projected_acoustic_harmonic_output(
     let result = profiler.finish(AnalysisNumericalObjectKind::SolverResult)?;
     crate::thermal_execution::require_inventory(&result, policy.inventory_limits())?;
     projected_transport_output_resource_facts(&result)
+}
+
+fn projected_acoustic_state_profiles_output(
+    workload: &AcousticHarmonicWorkload,
+    mesh: &SolverMeshArtifact,
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts> {
+    let profile = workload.state_publication_profiles_encoding_profile(Digest::from_bytes(
+        *mesh.canonical_digest.bytes(),
+    ))?;
+    let mut profiler = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
+    profiler.push(profile.encoded_bytes_upper_bound)?;
+    let output = profiler.finish(AnalysisNumericalObjectKind::StatePublicationProfiles)?;
+    crate::thermal_execution::require_inventory(&output, policy.inventory_limits())?;
+    projected_transport_output_resource_facts(&output)
 }

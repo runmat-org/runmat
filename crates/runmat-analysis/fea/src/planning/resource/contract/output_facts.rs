@@ -12,6 +12,10 @@ impl FeaResourceDemand {
                 Some(&demand.result_output)
             }
             (
+                Self::AcousticHarmonic(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
+            (
                 Self::ObservationHistoryFinalization(demand),
                 AnalysisNumericalObjectKind::History,
             ) => Some(&demand.history_output),

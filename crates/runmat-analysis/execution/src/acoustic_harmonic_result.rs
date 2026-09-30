@@ -15,6 +15,7 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 pub struct ImportedAcousticHarmonicResult {
     pub result: AcousticHarmonicSolverResult,
     pub objects: PreparedAnalysisObjects,
+    pub source_profiles: PreparedAnalysisObjects,
 }
 
 pub fn import_acoustic_harmonic_result(
@@ -25,11 +26,18 @@ pub fn import_acoustic_harmonic_result(
 ) -> AnalysisBridgeResult<ImportedAcousticHarmonicResult> {
     response.validate_against(&prepared.program.request)?;
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
-    let [output] = output_set.manifest.outputs.as_slice() else {
+    let [output, profiles] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
-            "acoustic task requires exactly one result".into(),
+            "acoustic task requires exactly one result and publication-profile catalog".into(),
         ));
     };
+    if output.kind != AnalysisNumericalObjectKind::SolverResult
+        || profiles.kind != AnalysisNumericalObjectKind::StatePublicationProfiles
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "acoustic output kinds differ",
+        ));
+    }
     let objects = import_analysis_objects(
         source,
         &output.root,
@@ -39,8 +47,22 @@ pub fn import_acoustic_harmonic_result(
         &prepared.host.artifact_access,
         limits,
     )?;
+    let source_profiles = import_analysis_objects(
+        source,
+        &profiles.root,
+        AnalysisNumericalObjectKind::StatePublicationProfiles,
+        profiles.logical_identity,
+        profiles.payload_digest,
+        &prepared.host.artifact_access,
+        limits,
+    )?;
     let mut references =
         objects.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+    references.extend(
+        source_profiles
+            .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
+    );
+    crate::object::retain_unique_references(&mut references);
     references.push(output_set.root);
     if references != output_set.result_objects {
         return Err(AnalysisBridgeError::Identity(
@@ -84,5 +106,19 @@ pub fn import_acoustic_harmonic_result(
             "acoustic result logical identity differs",
         ));
     }
-    Ok(ImportedAcousticHarmonicResult { result, objects })
+    let catalog = runmat_analysis_fea::execution::StatePublicationProfiles::from_canonical_bytes(
+        &source_profiles.payload(),
+    )?;
+    if catalog.identity() != source_profiles.manifest.logical_identity
+        || catalog != result.state_publication_profiles(objects.manifest.payload_digest)?
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "acoustic publication profiles differ from canonical source",
+        ));
+    }
+    Ok(ImportedAcousticHarmonicResult {
+        result,
+        objects,
+        source_profiles,
+    })
 }

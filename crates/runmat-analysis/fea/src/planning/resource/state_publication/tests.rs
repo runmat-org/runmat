@@ -23,6 +23,7 @@ fn fixture(
     declaration.kind = match source {
         SemanticStatePublicationSource::StructuralPrimaryFields => StateKind::StructuralPrimary,
         SemanticStatePublicationSource::ThermalPrimaryField => StateKind::Thermal,
+        SemanticStatePublicationSource::AcousticNativeFields => StateKind::AcousticComplex,
         SemanticStatePublicationSource::StructuralLinearization => StateKind::GeometricStiffness,
         SemanticStatePublicationSource::ModalBasis => StateKind::ModalBasis,
         SemanticStatePublicationSource::StructuralResponseEnvelope => {
@@ -79,6 +80,7 @@ fn all_sources_bind_canonical_request_and_account_owned_state_and_verification()
     for source in [
         SemanticStatePublicationSource::StructuralPrimaryFields,
         SemanticStatePublicationSource::ThermalPrimaryField,
+        SemanticStatePublicationSource::AcousticNativeFields,
         SemanticStatePublicationSource::StructuralLinearization,
         SemanticStatePublicationSource::ModalBasis,
         SemanticStatePublicationSource::StructuralResponseEnvelope,

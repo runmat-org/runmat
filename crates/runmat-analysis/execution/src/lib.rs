@@ -62,9 +62,11 @@ pub use structural_prestress_producer::ThermalPrestressSource;
 mod acoustic_harmonic_plan;
 mod acoustic_harmonic_result;
 mod acoustic_harmonic_task;
+mod acoustic_state_profiles;
 pub use acoustic_harmonic_result::{
     import_acoustic_harmonic_result, ImportedAcousticHarmonicResult,
 };
+pub use acoustic_state_profiles::acoustic_state_publication_profiles;
 mod structural_prestressed_frequency_study;
 mod structural_prestressed_modal_frequency_study;
 mod structural_prestressed_modal_study;

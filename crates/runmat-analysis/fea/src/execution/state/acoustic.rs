@@ -1,9 +1,6 @@
 //! A completed topology-bound acoustic phasor state from one harmonic solve.
 
-use runmat_analysis_core::{
-    FieldLocation, Frequency, IndependentDomain, ObservationQuantity, ObservationValueShape,
-    PhysicsFamily, StateCompleteness, StateKind,
-};
+use runmat_analysis_core::{FieldLocation, Frequency, ObservationQuantity, ObservationValueShape};
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
@@ -16,7 +13,7 @@ use crate::results::field::{
 use super::{
     field_validation::validate_portable_field, AnalysisExecutionError, AnalysisExecutionResult,
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
-    SequenceIdentity, SolverResultIdentity, StepIdentity,
+    SemanticStatePublicationRequest, SolverResultIdentity, StepIdentity,
 };
 use crate::execution::{
     AcousticHarmonicSolverResult, AcousticHarmonicWorkload, FieldRecoveryRequest,
@@ -156,69 +153,42 @@ impl CanonicalSemanticState {
     ) -> AnalysisExecutionResult<Self> {
         mesh.validate_canonical()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence)?;
-        let matching = workload
-            .model
-            .sequence
-            .steps
-            .iter()
-            .filter(|step| {
-                step.step_id == workload.step_id && step.family == PhysicsFamily::Acoustic
-            })
-            .collect::<Vec<_>>();
-        let [step] = matching.as_slice() else {
-            return Err(invalid(
-                "acoustic state result must match exactly one authored producer step",
-            ));
-        };
-        let IndependentDomain::FrequencyHertz(frequencies) = &step.independent_domain else {
-            return Err(invalid(
-                "acoustic state requires one authored harmonic frequency",
-            ));
-        };
-        if frequencies.as_slice() != [workload.frequency.hertz] {
-            return Err(invalid(
-                "acoustic state cannot represent an absent or multi-frequency domain",
-            ));
-        }
-        let declarations = step
-            .state_outputs
-            .iter()
-            .filter(|output| {
-                output.kind == StateKind::AcousticComplex
-                    && output.completeness == StateCompleteness::Complete
-            })
-            .collect::<Vec<_>>();
-        let [declaration] = declarations.as_slice() else {
-            return Err(invalid(
-                "acoustic producer must declare exactly one complete acoustic-complex output",
-            ));
-        };
-        if step.state_outputs.len() != 1 {
-            return Err(invalid(
-                "acoustic producer cannot publish additional semantic states",
-            ));
-        }
         result.validate_for(workload, mesh)?;
-        let producer = StepIdentity::from_solver_contract(sequence, step)?;
-        let source_result = result.source_result_identity()?;
-        let request = result.native_field_request(workload, mesh)?;
-        let fields = result.recover_native_fields(workload, mesh, &request)?;
-        let topology_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
+        let requests = result.state_publication_requests()?;
+        let [request] = requests.as_slice() else {
+            return Err(invalid(
+                "acoustic state requires one unambiguous persisted authored declaration",
+            ));
+        };
+        Self::from_acoustic_publication(request, result)
+    }
+
+    /// Detached publication consumes authenticated completed fields, never another solve.
+    pub fn from_acoustic_publication(
+        request: &SemanticStatePublicationRequest,
+        result: &AcousticHarmonicSolverResult,
+    ) -> AnalysisExecutionResult<Self> {
+        result.validate_publication_request(request)?;
+        let recovery_request = result.native_field_request_from_result()?;
+        let fields = result.recover_native_fields_from_result(&recovery_request)?;
         let payload = CanonicalAcousticStatePayload {
-            frequency: workload.frequency,
+            frequency: result.frequency(),
             phasor_convention: AcousticPhasorConvention::PositiveAngularFrequency,
             ordered_node_ids: result.ordered_node_ids().to_vec(),
             ordered_element_ids: result.ordered_element_ids().to_vec(),
-            recovery_request: request,
+            recovery_request,
             fields,
         };
-        payload.validate_for(topology_digest, source_result, producer)?;
+        payload.validate_for(
+            request.topology_digest,
+            request.source_result,
+            request.producer,
+        )?;
         Self::new(CanonicalSemanticStateInput {
-            producer,
-            declaration: (*declaration).clone(),
-            topology_digest,
-            source_result,
+            producer: request.producer,
+            declaration: request.declaration.clone(),
+            topology_digest: request.topology_digest,
+            source_result: request.source_result,
             payload: CanonicalSemanticStatePayload::Acoustic {
                 state: Box::new(payload),
             },

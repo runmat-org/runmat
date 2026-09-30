@@ -146,9 +146,9 @@ the equations. Independent traveling-wave checks cover cold object round-trips o
 both Tet4 and Tet10.
 
 Complete authored acoustic-complex output declarations remain part of workload
-identity. This numerical entry returns result fields, not semantic lifecycle state
-publications. It does not establish process restart, native authoring integration or
-graph-caller migration.
+identity. The numerical result retains exact producer and publication-declaration lineage;
+shared state publication is a separate admitted task, not part of the numerical solve.
+This does not establish process restart, native authoring integration or graph-caller migration.
 
 ### Authored product and native field/state publication
 
@@ -191,14 +191,13 @@ foreign result/mesh/plan, same-digest wrong topology, node-order and shape rejec
 are separate publication checks. These bounded coarse field checks do not replace
 the refinement/phase/power qualification above.
 
-The final acoustic-filter suite passes 30/30, including the independent references and
-authored/cold-state checks above. Shared field/observation regressions pass 123/123,
-the execution bridge passes 91/91, and the native runner compiles. Strict core/bridge
-all-target lint passes; the last subsequent edit only corrects a negative test to use
-explicit state admission rather than raw serde decoding. Architecture checking still
+The acoustic-filter suite passes 33/33, including the independent references and
+authored/cold-state/detached-profile checks above. Shared field/observation regressions
+previously passed 123/123; current resource regressions pass 124/124, the execution
+bridge passes 91/91, and native acoustic execution/publication passes 9/9. Architecture checking still
 reports five unrelated runtime module-size violations. This is not unrestricted suite
 or production evidence. Numerical receipts,
-output-policy-neutral entry intent, worker field/state outputs, shared observation
+output-policy-neutral entry intent, whole-study worker coordination, shared observation
 catalog admission, independent frequency fan-out/fan-in and durable accepted-entry
 sweep restart remain required. Storage topology is distinct from interpolation
 projection; acoustic fields are not forced through the legacy projection-specific
@@ -212,11 +211,23 @@ acoustic workload, sealed mesh and typed resource plan. It is not authored-langu
 dispatch. Its numerical identity binds the workload and topology, independent of transport
 chunking and placement. The native worker rederives the exact resource plan and checks the
 authored step, numerical/execution identities and output contract before invoking the canonical
-solver. It emits one source/mesh-bound canonical result through the shared artifact bridge.
+solver. It emits a source/mesh-bound canonical result and a source-bound shared
+`StatePublicationProfiles` catalog through the shared artifact bridge. Result import
+authenticates both roots, their exact closed transport inventory and the rederived catalog.
+
+The existing shared `PublishState` task consumes that result, catalog, exact publication
+request and rederived resource plan. It has no mesh or acoustic-workload inputs and does
+not solve again. Borrowed profiles interleave the already completed pressure/velocity arrays
+without constructing recovered buffers or a semantic state. The result's exact persisted
+single-frequency declaration is the authority; an ambiguous low-level sweep has an empty
+publication inventory rather than an invented single-frequency state. Production-authored
+dispatch and durable sweep continuation remain separate gates.
 
 The assembly-free planner counts canonical local operator supports, full real-block Krylov
 workspace, shared property/projection metadata, source evidence, input materialization and
-output construction/transport. Actual source identifiers and formulation metadata are profiled;
+output construction/transport, including catalog transport and retained profile metadata.
+Resource estimation revision40 includes both outputs. Actual source identifiers,
+publication declaration strings and formulation metadata are profiled;
 output fields use conservative typed serialization ceilings. The shared serial executor checks
 actual prepared outputs against their admitted envelope. Content-addressed transport is counted
 by unique chunks, separately from logical payload and decoded residency.
@@ -227,6 +238,14 @@ but substituted resource plans. Numerical equality with a hot solve is execution
 an independent physics reference; duct/cavity convergence and power references above remain
 the independent numerical evidence. Serial artifact round trips are not process restart.
 
+The detached publication integration reopens a filesystem object store before numerical
+result import and again before shared state import, for Tet4/Tet10 and 1024/8192-byte
+chunks. State identity is chunk-independent; exact producer/source, ordered IDs and native
+field layout survive. Published Tet4 pressure also agrees with the hand-integrated complex
+row below. Foreign numerical sources and understated catalogs reject at bridge admission;
+existing shared thermal-worker tests separately retain rejection of self-consistent forged
+resource/profile inputs. These are cold durable-object checks, not actual process replacement.
+
 A separate native Tet4 check uses hand-integrated unit-right-tetrahedron coefficients:
 `K44=1/18`, `M44=1/720`, `M4j=1/1440`, and `B44=sqrt(3)/72` for
 `rho=3`, `c=2`, `Z=6`. Three nodes have prescribed unit pressure; the fourth complex
@@ -236,7 +255,7 @@ intensity and energy. This is exact-element/native evidence, not continuum conve
 
 Reservations are conservative requested-heap estimates, not measured process peaks or arbitrary
 scale qualification. Scheduler-submission validation is not an observed remote scheduler attempt.
-Lifecycle state publication, observations, independent accuracy reports, authored/generated
+Whole-study lifecycle coordination, observations, independent accuracy reports, authored/generated
 spectral equivalence and blocking release evidence remain required before promotion.
 
 ```sh

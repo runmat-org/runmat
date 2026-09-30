@@ -1,11 +1,14 @@
 use super::*;
 use crate::topology::test_meshes::{quadratic_slab_mesh, slab_mesh};
 use crate::{
-    execution::{FieldRecoveryPlan, FieldRecoveryRequest, FieldTopologyIdentity},
+    execution::{FieldRecoveryPlan, FieldRecoveryRequest, FieldTopologyIdentity, SequenceIdentity},
     physics::structural::topology::CanonicalStructuralTopologyIdentity,
     results::field::{RecoveredField, RecoveredFieldArtifact},
 };
-use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, DeviceFieldRef, StateCompleteness};
+use runmat_analysis_core::{
+    AnalysisField, AnalysisFieldValues, DeviceFieldRef, IndependentDomain, StateCompleteness,
+    StateKind,
+};
 
 #[test]
 fn acoustic_result_publishes_one_cold_topology_bound_complex_state() {
@@ -35,6 +38,105 @@ fn acoustic_result_publishes_one_cold_topology_bound_complex_state() {
             state
         );
     }
+}
+
+#[test]
+fn acoustic_detached_publication_is_source_bound_and_borrowed_profile_bounded() {
+    for quadratic in [false, true] {
+        let mesh = if quadratic {
+            quadratic_slab_mesh(2)
+        } else {
+            slab_mesh(2)
+        };
+        let workload = crate::execution::acoustic::tests::workload();
+        let result = workload.execute(&mesh).unwrap();
+        let result_bytes = result.canonical_bytes().unwrap();
+        let topology = Digest::from_bytes(*mesh.canonical_digest.bytes());
+        let bound = workload
+            .state_publication_profiles_encoding_profile(topology)
+            .unwrap();
+        let result = AcousticHarmonicSolverResult::from_canonical_bytes(&result_bytes).unwrap();
+        let requests = result.state_publication_requests().unwrap();
+        assert_eq!(
+            requests,
+            workload
+                .state_publication_requests(topology, result.source_result_identity().unwrap())
+                .unwrap()
+        );
+        let catalog = result
+            .state_publication_profiles(Digest::sha256(&result_bytes))
+            .unwrap();
+        assert!(catalog.canonical_bytes().unwrap().len() as u64 <= bound.encoded_bytes_upper_bound);
+        assert!(result
+            .state_publication_profiles(Digest::sha256(b"foreign-payload"))
+            .is_err());
+        let request = &requests[0];
+        let projected = request
+            .encoding_profile(
+                crate::execution::SemanticStatePublicationProfileSource::AcousticNativeFields(
+                    &result,
+                ),
+            )
+            .unwrap();
+        // No workload/mesh is passed into the detached publication path. Result arrays are copied
+        // into the shared artifact exactly once; the profiler never materializes that artifact.
+        let state = CanonicalSemanticState::from_acoustic_publication(request, &result).unwrap();
+        assert!(
+            state.canonical_bytes().unwrap().len() as u64 <= projected.encoded_bytes_upper_bound
+        );
+        assert_eq!(catalog.entry(request).unwrap().profile(), projected);
+        assert_eq!(
+            state,
+            CanonicalSemanticState::from_acoustic_result(&workload, &mesh, &result).unwrap()
+        );
+        let mut foreign = request.clone();
+        foreign.declaration.state_id.0.push_str("-foreign");
+        assert!(CanonicalSemanticState::from_acoustic_publication(&foreign, &result).is_err());
+        foreign = request.clone();
+        foreign.producer = StepIdentity::new(
+            SequenceIdentity::new(Digest::sha256(b"foreign-sequence")).unwrap(),
+            Digest::sha256(b"foreign-step"),
+        )
+        .unwrap();
+        assert!(foreign
+            .encoding_profile(
+                crate::execution::SemanticStatePublicationProfileSource::AcousticNativeFields(
+                    &result
+                )
+            )
+            .is_err());
+        foreign = request.clone();
+        foreign.topology_digest = Digest::sha256(b"foreign-mesh");
+        assert!(CanonicalSemanticState::from_acoustic_publication(&foreign, &result).is_err());
+        foreign = request.clone();
+        foreign.source_result = SolverResultIdentity::from_step_result(
+            request.producer,
+            Digest::sha256(b"foreign-result"),
+        )
+        .unwrap();
+        assert!(CanonicalSemanticState::from_acoustic_publication(&foreign, &result).is_err());
+    }
+}
+
+#[test]
+fn acoustic_ambiguous_numerical_frequency_has_no_single_state_inventory() {
+    let mesh = slab_mesh(2);
+    let mut workload = crate::execution::acoustic::tests::workload();
+    workload.model.sequence.steps[0].independent_domain =
+        IndependentDomain::FrequencyHertz(vec![0.2, 0.4]);
+    let result = workload.execute(&mesh).unwrap();
+    let topology = Digest::from_bytes(*mesh.canonical_digest.bytes());
+    assert!(workload
+        .state_publication_requests(topology, result.source_result_identity().unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(result.state_publication_requests().unwrap().is_empty());
+    assert!(result
+        .state_publication_profiles(Digest::sha256(result.canonical_bytes().unwrap()))
+        .unwrap()
+        .entries()
+        .is_empty());
+    assert!(CanonicalSemanticState::from_acoustic_result(&workload, &mesh, &result).is_err());
 }
 
 #[test]

@@ -17,6 +17,7 @@ use crate::pipeline::{
     modal_basis::ModalBasisArtifact, structural_linearization::StructuralLinearizationArtifact,
 };
 
+mod acoustic;
 #[cfg(test)]
 mod tests;
 mod thermal;
@@ -31,6 +32,7 @@ pub enum SemanticStatePublicationProfileSource<'a> {
     StructuralResponseEnvelope(&'a StructuralModalResponseSpectrumSolverResult),
     StructuralRandomStatistics(&'a StructuralRandomResponseSolverResult),
     Thermal(&'a ThermalSolverResultManifest),
+    AcousticNativeFields(&'a crate::execution::AcousticHarmonicSolverResult),
 }
 
 impl SemanticStatePublicationRequest {
@@ -42,6 +44,10 @@ impl SemanticStatePublicationRequest {
     ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
         self.validate()?;
         match (self.source, source) {
+            (
+                SemanticStatePublicationSource::AcousticNativeFields,
+                SemanticStatePublicationProfileSource::AcousticNativeFields(result),
+            ) => acoustic::profile(self, result),
             (
                 SemanticStatePublicationSource::ThermalPrimaryField,
                 SemanticStatePublicationProfileSource::Thermal(manifest),

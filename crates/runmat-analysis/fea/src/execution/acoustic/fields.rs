@@ -3,7 +3,7 @@ use super::*;
 use crate::{
     execution::{
         FieldRecoveryCost, FieldRecoveryPlan, FieldRecoveryRequest, FieldRecoveryRequirement,
-        FieldRecoverySource, FieldTopologyIdentity, SequenceIdentity, StepIdentity,
+        FieldRecoverySource, FieldTopologyIdentity,
     },
     results::field::{
         RecoveredField, RecoveredFieldArtifact, RecoveredFieldDefinition,
@@ -28,13 +28,19 @@ impl AcousticHarmonicSolverResult {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<FieldRecoveryRequest> {
         self.validate_for(workload, mesh)?;
-        let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence)?;
-        let producer = StepIdentity::from_solver_contract(sequence, workload.step()?)?;
+        self.native_field_request_from_result()
+    }
+
+    /// Detached recovery authority, authenticated by the completed result's retained lineage.
+    pub fn native_field_request_from_result(
+        &self,
+    ) -> AnalysisExecutionResult<FieldRecoveryRequest> {
+        self.validate()?;
         FieldRecoveryRequest::new(
-            producer,
+            self.producer(),
             FieldRecoverySource::SolverResult(self.source_result_identity()?),
             FieldTopologyIdentity::VolumeMesh {
-                mesh_digest: mesh.canonical_digest,
+                mesh_digest: self.mesh_digest(),
             },
             native_acoustic_field_plan(
                 self.ordered_node_ids().len(),
@@ -52,14 +58,22 @@ impl AcousticHarmonicSolverResult {
         mesh: &SolverMeshArtifact,
         request: &FieldRecoveryRequest,
     ) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
+        self.validate_for(workload, mesh)?;
+        self.recover_native_fields_from_result(request)
+    }
+
+    pub fn recover_native_fields_from_result(
+        &self,
+        request: &FieldRecoveryRequest,
+    ) -> AnalysisExecutionResult<RecoveredFieldArtifact> {
         request.validate()?;
-        let expected = self.native_field_request(workload, mesh)?;
+        let expected = self.native_field_request_from_result()?;
         if request != &expected {
             return Err(AnalysisExecutionError::Identity(
                 "acoustic field request differs from its exact producer, result, topology or plan",
             ));
         }
-        let sample = RecoveredFieldSample::FrequencyHertz(workload.frequency.hertz);
+        let sample = RecoveredFieldSample::FrequencyHertz(self.frequency().hertz);
         let fields = vec![
             native_field(
                 "acoustic.pressure",
@@ -89,15 +103,7 @@ impl AcousticHarmonicSolverResult {
             request.identity(),
             request.source,
             request.topology.discretization_digest(),
-            RecoveredFieldEntityCounts {
-                nodes: self.ordered_node_ids().len(),
-                volume_elements: self.ordered_element_ids().len(),
-                volume_integration_points: 0,
-                beam_elements: 0,
-                shell_elements: 0,
-                connectors: 0,
-                constraint_groups: 0,
-            },
+            native_acoustic_entity_counts(self),
             fields,
         )
         .map_err(invalid)
@@ -155,14 +161,25 @@ fn native_requirement(
     })
 }
 
-fn native_field(
+pub(in crate::execution) fn native_acoustic_entity_counts(
+    result: &AcousticHarmonicSolverResult,
+) -> RecoveredFieldEntityCounts {
+    RecoveredFieldEntityCounts {
+        nodes: result.ordered_node_ids().len(),
+        volume_elements: result.ordered_element_ids().len(),
+        volume_integration_points: 0,
+        beam_elements: 0,
+        shell_elements: 0,
+        connectors: 0,
+        constraint_groups: 0,
+    }
+}
+
+pub(in crate::execution) fn native_acoustic_field_definition(
     field_id: &str,
     requirement: &FieldRecoveryRequirement,
-    sample: RecoveredFieldSample,
-    shape: Vec<usize>,
-    values: Vec<f64>,
-) -> AnalysisExecutionResult<RecoveredField> {
-    let definition = RecoveredFieldDefinition::new(
+) -> AnalysisExecutionResult<RecoveredFieldDefinition> {
+    RecoveredFieldDefinition::new(
         field_id,
         requirement.quantity,
         requirement.output_location,
@@ -170,7 +187,17 @@ fn native_field(
         requirement.value_shape.clone(),
         RecoveredFieldNumericRepresentation::ComplexInterleaved,
     )
-    .map_err(invalid)?;
+    .map_err(invalid)
+}
+
+fn native_field(
+    field_id: &str,
+    requirement: &FieldRecoveryRequirement,
+    sample: RecoveredFieldSample,
+    shape: Vec<usize>,
+    values: Vec<f64>,
+) -> AnalysisExecutionResult<RecoveredField> {
+    let definition = native_acoustic_field_definition(field_id, requirement)?;
     RecoveredField::new(
         definition,
         sample,

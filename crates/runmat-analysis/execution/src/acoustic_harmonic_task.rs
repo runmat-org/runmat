@@ -92,7 +92,10 @@ pub fn prepare_acoustic_harmonic_task(
                 reference_kind: ValueRefKind::DriverObject,
             })
             .collect(),
-        vec![AnalysisNumericalObjectKind::SolverResult],
+        vec![
+            AnalysisNumericalObjectKind::SolverResult,
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
+        ],
         capabilities,
     )?;
     let host = AnalysisHostWorkload::new(request, preparation.artifact_access)?;

@@ -25,7 +25,11 @@ pub(super) fn execute(
     let mesh_input = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
     let resource_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
     if invocation.inputs.len() != 3
-        || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::SolverResult]
+        || invocation.host.workload.outputs
+            != vec![
+                AnalysisNumericalObjectKind::SolverResult,
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ]
     {
         return Err(AnalysisBridgeError::Invalid(
             "acoustic_harmonic inputs or outputs differ from the workload contract".into(),
@@ -105,7 +109,32 @@ pub(super) fn execute(
         ObjectNamespace::ResultValue,
         policy.inventory_limits(),
     )?;
-    Ok(vec![AnalysisKernelOutput::prepared(objects)])
+    // The solve publishes metadata for the independently admitted state task. Profiling borrows
+    // the completed numerical fields; it does not construct the state or run recovery again.
+    let profiles = result.state_publication_profiles(Digest::sha256(&bytes))?;
+    let profile_bytes = profiles.canonical_bytes()?;
+    let profile_bound = workload
+        .state_publication_profiles_encoding_profile(Digest::from_bytes(
+            *mesh.canonical_digest.bytes(),
+        ))?
+        .encoded_bytes_upper_bound;
+    if profile_bytes.len() as u64 > profile_bound {
+        return Err(AnalysisBridgeError::Invalid(
+            "acoustic state profile catalog exceeds admitted payload bound".into(),
+        ));
+    }
+    let profile_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::StatePublicationProfiles,
+        profiles.identity(),
+        &profile_bytes,
+        policy.chunk_bytes(),
+        ObjectNamespace::ResultValue,
+        policy.inventory_limits(),
+    )?;
+    Ok(vec![
+        AnalysisKernelOutput::prepared(objects),
+        AnalysisKernelOutput::prepared(profile_objects),
+    ])
 }
 
 #[cfg(test)]

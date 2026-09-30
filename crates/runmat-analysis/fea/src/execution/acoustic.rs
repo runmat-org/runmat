@@ -17,7 +17,10 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 mod fields;
-pub(in crate::execution) use fields::native_acoustic_field_plan;
+pub(in crate::execution) use fields::{
+    native_acoustic_entity_counts, native_acoustic_field_definition, native_acoustic_field_plan,
+};
+mod publication;
 mod result;
 pub use result::AcousticHarmonicSolverResult;
 #[cfg(test)]

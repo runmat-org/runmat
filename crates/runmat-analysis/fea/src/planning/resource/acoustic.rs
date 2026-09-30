@@ -23,16 +23,17 @@ mod tests;
 pub struct PreparedAcousticResourceFacts {
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
+    pub state_profiles_output: PreparedOutputResourceFacts,
     pub output_set: PreparedOutputSetResourceFacts,
 }
 
 const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
-// Only the 23 fixed result keys, four fixed-width identity/digest values, six vector headers,
+// Only the fixed result keys, producer/fixed-width identity/digest values, six vector headers,
 // frequency/solver/tolerance/residual/power/iteration scalars and contract prefix. Even counting
 // every key at 64 bytes and every summary scalar at 9 bytes this fits 4096 bytes. The formulation
 // realization is independently profiled below (its vectors are not covered by this constant).
-// Authored strings are separately profiled using their actual shared evidence wire.
+// Authored strings are separately profiled using their declaration and shared evidence wire.
 const CLOSED_RESULT_SCHEMA_BYTES: u64 = 4096;
 
 fn invalid(error: impl std::fmt::Display) -> ResourcePlanningError {
@@ -115,8 +116,21 @@ pub fn acoustic_harmonic_result_payload_bytes_upper_bound(
     let formulation_bytes = profile_serialized(&formulation, PROFILE_LIMITS)
         .map_err(invalid)?
         .encoded_bytes_upper_bound;
+    let declarations = workload
+        .model
+        .sequence
+        .steps
+        .iter()
+        .find(|step| step.step_id == workload.step_id)
+        .ok_or_else(|| invalid("acoustic step missing"))?;
+    let declaration_bytes = profile_serialized(&declarations.state_outputs, PROFILE_LIMITS)
+        .map_err(invalid)?
+        .encoded_bytes_upper_bound;
     add(
-        add(add(CLOSED_RESULT_SCHEMA_BYTES, fields)?, formulation_bytes)?,
+        add(
+            add(add(CLOSED_RESULT_SCHEMA_BYTES, fields)?, formulation_bytes)?,
+            declaration_bytes,
+        )?,
         evidence_profile(workload)?.encoded_bytes_upper_bound,
     )
 }
@@ -127,12 +141,22 @@ pub fn build_acoustic_resource_plan(
     prepared: PreparedAcousticResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let payload_bound = acoustic_harmonic_result_payload_bytes_upper_bound(workload, mesh)?;
+    let state_profiles = workload
+        .state_publication_profiles_encoding_profile(Digest::from_bytes(
+            *mesh.canonical_digest.bytes(),
+        ))
+        .map_err(invalid)?;
     let input_bytes = add(
         count(workload.canonical_bytes().map_err(invalid)?.len())?,
         count(mesh.canonical_encode().map_err(invalid)?.len())?,
     )?;
     if prepared.inputs.encoded_payload_bytes.0 != input_bytes
         || prepared.result_output.encoded_payload_bytes_upper_bound.0 != payload_bound
+        || prepared
+            .state_profiles_output
+            .encoded_payload_bytes_upper_bound
+            .0
+            != state_profiles.encoded_bytes_upper_bound
     {
         return Err(invalid(
             "acoustic canonical input or projected result bytes disagree",
@@ -240,6 +264,10 @@ pub fn build_acoustic_resource_plan(
             numerical_reservation_bytes: ByteCount(reservation),
             inputs: prepared.inputs,
             result_output: prepared.result_output,
+            state_profiles_output: prepared.state_profiles_output,
+            state_profiles_resident_bytes: ByteCount(
+                state_profiles.materialization_resident_bytes_estimate,
+            ),
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {

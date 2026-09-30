@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    execution::AnalysisNumericalObjectKind,
     fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
     physics::acoustic::AcousticHarmonicPolicy,
     topology::test_meshes::{quadratic_slab_mesh, slab_mesh},
@@ -57,6 +58,12 @@ fn facts(
     let input =
         (workload.canonical_bytes().unwrap().len() + mesh.canonical_encode().unwrap().len()) as u64;
     let output = acoustic_harmonic_result_payload_bytes_upper_bound(workload, mesh).unwrap();
+    let profiles = workload
+        .state_publication_profiles_encoding_profile(Digest::from_bytes(
+            *mesh.canonical_digest.bytes(),
+        ))
+        .unwrap()
+        .encoded_bytes_upper_bound;
     PreparedAcousticResourceFacts {
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(input),
@@ -67,6 +74,11 @@ fn facts(
             encoded_payload_bytes_upper_bound: ByteCount(output),
             transport_closure_bytes_upper_bound: ByteCount(output + 2048),
             construction_resident_bytes_admission_budget: ByteCount(output * 16),
+        },
+        state_profiles_output: PreparedOutputResourceFacts {
+            encoded_payload_bytes_upper_bound: ByteCount(profiles),
+            transport_closure_bytes_upper_bound: ByteCount(profiles + 2048),
+            construction_resident_bytes_admission_budget: ByteCount(profiles * 16),
         },
         output_set: PreparedOutputSetResourceFacts {
             encoded_bytes_upper_bound: ByteCount(2048),
@@ -83,6 +95,16 @@ fn canonical_results_fit_admitted_tet4_tet10_payload_and_policy_identity_is_dete
         assert!(
             result.canonical_bytes().unwrap().len() as u64
                 <= prepared.result_output.encoded_payload_bytes_upper_bound.0
+        );
+        let profiles = result
+            .state_publication_profiles(Digest::sha256(result.canonical_bytes().unwrap()))
+            .unwrap();
+        assert!(
+            profiles.canonical_bytes().unwrap().len() as u64
+                <= prepared
+                    .state_profiles_output
+                    .encoded_payload_bytes_upper_bound
+                    .0
         );
         let plan = build_acoustic_resource_plan(&workload, &mesh, prepared.clone()).unwrap();
         assert_eq!(
@@ -108,16 +130,33 @@ fn canonical_results_fit_admitted_tet4_tet10_payload_and_policy_identity_is_dete
 fn acoustic_prepared_byte_facts_and_production_fail_closed() {
     let mut workload = workload();
     let mesh = slab_mesh(1);
-    for field in 0..5 {
+    for field in 0..8 {
         let mut prepared = facts(&workload, &mesh);
         match field {
             0 => prepared.inputs.encoded_payload_bytes.0 -= 1,
             1 => prepared.inputs.transport_closure_bytes = ByteCount(0),
             2 => prepared.inputs.decoded_resident_bytes_admission_budget = ByteCount(0),
             3 => prepared.result_output.encoded_payload_bytes_upper_bound.0 -= 1,
-            _ => {
+            4 => {
                 prepared
                     .result_output
+                    .construction_resident_bytes_admission_budget = ByteCount(0)
+            }
+            5 => {
+                prepared
+                    .state_profiles_output
+                    .encoded_payload_bytes_upper_bound
+                    .0 -= 1
+            }
+            6 => {
+                prepared
+                    .state_profiles_output
+                    .transport_closure_bytes_upper_bound
+                    .0 = u64::MAX
+            }
+            _ => {
+                prepared
+                    .state_profiles_output
                     .construction_resident_bytes_admission_budget = ByteCount(0)
             }
         }
@@ -125,4 +164,43 @@ fn acoustic_prepared_byte_facts_and_production_fail_closed() {
     }
     workload.formulation_requirement = FormulationRequirement::Production;
     assert!(acoustic_harmonic_result_payload_bytes_upper_bound(&workload, &mesh).is_err());
+}
+
+#[test]
+fn declared_and_ambiguous_publication_catalogs_have_exact_admitted_transport_envelopes() {
+    let mesh = slab_mesh(1);
+    let mut declared = workload();
+    declared.model.sequence.steps[0].state_outputs[0].state_id.0 = "declared_pressure".repeat(16);
+    let mut ambiguous = declared.clone();
+    ambiguous.model.sequence.steps[0].independent_domain =
+        IndependentDomain::FrequencyHertz(vec![0.2, 0.3]);
+    for (workload, entry_count) in [(declared, 1), (ambiguous, 0)] {
+        let prepared = facts(&workload, &mesh);
+        let result = workload.execute(&mesh).unwrap();
+        let bytes = result.canonical_bytes().unwrap();
+        let profiles = result
+            .state_publication_profiles(Digest::sha256(&bytes))
+            .unwrap();
+        assert_eq!(profiles.entries().len(), entry_count);
+        assert!(bytes.len() as u64 <= prepared.result_output.encoded_payload_bytes_upper_bound.0);
+        assert!(
+            profiles.canonical_bytes().unwrap().len() as u64
+                <= prepared
+                    .state_profiles_output
+                    .encoded_payload_bytes_upper_bound
+                    .0
+        );
+        let plan = build_acoustic_resource_plan(&workload, &mesh, prepared.clone()).unwrap();
+        assert_eq!(
+            plan.input
+                .demand
+                .output_facts(AnalysisNumericalObjectKind::StatePublicationProfiles),
+            Some(&prepared.state_profiles_output)
+        );
+        let FeaResourceDemand::AcousticHarmonic(demand) = &plan.input.demand else {
+            panic!("acoustic demand was not retained");
+        };
+        assert!(demand.state_profiles_resident_bytes.0 > 0);
+        assert!(plan.breakdown.workspace_bytes.0 >= demand.state_profiles_resident_bytes.0);
+    }
 }

@@ -55,6 +55,17 @@ pub(super) fn execute(
         Ok(())
     };
     let state = match publication.source {
+        SemanticStatePublicationSource::AcousticNativeFields => {
+            let result =
+                runmat_analysis_fea::execution::AcousticHarmonicSolverResult::from_canonical_bytes(
+                    &solver_result.payload(),
+                )?;
+            result.validate_publication_request(&publication)?;
+            check_profile(SemanticStatePublicationProfileSource::AcousticNativeFields(
+                &result,
+            ))?;
+            CanonicalSemanticState::from_acoustic_publication(&publication, &result)?
+        }
         SemanticStatePublicationSource::ThermalPrimaryField => {
             let manifest =
                 runmat_analysis_execution::decode_prepared_thermal_manifest(solver_result)?;
