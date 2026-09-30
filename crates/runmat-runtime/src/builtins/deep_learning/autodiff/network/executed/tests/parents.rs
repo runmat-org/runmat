@@ -52,6 +52,133 @@ fn objective(net: &Value, data: &[f64]) -> f64 {
         .sum()
 }
 
+fn squared_joint_loss(outputs: impl IntoIterator<Item = Value>) -> Value {
+    outputs
+        .into_iter()
+        .map(|output| {
+            dlarray_sum_builtin(
+                dlarray_times_builtin(output.clone(), output).unwrap(),
+                vec![Value::String("all".into())],
+            )
+            .unwrap()
+        })
+        .reduce(|left, right| dlarray_plus_builtin(left, right).unwrap())
+        .expect("at least one network output")
+}
+
+fn record_for(output: &Value, tape: &Rc<RefCell<Tape>>) -> Rc<NetworkTapeRecord> {
+    let node = dlarray_node_id(output).expect("traced network output");
+    let graph = tape.borrow();
+    let NodeKind::Network { execution, .. } = &graph.nodes[node].kind else {
+        panic!("network tape record expected")
+    };
+    execution.clone()
+}
+
+#[test]
+fn two_recurrent_traces_share_one_upstream_parent_without_losing_either_adjoint() {
+    let data = vec![-0.7, 0.3, 0.5, -0.4, 1.2, 0.8];
+    let first = network(K::Lstm, NumericDType::F64);
+    let second = network(K::Bilstm, NumericDType::F64);
+    let analytic = {
+        let tape = Rc::new(RefCell::new(Tape::new()));
+        let _activation = TapeActivation::enter(tape.clone());
+        let x = annotate_dlarray_value(input(data.clone(), NumericDType::F64)).unwrap();
+        let first_outputs = prediction_and_states(&first, x.clone());
+        let second_outputs = prediction_and_states(&second, x.clone());
+        let first_record = record_for(&first_outputs[0], &tape);
+        let second_record = record_for(&second_outputs[0], &tape);
+        assert!(!Rc::ptr_eq(&first_record, &second_record));
+        let loss = squared_joint_loss(first_outputs.into_iter().chain(second_outputs));
+        let gradient = block_on(dlgradient_builtin(loss.clone(), vec![x.clone()])).unwrap();
+        assert_eq!(first_record.reverse_calls.get(), 1);
+        assert_eq!(second_record.reverse_calls.get(), 1);
+        let repeated = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+        assert_eq!(first_record.reverse_calls.get(), 2);
+        assert_eq!(second_record.reverse_calls.get(), 2);
+        assert_eq!(tensor(&gradient), tensor(&repeated));
+        tensor(&gradient).materialize_f64()
+    };
+    let objective = |values: Vec<f64>| {
+        [first.clone(), second.clone()]
+            .into_iter()
+            .flat_map(|net| prediction_and_states(&net, input(values.clone(), NumericDType::F64)))
+            .flat_map(|output| tensor(&output).materialize_f64())
+            .map(|value| value * value)
+            .sum::<f64>()
+    };
+    for index in 0..data.len() {
+        let mut upper = data.clone();
+        upper[index] += 0.00001;
+        let mut lower = data.clone();
+        lower[index] -= 0.00001;
+        let expected = (objective(upper) - objective(lower)) / 0.00002;
+        assert!(
+            (analytic[index] - expected).abs() < 0.00002,
+            "shared input {index}: {} vs {expected}",
+            analytic[index]
+        );
+    }
+}
+
+#[test]
+fn aliased_input_and_initial_hidden_state_accumulate_to_one_parent() {
+    let base = network(K::Lstm, NumericDType::F64);
+    let sequence = |values: Vec<f64>| {
+        object(
+            "dlarray",
+            vec![
+                ("Data", super::values(values, vec![2, 1], NumericDType::F64)),
+                ("Format", Value::String("CT".into())),
+                ("Labels", Value::String("CT".into())),
+            ],
+        )
+    };
+    let data = vec![0.3, -0.4];
+    let analytic = {
+        let tape = Rc::new(RefCell::new(Tape::new()));
+        let _activation = TapeActivation::enter(tape.clone());
+        let x = annotate_dlarray_value(sequence(data.clone())).unwrap();
+        let net = replace_parent(&base, ParentRole::State(StateRole::HiddenState), x.clone());
+        let outputs = prediction_and_states(&net, x.clone());
+        let record = record_for(&outputs[0], &tape);
+        assert_eq!(
+            record.input.as_ref().unwrap().node,
+            record
+                .states
+                .get(&(1, StateRole::HiddenState))
+                .unwrap()
+                .node,
+            "input and HiddenState must retain the same tape parent"
+        );
+        let loss = squared_joint_loss(outputs);
+        let gradient = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+        assert_eq!(record.reverse_calls.get(), 1);
+        tensor(&gradient).materialize_f64()
+    };
+    let objective = |values: Vec<f64>| {
+        let x = sequence(values);
+        let net = replace_parent(&base, ParentRole::State(StateRole::HiddenState), x.clone());
+        prediction_and_states(&net, x)
+            .iter()
+            .flat_map(|output| tensor(output).materialize_f64())
+            .map(|value| value * value)
+            .sum::<f64>()
+    };
+    for index in 0..data.len() {
+        let mut upper = data.clone();
+        upper[index] += 0.00001;
+        let mut lower = data.clone();
+        lower[index] -= 0.00001;
+        let expected = (objective(upper) - objective(lower)) / 0.00002;
+        assert!(
+            (analytic[index] - expected).abs() < 0.00002,
+            "aliased input/State {index}: {} vs {expected}",
+            analytic[index]
+        );
+    }
+}
+
 #[test]
 fn prepared_single_reverse_restores_each_double_learnable_and_initial_state_parent() {
     let data = vec![-0.7, 0.3, 0.5, -0.4, 1.2, 0.8];
