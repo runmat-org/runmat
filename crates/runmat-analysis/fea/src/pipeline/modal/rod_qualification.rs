@@ -38,6 +38,7 @@ const YOUNGS: f64 = 100.0;
 const WAVE_SPEED: f64 = 10.0;
 const PHASOR: [f64; 2] = [1.0, 0.4];
 
+mod curved;
 mod damped;
 mod damped_modal;
 mod execution;

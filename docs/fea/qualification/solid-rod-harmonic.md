@@ -57,7 +57,10 @@ cells per axis; straight Tet10 refinements have 1, 2, and 4. The shared quadrati
 fixture uses canonical global-edge midsides, Tri6 faces and exact source-face
 parameters, validated and sealed through the ordinary meshing contract. It is a
 test fixture, not production-generated topology. This qualification does not
-extend to curved Tet10 or general unrestrained rods with nonzero Poisson ratio.
+extend to general unrestrained rods with nonzero Poisson ratio. The separate
+[analytic curved Tet10 envelope](curved-solid-harmonic.md) qualifies a fixed
+quadratic extrusion with its own geometry, force/moment and recovery checks;
+it does not turn this straight fixture into general curved-CAD evidence.
 
 The wave equation and fixed/free spectrum follow [UT Austin's longitudinal-wave
 derivation, equations 5.15–5.22](https://farside.ph.utexas.edu/teaching/315/Waves/node34.html).

@@ -44,6 +44,15 @@ fn damped_solid_rod_tet10_harmonic_cold_execution_and_recovery_preserve_phase() 
 
 fn cold_execution(quadratic: bool, damped: bool) {
     let mesh = rod_mesh(if quadratic { 4 } else { 8 }, quadratic);
+    cold_execution_on_mesh(mesh, quadratic, damped, None);
+}
+
+pub(super) fn cold_execution_on_mesh(
+    mesh: SolverMeshArtifact,
+    quadratic: bool,
+    damped: bool,
+    substitution: Option<SolverMeshArtifact>,
+) {
     let k = 1.0;
     let f = k * WAVE_SPEED / std::f64::consts::TAU;
     let mut model = rod_model(&mesh, &[k]);
@@ -142,16 +151,19 @@ fn cold_execution(quadratic: bool, damped: bool) {
 
     // Same node IDs and supports, but a different valid sealed physical geometry:
     // rejection must come from admitted identity, not missing constraint targets.
-    let mut substituted_mesh = cold_mesh.clone();
-    substituted_mesh
-        .topology
-        .nodes
-        .iter_mut()
-        .find(|node| node.coordinates_m == [0.5; 3])
-        .unwrap()
-        .coordinates_m[1] += 0.001;
-    substituted_mesh.canonical_digest = StableDigest::ZERO;
-    substituted_mesh.seal_canonical_digest().unwrap();
+    let substituted_mesh = substitution.unwrap_or_else(|| {
+        let mut substituted_mesh = cold_mesh.clone();
+        substituted_mesh
+            .topology
+            .nodes
+            .iter_mut()
+            .find(|node| node.coordinates_m == [0.5; 3])
+            .unwrap()
+            .coordinates_m[1] += 0.001;
+        substituted_mesh.canonical_digest = StableDigest::ZERO;
+        substituted_mesh.seal_canonical_digest().unwrap();
+        substituted_mesh
+    });
     substituted_mesh.validate_canonical().unwrap();
     assert!(matches!(
         execute_structural_frequency_entry(&cold_workload, &substituted_mesh, &cold_request, None),
