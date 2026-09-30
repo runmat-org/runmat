@@ -32,7 +32,7 @@ impl Drop for FailFreeBuffer {
 }
 
 #[test]
-fn failed_retirement_preserves_residency_marker_and_live_allocation() {
+fn failed_retirement_retains_payload_and_failure_record_without_reviving_view() {
     gc_test_context(|| {
         let _lock = accel_test_lock();
         ensure_provider_registered();
@@ -41,7 +41,7 @@ fn failed_retirement_preserves_residency_marker_and_live_allocation() {
         runmat_accelerate::fusion_residency::mark(&owned);
         provider
             .fail_free_buffer
-            .store(owned.buffer_id, Ordering::Relaxed);
+            .store(owned.buffer_id(), Ordering::Relaxed);
         let failure = FailFreeBuffer(provider);
         let mut vars = vec![Value::GpuTensor(owned.clone())];
         let mut context = Default::default();
@@ -62,9 +62,21 @@ fn failed_retirement_preserves_residency_marker_and_live_allocation() {
         .finish(&[]);
         assert!(runmat_accelerate::fusion_residency::is_resident(&owned));
         assert_eq!(provider.pull(&owned).unwrap(), (vec![11.0], vec![1, 1]));
+        drop(vars);
+        drop(context);
+        let id = owned.buffer_id();
+        let weak = owned.downgrade();
+        let error = owned
+            .release()
+            .expect_err("final release must surface injected failure");
+        assert!(error.to_string().contains("injected release failure"));
+        assert!(provider.buffers.lock().unwrap().contains_key(&id));
+        assert_eq!(provider.frees.lock().unwrap().get(&id), None);
+        assert!(
+            weak.acquire().is_err(),
+            "failed retirement cannot revive a view"
+        );
         drop(failure);
-        provider.free(&owned).unwrap();
-        runmat_accelerate::fusion_residency::clear(&owned);
     });
 }
 
@@ -115,23 +127,18 @@ fn borrowed_initial_workspace_survives_error_and_retires_only_after_replacement(
             assert_eq!(result.is_err(), fails, "source={source}; result={result:?}");
             if preserves {
                 assert_eq!(provider.pull(&input).unwrap(), (vec![7.0], vec![1, 1]));
-                assert_eq!(provider.frees.lock().unwrap().get(&input.buffer_id), None);
+                assert_eq!(provider.frees.lock().unwrap().get(&input.buffer_id()), None);
                 let handles = resident_outputs(&initial);
                 assert!(handles
                     .iter()
-                    .any(|handle| handle.buffer_id == input.buffer_id));
-                provider.free(&input).unwrap();
-            } else {
-                assert!(!provider
-                    .buffers
-                    .lock()
-                    .unwrap()
-                    .contains_key(&input.buffer_id));
-                assert_eq!(
-                    provider.frees.lock().unwrap().get(&input.buffer_id),
-                    Some(&1)
-                );
+                    .any(|handle| handle.buffer_id() == input.buffer_id()));
             }
+            let id = input.buffer_id();
+            drop(result);
+            drop(initial);
+            input.release().expect("last caller view retires input");
+            assert!(!provider.buffers.lock().unwrap().contains_key(&id));
+            assert_eq!(provider.frees.lock().unwrap().get(&id), Some(&1));
         }
     });
 }
@@ -204,7 +211,7 @@ fn completed_builtin_calls_release_consumed_intermediates_and_adopt_aliases() {
         );
         let outputs = resident_outputs(&completed.values);
         let mut expected = baseline.clone();
-        expected.extend(outputs.iter().map(|handle| handle.buffer_id));
+        expected.extend(outputs.iter().map(|handle| handle.buffer_id()));
         let live = provider
             .buffers
             .lock()
@@ -246,9 +253,9 @@ fn completed_builtin_calls_release_consumed_intermediates_and_adopt_aliases() {
                 "temporary {id} must be released exactly once"
             );
         }
-        for output in outputs {
-            provider.free(&output).unwrap();
-        }
+        drop(completed);
+        drop(outputs);
+        drop(input);
         assert_eq!(
             provider
                 .buffers
@@ -300,11 +307,13 @@ fn overwritten_fusion_stores_preserve_older_nested_alias_and_retire_once() {
         .finish(&[]);
         assert_eq!(provider.pull(&borrowed).unwrap(), (vec![7.0], vec![1, 1]));
         assert_eq!(
-            provider.frees.lock().unwrap().get(&borrowed.buffer_id),
+            provider.frees.lock().unwrap().get(&borrowed.buffer_id()),
             None
         );
         runmat_gc::gc_unregister_root(caller).unwrap();
-        provider.free(&borrowed).unwrap();
+        borrowed
+            .release()
+            .expect("final caller view retires allocation");
 
         let owned = provider.push(vec![9.0], vec![1, 1]);
         provider
@@ -321,18 +330,12 @@ fn overwritten_fusion_stores_preserve_older_nested_alias_and_retire_once() {
             &mut context,
         )
         .finish(&[]);
-        assert!(!provider
-            .buffers
-            .lock()
-            .unwrap()
-            .contains_key(&owned.buffer_id));
+        let owned_id = owned.buffer_id();
+        assert!(provider.buffers.lock().unwrap().contains_key(&owned_id));
+        owned.release().expect("last owned view retires allocation");
+        assert!(!provider.buffers.lock().unwrap().contains_key(&owned_id));
         assert_eq!(
-            provider
-                .frees
-                .lock()
-                .unwrap()
-                .get(&owned.buffer_id)
-                .copied(),
+            provider.frees.lock().unwrap().get(&owned_id).copied(),
             Some(1)
         );
     });

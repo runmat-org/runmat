@@ -51,7 +51,7 @@ fn semantic_projection_releases_temporaries_on_success_and_output_error() {
                 let [Value::GpuTensor(output)] = outputs.as_slice() else {
                     panic!("resident alias output")
                 };
-                assert_eq!(output.buffer_id, input.buffer_id);
+                assert_eq!(output.buffer_id(), input.buffer_id());
             }
             let end = provider.next_id.load(Ordering::Relaxed);
             assert!(
@@ -76,7 +76,12 @@ fn semantic_projection_releases_temporaries_on_success_and_output_error() {
                 (vec![0.25, 0.5], vec![1, 2])
             );
             runmat_gc::gc_unregister_root(caller).unwrap();
-            provider.free(&input).unwrap();
+            let input_id = input.buffer_id();
+            input
+                .release()
+                .expect("last caller view retires allocation");
+            assert!(!provider.buffers.lock().unwrap().contains_key(&input_id));
+            assert_eq!(provider.frees.lock().unwrap().get(&input_id), Some(&1));
         }
     });
 }

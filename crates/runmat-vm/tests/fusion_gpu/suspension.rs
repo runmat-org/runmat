@@ -33,18 +33,19 @@ fn assert_buffers_equal(provider: &TestProvider, expected: &BufferStore) {
     actual_ids.sort_unstable();
     expected_ids.sort_unstable();
     assert_eq!(actual_ids, expected_ids, "live buffer identities differ");
-    for (id, (expected_data, expected_shape)) in expected {
-        let (data, shape) = &actual[id];
-        assert_eq!(shape, expected_shape, "buffer {id} shape changed");
+    for (id, expected_record) in expected {
+        let record = &actual[id];
         assert_eq!(
-            data.len(),
-            expected_data.len(),
+            record.shape, expected_record.shape,
+            "buffer {id} shape changed"
+        );
+        assert_eq!(
+            record.data.len(),
+            expected_record.data.len(),
             "buffer {id} length changed"
         );
         assert!(
-            data.iter()
-                .zip(expected_data)
-                .all(|(a, b)| a.to_bits() == b.to_bits()),
+            record.data.exact_eq(&expected_record.data),
             "buffer {id} exact payload changed"
         );
     }
@@ -103,7 +104,7 @@ fn assert_published_buffers(
             let Value::GpuTensor(handle) = value else {
                 panic!("fixture publishes only borrowed device values")
             };
-            assert_eq!(provider.pull(&handle).unwrap().1, handle.shape);
+            assert_eq!(provider.pull(&handle).unwrap().1, handle.shape());
         }
     }));
 }
@@ -143,7 +144,7 @@ pub(super) async fn pending_download_if_armed(handle: &GpuTensorHandle) {
     let probe = DOWNLOAD.with(|slot| {
         slot.borrow()
             .as_ref()
-            .filter(|(id, _)| *id == handle.buffer_id)
+            .filter(|(id, _)| *id == handle.buffer_id())
             .map(|(_, probe)| probe.clone())
     });
     if let Some(probe) = probe {
@@ -233,7 +234,7 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         publish_borrowed(&runtime, &published);
         let probe = Rc::new(Probe::default());
         assert!(DOWNLOAD
-            .with(|slot| slot.replace(Some((drift.buffer_id, probe.clone()))))
+            .with(|slot| slot.replace(Some((drift.buffer_id(), probe.clone()))))
             .is_none());
         let _scope = Scope;
         let mut execution = Box::pin(runmat_vm::interpret_resume_in_context(
@@ -274,9 +275,11 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         assert_buffers_equal(provider, &baseline);
         assert_published_buffers(&runtime, provider);
         unpublish_borrowed(&runtime);
-        provider.free(&drift).unwrap();
+        drift.release().expect("last drift view retires allocation");
         if let Some(handle) = borrowed {
-            provider.free(&handle).unwrap();
+            handle
+                .release()
+                .expect("last borrowed view retires allocation");
         }
         assert!(runmat_runtime::context::legacy::active().is_none());
     });
@@ -372,10 +375,13 @@ fn borrowed_initial_workspace_survives_pending_cancel_and_drop() {
             let Value::GpuTensor(retained) = &initial[slot] else {
                 panic!("caller input changed")
             };
-            assert_eq!(retained.buffer_id, input.buffer_id);
+            assert_eq!(retained.buffer_id(), input.buffer_id());
             assert_eq!(provider.pull(retained).unwrap().1, vec![1, 4096]);
-            assert_eq!(provider.frees.lock().unwrap().get(&input.buffer_id), None);
-            provider.free(&input).unwrap();
+            assert_eq!(provider.frees.lock().unwrap().get(&input.buffer_id()), None);
+            drop(initial);
+            input
+                .release()
+                .expect("last caller view retires allocation");
         });
     }
 }
@@ -429,7 +435,7 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
             )
         };
         assert_eq!(
-            handle.descriptor.element_type,
+            handle.descriptor().element_type,
             Some(runmat_accelerate_api::NumericElementType::F32)
         );
         let output = block_on(provider.download_numeric(handle)).unwrap();
@@ -458,7 +464,7 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
             .keys()
             .copied()
             .collect::<std::collections::HashSet<_>>();
-        expected_ids.extend(adopted.iter().map(|value| value.buffer_id));
+        expected_ids.extend(adopted.iter().map(|value| value.buffer_id()));
         assert_eq!(
             provider
                 .buffers
@@ -470,9 +476,8 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
             expected_ids,
             "all remaining allocations must be reachable from the returned full frame"
         );
-        for output in adopted {
-            provider.free(&output).unwrap();
-        }
+        drop(completed);
+        drop(adopted);
         assert_buffers_equal(provider, &baseline);
     });
 }
@@ -589,7 +594,9 @@ fn witness(resident: bool, cancel: bool) {
         assert_published_buffers(&runtime, provider);
         if let Some(handle) = borrowed {
             unpublish_borrowed(&runtime);
-            provider.free(&handle).unwrap();
+            handle
+                .release()
+                .expect("last published view retires allocation");
         }
         assert!(runmat_runtime::context::legacy::active().is_none());
     });

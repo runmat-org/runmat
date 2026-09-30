@@ -36,7 +36,7 @@ use runmat_vm::{
 };
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
     block_on(interpret_async(bytecode))
@@ -51,7 +51,9 @@ fn interpret_function(
 use runmat_time::Instant;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
+#[path = "fusion_gpu/ownership.rs"]
+mod ownership;
+use ownership::{BufferPayload, BufferRecord, BufferStore};
 
 fn compile_semantic(source: &str) -> runmat_vm::Bytecode {
     test_helpers::compile_source(source).expect("compile source")
@@ -147,26 +149,40 @@ impl TestProvider {
     fn pull(&self, handle: &GpuTensorHandle) -> anyhow::Result<(Vec<f64>, Vec<usize>)> {
         let guard = self.buffers.lock().unwrap();
         guard
-            .get(&handle.buffer_id)
-            .cloned()
-            .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
+            .get(&handle.buffer_id())
+            .filter(|record| record.owns(handle))
+            .map(|record| (record.data.to_f64(), handle.shape().to_vec()))
+            .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id()))
     }
 
     fn push(&self, data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
+        self.push_typed(data, shape, runmat_accelerate_api::NumericElementType::F64)
+    }
+
+    fn push_typed(
+        &self,
+        data: Vec<f64>,
+        shape: Vec<usize>,
+        element: runmat_accelerate_api::NumericElementType,
+    ) -> GpuTensorHandle {
+        use runmat_accelerate_api::allocation::{AllocationIdentity, AllocationLease};
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let data = BufferPayload::from_values(data, element);
+        let physical = ownership::physical_for(data.len(), element);
         self.buffers
             .lock()
             .unwrap()
-            .insert(id, (data, shape.clone()));
-        let handle = GpuTensorHandle {
-            shape,
-            device_id: 0,
-            buffer_id: id,
-            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
-                runmat_accelerate_api::NumericElementType::F64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            ),
-        };
+            .insert(id, BufferRecord::new(data, shape.clone(), physical));
+        let registered = PROVIDER.get().expect("registered fixture provider");
+        assert!(std::ptr::eq(self, registered.as_ref()));
+        let owner: Arc<dyn runmat_accelerate_api::allocation::AllocationOwner> = registered.clone();
+        let lease = AllocationLease::register(AllocationIdentity::new(0, id, 1), owner)
+            .expect("fixture allocation registration");
+        let handle = GpuTensorHandle::from_allocation(
+            lease,
+            runmat_accelerate_api::GpuTensorView::contiguous(shape),
+        )
+        .expect("fixture tensor view admission");
         runmat_accelerate_api::mark_residency(&handle);
         handle
     }
@@ -287,12 +303,12 @@ impl AccelProvider for TestProvider {
                     "gather_linear: index {} (pos {}) out of bounds for buffer {}",
                     lin,
                     pos,
-                    source.buffer_id
+                    source.buffer_id()
                 ));
             }
             out.push(data[lin]);
         }
-        Ok(self.push(out, output_shape.to_vec()))
+        Ok(self.push_typed(out, output_shape.to_vec(), source.physical().element_type()))
     }
 
     fn scatter_linear(
@@ -311,19 +327,22 @@ impl AccelProvider for TestProvider {
         }
         let mut guard = self.buffers.lock().unwrap();
         let target_buf = guard
-            .get_mut(&target.buffer_id)
-            .ok_or_else(|| anyhow!("scatter_linear: unknown target {}", target.buffer_id))?;
+            .get_mut(&target.buffer_id())
+            .ok_or_else(|| anyhow!("scatter_linear: unknown target {}", target.buffer_id()))?;
+        if !target_buf.owns(target) {
+            bail!("scatter_linear: target allocation is not owned by this provider");
+        }
         for (pos, &idx) in indices.iter().enumerate() {
             let lin = idx as usize;
-            if lin >= target_buf.0.len() {
+            if lin >= target_buf.data.len() {
                 return Err(anyhow!(
                     "scatter_linear: index {} (pos {}) out of bounds for buffer {}",
                     lin,
                     pos,
-                    target.buffer_id
+                    target.buffer_id()
                 ));
             }
-            target_buf.0[lin] = vals[pos];
+            target_buf.data.write(lin, vals[pos]);
         }
         Ok(())
     }
@@ -345,13 +364,10 @@ impl AccelProvider for TestProvider {
                     shape: host.shape,
                 }),
             (HostNumericDataView::F32(data), runmat_accelerate_api::GpuTensorStorage::Real) => {
-                let mut handle = self.push(
+                let handle = self.push_typed(
                     data.iter().copied().map(f64::from).collect(),
                     host.shape.to_vec(),
-                );
-                handle.descriptor = runmat_accelerate_api::GpuTensorDescriptor::numeric(
                     runmat_accelerate_api::NumericElementType::F32,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
                 );
                 Ok(handle)
             }
@@ -378,7 +394,7 @@ impl AccelProvider for TestProvider {
         Box::pin(async move {
             suspension::pending_download_if_armed(handle).await;
             let (data, shape) = self.pull(handle)?;
-            let data = match handle.descriptor.element_type {
+            let data = match handle.descriptor().element_type {
                 Some(runmat_accelerate_api::NumericElementType::F32) => {
                     HostNumericDataOwned::F32(data.into_iter().map(|value| value as f32).collect())
                 }
@@ -391,31 +407,11 @@ impl AccelProvider for TestProvider {
                 data,
                 shape,
                 storage: handle
-                    .descriptor
+                    .descriptor()
                     .storage
                     .unwrap_or(runmat_accelerate_api::GpuTensorStorage::Real),
             })
         })
-    }
-
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        if self.fail_free_buffer.load(Ordering::Relaxed) == handle.buffer_id {
-            return Err(anyhow!("injected release failure for allocated buffer"));
-        }
-        if self.inspect_roots_on_free.load(Ordering::Relaxed) {
-            assert!(
-                runmat_gc::gc_visit_retained_values(&[], &mut |_| Some(())).is_some(),
-                "provider release must run outside root registration locks"
-            );
-        }
-        *self
-            .frees
-            .lock()
-            .unwrap()
-            .entry(handle.buffer_id)
-            .or_default() += 1;
-        self.buffers.lock().unwrap().remove(&handle.buffer_id);
-        Ok(())
     }
 
     fn device_info(&self) -> String {
@@ -862,7 +858,7 @@ impl AccelProvider for TestProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             suspension::pending_single_if_armed().await;
-            self.single_inputs.lock().unwrap().push(input.buffer_id);
+            self.single_inputs.lock().unwrap().push(input.buffer_id());
             let (data, shape) = self.pull(input)?;
             let single = data
                 .into_iter()
@@ -886,7 +882,9 @@ impl AccelProvider for TestProvider {
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         len: usize,
+        output_class: ProviderElementType,
     ) -> anyhow::Result<GpuTensorHandle> {
+        let output_element = ownership::element_for(output_class)?;
         self.fused_dispatches.fetch_add(1, Ordering::Relaxed);
         let parsed = ParsedShader::parse(shader)?;
         if parsed.tmp_exprs.len() > 1024 {
@@ -941,7 +939,7 @@ impl AccelProvider for TestProvider {
 
         let mut shape = if output_elements == 0 {
             if let Some(first) = inputs.first() {
-                first.shape.clone()
+                first.shape().to_vec()
             } else {
                 vec![total]
             }
@@ -951,7 +949,7 @@ impl AccelProvider for TestProvider {
         if shape.iter().product::<usize>() != total {
             shape = vec![total];
         }
-        Ok(self.push(out, shape))
+        Ok(self.push_typed(out, shape, output_element))
     }
 
     fn fused_elementwise_multi(
@@ -960,15 +958,20 @@ impl AccelProvider for TestProvider {
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         len: usize,
-        num_outputs: usize,
+        output_classes: &[ProviderElementType],
     ) -> anyhow::Result<Vec<GpuTensorHandle>> {
+        let output_element_types = output_classes
+            .iter()
+            .copied()
+            .map(ownership::element_for)
+            .collect::<anyhow::Result<Vec<_>>>()?;
         self.fused_dispatches.fetch_add(1, Ordering::Relaxed);
         let parsed = ParsedShader::parse(shader)?;
-        if parsed.output_exprs.len() != num_outputs {
+        if parsed.output_exprs.len() != output_classes.len() {
             bail!(
                 "test provider: multi-output shader has {} output expressions, expected {}",
                 parsed.output_exprs.len(),
-                num_outputs
+                output_classes.len()
             );
         }
         if parsed.tmp_exprs.len() > 1024 {
@@ -993,13 +996,13 @@ impl AccelProvider for TestProvider {
         let shape = if output_elements == 0 {
             inputs
                 .first()
-                .map(|h| h.shape.clone())
+                .map(|h| h.shape().to_vec())
                 .unwrap_or_else(|| vec![total])
         } else {
             output_shape.to_vec()
         };
 
-        let mut per_output: Vec<Vec<f64>> = vec![Vec::with_capacity(total); num_outputs];
+        let mut per_output: Vec<Vec<f64>> = vec![Vec::with_capacity(total); output_classes.len()];
         for idx in 0..total {
             let mut tmp_values: Vec<Option<f64>> = vec![None; parsed.tmp_exprs.len()];
             for (slot, expr) in parsed.tmp_exprs.iter().enumerate() {
@@ -1028,13 +1031,13 @@ impl AccelProvider for TestProvider {
             }
         }
 
-        let mut handles = Vec::with_capacity(num_outputs);
-        for out_data in per_output {
+        let mut handles = Vec::with_capacity(output_classes.len());
+        for (out_data, output_element) in per_output.into_iter().zip(output_element_types) {
             let mut out_shape = shape.clone();
             if out_shape.iter().product::<usize>() != total {
                 out_shape = vec![total];
             }
-            handles.push(self.push(out_data, out_shape));
+            handles.push(self.push_typed(out_data, out_shape, output_element));
         }
         Ok(handles)
     }
@@ -1042,7 +1045,7 @@ impl AccelProvider for TestProvider {
     fn transpose(&self, handle: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         let (data, shape) = self.pull(handle)?;
         if shape.len() < 2 {
-            return Ok(self.push(data, shape));
+            return Ok(self.push_typed(data, shape, handle.physical().element_type()));
         }
         let rows = shape[0];
         let cols = shape[1];
@@ -1057,7 +1060,7 @@ impl AccelProvider for TestProvider {
         let mut new_shape = shape.clone();
         new_shape[0] = cols;
         new_shape[1] = rows;
-        Ok(self.push(out, new_shape))
+        Ok(self.push_typed(out, new_shape, handle.physical().element_type()))
     }
 
     fn matmul<'a>(
@@ -1122,22 +1125,23 @@ impl AccelProvider for TestProvider {
         handle: &GpuTensorHandle,
         new_shape: &[usize],
     ) -> anyhow::Result<GpuTensorHandle> {
-        let len: usize = new_shape.iter().product();
-        let mut buffers = self.buffers.lock().unwrap();
+        let len = new_shape
+            .iter()
+            .try_fold(1usize, |total, &dim| total.checked_mul(dim))
+            .ok_or_else(|| anyhow!("reshape: dimensions exceed addressable length"))?;
+        let buffers = self.buffers.lock().unwrap();
         let entry = buffers
-            .get_mut(&handle.buffer_id)
-            .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id))?;
-        if entry.0.len() != len {
+            .get(&handle.buffer_id())
+            .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id()))?;
+        if entry.data.len() != len {
             bail!(
                 "reshape: product of new dimensions ({}) must equal existing length ({})",
                 len,
-                entry.0.len()
+                entry.data.len()
             );
         }
-        entry.1 = new_shape.to_vec();
-        let mut updated = handle.clone();
-        updated.shape = new_shape.to_vec();
-        Ok(updated)
+        drop(buffers);
+        Ok(handle.with_view(handle.view().clone().with_shape(new_shape.to_vec()))?)
     }
 }
 
@@ -1664,10 +1668,10 @@ impl<'a> ExprParser<'a> {
     }
 }
 
-static PROVIDER: OnceCell<TestProvider> = OnceCell::new();
+static PROVIDER: OnceCell<Arc<TestProvider>> = OnceCell::new();
 
 fn ensure_provider_registered() {
-    let provider: &'static TestProvider = PROVIDER.get_or_init(TestProvider::new);
+    let provider: &'static TestProvider = PROVIDER.get_or_init(|| Arc::new(TestProvider::new()));
     unsafe {
         runmat_accelerate_api::register_provider(provider);
     }

@@ -314,7 +314,7 @@ mod tests {
         vars.iter().any(|value| {
             matches!(
                 value,
-                Value::GpuTensor(candidate) if candidate.buffer_id == handle.buffer_id
+                Value::GpuTensor(candidate) if candidate.shares_allocation_with(handle)
             )
         })
     }
@@ -325,7 +325,7 @@ mod tests {
     ) -> bool {
         matches!(
             value,
-            Value::GpuTensor(candidate) if candidate.buffer_id == handle.buffer_id
+            Value::GpuTensor(candidate) if candidate.shares_allocation_with(handle)
         )
     }
 
@@ -413,8 +413,11 @@ mod tests {
             "aliased spawn/drop flow should preserve provider storage for retained alias handle"
         );
 
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
+        drop(result);
+        assert_eq!(
+            handle.release().expect("release retained alias view"),
+            runmat_accelerate_api::allocation::AllocationReleaseOutcome::Retired
+        );
     }
 
     #[test]
@@ -508,8 +511,11 @@ mod tests {
             "async spawn/await aliased flow should preserve provider storage for retained alias handle"
         );
 
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
+        drop(result);
+        assert_eq!(
+            handle.release().expect("release retained async alias view"),
+            runmat_accelerate_api::allocation::AllocationReleaseOutcome::Retired
+        );
     }
 
     #[test]
@@ -821,8 +827,13 @@ mod tests {
             "parallel async flow should release provider storage for dropped second handle"
         );
 
-        fusion_residency::clear(&handle_a);
-        let _ = TEST_PROVIDER.free(&handle_a);
+        drop(result);
+        assert_eq!(
+            handle_a
+                .release()
+                .expect("release retained parallel alias view"),
+            runmat_accelerate_api::allocation::AllocationReleaseOutcome::Retired
+        );
     }
 
     #[test]
