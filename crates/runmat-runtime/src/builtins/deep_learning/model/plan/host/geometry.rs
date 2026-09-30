@@ -34,6 +34,7 @@ pub(in crate::builtins::deep_learning) struct StepDescriptor {
 }
 
 pub(in crate::builtins::deep_learning) struct HostNetworkPlan<'a> {
+    pub(super) input: &'a Value,
     pub(super) parameters: Vec<ParameterView<'a>>,
     pub(super) state: Vec<StateView<'a>>,
     pub(super) steps: Vec<StepDescriptor>,
@@ -78,6 +79,10 @@ impl<'a> HostNetworkPlan<'a> {
         self.function
     }
 
+    pub(in crate::builtins::deep_learning) fn admitted_input(&self) -> &'a Value {
+        self.input
+    }
+
     /// A bounded first resident route. The same admitted geometry is used by
     /// host execution; future composed device stages consume these steps.
     pub(in crate::builtins::deep_learning) fn standalone_normalization(
@@ -112,7 +117,7 @@ impl<'a> HostNetworkPlan<'a> {
 
     pub(in crate::builtins::deep_learning) fn admit(
         network: &'a ObjectInstance,
-        input: &Value,
+        input: &'a Value,
         function: &'static str,
     ) -> BuiltinResult<Self> {
         validate_sequential_connections(network, function)?;
@@ -139,6 +144,7 @@ impl<'a> HostNetworkPlan<'a> {
         let (input_axes, axes, precision, input_payload_kind, steps) =
             admit_layers(&layers.data, first, first_kind, input, &shapes, function)?;
         Ok(Self {
+            input,
             parameters,
             state,
             steps,

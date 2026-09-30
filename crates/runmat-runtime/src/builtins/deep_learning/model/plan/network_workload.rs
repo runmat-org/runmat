@@ -19,15 +19,10 @@ use crate::builtins::deep_learning::model::{
 use crate::BuiltinResult;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::builtins::deep_learning) enum PayloadClass {
-    Numeric(NumericDType),
+pub(in crate::builtins::deep_learning) enum PayloadKind {
+    Real(NumericDType),
+    Complex(NumericDType),
     Logical,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::builtins::deep_learning) enum PayloadStorage {
-    Real,
-    Complex,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,8 +39,7 @@ pub(in crate::builtins::deep_learning) enum PayloadOrigin {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::builtins::deep_learning) struct PayloadFacts {
-    pub class: PayloadClass,
-    pub storage: PayloadStorage,
+    pub kind: PayloadKind,
     pub shape: Vec<usize>,
     pub logical_bytes: u64,
     pub origin: PayloadOrigin,
@@ -64,26 +58,27 @@ fn logical_bytes(shape: &[usize], bytes_per_element: usize, lanes: usize) -> Opt
 impl PayloadFacts {
     fn from_admitted(value: &Value, function: &'static str) -> BuiltinResult<Self> {
         let data = forward_data(value);
-        let (class, storage, shape, origin) = match data {
+        let (kind, shape, origin) = match data {
             Value::Tensor(tensor) => (
-                PayloadClass::Numeric(tensor.numeric_dtype()),
-                PayloadStorage::Real,
+                PayloadKind::Real(tensor.numeric_dtype()),
                 tensor.shape.clone(),
                 PayloadOrigin::Host,
             ),
             Value::ComplexTensor(tensor) => (
-                PayloadClass::Numeric(tensor.numeric_dtype()),
-                PayloadStorage::Complex,
+                PayloadKind::Complex(tensor.numeric_dtype()),
                 tensor.shape.clone(),
                 PayloadOrigin::Host,
             ),
             Value::LogicalArray(array) => (
-                PayloadClass::Logical,
-                PayloadStorage::Real,
+                PayloadKind::Logical,
                 array.shape.clone(),
                 PayloadOrigin::Host,
             ),
             Value::GpuTensor(handle) => {
+                handle
+                    .allocation_lease()
+                    .validate_live()
+                    .map_err(|error| deep_learning_error(function, error))?;
                 let dtype = match runmat_accelerate_api::handle_precision(handle) {
                     Some(ProviderPrecision::F32) => NumericDType::F32,
                     Some(ProviderPrecision::F64) => NumericDType::F64,
@@ -95,8 +90,7 @@ impl PayloadFacts {
                     }
                 };
                 (
-                    PayloadClass::Numeric(dtype),
-                    PayloadStorage::Real,
+                    PayloadKind::Real(dtype),
                     handle.shape().to_vec(),
                     PayloadOrigin::Provider {
                         allocation: handle.allocation_identity(),
@@ -107,23 +101,16 @@ impl PayloadFacts {
                 )
             }
             Value::Num(_) => (
-                PayloadClass::Numeric(NumericDType::F64),
-                PayloadStorage::Real,
+                PayloadKind::Real(NumericDType::F64),
                 vec![1, 1],
                 PayloadOrigin::Host,
             ),
             Value::Int(value) => (
-                PayloadClass::Numeric(value.numeric_dtype()),
-                PayloadStorage::Real,
+                PayloadKind::Real(value.numeric_dtype()),
                 vec![1, 1],
                 PayloadOrigin::Host,
             ),
-            Value::Bool(_) => (
-                PayloadClass::Logical,
-                PayloadStorage::Real,
-                vec![1, 1],
-                PayloadOrigin::Host,
-            ),
+            Value::Bool(_) => (PayloadKind::Logical, vec![1, 1], PayloadOrigin::Host),
             _ => {
                 return Err(deep_learning_error(
                     function,
@@ -131,20 +118,15 @@ impl PayloadFacts {
                 ))
             }
         };
-        let element_bytes = match class {
-            PayloadClass::Numeric(dtype) => dtype.byte_size(),
-            PayloadClass::Logical => 1,
-        };
-        let lanes = if storage == PayloadStorage::Complex {
-            2
-        } else {
-            1
+        let (element_bytes, lanes) = match kind {
+            PayloadKind::Real(dtype) => (dtype.byte_size(), 1),
+            PayloadKind::Complex(dtype) => (dtype.byte_size(), 2),
+            PayloadKind::Logical => (1, 1),
         };
         let logical_bytes = logical_bytes(&shape, element_bytes, lanes)
             .ok_or_else(|| deep_learning_error(function, "network payload byte size overflows"))?;
         Ok(Self {
-            class,
-            storage,
+            kind,
             shape,
             logical_bytes,
             origin,
@@ -182,10 +164,24 @@ pub(in crate::builtins::deep_learning) struct NetworkWorkload<'a> {
 impl<'a> NetworkWorkload<'a> {
     pub fn from_admitted(
         plan: &'a HostNetworkPlan<'_>,
-        input: &Value,
         target_output_axes: &'a AxisPlan,
     ) -> BuiltinResult<Self> {
         let function = plan.function();
+        let presented = plan
+            .output_axes()
+            .lower_to(target_output_axes.layout())
+            .map_err(|error| {
+                deep_learning_error(
+                    function,
+                    format!("invalid presented output axes: {error:?}"),
+                )
+            })?;
+        if presented.target_shape() != target_output_axes.shape() {
+            return Err(deep_learning_error(
+                function,
+                "presented output geometry differs from admitted network",
+            ));
+        }
         let parameters = plan
             .parameter_views()
             .iter()
@@ -223,7 +219,7 @@ impl<'a> NetworkWorkload<'a> {
             input_axes: plan.input_axes(),
             source_output_axes: plan.output_axes(),
             target_output_axes,
-            input: PayloadFacts::from_admitted(input, function)?,
+            input: PayloadFacts::from_admitted(plan.admitted_input(), function)?,
             parameters,
             state,
             execution_precision: plan.execution_precision(),

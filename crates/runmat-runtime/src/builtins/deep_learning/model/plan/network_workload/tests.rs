@@ -53,8 +53,8 @@ fn admitted_host_projection_retains_actual_input_class_and_canonical_resources()
         &[2, 1],
     )
     .unwrap();
-    let work = NetworkWorkload::from_admitted(&plan, &input, &target).unwrap();
-    assert_eq!(work.input.class, PayloadClass::Numeric(NumericDType::I32));
+    let work = NetworkWorkload::from_admitted(&plan, &target).unwrap();
+    assert_eq!(work.input.kind, PayloadKind::Real(NumericDType::I32));
     assert_eq!(work.input.logical_bytes, 16);
     assert_eq!(work.input.origin, PayloadOrigin::Host);
     assert_eq!(work.execution_precision, NumericDType::F64);
@@ -72,6 +72,41 @@ fn admitted_host_projection_retains_actual_input_class_and_canonical_resources()
 }
 
 #[test]
+fn projection_rejects_a_target_shape_not_derived_from_admitted_axes() {
+    let network = network();
+    let input = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
+    let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    let wrong = AxisPlan::new(plan.output_axes().layout().clone(), &[99, 1]).unwrap();
+    let error = NetworkWorkload::from_admitted(&plan, &wrong)
+        .err()
+        .expect("a caller must not substitute output shape");
+    assert!(error.message.contains("presented output geometry"));
+}
+
+#[test]
+fn projection_binds_the_original_input_not_a_same_shape_substitution() {
+    let network = network();
+    let original = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::I32(vec![1, 2, 3, 4]), vec![2, 2]).unwrap(),
+    );
+    let replacement = Value::Tensor(Tensor::from_f32(vec![1.0; 4], vec![2, 2]).unwrap());
+    let admitted = HostNetworkPlan::admit(&network, &original, "predict").unwrap();
+    let alternative = HostNetworkPlan::admit(&network, &replacement, "predict").unwrap();
+    let admitted_work = NetworkWorkload::from_admitted(&admitted, admitted.output_axes()).unwrap();
+    let alternative_work =
+        NetworkWorkload::from_admitted(&alternative, alternative.output_axes()).unwrap();
+    assert_eq!(
+        admitted_work.input.kind,
+        PayloadKind::Real(NumericDType::I32)
+    );
+    assert_eq!(
+        alternative_work.input.kind,
+        PayloadKind::Real(NumericDType::F32)
+    );
+    assert_eq!(admitted_work.input.shape, alternative_work.input.shape);
+}
+
+#[test]
 fn provider_projection_preserves_explicit_intent_owner_and_physical_allocation() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let handle = provider
@@ -82,6 +117,16 @@ fn provider_projection_preserves_explicit_intent_owner_and_physical_allocation()
             .unwrap()
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
+        let substitute = provider
+            .upload(&HostTensorView {
+                data: &[5.0, 6.0, 7.0, 8.0],
+                shape: &[2, 2],
+            })
+            .unwrap();
+        assert_ne!(
+            handle.allocation_identity(),
+            substitute.allocation_identity()
+        );
         let input = object(
             "dlarray",
             vec![
@@ -92,9 +137,9 @@ fn provider_projection_preserves_explicit_intent_owner_and_physical_allocation()
         );
         let network = network();
         let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
-        let work = NetworkWorkload::from_admitted(&plan, &input, plan.output_axes()).unwrap();
+        let work = NetworkWorkload::from_admitted(&plan, plan.output_axes()).unwrap();
         assert_eq!(work.input.logical_bytes, 32);
-        assert_eq!(work.input.class, PayloadClass::Numeric(NumericDType::F64));
+        assert_eq!(work.input.kind, PayloadKind::Real(NumericDType::F64));
         assert_eq!(work.input.shape, vec![2, 2]);
         assert_eq!(
             work.input.origin,
@@ -103,6 +148,15 @@ fn provider_projection_preserves_explicit_intent_owner_and_physical_allocation()
                 provenance: Some(GpuHandleProvenance::Explicit),
                 layout: handle.view().layout(),
                 requested_bytes: handle.physical().requested_bytes(),
+            }
+        );
+        assert_ne!(
+            work.input.origin,
+            PayloadOrigin::Provider {
+                allocation: substitute.allocation_identity(),
+                provenance: runmat_accelerate_api::handle_provenance(&substitute),
+                layout: substitute.view().layout(),
+                requested_bytes: substitute.physical().requested_bytes(),
             }
         );
     });
@@ -116,6 +170,6 @@ fn byte_geometry_is_checked_and_complex_lanes_are_counted() {
     let complex =
         Value::ComplexTensor(ComplexTensor::new(vec![(1.0, -1.0); 6], vec![2, 3]).unwrap());
     let facts = PayloadFacts::from_admitted(&complex, "forward").unwrap();
-    assert_eq!(facts.storage, PayloadStorage::Complex);
+    assert_eq!(facts.kind, PayloadKind::Complex(NumericDType::F64));
     assert_eq!(facts.logical_bytes, 96);
 }
