@@ -18,6 +18,7 @@ use crate::builtins::deep_learning::model::{
     topology::{validate_sequential_connections, validate_sequential_topology},
 };
 use crate::BuiltinResult;
+pub(super) use input::InputPayloadKind;
 
 pub(super) struct StepDescriptor {
     pub index: usize,
@@ -32,6 +33,7 @@ pub(in crate::builtins::deep_learning) struct HostNetworkPlan<'a> {
     pub(super) input_axes: AxisPlan,
     pub(super) output_axes: AxisPlan,
     pub(super) precision: NumericDType,
+    pub(super) input_payload_kind: InputPayloadKind,
     pub(super) function: &'static str,
 }
 
@@ -67,10 +69,9 @@ impl<'a> HostNetworkPlan<'a> {
         let options = LayerOperationalPlan::inspect(&layers.data, function)?;
         options.require_consumed(function, options::consumed)?;
         let (parameters, state) = resources::views(network, function)?;
-        let (shape, precision, format) = input::metadata(input, function)?;
+        let (shape, precision, format, input_payload_kind) = input::metadata(input, function)?;
         let input_kind = input::kind(first, first_kind, function)?;
-        let input_axes = AxisPlan::for_input(&format, input_kind, shape)
-            .map_err(|error| fail(function, format!("invalid input axes: {error:?}")))?;
+        let input_axes = input::axes(&format, input_kind, shape, input_payload_kind, function)?;
         let mut axes = input_axes.clone();
         let mut steps = Vec::with_capacity(layers.data.len());
         for (index, value) in layers.data.iter().enumerate() {
@@ -79,6 +80,14 @@ impl<'a> HostNetworkPlan<'a> {
             };
             let kind = K::from_identity(&layer.class_name)
                 .ok_or_else(|| fail(function, "unsupported layer"))?;
+            if input_payload_kind == InputPayloadKind::Complex
+                && !(kind.is_input() || kind == K::GlobalAveragePooling1D || kind.is_output())
+            {
+                return Err(fail(
+                    function,
+                    format!("layer {} does not support complex host input", index + 1),
+                ));
+            }
             let controls = controls::decode(layer, kind, function)?;
             let output_axes = layers::admit(
                 layer,
@@ -88,6 +97,7 @@ impl<'a> HostNetworkPlan<'a> {
                 &parameters,
                 &state,
                 precision,
+                input_payload_kind,
                 function,
             )?;
             steps.push(StepDescriptor {
@@ -104,6 +114,7 @@ impl<'a> HostNetworkPlan<'a> {
             input_axes,
             output_axes: axes,
             precision,
+            input_payload_kind,
             function,
         })
     }

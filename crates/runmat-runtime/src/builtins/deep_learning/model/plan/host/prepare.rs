@@ -6,7 +6,7 @@ use runmat_accelerate_api::handle_is_explicit;
 use runmat_value::{Tensor, Value};
 
 use super::controls::Controls;
-use super::geometry::HostNetworkPlan;
+use super::geometry::{HostNetworkPlan, InputPayloadKind};
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use crate::builtins::deep_learning::model::{
     execution::host::network::{self, HostExecutionResult, HostStep, HostValue},
@@ -96,6 +96,26 @@ impl PreparedHostNetwork<'_> {
         &self,
         input: &Value,
     ) -> BuiltinResult<HostValue> {
+        if self.plan.input_payload_kind == InputPayloadKind::Complex {
+            let Value::ComplexTensor(tensor) = data(input) else {
+                return Err(fail(
+                    self.plan.function,
+                    "prepared input differs from admitted complex payload",
+                ));
+            };
+            if tensor.shape != self.plan.input_axes.shape()
+                || tensor.numeric_dtype() != self.plan.precision
+                || tensor.len() != self.plan.input_axes.element_count()
+            {
+                return Err(fail(
+                    self.plan.function,
+                    "prepared complex input differs from admitted shape or precision",
+                ));
+            }
+            // ComplexTensor owns an Arc/CoW host allocation. This pins the
+            // admitted class and bytes without a host copy or demotion.
+            return Ok(HostValue::Complex(tensor.clone()));
+        }
         let tensor = project_owned(
             host_tensor(input, self.plan.function).await?,
             self.plan.precision,

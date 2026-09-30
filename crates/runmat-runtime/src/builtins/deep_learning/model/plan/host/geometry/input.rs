@@ -1,10 +1,14 @@
 //! Input payload metadata and the input layer's axis interpretation.
 
 use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
-use runmat_builtins::{DeepLearningInputKind, DeepLearningLayerKind as K};
+use runmat_builtins::{
+    DeepLearningAxisLabel as A, DeepLearningAxisLayout, DeepLearningInputKind,
+    DeepLearningLayerKind as K,
+};
 use runmat_value::{NumericDType, ObjectInstance, Value};
 
 use crate::builtins::deep_learning::model::admission::forward_data;
+use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use crate::builtins::deep_learning::{deep_learning_error, numeric_vector, DLARRAY_CLASS};
 use crate::BuiltinResult;
 
@@ -12,10 +16,16 @@ fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::Runtim
     deep_learning_error(function, format!("{function}: {detail}"))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::builtins::deep_learning::model::plan::host) enum InputPayloadKind {
+    Real,
+    Complex,
+}
+
 pub(super) fn metadata<'a>(
     input: &'a Value,
     function: &'static str,
-) -> BuiltinResult<(&'a [usize], NumericDType, String)> {
+) -> BuiltinResult<(&'a [usize], NumericDType, String, InputPayloadKind)> {
     let format = match input {
         Value::Object(object) if object.class_name.is(DLARRAY_CLASS) => {
             match object.properties.get("Format") {
@@ -27,7 +37,7 @@ pub(super) fn metadata<'a>(
         _ => String::new(),
     };
     let data = forward_data(input);
-    let (shape, dtype) = match data {
+    let (shape, dtype, payload_kind) = match data {
         Value::Tensor(tensor) => (
             tensor.shape.as_slice(),
             if tensor.numeric_dtype().integer_class().is_some() {
@@ -37,6 +47,12 @@ pub(super) fn metadata<'a>(
             } else {
                 tensor.numeric_dtype()
             },
+            InputPayloadKind::Real,
+        ),
+        Value::ComplexTensor(tensor) => (
+            tensor.shape.as_slice(),
+            tensor.numeric_dtype(),
+            InputPayloadKind::Complex,
         ),
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
@@ -54,19 +70,57 @@ pub(super) fn metadata<'a>(
                 Some(ProviderPrecision::F64) => NumericDType::F64,
                 None => return Err(fail(function, "input has unsupported resident precision")),
             };
-            (handle.shape(), dtype)
+            (handle.shape(), dtype, InputPayloadKind::Real)
         }
-        Value::LogicalArray(array) => (array.shape.as_slice(), NumericDType::F64),
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => (&[1usize, 1][..], NumericDType::F64),
-        _ => return Err(fail(function, "input must contain real numeric data")),
+        Value::LogicalArray(array) => (
+            array.shape.as_slice(),
+            NumericDType::F64,
+            InputPayloadKind::Real,
+        ),
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
+            (&[1usize, 1][..], NumericDType::F64, InputPayloadKind::Real)
+        }
+        _ => return Err(fail(function, "input must contain supported numeric data")),
     };
     if !matches!(dtype, NumericDType::F32 | NumericDType::F64) {
         return Err(fail(
             function,
-            "host network input requires single or double precision",
+            "host network input requires real or complex single or double precision",
         ));
     }
-    Ok((shape, dtype, format))
+    Ok((shape, dtype, format, payload_kind))
+}
+
+pub(super) fn axes(
+    format: &str,
+    kind: DeepLearningInputKind,
+    shape: &[usize],
+    payload_kind: InputPayloadKind,
+    function: &'static str,
+) -> BuiltinResult<AxisPlan> {
+    // GAP accepts singleton-channel complex spatial/temporal layouts without
+    // an explicit C. Keep this exception typed and route-local: the general
+    // input-layer axis contract continues to require C.
+    if payload_kind == InputPayloadKind::Complex && !format.is_empty() {
+        let layout = DeepLearningAxisLayout::parse(format, shape.len())
+            .map_err(|error| fail(function, format!("invalid input axes: {error:?}")))?;
+        let axes = layout.axes();
+        let no_channel = matches!(
+            (kind, axes),
+            (DeepLearningInputKind::VectorSequence, [A::Batch, A::Time])
+                | (DeepLearningInputKind::Spatial1d, [A::Spatial, A::Batch])
+                | (
+                    DeepLearningInputKind::SpatialSequence1d,
+                    [A::Spatial, A::Batch, A::Time]
+                )
+        );
+        if no_channel {
+            return AxisPlan::new(layout, shape)
+                .map_err(|error| fail(function, format!("invalid input axes: {error:?}")));
+        }
+    }
+    AxisPlan::for_input(format, kind, shape)
+        .map_err(|error| fail(function, format!("invalid input axes: {error:?}")))
 }
 
 pub(super) fn kind(
@@ -97,7 +151,9 @@ pub(super) fn kind(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{NumericStorage, Tensor};
+    use runmat_value::{
+        ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
+    };
 
     #[test]
     fn all_integer_predictor_classes_enter_the_double_boundary_without_storage_mutation() {
@@ -115,14 +171,27 @@ mod tests {
             let tensor = Tensor::from_numeric_storage(storage, vec![1, 2]).unwrap();
             let original_dtype = tensor.numeric_dtype();
             let input = Value::Tensor(tensor);
-            let (shape, precision, format) = metadata(&input, "forward").unwrap();
+            let (shape, precision, format, payload_kind) = metadata(&input, "forward").unwrap();
             assert_eq!(shape, &[1, 2]);
             assert_eq!(precision, NumericDType::F64);
             assert!(format.is_empty());
+            assert_eq!(payload_kind, InputPayloadKind::Real);
             let Value::Tensor(tensor) = input else {
                 unreachable!()
             };
             assert_eq!(tensor.numeric_dtype(), original_dtype);
         }
+    }
+
+    #[test]
+    fn integer_complex_input_is_rejected_before_any_host_projection() {
+        let components = IntegerComplexStorage::new(
+            IntegerStorage::I32(vec![1, 2]),
+            IntegerStorage::I32(vec![3, 4]),
+        )
+        .unwrap();
+        let input =
+            Value::ComplexTensor(ComplexTensor::new_integer(components, vec![1, 2]).unwrap());
+        assert!(metadata(&input, "forward").is_err());
     }
 }

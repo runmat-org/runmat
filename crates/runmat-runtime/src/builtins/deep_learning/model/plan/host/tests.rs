@@ -1,6 +1,10 @@
 use futures::executor::block_on;
-use runmat_value::{CellArray, NumericDType, NumericStorage, Tensor, Value};
+use runmat_value::{
+    CellArray, ComplexElement, ComplexStorage, ComplexTensor, NumericDType, NumericStorage, Tensor,
+    Value,
+};
 
+use super::{HostNetworkPlan, HostValue};
 use crate::builtins::deep_learning::{layers::*, model::*, object};
 
 fn network() -> Value {
@@ -19,6 +23,166 @@ fn network() -> Value {
         CellArray::new(vec![input, dense], 2, 1).unwrap(),
     )]))
     .unwrap()
+}
+
+fn pooling_network(input_layer: Value) -> Value {
+    let pooling = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
+    block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input_layer, pooling], 2, 1).unwrap(),
+    )]))
+    .unwrap()
+}
+
+#[test]
+fn public_raw_complex_sequence_gap_retains_double_and_input_storage() {
+    let input_layer = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let network = pooling_network(input_layer);
+    let input = ComplexTensor::new(
+        vec![
+            (1., 10.),
+            (2., 20.),
+            (3., 30.),
+            (4., 40.),
+            (5., 50.),
+            (6., 60.),
+        ],
+        vec![2, 3],
+    )
+    .unwrap();
+    let original = input.as_f64_slice().unwrap().as_ptr();
+    let Value::ComplexTensor(result) = block_on(forward_builtin(
+        network,
+        Value::ComplexTensor(input.clone()),
+        vec![],
+    ))
+    .unwrap() else {
+        panic!("complex tensor result expected")
+    };
+    assert_eq!(result.numeric_dtype(), NumericDType::F64);
+    assert_eq!(result.shape, vec![2, 1]);
+    assert_eq!(
+        result.as_f64_slice().unwrap(),
+        &[ComplexElement(3., 30.), ComplexElement(4., 40.)]
+    );
+    assert_eq!(input.as_f64_slice().unwrap().as_ptr(), original);
+    assert_eq!(input.as_f64_slice().unwrap()[0], ComplexElement(1., 10.));
+}
+
+#[test]
+fn public_formatted_complex_gap_supports_cbt_and_no_channel_sb() {
+    let vector =
+        pooling_network(block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap());
+    let values = (1..=12)
+        .map(|value| (value as f32, (value * 10) as f32))
+        .collect();
+    let cbt = object(
+        "dlarray",
+        vec![
+            (
+                "Data",
+                Value::ComplexTensor(ComplexTensor::from_f32(values, vec![2, 2, 3]).unwrap()),
+            ),
+            ("Format", Value::String("CBT".into())),
+            ("Labels", Value::String("CBT".into())),
+        ],
+    );
+    let Value::Object(cbt_output) = block_on(forward_builtin(vector, cbt, vec![])).unwrap() else {
+        panic!("formatted complex result expected")
+    };
+    let Some(Value::ComplexTensor(cbt_data)) = cbt_output.properties.get("Data") else {
+        panic!("complex dlarray data expected")
+    };
+    assert_eq!(cbt_data.numeric_dtype(), NumericDType::F32);
+    assert_eq!(cbt_data.shape, vec![2, 2]);
+    assert_eq!(
+        cbt_data.as_f32_slice().unwrap(),
+        &[
+            ComplexElement(5., 50.),
+            ComplexElement(6., 60.),
+            ComplexElement(7., 70.),
+            ComplexElement(8., 80.),
+        ]
+    );
+    assert_eq!(
+        cbt_output.properties.get("Format"),
+        Some(&Value::String("CB".into()))
+    );
+
+    let spatial_size = Value::Tensor(Tensor::new(vec![3., 1.], vec![1, 2]).unwrap());
+    let spatial =
+        pooling_network(block_on(feature_input_layer_builtin(spatial_size, vec![])).unwrap());
+    let sb = object(
+        "dlarray",
+        vec![
+            (
+                "Data",
+                Value::ComplexTensor(
+                    ComplexTensor::new(
+                        vec![
+                            (1., 10.),
+                            (2., 20.),
+                            (3., 30.),
+                            (4., 40.),
+                            (5., 50.),
+                            (6., 60.),
+                        ],
+                        vec![3, 2],
+                    )
+                    .unwrap(),
+                ),
+            ),
+            ("Format", Value::String("SB".into())),
+            ("Labels", Value::String("SB".into())),
+        ],
+    );
+    let Value::Object(sb_output) = block_on(forward_builtin(spatial, sb, vec![])).unwrap() else {
+        panic!("formatted no-channel complex result expected")
+    };
+    let Some(Value::ComplexTensor(sb_data)) = sb_output.properties.get("Data") else {
+        panic!("complex dlarray data expected")
+    };
+    assert_eq!(sb_data.shape, vec![1, 2]);
+    assert_eq!(
+        sb_data.as_f64_slice().unwrap(),
+        &[ComplexElement(2., 20.), ComplexElement(5., 50.)]
+    );
+    assert_eq!(
+        sb_output.properties.get("Format"),
+        Some(&Value::String("SB".into()))
+    );
+}
+
+#[test]
+fn complex_preparation_shares_cow_payload_and_rejects_real_only_layers_before_effects() {
+    let pool_net =
+        pooling_network(block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap());
+    let input = Value::ComplexTensor(
+        ComplexTensor::from_f32(vec![(1., 2.), (3., 4.), (5., 6.), (7., 8.)], vec![2, 2]).unwrap(),
+    );
+    let Value::Object(ref network_object) = pool_net else {
+        panic!("network object expected")
+    };
+    let admitted = HostNetworkPlan::admit(network_object, &input, "forward").unwrap();
+    let prepared = block_on(admitted.prepare()).unwrap();
+    let HostValue::Complex(prepared_input) = block_on(prepared.prepare_input(&input)).unwrap()
+    else {
+        panic!("complex prepared value expected")
+    };
+    let Value::ComplexTensor(original) = &input else {
+        unreachable!()
+    };
+    let (ComplexStorage::F32(left), ComplexStorage::F32(right)) =
+        (original.complex_storage(), prepared_input.complex_storage())
+    else {
+        panic!("single-precision complex storage expected")
+    };
+    assert!(left.shares_allocation_with(right));
+
+    let Value::Object(ref dense_network) = network() else {
+        panic!("network object expected")
+    };
+    let rejected = HostNetworkPlan::admit(dense_network, &input, "forward");
+    assert!(rejected.is_err());
 }
 
 #[test]
