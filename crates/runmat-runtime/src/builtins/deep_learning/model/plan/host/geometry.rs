@@ -62,16 +62,8 @@ impl<'a> HostNetworkPlan<'a> {
         &self.steps
     }
 
-    pub(in crate::builtins::deep_learning) fn has_resident_parameter(&self) -> bool {
-        self.parameters
-            .iter()
-            .filter_map(|row| row.value)
-            .any(|value| {
-                matches!(
-                    crate::builtins::deep_learning::model::admission::forward_data(value),
-                    Value::GpuTensor(_)
-                )
-            })
+    pub(in crate::builtins::deep_learning) fn parameter_views(&self) -> &[ParameterView<'a>] {
+        &self.parameters
     }
     /// A bounded first resident route. The same admitted geometry is used by
     /// host execution; future composed device stages consume these steps.

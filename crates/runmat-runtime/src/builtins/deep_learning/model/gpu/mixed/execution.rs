@@ -3,6 +3,53 @@
 
 use super::super::*;
 use super::plan::{Plan, Stage};
+use runmat_accelerate_api::GpuTensorLayout;
+
+fn materialize_view(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+    function: &'static str,
+) -> BuiltinResult<GpuTensorHandle> {
+    use crate::builtins::common::gpu_helpers::{
+        reject_gpu_output, unary_gpu_output_matches_shape, GpuOutputAliasPolicy,
+        UnaryGpuOutputContract,
+    };
+    let output = provider.reshape(input, input.shape()).map_err(|error| {
+        provider_failure(function, "planned view materialization", error.into())
+    })?;
+    let alias = if input.shape().iter().all(|extent| *extent > 1) {
+        GpuOutputAliasPolicy::RequireDistinctAllocation
+    } else {
+        GpuOutputAliasPolicy::AllowInput
+    };
+    if output.view().layout() == GpuTensorLayout::Contiguous
+        && unary_gpu_output_matches_shape(
+            &output,
+            input,
+            provider,
+            input.shape(),
+            UnaryGpuOutputContract {
+                storage: GpuTensorStorage::Real,
+                precision: runmat_accelerate_api::handle_precision(input),
+                integer: None,
+                logical: false,
+                alias,
+            },
+        )
+    {
+        Ok(output)
+    } else {
+        Err(reject_gpu_output(
+            output,
+            crate::runtime_error::build_runtime_error(format!(
+                "{function}: provider returned an invalid materialized view"
+            ))
+            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build(),
+        ))
+    }
+}
 
 fn capability_changed(function: &'static str, reason: GpuCapabilityReason) -> crate::RuntimeError {
     crate::runtime_error::build_runtime_error(format!(
@@ -26,9 +73,12 @@ pub(super) async fn execute(
     };
     let mut current = input.clone();
     for stage in plan.stages {
+        let changes_view_layout = matches!(&stage, Stage::Transpose { .. });
         current = match stage {
+            Stage::Materialize => materialize_view(provider, &current, function)?,
             Stage::Transpose {
                 output_axes,
+                output_layout,
                 materialize,
             } => {
                 let output = (if materialize {
@@ -42,6 +92,7 @@ pub(super) async fn execute(
                 let output = validate_layout_transpose(output, &current, provider, function)?;
                 if materialize
                     && current.shape().iter().all(|extent| *extent > 1)
+                    && runmat_accelerate_api::handle_transpose_info(&current).is_none()
                     && output.shares_allocation_with(&current)
                 {
                     return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
@@ -61,6 +112,17 @@ pub(super) async fn execute(
                             function,
                             "planned transpose differs from admitted axes",
                         ),
+                    ));
+                }
+                if output.view().layout() != output_layout {
+                    return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                        output,
+                        crate::runtime_error::build_runtime_error(format!(
+                            "{function}: provider transpose layout differs from admitted view"
+                        ))
+                        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build(),
                     ));
                 }
                 output
@@ -123,6 +185,17 @@ pub(super) async fn execute(
             .await?
             .ok_or_else(|| capability_changed(function, GpuCapabilityReason::ProviderOperation))?,
         };
+        if !changes_view_layout && current.view().layout() != GpuTensorLayout::Contiguous {
+            return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                current,
+                crate::runtime_error::build_runtime_error(format!(
+                    "{function}: resident stage returned an unexpected lazy view"
+                ))
+                .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build(),
+            ));
+        }
     }
     if current.shape() != plan.output_axes.shape() {
         return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(

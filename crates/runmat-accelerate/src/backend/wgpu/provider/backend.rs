@@ -129,6 +129,8 @@ mod telemetry;
 mod tensor;
 #[path = "ops/storage_move.rs"]
 mod storage_move;
+#[path = "ops/view_plan.rs"]
+mod view_plan;
 #[path = "ops/window.rs"]
 mod window;
 

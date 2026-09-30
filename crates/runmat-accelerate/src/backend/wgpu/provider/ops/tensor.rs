@@ -919,6 +919,26 @@ impl WgpuProvider {
         order: &[usize],
     ) -> Result<GpuTensorHandle> {
         ensure!(!order.is_empty(), "permute: order must not be empty");
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
+            // A 2-D lazy transpose already describes the permuted coordinates.
+            // Its inverse restores the original contiguous interpretation of
+            // the same authenticated allocation; feeding its logical shape to
+            // the raw permutation shader would permute the underlying bytes
+            // a second time.
+            self.get_entry_raw(handle)?;
+            if order == [0, 1] {
+                return Ok(handle.clone());
+            }
+            if order == [1, 0] {
+                return Ok(handle.with_view(
+                    handle
+                        .view()
+                        .clone()
+                        .with_shape(vec![info.base_rows, info.base_cols])
+                        .with_layout(runmat_accelerate_api::GpuTensorLayout::Contiguous),
+                )?);
+            }
+        }
         let entry = self.get_entry_for_bitwise_move(handle, "permute")?;
         let output = self.permute_buffer_exec(&entry, order)?;
         self.register_storage_move_buffer(

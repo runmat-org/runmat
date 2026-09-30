@@ -1,6 +1,7 @@
 //! Typed whole-route plan for composed resident forward stages.
 
 mod execution;
+mod parameters;
 mod plan;
 #[cfg(test)]
 mod tests;

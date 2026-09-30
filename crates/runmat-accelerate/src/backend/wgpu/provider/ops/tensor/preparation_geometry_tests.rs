@@ -2,6 +2,58 @@ use super::*;
 use runmat_accelerate_api::{HostNumericDataOwned, HostNumericDataView, HostNumericTensorView};
 
 #[test]
+#[ignore = "requires actual WGPU device; execute explicitly for lazy-view permutation"]
+fn inverse_permutation_of_lazy_transpose_restores_physical_order_without_dispatch() {
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    let source = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            shape: &[3, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let lazy = provider.transpose_exec(&source).unwrap();
+    assert_eq!(lazy.shape(), [2, 3]);
+    assert!(runmat_accelerate_api::handle_is_transposed(&lazy));
+    provider.reset_telemetry();
+    let before = provider.telemetry_snapshot();
+    let inverse = provider.permute_exec(&lazy, &[1, 0]).unwrap();
+    assert_eq!(inverse.shape(), [3, 2]);
+    assert!(!runmat_accelerate_api::handle_is_transposed(&inverse));
+    assert!(inverse.shares_allocation_with(&source));
+    assert_eq!(provider.telemetry_snapshot(), before);
+    let downloaded = futures::executor::block_on(provider.download_numeric(&inverse)).unwrap();
+    assert_eq!(
+        downloaded.data,
+        HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    );
+}
+
+#[test]
+#[ignore = "requires actual WGPU device; execute explicitly for scalar lazy-view semantics"]
+fn scalar_max_retains_lazy_transpose_coordinates() {
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    let source = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[-1.0, 2.0, -3.0, 4.0, -5.0, 6.0]),
+            shape: &[3, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let lazy = provider.transpose_exec(&source).unwrap();
+    let result = provider
+        .scalar_op_exec(crate::backend::wgpu::types::ScalarOpCode::Max, &lazy, 0.0)
+        .unwrap();
+    assert_eq!(result.shape(), [2, 3]);
+    assert!(runmat_accelerate_api::handle_is_transposed(&result));
+    let downloaded = futures::executor::block_on(provider.download_numeric(&result)).unwrap();
+    assert_eq!(
+        downloaded.data,
+        HostNumericDataOwned::F32(vec![0.0, 4.0, 2.0, 0.0, 0.0, 6.0])
+    );
+}
+
+#[test]
 #[ignore = "requires actual WGPU device and RUNMAT_WG=64; execute explicitly"]
 fn non512_lazy_transpose_materialization_covers_chunk_boundary() {
     let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");

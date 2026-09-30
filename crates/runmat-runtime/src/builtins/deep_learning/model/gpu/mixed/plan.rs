@@ -2,19 +2,23 @@
 //! capability query completes before the executor receives this plan.
 
 use super::super::*;
+use super::parameters;
 use crate::builtins::deep_learning::model::plan::{
     host::{Controls, HostNetworkPlan},
     normalization::{Geometry, NormalizationStage},
 };
 use runmat_accelerate_api::{
     DeepLearningFeedForwardStage as PhysicalStage, DeepLearningLayerNormCapability,
-    DeepLearningPool1DCapability,
+    DeepLearningPool1DCapability, GpuTensorLayout, GpuTensorView, ProviderViewCapability,
+    ProviderViewChain, ProviderViewSource, ProviderViewStep,
 };
 use runmat_builtins::{DeepLearningAxisLabel as Label, DeepLearningAxisLayout};
 
 pub(super) enum Stage {
+    Materialize,
     Transpose {
         output_axes: AxisPlan,
+        output_layout: GpuTensorLayout,
         materialize: bool,
     },
     Dense {
@@ -54,6 +58,51 @@ fn query(
     )
 }
 
+fn query_view(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    anchor: &GpuTensorHandle,
+    source: &GpuTensorView,
+    step: ProviderViewStep,
+    function: &'static str,
+) -> BuiltinResult<Result<GpuTensorView, GpuCapabilityReason>> {
+    let request = ProviderViewChain {
+        source: ProviderViewSource::Planned(source.clone()),
+        steps: vec![step],
+    };
+    let capability = provider
+        .provider_view_chain_capability(anchor, &request)
+        .map_err(|error| provider_failure(function, "physical view admission", error.into()))?;
+    Ok(match capability {
+        ProviderViewCapability::Ready(outcome) => Ok(outcome.view),
+        ProviderViewCapability::UnsupportedOperation => Err(GpuCapabilityReason::ProviderOperation),
+        ProviderViewCapability::ResourceLimit => Err(GpuCapabilityReason::ResourceLimit),
+    })
+}
+
+fn ensure_contiguous(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    anchor: &GpuTensorHandle,
+    view: &mut GpuTensorView,
+    stages: &mut Vec<Stage>,
+    function: &'static str,
+) -> BuiltinResult<Result<(), GpuCapabilityReason>> {
+    if matches!(view.layout(), GpuTensorLayout::Contiguous) {
+        return Ok(Ok(()));
+    }
+    *view = match query_view(
+        provider,
+        anchor,
+        view,
+        ProviderViewStep::Reshape(view.shape().to_vec()),
+        function,
+    )? {
+        Ok(view) => view,
+        Err(reason) => return Ok(Err(reason)),
+    };
+    stages.push(Stage::Materialize);
+    Ok(Ok(()))
+}
+
 fn batch_channels() -> DeepLearningAxisLayout {
     DeepLearningAxisLayout::from_axes(&[Label::Batch, Label::Channel])
         .expect("two distinct canonical axes")
@@ -63,6 +112,7 @@ fn transpose_to_bc(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     anchor: &GpuTensorHandle,
     current: &AxisPlan,
+    view: &mut GpuTensorView,
     stages: &mut Vec<Stage>,
     materialize: bool,
     function: &'static str,
@@ -86,26 +136,29 @@ fn transpose_to_bc(
             format!("{function}: invalid resident axes: {error:?}"),
         )
     })?;
-    if let Err(reason) = query(
+    *view = match query_view(
         provider,
         anchor,
+        view,
         if materialize {
-            PhysicalStage::Permute2D {
-                rows: current.shape()[0],
-                columns: current.shape()[1],
-            }
+            ProviderViewStep::Permute2D
         } else {
-            PhysicalStage::Transpose2D {
-                rows: current.shape()[0],
-                columns: current.shape()[1],
-            }
+            ProviderViewStep::Transpose2D
         },
         function,
     )? {
-        return Ok(Err(reason));
+        Ok(view) => view,
+        Err(reason) => return Ok(Err(reason)),
+    };
+    if view.shape() != output_axes.shape() {
+        return Err(deep_learning_error(
+            function,
+            "physical view transition differs from admitted axes",
+        ));
     }
     stages.push(Stage::Transpose {
         output_axes: output_axes.clone(),
+        output_layout: view.layout(),
         materialize,
     });
     Ok(Ok(output_axes))
@@ -117,9 +170,9 @@ fn semantic_shape_matches(semantic: &AxisPlan, physical: &AxisPlan) -> bool {
         .is_ok_and(|lowering| lowering.target_shape() == physical.shape())
 }
 
-/// `None` leaves the existing single-operation routes untouched. A mixed
-/// route is attempted only when canonical parameters remain host-owned;
-/// resident parameter-view geometry requires a separate typed admission.
+/// `None` leaves the existing single-operation routes untouched. Every
+/// resident parameter view used by a dense step is admitted from its live
+/// owner before any network stage can execute.
 pub(super) fn admit(
     network: &ObjectInstance,
     host: &HostNetworkPlan<'_>,
@@ -138,7 +191,10 @@ pub(super) fn admit(
             Controls::Normalization(_) | Controls::Pooling
         )
     });
-    if transformations < 2 || !combines_pool_or_norm || host.has_resident_parameter() {
+    if transformations < 2
+        || !combines_pool_or_norm
+        || parameters::has_other_resident_parameters(host)
+    {
         return Ok(None);
     }
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
@@ -162,6 +218,7 @@ pub(super) fn admit(
         unreachable!("host plan admitted Layers")
     };
     let mut physical = host.input_axes().clone();
+    let mut view = input.view().clone();
     let mut stages = Vec::with_capacity(steps.len() + 2);
     for step in steps {
         if !semantic_shape_matches(&step.input_axes, &physical) {
@@ -174,6 +231,7 @@ pub(super) fn admit(
                     provider,
                     input,
                     &physical,
+                    &mut view,
                     &mut stages,
                     false,
                     function,
@@ -187,6 +245,16 @@ pub(super) fn admit(
                     .output_axes
                     .axis_size(Label::Channel)
                     .expect("host-admitted dense output has channels");
+                if let Err(reason) = parameters::admit_dense(
+                    host,
+                    input,
+                    step.index,
+                    input_channels,
+                    output_channels,
+                    function,
+                )? {
+                    return Ok(Some(Err(reason)));
+                }
                 if let Err(reason) = query(
                     provider,
                     input,
@@ -207,11 +275,19 @@ pub(super) fn admit(
                             format!("{function}: invalid dense axes: {error:?}"),
                         )
                     })?;
+                view = view
+                    .with_shape(physical.shape().to_vec())
+                    .with_layout(GpuTensorLayout::Contiguous);
                 stages.push(Stage::Dense {
                     layer_index: step.index,
                 });
             }
             Controls::Relu | Controls::Elu { .. } => {
+                if let Err(reason) =
+                    ensure_contiguous(provider, input, &mut view, &mut stages, function)?
+                {
+                    return Ok(Some(Err(reason)));
+                }
                 let stage = match step.controls {
                     Controls::Relu => PhysicalStage::Relu {
                         elements: physical.element_count(),
@@ -231,12 +307,23 @@ pub(super) fn admit(
                 });
             }
             Controls::Softmax => {
-                physical =
-                    match transpose_to_bc(provider, input, &physical, &mut stages, true, function)?
-                    {
-                        Ok(axes) => axes,
-                        Err(reason) => return Ok(Some(Err(reason))),
-                    };
+                physical = match transpose_to_bc(
+                    provider,
+                    input,
+                    &physical,
+                    &mut view,
+                    &mut stages,
+                    true,
+                    function,
+                )? {
+                    Ok(axes) => axes,
+                    Err(reason) => return Ok(Some(Err(reason))),
+                };
+                if let Err(reason) =
+                    ensure_contiguous(provider, input, &mut view, &mut stages, function)?
+                {
+                    return Ok(Some(Err(reason)));
+                }
                 if let Err(reason) = query(
                     provider,
                     input,
@@ -251,6 +338,11 @@ pub(super) fn admit(
                 stages.push(Stage::Softmax);
             }
             Controls::Normalization(options) => {
+                if let Err(reason) =
+                    ensure_contiguous(provider, input, &mut view, &mut stages, function)?
+                {
+                    return Ok(Some(Err(reason)));
+                }
                 let geometry = match Geometry::new(&physical, options) {
                     Ok(geometry) => geometry,
                     Err(_) => return Ok(Some(Err(GpuCapabilityReason::AxisLayout))),
@@ -278,6 +370,11 @@ pub(super) fn admit(
                 });
             }
             Controls::Pooling => {
+                if let Err(reason) =
+                    ensure_contiguous(provider, input, &mut view, &mut stages, function)?
+                {
+                    return Ok(Some(Err(reason)));
+                }
                 if physical != step.input_axes {
                     return Ok(Some(Err(GpuCapabilityReason::AxisLayout)));
                 }
@@ -319,6 +416,9 @@ pub(super) fn admit(
                     output_axes: step.output_axes.clone(),
                 });
                 physical = step.output_axes.clone();
+                view = view
+                    .with_shape(physical.shape().to_vec())
+                    .with_layout(GpuTensorLayout::Contiguous);
             }
             Controls::Convolution(_) | Controls::Recurrent(_) => {
                 let Value::Object(layer) = &layers.data[step.index] else {
@@ -338,19 +438,25 @@ pub(super) fn admit(
         if physical.shape().len() != 2 || lowering.target_to_source() != [1, 0] {
             return Ok(Some(Err(GpuCapabilityReason::AxisLayout)));
         }
-        if let Err(reason) = query(
+        view = match query_view(
             provider,
             input,
-            PhysicalStage::Transpose2D {
-                rows: physical.shape()[0],
-                columns: physical.shape()[1],
-            },
+            &view,
+            ProviderViewStep::Transpose2D,
             function,
         )? {
-            return Ok(Some(Err(reason)));
+            Ok(view) => view,
+            Err(reason) => return Ok(Some(Err(reason))),
+        };
+        if view.shape() != target_axes.shape() {
+            return Err(deep_learning_error(
+                function,
+                "physical output view differs from admitted axes",
+            ));
         }
         stages.push(Stage::Transpose {
             output_axes: target_axes.clone(),
+            output_layout: view.layout(),
             materialize: false,
         });
         physical = target_axes.clone();

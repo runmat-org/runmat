@@ -526,6 +526,14 @@ impl AccelProvider for WgpuProvider {
         self.deep_learning_feed_forward_stage_capability_exec(anchor, stage)
     }
 
+    fn provider_view_chain_capability(
+        &self,
+        anchor: &GpuTensorHandle,
+        chain: &runmat_accelerate_api::ProviderViewChain,
+    ) -> Result<runmat_accelerate_api::ProviderViewCapability> {
+        self.provider_view_chain_capability_exec(anchor, chain)
+    }
+
     fn reduce_moments_nd<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

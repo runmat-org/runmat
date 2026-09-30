@@ -28,6 +28,11 @@ pub mod observation;
 mod residency;
 mod numeric_upload;
 mod provider_execution;
+mod view_plan;
+pub use view_plan::{
+    ProviderViewCapability, ProviderViewChain, ProviderViewOutcome, ProviderViewPlanError,
+    ProviderViewSource, ProviderViewStep,
+};
 mod covariance;
 pub use covariance::CovarianceWeightDomainError;
 mod deep_learning;
@@ -3530,6 +3535,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _stage: DeepLearningFeedForwardStage,
     ) -> anyhow::Result<DeepLearningFeedForwardCapability> {
         Ok(DeepLearningFeedForwardCapability::UnsupportedOperation)
+    }
+    /// Pure admission of an exact physical view chain. The live anchor proves
+    /// owner and element type; a planned source is geometry, not a lease.
+    fn provider_view_chain_capability(
+        &self,
+        _anchor: &GpuTensorHandle,
+        _chain: &ProviderViewChain,
+    ) -> anyhow::Result<ProviderViewCapability> {
+        Ok(ProviderViewCapability::UnsupportedOperation)
     }
     /// Reduce moments across multiple zero-based dimensions in one device pass.
     /// Returns mean (E[x]) and mean of squares (E[x^2]).

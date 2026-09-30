@@ -1276,7 +1276,7 @@ impl WgpuProvider {
             self.telemetry
                 .record_fused_elementwise_duration(start.elapsed());
         }
-        Ok(handle)
+        self.inherit_elementwise_layout(handle, a)
     }
 
     pub(crate) fn binary_op_exec(
