@@ -329,6 +329,34 @@ mod tests {
         )
     }
 
+    fn assert_caller_view_retires(
+        handle: runmat_accelerate_api::GpuTensorHandle,
+        expected: &[f64],
+    ) {
+        use runmat_accelerate_api::allocation::AllocationReleaseOutcome;
+
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "a caller-owned view must retain its residency marker"
+        );
+        let downloaded = block_on(TEST_PROVIDER.download(&handle))
+            .expect("caller-owned view must retain readable provider storage");
+        assert_eq!(downloaded.data, expected);
+        assert_eq!(downloaded.shape, [1, expected.len()]);
+        let weak = handle.downgrade();
+        assert_eq!(
+            handle
+                .release()
+                .expect("final caller view must retire allocation"),
+            AllocationReleaseOutcome::Retired,
+            "a retained VM frame or future must not outlive the completed call"
+        );
+        assert!(
+            weak.acquire().is_err(),
+            "a retired allocation must not revive a view"
+        );
+    }
+
     #[test]
     fn spawn_overwrite_releases_unaliased_provider_handle() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
@@ -361,14 +389,8 @@ mod tests {
             !result_contains_handle(&result, &handle),
             "unaliased spawn/drop flow should not retain the input handle in function slots"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "unaliased spawn/drop flow should clear residency for dropped input handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "unaliased spawn/drop flow should release provider storage for dropped input handle"
-        );
+        drop(result);
+        assert_caller_view_retires(handle, &[1.0, 2.0]);
     }
 
     #[test]
@@ -414,10 +436,7 @@ mod tests {
         );
 
         drop(result);
-        assert_eq!(
-            handle.release().expect("release retained alias view"),
-            runmat_accelerate_api::allocation::AllocationReleaseOutcome::Retired
-        );
+        assert_caller_view_retires(handle, &[3.0, 4.0]);
     }
 
     #[test]
@@ -457,14 +476,7 @@ mod tests {
             Value::Num(0.0),
             "async spawn/await helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[5.0, 6.0]);
     }
 
     #[test]
@@ -512,10 +524,7 @@ mod tests {
         );
 
         drop(result);
-        assert_eq!(
-            handle.release().expect("release retained async alias view"),
-            runmat_accelerate_api::allocation::AllocationReleaseOutcome::Retired
-        );
+        assert_caller_view_retires(handle, &[7.0, 8.0]);
     }
 
     #[test]
@@ -557,14 +566,7 @@ mod tests {
             Value::Num(0.0),
             "async spawn/await struct helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await struct helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await struct helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[9.0, 10.0]);
     }
 
     #[test]
@@ -604,14 +606,7 @@ mod tests {
             Value::Num(0.0),
             "async spawn/await cell helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await cell helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await cell helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[11.0, 12.0]);
     }
 
     #[test]
@@ -654,14 +649,7 @@ mod tests {
             Value::Num(0.0),
             "async spawn/await multi-output helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await multi-output helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await multi-output helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[13.0, 14.0]);
     }
 
     #[test]
@@ -703,14 +691,7 @@ mod tests {
             Value::Num(0.0),
             "async spawn/await varargout helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await varargout helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await varargout helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[15.0, 16.0]);
     }
 
     #[test]
@@ -752,14 +733,7 @@ mod tests {
             Value::Num(0.0),
             "async spawn/await nested varargout helper unaliased flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle),
-            "async spawn/await nested varargout helper unaliased flow should clear residency for dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle)).is_err(),
-            "async spawn/await nested varargout helper unaliased flow should release provider storage for dropped handle"
-        );
+        assert_caller_view_retires(handle, &[17.0, 18.0]);
     }
 
     #[test]
@@ -818,22 +792,11 @@ mod tests {
             block_on(TEST_PROVIDER.download(&handle_a)).is_ok(),
             "parallel async flow should preserve provider storage for retained first handle"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle_b),
-            "parallel async flow should clear residency for dropped second handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle_b)).is_err(),
-            "parallel async flow should release provider storage for dropped second handle"
-        );
+        assert_caller_view_retires(handle_b, &[23.0, 24.0]);
+        assert!(block_on(TEST_PROVIDER.download(&handle_a)).is_ok());
 
         drop(result);
-        assert_eq!(
-            handle_a
-                .release()
-                .expect("release retained parallel alias view"),
-            runmat_accelerate_api::allocation::AllocationReleaseOutcome::Retired
-        );
+        assert_caller_view_retires(handle_a, &[21.0, 22.0]);
     }
 
     #[test]
@@ -884,21 +847,7 @@ mod tests {
             Value::Num(0.0),
             "parallel async drop-both flow should preserve scalar output semantics"
         );
-        assert!(
-            !fusion_residency::is_resident(&handle_a),
-            "parallel async drop-both flow should clear residency for first dropped handle"
-        );
-        assert!(
-            !fusion_residency::is_resident(&handle_b),
-            "parallel async drop-both flow should clear residency for second dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle_a)).is_err(),
-            "parallel async drop-both flow should release provider storage for first dropped handle"
-        );
-        assert!(
-            block_on(TEST_PROVIDER.download(&handle_b)).is_err(),
-            "parallel async drop-both flow should release provider storage for second dropped handle"
-        );
+        assert_caller_view_retires(handle_a, &[25.0, 26.0]);
+        assert_caller_view_retires(handle_b, &[27.0, 28.0]);
     }
 }
