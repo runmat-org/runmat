@@ -1,5 +1,5 @@
 use runmat_builtins::DeepLearningAxisLabel;
-use runmat_value::{NumericDType, Tensor};
+use runmat_value::{ComplexTensor, NumericDType, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 
@@ -19,9 +19,9 @@ impl std::fmt::Display for PoolError {
             Self::UnsupportedLayout => f.write_str(
                 "globalAveragePooling1dLayer requires a supported spatial or time axis layout",
             ),
-            Self::UnsupportedPrecision => {
-                f.write_str("globalAveragePooling1dLayer requires real single or double data")
-            }
+            Self::UnsupportedPrecision => f.write_str(
+                "globalAveragePooling1dLayer requires single or double real or complex data",
+            ),
             Self::EmptyPool => f.write_str(
                 "globalAveragePooling1dLayer cannot average an empty spatial or time axis",
             ),
@@ -85,6 +85,17 @@ impl Geometry {
     }
 
     pub fn validate_input(&self, input: &Tensor) -> Result<(), PoolError> {
+        if input.shape.as_slice() != self.input.shape() || input.len() != self.input.element_count()
+        {
+            return Err(PoolError::ShapeMismatch);
+        }
+        if !matches!(input.numeric_dtype(), NumericDType::F32 | NumericDType::F64) {
+            return Err(PoolError::UnsupportedPrecision);
+        }
+        Ok(())
+    }
+
+    pub fn validate_complex_input(&self, input: &ComplexTensor) -> Result<(), PoolError> {
         if input.shape.as_slice() != self.input.shape() || input.len() != self.input.element_count()
         {
             return Err(PoolError::ShapeMismatch);
