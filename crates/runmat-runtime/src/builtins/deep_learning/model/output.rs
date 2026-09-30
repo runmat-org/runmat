@@ -65,8 +65,13 @@ pub(super) fn present(
             trace,
             next_state: state_updates,
         };
-        let nodes =
-            autodiff::record_network_execution(network, input, &mut execution, requested_state)?;
+        let nodes = autodiff::record_network_execution(
+            network,
+            input,
+            &mut execution,
+            requested_state,
+            presentation.caller(),
+        )?;
         let data = match execution.value {
             HostValue::Real(tensor) => Value::Tensor(tensor),
             HostValue::Complex(tensor) => Value::ComplexTensor(tensor),
@@ -112,7 +117,13 @@ pub(super) fn present(
         None
     };
     let (prediction, state) = match nodes {
-        Some(nodes) => autodiff::annotate_network_outputs(network, prediction, state, nodes)?,
+        Some(nodes) => autodiff::annotate_network_outputs(
+            network,
+            prediction,
+            state,
+            nodes,
+            presentation.caller(),
+        )?,
         None => (prediction, state),
     };
     let mut output = vec![prediction];

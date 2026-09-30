@@ -41,9 +41,10 @@ pub(in crate::builtins::deep_learning) fn stage_annotated(
 pub(in crate::builtins::deep_learning) fn map_result_values(
     network: &ObjectInstance,
     state: Value,
+    function: &'static str,
     mapper: impl FnMut(&StateKey, Value) -> BuiltinResult<Value>,
 ) -> BuiltinResult<Value> {
-    map_values(network, &state, "forward", mapper)
+    map_values(network, &state, function, mapper)
 }
 
 fn map_values(

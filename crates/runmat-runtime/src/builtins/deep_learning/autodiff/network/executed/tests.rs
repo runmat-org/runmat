@@ -11,6 +11,30 @@ use runmat_builtins::DeepLearningLayerKind as K;
 mod parents;
 mod presentation;
 
+#[test]
+fn output_annotation_errors_identify_the_actual_network_caller() {
+    for caller in [NetworkCaller::Forward, NetworkCaller::Predict] {
+        let network = ObjectInstance::new(model::DLNETWORK_CLASS.owned());
+        let nodes = NetworkOutputNodes {
+            prediction: None,
+            state: vec![(
+                StateKey {
+                    layer_index: 0,
+                    layer_name: "recurrent".into(),
+                    role: StateRole::HiddenState,
+                    channels: 1,
+                },
+                0,
+            )],
+        };
+        let error = annotate_outputs(&network, Value::Num(1.0), None, nodes, caller).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert!(error.to_string().starts_with(caller.function()));
+        let error = attach(Value::String("not numerical".into()), 0, caller).unwrap_err();
+        assert!(error.to_string().starts_with(caller.function()));
+    }
+}
+
 fn layer(kind: K, fields: &[(&str, Value)]) -> Value {
     let mut layer = ObjectInstance::new(kind.class().owned());
     layer
@@ -222,7 +246,7 @@ fn hidden_state(net: &Value, x: Value) -> Value {
         panic!("network")
     };
     let mut hidden = None;
-    model::state::map_result_values(network, outputs.remove(1), |key, value| {
+    model::state::map_result_values(network, outputs.remove(1), "forward", |key, value| {
         if key.role == StateRole::HiddenState {
             hidden = Some(value.clone());
         }
@@ -301,7 +325,7 @@ fn prediction_and_states(net: &Value, x: Value) -> [Value; 3] {
     };
     let mut hidden = None;
     let mut cell = None;
-    model::state::map_result_values(network, outputs.remove(1), |key, value| {
+    model::state::map_result_values(network, outputs.remove(1), "forward", |key, value| {
         match key.role {
             StateRole::HiddenState => hidden = Some(value.clone()),
             StateRole::CellState => cell = Some(value.clone()),

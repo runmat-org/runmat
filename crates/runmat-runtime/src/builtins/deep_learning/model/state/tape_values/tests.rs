@@ -53,7 +53,7 @@ fn returned_state_mapping_uses_typed_canonical_keys_and_preserves_payloads() {
     let original = Value::Object(state_object);
     let before = view(&network, "forward").unwrap();
     let mut roles = Vec::new();
-    let mapped = map_result_values(&network, original.clone(), |key, value| {
+    let mapped = map_result_values(&network, original.clone(), "forward", |key, value| {
         roles.push((key.layer_name.clone(), key.role, key.channels));
         Ok(value)
     })
@@ -100,7 +100,7 @@ fn wrong_identity_is_rejected_before_mapper_and_failure_does_not_mutate_network(
     roles.data[1] = "Bias".into();
     let invalid = crate::builtins::table::table_replace_variables_like(source, variables).unwrap();
     let calls = Cell::new(0);
-    assert!(map_result_values(&network, invalid, |_, value| {
+    assert!(map_result_values(&network, invalid, "forward", |_, value| {
         calls.set(calls.get() + 1);
         Ok(value)
     })
@@ -114,17 +114,19 @@ fn invalid_final_mapped_value_fails_without_mutating_network() {
     let network = network();
     let before = project(&network, "get.State").unwrap();
     let calls = Cell::new(0);
-    assert!(map_result_values(&network, before.clone(), |_, value| {
-        calls.set(calls.get() + 1);
-        if calls.get() == 2 {
-            Ok(Value::Tensor(
-                Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap(),
-            ))
-        } else {
-            Ok(value)
-        }
-    })
-    .is_err());
+    assert!(
+        map_result_values(&network, before.clone(), "forward", |_, value| {
+            calls.set(calls.get() + 1);
+            if calls.get() == 2 {
+                Ok(Value::Tensor(
+                    Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap(),
+                ))
+            } else {
+                Ok(value)
+            }
+        })
+        .is_err()
+    );
     assert_eq!(calls.get(), 2);
     assert_eq!(project(&network, "get.State").unwrap(), before);
 }

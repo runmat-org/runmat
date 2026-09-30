@@ -1,6 +1,7 @@
 //! Tape bindings for an already executed, immutable host network trace.
 use super::super::*;
 use model::execution::host::network::{HostExecutionResult, HostTrace, HostValue};
+use model::execution::NetworkCaller;
 use model::parameters::ParameterRole;
 use model::state::{StateKey, StateRole};
 use std::collections::HashMap;
@@ -57,7 +58,9 @@ pub(in crate::builtins::deep_learning) fn record_execution(
     input: &Value,
     execution: &mut HostExecutionResult,
     capture_state: bool,
+    caller: NetworkCaller,
 ) -> BuiltinResult<NetworkOutputNodes> {
+    let function = caller.function();
     let mut outputs = NetworkOutputNodes {
         prediction: None,
         state: Vec::new(),
@@ -66,14 +69,14 @@ pub(in crate::builtins::deep_learning) fn record_execution(
         return Ok(outputs);
     }
     let mut parameters = HashMap::new();
-    for row in model::parameters::view(network, "forward")? {
+    for row in model::parameters::view(network, function)? {
         if let Some(value) = row.value {
             if let Some(binding) = parent(value)? {
                 parameters.insert((row.key.layer_index, row.key.role), binding);
             }
         }
     }
-    let rows = model::state::view(network, "forward")?;
+    let rows = model::state::view(network, function)?;
     let mut states = HashMap::new();
     let mut keys = HashMap::new();
     for row in rows {
@@ -89,26 +92,26 @@ pub(in crate::builtins::deep_learning) fn record_execution(
     }
     let HostValue::Real(output) = &execution.value else {
         return Err(unsupported_error(
-            "forward",
-            "forward: complex network tape values require complex adjoint support",
+            function,
+            format!("{function}: complex network tape values require complex adjoint support"),
         ));
     };
     for update in execution.next_state.iter().filter(|_| capture_state) {
         if !keys.contains_key(&(update.layer_index, update.role)) {
             return Err(deep_learning_error(
-                "forward",
-                "forward: traced State result has no canonical row",
+                function,
+                format!("{function}: traced State result has no canonical row"),
             ));
         }
     }
     let trace = execution.trace.take().ok_or_else(|| {
         deep_learning_error(
-            "forward",
-            "forward: active network tape requires an execution trace",
+            function,
+            format!("{function}: active network tape requires an execution trace"),
         )
     })?;
     let first_node = active_tape()
-        .ok_or_else(|| deep_learning_error("forward", "forward: no active tape"))?
+        .ok_or_else(|| deep_learning_error(function, format!("{function}: no active tape")))?
         .borrow()
         .nodes
         .len();
@@ -122,8 +125,8 @@ pub(in crate::builtins::deep_learning) fn record_execution(
         .and_then(|end| end.checked_add(1))
         .ok_or_else(|| {
             deep_learning_error(
-                "forward",
-                "forward: tape output count exceeds addressable size",
+                function,
+                format!("{function}: tape output count exceeds addressable size"),
             )
         })?;
     let record = Rc::new(NetworkTapeRecord {
@@ -168,9 +171,11 @@ pub(in crate::builtins::deep_learning) fn annotate_outputs(
     prediction: Value,
     state: Option<Value>,
     nodes: NetworkOutputNodes,
+    caller: NetworkCaller,
 ) -> BuiltinResult<(Value, Option<Value>)> {
+    let function = caller.function();
     let prediction = match nodes.prediction {
-        Some(node) => attach(prediction, node)?,
+        Some(node) => attach(prediction, node, caller)?,
         None => prediction,
     };
     if nodes.state.is_empty() {
@@ -178,26 +183,29 @@ pub(in crate::builtins::deep_learning) fn annotate_outputs(
     }
     let state = state.ok_or_else(|| {
         deep_learning_error(
-            "forward",
-            "forward: traced State nodes require a published State result",
+            function,
+            format!("{function}: traced State nodes require a published State result"),
         )
     })?;
     let mut nodes: HashMap<_, _> = nodes.state.into_iter().collect();
     let state =
-        model::state::map_result_values(network, state, |key, value| match nodes.remove(key) {
-            Some(node) => attach(value, node),
-            None => Ok(value),
+        model::state::map_result_values(network, state, function, |key, value| {
+            match nodes.remove(key) {
+                Some(node) => attach(value, node, caller),
+                None => Ok(value),
+            }
         })?;
     if !nodes.is_empty() {
         return Err(deep_learning_error(
-            "forward",
-            "forward: traced State nodes differ from the published canonical table",
+            function,
+            format!("{function}: traced State nodes differ from the published canonical table"),
         ));
     }
     Ok((prediction, Some(state)))
 }
 
-fn attach(value: Value, node: usize) -> BuiltinResult<Value> {
-    let payload = Payload::parse(value, "forward")?;
+fn attach(value: Value, node: usize, caller: NetworkCaller) -> BuiltinResult<Value> {
+    let function = caller.function();
+    let payload = Payload::parse(value, function)?;
     Ok(wrap_result(&payload, payload.tensor.clone(), Some(node)))
 }
