@@ -8,11 +8,14 @@ use runmat_execution_artifact::ArtifactAccess;
 
 use super::LocalFeaExecutionOptions;
 
+mod acoustic;
 mod admission;
 mod thermal;
+pub use acoustic::PreparedAuthoredAcousticStudy;
 pub use thermal::PreparedAuthoredThermalStudy;
 
 pub enum PreparedFeaStudyRoot {
+    Acoustic(PreparedAuthoredAcousticStudy),
     Structural(crate::PreparedStructuralStudyRoot),
     Thermal(PreparedAuthoredThermalStudy),
 }
@@ -32,6 +35,12 @@ pub async fn prepare_study(
     options: &LocalFeaExecutionOptions,
 ) -> Result<PreparedFeaStudy, String> {
     let family = admission::select_family(&resolved.study.sequence)?;
+    if family == admission::PreparedFamily::Acoustic
+        && (options.backend != runmat_analysis_fea::ComputeBackend::Cpu
+            || !options.accelerators.is_empty())
+    {
+        return Err("authored acoustic execution has no admitted accelerator envelope".into());
+    }
     let realized: RealizedStudy = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
@@ -110,6 +119,34 @@ pub async fn prepare_study(
         .frozen_project()
         .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
     let root = match family {
+        admission::PreparedFamily::Acoustic => {
+            let input_materializations = input_materializations
+                .into_iter()
+                .map(|materialization| materialization.rebind(&access).map_err(|e| e.to_string()))
+                .collect::<Result<Vec<_>, String>>()?;
+            crate::input_materialization_contract::validate_input_materialization_inventory(
+                &realized,
+                &input_materializations,
+                &revision,
+            )
+            .map_err(|e| e.to_string())?;
+            PreparedFeaStudyRoot::Acoustic(PreparedAuthoredAcousticStudy {
+                geometry_meshing,
+                authored_study_digest,
+                frozen_project_digest,
+                study: realized.clone(),
+                materials: resolved.material_catalog,
+                program_revision: revision.clone(),
+                artifact_access: access,
+                input_materializations,
+                planning: runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
+                    formulation_requirement: resolved.study.formulation_requirement,
+                    ..runmat_analysis_fea::study::AcousticStudyPlanningPolicy::experimental()
+                },
+                local_execution,
+                analysis_accelerator_requests: options.accelerators.clone(),
+            })
+        }
         admission::PreparedFamily::Thermal => {
             let input_materializations = input_materializations
                 .into_iter()

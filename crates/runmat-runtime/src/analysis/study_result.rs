@@ -4,7 +4,9 @@ use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 
 use super::StructuralStudyNumericalResult;
 
+mod acoustic;
 pub(super) mod thermal;
+pub use acoustic::{AcousticStudyCompletion, AcousticStudyObjectSource, AcousticStudySource};
 mod thermal_completion;
 pub(super) mod thermal_observation_admission;
 mod thermal_observations;

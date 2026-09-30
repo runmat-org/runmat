@@ -78,30 +78,12 @@ impl ThermalStudyObjectSource {
         study_digest: Digest,
     ) -> Result<Vec<String>, String> {
         self.authenticate(completed)?;
-        completed
-            .catalog
-            .objects
-            .iter()
-            .map(|reference| {
-                let bytes = self.0.read_verified(reference)?;
-                if Digest::sha256(&bytes) != reference.logical_digest
-                    || bytes.len() as u64 != reference.encoded_length
-                {
-                    return Err("thermal catalog object digest or length mismatch".into());
-                }
-                super::super::structural_study::persist_content_addressed_study_evidence(
-                    &study_digest.to_string(),
-                    &format!(
-                        "thermal-object-{}",
-                        reference
-                            .logical_digest
-                            .to_string()
-                            .trim_start_matches("sha256:")
-                    ),
-                    serde_json::json!({"reference": reference, "bytes": bytes}),
-                )
-            })
-            .collect()
+        super::super::study_result_manifest::persist_catalog_objects(
+            self,
+            &completed.catalog,
+            study_digest,
+            "thermal-object",
+        )
     }
 }
 

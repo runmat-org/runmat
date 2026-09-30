@@ -32,13 +32,13 @@ pub(super) use lifecycle::{
     prepare_structural_prestressed_modal_template, prepare_structural_random_response_template,
     prepare_structural_response_spectrum_template,
 };
-pub(super) use publication::standalone_thermal_completion;
 pub(super) use publication::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
     study_evidence_root, CompletedStudyStep, CompletedStudyStepRun,
 };
 #[cfg(test)]
 pub(super) use publication::{persist_immutable_study_evidence, run_evidence_stage};
+pub(super) use publication::{standalone_completion, standalone_thermal_completion};
 
 pub const STRUCTURAL_STUDY_INTENT_MAX_BYTES: usize = 64 * 1024 * 1024;
 

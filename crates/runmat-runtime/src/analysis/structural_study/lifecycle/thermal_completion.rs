@@ -3,7 +3,7 @@ use super::*;
 use crate::analysis::ThermalStudyCompletion;
 use runmat_analysis_fea::execution::{StructuralStepWorkload, StructuralStudyWorkloads};
 
-use crate::analysis::thermal_study_publication::materialization as thermal_run;
+use crate::analysis::study_publication::thermal::materialization as thermal_run;
 
 pub(super) fn complete(
     intent: PreparedStructuralStudyIntent,

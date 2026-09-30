@@ -7,6 +7,7 @@
 use runmat_analysis_core::ProcedureStepId;
 use runmat_execution::Digest;
 
+#[path = "typed_study_publication/publication_options.rs"]
 mod publication_options;
 
 use super::study_result_manifest::StudyResultManifest;

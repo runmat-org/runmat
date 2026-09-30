@@ -8,7 +8,9 @@ use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvel
 use runmat_execution::Digest;
 use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 
+#[path = "thermal_study_publication/admission.rs"]
 mod admission;
+#[path = "thermal_study_publication/materialization.rs"]
 pub(in crate::analysis) mod materialization;
 
 /// Authenticate the source-bound definition, numerical result and meshing provenance before

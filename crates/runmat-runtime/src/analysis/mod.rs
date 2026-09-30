@@ -86,14 +86,12 @@ mod study_result;
 mod study_result_manifest;
 mod study_sweep;
 mod thermal_execution;
-mod thermal_study_publication;
-mod typed_study_publication;
+mod study_publication;
 pub use response_study_result::{
     StructuralStudyModalResponseSpectrumNumericalResult,
     StructuralStudyRandomResponseNumericalResult,
 };
 pub use thermal_execution::analysis_run_thermal_with_options_op;
-pub use thermal_study_publication::publish_thermal_study_result;
 pub mod value_admission;
 
 #[cfg(test)]
@@ -138,7 +136,7 @@ pub use study_sweep::{
     analysis_complete_study_sweep_op, analysis_study_sweep_definition,
     analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
 };
-pub use typed_study_publication::publish_structural_study_result;
+pub use study_publication::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeaRuntimeConfig {

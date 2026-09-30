@@ -53,6 +53,43 @@ pub(in crate::analysis) enum CompletedStudyStepRun {
     StructuralRandomResponse(Box<CompletedStructuralRandomResponseStep>),
 }
 
+/// Family-neutral singleton carrier. Numerical evidence remains with its physics owner.
+pub(in crate::analysis) fn standalone_completion(
+    context: OperationContext,
+    compiled: &runmat_analysis_fea::study::CompiledAnalysisStudy,
+    execution: AnalysisExecutionStep,
+    mesh: crate::analysis::meshing::ResolvedStudyMesh,
+) -> Result<PreparedStudyCompletion, String> {
+    let [step] = compiled.model.sequence.steps.as_slice() else {
+        return Err("standalone completion requires one authored procedure step".into());
+    };
+    if execution.step_id != step.step_id
+        || execution.requirement != compiled.formulation_requirement
+    {
+        return Err(
+            "standalone execution differs from compiled step or formulation requirement".into(),
+        );
+    }
+    let operation = crate::analysis::execution_dispatch::execution_operation(&execution, step)
+        .ok_or("standalone completion execution options differ from authored procedure")?;
+    let definition = compiled.definition_digest().map_err(|e| e.to_string())?;
+    Ok(PreparedStudyCompletion {
+        thermal_prefix: None,
+        context,
+        study_id: compiled.study_id.clone(),
+        study_fingerprint: definition.to_string(),
+        authored_study_digest: definition,
+        model: compiled.model.clone(),
+        steps: vec![PreparedStudyStep {
+            authored_execution: execution,
+            procedure_step: step.clone(),
+        }],
+        operation_sequence: vec![operation.version().into()],
+        solver_mesh_artifact_path: mesh.artifact_path,
+        meshing_evidence_artifact_path: mesh.evidence_path,
+    })
+}
+
 /// Reuse the shared thermal carrier for a genuine singleton study, without a structural suffix.
 pub(in crate::analysis) fn standalone_thermal_completion(
     context: OperationContext,

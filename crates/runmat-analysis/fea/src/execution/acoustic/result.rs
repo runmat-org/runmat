@@ -237,6 +237,9 @@ impl AcousticHarmonicSolverResult {
     pub fn velocity_m_per_s(&self) -> &[ProjectionVector3] {
         &self.data.velocity_m_per_s
     }
+    pub fn source_evidence(&self) -> &[SpatialProjectionEvidence] {
+        &self.data.source_evidence
+    }
     pub fn intensity_w_per_m2(&self) -> &[[f64; 3]] {
         &self.data.intensity_w_per_m2
     }

@@ -14,11 +14,10 @@ use crate::operations::{
 use super::{PreparedStudySequence, PreparedStudyStep};
 use crate::analysis::frequency_result::CompletedStructuralFrequencyStep;
 use crate::analysis::{
-    current_fea_runtime_config, default_fea_artifact_root, persist_linear_static_run,
-    run_operation_for_identity, storage, AnalysisExecutionStep, AnalysisRunResult,
-    AnalysisSolverOptions, AnalysisStudyRunData, AnalysisStudyStatePublicationData,
-    AnalysisStudyStepRunData, QualityGate, RunStatus, ANALYSIS_RUN_STUDY_OPERATION,
-    ANALYSIS_RUN_STUDY_OP_VERSION,
+    current_fea_runtime_config, default_fea_artifact_root, run_operation_for_identity, storage,
+    AnalysisExecutionStep, AnalysisRunResult, AnalysisSolverOptions, AnalysisStudyRunData,
+    AnalysisStudyStatePublicationData, AnalysisStudyStepRunData, QualityGate, RunStatus,
+    ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
 const STUDY_EVIDENCE_SCHEMA_VERSION: &str = "analysis_study_evidence/2026-09";
@@ -188,8 +187,8 @@ pub(in crate::analysis) fn run_evidence_stage(run_id: &str) -> String {
 
 mod completion_contract;
 pub(in crate::analysis) use completion_contract::{
-    standalone_thermal_completion, study_completion_from_prepared, CompletedStudyStep,
-    CompletedStudyStepRun, PreparedStudyCompletion, ThermalPrefixCompletion,
+    standalone_completion, standalone_thermal_completion, study_completion_from_prepared,
+    CompletedStudyStep, CompletedStudyStepRun, PreparedStudyCompletion, ThermalPrefixCompletion,
 };
 
 pub(in crate::analysis) struct CompletedStructuralResponseSpectrumStep {
@@ -242,6 +241,7 @@ struct CompletedRunFacts {
 }
 
 mod run_facts;
+mod run_persistence;
 use run_facts::completed_run_facts;
 
 pub(in crate::analysis) fn complete_study_run(
@@ -432,7 +432,7 @@ pub(in crate::analysis) fn complete_study_run(
         states,
     )?;
     for run in &runs_to_persist {
-        persist_linear_static_run(&context, run)?;
+        run_persistence::persist(&context, run)?;
     }
     if let Some((run_id, completed, source)) = thermal_observations {
         storage::persist_thermal_observations(&run_id, &completed, &source).map_err(|error| {

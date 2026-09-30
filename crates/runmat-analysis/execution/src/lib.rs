@@ -63,10 +63,17 @@ mod acoustic_harmonic_plan;
 mod acoustic_harmonic_result;
 mod acoustic_harmonic_task;
 mod acoustic_state_profiles;
+mod acoustic_study;
 pub use acoustic_harmonic_result::{
     import_acoustic_harmonic_result, ImportedAcousticHarmonicResult,
 };
 pub use acoustic_state_profiles::acoustic_state_publication_profiles;
+pub use acoustic_study::{
+    import_acoustic_study_completion, import_acoustic_study_root, prepare_acoustic_study_root,
+    AcousticStudyCoordinator, AcousticStudyPhase, AcousticStudyPreparation,
+    AcousticStudyResultClosure, AcousticStudyResultPhase, CompletedAcousticStudy,
+    PreparedAcousticStudyRoot,
+};
 mod structural_prestressed_frequency_study;
 mod structural_prestressed_modal_frequency_study;
 mod structural_prestressed_modal_study;

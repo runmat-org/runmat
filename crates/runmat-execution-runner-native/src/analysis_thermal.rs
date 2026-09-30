@@ -16,9 +16,9 @@ use runmat_execution_runner::AttemptResourceAccounting;
 
 use crate::{
     analysis_task_pool::{
-        configure_local_analysis, execute_analysis_task_batch, planned_resource_attempt,
-        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask,
-        LocalAnalysisTaskPool, PreparedAnalysisTask, RemoteAnalysisTaskPool,
+        configure_local_analysis, execute_governed_analysis_phase, AnalysisTaskBatchPolicy,
+        AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask, LocalAnalysisTaskPool,
+        RemoteAnalysisTaskPool,
     },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver,
@@ -198,26 +198,20 @@ async fn execute_one(
     dependencies: Vec<AnalysisTaskDependency>,
     policy: &ThermalStudyExecutionPolicy,
 ) -> NativeExecutionResult<(ExecutedAnalysisTask, AttemptResourceAccounting)> {
-    let [executed] = execute_analysis_task_batch(
+    execute_governed_analysis_phase(
         pool,
-        vec![PreparedAnalysisTask {
-            host,
-            program,
-            resource_plan: Some(plan),
-            fallback_resources: policy.resources.clone(),
-            dependencies,
-        }],
+        host,
+        program,
+        plan,
+        dependencies,
+        policy.resources.clone(),
         AnalysisTaskBatchPolicy {
             retry: policy.retry,
             deadline_unix_millis: policy.deadline_unix_millis,
             priority: policy.priority,
         },
     )
-    .await?
-    .try_into()
-    .map_err(|_| protocol("thermal phase returned an invalid task inventory"))?;
-    let accounting = planned_resource_attempt(plan, &executed)?.accounting;
-    Ok((executed, accounting))
+    .await
 }
 
 fn dependency(executed: &ExecutedAnalysisTask) -> AnalysisTaskDependency {

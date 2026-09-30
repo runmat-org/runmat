@@ -8,6 +8,9 @@ use runmat_runtime::analysis::storage::{AnalysisArtifactStore, FilesystemAnalysi
 use serde_json::Value;
 use tempfile::TempDir;
 
+#[path = "typed_fea_geometry_cli/acoustic.rs"]
+mod acoustic;
+
 fn runmat(project: &TempDir, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(project.path())

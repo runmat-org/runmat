@@ -4,6 +4,7 @@ use runmat_analysis_core::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PreparedFamily {
+    Acoustic,
     Structural,
     Thermal,
 }
@@ -21,6 +22,18 @@ pub(super) fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamil
     let [step] = sequence.steps.as_slice() else {
         return Err(unsupported());
     };
+    if step.family == PhysicsFamily::Acoustic
+        && step.procedure == AnalysisProcedure::HarmonicResponse
+        && step.solution_space == SolutionSpace::Direct
+        && step.restart == RestartPolicy::Fresh
+        && step.state_inputs.is_empty()
+        && step.activations.is_empty()
+        && sequence.dependencies.is_empty()
+        && sequence.transitions.is_empty()
+        && sequence.branches.is_empty()
+    {
+        return Ok(PreparedFamily::Acoustic);
+    }
     if step.family != PhysicsFamily::Thermal
         || !matches!(
             step.procedure,
@@ -39,13 +52,40 @@ pub(super) fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamil
 }
 
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient or acoustic harmonic step".into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_analysis_core::ProcedureStep;
+
+    #[test]
+    fn fresh_acoustic_harmonic_selects_without_admitting_restart_or_cross_physics() {
+        let acoustic = ProcedureStep::acoustic_harmonic("sound");
+        assert_eq!(
+            select_family(&AnalysisSequence::from_steps(
+                "sound",
+                vec![acoustic.clone()]
+            ))
+            .unwrap(),
+            PreparedFamily::Acoustic
+        );
+        let mut resumed = acoustic.clone();
+        resumed.restart = RestartPolicy::ResumeCheckpoint {
+            checkpoint_id: "checkpoint".into(),
+            required_state_digest: "digest".into(),
+        };
+        let mut modal = acoustic.clone();
+        modal.solution_space = SolutionSpace::ModalReduced;
+        for steps in [
+            vec![resumed],
+            vec![modal],
+            vec![acoustic, ProcedureStep::thermal_steady("heat")],
+        ] {
+            assert!(select_family(&AnalysisSequence::from_steps("unsupported", steps)).is_err());
+        }
+    }
 
     #[test]
     fn standalone_thermal_and_existing_structural_families_select_without_cad() {

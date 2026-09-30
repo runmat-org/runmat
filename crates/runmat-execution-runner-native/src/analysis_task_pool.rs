@@ -23,6 +23,9 @@ use crate::{
     RemotePoolDriver,
 };
 
+mod phase;
+pub(crate) use phase::execute_governed_analysis_phase;
+
 pub(crate) fn configure_local_analysis(
     config: &mut NativeExecutionConfig,
     resources: &ResourceRequest,
