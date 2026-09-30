@@ -13,6 +13,7 @@ use super::controls::{self, Controls};
 use crate::builtins::deep_learning::deep_learning_error;
 use crate::builtins::deep_learning::model::plan::{axes::AxisPlan, options::LayerOperationalPlan};
 use crate::builtins::deep_learning::model::{
+    is_deep_learning_network_object, layers_from_network_ref,
     parameters::ParameterView,
     state::StateView,
     topology::{validate_sequential_connections, validate_sequential_topology},
@@ -36,6 +37,15 @@ pub(in crate::builtins::deep_learning) struct HostNetworkPlan<'a> {
     pub(super) precision: NumericDType,
     pub(super) input_payload_kind: InputPayloadKind,
     pub(super) function: &'static str,
+}
+
+/// Pure training descriptor. It intentionally owns only shape/control facts;
+/// the initialized network is built after target/loss admission and is then
+/// checked again by `HostNetworkPlan::admit` against its filled payloads.
+pub(in crate::builtins::deep_learning) struct TrainingGeometry {
+    pub(in crate::builtins::deep_learning) input_axes: AxisPlan,
+    pub(in crate::builtins::deep_learning) output_axes: AxisPlan,
+    pub(in crate::builtins::deep_learning) precision: NumericDType,
 }
 
 fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::RuntimeError {
@@ -98,48 +108,10 @@ impl<'a> HostNetworkPlan<'a> {
                 "network parameters and state must be initialized before forward execution",
             ));
         }
-        let options = LayerOperationalPlan::inspect(&layers.data, function)?;
-        options.require_consumed(function, options::consumed)?;
         let (parameters, state) = resources::views(network, function)?;
-        let (shape, precision, format, input_payload_kind) = input::metadata(input, function)?;
-        let input_kind = input::kind(first, first_kind, function)?;
-        let channel_policy = ChannelPolicy::for_layers(&layers.data);
-        let input_axes = input::axes(&format, input_kind, shape, channel_policy, function)?;
-        let mut axes = input_axes.clone();
-        let mut steps = Vec::with_capacity(layers.data.len());
-        for (index, value) in layers.data.iter().enumerate() {
-            let Value::Object(layer) = value else {
-                unreachable!("admitted layer")
-            };
-            let kind = K::from_identity(&layer.class_name)
-                .ok_or_else(|| fail(function, "unsupported layer"))?;
-            if input_payload_kind == InputPayloadKind::Complex
-                && !(kind.is_input() || kind == K::GlobalAveragePooling1D || kind.is_output())
-            {
-                return Err(fail(
-                    function,
-                    format!("layer {} does not support complex host input", index + 1),
-                ));
-            }
-            let controls = controls::decode(layer, kind, function)?;
-            let output_axes = layers::admit(
-                layer,
-                index,
-                controls,
-                &axes,
-                &parameters,
-                &state,
-                precision,
-                channel_policy,
-                function,
-            )?;
-            steps.push(StepDescriptor {
-                index,
-                kind,
-                controls,
-            });
-            axes = output_axes;
-        }
+        let shapes = resources::ResourceShapes::filled(&parameters, &state, function)?;
+        let (input_axes, axes, precision, input_payload_kind, steps) =
+            admit_layers(&layers.data, first, first_kind, input, &shapes, function)?;
         Ok(Self {
             parameters,
             state,
@@ -161,4 +133,90 @@ impl<'a> HostNetworkPlan<'a> {
             .filter_map(|row| row.value)
             .any(|value| crate::builtins::common::validation::value_has_native_integer_class(value))
     }
+}
+
+pub(in crate::builtins::deep_learning) fn admit_training_geometry(
+    source: &Value,
+    input: &Value,
+    function: &'static str,
+) -> BuiltinResult<TrainingGeometry> {
+    let layers = layers_from_network_ref(source, function)?;
+    validate_sequential_topology(layers, function)?;
+    let Some(Value::Object(first)) = layers.first() else {
+        return Err(fail(function, "network must start with an input layer"));
+    };
+    let first_kind = K::from_identity(&first.class_name)
+        .ok_or_else(|| fail(function, "unsupported first layer"))?;
+    if !first_kind.is_input() {
+        return Err(fail(function, "network must start with an input layer"));
+    }
+    let canonical_network = match source {
+        Value::Object(object) if is_deep_learning_network_object(object) => Some(object),
+        _ => None,
+    };
+    let shapes =
+        resources::ResourceShapes::before_initialization(layers, canonical_network, function)?;
+    let (input_axes, output_axes, precision, _, _) =
+        admit_layers(layers, first, first_kind, input, &shapes, function)?;
+    Ok(TrainingGeometry {
+        input_axes,
+        output_axes,
+        precision,
+    })
+}
+
+fn admit_layers(
+    layers: &[Value],
+    first: &ObjectInstance,
+    first_kind: K,
+    input: &Value,
+    shapes: &resources::ResourceShapes,
+    function: &'static str,
+) -> BuiltinResult<(
+    AxisPlan,
+    AxisPlan,
+    NumericDType,
+    InputPayloadKind,
+    Vec<StepDescriptor>,
+)> {
+    let options = LayerOperationalPlan::inspect(layers, function)?;
+    options.require_consumed(function, options::consumed)?;
+    let (shape, precision, format, input_payload_kind) = input::metadata(input, function)?;
+    let input_kind = input::kind(first, first_kind, function)?;
+    let channel_policy = ChannelPolicy::for_layers(layers);
+    let input_axes = input::axes(&format, input_kind, shape, channel_policy, function)?;
+    let mut axes = input_axes.clone();
+    let mut steps = Vec::with_capacity(layers.len());
+    for (index, value) in layers.iter().enumerate() {
+        let Value::Object(layer) = value else {
+            unreachable!("admitted layer")
+        };
+        let kind = K::from_identity(&layer.class_name)
+            .ok_or_else(|| fail(function, "unsupported layer"))?;
+        if input_payload_kind == InputPayloadKind::Complex
+            && !(kind.is_input() || kind == K::GlobalAveragePooling1D || kind.is_output())
+        {
+            return Err(fail(
+                function,
+                format!("layer {} does not support complex host input", index + 1),
+            ));
+        }
+        let controls = controls::decode(layer, kind, function)?;
+        axes = layers::admit(
+            layer,
+            index,
+            controls,
+            &axes,
+            shapes,
+            precision,
+            channel_policy,
+            function,
+        )?;
+        steps.push(StepDescriptor {
+            index,
+            kind,
+            controls,
+        });
+    }
+    Ok((input_axes, axes, precision, input_payload_kind, steps))
 }

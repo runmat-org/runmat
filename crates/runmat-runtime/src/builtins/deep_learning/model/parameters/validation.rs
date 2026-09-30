@@ -80,7 +80,7 @@ pub(super) fn validate_parameter(
 
 /// Validate physical storage and ownership before interpreting geometry. This
 /// is shared by parameter and recurrent-state admission, including empties.
-pub(in crate::builtins::deep_learning::model) fn numeric_payload_shape<'a>(
+pub(in crate::builtins::deep_learning) fn numeric_payload_shape<'a>(
     value: &'a Value,
     label: &str,
     function: &'static str,

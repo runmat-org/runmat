@@ -262,6 +262,65 @@ fn constructor_option_identity_is_case_insensitive_in_static_admission() {
 }
 
 #[test]
+fn initialize_option_diagnoses_only_proven_invalid_numeric_values() {
+    let real_scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let complex_scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Complex,
+    }));
+    let integer_scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt64,
+        domain: NumericDomain::Real,
+    }));
+    let check = |value, literal| {
+        infer(
+            vec![layer(), ValueFact::scalar(ValueKindFact::String), value],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("Initialize".into()),
+                literal,
+            ],
+        )
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLNETWORK-OPTION-VALUE")
+    };
+    assert!(check(real_scalar.clone(), LiteralValue::Number(2.0)));
+    assert!(check(real_scalar.clone(), LiteralValue::Number(f64::NAN)));
+    assert!(check(complex_scalar, LiteralValue::Unknown));
+    assert!(check(
+        integer_scalar.clone(),
+        LiteralValue::Integer {
+            text: "18446744073709551615".into(),
+            class: NumericClass::UInt64,
+        }
+    ));
+    assert!(!check(
+        integer_scalar,
+        LiteralValue::Integer {
+            text: "1".into(),
+            class: NumericClass::UInt64,
+        }
+    ));
+    assert!(!check(real_scalar.clone(), LiteralValue::Number(0.0)));
+    assert!(!check(real_scalar.clone(), LiteralValue::Number(1.0)));
+    assert!(!check(real_scalar, LiteralValue::Unknown));
+    assert!(!check(
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        })),
+        LiteralValue::Real {
+            text: "1.00000001".into(),
+            class: NumericClass::Single,
+        }
+    ));
+}
+
+#[test]
 fn unknown_object_identity_does_not_imply_one_layer() {
     let mut source = layer();
     let ValueKindFact::Object(object) = &mut source.kind else {

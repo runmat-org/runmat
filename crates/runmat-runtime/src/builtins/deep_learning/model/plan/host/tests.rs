@@ -4,7 +4,8 @@ use runmat_value::{
     Value,
 };
 
-use super::{HostNetworkPlan, HostValue};
+use super::{admit_training_geometry, HostNetworkPlan, HostValue};
+use crate::builtins::deep_learning::model::state::{self, StateRole, StateUpdate};
 use crate::builtins::deep_learning::{layers::*, model::*, object};
 
 fn network() -> Value {
@@ -23,6 +24,141 @@ fn network() -> Value {
         CellArray::new(vec![input, dense], 2, 1).unwrap(),
     )]))
     .unwrap()
+}
+
+#[test]
+fn training_geometry_uses_initialization_shapes_before_any_parameter_is_filled() {
+    let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let dense = block_on(fully_connected_layer_builtin(Value::Num(4.0), vec![])).unwrap();
+    let layers = vec![input_layer, dense];
+    let input = Value::Tensor(Tensor::from_f32(vec![1.; 6], vec![3, 2]).unwrap());
+    let Value::Object(dense) = &layers[1] else {
+        panic!("dense layer")
+    };
+    assert!(dense.properties.get("Weights").is_none_or(|value| {
+        matches!(value, Value::Tensor(tensor) if tensor.shape.contains(&0))
+    }));
+    let layers = Value::Cell(CellArray::new(layers, 2, 1).unwrap());
+    let admitted = admit_training_geometry(&layers, &input, "test").unwrap();
+    assert_eq!(admitted.input_axes.shape(), &[3, 2]);
+    assert_eq!(admitted.output_axes.shape(), &[3, 4]);
+}
+
+#[test]
+fn uninitialized_recurrent_geometry_uses_canonical_state_and_gate_shapes() {
+    let input_layer = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+    let recurrent = block_on(lstm_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let layers = vec![input_layer, recurrent];
+    let input = Value::Tensor(Tensor::from_f32(vec![1.; 3 * 2 * 4], vec![3, 2, 4]).unwrap());
+    let layers = Value::Cell(CellArray::new(layers, 2, 1).unwrap());
+    let admitted = admit_training_geometry(&layers, &input, "test").unwrap();
+    assert_eq!(admitted.input_axes.shape(), &[3, 2, 4]);
+    assert_eq!(admitted.output_axes.shape(), &[2, 2, 4]);
+}
+
+fn compare_training_geometry_with_filled_network(layers: Vec<Value>, input: Value) {
+    let layers = Value::Cell(CellArray::new(layers, 2, 1).unwrap());
+    let proposed = admit_training_geometry(&layers, &input, "test").unwrap();
+    let network = block_on(dlnetwork_builtin(vec![layers])).unwrap();
+    let Value::Object(network) = network else {
+        panic!("initialized network expected")
+    };
+    let filled = HostNetworkPlan::admit(&network, &input, "test").unwrap();
+    assert_eq!(proposed.input_axes.shape(), filled.input_axes().shape());
+    assert_eq!(proposed.output_axes.shape(), filled.output_axes().shape());
+    assert_eq!(proposed.output_axes.layout(), filled.output_axes().layout());
+}
+
+#[test]
+fn training_geometry_matches_filled_conv_normalization_and_pooling_routes() {
+    let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let conv = block_on(convolution_1d_layer_builtin(
+        Value::Num(3.0),
+        Value::Num(4.0),
+        vec![],
+    ))
+    .unwrap();
+    compare_training_geometry_with_filled_network(
+        vec![input, conv],
+        Value::Tensor(Tensor::from_f32(vec![1.; 2 * 3 * 5], vec![2, 3, 5]).unwrap()),
+    );
+
+    let input = block_on(feature_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+    let normalization = block_on(layer_normalization_layer_builtin(vec![])).unwrap();
+    compare_training_geometry_with_filled_network(
+        vec![input, normalization],
+        Value::Tensor(Tensor::from_f32(vec![1.; 4 * 3], vec![4, 3]).unwrap()),
+    );
+
+    let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let pooling = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
+    compare_training_geometry_with_filled_network(
+        vec![input, pooling],
+        Value::Tensor(Tensor::from_f32(vec![1.; 2 * 3 * 5], vec![2, 3, 5]).unwrap()),
+    );
+}
+
+#[test]
+fn training_geometry_matches_filled_bilstm_sequence_and_last_modes() {
+    for options in [
+        Vec::new(),
+        vec![
+            Value::String("OutputMode".into()),
+            Value::String("last".into()),
+        ],
+    ] {
+        let input = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+        let recurrent = block_on(bilstm_layer_builtin(Value::Num(2.0), options)).unwrap();
+        compare_training_geometry_with_filled_network(
+            vec![input, recurrent],
+            Value::Tensor(Tensor::from_f32(vec![1.; 3 * 2 * 4], vec![3, 2, 4]).unwrap()),
+        );
+    }
+}
+
+#[test]
+fn training_geometry_reads_supplied_network_canonical_state_batch() {
+    let input_layer = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+    let recurrent = block_on(lstm_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let Value::Object(network) = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input_layer, recurrent], 2, 1).unwrap(),
+    )]))
+    .unwrap() else {
+        panic!("network expected")
+    };
+    let input = Value::Tensor(Tensor::from_f32(vec![1.; 3 * 2 * 4], vec![3, 2, 4]).unwrap());
+    let proposed =
+        admit_training_geometry(&Value::Object(network.clone()), &input, "test").unwrap();
+    let filled = HostNetworkPlan::admit(&network, &input, "test").unwrap();
+    assert_eq!(proposed.output_axes.shape(), filled.output_axes().shape());
+
+    let state = state::publish_updates(
+        &network,
+        vec![
+            StateUpdate {
+                layer_index: 1,
+                role: StateRole::HiddenState,
+                value: Tensor::new(vec![1.; 6], vec![2, 3]).unwrap(),
+            },
+            StateUpdate {
+                layer_index: 1,
+                role: StateRole::CellState,
+                value: Tensor::new(vec![1.; 6], vec![2, 3]).unwrap(),
+            },
+        ],
+        "test",
+    )
+    .unwrap();
+    let Value::Object(network) = state::apply(network, state, "test").unwrap() else {
+        panic!("updated network expected")
+    };
+    let error = admit_training_geometry(&Value::Object(network), &input, "test")
+        .err()
+        .expect("incompatible canonical State must fail");
+    assert!(
+        error.message.contains("State") || error.message.contains("state"),
+        "{error:?}"
+    );
 }
 
 fn pooling_network(input_layer: Value) -> Value {

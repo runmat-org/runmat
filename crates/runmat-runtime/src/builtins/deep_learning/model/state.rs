@@ -51,10 +51,62 @@ pub(in crate::builtins::deep_learning::model) fn admit_initial(
     Ok(())
 }
 
+/// The canonical State schema supplies recurrent initial-state geometry for
+/// training preflight, including the documented unfilled H-by-1 default.
+/// Payloads are neither allocated nor gathered at this boundary.
+pub(in crate::builtins::deep_learning) fn planned_initial_shapes(
+    layers: &[Value],
+    function: &'static str,
+) -> BuiltinResult<Vec<(usize, StateRole, Vec<usize>)>> {
+    admit_initial(layers, function)?;
+    schema::keys(layers, function)?
+        .into_iter()
+        .map(|key| {
+            let Value::Object(layer) = &layers[key.layer_index] else {
+                unreachable!("canonical state schema admitted layer objects")
+            };
+            let shape = match layer.properties.get(key.role.name()) {
+                Some(value) => {
+                    let shape =
+                        parameters::numeric_payload_shape(value, key.role.name(), function)?;
+                    if shape.contains(&0) {
+                        vec![key.channels, 1]
+                    } else {
+                        shape.to_vec()
+                    }
+                }
+                None => vec![key.channels, 1],
+            };
+            Ok((key.layer_index, key.role, shape))
+        })
+        .collect()
+}
+
 /// A typed, borrowed row from the single canonical serialized State table.
 pub(in crate::builtins::deep_learning) struct StateView<'a> {
     pub key: StateKey,
     pub value: &'a Value,
+}
+
+/// Borrow only explicitly supplied layer initial conditions. The State owner
+/// decides which recurrent roles exist (including HasStateInputs), so callers
+/// need not reproduce that schema while admitting a training route.
+pub(in crate::builtins::deep_learning) fn supplied_initial_values<'a>(
+    layers: &'a [Value],
+    function: &'static str,
+) -> BuiltinResult<Vec<StateView<'a>>> {
+    Ok(schema::keys(layers, function)?
+        .into_iter()
+        .filter_map(|key| {
+            let Value::Object(layer) = &layers[key.layer_index] else {
+                unreachable!("State schema admitted layer objects")
+            };
+            layer
+                .properties
+                .get(key.role.name())
+                .map(|value| StateView { key, value })
+        })
+        .collect())
 }
 
 pub(in crate::builtins::deep_learning) fn view<'a>(
@@ -105,6 +157,59 @@ pub(super) fn all_filled(network: &ObjectInstance, function: &'static str) -> Bu
         )
     })?;
     table::all_filled(&layers.data, stored, function)
+}
+
+/// Fill only missing canonical recurrent State rows after layer learnables have
+/// been initialized. Existing State payloads remain the authority, including
+/// their batch extent and precision. The replacement is staged and validated
+/// as a whole before changing the network.
+pub(in crate::builtins::deep_learning) fn initialize_missing(
+    network: &mut ObjectInstance,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: network is missing Layers"),
+        ));
+    };
+    let keys = schema::keys(&layers.data, function)?;
+    let current = view(network, function)?;
+    if current.iter().all(|row| {
+        parameters::numeric_payload_shape(row.value, row.key.role.name(), function)
+            .is_ok_and(|shape| !shape.contains(&0))
+    }) {
+        let initialized = parameters::all_filled(network, function)?;
+        network
+            .properties
+            .insert("Initialized".into(), Value::Bool(initialized));
+        return Ok(());
+    }
+    let defaults = table::initial_with_defaults(&layers.data, true, function)?;
+    let Value::Object(default_table) = &defaults else {
+        unreachable!("State owner constructs a table")
+    };
+    let default_values = super::table_rows::values(default_table, "State", function)?;
+    let mut values = Vec::with_capacity(keys.len());
+    for (row, default) in current.iter().zip(&default_values.data) {
+        let shape = parameters::numeric_payload_shape(row.value, row.key.role.name(), function)?;
+        values.push(if shape.contains(&0) {
+            default.clone()
+        } else {
+            parameters::public_value(Some(row.value))
+        });
+    }
+    let replacement = table::table(&keys, values, function)?;
+    table::validate_canonical(&layers.data, &replacement, function)?;
+    let initialized = parameters::all_filled(network, function)?
+        && table::all_filled(&layers.data, &replacement, function)?;
+    network
+        .properties
+        .insert(STORAGE_PROPERTY.into(), replacement);
+    network
+        .properties
+        .insert("Initialized".into(), Value::Bool(initialized));
+    Ok(())
 }
 
 pub(in crate::builtins) fn project(
@@ -253,5 +358,64 @@ mod tests {
             panic!("expected values")
         };
         assert_eq!(values.shape, [0, 1]);
+    }
+
+    #[test]
+    fn missing_state_initialization_preserves_filled_canonical_rows() {
+        let mut network = recurrent_network();
+        let Value::Cell(layers) = network.properties.get("Layers").unwrap() else {
+            panic!("Layers expected")
+        };
+        let keys = schema::keys(&layers.data, "trainnet").unwrap();
+        let supplied = Value::Tensor(Tensor::from_f32(vec![4., 5., 6.], vec![3, 1]).unwrap());
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        let partial = table::table(&keys, vec![supplied.clone(), empty], "trainnet").unwrap();
+        network.properties.insert(STORAGE_PROPERTY.into(), partial);
+
+        initialize_missing(&mut network, "trainnet").unwrap();
+        let rows = view(&network, "trainnet").unwrap();
+        let supplied_data = match rows[0].value {
+            Value::Object(wrapper) if wrapper.class_name.is(DLARRAY_CLASS) => {
+                wrapper.properties.get("Data").unwrap()
+            }
+            value => value,
+        };
+        assert_eq!(supplied_data, &supplied);
+        let default_data = match rows[1].value {
+            Value::Object(wrapper) if wrapper.class_name.is(DLARRAY_CLASS) => {
+                wrapper.properties.get("Data").unwrap()
+            }
+            value => value,
+        };
+        let Value::Tensor(default_data) = default_data else {
+            panic!("default tensor expected")
+        };
+        assert_eq!(default_data.shape, [3, 1]);
+        assert_eq!(default_data.as_f64_slice(), Some(&[0., 0., 0.][..]));
+        // Learnables are still unfilled, so filling State must not claim the
+        // entire network has been initialized.
+        assert_eq!(
+            network.properties.get("Initialized"),
+            Some(&Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn malformed_partial_state_does_not_mutate_network() {
+        let mut network = recurrent_network();
+        let Value::Object(stored) = network.properties.get(STORAGE_PROPERTY).unwrap() else {
+            panic!("State table expected")
+        };
+        let mut variables = crate::builtins::table::table_variables(stored).unwrap();
+        let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+            panic!("State values expected")
+        };
+        values.data[0] = Value::Tensor(Tensor::new(vec![1., 2.], vec![2, 1]).unwrap());
+        let invalid =
+            crate::builtins::table::table_replace_variables_like(stored, variables).unwrap();
+        network.properties.insert(STORAGE_PROPERTY.into(), invalid);
+        let original = network.clone();
+        assert!(initialize_missing(&mut network, "trainnet").is_err());
+        assert_eq!(network, original);
     }
 }

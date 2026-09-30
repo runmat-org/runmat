@@ -3,12 +3,12 @@
 use runmat_builtins::DeepLearningAxisLabel;
 use runmat_value::{NumericDType, ObjectInstance};
 
-use super::{input::ChannelPolicy, resources};
+use super::{input::ChannelPolicy, resources::ResourceShapes};
 use crate::builtins::deep_learning::model::{
     execution::host::{conv, dense, normalization, pooling, recurrent, softmax, Activation},
-    parameters::{ParameterRole, ParameterView},
+    parameters::ParameterRole,
     plan::axes::AxisPlan,
-    state::{StateRole, StateView},
+    state::StateRole,
 };
 use crate::builtins::deep_learning::{deep_learning_error, numeric_vector};
 use crate::BuiltinResult;
@@ -24,8 +24,7 @@ pub(super) fn admit(
     index: usize,
     controls: Controls,
     axes: &AxisPlan,
-    parameters: &[ParameterView<'_>],
-    state: &[StateView<'_>],
+    resources: &ResourceShapes,
     precision: NumericDType,
     channel_policy: ChannelPolicy,
     function: &'static str,
@@ -76,14 +75,14 @@ pub(super) fn admit(
         }
         Controls::Dense => dense::admit(
             axes,
-            resources::parameter_shape(parameters, index, ParameterRole::Weights, function)?,
-            resources::parameter_shape(parameters, index, ParameterRole::Bias, function)?,
+            resources.parameter_shape(index, ParameterRole::Weights, function)?,
+            resources.parameter_shape(index, ParameterRole::Bias, function)?,
         )
         .map_err(|error| fail(function, error)),
         Controls::Convolution(options) => conv::admit(
             axes,
-            resources::parameter_shape(parameters, index, ParameterRole::Weights, function)?,
-            resources::parameter_shape(parameters, index, ParameterRole::Bias, function)?,
+            resources.parameter_shape(index, ParameterRole::Weights, function)?,
+            resources.parameter_shape(index, ParameterRole::Bias, function)?,
             precision,
             options,
         )
@@ -91,26 +90,19 @@ pub(super) fn admit(
         Controls::Recurrent(options) => recurrent::admit(
             axes,
             recurrent::RecurrentParameterShapes {
-                input_weights: resources::parameter_shape(
-                    parameters,
+                input_weights: resources.parameter_shape(
                     index,
                     ParameterRole::InputWeights,
                     function,
                 )?,
-                recurrent_weights: resources::parameter_shape(
-                    parameters,
+                recurrent_weights: resources.parameter_shape(
                     index,
                     ParameterRole::RecurrentWeights,
                     function,
                 )?,
-                bias: resources::parameter_shape(parameters, index, ParameterRole::Bias, function)?,
-                initial_hidden: resources::state_shape(
-                    state,
-                    index,
-                    StateRole::HiddenState,
-                    function,
-                )?,
-                initial_cell: resources::state_shape(state, index, StateRole::CellState, function)?,
+                bias: resources.parameter_shape(index, ParameterRole::Bias, function)?,
+                initial_hidden: resources.state_shape(index, StateRole::HiddenState),
+                initial_cell: resources.state_shape(index, StateRole::CellState),
             },
             precision,
             options,
@@ -118,8 +110,8 @@ pub(super) fn admit(
         .map_err(|error| fail(function, error)),
         Controls::Normalization(options) => normalization::admit(
             axes,
-            resources::parameter_shape(parameters, index, ParameterRole::Scale, function)?,
-            resources::parameter_shape(parameters, index, ParameterRole::Offset, function)?,
+            resources.parameter_shape(index, ParameterRole::Scale, function)?,
+            resources.parameter_shape(index, ParameterRole::Offset, function)?,
             precision,
             options,
         )

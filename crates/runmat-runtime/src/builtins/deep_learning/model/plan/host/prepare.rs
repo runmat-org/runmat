@@ -9,7 +9,7 @@ use super::controls::Controls;
 use super::geometry::{HostNetworkPlan, InputPayloadKind};
 use crate::builtins::deep_learning::model::{
     execution::host::network::{self, HostExecutionResult, HostStep, HostValue},
-    parameters::ParameterRole,
+    parameters::{ParameterKey, ParameterRole},
     precision::project_owned,
     state::StateRole,
 };
@@ -18,8 +18,20 @@ use crate::BuiltinResult;
 
 pub(in crate::builtins::deep_learning) struct PreparedHostNetwork<'a> {
     plan: HostNetworkPlan<'a>,
-    parameters: HashMap<(usize, ParameterRole), Tensor>,
+    parameters: HashMap<(usize, ParameterRole), PreparedParameter>,
     state: HashMap<(usize, StateRole), Tensor>,
+}
+
+struct PreparedParameter {
+    key: ParameterKey,
+    execution: Tensor,
+    native_source: Option<Tensor>,
+}
+
+#[derive(Clone, Copy)]
+enum ParameterPreparation {
+    ExecutionOnly,
+    RetainNativeSource,
 }
 
 fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::RuntimeError {
@@ -54,20 +66,53 @@ async fn host_tensor(value: &Value, function: &'static str) -> BuiltinResult<Ten
 }
 
 impl<'a> HostNetworkPlan<'a> {
+    /// Input-only preparation does not touch the network's Learnables. A
+    /// supervised caller can prepare its full predictor once, then prepare
+    /// parameters only for the minibatch that actually executes.
+    pub(in crate::builtins::deep_learning) async fn prepare_input(
+        &self,
+        input: &Value,
+    ) -> BuiltinResult<HostValue> {
+        prepare_input(self, input).await
+    }
+
     pub(in crate::builtins::deep_learning) async fn prepare(
         self,
+    ) -> BuiltinResult<PreparedHostNetwork<'a>> {
+        self.prepare_parameters(ParameterPreparation::ExecutionOnly)
+            .await
+    }
+
+    pub(in crate::builtins::deep_learning) async fn prepare_for_training(
+        self,
+    ) -> BuiltinResult<PreparedHostNetwork<'a>> {
+        self.prepare_parameters(ParameterPreparation::RetainNativeSource)
+            .await
+    }
+
+    async fn prepare_parameters(
+        self,
+        retention: ParameterPreparation,
     ) -> BuiltinResult<PreparedHostNetwork<'a>> {
         let mut parameters = HashMap::with_capacity(self.parameters.len());
         for row in &self.parameters {
             let value = row
                 .value
                 .ok_or_else(|| fail(self.function, "network has an uninitialized parameter"))?;
-            let prepared = project_owned(
-                host_tensor(value, self.function).await?,
-                self.precision,
-                self.function,
-            )?;
-            parameters.insert((row.key.layer_index, row.key.role), prepared);
+            let original = host_tensor(value, self.function).await?;
+            let native_source = match retention {
+                ParameterPreparation::ExecutionOnly => None,
+                ParameterPreparation::RetainNativeSource => Some(original.clone()),
+            };
+            let execution = project_owned(original, self.precision, self.function)?;
+            parameters.insert(
+                (row.key.layer_index, row.key.role),
+                PreparedParameter {
+                    key: row.key.clone(),
+                    execution,
+                    native_source,
+                },
+            );
         }
         let mut state = HashMap::with_capacity(self.state.len());
         for row in &self.state {
@@ -91,43 +136,37 @@ impl PreparedHostNetwork<'_> {
         &self,
         input: &Value,
     ) -> BuiltinResult<HostValue> {
-        if self.plan.input_payload_kind == InputPayloadKind::Complex {
-            let Value::ComplexTensor(tensor) = data(input) else {
-                return Err(fail(
-                    self.plan.function,
-                    "prepared input differs from admitted complex payload",
-                ));
-            };
-            if tensor.shape != self.plan.input_axes.shape()
-                || tensor.numeric_dtype() != self.plan.precision
-                || tensor.len() != self.plan.input_axes.element_count()
-            {
-                return Err(fail(
-                    self.plan.function,
-                    "prepared complex input differs from admitted shape or precision",
-                ));
-            }
-            // ComplexTensor owns an Arc/CoW host allocation. This pins the
-            // admitted class and bytes without a host copy or demotion.
-            return Ok(HostValue::Complex(tensor.clone()));
-        }
-        let tensor = project_owned(
-            host_tensor(input, self.plan.function).await?,
-            self.plan.precision,
-            self.plan.function,
-        )?;
-        if tensor.shape != self.plan.input_axes.shape() {
-            return Err(fail(
-                self.plan.function,
-                "prepared input shape differs from admitted input",
-            ));
-        }
-        Ok(HostValue::Real(tensor))
+        prepare_input(&self.plan, input).await
+    }
+
+    /// Borrowed execution snapshot, keyed by canonical roles. Cloning a
+    /// Tensor here pins its Arc/CoW payload; it does not create a persistent
+    /// second parameter store or redownload a resident value.
+    pub(in crate::builtins::deep_learning) fn original_parameters(
+        &self,
+    ) -> Vec<(ParameterKey, Tensor)> {
+        self.plan
+            .parameters
+            .iter()
+            .map(|row| {
+                let parameter = self
+                    .parameters
+                    .get(&(row.key.layer_index, row.key.role))
+                    .expect("prepared every admitted parameter");
+                let tensor = parameter
+                    .native_source
+                    .as_ref()
+                    .expect("training preparation retains native source")
+                    .clone();
+                (parameter.key.clone(), tensor)
+            })
+            .collect()
     }
 
     fn parameter(&self, index: usize, role: ParameterRole) -> &Tensor {
         self.parameters
             .get(&(index, role))
+            .map(|parameter| &parameter.execution)
             .expect("pure plan admitted every consumed parameter")
     }
 
@@ -191,4 +230,39 @@ impl PreparedHostNetwork<'_> {
         }
         Ok(result)
     }
+}
+
+async fn prepare_input(plan: &HostNetworkPlan<'_>, input: &Value) -> BuiltinResult<HostValue> {
+    if plan.input_payload_kind == InputPayloadKind::Complex {
+        let Value::ComplexTensor(tensor) = data(input) else {
+            return Err(fail(
+                plan.function,
+                "prepared input differs from admitted complex payload",
+            ));
+        };
+        if tensor.shape != plan.input_axes.shape()
+            || tensor.numeric_dtype() != plan.precision
+            || tensor.len() != plan.input_axes.element_count()
+        {
+            return Err(fail(
+                plan.function,
+                "prepared complex input differs from admitted shape or precision",
+            ));
+        }
+        // ComplexTensor owns an Arc/CoW host allocation. This pins the
+        // admitted class and bytes without a host copy or demotion.
+        return Ok(HostValue::Complex(tensor.clone()));
+    }
+    let tensor = project_owned(
+        host_tensor(input, plan.function).await?,
+        plan.precision,
+        plan.function,
+    )?;
+    if tensor.shape != plan.input_axes.shape() {
+        return Err(fail(
+            plan.function,
+            "prepared input shape differs from admitted input",
+        ));
+    }
+    Ok(HostValue::Real(tensor))
 }

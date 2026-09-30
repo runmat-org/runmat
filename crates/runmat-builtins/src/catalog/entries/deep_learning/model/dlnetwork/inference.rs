@@ -3,8 +3,8 @@ use crate::{
     BuiltinCatalogEntry, DeepLearningLayerKind, DeepLearningNetworkOption,
 };
 use runmat_types::{
-    standard, CallInference, CallRequest, CellFact, DynamicReason, ObjectFact, ShapeFact,
-    StaticClassIdentity, StorageFact, StructFact, ValueFact, ValueKindFact,
+    standard, CallInference, CallRequest, CellFact, DynamicReason, NumericDomain, ObjectFact,
+    ShapeFact, StaticClassIdentity, StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -227,10 +227,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ) {
             let admissible = match DeepLearningNetworkOption::from_name(&option) {
                 Some(DeepLearningNetworkOption::Initialize) => {
-                    matches!(
-                        &value.kind,
-                        ValueKindFact::Logical | ValueKindFact::Numeric(_) | ValueKindFact::Unknown
-                    ) && value.shape.element_count().is_none_or(|count| count == 1)
+                    let class_possible = match &value.kind {
+                        ValueKindFact::Logical | ValueKindFact::Unknown => true,
+                        ValueKindFact::Numeric(numeric) => numeric.domain == NumericDomain::Real,
+                        _ => false,
+                    };
+                    let literal_possible = request
+                        .literals
+                        .numeric_at(index + 1)
+                        .is_none_or(|number| number == 0.0 || number == 1.0);
+                    class_possible
+                        && literal_possible
+                        && value.shape.element_count().is_none_or(|count| count == 1)
                 }
                 Some(DeepLearningNetworkOption::OutputNames) => {
                     matches!(

@@ -10,8 +10,7 @@ pub(in crate::builtins) const DLARRAY_CLASS: runmat_types::StaticClassIdentity =
 pub(in crate::builtins) const LAYER_GRAPH_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("nnet.cnn.LayerGraph");
 pub(in crate::builtins) use runmat_builtins::{
-    CLASSIFICATION_OUTPUT_LAYER_CLASS, ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS,
-    FULLY_CONNECTED_LAYER_CLASS, REGRESSION_OUTPUT_LAYER_CLASS, RELU_LAYER_CLASS,
+    ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS, RELU_LAYER_CLASS,
     SOFTMAX_LAYER_CLASS,
 };
 pub(in crate::builtins) const TRAINING_OPTIONS_CLASS: runmat_types::StaticClassIdentity =

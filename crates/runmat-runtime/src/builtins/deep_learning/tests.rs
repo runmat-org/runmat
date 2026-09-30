@@ -2238,6 +2238,52 @@ fn supervised_rejects_mutated_elu_alpha_before_resident_predictor_download() {
 }
 
 #[test]
+fn supervised_integer_learnable_rejects_before_initializer_callback_and_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let predictor = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 1.0],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        let Value::Cell(mut layers) = regression_training_layers() else {
+            panic!("expected regression layers")
+        };
+        let Value::Object(fc) = &mut layers.data[1] else {
+            panic!("expected fully connected layer")
+        };
+        fc.properties.insert(
+            "Weights".into(),
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I32(vec![1]), vec![1, 1]).unwrap()),
+        );
+        fc.properties.insert(
+            "Bias".into(),
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+        );
+        fc.properties.insert(
+            "BiasInitializer".into(),
+            Value::FunctionHandle("__missing_training_initializer_callback".into()),
+        );
+        provider.reset_telemetry();
+        let error = block_on(train_network_builtin(vec![
+            Value::GpuTensor(predictor),
+            Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+            Value::Cell(layers),
+            adam_training_options(),
+        ]))
+        .unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("filled Weights must be single or double"),
+            "{error:?}"
+        );
+        assert!(!error.message.contains("initializer"), "{error:?}");
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
 fn supervised_rejects_empty_predictor_observations() {
     let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap());
     let error = block_on(train_network_builtin(vec![
@@ -2248,6 +2294,33 @@ fn supervised_rejects_empty_predictor_observations() {
     ]))
     .unwrap_err();
     assert!(error.message.contains("at least one observation"));
+}
+
+#[test]
+fn supervised_target_mismatch_precedes_initializer_admission_and_effects() {
+    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let mut dense = block_on(fully_connected_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+    let Value::Object(ref mut dense_object) = dense else {
+        panic!("fully connected layer expected")
+    };
+    // If target admission were delayed until after initialization, this
+    // deliberately invalid initializer would win (and a callable one could
+    // run). The target mismatch must be rejected while the plan is pure.
+    dense_object.properties.insert(
+        "WeightsInitializer".into(),
+        Value::String("not-an-initializer".into()),
+    );
+    let layers = Value::Cell(CellArray::new(vec![input, dense], 2, 1).unwrap());
+    let error = block_on(trainnet_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.; 4], vec![2, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.; 2], vec![2, 1]).unwrap()),
+        layers,
+        Value::String("mse".into()),
+        adam_training_options(),
+    ]))
+    .unwrap_err();
+    assert!(error.message.contains("Y has 1 channels"), "{error:?}");
+    assert!(!error.message.contains("WeightsInitializer"), "{error:?}");
 }
 
 #[test]
@@ -2327,7 +2400,15 @@ fn supervised_training_gathers_only_consumed_nested_learnables() {
         };
         fc.properties
             .insert("Weights".into(), Value::GpuTensor(weights));
-        fc.properties
+        // Unknown layer options are rejected by the typed layer schema. Put
+        // this unrelated resident payload in opaque network metadata instead
+        // and verify training still downloads only the consumed learnable.
+        let mut network = block_on(dlnetwork_builtin(vec![Value::Cell(layers)])).unwrap();
+        let Value::Object(network_object) = &mut network else {
+            panic!("network expected")
+        };
+        network_object
+            .properties
             .insert("Unrelated".into(), Value::GpuTensor(unrelated));
         let options = block_on(training_options_builtin(
             Value::String("adam".into()),
@@ -2338,7 +2419,7 @@ fn supervised_training_gathers_only_consumed_nested_learnables() {
         let trained = block_on(train_network_builtin(vec![
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
-            Value::Cell(layers),
+            network,
             options,
         ]))
         .unwrap();

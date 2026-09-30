@@ -17,13 +17,14 @@ pub(in crate::builtins::deep_learning) use schema::{
     ParameterKey, ParameterRole, ParameterShape, ParameterView,
 };
 pub(in crate::builtins::deep_learning) use tape_values::install_annotated;
-pub(super) use validation::numeric_payload_shape;
+pub(in crate::builtins::deep_learning) use validation::numeric_payload_shape;
 use validation::{empty_parameter, parameter_data, validate_parameter};
 pub(in crate::builtins::deep_learning) use view::{view, view_layers};
 
 pub(in crate::builtins) use projection::project;
 pub(super) use projection::public_value;
 pub(in crate::builtins) use update::apply;
+pub(in crate::builtins::deep_learning) use update::{apply_updates, ParameterUpdate};
 pub(in crate::builtins) use view::validate_matching_networks;
 
 pub(in crate::builtins::deep_learning) fn validate_initialized_parameter(

@@ -2,7 +2,7 @@
 
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
 
-pub(super) trait Real:
+pub(in crate::builtins::deep_learning) trait Real:
     Copy
     + Add<Output = Self>
     + AddAssign
@@ -19,6 +19,7 @@ pub(super) trait Real:
     fn is_nan(self) -> bool;
     fn sqrt(self) -> Self;
     fn exp(self) -> Self;
+    fn ln(self) -> Self;
 }
 
 impl Real for f32 {
@@ -46,6 +47,9 @@ impl Real for f32 {
     fn exp(self) -> Self {
         self.exp()
     }
+    fn ln(self) -> Self {
+        self.ln()
+    }
 }
 
 impl Real for f64 {
@@ -72,5 +76,8 @@ impl Real for f64 {
     }
     fn exp(self) -> Self {
         self.exp()
+    }
+    fn ln(self) -> Self {
+        self.ln()
     }
 }

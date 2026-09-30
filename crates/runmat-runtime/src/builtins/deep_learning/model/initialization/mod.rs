@@ -144,3 +144,13 @@ pub(in crate::builtins) async fn initialise_layers(
     }
     Ok(())
 }
+
+/// Reuse the initializer's effect-free structural plan when training needs
+/// output geometry before the first random draw or user callback. Only small
+/// shape metadata escapes; no parameter payload or initializer is run here.
+pub(in crate::builtins::deep_learning) fn planned_parameter_shapes(
+    layers: &[Value],
+    function: &'static str,
+) -> BuiltinResult<Vec<(usize, ParameterRole, Vec<usize>)>> {
+    plan::planned_shapes(layers, function)
+}

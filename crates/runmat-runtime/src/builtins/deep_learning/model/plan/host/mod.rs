@@ -4,7 +4,7 @@ mod controls;
 mod geometry;
 mod prepare;
 
-pub(in crate::builtins::deep_learning) use geometry::HostNetworkPlan;
+pub(in crate::builtins::deep_learning) use geometry::{admit_training_geometry, HostNetworkPlan};
 
 impl HostNetworkPlan<'_> {
     pub(in crate::builtins::deep_learning) fn output_axes(&self) -> &super::axes::AxisPlan {

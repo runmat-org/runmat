@@ -1,6 +1,7 @@
 //! Typed per-role initializer selection and effect-free admission.
 use super::*;
 use runmat_builtins::DeepLearningLayerKind;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum BuiltinInitializer {
@@ -223,11 +224,53 @@ fn admit_builtin(
     Ok(())
 }
 
+fn missing_shapes(
+    rows: &[parameters::ParameterView<'_>],
+    function: &'static str,
+) -> BuiltinResult<HashMap<(usize, ParameterRole), Vec<usize>>> {
+    let mut shapes = HashMap::new();
+    for row in rows {
+        let needs_value = match row.value {
+            None => true,
+            Some(value) => parameters::numeric_payload_shape(value, row.key.role.name(), function)?
+                .contains(&0),
+        };
+        if needs_value {
+            shapes.insert(
+                (row.key.layer_index, row.key.role),
+                exact_shape(&row.expected_shape, row.key.role, function)?,
+            );
+        }
+    }
+    Ok(shapes)
+}
+
+/// Only the geometry needed by training's target admission. Initializer
+/// policy and callbacks are checked after the target has been admitted, but
+/// before any initializer effect.
+pub(super) fn planned_shapes(
+    layers: &[Value],
+    function: &'static str,
+) -> BuiltinResult<Vec<(usize, ParameterRole, Vec<usize>)>> {
+    super::super::state::admit_initial(layers, function)?;
+    let rows = parameters::view_layers(layers, function)?;
+    let shapes = missing_shapes(&rows, function)?;
+    Ok(rows
+        .iter()
+        .filter_map(|row| {
+            shapes
+                .get(&(row.key.layer_index, row.key.role))
+                .map(|shape| (row.key.layer_index, row.key.role, shape.clone()))
+        })
+        .collect())
+}
+
 pub(super) fn tasks(layers: &[Value], function: &'static str) -> BuiltinResult<Vec<Task>> {
     // The canonical State schema and every existing parameter are admitted
     // before either a random draw or callback can occur.
     super::super::state::admit_initial(layers, function)?;
     let rows = parameters::view_layers(layers, function)?;
+    let planned = missing_shapes(&rows, function)?;
     let mut layer_precision = vec![None; layers.len()];
     for row in &rows {
         if let Some(value) = row.value {
@@ -262,21 +305,15 @@ pub(super) fn tasks(layers: &[Value], function: &'static str) -> BuiltinResult<V
         let kind = DeepLearningLayerKind::from_identity(&layer.class_name)
             .expect("canonical parameter view admitted known classes");
         let initializer = parse_initializer(layer, kind, row.key.role, function)?;
-        let needs_value = match row.value {
-            None => true,
-            Some(value) => parameters::numeric_payload_shape(value, row.key.role.name(), function)?
-                .contains(&0),
-        };
-        if needs_value {
-            let shape = exact_shape(&row.expected_shape, row.key.role, function)?;
+        if let Some(shape) = planned.get(&(row.key.layer_index, row.key.role)) {
             if let Initializer::Builtin(builtin) = &initializer {
-                admit_builtin(*builtin, kind, &shape, function)?;
+                admit_builtin(*builtin, kind, shape, function)?;
             }
             tasks.push(Task {
                 layer_index: row.key.layer_index,
                 kind,
                 role: row.key.role,
-                shape,
+                shape: shape.clone(),
                 expected_shape: row.expected_shape,
                 precision: layer_precision[row.key.layer_index],
                 initializer,

@@ -1,6 +1,9 @@
 use super::*;
 use runmat_builtins::TrainingOptionKey as O;
+use runmat_value::ObjectInstance;
 use std::collections::HashMap;
+
+use crate::builtins::deep_learning::{numeric_values, positive_usize, scalar_text};
 
 #[cfg(test)]
 mod tests;

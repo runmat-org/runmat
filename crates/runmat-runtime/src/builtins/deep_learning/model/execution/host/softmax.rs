@@ -82,7 +82,15 @@ impl ChannelGeometry {
         })
     }
 
-    fn base(&self, mut sample: usize) -> usize {
+    pub(in crate::builtins::deep_learning) fn samples(&self) -> usize {
+        self.samples
+    }
+
+    pub(in crate::builtins::deep_learning) fn channels(&self) -> usize {
+        self.channels
+    }
+
+    pub(in crate::builtins::deep_learning) fn base(&self, mut sample: usize) -> usize {
         let mut offset = 0;
         for (&extent, &stride) in self.other_extents.iter().zip(&self.other_strides) {
             offset += (sample % extent) * stride;
@@ -90,7 +98,7 @@ impl ChannelGeometry {
         }
         offset
     }
-    fn offset(&self, base: usize, channel: usize) -> usize {
+    pub(in crate::builtins::deep_learning) fn offset(&self, base: usize, channel: usize) -> usize {
         base + channel * self.channel_stride
     }
 }
