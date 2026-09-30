@@ -77,6 +77,83 @@ pub struct ExecutionCostEstimate {
     pub source: EstimateSource,
 }
 
+/// Candidate assembly must not turn missing route evidence into a zero-cost
+/// estimate. Only `Estimated` can enter a numeric placement graph.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CandidateCostEvidence {
+    Estimated(ExecutionCostEstimate),
+    Unavailable(CandidateCostUnavailable),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CandidateCostUnavailable {
+    NoEstimate,
+    NoObservations,
+    InsufficientObservations { successful: u64, failed: u64 },
+    RepeatedFailures { failed: u64 },
+    StaleObservations,
+}
+
+impl CandidateCostEvidence {
+    pub const fn from_estimate(estimate: Option<ExecutionCostEstimate>) -> Self {
+        match estimate {
+            Some(estimate) => Self::Estimated(estimate),
+            None => Self::Unavailable(CandidateCostUnavailable::NoEstimate),
+        }
+    }
+
+    pub const fn estimate(self) -> Option<ExecutionCostEstimate> {
+        match self {
+            Self::Estimated(estimate) => Some(estimate),
+            Self::Unavailable(_) => None,
+        }
+    }
+
+    /// The caller supplies independently admitted scratch demand. A completed
+    /// duration is a full-route observation, so its component is not split
+    /// into guessed upload/kernel/download times.
+    pub const fn from_observation(
+        observation: CandidateObservationEvidence,
+        scratch_bytes: u64,
+    ) -> Self {
+        match observation {
+            CandidateObservationEvidence::Observed(duration) => {
+                Self::Estimated(ExecutionCostEstimate {
+                    components: ExecutionCostComponents {
+                        compile_or_prepare_ns: 0,
+                        upload_ns: 0,
+                        allocation_ns: 0,
+                        queue_ns: 0,
+                        execution_ns: duration.elapsed_ns,
+                        synchronization_ns: 0,
+                        download_ns: 0,
+                        downstream_ns: 0,
+                    },
+                    scratch_bytes,
+                    confidence: duration.confidence,
+                    source: EstimateSource::Observation,
+                })
+            }
+            CandidateObservationEvidence::Unavailable(reason) => Self::Unavailable(reason),
+        }
+    }
+}
+
+/// Feedback measures completed wall time, not peak/scratch allocation or
+/// individual transfer stages. Candidate assembly retains those independent
+/// facts when combining this observation with its own legal route.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObservedCandidateDuration {
+    pub elapsed_ns: u64,
+    pub confidence: EstimateConfidence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CandidateObservationEvidence {
+    Observed(ObservedCandidateDuration),
+    Unavailable(CandidateCostUnavailable),
+}
+
 impl ExecutionCostEstimate {
     pub fn checked_total_ns(self) -> Option<u64> {
         self.components.checked_total_ns()
@@ -117,5 +194,25 @@ mod tests {
             ..ExecutionCostComponents::default()
         };
         assert_eq!(overflow.checked_total_ns(), None);
+        assert_eq!(
+            CandidateCostEvidence::from_estimate(None),
+            CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate)
+        );
+        assert_eq!(
+            CandidateCostEvidence::from_estimate(Some(estimate)).estimate(),
+            Some(estimate)
+        );
+        let observed = CandidateCostEvidence::from_observation(
+            CandidateObservationEvidence::Observed(ObservedCandidateDuration {
+                elapsed_ns: 75,
+                confidence: EstimateConfidence::Medium,
+            }),
+            4_096,
+        )
+        .estimate()
+        .unwrap();
+        assert_eq!(observed.checked_total_ns(), Some(75));
+        assert_eq!(observed.scratch_bytes, 4_096);
+        assert_eq!(observed.source, EstimateSource::Observation);
     }
 }

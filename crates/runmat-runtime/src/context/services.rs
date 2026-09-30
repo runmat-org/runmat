@@ -204,6 +204,20 @@ pub trait RuntimePlacementFeedbackSource: Send {
 /// executor-neutral contracts; candidate generation and policy remain in their
 /// owning executor/acceleration crates.
 pub trait RuntimePlacementService {
+    /// A duration measured for this exact signature and candidate. The
+    /// default makes third-party services conservative: absence of a lookup
+    /// does not authorize inventing a numeric route cost.
+    fn observed_candidate_duration(
+        &self,
+        _signature: &runmat_execution::PlacementSignature,
+        _candidate: &str,
+        _kind: runmat_execution::ExecutionCandidateKind,
+    ) -> runmat_execution::CandidateObservationEvidence {
+        runmat_execution::CandidateObservationEvidence::Unavailable(
+            runmat_execution::CandidateCostUnavailable::NoObservations,
+        )
+    }
+
     fn plan(
         &self,
         request: runmat_execution::PlacementPlanRequest,
@@ -713,6 +727,46 @@ impl RuntimeServicePorts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn third_party_placement_service_has_no_invented_observation() {
+        struct ExternalPlacement;
+        impl RuntimePlacementService for ExternalPlacement {
+            fn plan(
+                &self,
+                _: runmat_execution::PlacementPlanRequest,
+            ) -> Result<runmat_execution::PlacementDecision, RuntimeError> {
+                unreachable!("observation lookup does not plan")
+            }
+            fn observe(&self, _: runmat_execution::PlacementFeedback) -> Result<(), RuntimeError> {
+                unreachable!("observation lookup does not submit feedback")
+            }
+            fn invalidate(&self, _: runmat_execution::PlacementInvalidation) {}
+        }
+        let digest = runmat_execution::Digest::sha256(b"revision");
+        let signature = runmat_execution::PlacementSignature {
+            region: None,
+            operation: "route".into(),
+            runtime_facts: digest,
+            revision: runmat_execution::PlacementRevision {
+                program: None,
+                catalog: digest,
+                compiler: digest,
+                provider: digest,
+                policy: digest,
+            },
+        };
+        assert_eq!(
+            ExternalPlacement.observed_candidate_duration(
+                &signature,
+                "provider.route",
+                runmat_execution::ExecutionCandidateKind::ProviderGraph,
+            ),
+            runmat_execution::CandidateObservationEvidence::Unavailable(
+                runmat_execution::CandidateCostUnavailable::NoObservations,
+            )
+        );
+    }
 
     #[test]
     fn absent_ports_report_stable_typed_capabilities() {

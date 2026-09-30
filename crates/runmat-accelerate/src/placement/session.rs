@@ -2,13 +2,15 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use runmat_execution::{
-    Digest, EstimateConfidence, EstimateSource, ExecutionCostComponents, PlacementDecision,
-    PlacementFeedback, PlacementInvalidation, PlacementPlanRequest, SelectedExecutionCandidate,
+    CandidateCostUnavailable, CandidateObservationEvidence, Digest, EstimateSource,
+    ExecutionCandidateKind, ExecutionCostComponents, PlacementDecision, PlacementFeedback,
+    PlacementInvalidation, PlacementPlanRequest, PlacementSignature, SelectedExecutionCandidate,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{partition::evaluate_selections, partition::solve_partition, PlacementPolicy};
+mod evidence;
 mod pending;
 
 pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 1;
@@ -258,6 +260,21 @@ impl PlacementSession {
         self.record_feedback(feedback)
     }
 
+    pub fn observed_candidate_duration(
+        &self,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+    ) -> CandidateObservationEvidence {
+        self.drain_observations();
+        let state = self.state.borrow();
+        let key = (signature.cache_key(), candidate.to_owned());
+        state.feedback.get(&key).map_or(
+            CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
+            |series| evidence::from_series(series, state.tick, kind),
+        )
+    }
+
     fn record_feedback(&self, feedback: PlacementFeedback) -> Result<(), PlacementPlanError> {
         if feedback.signature.validate().is_err()
             || feedback.candidate.is_empty()
@@ -446,6 +463,14 @@ fn valid_profile_series(series: &PlacementFeedbackSeries) -> bool {
 }
 
 impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
+    fn observed_candidate_duration(
+        &self,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+    ) -> CandidateObservationEvidence {
+        PlacementSession::observed_candidate_duration(self, signature, candidate, kind)
+    }
     fn defer_feedback(
         &self,
         source: Box<dyn runmat_runtime::context::RuntimePlacementFeedbackSource>,
@@ -508,35 +533,21 @@ fn apply_feedback_estimates(
             let Some(series) = feedback.get(&key) else {
                 continue;
             };
-            if tick.saturating_sub(series.latest_tick) > 1_024 {
-                continue;
-            }
-            if series.failures >= 2 && candidate.descriptor.kind.is_provider() {
-                candidate.resources.queue_slots = u32::MAX;
-                continue;
-            }
-            if series.samples >= 2 {
-                if let Some(mean) = series.mean_ns() {
+            match evidence::from_series(series, tick, candidate.descriptor.kind) {
+                CandidateObservationEvidence::Observed(duration) => {
                     candidate.descriptor.cost.components = ExecutionCostComponents {
-                        execution_ns: mean,
+                        execution_ns: duration.elapsed_ns,
                         ..ExecutionCostComponents::default()
                     };
-                    let deviation = integer_sqrt(series.variance_ns2().unwrap_or(0));
-                    let variation_basis_points = if mean == 0 {
-                        u128::MAX
-                    } else {
-                        deviation.saturating_mul(10_000) / u128::from(mean)
-                    };
-                    candidate.descriptor.cost.confidence =
-                        if series.samples >= 8 && variation_basis_points <= 1_000 {
-                            EstimateConfidence::High
-                        } else if variation_basis_points > 5_000 {
-                            EstimateConfidence::Low
-                        } else {
-                            EstimateConfidence::Medium
-                        };
+                    candidate.descriptor.cost.confidence = duration.confidence;
                     candidate.descriptor.cost.source = EstimateSource::Observation;
                 }
+                CandidateObservationEvidence::Unavailable(
+                    CandidateCostUnavailable::RepeatedFailures { .. },
+                ) if candidate.descriptor.kind.is_provider() => {
+                    candidate.resources.queue_slots = u32::MAX;
+                }
+                CandidateObservationEvidence::Unavailable(_) => {}
             }
         }
     }
@@ -673,10 +684,10 @@ mod tests {
 
     use runmat_execution::{
         CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
-        CandidateResourceDemand, ExecutionCandidateDescriptor, ExecutionCandidateKind,
-        ExecutionCostComponents, ExecutionCostEstimate, PlacementGraph, PlacementGraphCandidate,
-        PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode, PlacementResourceSnapshot,
-        PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
+        CandidateResourceDemand, EstimateConfidence, ExecutionCandidateDescriptor,
+        ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate, PlacementGraph,
+        PlacementGraphCandidate, PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode,
+        PlacementResourceSnapshot, PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
     };
 
     use super::*;
@@ -1176,6 +1187,179 @@ mod tests {
         let restored = PlacementSession::default();
         restored.restore_profile(snapshot).unwrap();
         assert_eq!(restored.profile_snapshot().feedback.len(), 2);
+    }
+
+    #[test]
+    fn observed_duration_requires_two_successes_and_tracks_revision_invalidation() {
+        use runmat_execution::{
+            CandidateCostUnavailable as Missing, CandidateObservationEvidence as E,
+        };
+
+        let session = PlacementSession::default();
+        let signature = signature("whole-route");
+        let candidate = "provider.whole-route";
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::NoObservations)
+        );
+        session
+            .observe(PlacementFeedback {
+                signature: signature.clone(),
+                candidate: candidate.into(),
+                total_elapsed_ns: 8,
+                succeeded: false,
+            })
+            .unwrap();
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::InsufficientObservations {
+                successful: 0,
+                failed: 1
+            })
+        );
+        for elapsed_ns in [100, 120] {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.into(),
+                    total_elapsed_ns: elapsed_ns,
+                    succeeded: true,
+                })
+                .unwrap();
+            if elapsed_ns == 100 {
+                assert_eq!(
+                    session.observed_candidate_duration(
+                        &signature,
+                        candidate,
+                        ExecutionCandidateKind::ProviderGraph
+                    ),
+                    E::Unavailable(Missing::InsufficientObservations {
+                        successful: 1,
+                        failed: 1
+                    })
+                );
+            }
+        }
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Observed(runmat_execution::ObservedCandidateDuration {
+                elapsed_ns: 110,
+                confidence: EstimateConfidence::Medium,
+            })
+        );
+        let port: &dyn runmat_runtime::context::RuntimePlacementService = &session;
+        assert_eq!(
+            port.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            )
+        );
+        let series = session.profile_snapshot().feedback.pop().unwrap();
+        assert_eq!(
+            evidence::from_series(
+                &series,
+                series.latest_tick + 1_025,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::StaleObservations)
+        );
+        for _ in 0..6 {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.into(),
+                    total_elapsed_ns: 110,
+                    succeeded: true,
+                })
+                .unwrap();
+        }
+        assert!(matches!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Observed(runmat_execution::ObservedCandidateDuration {
+                confidence: EstimateConfidence::High,
+                ..
+            })
+        ));
+        let mut different_revision = signature.clone();
+        different_revision.revision.provider = digest("new-provider");
+        assert_eq!(
+            session.observed_candidate_duration(
+                &different_revision,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::NoObservations)
+        );
+        session.invalidate(PlacementInvalidation::Provider {
+            digest: signature.revision.provider.clone(),
+        });
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::NoObservations)
+        );
+    }
+
+    #[test]
+    fn repeated_failures_suppress_observation_without_fabricating_cost() {
+        use runmat_execution::{
+            CandidateCostUnavailable as Missing, CandidateObservationEvidence as E,
+        };
+
+        let session = PlacementSession::default();
+        let signature = signature("failed-route");
+        let candidate = "provider.failed-route";
+        for succeeded in [true, true, false, false] {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.into(),
+                    total_elapsed_ns: 100,
+                    succeeded,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::RepeatedFailures { failed: 2 })
+        );
+        assert!(matches!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            E::Observed(_)
+        ));
     }
 
     #[test]

@@ -9,7 +9,9 @@ pub use candidate::{
     ExecutionCandidateDescriptor, ExecutionCandidateKind,
 };
 pub use cost::{
+    CandidateCostEvidence, CandidateCostUnavailable, CandidateObservationEvidence,
     EstimateConfidence, EstimateSource, ExecutionCostComponents, ExecutionCostEstimate,
+    ObservedCandidateDuration,
 };
 pub use decision::{
     PlacementDecision, PlacementFeedback, PlacementInvalidation, PlacementRevision,

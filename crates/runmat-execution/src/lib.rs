@@ -48,13 +48,14 @@ pub use identity::{
     Digest, DomainContribution, LanguageCompatibilityMode, ProgramEnvironment, ProgramRevision,
 };
 pub use placement::{
-    CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
+    CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
+    CandidateObservationEvidence, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, EstimateConfidence, EstimateSource, ExecutionCandidateDescriptor,
-    ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate, PlacementDecision,
-    PlacementFeedback, PlacementGraph, PlacementGraphCandidate, PlacementGraphEdge,
-    PlacementGraphLimits, PlacementGraphNode, PlacementInvalidation, PlacementPlanRequest,
-    PlacementResourceSnapshot, PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
-    SelectedExecutionCandidate,
+    ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate,
+    ObservedCandidateDuration, PlacementDecision, PlacementFeedback, PlacementGraph,
+    PlacementGraphCandidate, PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode,
+    PlacementInvalidation, PlacementPlanRequest, PlacementResourceSnapshot, PlacementRevision,
+    PlacementSignature, ProviderResourceSnapshot, SelectedExecutionCandidate,
 };
 pub use runmat_types::ProgramFunctionId;
 pub use state::{CancellationReason, PoolState};
