@@ -7,6 +7,9 @@ use runmat_runtime::{
 use runmat_value::{CellArray, StructArray, StructValue, Tensor, Value};
 use std::{cell::RefCell, rc::Rc};
 
+#[path = "deep_learning_callback_context/lifecycle.rs"]
+mod lifecycle;
+
 thread_local! {
     static CALLBACKS: RefCell<Vec<(runmat_runtime::context::RuntimeContextLocalId, Option<usize>)>> =
         const { RefCell::new(Vec::new()) };
