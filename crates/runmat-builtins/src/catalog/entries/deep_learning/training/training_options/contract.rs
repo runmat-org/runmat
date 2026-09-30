@@ -1,7 +1,11 @@
 use crate::*;
 
-pub const TRAINING_OPTIONS_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptions");
+pub const TRAINING_OPTIONS_SGDM_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptionsSGDM");
+pub const TRAINING_OPTIONS_RMSPROP_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptionsRMSProp");
+pub const TRAINING_OPTIONS_ADAM_CLASS: runmat_types::StaticClassIdentity =
+    runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptionsADAM");
 
 /// Solver identity and solver-dependent defaults shared by the constructor,
 /// static inference, and the runtime consumer. Text is parsed only at the
@@ -14,6 +18,22 @@ pub enum TrainingSolver {
 }
 
 impl TrainingSolver {
+    pub const ALL: [Self; 3] = [Self::Sgdm, Self::Rmsprop, Self::Adam];
+
+    pub const fn class_identity(self) -> runmat_types::StaticClassIdentity {
+        match self {
+            Self::Sgdm => TRAINING_OPTIONS_SGDM_CLASS,
+            Self::Rmsprop => TRAINING_OPTIONS_RMSPROP_CLASS,
+            Self::Adam => TRAINING_OPTIONS_ADAM_CLASS,
+        }
+    }
+
+    pub fn from_identity(identity: &runmat_types::ClassIdentity) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|solver| identity.is(solver.class_identity()))
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         Some(match name.to_ascii_lowercase().as_str() {
             "sgdm" => Self::Sgdm,

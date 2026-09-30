@@ -39,7 +39,7 @@ fn literal_option_names_preserve_value_facts_in_host_object() {
     };
     assert_eq!(
         object.runtime_class,
-        Some(runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptions").owned())
+        Some(super::TrainingSolver::Adam.class_identity().owned())
     );
     assert_eq!(object.properties["MaxEpochs"], integer);
     assert!(object.properties_complete);
@@ -87,6 +87,15 @@ fn solver_literal_controls_closed_property_set_but_unknown_solver_keeps_common_f
         };
         assert!(object.properties_complete, "{name}");
         assert_eq!(
+            object.runtime_class,
+            Some(
+                super::TrainingSolver::from_name(name)
+                    .unwrap()
+                    .class_identity()
+                    .owned()
+            )
+        );
+        assert_eq!(
             object.properties.contains_key("SquaredGradientDecayFactor"),
             expected_squared,
             "{name}"
@@ -100,6 +109,7 @@ fn solver_literal_controls_closed_property_set_but_unknown_solver_keeps_common_f
         panic!("expected options object")
     };
     assert!(!object.properties_complete);
+    assert!(object.runtime_class.is_none());
     assert!(object.properties.contains_key("InitialLearnRate"));
     assert!(!object.properties.contains_key("SquaredGradientDecayFactor"));
 }

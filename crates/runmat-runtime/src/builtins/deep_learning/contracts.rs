@@ -13,8 +13,6 @@ pub(in crate::builtins) use runmat_builtins::{
     ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS, RELU_LAYER_CLASS,
     SOFTMAX_LAYER_CLASS,
 };
-pub(in crate::builtins) const TRAINING_OPTIONS_CLASS: runmat_types::StaticClassIdentity =
-    runmat_builtins::TRAINING_OPTIONS_CLASS;
 
 pub(super) const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.INVALID_INPUT",

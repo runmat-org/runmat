@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("trainingOptions"),
     slug: Some("trainingOptions"),
     summary: "Create a host training-configuration object.",
-    description: "`trainingOptions(solver, Name, Value, ...)` stores training metadata for the supported `sgdm`, `adam`, and `rmsprop` solver names. It does not start training or run a provider kernel.",
+    description: "`trainingOptions(solver, Name, Value, ...)` creates solver-specific host configuration for `sgdm`, `adam`, or `rmsprop`. It does not start training or run a provider kernel.",
     keywords: &["trainingOptions", "deep learning", "training", "Adam", "SGDM", "RMSProp"],
     related: &["trainNetwork", "trainnet", "adamupdate"],
     sections: &[
@@ -20,7 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Solvers and options",
             paragraphs: &[
                 "The constructor recognizes `sgdm`, `adam`, and `rmsprop`. It initializes `MaxEpochs`, `MiniBatchSize`, `InitialLearnRate`, `Shuffle`, `Verbose`, `Plots`, and `ExecutionEnvironment`, then stores supplied name-value options as properties. `MaxEpochs` and `MiniBatchSize` default to 30 and 128; the initial learning rate is 0.01 for SGDM and 0.001 for Adam and RMSProp.",
-                "`trainNetwork` and `trainnet` consume the supported in-memory feed-forward subset of `sgdm` and `adam` options. `rmsprop` configuration is constructible metadata, but RMSProp training execution is not implemented and reports a training error. Additional stored option properties are not a promise that every training loop interprets them.",
+                "The result has class `nnet.cnn.TrainingOptionsSGDM`, `nnet.cnn.TrainingOptionsADAM`, or `nnet.cnn.TrainingOptionsRMSProp`, matching the positional solver. `trainNetwork` and `trainnet` execute supported host training forms for all three solvers. Operational options that a training route cannot consume are rejected before training effects rather than silently ignored.",
             ],
         },
         BuiltinDocumentationSection {
@@ -48,7 +48,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "Does constructing RMSProp options run RMSProp training?",
-            answer: "No. This constructor creates metadata. RMSProp execution is not part of the supported training slice.",
+            answer: "No. This constructor only creates options; the supported host training route applies RMSProp when those options are passed to `trainNetwork` or `trainnet`.",
         },
         BuiltinDocumentationFaq {
             question: "Are typed integer option values converted to double?",
@@ -70,7 +70,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         verification: &[BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,
             label: "Training option defaults, exact value retention, and solver admission",
-            location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs",
+            location: "crates/runmat-runtime/src/builtins/deep_learning/supervised/config/tests.rs",
         }],
         notes: &["The supported training-consumer subset is narrower than the metadata accepted by this constructor."],
     },

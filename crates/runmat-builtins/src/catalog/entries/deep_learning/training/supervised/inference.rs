@@ -77,9 +77,8 @@ fn possible_layers(value: &ValueFact) -> bool {
 fn possible_options(value: &ValueFact) -> bool {
     match &value.kind {
         ValueKindFact::Unknown => true,
-        ValueKindFact::Object(object) => {
-            known_object_class(object).is_none_or(|class| class.is(crate::TRAINING_OPTIONS_CLASS))
-        }
+        ValueKindFact::Object(object) => known_object_class(object)
+            .is_none_or(|class| crate::TrainingSolver::from_identity(class).is_some()),
         _ => false,
     }
 }

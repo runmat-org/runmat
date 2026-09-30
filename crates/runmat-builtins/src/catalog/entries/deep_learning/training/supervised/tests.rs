@@ -51,7 +51,7 @@ fn network_class_and_two_result_structure_are_inferred() {
             predictors(),
             predictors(),
             object("nnet.cnn.LayerGraph"),
-            object("nnet.cnn.TrainingOptions"),
+            object("nnet.cnn.TrainingOptionsSGDM"),
         ],
         vec![],
         2,
@@ -85,7 +85,7 @@ fn network_class_and_two_result_structure_are_inferred() {
             predictors(),
             predictors(),
             object("nnet.cnn.layer.FeatureInputLayer"),
-            object("nnet.cnn.TrainingOptions"),
+            object("nnet.cnn.TrainingOptionsADAM"),
         ],
         vec![],
         1,
@@ -142,7 +142,7 @@ fn unknown_layer_role_does_not_claim_series_network() {
             predictors(),
             predictors(),
             ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
-            object("nnet.cnn.TrainingOptions"),
+            object("nnet.cnn.TrainingOptionsRMSProp"),
         ],
         vec![],
         1,
@@ -151,4 +151,45 @@ fn unknown_layer_role_does_not_claim_series_network() {
         panic!("expected network fact")
     };
     assert!(network.runtime_class.is_none());
+}
+
+#[test]
+fn supervised_calls_accept_only_the_three_typed_training_option_classes() {
+    for solver in crate::TrainingSolver::ALL {
+        let class = solver.class_identity().display_name();
+        let result = infer(
+            &TRAIN_NETWORK_CATALOG_ENTRY,
+            vec![
+                predictors(),
+                predictors(),
+                object("nnet.cnn.layer.FeatureInputLayer"),
+                object(class),
+            ],
+            vec![],
+            1,
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "RM-DL-SUPERVISED-OPTIONS"),
+            "{solver:?}: {:?}",
+            result.diagnostics
+        );
+    }
+    let legacy = infer(
+        &TRAIN_NETWORK_CATALOG_ENTRY,
+        vec![
+            predictors(),
+            predictors(),
+            object("nnet.cnn.layer.FeatureInputLayer"),
+            object("nnet.cnn.TrainingOptions"),
+        ],
+        vec![],
+        1,
+    );
+    assert!(legacy
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-SUPERVISED-OPTIONS"));
 }

@@ -1,7 +1,10 @@
 use super::*;
 
 fn options(solver: &str, extra: &[(&str, Value)]) -> Value {
-    let mut object = ObjectInstance::new(super::super::super::TRAINING_OPTIONS_CLASS.owned());
+    let identity = Solver::from_name(solver)
+        .expect("test solver is supported")
+        .class_identity();
+    let mut object = ObjectInstance::new(identity);
     object
         .properties
         .insert("SolverName".into(), Value::String(solver.into()));
@@ -56,6 +59,7 @@ fn constructor_and_training_consumer_share_solver_defaults() {
         let Value::Object(object) = &value else {
             panic!("trainingOptions must return an object")
         };
+        assert!(object.class_name.is(solver.class_identity()));
         assert_eq!(
             object.properties.get("InitialLearnRate"),
             Some(&Value::Num(rate))
@@ -69,6 +73,41 @@ fn constructor_and_training_consumer_share_solver_defaults() {
         assert_eq!(config.learn_rate, rate);
         assert_eq!(config.squared_gradient_decay_factor, decay.unwrap_or(0.999));
     }
+}
+
+#[test]
+fn solver_class_and_solver_name_must_agree_without_generic_class_fallback() {
+    let mut mismatch = options("adam", &[]);
+    let Value::Object(object) = &mut mismatch else {
+        unreachable!()
+    };
+    object
+        .properties
+        .insert("SolverName".into(), Value::String("sgdm".into()));
+    assert!(TrainingConfig::from_value(&mismatch, "trainnet")
+        .err()
+        .unwrap()
+        .message()
+        .contains("disagrees"));
+
+    let mut missing_name = options("rmsprop", &[]);
+    let Value::Object(object) = &mut missing_name else {
+        unreachable!()
+    };
+    object.properties.remove("SolverName");
+    assert_eq!(
+        TrainingConfig::from_value(&missing_name, "trainnet")
+            .unwrap()
+            .solver,
+        Solver::Rmsprop
+    );
+
+    let mut legacy = options("adam", &[]);
+    let Value::Object(object) = &mut legacy else {
+        unreachable!()
+    };
+    object.class_name = runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptions").owned();
+    assert!(TrainingConfig::from_value(&legacy, "trainnet").is_err());
 }
 
 #[test]

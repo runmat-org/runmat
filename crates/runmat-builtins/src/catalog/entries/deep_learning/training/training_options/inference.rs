@@ -142,7 +142,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let result = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(super::TRAINING_OPTIONS_CLASS.owned()),
+            runtime_class: solver.map(|solver| solver.class_identity().owned()),
             properties,
             properties_complete: complete,
             handle_semantics: Some(false),

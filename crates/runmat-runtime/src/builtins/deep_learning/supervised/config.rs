@@ -110,21 +110,23 @@ impl TrainingConfig {
                 format!("{function}: expected a trainingOptions object"),
             ));
         };
-        if !object.class_name.is(super::super::TRAINING_OPTIONS_CLASS) {
-            return Err(deep_learning_error(
-                function,
-                format!("{function}: expected a trainingOptions object"),
-            ));
-        }
-        let options = TrainingOptionsView::parse(object, function)?;
-        options.admit_unsupported(function)?;
-        let solver_name = text_property(&options, O::SolverName, "sgdm", function)?;
-        let solver = Solver::from_name(&solver_name).ok_or_else(|| {
+        let solver = Solver::from_identity(&object.class_name).ok_or_else(|| {
             deep_learning_error(
                 function,
-                format!("{function}: unsupported solver '{solver_name}'"),
+                format!("{function}: expected a trainingOptions object"),
             )
         })?;
+        let options = TrainingOptionsView::parse(object, function)?;
+        options.admit_unsupported(function)?;
+        if let Some(name) = options.get(O::SolverName) {
+            let name = scalar_text(name, function)?;
+            if Solver::from_name(&name) != Some(solver) {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: SolverName disagrees with the trainingOptions class"),
+                ));
+            }
+        }
         if solver != Solver::Sgdm && options.get(O::Momentum).is_some() {
             return Err(deep_learning_error(
                 function,

@@ -7,21 +7,21 @@
   "behaviors": [
     "`solver` accepts `sgdm`, `adam`, or `rmsprop`.",
     "Common options such as `MaxEpochs`, `MiniBatchSize`, `InitialLearnRate`, `Shuffle`, `Verbose`, `Plots`, and `ExecutionEnvironment` are stored as properties.",
-    "`trainNetwork` and `trainnet` consume `sgdm` and `adam` options for the supported in-memory feed-forward training slice.",
-    "`rmsprop` options are accepted as metadata, but RMSProp execution is not implemented yet and raises an explicit training error."
+    "The result class is `nnet.cnn.TrainingOptionsSGDM`, `nnet.cnn.TrainingOptionsADAM`, or `nnet.cnn.TrainingOptionsRMSProp`, according to the positional solver.",
+    "`trainNetwork` and `trainnet` consume supported host training forms for all three solvers. Unsupported operational options are rejected before training effects."
   ],
   "examples": [
     {
       "description": "Create Adam Options",
       "input": "opts = trainingOptions('adam', 'MaxEpochs', 5, 'Verbose', false)",
-      "output": "Training options compatibility object."
+      "output": "nnet.cnn.TrainingOptionsADAM object."
     }
   ],
   "syntax": {
     "example": {
       "description": "Supported forms",
       "input": "opts = trainingOptions(solver)\nopts = trainingOptions(solver, Name, Value)",
-      "output": "Training options compatibility object."
+      "output": "Solver-specific training options object."
     }
   },
   "gpu_residency": "Training option construction is host metadata work and has no provider kernel."

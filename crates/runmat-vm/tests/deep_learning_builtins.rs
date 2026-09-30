@@ -258,8 +258,13 @@ fn compiled_training_options_preserve_defaults_and_exact_integer_controls() {
         sgdm = trainingOptions('sgdm');
         adam = trainingOptions('adam', 'MaxEpochs', uint16(5), 'Verbose', false);
         rmsprop = trainingOptions('rmsprop');
-        assert(strcmp(class(adam), 'nnet.cnn.TrainingOptions'));
-        assert(strcmp(sgdm.SolverName, 'sgdm') && sgdm.MaxEpochs == 30);
+        assert(strcmp(class(sgdm), 'nnet.cnn.TrainingOptionsSGDM'));
+        assert(strcmp(class(adam), 'nnet.cnn.TrainingOptionsADAM'));
+        assert(strcmp(class(rmsprop), 'nnet.cnn.TrainingOptionsRMSProp'));
+        assert(strcmp(sgdm.SolverName, 'sgdm'));
+        assert(strcmp(adam.SolverName, 'adam'));
+        assert(strcmp(rmsprop.SolverName, 'rmsprop'));
+        assert(sgdm.MaxEpochs == 30);
         assert(sgdm.MiniBatchSize == 128 && sgdm.InitialLearnRate == 0.01);
         assert(adam.InitialLearnRate == 0.001 && isa(adam.MaxEpochs, 'uint16'));
         assert(adam.MaxEpochs == uint16(5) && adam.Verbose == false);

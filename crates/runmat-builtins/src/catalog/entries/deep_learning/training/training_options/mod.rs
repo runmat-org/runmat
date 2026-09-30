@@ -10,8 +10,9 @@ mod inference;
 mod tests;
 
 pub use contract::{
-    canonical_training_option_name, TrainingOptionKey, TrainingSolver, TRAINING_OPTIONS_CLASS,
-    TRAINING_OPTIONS_DESCRIPTOR, TRAINING_OPTIONS_INVALID_INPUT,
+    canonical_training_option_name, TrainingOptionKey, TrainingSolver, TRAINING_OPTIONS_ADAM_CLASS,
+    TRAINING_OPTIONS_DESCRIPTOR, TRAINING_OPTIONS_INVALID_INPUT, TRAINING_OPTIONS_RMSPROP_CLASS,
+    TRAINING_OPTIONS_SGDM_CLASS,
 };
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&TRAINING_OPTIONS_CATALOG_ENTRY];

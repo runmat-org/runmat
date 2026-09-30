@@ -78,10 +78,7 @@ pub(super) async fn training_options_builtin(
         }
         properties.push((runmat_builtins::canonical_training_option_name(&key), value));
     }
-    Ok(object_with_identity(
-        super::TRAINING_OPTIONS_CLASS,
-        properties,
-    ))
+    Ok(object_with_identity(solver.class_identity(), properties))
 }
 
 #[runtime_builtin(
