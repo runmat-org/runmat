@@ -2,11 +2,42 @@
 
 use super::super::*;
 use crate::builtins::deep_learning::model::{
-    admission::forward_data, parameters::ParameterRole, plan::host::HostNetworkPlan,
+    admission::forward_data,
+    parameters::{ParameterRole, ParameterView},
+    plan::host::HostNetworkPlan,
 };
 use runmat_accelerate_api::{
     ProviderViewCapability, ProviderViewChain, ProviderViewSource, ProviderViewStep,
 };
+
+pub(super) fn consumed_resident_handles(
+    views: &[ParameterView<'_>],
+    stages: &[super::plan::Stage],
+) -> Vec<GpuTensorHandle> {
+    let mut consumed = Vec::new();
+    for stage in stages {
+        let (layer_index, roles): (usize, &[ParameterRole]) = match stage {
+            super::plan::Stage::Dense { layer_index } => {
+                (*layer_index, &[ParameterRole::Weights, ParameterRole::Bias])
+            }
+            super::plan::Stage::Normalize { stage } => (
+                stage.layer_index,
+                &[ParameterRole::Scale, ParameterRole::Offset],
+            ),
+            _ => continue,
+        };
+        for role in roles {
+            let row = views
+                .iter()
+                .find(|row| row.key.layer_index == layer_index && row.key.role == *role)
+                .expect("admitted learnable stage has a canonical parameter row");
+            if let Some(Value::GpuTensor(handle)) = row.value.map(forward_data) {
+                consumed.push(handle.clone());
+            }
+        }
+    }
+    consumed
+}
 
 pub(super) fn has_other_resident_parameters(host: &HostNetworkPlan<'_>) -> bool {
     host.parameter_views().iter().any(|row| {

@@ -72,6 +72,7 @@ pub(super) async fn execute(
         unreachable!("host plan admitted Layers")
     };
     let mut current = input.clone();
+    let consumed_resident_parameters = plan.consumed_resident_parameters;
     for stage in plan.stages {
         let changes_view_layout = matches!(&stage, Stage::Transpose { .. });
         current = match stage {
@@ -206,6 +207,9 @@ pub(super) async fn execute(
             ),
         ));
     }
-    crate::builtins::common::gpu_helpers::propagate_output_provenance(&mut current, [input])?;
+    crate::builtins::common::gpu_helpers::propagate_output_provenance(
+        &mut current,
+        std::iter::once(input).chain(consumed_resident_parameters.iter()),
+    )?;
     Ok(current)
 }

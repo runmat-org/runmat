@@ -42,6 +42,7 @@ pub(super) enum Stage {
 pub(super) struct Plan {
     pub stages: Vec<Stage>,
     pub output_axes: AxisPlan,
+    pub consumed_resident_parameters: Vec<GpuTensorHandle>,
 }
 
 fn query(
@@ -461,8 +462,11 @@ pub(super) fn admit(
         });
         physical = target_axes.clone();
     }
+    let consumed_resident_parameters =
+        parameters::consumed_resident_handles(host.parameter_views(), &stages);
     Ok(Some(Ok(Plan {
         stages,
         output_axes: physical,
+        consumed_resident_parameters,
     })))
 }

@@ -10,6 +10,139 @@ use runmat_accelerate_api::{
 use runmat_value::{CellArray, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+#[test]
+fn consumed_resident_learnables_preserve_explicit_intent_across_later_stages() {
+    use crate::builtins::common::gpu_helpers::propagate_output_provenance;
+    use crate::builtins::deep_learning::model::{
+        parameters::{ParameterKey, ParameterRole, ParameterShape, ParameterView},
+        plan::normalization::{Geometry, NormalizationOptions, NormalizationStage},
+    };
+    use runmat_accelerate_api::{handle_is_explicit, GpuHandleProvenance, NumericElementType};
+    use runmat_builtins::{DeepLearningAxisLayout, DeepLearningNormalizationAxes};
+
+    let owner = TestAllocationOwner::new();
+    let allocate = || {
+        owner
+            .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap()
+    };
+    let input = allocate();
+    let weights = allocate();
+    let bias = allocate();
+    let scale = allocate();
+    let offset = allocate();
+    let unused = allocate();
+    let output = allocate();
+    let weights_value = Value::GpuTensor(
+        weights
+            .handle
+            .clone()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap(),
+    );
+    let bias_value = Value::GpuTensor(
+        bias.handle
+            .clone()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap(),
+    );
+    let scale_value = Value::GpuTensor(
+        scale
+            .handle
+            .clone()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap(),
+    );
+    let offset_value = Value::GpuTensor(
+        offset
+            .handle
+            .clone()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap(),
+    );
+    let unused_value = Value::GpuTensor(
+        unused
+            .handle
+            .clone()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap(),
+    );
+    let values = [
+        weights_value,
+        bias_value,
+        scale_value,
+        offset_value,
+        unused_value,
+    ];
+    let roles = [
+        (1, ParameterRole::Weights),
+        (1, ParameterRole::Bias),
+        (2, ParameterRole::Scale),
+        (2, ParameterRole::Offset),
+        (3, ParameterRole::Weights),
+    ];
+    let views = values
+        .iter()
+        .zip(roles)
+        .map(|(value, (layer_index, role))| ParameterView {
+            key: ParameterKey {
+                layer_index,
+                layer_name: format!("layer{layer_index}"),
+                role,
+            },
+            value: Some(value),
+            expected_shape: ParameterShape::Dimensions(vec![Some(2), Some(2)]),
+        })
+        .collect::<Vec<_>>();
+    let axes = AxisPlan::new(DeepLearningAxisLayout::parse("CB", 2).unwrap(), &[2, 2]).unwrap();
+    let geometry = Geometry::new(
+        &axes,
+        NormalizationOptions {
+            epsilon: 1.0e-5,
+            operation: DeepLearningNormalizationAxes::ChannelOnly,
+        },
+    )
+    .unwrap();
+    let stages = [
+        plan::Stage::Dense { layer_index: 1 },
+        plan::Stage::Normalize {
+            stage: NormalizationStage {
+                layer_index: 2,
+                geometry,
+            },
+        },
+        plan::Stage::Relu,
+    ];
+    for stage in [&stages[0], &stages[1]] {
+        let selected = parameters::consumed_resident_handles(&views, std::slice::from_ref(stage));
+        assert_eq!(selected.len(), 2);
+        assert!(selected.iter().all(handle_is_explicit));
+        let mut individual_output = output.handle.clone();
+        propagate_output_provenance(
+            &mut individual_output,
+            std::iter::once(&input.handle).chain(selected.iter()),
+        )
+        .unwrap();
+        assert!(handle_is_explicit(&individual_output));
+    }
+    let consumed = parameters::consumed_resident_handles(&views, &stages);
+    assert_eq!(consumed.len(), 4);
+    assert!(consumed.iter().all(handle_is_explicit));
+    assert!(!consumed
+        .iter()
+        .any(|handle| handle.shares_allocation_with(&unused.handle)));
+    let mut result = output.handle.clone();
+    propagate_output_provenance(
+        &mut result,
+        std::iter::once(&input.handle).chain(consumed.iter()),
+    )
+    .unwrap();
+    assert!(handle_is_explicit(&result));
+    for allocation in [&input, &weights, &bias, &scale, &offset, &unused, &output] {
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
+}
+
 fn normalization_then_relu() -> Value {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let normalization = block_on(layer_normalization_layer_builtin(vec![])).unwrap();
