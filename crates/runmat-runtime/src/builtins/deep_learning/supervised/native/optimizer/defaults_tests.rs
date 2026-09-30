@@ -1,15 +1,12 @@
 use super::*;
 use crate::builtins::deep_learning::{
     layers::{lstm_layer_builtin, sequence_input_layer_builtin},
-    model::{
-        execution::host::numeric::Real,
-        parameters::{self, ParameterRole},
-    },
-    supervised::native::factors::{FactorPlan, Factors},
+    model::parameters::{self, ParameterRole},
+    supervised::native::factors::FactorPlan,
     training::training_options_builtin,
 };
 use futures::executor::block_on;
-use runmat_value::Tensor;
+use runmat_value::{Tensor, Value};
 
 fn config_with_decay(override_decay: Option<f64>) -> TrainingConfig {
     let rest = override_decay.map_or_else(Vec::new, |value| {
@@ -27,34 +24,20 @@ fn config_with_decay(override_decay: Option<f64>) -> TrainingConfig {
 }
 
 fn two_steps<T: Real>(config: &TrainingConfig) -> (T, T, T) {
-    let factors = Factors::uniform(1.0, 0.0)
-        .native::<T>(config.learn_rate, config.l2_regularization, "test")
-        .unwrap();
-    let mut first = [];
-    let mut second = [T::zero()];
-    let first_value = step_values(
-        &[T::one()],
-        &[T::from_f64(2.0)],
-        &mut first,
-        &mut second,
-        config,
-        &factors,
-        1,
-        "test",
-    )
-    .unwrap()[0];
-    let second_value = step_values(
-        &[first_value],
+    let factors = native_factors::<T>(config, 1.0, 0.0);
+    let (first, slot) = run(&[T::one()], &[T::from_f64(2.0)], None, config, &factors, 1);
+    let (second, slot) = run(
+        &first,
         &[T::from_f64(-1.0)],
-        &mut first,
-        &mut second,
+        Some(&slot),
         config,
         &factors,
         2,
-        "test",
-    )
-    .unwrap()[0];
-    (first_value, second_value, second[0])
+    );
+    let SolverSlot::Rmsprop { squared } = slot else {
+        panic!("RMSProp slot")
+    };
+    (first[0], second[0], squared[0])
 }
 
 fn assert_default_oracle<T: Real>() {
@@ -91,15 +74,13 @@ fn rmsprop_default_and_explicit_decay_have_distinct_native_double_two_step_oracl
 
 fn recurrent_step_oracle<T: Real>() {
     let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-    let learn = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap();
-    let l2 = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![1, 4]).unwrap();
     let layer = block_on(lstm_layer_builtin(
         Value::Num(2.0),
         vec![
             Value::String("InputWeightsLearnRateFactor".into()),
-            Value::Tensor(learn),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap()),
             Value::String("InputWeightsL2Factor".into()),
-            Value::Tensor(l2),
+            Value::Tensor(Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![1, 4]).unwrap()),
         ],
     ))
     .unwrap();
@@ -119,21 +100,16 @@ fn recurrent_step_oracle<T: Real>() {
     let mut config = config_with_decay(None);
     config.solver = Solver::Sgdm;
     config.momentum = 0.0;
-    let mut first = vec![T::zero(); 16];
-    let mut second = [];
-    let updated = step_values(
+    let (updated, slot) = run(
         &[T::one(); 16],
         &[T::one(); 16],
-        &mut first,
-        &mut second,
+        None,
         &config,
         &factors,
         1,
-        "test",
-    )
-    .unwrap();
+    );
+    assert!(matches!(slot, SolverSlot::Sgdm { .. }));
     // InputWeights is [4 gates × 2 units, 2 input channels], column-major.
-    // Each gate factor applies to both hidden units and both columns.
     let expected = [1.0, 0.9, 0.6, 0.7];
     for column in 0..2 {
         for (gate, expected) in expected.into_iter().enumerate() {
@@ -153,4 +129,47 @@ fn lstm_gate_factors_change_native_single_parameter_step_by_gate() {
 #[test]
 fn lstm_gate_factors_change_native_double_parameter_step_by_gate() {
     recurrent_step_oracle::<f64>();
+}
+
+fn near_one_coefficients_oracle<T: Real>() {
+    let beta = 0.999_999_999;
+    let mut rms = config(Solver::Rmsprop);
+    rms.squared_gradient_decay_factor = beta;
+    let factors = native_factors::<T>(&rms, 1.0, 0.0);
+    let (_, slot) = run(&[T::one()], &[T::from_f64(2.0)], None, &rms, &factors, 1);
+    let SolverSlot::Rmsprop { squared } = slot else {
+        panic!("RMSProp slot")
+    };
+    let expected_squared = 4.0 * (1.0 - beta);
+    assert!(squared[0] > T::zero());
+    assert!(
+        (squared[0] - T::from_f64(expected_squared)).abs() < T::from_f64(expected_squared * 1.0e-5)
+    );
+
+    let mut adam = config(Solver::Adam);
+    adam.gradient_decay_factor = beta;
+    adam.squared_gradient_decay_factor = beta;
+    let factors = native_factors::<T>(&adam, 1.0, 0.0);
+    let (updated, slot) = run(&[T::one()], &[T::from_f64(2.0)], None, &adam, &factors, 1);
+    let SolverSlot::Adam { mean, squared } = slot else {
+        panic!("Adam slot")
+    };
+    assert!(
+        (mean[0] - T::from_f64(2.0 * (1.0 - beta))).abs()
+            < T::from_f64(2.0 * (1.0 - beta) * 1.0e-5)
+    );
+    assert!(
+        (squared[0] - T::from_f64(expected_squared)).abs() < T::from_f64(expected_squared * 1.0e-5)
+    );
+    assert!((updated[0] - T::from_f64(0.9)).abs() < T::from_f64(2.0e-6));
+}
+
+#[test]
+fn near_one_solver_controls_preserve_native_single_complements() {
+    near_one_coefficients_oracle::<f32>();
+}
+
+#[test]
+fn near_one_solver_controls_preserve_native_double_complements() {
+    near_one_coefficients_oracle::<f64>();
 }

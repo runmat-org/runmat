@@ -1,6 +1,7 @@
 //! Native-class supervised parameter steps keyed by canonical Learnables roles.
 //! Slot state is private to a training invocation; `Layers` remains the only
-//! network parameter authority and receives one atomic selected-role update.
+//! network parameter authority. Neither slots nor network updates are
+//! published until every proposed parameter step has succeeded.
 
 use std::collections::HashMap;
 
@@ -16,16 +17,23 @@ use crate::builtins::deep_learning::{
 };
 use crate::BuiltinResult;
 
-use super::super::{Solver, TrainingConfig};
-use super::factors::{FactorPlan, NativeFactors};
+use super::super::TrainingConfig;
+use super::factors::FactorPlan;
+
+mod controls;
+mod slot;
+mod step;
+
+use controls::NativeControls;
+use slot::SolverSlot;
 
 fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::RuntimeError {
     deep_learning_error(function, format!("{function}: {detail}"))
 }
 
 enum Slot {
-    Single { first: Vec<f32>, second: Vec<f32> },
-    Double { first: Vec<f64>, second: Vec<f64> },
+    Single(SolverSlot<f32>),
+    Double(SolverSlot<f64>),
 }
 
 pub(super) struct NativeOptimizer {
@@ -41,9 +49,9 @@ impl NativeOptimizer {
         }
     }
 
-    /// All gradient and source identities, shapes, and classes are admitted
-    /// before a step. Source tensors are the native host snapshots used by
-    /// the same forward execution; no second provider download occurs here.
+    /// All source identities, shapes, and classes are admitted before any
+    /// numerical step. Source tensors are the host snapshots used by forward;
+    /// no extra provider download occurs at this boundary.
     pub(super) fn propose(
         &mut self,
         network: &ObjectInstance,
@@ -129,302 +137,98 @@ impl NativeOptimizer {
                 "prepared source or gradient identity differs from Learnables",
             ));
         }
+
+        // The control plan is per native class and per iteration, never per
+        // element. Unused classes do not need materialization.
+        let mut single_controls = None;
+        let mut double_controls = None;
+        let mut staged_slots = Vec::with_capacity(admitted.len());
         let mut updates = Vec::with_capacity(admitted.len());
-        for (key, value, gradient, dtype) in admitted {
+        for (key, source, gradient, dtype) in admitted {
             let factors = self.factors.get(&key, function)?;
-            if value.shape != gradient.shape || value.numeric_dtype() != dtype {
-                return Err(fail(function, "prepared parameter changed after admission"));
-            }
             let gradient = project_owned(gradient, dtype, function)?;
-            let next = match dtype {
+            let (storage, next_slot) = match dtype {
                 NumericDType::F32 => {
-                    let current = value.as_f32_slice().expect("admitted F32");
-                    let gradient = gradient.as_f32_slice().expect("projected F32");
+                    let controls = match single_controls {
+                        Some(controls) => controls,
+                        None => {
+                            let controls =
+                                NativeControls::<f32>::admit(config, iteration, function)?;
+                            single_controls = Some(controls);
+                            controls
+                        }
+                    };
+                    let old = match self.slots.get(&key) {
+                        None => None,
+                        Some(Slot::Single(slot)) => Some(slot),
+                        Some(Slot::Double(_)) => {
+                            return Err(fail(function, "optimizer slot precision changed"))
+                        }
+                    };
                     let native_factors = factors.native::<f32>(
                         config.learn_rate,
                         config.l2_regularization,
                         function,
                     )?;
-                    let slot = self
-                        .slots
-                        .entry(key.clone())
-                        .or_insert_with(|| Slot::Single {
-                            first: if matches!(config.solver, Solver::Rmsprop) {
-                                Vec::new()
-                            } else {
-                                vec![0.; current.len()]
-                            },
-                            second: if matches!(config.solver, Solver::Adam | Solver::Rmsprop) {
-                                vec![0.; current.len()]
-                            } else {
-                                Vec::new()
-                            },
-                        });
-                    let Slot::Single { first, second } = slot else {
-                        return Err(fail(function, "optimizer slot precision changed"));
-                    };
-                    NumericStorage::F32(step_values(
-                        current,
-                        gradient,
-                        first,
-                        second,
-                        config,
+                    let (values, slot) = step::step(
+                        source.as_f32_slice().expect("admitted F32"),
+                        gradient.as_f32_slice().expect("projected F32"),
+                        old,
+                        controls,
                         &native_factors,
-                        iteration,
                         function,
-                    )?)
+                    )?;
+                    (NumericStorage::F32(values), Slot::Single(slot))
                 }
                 NumericDType::F64 => {
-                    let current = value.as_f64_slice().expect("admitted F64");
-                    let gradient = gradient.as_f64_slice().expect("projected F64");
+                    let controls = match double_controls {
+                        Some(controls) => controls,
+                        None => {
+                            let controls =
+                                NativeControls::<f64>::admit(config, iteration, function)?;
+                            double_controls = Some(controls);
+                            controls
+                        }
+                    };
+                    let old = match self.slots.get(&key) {
+                        None => None,
+                        Some(Slot::Double(slot)) => Some(slot),
+                        Some(Slot::Single(_)) => {
+                            return Err(fail(function, "optimizer slot precision changed"))
+                        }
+                    };
                     let native_factors = factors.native::<f64>(
                         config.learn_rate,
                         config.l2_regularization,
                         function,
                     )?;
-                    let slot = self
-                        .slots
-                        .entry(key.clone())
-                        .or_insert_with(|| Slot::Double {
-                            first: if matches!(config.solver, Solver::Rmsprop) {
-                                Vec::new()
-                            } else {
-                                vec![0.; current.len()]
-                            },
-                            second: if matches!(config.solver, Solver::Adam | Solver::Rmsprop) {
-                                vec![0.; current.len()]
-                            } else {
-                                Vec::new()
-                            },
-                        });
-                    let Slot::Double { first, second } = slot else {
-                        return Err(fail(function, "optimizer slot precision changed"));
-                    };
-                    NumericStorage::F64(step_values(
-                        current,
-                        gradient,
-                        first,
-                        second,
-                        config,
+                    let (values, slot) = step::step(
+                        source.as_f64_slice().expect("admitted F64"),
+                        gradient.as_f64_slice().expect("projected F64"),
+                        old,
+                        controls,
                         &native_factors,
-                        iteration,
                         function,
-                    )?)
+                    )?;
+                    (NumericStorage::F64(values), Slot::Double(slot))
                 }
                 _ => unreachable!("admitted native precision"),
             };
-            let value = Tensor::from_numeric_storage(next, value.shape.clone())
+            let value = Tensor::from_numeric_storage(storage, source.shape.clone())
                 .map_err(|error| fail(function, error))?;
+            staged_slots.push((key.clone(), next_slot));
             updates.push(ParameterUpdate { key, value });
+        }
+        self.slots
+            .try_reserve(staged_slots.len())
+            .map_err(|_| fail(function, "cannot reserve optimizer slot storage"))?;
+        for (key, slot) in staged_slots {
+            self.slots.insert(key, slot);
         }
         Ok(updates)
     }
 }
 
-fn step_values<T: crate::builtins::deep_learning::model::execution::host::numeric::Real>(
-    current: &[T],
-    gradient: &[T],
-    first: &mut [T],
-    second: &mut [T],
-    config: &TrainingConfig,
-    factors: &NativeFactors<T>,
-    iteration: usize,
-    function: &'static str,
-) -> BuiltinResult<Vec<T>> {
-    if current.len() != gradient.len()
-        || (!matches!(config.solver, Solver::Rmsprop) && current.len() != first.len())
-        || (matches!(config.solver, Solver::Adam | Solver::Rmsprop)
-            && current.len() != second.len())
-    {
-        return Err(fail(function, "optimizer slot geometry changed"));
-    }
-    let momentum = T::from_f64(config.momentum);
-    let beta1 = T::from_f64(config.gradient_decay_factor);
-    let beta2 = T::from_f64(config.squared_gradient_decay_factor);
-    let epsilon = T::from_f64(config.epsilon);
-    if !epsilon.is_finite() || epsilon <= T::zero() {
-        return Err(fail(
-            function,
-            "optimizer controls are not representable in parameter precision",
-        ));
-    }
-    let correction1 = T::from_f64(1.0 - config.gradient_decay_factor.powf(iteration as f64));
-    let correction2 =
-        T::from_f64(1.0 - config.squared_gradient_decay_factor.powf(iteration as f64));
-    if matches!(config.solver, Solver::Adam)
-        && (correction1 <= T::zero() || correction2 <= T::zero())
-    {
-        return Err(fail(function, "Adam bias correction is not representable"));
-    }
-    let mut next = Vec::new();
-    next.try_reserve_exact(current.len())
-        .map_err(|_| fail(function, "cannot reserve updated parameter storage"))?;
-    for index in 0..current.len() {
-        let value = current[index];
-        let (rate, regularization) = factors.at(index);
-        let grad = gradient[index] + regularization * value;
-        if !value.is_finite() || !grad.is_finite() {
-            return Err(fail(
-                function,
-                "optimizer requires finite values and gradients",
-            ));
-        }
-        let updated = match config.solver {
-            Solver::Sgdm => {
-                first[index] = momentum * first[index] - rate * grad;
-                value + first[index]
-            }
-            Solver::Adam => {
-                first[index] = beta1 * first[index] + (T::one() - beta1) * grad;
-                second[index] = beta2 * second[index] + (T::one() - beta2) * grad * grad;
-                let mean = first[index] / correction1;
-                let variance = second[index] / correction2;
-                value - rate * mean / (variance.sqrt() + epsilon)
-            }
-            Solver::Rmsprop => {
-                second[index] = beta2 * second[index] + (T::one() - beta2) * grad * grad;
-                value - rate * grad / (second[index].sqrt() + epsilon)
-            }
-        };
-        if !updated.is_finite()
-            || (!matches!(config.solver, Solver::Rmsprop) && !first[index].is_finite())
-            || (matches!(config.solver, Solver::Adam | Solver::Rmsprop)
-                && !second[index].is_finite())
-        {
-            return Err(fail(function, "optimizer step exceeds native precision"));
-        }
-        next.push(updated);
-    }
-    Ok(next)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::super::factors::Factors;
-    use super::*;
-    use crate::builtins::deep_learning::supervised::{ShuffleMode, Solver};
-
-    fn config(solver: Solver) -> TrainingConfig {
-        TrainingConfig {
-            solver,
-            max_epochs: 1,
-            mini_batch_size: 1,
-            learn_rate: 0.1,
-            momentum: 0.9,
-            gradient_decay_factor: 0.9,
-            squared_gradient_decay_factor: 0.999,
-            epsilon: 1.0e-8,
-            l2_regularization: 0.0001,
-            shuffle: ShuffleMode::Never,
-            verbose: false,
-        }
-    }
-
-    fn native_factors<T: crate::builtins::deep_learning::model::execution::host::numeric::Real>(
-        config: &TrainingConfig,
-        learning: f64,
-        l2: f64,
-    ) -> NativeFactors<T> {
-        Factors::uniform(learning, l2)
-            .native(config.learn_rate, 1.0, "test")
-            .unwrap()
-    }
-
-    #[test]
-    fn l2_regularization_adds_weight_decay_to_native_sgdm_gradient() {
-        let mut first = [0.0_f64];
-        let mut second = [];
-        let updated = step_values(
-            &[2.0_f64],
-            &[0.0_f64],
-            &mut first,
-            &mut second,
-            &config(Solver::Sgdm),
-            &native_factors(&config(Solver::Sgdm), 1.0, 0.5),
-            1,
-            "test",
-        )
-        .unwrap();
-        assert_eq!(updated, vec![1.9]);
-        assert_eq!(first, [-0.1]);
-    }
-
-    #[test]
-    fn rmsprop_updates_from_native_squared_gradient_without_bias_correction() {
-        let mut config = config(Solver::Rmsprop);
-        config.squared_gradient_decay_factor = 0.0;
-        config.epsilon = 1.0;
-        let mut first = [];
-        let mut second = [0.0_f32];
-        let updated = step_values(
-            &[2.0_f32],
-            &[3.0_f32],
-            &mut first,
-            &mut second,
-            &config,
-            &native_factors(&config, 1.0, 0.0),
-            1,
-            "test",
-        )
-        .unwrap();
-        assert_eq!(second, [9.0]);
-        assert!((updated[0] - 1.925).abs() < 1.0e-6);
-    }
-
-    #[test]
-    fn native_single_sgdm_and_adam_follow_independent_nonzero_oracles() {
-        let value = [2.0_f32];
-        let gradient = [3.0_f32];
-        let mut first = [0.0_f32];
-        let mut second = [0.0_f32];
-        let result = step_values(
-            &value,
-            &gradient,
-            &mut first,
-            &mut second,
-            &config(Solver::Sgdm),
-            &native_factors(&config(Solver::Sgdm), 1.0, 0.0),
-            1,
-            "test",
-        )
-        .unwrap();
-        assert!((result[0] - 1.7).abs() < 1.0e-6);
-        assert!((first[0] + 0.3).abs() < 1.0e-6);
-        let mut first = [0.0_f32];
-        let mut second = [0.0_f32];
-        let result = step_values(
-            &value,
-            &gradient,
-            &mut first,
-            &mut second,
-            &config(Solver::Adam),
-            &native_factors(&config(Solver::Adam), 1.0, 0.0),
-            1,
-            "test",
-        )
-        .unwrap();
-        assert!((result[0] - 1.9).abs() < 1.0e-6);
-        assert!((first[0] - 0.3).abs() < 1.0e-6);
-        assert!((second[0] - 0.009).abs() < 1.0e-6);
-
-        let mut first = [0.0_f32];
-        let mut second = [];
-        let result = step_values(
-            &value,
-            &gradient,
-            &mut first,
-            &mut second,
-            &config(Solver::Sgdm),
-            &native_factors(&config(Solver::Sgdm), 2.0, 0.5),
-            1,
-            "test",
-        )
-        .unwrap();
-        // Effective gradient is 3 + 0.5*2 = 4, effective rate is 0.2.
-        assert!((result[0] - 1.2).abs() < 1.0e-6);
-    }
-}
-
-#[cfg(test)]
-#[path = "optimizer/defaults_tests.rs"]
-mod defaults_tests;
+#[path = "optimizer/tests.rs"]
+mod tests;
