@@ -160,8 +160,6 @@ impl DeepLearningForwardRoute<'_> {
                     {
                         return Err(DeepLearningForwardRouteError::InvalidGeometry);
                     }
-                    used_parameters[scale] = true;
-                    used_parameters[offset] = true;
                 }
                 (
                     DeepLearningForwardOperation::Pool1D { input_shape, route },
@@ -215,6 +213,8 @@ impl DeepLearningForwardRoute<'_> {
                     {
                         return Err(DeepLearningForwardRouteError::InvalidGeometry);
                     }
+                    used_parameters[scale] = true;
+                    used_parameters[offset] = true;
                 }
                 _ => return Err(DeepLearningForwardRouteError::InvalidParameter),
             }
