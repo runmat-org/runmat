@@ -28,6 +28,7 @@ pub struct ThermalWorkload {
     pub formulation_requirement: FormulationRequirement,
     pub procedure: ThermalProcedureControl,
     pub residual_target: f64,
+    pub initial_fields: Vec<super::InitialFieldBinding>,
 }
 
 impl ThermalWorkload {
@@ -57,6 +58,15 @@ impl ThermalWorkload {
         }
         crate::pipeline::thermal::validate_step(step, self.procedure)
             .map_err(|error| invalid(error.to_string()))?;
+        crate::planning::resource::require_initial_field_ceiling(
+            &self.initial_fields,
+            LIMITS,
+            step.accuracy.resources.maximum_resident_bytes,
+        )
+        .map_err(|error| invalid(error.to_string()))?;
+        for field in &self.initial_fields {
+            field.validate()?;
+        }
         Ok(step)
     }
 
@@ -80,6 +90,7 @@ impl ThermalWorkload {
             self.formulation_requirement,
             self.procedure,
             self.residual_target,
+            &self.initial_fields,
         )
     }
 
@@ -92,6 +103,7 @@ impl ThermalWorkload {
         formulation_requirement: FormulationRequirement,
         procedure: ThermalProcedureControl,
         residual_target: f64,
+        initial_fields: &[super::InitialFieldBinding],
     ) -> AnalysisExecutionResult<AnalysisWorkloadIdentity> {
         #[derive(Serialize)]
         struct BorrowedWorkload<'a> {
@@ -101,6 +113,7 @@ impl ThermalWorkload {
             formulation_requirement: FormulationRequirement,
             procedure: ThermalProcedureControl,
             residual_target: f64,
+            initial_fields: &'a [super::InitialFieldBinding],
         }
         let bytes = encode_contract(
             PREFIX,
@@ -112,6 +125,7 @@ impl ThermalWorkload {
                 formulation_requirement,
                 procedure,
                 residual_target,
+                initial_fields,
             },
             LIMITS,
         )?;
@@ -129,6 +143,7 @@ impl ThermalWorkload {
             &self.step_id,
             self.procedure,
             self.residual_target,
+            &self.initial_fields,
         )
     }
 
@@ -137,6 +152,7 @@ impl ThermalWorkload {
         step_id: &ProcedureStepId,
         procedure: ThermalProcedureControl,
         residual_target: f64,
+        initial_fields: &[super::InitialFieldBinding],
     ) -> AnalysisExecutionResult<super::ThermalNumericalIntentIdentity> {
         // The shared solver view excludes display/import provenance. Its borrowed selection
         // vectors and canonical encoding are identity scratch, not allocation-free streaming.
@@ -148,6 +164,7 @@ impl ThermalWorkload {
                 step_id,
                 procedure,
                 residual_target,
+                initial_fields,
             ),
             LIMITS,
         )?;
@@ -179,6 +196,11 @@ impl ThermalWorkload {
         let step = self
             .validated_step()
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+        crate::planning::resource::ThermalPreassemblyResourceFacts::require_input_fits(
+            &self.model,
+            &self.initial_fields,
+            step.accuracy.resources.maximum_resident_bytes,
+        )?;
         crate::pipeline::thermal::prepare_selected(
             &self.model,
             self.backend,
@@ -187,6 +209,7 @@ impl ThermalWorkload {
                 procedure: self.procedure,
                 residual_target: self.residual_target,
                 solver_mesh: None,
+                initial_fields: self.initial_fields.clone(),
             },
             mesh,
             step,

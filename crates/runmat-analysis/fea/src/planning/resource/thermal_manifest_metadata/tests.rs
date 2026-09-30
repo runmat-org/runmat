@@ -26,6 +26,7 @@ fn workload(procedure: ThermalProcedureControl) -> ThermalWorkload {
     model.materials.push(alternate);
     model.sequence = AnalysisSequence::from_steps("thermal", vec![step]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -70,6 +71,7 @@ fn complete_manifest_profile_bounds_real_steady_and_transient_headers() {
             .unwrap();
             let schedule = workload.solve_schedule().unwrap();
             let facts = ThermalPreassemblyResourceFacts::derive(
+                &[],
                 &workload.model,
                 &workload.model.sequence.steps[0],
                 &mesh,
@@ -163,7 +165,7 @@ fn planning_rejects_an_identity_for_a_different_procedure() {
     )
     .unwrap();
     assert!(
-        matches!(ThermalPreassemblyResourceFacts::derive(&workload.model,
+        matches!(ThermalPreassemblyResourceFacts::derive(&[], &workload.model,
         &workload.model.sequence.steps[0], &mesh, &workload.solve_schedule().unwrap(), &identity),
         Err(ResourcePlanningError::Invalid(message)) if message.contains("identity differs"))
     );

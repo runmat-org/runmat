@@ -31,10 +31,48 @@ pub struct ThermalPreassemblyResourceFacts {
 }
 
 impl ThermalPreassemblyResourceFacts {
+    /// Borrowed input preflight before an owned preparation clones the field closure.
+    pub(crate) fn require_input_fits(
+        model: &AnalysisModel,
+        fields: &[crate::execution::InitialFieldBinding],
+        maximum: u64,
+    ) -> Result<(), ResourcePlanningError> {
+        require_ceiling(Self::input_materialization_bytes(model, fields)?.0, maximum)
+    }
+
+    fn input_materialization_bytes(
+        model: &AnalysisModel,
+        fields: &[crate::execution::InitialFieldBinding],
+    ) -> Result<ByteCount, ResourcePlanningError> {
+        let model_bytes =
+            runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
+                model,
+                crate::execution::THERMAL_WORKLOAD_LIMITS,
+            )
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let bytes = model_bytes
+            .checked_mul(2)
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal model materialization",
+            ))?
+            .checked_add(
+                super::initial_field_reservation_bytes(
+                    fields,
+                    crate::execution::THERMAL_WORKLOAD_LIMITS,
+                )?
+                .0,
+            )
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal model and initial-field materialization",
+            ))?;
+        Ok(ByteCount(bytes))
+    }
+
     /// Estimate the selected mesh after exact formulation admission. `identity` must be the
     /// registry receipt for this mesh; the numerical pipeline obtains it immediately before
     /// this call. These estimates do not replace formulation or mesh admission.
     pub fn derive(
+        initial_fields: &[crate::execution::InitialFieldBinding],
         model: &AnalysisModel,
         step: &ProcedureStep,
         mesh: &SolverMeshArtifact,
@@ -52,15 +90,7 @@ impl ThermalPreassemblyResourceFacts {
         history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
         // Reuse the workload's bounded input envelope; do not allocate canonical bytes or a
         // serde value tree to decide whether the model fits the authored resident ceiling.
-        let model_bytes =
-            runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
-                model,
-                crate::execution::THERMAL_WORKLOAD_LIMITS,
-            )
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        let model_materialization_bytes = ByteCount(model_bytes.checked_mul(2).ok_or(
-            ResourcePlanningError::Overflow("thermal model materialization"),
-        )?);
+        let model_materialization_bytes = Self::input_materialization_bytes(model, initial_fields)?;
         require_ceiling(
             model_materialization_bytes.0,
             step.accuracy.resources.maximum_resident_bytes,

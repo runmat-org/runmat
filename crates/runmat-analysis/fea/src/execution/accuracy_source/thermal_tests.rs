@@ -29,6 +29,7 @@ fn receipt_with_energy(
         vec![ProcedureStep::thermal_transient("heat")],
     );
     let workload = ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,

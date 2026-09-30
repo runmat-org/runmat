@@ -14,6 +14,7 @@ fn workload() -> ThermalWorkload {
     model.sequence =
         AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_transient("heat")]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
@@ -31,6 +32,7 @@ fn field_construction_scratch_is_composed_before_assembly() {
         let schedule = workload.solve_schedule().unwrap();
         let step = &workload.model.sequence.steps[0];
         let facts = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             step,
             &mesh,
@@ -84,6 +86,7 @@ fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let schedule = workload.solve_schedule().unwrap();
     let facts = ThermalPreassemblyResourceFacts::derive(
+        &[],
         &workload.model,
         &workload.model.sequence.steps[0],
         &mesh,
@@ -182,6 +185,7 @@ fn assignment_diagnostics_are_admitted_and_checked_before_retention() {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let schedule = workload.solve_schedule().unwrap();
         let preassembly = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &step,
             &mesh,
@@ -198,6 +202,7 @@ fn assignment_diagnostics_are_admitted_and_checked_before_retention() {
             preassembly.reservation_bytes().unwrap().0 - 1;
         assert!(matches!(
             ThermalPreassemblyResourceFacts::derive(
+                &[],
                 &workload.model,
                 &bounded,
                 &mesh,
@@ -226,6 +231,7 @@ fn mesh_validation_is_admitted_before_projection_in_derivation_and_execution() {
     let schedule = workload.solve_schedule().unwrap();
     assert!(matches!(
         ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,
@@ -300,6 +306,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
         let mut workload = workload();
         let schedule = workload.solve_schedule().unwrap();
         let base = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,
@@ -309,6 +316,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
         .unwrap();
         workload.model.model_id.0 = "large_model_identifier".repeat(512);
         let grown = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,
@@ -420,6 +428,7 @@ fn oversized_input_strings_fail_the_shared_codec_limit() {
     workload.model.model_id.0 =
         "x".repeat(crate::execution::THERMAL_WORKLOAD_LIMITS.maximum_string_bytes + 1);
     assert!(ThermalPreassemblyResourceFacts::derive(
+        &[],
         &workload.model,
         &workload.model.sequence.steps[0],
         &mesh,
@@ -436,6 +445,7 @@ fn retained_property_metadata_is_reserved_before_assembly() {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let schedule = workload.solve_schedule().unwrap();
         let base = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,
@@ -445,6 +455,7 @@ fn retained_property_metadata_is_reserved_before_assembly() {
         .unwrap();
         workload.model.materials[0].name = "long_material_description".repeat(512);
         let facts = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,

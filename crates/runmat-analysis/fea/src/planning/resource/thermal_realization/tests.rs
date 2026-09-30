@@ -16,6 +16,7 @@ fn workload() -> ThermalWorkload {
     model.sequence =
         AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_transient("heat")]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
@@ -98,6 +99,7 @@ fn realization_budget_is_composed_and_enforced_for_both_element_orders() {
         let mut workload = workload();
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let facts = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,

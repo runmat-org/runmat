@@ -3,6 +3,8 @@ use crate::execution::{CanonicalSemanticState, SequenceIdentity, StepIdentity};
 use runmat_analysis_core::{AnalysisSequence, ProcedureStep, RestartPolicy};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
+mod initial_fields;
+
 fn workload() -> ThermalWorkload {
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
@@ -12,6 +14,7 @@ fn workload() -> ThermalWorkload {
     model.sequence =
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_transient("heat_a")]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         model,
         step_id: ProcedureStepId("heat_a".into()),
         backend: ComputeBackend::Cpu,
@@ -181,6 +184,7 @@ fn steady_portable_entry_preserves_uniform_temperature_on_both_tetrahedra() {
                 procedure: workload.procedure,
                 residual_target: workload.residual_target,
                 solver_mesh: Some(mesh),
+                initial_fields: workload.initial_fields.clone(),
             },
         )
         .unwrap();

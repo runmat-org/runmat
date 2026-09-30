@@ -113,6 +113,7 @@ fn thermal_selection_is_sample_local_and_rejects_foreign_coordinates() {
     ))];
     model.sequence = AnalysisSequence::from_steps("heat", vec![step.clone()]);
     let workload = ThermalWorkload {
+        initial_fields: Vec::new(),
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,

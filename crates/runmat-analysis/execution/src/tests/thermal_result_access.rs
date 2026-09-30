@@ -121,6 +121,7 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
             );
             assert_eq!(prepared, collected_reference(&result, chunk_bytes));
             let workload = runmat_analysis_fea::execution::ThermalWorkload {
+                initial_fields: Vec::new(),
                 model: model.clone(),
                 step_id: model.sequence.steps[0].step_id.clone(),
                 backend: ComputeBackend::Cpu,

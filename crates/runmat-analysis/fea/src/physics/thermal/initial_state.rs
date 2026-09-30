@@ -6,6 +6,8 @@ use runmat_canonical_codec::{CanonicalCodecError, SerializedCanonicalProfile};
 use serde::{ser::SerializeSeq, Serialize, Serializer};
 use thiserror::Error;
 
+pub(crate) mod fields;
+
 use crate::{
     contracts::ThermalInitialStateEvidence,
     excitation::{expect_scalar, sample_signal, ExcitationSamplePoint},
@@ -50,8 +52,8 @@ pub(crate) enum ThermalInitialStateError {
         initial_condition_id: String,
         detail: String,
     },
-    #[error("thermal initial condition {initial_condition_id} references a field artifact that has not been materialized into the solve request")]
-    UnmaterializedField { initial_condition_id: String },
+    #[error("thermal initial field admission failed: {detail}")]
+    FieldAdmission { detail: String },
 }
 
 fn selected_conditions<'a>(
@@ -114,6 +116,7 @@ pub(crate) fn realize(
     procedure_step_id: &str,
     reference_temperature_k: f64,
     prescribed_temperature_k: &[Option<f64>],
+    fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<RealizedThermalInitialState, ThermalInitialStateError> {
     let step = model
         .sequence
@@ -125,14 +128,33 @@ pub(crate) fn realize(
     let mut assigned = vec![None; projection.nodes.len()];
     let mut applied_condition_ids = Vec::new();
     for condition in selected_conditions(model, step) {
-        let value = realize_value(model, condition)?;
-        if value < 0.0 {
+        let field = fields::values(
+            model,
+            condition,
+            runmat_execution::Digest::from_bytes(*projection.mesh_digest.bytes()),
+            projection.nodes.len(),
+            fields,
+        )
+        .map_err(|error| ThermalInitialStateError::FieldAdmission {
+            detail: error.to_string(),
+        })?;
+        let uniform = if field.is_none() {
+            Some(realize_value(model, condition)?)
+        } else {
+            None
+        };
+        if uniform.is_some_and(|value| value < 0.0) {
             return Err(ThermalInitialStateError::InvalidTemperature {
                 initial_condition_id: condition.initial_condition_id.clone(),
             });
         }
         let nodes = target_nodes(projection, condition)?;
         for node in nodes {
+            let value = match (field, uniform) {
+                (Some(values), _) => values[node],
+                (_, Some(value)) => value,
+                _ => unreachable!("admitted initial condition has a field or uniform value"),
+            };
             if assigned[node].is_some_and(|existing| existing != value) {
                 return Err(ThermalInitialStateError::ConflictingTemperature {
                     initial_condition_id: condition.initial_condition_id.clone(),
@@ -259,8 +281,8 @@ fn realize_value(
             }
             Ok(value.real)
         }
-        InitialValue::FieldArtifact(_) => Err(ThermalInitialStateError::UnmaterializedField {
-            initial_condition_id: condition.initial_condition_id.clone(),
+        InitialValue::FieldArtifact(_) => Err(ThermalInitialStateError::FieldAdmission {
+            detail: "nodal field must be admitted before scalar realization".into(),
         }),
         InitialValue::UniformVector3(_) => {
             unreachable!("core validation rejects vector temperature initial conditions")
@@ -370,6 +392,7 @@ mod tests {
             "thermal_step",
             293.15,
             &vec![None; projection.nodes.len()],
+            &[],
         )
         .unwrap();
         assert!(state.temperature_k.iter().all(|value| *value == 325.0));
@@ -396,6 +419,7 @@ mod tests {
                 "thermal_step",
                 293.15,
                 &vec![None; projection.nodes.len()],
+                &[],
             ),
             Err(ThermalInitialStateError::ConflictingTemperature { .. })
         ));
@@ -424,8 +448,9 @@ mod tests {
                 "thermal_step",
                 293.15,
                 &vec![None; projection.nodes.len()],
+                &[],
             ),
-            Err(ThermalInitialStateError::UnmaterializedField { .. })
+            Err(ThermalInitialStateError::FieldAdmission { .. })
         ));
     }
 
@@ -435,7 +460,15 @@ mod tests {
         let mut prescribed = vec![None; projection.nodes.len()];
         prescribed[0] = Some(310.0);
 
-        let state = realize(&model, &projection, "thermal_step", 293.15, &prescribed).unwrap();
+        let state = realize(
+            &model,
+            &projection,
+            "thermal_step",
+            293.15,
+            &prescribed,
+            &[],
+        )
+        .unwrap();
 
         assert_eq!(state.temperature_k[0], 310.0);
         assert_eq!(state.evidence.authored_node_count, 0);
@@ -455,7 +488,14 @@ mod tests {
         let prescribed = vec![Some(310.0); projection.nodes.len()];
 
         assert!(matches!(
-            realize(&model, &projection, "thermal_step", 293.15, &prescribed,),
+            realize(
+                &model,
+                &projection,
+                "thermal_step",
+                293.15,
+                &prescribed,
+                &[]
+            ),
             Err(ThermalInitialStateError::PrescribedTemperatureConflict { .. })
         ));
     }

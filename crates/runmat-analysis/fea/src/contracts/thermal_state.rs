@@ -29,6 +29,7 @@ impl ThermalProcedureControl {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThermalSolveOptions {
+    pub initial_fields: Vec<crate::execution::InitialFieldBinding>,
     pub formulation_requirement: FormulationRequirement,
     pub procedure: ThermalProcedureControl,
     pub residual_target: f64,
@@ -42,6 +43,7 @@ impl Default for ThermalSolveOptions {
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 10 },
             residual_target: 1.0e-4,
             solver_mesh: None,
+            initial_fields: Vec::new(),
         }
     }
 }

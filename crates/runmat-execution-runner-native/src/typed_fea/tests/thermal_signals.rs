@@ -443,6 +443,7 @@ fn workload(
     };
     model.sequence = AnalysisSequence::from_steps("heating", vec![step]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,

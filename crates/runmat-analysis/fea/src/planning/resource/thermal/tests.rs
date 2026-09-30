@@ -24,6 +24,7 @@ fn fixture(
     let step_id = step.step_id.clone();
     model.sequence = AnalysisSequence::from_steps("thermal_plan", vec![step]);
     let workload = ThermalWorkload {
+        initial_fields: Vec::new(),
         model,
         step_id,
         backend: ComputeBackend::Cpu,

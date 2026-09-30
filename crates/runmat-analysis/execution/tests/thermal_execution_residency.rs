@@ -26,6 +26,7 @@ fn workload(samples: usize) -> ThermalWorkload {
         vec![ProcedureStep::thermal_transient("insulated")],
     );
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,

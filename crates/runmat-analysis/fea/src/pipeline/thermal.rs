@@ -99,6 +99,17 @@ fn prepare_validated_model<'a>(
     step: &'a ProcedureStep,
 ) -> Result<PreparedThermalSolve<'a>, FeaRunError> {
     validate_step(step, options.procedure)?;
+    crate::planning::resource::require_initial_field_ceiling(
+        &options.initial_fields,
+        crate::execution::THERMAL_WORKLOAD_LIMITS,
+        step.accuracy.resources.maximum_resident_bytes,
+    )?;
+    crate::physics::thermal::initial_state::fields::validate_selected(
+        model,
+        step,
+        mesh,
+        &options.initial_fields,
+    )?;
     let identity = crate::admission::admit_nonstructural(
         PhysicsFamily::Thermal,
         options.procedure.procedure(),
@@ -109,7 +120,12 @@ fn prepare_validated_model<'a>(
     )?;
     let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;
     let facts = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(
-        model, step, mesh, &schedule, &identity,
+        &options.initial_fields,
+        model,
+        step,
+        mesh,
+        &schedule,
+        &identity,
     )?;
     facts.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
     Ok(PreparedThermalSolve {

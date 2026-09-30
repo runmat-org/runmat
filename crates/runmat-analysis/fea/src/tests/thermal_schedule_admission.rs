@@ -16,6 +16,7 @@ fn workload() -> ThermalWorkload {
     }
     model.sequence = runmat_analysis_core::AnalysisSequence::from_steps("heat", vec![step]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -148,20 +149,31 @@ fn impossible_sample_or_retained_memory_ceilings_fail_before_thermal_assembly() 
     // Isolate mandatory field storage from the independently validated observation budget.
     workload.model.sequence.steps[0].observations.clear();
     workload.procedure = ThermalProcedureControl::BackwardEuler { snapshot_count: 5 };
-    let error = workload.execute(&mesh).unwrap_err();
+    let history =
+        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap()).unwrap();
+    let error = history.require_fits(439).unwrap_err();
     assert!(
         matches!(
             error,
-            crate::FeaRunError::Resource(
-                crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
-                    required: 440,
-                    maximum: 439,
-                    ..
-                }
-            )
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                required: 440,
+                maximum: 439,
+                ..
+            }
         ),
         "{error}"
     );
+    // The whole workload now rejects its larger input closure before history allocation.
+    assert!(matches!(
+        workload.execute(&mesh),
+        Err(crate::FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "thermal preassembly components",
+                required,
+                maximum: 439,
+            }
+        )) if required > 440
+    ));
     workload.model.sequence.steps[0]
         .accuracy
         .resources
@@ -214,6 +226,7 @@ fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
             .sum();
         assert_eq!(retained_samples as u64, shared.retained_sample_count.0);
         let total = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             step,
             &mesh,

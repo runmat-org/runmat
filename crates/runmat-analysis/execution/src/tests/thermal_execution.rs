@@ -17,6 +17,7 @@ fn workload(procedure: ThermalProcedureControl) -> ThermalWorkload {
     };
     model.sequence = AnalysisSequence::from_steps("thermal", vec![step]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,

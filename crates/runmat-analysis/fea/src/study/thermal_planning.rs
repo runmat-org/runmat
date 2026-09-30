@@ -65,6 +65,7 @@ fn plan_selected(
     }
     let (step, procedure, residual_target) = authored_controls(&study.model, step_id)?;
     let workload = ThermalWorkload {
+        initial_fields: Vec::new(),
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,

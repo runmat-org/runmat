@@ -66,8 +66,11 @@ lint is blocked by the existing core `fea_source` integration test referencing r
 `FeaSourceCheckResult.roots`; strict core/native library lint with `occt-native` passes.
 Optional CAD execution remains unverified by this slice. These tests
 are not a release gate or optional CAD execution evidence.
-Mesh-aware signal artifacts and initial field artifacts
-remain fail-closed implementation gaps. Nonconstant boundary/source histories,
+Mesh-aware signal artifacts remain a fail-closed implementation gap. The separate
+[canonical initial-field chain](thermal-field-inputs.md) integrates shared immutable
+field admission into the portable thermal workload; it does not establish authored
+artifact resolution, spatial source/boundary equivalence or process restart.
+Nonconstant boundary/source histories,
 spatial artifact equivalence, generic authored family dispatch, solver-specific
 process replacement/restart, measured resource/accuracy evidence and release
 qualification remain required. Radiation and temperature-dependent closure are

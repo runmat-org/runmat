@@ -27,6 +27,7 @@ fn projected_initial_evidence_uses_exact_selected_ids_and_covers_realized_values
         step.step_id.as_str(),
         293.15,
         &vec![None; projection.nodes.len()],
+        &[],
     )
     .unwrap();
     assert_eq!(realized.evidence.applied_initial_condition_ids, [long_id]);
@@ -60,6 +61,7 @@ fn projected_initial_evidence_uses_exact_selected_ids_and_covers_realized_values
         "thermal_step",
         293.15,
         &vec![None; projection.nodes.len()],
+        &[],
     )
     .unwrap();
     assert!(inactive_state
@@ -117,6 +119,7 @@ fn borrowed_initial_evidence_preserves_derived_json_and_canonical_wire() {
         "thermal_step",
         293.15,
         &vec![None; projection.nodes.len()],
+        &[],
     )
     .unwrap()
     .evidence;

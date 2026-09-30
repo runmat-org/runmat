@@ -48,6 +48,7 @@ fn workload(samples: usize) -> ThermalWorkload {
     model.material_assignments[0].confidence = EvidenceConfidence::Probable;
     model.materials.push(alternate);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
@@ -75,6 +76,7 @@ fn manifest_construction_and_header_peak_fit_composed_reservation() {
             )
             .unwrap();
             let facts = ThermalPreassemblyResourceFacts::derive(
+                &[],
                 &workload.model,
                 &workload.model.sequence.steps[0],
                 &mesh,

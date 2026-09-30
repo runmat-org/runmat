@@ -16,6 +16,7 @@ fn retained_metadata_is_explicit_and_composed_before_assembly() {
     model.sequence =
         AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_transient("heat")]);
     let mut workload = ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
@@ -39,6 +40,7 @@ fn retained_metadata_is_explicit_and_composed_before_assembly() {
         )
         .unwrap();
         let facts = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,

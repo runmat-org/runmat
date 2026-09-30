@@ -118,6 +118,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     model.sequence = AnalysisSequence::from_steps("thermal_memory", vec![step]);
     let workload = ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: ProcedureStepId("insulated".into()),
         model,
         backend: ComputeBackend::Cpu,
@@ -129,6 +130,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let schedule = workload.solve_schedule()?;
     let facts = ThermalPreassemblyResourceFacts::derive(
+        &[],
         &workload.model,
         &workload.model.sequence.steps[0],
         &mesh,

@@ -24,6 +24,8 @@ mod frequency_sample;
 mod frequency_scope;
 mod frequency_workload;
 mod identity;
+mod initial_field;
+pub use initial_field::{AdmittedInitialField, InitialFieldBinding};
 mod modal_result;
 mod modal_workload;
 mod object;

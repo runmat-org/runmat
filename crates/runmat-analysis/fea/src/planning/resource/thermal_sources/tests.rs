@@ -36,6 +36,7 @@ fn workload() -> ThermalWorkload {
     model.sequence =
         AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_transient("heat")]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: ProcedureStepId("heat".into()),
         model,
         backend: crate::ComputeBackend::Cpu,
@@ -208,6 +209,7 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
             .all(|evidence| evidence.accepted));
         let schedule = workload.solve_schedule().unwrap();
         let admitted = ThermalPreassemblyResourceFacts::derive(
+            &[],
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,

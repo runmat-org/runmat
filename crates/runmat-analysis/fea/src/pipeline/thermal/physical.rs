@@ -41,6 +41,7 @@ pub(super) fn run(
         options.formulation_requirement,
         options.procedure,
         options.residual_target,
+        &options.initial_fields,
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let operators = &facts.operators;
@@ -49,6 +50,7 @@ pub(super) fn run(
         &thermal_step.step_id,
         options.procedure,
         options.residual_target,
+        &options.initial_fields,
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     emit_phase(
@@ -87,6 +89,7 @@ pub(super) fn run(
         thermal_step.step_id.as_str(),
         domain.reference_temperature.kelvin,
         &initial_assembly.prescribed_temperature_k,
+        &options.initial_fields,
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     facts.metadata.verify_initial_state(&initial.evidence)?;

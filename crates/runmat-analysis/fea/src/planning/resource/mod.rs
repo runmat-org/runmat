@@ -27,6 +27,8 @@ mod contract;
 mod estimate;
 mod facts;
 mod field_metadata;
+mod initial_fields;
+pub(crate) use initial_fields::{initial_field_reservation_bytes, require_initial_field_ceiling};
 mod frequency;
 mod local_execution;
 mod modal;

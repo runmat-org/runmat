@@ -21,6 +21,7 @@ fn workload() -> ThermalWorkload {
     model.sequence =
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_transient("heat")]);
     ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
@@ -188,6 +189,7 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     );
     assert!(required > history.retained_field_bytes.0);
     let required = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(
+        &[],
         &workload.model,
         &workload.model.sequence.steps[0],
         &mesh,

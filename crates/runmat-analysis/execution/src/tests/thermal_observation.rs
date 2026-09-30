@@ -75,6 +75,7 @@ fn thermal_observation_fanout_uses_published_sample_and_reads_only_selected_fiel
             model.sequence =
                 AnalysisSequence::from_steps("thermal_observation", vec![step.clone()]);
             let workload = ThermalWorkload {
+                initial_fields: Vec::new(),
                 model,
                 step_id: step.step_id.clone(),
                 backend: ComputeBackend::Cpu,

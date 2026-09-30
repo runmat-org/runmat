@@ -1,4 +1,5 @@
 use super::*;
+mod initial_fields;
 mod profile_rejection;
 mod publication_admission;
 use crate::analysis_kernel::NativeAnalysisKernel;
@@ -42,6 +43,7 @@ fn task(order: ElementOrder, chunk: usize) -> (ThermalWorkload, PreparedThermalT
     model.sequence =
         AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_transient("heat")]);
     let workload = ThermalWorkload {
+        initial_fields: Vec::new(),
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,

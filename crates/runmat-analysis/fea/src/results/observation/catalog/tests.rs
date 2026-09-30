@@ -16,6 +16,7 @@ fn thermal_catalog_is_metadata_only_and_rejects_tampering_and_foreign_selection(
     model.sequence =
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_transient("heat_a")]);
     let workload = ThermalWorkload {
+        initial_fields: Vec::new(),
         model,
         step_id: ProcedureStepId("heat_a".into()),
         backend: ComputeBackend::Cpu,
