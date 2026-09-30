@@ -32,7 +32,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Options and effects",
             paragraphs: &[
-                "`OpsetVersion` accepts 13 through 20 (default 14); `BatchSize` is a positive integer. `InputNames` and `OutputNames` each accept exactly one nonempty name. `Verbose` accepts a logical scalar. Native fixed-width integer controls are a RunMat extension. The export validates the supported graph and serializes it before opening the destination through the filesystem service.",
+                "`OpsetVersion` accepts 13 through 20 (default 14); `BatchSize` is a positive integer. `InputNames` and `OutputNames` each accept exactly one nonempty name. `Verbose` accepts a logical scalar or numeric zero or one. Option names are case-insensitive; a repeated name uses its last value. Native fixed-width integer controls are a RunMat extension. The export validates the supported graph and serializes it before opening the destination through the filesystem service.",
                 "ONNX export is host graph serialization, not an accelerator kernel. A resident fully connected Weight or Bias is downloaded from its owning provider only when that property is consumed. Unrelated network properties are not gathered. Provider and filesystem operations can suspend or fail; the serialized file depends on the filesystem capability available to the current native or web runtime.",
             ],
         },

@@ -1,3 +1,4 @@
+use super::{ExportOnnxOptionKey, ExportOnnxOptionValueRole};
 use crate::{
     catalog::inference::{argument_error, finish_fixed_outputs},
     BuiltinCatalogEntry,
@@ -70,53 +71,50 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
         if let Some(name) = request.literals.literal_string_at(index) {
-            let key = name.to_ascii_lowercase();
-            if !matches!(
-                key.as_str(),
-                "opsetversion" | "batchsize" | "inputnames" | "outputnames" | "verbose"
-            ) {
+            if let Some(key) = ExportOnnxOptionKey::from_name(&name) {
+                if let Some(value) = args.get(index + 1) {
+                    let possible = match key.value_role() {
+                        ExportOnnxOptionValueRole::SingleName => {
+                            scalar_text(value)
+                                || matches!(value.kind, ValueKindFact::Cell(_))
+                                    && value.shape.element_count().is_none_or(|count| count == 1)
+                        }
+                        ExportOnnxOptionValueRole::PositiveInteger => {
+                            matches!(
+                                &value.kind,
+                                ValueKindFact::Unknown
+                                    | ValueKindFact::Numeric(runmat_types::NumericFact {
+                                        domain: NumericDomain::Real,
+                                        ..
+                                    })
+                            ) && value.shape.element_count().is_none_or(|count| count == 1)
+                        }
+                        ExportOnnxOptionValueRole::LogicalFlag => {
+                            matches!(
+                                &value.kind,
+                                ValueKindFact::Unknown
+                                    | ValueKindFact::Logical
+                                    | ValueKindFact::Numeric(runmat_types::NumericFact {
+                                        domain: NumericDomain::Real,
+                                        ..
+                                    })
+                            ) && value.shape.element_count().is_none_or(|count| count == 1)
+                        }
+                    };
+                    if !possible {
+                        diagnostics.push(argument_error(
+                            "RM-DL-EXPORTONNX-OPTION-VALUE",
+                            "option value has an invalid class or shape",
+                            index + 1,
+                        ));
+                    }
+                }
+            } else {
                 diagnostics.push(argument_error(
                     "RM-DL-EXPORTONNX-OPTION",
                     "unsupported exportONNXNetwork option",
                     index,
                 ));
-            } else if let Some(value) = args.get(index + 1) {
-                let possible = match key.as_str() {
-                    "inputnames" | "outputnames" => {
-                        scalar_text(value)
-                            || matches!(value.kind, ValueKindFact::Cell(_))
-                                && value.shape.element_count().is_none_or(|count| count == 1)
-                    }
-                    "opsetversion" | "batchsize" => {
-                        matches!(
-                            &value.kind,
-                            ValueKindFact::Unknown
-                                | ValueKindFact::Numeric(runmat_types::NumericFact {
-                                    domain: NumericDomain::Real,
-                                    ..
-                                })
-                        ) && value.shape.element_count().is_none_or(|count| count == 1)
-                    }
-                    "verbose" => {
-                        matches!(
-                            &value.kind,
-                            ValueKindFact::Unknown
-                                | ValueKindFact::Logical
-                                | ValueKindFact::Numeric(runmat_types::NumericFact {
-                                    domain: NumericDomain::Real,
-                                    ..
-                                })
-                        ) && value.shape.element_count().is_none_or(|count| count == 1)
-                    }
-                    _ => true,
-                };
-                if !possible {
-                    diagnostics.push(argument_error(
-                        "RM-DL-EXPORTONNX-OPTION-VALUE",
-                        "option value has an invalid class or shape",
-                        index + 1,
-                    ));
-                }
             }
         }
     }

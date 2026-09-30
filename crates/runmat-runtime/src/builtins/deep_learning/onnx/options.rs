@@ -1,13 +1,44 @@
 use super::*;
+use std::collections::BTreeMap;
+
+/// Keep the legacy lowercase/last-value-wins public parsing order. Unknown
+/// names stay here until validation so the integer compatibility gate and
+/// first-error ordering remain unchanged; no semantic consumer switches on
+/// the retained text.
+pub(super) struct ParsedExportOption {
+    pub(super) name: String,
+    pub(super) key: Option<ExportOnnxOptionKey>,
+    pub(super) value: Value,
+}
+
+pub(super) fn parse_option_inputs(args: Vec<Value>) -> BuiltinResult<Vec<ParsedExportOption>> {
+    parse_name_values(args, EXPORT_ONNX).map(|values| {
+        values
+            .into_iter()
+            .map(|(name, value)| ParsedExportOption {
+                key: ExportOnnxOptionKey::from_name(&name),
+                name,
+                value,
+            })
+            .collect()
+    })
+}
+
+pub(super) fn unsupported_option(name: &str) -> crate::RuntimeError {
+    deep_learning_error(
+        EXPORT_ONNX,
+        format!("exportONNXNetwork: unsupported option '{name}'"),
+    )
+}
 
 pub(super) fn parse_export_options(
-    map: std::collections::BTreeMap<String, Value>,
+    map: BTreeMap<ExportOnnxOptionKey, Value>,
 ) -> BuiltinResult<ExportOptions> {
     let mut options = ExportOptions::default();
     for (key, value) in map {
-        match key.as_str() {
-            "opsetversion" => {
-                let version = integer_scalar(&value, "OpsetVersion")?;
+        match key {
+            ExportOnnxOptionKey::OpsetVersion => {
+                let version = integer_scalar(&value, key.canonical_name())?;
                 if !(MIN_SUPPORTED_OPSET_VERSION..=MAX_SUPPORTED_OPSET_VERSION).contains(&version) {
                     return Err(deep_learning_error(
                         EXPORT_ONNX,
@@ -18,32 +49,26 @@ pub(super) fn parse_export_options(
                 }
                 options.opset_version = version;
             }
-            "batchsize" => {
-                options.batch_size = Some(integer_scalar(&value, "BatchSize")?);
+            ExportOnnxOptionKey::BatchSize => {
+                options.batch_size = Some(integer_scalar(&value, key.canonical_name())?);
             }
-            "inputnames" => {
-                options.input_name = Some(single_name(&value, "InputNames")?);
+            ExportOnnxOptionKey::InputNames => {
+                options.input_name = Some(single_name(&value, key.canonical_name())?);
             }
-            "outputnames" => {
-                options.output_name = Some(single_name(&value, "OutputNames")?);
+            ExportOnnxOptionKey::OutputNames => {
+                options.output_name = Some(single_name(&value, key.canonical_name())?);
             }
-            "verbose" => {
-                let _ = logical_scalar(&value, EXPORT_ONNX, "Verbose")?;
-            }
-            other => {
-                return Err(deep_learning_error(
-                    EXPORT_ONNX,
-                    format!("exportONNXNetwork: unsupported option '{other}'"),
-                ));
+            ExportOnnxOptionKey::Verbose => {
+                let _ = logical_scalar(&value, EXPORT_ONNX, key.canonical_name())?;
             }
         }
     }
     Ok(options)
 }
 
-pub(super) fn validate_option(key: &str, value: &Value) -> BuiltinResult<()> {
+pub(super) fn validate_option(key: ExportOnnxOptionKey, value: &Value) -> BuiltinResult<()> {
     if let Value::GpuTensor(handle) = value {
-        if matches!(key, "opsetversion" | "batchsize" | "verbose") {
+        if key.accepts_integer_extension() {
             let scalar = handle
                 .shape()
                 .iter()
@@ -52,7 +77,11 @@ pub(super) fn validate_option(key: &str, value: &Value) -> BuiltinResult<()> {
             let numeric = runmat_accelerate_api::handle_precision(handle).is_some()
                 || runmat_accelerate_api::handle_integer_type(handle).is_some();
             let logical = runmat_accelerate_api::handle_is_logical(handle);
-            let admitted_class = if logical { key == "verbose" } else { numeric };
+            let admitted_class = match key.value_role() {
+                ExportOnnxOptionValueRole::PositiveInteger => numeric && !logical,
+                ExportOnnxOptionValueRole::LogicalFlag => logical || numeric,
+                ExportOnnxOptionValueRole::SingleName => unreachable!("name control excluded"),
+            };
             if scalar
                 && runmat_accelerate_api::handle_storage(handle)
                     == runmat_accelerate_api::GpuTensorStorage::Real
@@ -62,34 +91,31 @@ pub(super) fn validate_option(key: &str, value: &Value) -> BuiltinResult<()> {
             }
             return Err(deep_learning_error(
                 EXPORT_ONNX,
-                format!("exportONNXNetwork: {key} must have supported real scalar storage"),
+                format!(
+                    "exportONNXNetwork: {} must have supported real scalar storage",
+                    key.canonical_name().to_ascii_lowercase()
+                ),
             ));
         }
     }
     match key {
-        "opsetversion" => {
-            let version = integer_scalar(value, "OpsetVersion")?;
+        ExportOnnxOptionKey::OpsetVersion => {
+            let version = integer_scalar(value, key.canonical_name())?;
             if !(MIN_SUPPORTED_OPSET_VERSION..=MAX_SUPPORTED_OPSET_VERSION).contains(&version) {
                 return Err(deep_learning_error(EXPORT_ONNX, format!("exportONNXNetwork: OpsetVersion must be between {MIN_SUPPORTED_OPSET_VERSION} and {MAX_SUPPORTED_OPSET_VERSION}")));
             }
         }
-        "batchsize" => {
-            integer_scalar(value, "BatchSize")?;
+        ExportOnnxOptionKey::BatchSize => {
+            integer_scalar(value, key.canonical_name())?;
         }
-        "inputnames" => {
-            single_name(value, "InputNames")?;
+        ExportOnnxOptionKey::InputNames => {
+            single_name(value, key.canonical_name())?;
         }
-        "outputnames" => {
-            single_name(value, "OutputNames")?;
+        ExportOnnxOptionKey::OutputNames => {
+            single_name(value, key.canonical_name())?;
         }
-        "verbose" => {
-            logical_scalar(value, EXPORT_ONNX, "Verbose")?;
-        }
-        other => {
-            return Err(deep_learning_error(
-                EXPORT_ONNX,
-                format!("exportONNXNetwork: unsupported option '{other}'"),
-            ))
+        ExportOnnxOptionKey::Verbose => {
+            logical_scalar(value, EXPORT_ONNX, key.canonical_name())?;
         }
     }
     Ok(())

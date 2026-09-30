@@ -8,6 +8,7 @@ use runmat_types::{
 mod contract;
 mod documentation;
 mod inference;
+mod options;
 #[cfg(test)]
 mod tests;
 
@@ -15,6 +16,7 @@ pub use contract::{
     EXPORT_ONNX_DESCRIPTOR, EXPORT_ONNX_INTEGER_EXTENSION, EXPORT_ONNX_INVALID_INPUT,
     EXPORT_ONNX_UNSUPPORTED,
 };
+pub use options::{ExportOnnxOptionKey, ExportOnnxOptionValueRole};
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&EXPORT_ONNX_CATALOG_ENTRY];
 

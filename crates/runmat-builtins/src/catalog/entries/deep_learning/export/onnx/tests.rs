@@ -27,6 +27,41 @@ fn infer(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>, count: usize) -
 }
 
 #[test]
+fn option_schema_round_trips_and_agrees_with_public_declarations() {
+    let signature = &EXPORT_ONNX_DESCRIPTOR.signatures[0];
+    let option_description = signature.inputs[2].description;
+    let options_section = documentation::DOCUMENTATION
+        .sections
+        .iter()
+        .find(|section| section.heading == "Options and effects")
+        .expect("public option documentation");
+    for key in ExportOnnxOptionKey::ALL {
+        let name = key.canonical_name();
+        assert_eq!(ExportOnnxOptionKey::from_name(name), Some(key));
+        assert_eq!(
+            ExportOnnxOptionKey::from_name(&name.to_ascii_uppercase()),
+            Some(key)
+        );
+        assert!(
+            option_description.contains(name),
+            "signature omitted {name}"
+        );
+        assert!(
+            options_section
+                .paragraphs
+                .iter()
+                .any(|paragraph| paragraph.contains(name)),
+            "documentation omitted {name}"
+        );
+        assert_eq!(
+            key.accepts_integer_extension(),
+            key.value_role() != ExportOnnxOptionValueRole::SingleName
+        );
+    }
+    assert_eq!(ExportOnnxOptionKey::from_name("unknown"), None);
+}
+
+#[test]
 fn known_network_and_zero_output_have_filesystem_effect() {
     let result = infer(
         vec![

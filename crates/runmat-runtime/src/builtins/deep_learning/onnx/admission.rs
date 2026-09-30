@@ -26,18 +26,23 @@ pub(super) async fn admit_export_call(mut args: Vec<Value>) -> BuiltinResult<Adm
             "exportONNXNetwork: filename must not be empty",
         ));
     }
-    let mut options_map = parse_name_values(option_args, EXPORT_ONNX)?;
-    if options_map.iter().any(|(key, value)| {
-        matches!(key.as_str(), "opsetversion" | "batchsize" | "verbose")
-            && crate::builtins::common::validation::value_has_native_integer_class(value)
+    let parsed_options = parse_option_inputs(option_args)?;
+    if parsed_options.iter().any(|option| {
+        option
+            .key
+            .is_some_and(ExportOnnxOptionKey::accepts_integer_extension)
+            && crate::builtins::common::validation::value_has_native_integer_class(&option.value)
     }) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &runmat_builtins::EXPORT_ONNX_INTEGER_EXTENSION,
             EXPORT_ONNX,
         )?;
     }
-    for (key, value) in &options_map {
-        validate_option(key, value)?;
+    let mut options_map = std::collections::BTreeMap::new();
+    for option in parsed_options {
+        let key = option.key.ok_or_else(|| unsupported_option(&option.name))?;
+        validate_option(key, &option.value)?;
+        options_map.insert(key, option.value);
     }
     let layers = model::layers_from_network_ref(&args[0], EXPORT_ONNX)?;
     preflight_layers(network, layers, &options_map)?;
@@ -89,7 +94,7 @@ pub(super) async fn admit_export_call(mut args: Vec<Value>) -> BuiltinResult<Adm
 fn preflight_layers(
     network: &ObjectInstance,
     layers: &[Value],
-    options: &std::collections::BTreeMap<String, Value>,
+    options: &std::collections::BTreeMap<ExportOnnxOptionKey, Value>,
 ) -> BuiltinResult<()> {
     model::validate_sequential_connections(network, EXPORT_ONNX)?;
     if layers.is_empty() {
@@ -109,10 +114,10 @@ fn preflight_layers(
             ));
         }
     }
-    if !options.contains_key("inputnames") {
+    if !options.contains_key(&ExportOnnxOptionKey::InputNames) {
         graph::network_name(network, "InputNames")?;
     }
-    if !options.contains_key("outputnames") {
+    if !options.contains_key(&ExportOnnxOptionKey::OutputNames) {
         graph::network_name(network, "OutputNames")?;
     }
     let mut current_features = None;
@@ -317,9 +322,65 @@ mod tests {
     }
 
     #[test]
+    fn unknown_and_known_invalid_options_precede_learnable_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let weights = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0],
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            for (name, value) in [
+                ("UnknownOption", Value::Num(1.0)),
+                ("OpsetVersion", Value::Bool(true)),
+                (
+                    "InputNames",
+                    Value::StringArray(
+                        runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2])
+                            .unwrap(),
+                    ),
+                ),
+            ] {
+                provider.reset_telemetry();
+                let error = futures::executor::block_on(admit_export_call(vec![
+                    network(Value::GpuTensor(weights.clone()), Value::Num(1.0)),
+                    Value::String("unused.onnx".into()),
+                    Value::String(name.into()),
+                    value,
+                ]))
+                .unwrap_err();
+                assert!(
+                    error.message.contains(name)
+                        || error.message.contains(&name.to_ascii_lowercase()),
+                    "{name}: {error}"
+                );
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 0, "{name}");
+            }
+            weights.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
+    fn public_option_names_fold_case_and_duplicate_values_before_typed_admission() {
+        let parsed = parse_option_inputs(vec![
+            Value::String("OpsetVersion".into()),
+            Value::Num(13.0),
+            Value::String("OPSETVERSION".into()),
+            Value::Num(14.0),
+            Value::String("InputNames".into()),
+            Value::String("input".into()),
+        ])
+        .unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].key, Some(ExportOnnxOptionKey::InputNames));
+        assert_eq!(parsed[1].key, Some(ExportOnnxOptionKey::OpsetVersion));
+        assert!(matches!(&parsed[1].value, Value::Num(number) if *number == 14.0));
+    }
+
+    #[test]
     fn verbose_accepts_scalar_host_logical_storage() {
         let options = parse_export_options(std::collections::BTreeMap::from([(
-            "verbose".into(),
+            ExportOnnxOptionKey::Verbose,
             Value::LogicalArray(runmat_value::LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
         )]))
         .unwrap();
@@ -329,7 +390,7 @@ mod tests {
         );
         let nonscalar =
             Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap());
-        assert!(validate_option("verbose", &nonscalar).is_err());
+        assert!(validate_option(ExportOnnxOptionKey::Verbose, &nonscalar).is_err());
     }
 
     #[test]
