@@ -552,7 +552,7 @@ fn set_workspace_variable_in_frame(
             runmat_runtime::workspace::session::store_global_named(name, vars[idx].clone());
         }
         Some(FrameGlobalBinding::LegacySlot) => {
-            runmat_runtime::workspace::session::update_global_slot(idx, None, &vars[idx]);
+            runmat_runtime::workspace::session::store_global_slot(idx, vars[idx].clone());
         }
         Some(FrameGlobalBinding::Named(_)) | None => {}
     }

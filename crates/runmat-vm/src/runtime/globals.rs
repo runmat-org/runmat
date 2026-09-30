@@ -34,17 +34,12 @@ pub fn update_global_store(
 ) {
     match global_aliases.binding_for_slot(stored_index) {
         Some(FrameGlobalBinding::Named(alias)) => {
-            runmat_runtime::workspace::session::update_global_slot(
-                stored_index,
-                Some(&alias),
-                stored_value,
-            );
+            runmat_runtime::workspace::session::store_global_named(&alias, stored_value.clone());
         }
         Some(FrameGlobalBinding::LegacySlot) => {
-            runmat_runtime::workspace::session::update_global_slot(
+            runmat_runtime::workspace::session::store_global_slot(
                 stored_index,
-                None,
-                stored_value,
+                stored_value.clone(),
             );
         }
         None => {}
@@ -98,7 +93,6 @@ pub fn declare_global_named(
             vars[i] = v;
             refresh_workspace_state(vars);
         }
-        runmat_runtime::workspace::session::bind_global_slot(i, &name);
         global_aliases.declare_named(i, name);
     }
 }
@@ -183,4 +177,31 @@ pub fn persist_declared_for_bytecode(bytecode: &Bytecode, func_name: &str, vars:
 
 pub(crate) fn reset_thread_state_for_tests() {
     runmat_runtime::workspace::session::reset_legacy_state_for_tests();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{update_global_store, FrameGlobalBindings};
+    use runmat_value::Value;
+
+    #[test]
+    fn named_global_write_does_not_mutate_an_unrelated_legacy_slot() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        futures::executor::block_on(runtime.scope(async {
+            let bindings = FrameGlobalBindings::default();
+            bindings.declare_named(4, "other".into());
+            runmat_runtime::workspace::session::store_global_slot(4, Value::Num(11.0));
+            update_global_store(4, &Value::Num(19.0), &bindings);
+            assert_eq!(
+                runmat_runtime::workspace::session::global_slot_value(4),
+                Some(Value::Num(11.0))
+            );
+            assert_eq!(
+                runmat_runtime::workspace::session::global_value("other"),
+                Some(Value::Num(19.0))
+            );
+        }));
+    }
 }

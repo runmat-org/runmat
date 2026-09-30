@@ -23,13 +23,14 @@ impl PartialEq for GlobalRevision {
 
 impl Eq for GlobalRevision {}
 
-/// Named session variables and legacy bytecode-keyed persistent storage.
+/// Named session variables and legacy bytecode-keyed slot storage.
 ///
 /// Slot-to-local synchronization belongs to the executor. This state owns only
 /// values whose lifetime and identity cross an individual VM frame.
 #[derive(Debug, Default, Clone)]
 pub struct SessionVariableState {
     globals: HashMap<String, Value>,
+    global_slots: HashMap<usize, Value>,
     global_revision: GlobalRevision,
     persistent_slots: HashMap<(String, usize), Value>,
     persistent_names: HashMap<(String, String), Value>,
@@ -55,12 +56,7 @@ fn with_state_mut<R>(operation: impl FnOnce(&mut SessionVariableState) -> R) -> 
 
 pub fn global_names() -> Vec<String> {
     with_state(|state| {
-        let mut names = state
-            .globals
-            .keys()
-            .filter(|name| !name.starts_with("var_"))
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut names = state.globals.keys().cloned().collect::<Vec<_>>();
         names.sort();
         names
     })
@@ -93,6 +89,7 @@ pub fn roots() -> Vec<Value> {
         state
             .globals
             .values()
+            .chain(state.global_slots.values())
             .chain(state.persistent_slots.values())
             .chain(state.persistent_names.values())
             .cloned()
@@ -110,6 +107,7 @@ pub fn visit_roots(visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> 
         for value in state
             .globals
             .values()
+            .chain(state.global_slots.values())
             .chain(state.persistent_slots.values())
             .chain(state.persistent_names.values())
         {
@@ -127,37 +125,17 @@ pub fn visit_roots(visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> 
     })
 }
 
-pub fn update_global_slot(index: usize, alias: Option<&str>, value: &Value) {
+/// Store a global addressed by a legacy bytecode slot. This namespace is
+/// distinct from user-written global names, even when a name is `var_4`.
+pub fn store_global_slot(index: usize, value: Value) {
     with_state_mut(|state| {
-        let mut changed = false;
-        let slot_key = format!("var_{index}");
-        if let std::collections::hash_map::Entry::Occupied(mut entry) =
-            state.globals.entry(slot_key)
-        {
-            entry.insert(value.clone());
-            changed = true;
-        }
-        if let Some(alias) = alias {
-            state.globals.insert(alias.to_string(), value.clone());
-            changed = true;
-        }
-        if changed {
-            state.global_revision = GlobalRevision::default();
-        }
+        state.global_slots.insert(index, value);
+        state.global_revision = GlobalRevision::default();
     });
 }
 
 pub fn global_slot_value(index: usize) -> Option<Value> {
-    global_value(&format!("var_{index}"))
-}
-
-pub fn bind_global_slot(index: usize, name: &str) {
-    with_state_mut(|state| {
-        if let Some(value) = state.globals.get(name).cloned() {
-            state.globals.insert(format!("var_{index}"), value);
-            state.global_revision = GlobalRevision::default();
-        }
-    });
+    with_state(|state| state.global_slots.get(&index).cloned())
 }
 
 pub fn persistent_slot_value(function: &str, index: usize) -> Option<Value> {
@@ -222,7 +200,7 @@ mod tests {
         let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
 
         block_on(first.scope(async {
-            update_global_slot(0, Some("answer"), &Value::Num(42.0));
+            store_global_named("answer", Value::Num(42.0));
             assert_eq!(global_value("answer"), Some(Value::Num(42.0)));
         }));
         block_on(second.scope(async {
@@ -254,14 +232,54 @@ mod tests {
             let first = global_revision();
             assert_ne!(initial, first);
             assert_eq!(first, global_revision());
-            update_global_slot(4, Some("answer"), &Value::Num(2.0));
+            store_global_named("answer", Value::Num(2.0));
             let second = global_revision();
             assert_ne!(first, second);
-            bind_global_slot(4, "answer");
+            store_global_slot(4, Value::Num(2.0));
             let third = global_revision();
             assert_ne!(second, third);
             assert_ne!(initial, third);
             assert_eq!(global_value("answer"), Some(Value::Num(2.0)));
+        }));
+    }
+
+    #[test]
+    fn user_global_with_legacy_slot_spelling_stays_named_and_disjoint() {
+        let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        block_on(context.scope(async {
+            store_global_named("var_4", Value::Num(11.0));
+            store_global_named("other", Value::Num(2.0));
+            assert_eq!(global_names(), vec!["other", "var_4"]);
+
+            let before_binding = global_revision();
+            store_global_slot(4, Value::Num(2.0));
+            assert_ne!(global_revision(), before_binding);
+            assert_eq!(global_slot_value(4), Some(Value::Num(2.0)));
+            assert_eq!(global_value("var_4"), Some(Value::Num(11.0)));
+
+            store_global_slot(4, Value::Num(3.0));
+            store_global_named("other", Value::Num(3.0));
+            assert_eq!(global_slot_value(4), Some(Value::Num(3.0)));
+            assert_eq!(global_value("other"), Some(Value::Num(3.0)));
+            assert_eq!(global_value("var_4"), Some(Value::Num(11.0)));
+            assert_eq!(global_names(), vec!["other", "var_4"]);
+
+            store_global_slot(4, Value::Num(7.0));
+            assert_eq!(global_slot_value(4), Some(Value::Num(7.0)));
+            assert_eq!(global_value("other"), Some(Value::Num(3.0)));
+            let roots = roots();
+            assert!(roots.contains(&Value::Num(11.0)));
+            assert!(roots.contains(&Value::Num(7.0)));
+            let mut visited = Vec::new();
+            assert_eq!(
+                visit_roots(&mut |value| {
+                    visited.push(value.clone());
+                    Some(())
+                }),
+                Some(())
+            );
+            assert!(visited.contains(&Value::Num(11.0)));
+            assert!(visited.contains(&Value::Num(7.0)));
         }));
     }
 }

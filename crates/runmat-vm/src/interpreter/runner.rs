@@ -1625,6 +1625,59 @@ mod tests {
     }
 
     #[test]
+    fn resumed_legacy_global_slot_keeps_its_typed_binding_and_store() {
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::DeclareGlobal(vec![0]),
+                Instr::LoadVar(0),
+                Instr::StoreVar(1),
+                Instr::LoadConst(29.0),
+                Instr::StoreVar(0),
+                Instr::LoadVar(0),
+                Instr::StoreVar(2),
+                Instr::Return,
+            ],
+            3,
+        );
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        block_on(runtime.scope(async {
+            runmat_runtime::workspace::session::store_global_slot(0, Value::Num(17.0));
+        }));
+        let resume = InterpreterResumeState {
+            pc: 1,
+            completion_boundary: None,
+            vars: vec![Some(Value::Num(3.0)), None, None],
+            supplied_inputs: 0,
+            requested_outputs: 3,
+            missing_input_slots: Default::default(),
+            global_aliases: std::collections::HashMap::from([(
+                0,
+                runmat_runtime::workspace::bindings::FrameGlobalBinding::LegacySlot,
+            )]),
+            persistent_aliases: Default::default(),
+            side_effect_epoch: 0,
+        };
+        let super::InterpreterOutcome::Completed(completion) =
+            block_on(interpret_resume_in_context(
+                &bytecode,
+                resume,
+                Some("legacy_resume_test"),
+                runtime.clone(),
+            ))
+            .unwrap();
+        assert_eq!(completion.values[1], Value::Num(17.0));
+        assert_eq!(completion.values[2], Value::Num(29.0));
+        block_on(runtime.scope(async {
+            assert_eq!(
+                runmat_runtime::workspace::session::global_slot_value(0),
+                Some(Value::Num(29.0))
+            );
+        }));
+    }
+
+    #[test]
     fn interpreter_resume_stops_before_the_declared_completion_boundary() {
         super::CALL_COUNTS.with(|counts| assert!(counts.borrow().is_empty()));
         let bytecode = Bytecode::with_instructions(
