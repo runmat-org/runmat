@@ -521,11 +521,12 @@ mod tests {
 
     #[test]
     fn fused_output_adapter_dispatches_and_physical_upload_bytes_reach_costing() {
+        use crate::placement::provider_contract::fusion_elementwise::fixture::GeometryProvider;
         use runmat_accelerate_api::{
             ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency,
             ProviderStorage,
         };
-        let provider = crate::simple_provider::InProcessProvider::new();
+        let provider = GeometryProvider::new();
         let input = ProviderRepresentation {
             element_type: ProviderElementType::F32,
             storage: ProviderStorage::DenseReal,
@@ -553,14 +554,16 @@ mod tests {
             downstream_materialization: false,
         };
         let adapted = wgpu_cost_estimate(&provider, &query).cost;
-        assert_eq!(adapted.components.queue_ns, 20_000);
+        // One fused dispatch, one output adapter, and the pipeline warmup.
+        assert_eq!(adapted.components.queue_ns, 30_000);
         assert_eq!(adapted.components.allocation_ns, 10_000);
         assert_eq!(adapted.components.upload_ns, transfer_prior_ns(64));
         assert_eq!(adapted.scratch_bytes, 128);
         assert_eq!(adapted.source, EstimateSource::StaticPrior);
         query.operation.outputs[0].element_type = ProviderElementType::F64;
         let native = wgpu_cost_estimate(&provider, &query).cost;
-        assert_eq!(native.components.queue_ns, 10_000);
+        // The native output omits the adapter but retains the warmup.
+        assert_eq!(native.components.queue_ns, 20_000);
         assert!(adapted.components.execution_ns > native.components.execution_ns);
     }
 }

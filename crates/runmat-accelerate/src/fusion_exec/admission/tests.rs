@@ -77,7 +77,11 @@ fn request<'a>(plan: &'a FusionGroupPlan, runtime: &RuntimeContext) -> FusionExe
 #[test]
 fn selected_named_bindings_reject_replacements_absence_and_ambiguity() {
     runmat_gc::gc_test_context(|| {
-        for name in ["sin", "mtimes", "power"] {
+        for (name, args) in [
+            ("sin", vec![Value::Num(2.)]),
+            ("mtimes", vec![Value::Num(2.), Value::Num(3.)]),
+            ("power", vec![Value::Num(2.), Value::Num(3.)]),
+        ] {
             let original = runmat_runtime::builtin::runtime_builtin_bindings_by_name(name);
             assert_eq!(original.len(), 1, "{name}");
             let plan = make_plan(vec![named(name, FusionCallOrigin::named(name))]);
@@ -87,13 +91,11 @@ fn selected_named_bindings_reject_replacements_absence_and_ambiguity() {
             let selected = context(changed);
             assert!(AdmittedBindings::new(&request(&plan, &selected)).is_none());
             // The retained route really reaches the selected implementation.
-            let result = futures::executor::block_on(selected.scope(
-                runmat_runtime::call_builtin_async_with_outputs(
-                    name,
-                    &[Value::Num(2.), Value::Num(3.)],
-                    1,
+            let result = futures::executor::block_on(
+                runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &selected, name, &args, 1,
                 ),
-            ))
+            )
             .unwrap();
             assert_eq!(result, Value::Num(99.));
             assert!(AdmittedBindings::new(&request(&plan, &context(vec![]))).is_none());
