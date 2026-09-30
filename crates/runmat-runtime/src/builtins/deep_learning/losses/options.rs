@@ -69,6 +69,10 @@ impl ParsedLossOptions {
         self.known.iter().map(|(key, value)| (*key, value))
     }
 
+    pub(super) fn unknown_name(&self) -> Option<&str> {
+        self.unknown.keys().next().map(String::as_str)
+    }
+
     pub(super) fn unsupported_name(&self) -> Option<String> {
         let known = self
             .known

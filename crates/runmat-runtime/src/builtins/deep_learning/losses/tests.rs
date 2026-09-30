@@ -50,6 +50,30 @@ fn repeated_spatial_weight_axes_broadcast_by_occurrence() {
 }
 
 #[test]
+fn recognized_name_value_options_pass_public_preflight() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let output = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.7, 0.3, 0.6, 0.4], vec![2, 3]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0], vec![2, 3]).unwrap()),
+        vec![
+            Value::String("DataFormat".into()),
+            Value::String("cB".into()),
+            Value::String("Reduction".into()),
+            Value::String("none".into()),
+        ],
+    ))
+    .expect("recognized options pass preflight");
+    let Value::Tensor(losses) = output else {
+        panic!("unreduced numeric pair returns an array");
+    };
+    assert_eq!(losses.shape, vec![2, 3]);
+    let expected = [-0.8_f64.ln(), 0.0, -0.7_f64.ln(), 0.0, -0.6_f64.ln(), 0.0];
+    for (actual, expected) in losses.materialize_f64().iter().zip(expected) {
+        assert!((actual - expected).abs() < 1e-12);
+    }
+}
+
+#[test]
 fn plain_numeric_pair_is_an_explicit_runmat_extension() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let err = block_on(crossentropy_builtin(

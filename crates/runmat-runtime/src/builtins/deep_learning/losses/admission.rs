@@ -75,7 +75,7 @@ pub(super) fn preflight_host_decidable(
     if let Some(value) = weights.filter(|value| !matches!(value, Value::GpuTensor(_))) {
         host_weights = Some(LossWeights::parse(value, "weights")?);
     }
-    if let Some(key) = options.unsupported_name() {
+    if let Some(key) = options.unknown_name() {
         return Err(deep_learning_error(
             "crossentropy",
             format!("crossentropy: unsupported option '{key}'"),
