@@ -148,8 +148,6 @@ impl DeepLearningForwardRoute<'_> {
                     {
                         return Err(DeepLearningForwardRouteError::InvalidGeometry);
                     }
-                    used_parameters[scale] = true;
-                    used_parameters[offset] = true;
                 }
                 (
                     DeepLearningForwardOperation::FeedForward(
@@ -162,6 +160,8 @@ impl DeepLearningForwardRoute<'_> {
                     {
                         return Err(DeepLearningForwardRouteError::InvalidGeometry);
                     }
+                    used_parameters[scale] = true;
+                    used_parameters[offset] = true;
                 }
                 (
                     DeepLearningForwardOperation::Pool1D { input_shape, route },
@@ -330,5 +330,65 @@ mod tests {
         let route = dense_route(DeepLearningForwardSource::Resident(&input.handle));
         assert_eq!(route.analyze().unwrap().output_bytes, 32);
         assert_eq!(input.probe.retirements(), 0);
+    }
+
+    #[test]
+    fn normalization_then_activation_consumes_both_affine_parameters() {
+        let mut route = DeepLearningForwardRoute {
+            input: DeepLearningForwardSource::Host {
+                element_type: NumericElementType::F32,
+                shape: vec![2, 3],
+            },
+            parameters: vec![
+                DeepLearningForwardParameter {
+                    source: DeepLearningForwardSource::Host {
+                        element_type: NumericElementType::F32,
+                        shape: vec![3, 1],
+                    },
+                    view_steps: Vec::new(),
+                },
+                DeepLearningForwardParameter {
+                    source: DeepLearningForwardSource::Host {
+                        element_type: NumericElementType::F32,
+                        shape: vec![3, 1],
+                    },
+                    view_steps: Vec::new(),
+                },
+            ],
+            steps: vec![
+                DeepLearningForwardStep {
+                    operation: DeepLearningForwardOperation::LayerNorm(
+                        DeepLearningLayerNormRequest {
+                            shape: vec![2, 3],
+                            reduce_mask: 0b10,
+                            channel_axis: 1,
+                            scale_shape: vec![3, 1],
+                            offset_shape: vec![3, 1],
+                            epsilon: 1.0e-5,
+                        },
+                    ),
+                    parameters: DeepLearningForwardParameters::LayerNorm {
+                        scale: 0,
+                        offset: 1,
+                    },
+                },
+                DeepLearningForwardStep {
+                    operation: DeepLearningForwardOperation::FeedForward(
+                        DeepLearningFeedForwardStage::Relu { elements: 6 },
+                    ),
+                    parameters: DeepLearningForwardParameters::None,
+                },
+            ],
+            output_view: GpuTensorView::contiguous(vec![2, 3]),
+        };
+        assert_eq!(route.analyze().unwrap().output_bytes, 24);
+        route.steps[0].parameters = DeepLearningForwardParameters::LayerNorm {
+            scale: 0,
+            offset: 2,
+        };
+        assert_eq!(
+            route.analyze(),
+            Err(DeepLearningForwardRouteError::InvalidParameter)
+        );
     }
 }
