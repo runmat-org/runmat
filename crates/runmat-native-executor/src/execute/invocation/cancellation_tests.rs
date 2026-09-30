@@ -94,17 +94,19 @@ fn invocation(source: &CancellationSource, work: PendingProbe) -> NativeInvocati
     )
 }
 
-fn work() -> (
-    PendingProbe,
-    Rc<Cell<usize>>,
-    Rc<Cell<usize>>,
-    Rc<Cell<bool>>,
-) {
+struct ProbeFixture {
+    work: PendingProbe,
+    polls: Rc<Cell<usize>>,
+    drops: Rc<Cell<usize>>,
+    ready: Rc<Cell<bool>>,
+}
+
+fn work() -> ProbeFixture {
     let polls = Rc::new(Cell::new(0));
     let drops = Rc::new(Cell::new(0));
     let ready = Rc::new(Cell::new(false));
-    (
-        PendingProbe {
+    ProbeFixture {
+        work: PendingProbe {
             polls: polls.clone(),
             drops: drops.clone(),
             ready: ready.clone(),
@@ -113,13 +115,15 @@ fn work() -> (
         polls,
         drops,
         ready,
-    )
+    }
 }
 
 #[test]
 fn cancellation_wakes_pending_resume_and_terminalizes_retained_invocation() {
     let source = CancellationSource::new();
-    let (work, polls, drops, _) = work();
+    let ProbeFixture {
+        work, polls, drops, ..
+    } = work();
     let mut invocation = invocation(&source, work);
     let wakes = Arc::new(Wakes::default());
     let waker = Waker::from(wakes.clone());
@@ -148,7 +152,9 @@ fn cancellation_wakes_pending_resume_and_terminalizes_retained_invocation() {
 #[test]
 fn unpolled_drop_and_invalid_requests_preserve_retry_but_polled_drop_abandons() {
     let source = CancellationSource::new();
-    let (work, polls, drops, _) = work();
+    let ProbeFixture {
+        work, polls, drops, ..
+    } = work();
     let mut invocation = invocation(&source, work);
     drop(invocation.resume_suspension(1, 1));
     assert!(futures::executor::block_on(invocation.resume_suspension(2, 1)).is_err());
@@ -172,7 +178,12 @@ fn unpolled_drop_and_invalid_requests_preserve_retry_but_polled_drop_abandons() 
 #[test]
 fn correct_resume_after_stale_request_restores_active_execution() {
     let source = CancellationSource::new();
-    let (work, polls, drops, ready) = work();
+    let ProbeFixture {
+        work,
+        polls,
+        drops,
+        ready,
+    } = work();
     let mut invocation = invocation(&source, work);
     assert!(futures::executor::block_on(invocation.resume_suspension(1, 2)).is_err());
     ready.set(true);
@@ -189,7 +200,9 @@ fn observed_cancellation_releases_captured_arena_roots_before_invocation_drop() 
         let allocation =
             runmat_gc::gc_allocate_rooted(runmat_value::Value::String("capture".into())).unwrap();
         let handle = allocation.handle();
-        let (mut work, _, drops, _) = work();
+        let ProbeFixture {
+            mut work, drops, ..
+        } = work();
         work.on_drop = Some(Box::new(move || {
             let runtime = runmat_runtime::context::legacy::active()
                 .expect("originating runtime during pending destructor");
@@ -237,7 +250,9 @@ fn polled_resume_drop_and_cancellation_keep_roots_and_context_during_work_destru
                 runmat_gc::gc_allocate_rooted(runmat_value::Value::String("polled capture".into()))
                     .unwrap();
             let handle = allocation.handle();
-            let (mut work, _, drops, _) = work();
+            let ProbeFixture {
+                mut work, drops, ..
+            } = work();
             work.on_drop = Some(Box::new(move || {
                 let runtime =
                     runmat_runtime::context::legacy::active().expect("resume destructor context");

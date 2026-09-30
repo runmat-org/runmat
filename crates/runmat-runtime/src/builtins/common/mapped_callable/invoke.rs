@@ -4,11 +4,6 @@ use runmat_value::Value;
 use super::{CallableCallError, MappedCallable};
 
 impl MappedCallable {
-    pub(crate) async fn invoke(&self, arguments: &[Value]) -> Result<Value, CallableCallError> {
-        self.invoke_with_outputs_in_context(None, arguments, 1)
-            .await
-    }
-
     pub(crate) async fn invoke_with_outputs(
         &self,
         arguments: &[Value],

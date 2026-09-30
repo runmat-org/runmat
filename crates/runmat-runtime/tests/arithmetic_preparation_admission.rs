@@ -3,7 +3,7 @@ use runmat_runtime::context::preparation::{AdmittedBuiltinPreparation, PreparedB
 use runmat_runtime::context::{
     RuntimeAccelerationService, RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts,
 };
-use runmat_runtime::{call_builtin_async_with_outputs, RuntimeError};
+use runmat_runtime::RuntimeError;
 use runmat_value::{Tensor, Value};
 use std::{cell::Cell, rc::Rc};
 

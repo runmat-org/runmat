@@ -273,7 +273,15 @@ async fn execute_parfor_tasks(
     }
 
     let results = await_parallel_tasks(context, &tasks).await?;
-    assemble_sliced_results(executable, &graph, &iterations, results, vars).await
+    assemble_sliced_results(
+        &context.runtime,
+        executable,
+        &graph,
+        &iterations,
+        results,
+        vars,
+    )
+    .await
 }
 
 async fn await_parallel_tasks(
@@ -443,6 +451,7 @@ fn slice_randomness(
 }
 
 async fn assemble_sliced_results(
+    runtime: &runmat_runtime::context::RuntimeContext,
     executable: &crate::BytecodeParforRegion,
     graph: &runmat_execution::ParallelTaskGraph,
     iterations: &[Value],
@@ -507,7 +516,7 @@ async fn assemble_sliced_results(
                     };
                     for contribution in &contributions.data {
                         accumulator = runmat_runtime::parallel::reduction::combine_in_context(
-                            Some(&context.runtime),
+                            Some(runtime),
                             *operator,
                             accumulator,
                             contribution.clone(),

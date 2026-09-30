@@ -472,11 +472,3 @@ pub(super) fn function_symbol(
         format!("runmat_native_f{}", function.0)
     }
 }
-
-fn valid_link_symbol(symbol: &str) -> bool {
-    symbol.starts_with("runmat_")
-        && symbol.len() <= 2_048
-        && symbol
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}

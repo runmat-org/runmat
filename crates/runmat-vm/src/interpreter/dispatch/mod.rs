@@ -1105,8 +1105,9 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CreateRange(has_step) => {
+            let runtime = &context.runtime;
             create_range(stack, *has_step, |args| async move {
-                crate::call::call_builtin_async(&context.runtime, "colon", &args).await
+                crate::call::call_builtin_async(runtime, "colon", &args).await
             })
             .await?;
             Ok(Some(DispatchHandled::Generic(

@@ -3,7 +3,7 @@ use crate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind};
 use crate::fusion_exec::*;
 use crate::graph::{InstrSpan, ShapeInfo};
 use runmat_runtime::{
-    builtin::{RuntimeBuiltinBinding, RuntimeBuiltinFuture},
+    builtin::{RuntimeBuiltinBinding, RuntimeBuiltinFuture, RuntimeBuiltinInvocation},
     context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts},
 };
 use std::{collections::HashMap, rc::Rc};
@@ -18,7 +18,7 @@ impl RuntimeBuiltinService for Selected {
             .collect()
     }
 }
-fn replacement(_: &[Value]) -> RuntimeBuiltinFuture {
+fn replacement(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async { Ok(Value::Num(99.0)) })
 }
 fn context(bindings: Vec<RuntimeBuiltinBinding>) -> RuntimeContext {

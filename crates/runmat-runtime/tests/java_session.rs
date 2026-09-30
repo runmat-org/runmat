@@ -77,7 +77,6 @@ fn invoke(
         .clone();
     let sequence = futures::executor::block_on(context.scope(service.invoke(
         context.clone(),
-        context.clone(),
         ForeignCall {
             adapter: JAVA_ADAPTER_ID.into(),
             symbol: symbol.into(),

@@ -4,7 +4,7 @@ use runmat_runtime::context::preparation::{AdmittedBuiltinPreparation, PreparedB
 use runmat_runtime::context::{
     RuntimeAccelerationService, RuntimeContext, RuntimeServiceFuture, RuntimeServicePorts,
 };
-use runmat_runtime::{call_builtin_async_with_outputs, RuntimeError};
+use runmat_runtime::RuntimeError;
 use runmat_types::{RealUnaryClassification, RealUnaryPredicate};
 use runmat_value::{IntValue, Tensor, Value};
 use std::{cell::RefCell, rc::Rc};

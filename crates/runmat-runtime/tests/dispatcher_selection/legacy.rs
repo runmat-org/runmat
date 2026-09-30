@@ -1,5 +1,6 @@
 use super::*;
 use runmat_macros::runtime_builtin;
+use runmat_runtime::call_builtin;
 
 #[runtime_builtin(
     name = "__dispatcher_category_failure",

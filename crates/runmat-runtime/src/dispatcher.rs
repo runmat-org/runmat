@@ -1735,6 +1735,7 @@ mod tests {
                 &format!("{class_name}.zero"),
                 &[],
                 Some(requested_outputs),
+                None,
             ))
             .unwrap()
             .unwrap();

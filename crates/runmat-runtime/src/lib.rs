@@ -1451,10 +1451,6 @@ pub async fn test_register_classes() {
     let _ = register_test_classes_builtin().await;
 }
 
-pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    feval_builtin_in_runtime(None, None, f, rest).await
-}
-
 async fn feval_builtin_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     invocation_outputs: Option<usize>,
@@ -1718,6 +1714,10 @@ async fn feval_builtin_in_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        crate::builtins::introspection::feval::feval_builtin_registered(None, None, f, rest).await
+    }
     use crate::builtins::introspection::test_methods::*;
     use futures::executor::block_on;
     use runmat_value::{HandleRef, IntegerStorage, Tensor};

@@ -777,7 +777,7 @@ async fn execute_function_request(
             );
             runtime
                 .scope(crate::call::execute_callable_descriptor(
-                    &runtime, descriptor,
+                    runtime, descriptor,
                 ))
                 .await
         }
