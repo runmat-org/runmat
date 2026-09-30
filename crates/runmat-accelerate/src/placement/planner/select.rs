@@ -84,7 +84,7 @@ mod tests {
                     upload_ns,
                     ..ExecutionCostComponents::default()
                 },
-                scratch_bytes: 0,
+                scratch_bytes: Some(0),
                 confidence: EstimateConfidence::Exact,
                 source: EstimateSource::Synthetic,
             },

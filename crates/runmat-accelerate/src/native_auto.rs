@@ -695,7 +695,7 @@ fn provider_prior(evaluation: &DecisionEvaluation) -> ExecutionCostEstimate {
             execution_ns,
             ..ExecutionCostComponents::default()
         },
-        scratch_bytes: 0,
+        scratch_bytes: Some(0),
         confidence: if modeled_execution.is_some() {
             EstimateConfidence::Medium
         } else {
@@ -1287,7 +1287,7 @@ impl NativeAutoOffload {
                     .unwrap_or(u64::MAX),
                 ..ExecutionCostComponents::default()
             },
-            scratch_bytes: 0,
+            scratch_bytes: Some(0),
             confidence: EstimateConfidence::Low,
             source: EstimateSource::StaticPrior,
         };
@@ -1820,7 +1820,7 @@ mod tests {
                         execution_ns: 1,
                         ..ExecutionCostComponents::default()
                     },
-                    scratch_bytes: 0,
+                    scratch_bytes: Some(0),
                     confidence: EstimateConfidence::Exact,
                     source: EstimateSource::Provider,
                 },

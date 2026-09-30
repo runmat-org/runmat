@@ -6,7 +6,7 @@
 
 use runmat_value::Value;
 
-use super::{layout, request::*};
+use super::{layout, placement, request::*};
 use crate::builtins::deep_learning::model::{
     admission::{forward_data, resident_input_handle},
     execution::host::network::HostValue,
@@ -72,6 +72,8 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                         output_axes,
                         state_updates: Vec::new(),
                         trace: execution.trace.map(NetworkTrace::Resident),
+                        runtime: request.runtime.cloned(),
+                        placement: None,
                     });
                 }
                 Err(reason) if active_tape => {
@@ -114,6 +116,8 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                         output_axes,
                         state_updates: Vec::new(),
                         trace: None,
+                        runtime: request.runtime.cloned(),
+                        placement: None,
                     })
                 }
                 Err(reason) if runmat_accelerate_api::handle_is_explicit(handle) => {
@@ -165,6 +169,8 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                     output_axes,
                     state_updates: Vec::new(),
                     trace: None,
+                    runtime: request.runtime.cloned(),
+                    placement: None,
                 });
             }
         }
@@ -179,6 +185,116 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
             ));
         }
     }
+
+    // A host-origin provider route is eligible only after the same semantic
+    // admission as the CPU route. The shared placement service selects one
+    // executable route; this call never runs either route as a timing probe.
+    let selected = placement::select(&request, &plan, &output_axes, active_tape)?;
+    let pending = match selected {
+        Some(placement::SelectedNetworkRoute::Provider {
+            route,
+            mut observation,
+            present_resident,
+        }) => {
+            let route_device = route.provider().device_id();
+            let output = match gpu::execute_host_route_selected(route, request.runtime).await {
+                Ok(output) => output,
+                Err(failure) => {
+                    if failure.is_operational() {
+                        if let Some(observation) = observation.take() {
+                            observation.operational_failure();
+                        }
+                    }
+                    return Err(failure.into_error());
+                }
+            };
+            let expected_element = match plan.execution_precision() {
+                runmat_value::NumericDType::F32 => runmat_accelerate_api::NumericElementType::F32,
+                runmat_value::NumericDType::F64 => runmat_accelerate_api::NumericElementType::F64,
+                _ => {
+                    return Err(deep_learning_error(
+                        function,
+                        "admitted network has no provider floating output class",
+                    ));
+                }
+            };
+            if output.shape() != output_axes.shape()
+                || output.physical().element_type() != expected_element
+                || output.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+                || output.device_id() != route_device
+            {
+                if let Some(observation) = observation.take() {
+                    observation.operational_failure();
+                }
+                return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                    output,
+                    crate::build_runtime_error(format!(
+                        "{function}: provider output differs from admitted shape, class or owner"
+                    ))
+                    .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build(),
+                ));
+            }
+            if present_resident {
+                let data = match crate::builtins::common::gpu_helpers::resident_gpu_value(output) {
+                    Ok(data) => data,
+                    Err(error) => {
+                        if let Some(observation) = observation.take() {
+                            observation.operational_failure();
+                        }
+                        return Err(error);
+                    }
+                };
+                return Ok(NetworkExecutionOutcome {
+                    data,
+                    output_axes,
+                    state_updates: Vec::new(),
+                    trace: None,
+                    runtime: request.runtime.cloned(),
+                    placement: observation,
+                });
+            }
+            let tensor =
+                match crate::builtins::common::gpu_helpers::gather_tensor_async(&output).await {
+                    Ok(tensor) => tensor,
+                    Err(error) => {
+                        if placement::is_provider_download_failure(&error) {
+                            if let Some(observation) = observation.take() {
+                                observation.operational_failure();
+                            }
+                        }
+                        return Err(error);
+                    }
+                };
+            if tensor.shape != output_axes.shape()
+                || tensor.numeric_dtype() != plan.execution_precision()
+            {
+                if let Some(observation) = observation.take() {
+                    observation.operational_failure();
+                }
+                return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                    output,
+                    crate::build_runtime_error(format!(
+                        "{function}: downloaded provider output differs from admitted network"
+                    ))
+                    .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build(),
+                ));
+            }
+            return Ok(NetworkExecutionOutcome {
+                data: Value::Tensor(tensor),
+                output_axes,
+                state_updates: Vec::new(),
+                trace: None,
+                runtime: request.runtime.cloned(),
+                placement: observation,
+            });
+        }
+        Some(placement::SelectedNetworkRoute::Host(observation)) => Some(observation),
+        None => None,
+    };
 
     let prepared = plan.prepare().await?;
     let host_input = prepared.prepare_input(request.input).await?;
@@ -196,6 +312,8 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
         // preserves those axes; `predict` currently returns raw scores and
         // does not publish an autodiff node for a reordered result.
         trace: result.trace.map(NetworkTrace::Host),
+        runtime: request.runtime.cloned(),
+        placement: pending,
     })
 }
 

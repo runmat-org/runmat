@@ -200,10 +200,65 @@ pub trait RuntimePlacementFeedbackSource: Send {
     fn take_ready(&mut self) -> Option<runmat_execution::PlacementFeedback>;
 }
 
+/// A process-local reservation for one exploratory whole-work invocation.
+/// Dropping it releases the reservation without reporting a provider failure.
+pub trait RuntimeWholeWorkProbeLease {}
+
+pub struct RuntimeWholeWorkSelection {
+    pub decision: runmat_execution::WholeWorkDecision,
+    pub probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
+}
+
 /// Session-owned execution-placement authority. The runtime exposes only
 /// executor-neutral contracts; candidate generation and policy remain in their
 /// owning executor/acceleration crates.
 pub trait RuntimePlacementService {
+    /// Owning placement policy supplies revisions for complete-route feedback.
+    /// A third-party service that does not support this contract returns None
+    /// rather than inventing catalog/compiler/policy identities in the caller.
+    fn whole_work_revision(
+        &self,
+        _program: Option<runmat_execution::ProgramRevision>,
+        _provider: runmat_execution::Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        None
+    }
+
+    /// Select one complete, already admitted invocation. Third-party
+    /// implementations remain conservative until they support this contract.
+    fn select_whole_work(
+        &self,
+        _request: runmat_execution::WholeWorkPlacementRequest,
+    ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
+        Err(
+            crate::build_runtime_error("whole-work placement is unavailable")
+                .with_identifier("RunMat:Placement:Unavailable")
+                .build(),
+        )
+    }
+
+    /// A cancelled or abandoned invocation is not a failure observation.
+    fn observe_whole_work(
+        &self,
+        observation: runmat_execution::WholeWorkObservation,
+    ) -> Result<(), RuntimeError> {
+        use runmat_execution::WholeWorkObservationOutcome;
+        let succeeded = match observation.outcome {
+            WholeWorkObservationOutcome::Success => true,
+            WholeWorkObservationOutcome::OperationalFailure => false,
+            WholeWorkObservationOutcome::Cancelled | WholeWorkObservationOutcome::Abandoned => {
+                return Ok(());
+            }
+        };
+        self.observe(runmat_execution::PlacementFeedback {
+            signature: observation.signature,
+            candidate: observation.selected.candidate,
+            kind: observation.selected.kind,
+            total_elapsed_ns: observation.elapsed_ns,
+            succeeded,
+        })
+    }
+
     /// A duration measured for this exact signature and candidate. The
     /// default makes third-party services conservative: absence of a lookup
     /// does not authorize inventing a numeric route cost.

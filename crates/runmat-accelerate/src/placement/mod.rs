@@ -11,6 +11,7 @@ mod provider_contract;
 #[cfg(feature = "wgpu")]
 mod provider_cost;
 mod recorder;
+mod revision;
 mod residency;
 mod session;
 pub(crate) use provider_contract::matmul::scalar_work_units as matmul_scalar_work_units;

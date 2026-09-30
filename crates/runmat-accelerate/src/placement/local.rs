@@ -7,8 +7,7 @@ use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
     CandidateResourceDemand, Digest, ExecutionCandidateDescriptor, ExecutionCandidateKind,
     ExecutionCostEstimate, PlacementGraph, PlacementGraphCandidate, PlacementGraphLimits,
-    PlacementGraphNode, PlacementPlanRequest, PlacementResourceSnapshot, PlacementRevision,
-    PlacementSignature,
+    PlacementGraphNode, PlacementPlanRequest, PlacementResourceSnapshot, PlacementSignature,
 };
 use runmat_value::Value;
 
@@ -114,6 +113,20 @@ pub(crate) fn plan_local(
         outputs: request.outputs,
         workload,
     };
+    if query
+        .outputs
+        .iter()
+        .try_fold(0_u64, |total, output| {
+            total.checked_add(output.checked_byte_len()?)
+        })
+        .is_none()
+    {
+        return Err(Box::new(
+            runmat_runtime::build_runtime_error("automatic placement output size overflows")
+                .with_identifier("RunMat:Placement:ResourceOverflow")
+                .build(),
+        ));
+    }
     let estimate = match provider.query_feasibility(&query) {
         ProviderFeasibility::Supported { estimate } => estimate,
         ProviderFeasibility::Rejected { rejection } => {
@@ -132,6 +145,11 @@ pub(crate) fn plan_local(
             cpu_cost: cpu.cost,
         });
     }
+    // A logical output template cannot prove the size or freshness of its
+    // backing allocation. Even a contiguous view may alias a larger owner.
+    let cpu_retained_bytes = runmat_execution::ResourceByteBound::Unavailable(
+        runmat_execution::ResourceBoundUnavailable::NoRetainedValueBound,
+    );
 
     let upload_bytes = request
         .required_upload_bytes
@@ -229,16 +247,11 @@ pub(crate) fn plan_local(
                         ),
                         request.semantic_identity,
                     ),
-                    revision: PlacementRevision {
-                        program: runtime.program_revision().cloned(),
-                        catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
-                        compiler: Digest::sha256(b"runmat-placement-compiler-v1"),
-                        provider: provider_digest,
-                        policy: Digest::sha256(format!(
-                            "local:{}:{}",
-                            policy.absolute_margin_ns, policy.relative_margin_basis_points
-                        )),
-                    },
+                    revision: super::revision::local(
+                        runtime.program_revision().cloned(),
+                        provider_digest,
+                        policy,
+                    ),
                 };
                 let transactional = capability.concurrency.transactional_results;
                 let decision = service.plan(PlacementPlanRequest {
@@ -250,8 +263,13 @@ pub(crate) fn plan_local(
                                 PlacementGraphCandidate {
                                     resources: CandidateResourceDemand {
                                         cpu_millicores: 1_000,
-                                        retained_bytes: 0,
-                                        scratch_bytes: cpu_cost.scratch_bytes,
+                                        retained_bytes: cpu_retained_bytes,
+                                        scratch_bytes: cpu_cost.scratch_bytes.map_or(
+                                            runmat_execution::ResourceByteBound::Unavailable(
+                                                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+                                            ),
+                                            Into::into,
+                                        ),
                                         queue_slots: 0,
                                     },
                                     descriptor: cpu.clone(),
@@ -262,8 +280,13 @@ pub(crate) fn plan_local(
                                         cpu_millicores: 0,
                                         retained_bytes: estimate.output_bytes.expect(
                                             "automatic placement admitted known physical output bytes",
+                                        ).into(),
+                                        scratch_bytes: provider_cost.scratch_bytes.map_or(
+                                            runmat_execution::ResourceByteBound::Unavailable(
+                                                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+                                            ),
+                                            Into::into,
                                         ),
-                                        scratch_bytes: provider_cost.scratch_bytes,
                                         queue_slots: 1,
                                     },
                                     descriptor: provider_candidate.clone(),

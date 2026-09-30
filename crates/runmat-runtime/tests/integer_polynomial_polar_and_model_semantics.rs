@@ -188,7 +188,9 @@ fn strict_mode_rejects_each_runmat_only_integer_surface_before_evaluation() {
         )
         .expect("complex integer"),
     );
-    let statistical_model = Value::Object(ObjectInstance::new("LinearModel".to_string()));
+    let statistical_model = Value::Object(ObjectInstance::new(
+        runmat_types::standard::LINEAR_MODEL.to_string(),
+    ));
     let calls = vec![
         (
             "perfcurve",
@@ -262,7 +264,9 @@ fn strict_resident_integer_gates_run_before_provider_lookup() {
         (
             "predict",
             vec![
-                Value::Object(ObjectInstance::new("LinearModel".to_string())),
+                Value::Object(ObjectInstance::new(
+                    runmat_types::standard::LINEAR_MODEL.to_string(),
+                )),
                 resident_integer(vec![1, 2]),
             ],
         ),

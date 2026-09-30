@@ -26,6 +26,8 @@ use tape::{
     active_tape, attach_node_to_object, push_binary_node, push_node, value_for_node, Node, NodeKind,
 };
 pub(super) use tape::{annotate_dlarray_value, dlarray_node_id, tape_is_active, with_tape_context};
+#[cfg(test)]
+pub(in crate::builtins::deep_learning) use tape::{test_tape_node_count, with_test_tape};
 mod value;
 pub(super) use value::{dlarray_format_and_labels, host_tensor_from_value};
 use value::{

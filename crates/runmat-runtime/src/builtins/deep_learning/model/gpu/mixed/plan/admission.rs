@@ -318,6 +318,9 @@ fn admit_for_purpose(
         RoutePurpose::ResidentTape => {
             super::lowering::lower_for_tape(network, host, target_axes, function)?
         }
+        RoutePurpose::HostPlacement => {
+            super::lowering::lower_for_host_placement(network, host, target_axes, function)?
+        }
     };
     let Some(plan) = lowered else {
         return Ok(None);

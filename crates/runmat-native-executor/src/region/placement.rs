@@ -83,9 +83,12 @@ pub(crate) fn choose_region(
         .parallel()
         .map(|service| service.placement_resources())
         .unwrap_or_default();
-    let output_bytes = workload
-        .output_bytes_per_value
-        .saturating_mul(u64::try_from(plan.program.outputs.len()).unwrap_or(u64::MAX));
+    let Some(output_bytes) =
+        checked_output_bytes(workload.output_bytes_per_value, plan.program.outputs.len())
+    else {
+        return RegionPlacement::Unavailable;
+    };
+    let retained_output = output_bytes.into();
     let request = PlacementPlanRequest {
         signature: signature.clone(),
         graph: PlacementGraph {
@@ -96,6 +99,10 @@ pub(crate) fn choose_region(
                         descriptor: generic.clone(),
                         resources: CandidateResourceDemand {
                             cpu_millicores: 1_000,
+                            retained_bytes: retained_output,
+                            // The generic executor has not supplied a peak
+                            // scratch bound. A finite host-memory budget must
+                            // not read the omitted dimension as zero.
                             ..CandidateResourceDemand::default()
                         },
                         transactional_results: true,
@@ -104,8 +111,8 @@ pub(crate) fn choose_region(
                         descriptor: vectorized.clone(),
                         resources: CandidateResourceDemand {
                             cpu_millicores: 1_000,
-                            retained_bytes: output_bytes,
-                            scratch_bytes: output_bytes,
+                            retained_bytes: retained_output,
+                            scratch_bytes: output_bytes.into(),
                             queue_slots: 0,
                         },
                         transactional_results: true,
@@ -153,6 +160,12 @@ pub(crate) fn choose_region(
     }
 }
 
+fn checked_output_bytes(bytes_per_value: u64, outputs: usize) -> Option<u64> {
+    u64::try_from(outputs)
+        .ok()
+        .and_then(|count| bytes_per_value.checked_mul(count))
+}
+
 fn candidate(
     plan: &OptimizedRegionPlan,
     vectorized: bool,
@@ -173,7 +186,7 @@ fn candidate(
                 execution_ns,
                 ..ExecutionCostComponents::default()
             },
-            scratch_bytes: 0,
+            scratch_bytes: Some(0),
             confidence: EstimateConfidence::Prior,
             source: EstimateSource::Compiler,
         },

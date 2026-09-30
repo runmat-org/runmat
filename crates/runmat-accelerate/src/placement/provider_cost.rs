@@ -249,6 +249,9 @@ pub(crate) fn wgpu_cost_estimate(
         CandidatePreparationState::Ready | CandidatePreparationState::Warm => 0,
         CandidatePreparationState::Cold => 100_000,
         CandidatePreparationState::Preparing => 50_000,
+        CandidatePreparationState::Unknown => {
+            unreachable!("unknown preparation is rejected at the provider cost boundary")
+        }
     };
     let execution_ns = matrix_work
         .as_ref()
@@ -282,7 +285,8 @@ pub(crate) fn wgpu_cost_estimate(
             Some(CandidatePreparationState::Cold) => {
                 100_000u64.saturating_mul(u64::from(snapshot.cold_pipelines))
             }
-            Some(CandidatePreparationState::Preparing) | None => compile_or_prepare_ns,
+            Some(CandidatePreparationState::Preparing | CandidatePreparationState::Unknown)
+            | None => compile_or_prepare_ns,
         },
         None => compile_or_prepare_ns,
     };
@@ -353,7 +357,7 @@ pub(crate) fn wgpu_cost_estimate(
                     0
                 },
             },
-            scratch_bytes,
+            scratch_bytes: Some(scratch_bytes),
             confidence: if observed_execution_ns.is_some() {
                 EstimateConfidence::Medium
             } else {
@@ -441,7 +445,7 @@ mod tests {
         assert_eq!(estimate.components.synchronization_ns, 10_000);
         assert_eq!(estimate.components.download_ns, transfer_prior_ns(16));
         assert_eq!(estimate.components.queue_ns, 80_000);
-        assert_eq!(estimate.scratch_bytes, 144);
+        assert_eq!(estimate.scratch_bytes, Some(144));
         assert_eq!(estimate.source, EstimateSource::StaticPrior);
     }
 
@@ -485,7 +489,7 @@ mod tests {
         let estimate = wgpu_cost_estimate(&provider, &query).cost;
         assert!(estimate.components.synchronization_ns > 0);
         assert_eq!(estimate.components.download_ns, transfer_prior_ns(8));
-        assert_eq!(estimate.scratch_bytes, 40);
+        assert_eq!(estimate.scratch_bytes, Some(40));
         assert_eq!(estimate.components.queue_ns, 40_000);
         assert_eq!(estimate.source, EstimateSource::StaticPrior);
     }
@@ -558,7 +562,7 @@ mod tests {
         assert_eq!(adapted.components.queue_ns, 30_000);
         assert_eq!(adapted.components.allocation_ns, 10_000);
         assert_eq!(adapted.components.upload_ns, transfer_prior_ns(64));
-        assert_eq!(adapted.scratch_bytes, 128);
+        assert_eq!(adapted.scratch_bytes, Some(128));
         assert_eq!(adapted.source, EstimateSource::StaticPrior);
         query.operation.outputs[0].element_type = ProviderElementType::F64;
         let native = wgpu_cost_estimate(&provider, &query).cost;

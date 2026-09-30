@@ -3602,6 +3602,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> anyhow::Result<Option<DeepLearningForwardCapability>> {
         Ok(None)
     }
+    /// Read-only preparation state for an admitted whole forward route.
+    /// An absent snapshot means the provider cannot certify every pipeline
+    /// that route may use; it must not be interpreted as a warm route.
+    fn deep_learning_forward_preparation_snapshot(
+        &self,
+        _route: &DeepLearningForwardRoute<'_>,
+    ) -> Option<ProviderPreparationSnapshot> {
+        None
+    }
     /// Pure admission of an exact physical view chain. The live anchor proves
     /// owner and element type; a planned source is geometry, not a lease.
     fn provider_view_chain_capability(

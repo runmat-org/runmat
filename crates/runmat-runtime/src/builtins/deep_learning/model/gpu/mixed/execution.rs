@@ -56,13 +56,38 @@ fn materialize_view(
     }
 }
 
-fn capability_changed(function: &'static str, reason: GpuCapabilityReason) -> crate::RuntimeError {
+pub(super) fn capability_changed(
+    function: &'static str,
+    reason: GpuCapabilityReason,
+) -> crate::RuntimeError {
     crate::runtime_error::build_runtime_error(format!(
         "{function}: resident provider capability changed during execution: {reason}"
     ))
     .with_identifier("RunMat:gpu:ProviderCapabilityChanged")
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
     .build()
+}
+
+/// Failure provenance is fixed at the operation that produced the error.
+/// A cancellation arriving after a provider error cannot rewrite that error
+/// into an abandoned call.
+pub(super) enum SelectedExecutionFailure {
+    Abandoned(crate::RuntimeError),
+    Operational(crate::RuntimeError),
+}
+
+impl SelectedExecutionFailure {
+    pub(super) fn into_error(self) -> crate::RuntimeError {
+        match self {
+            Self::Abandoned(error) | Self::Operational(error) => error,
+        }
+    }
+}
+
+impl From<crate::RuntimeError> for SelectedExecutionFailure {
+    fn from(error: crate::RuntimeError) -> Self {
+        Self::Operational(error)
+    }
 }
 
 pub(super) async fn execute(
@@ -72,7 +97,7 @@ pub(super) async fn execute(
     capture: bool,
     runtime: Option<&crate::context::RuntimeContext>,
     function: &'static str,
-) -> BuiltinResult<ResidentExecution> {
+) -> Result<ResidentExecution, SelectedExecutionFailure> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| admission::invalid_owner(function, admission::GpuOperand::Input))?;
     let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
@@ -82,7 +107,7 @@ pub(super) async fn execute(
     let mut recorded = capture.then(|| Vec::with_capacity(plan.stages.len()));
     let consumed_resident_parameters = plan.consumed_resident_parameters;
     for stage in plan.stages {
-        super::check_cancellation(runtime, function)?;
+        admit_cancellation(runtime, function).map_err(SelectedExecutionFailure::Abandoned)?;
         let changes_view_layout = matches!(&stage, Stage::Transpose { .. });
         let stage_input = recorded.as_ref().map(|_| current.clone());
         let (next, kind) = match stage {
@@ -117,7 +142,8 @@ pub(super) async fn execute(
                         .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                         .build(),
-                    ));
+                    )
+                    .into());
                 }
                 if output.shape() != output_axes.shape() {
                     return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
@@ -126,7 +152,8 @@ pub(super) async fn execute(
                             function,
                             "planned transpose differs from admitted axes",
                         ),
-                    ));
+                    )
+                    .into());
                 }
                 if output.view().layout() != output_layout {
                     return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
@@ -137,7 +164,8 @@ pub(super) async fn execute(
                         .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                         .build(),
-                    ));
+                    )
+                    .into());
                 }
                 (output, Some(ResidentStageKind::Transpose { materialize }))
             }
@@ -199,7 +227,7 @@ pub(super) async fn execute(
             .await?
             {
                 Ok(output) => (output, None),
-                Err(reason) => return Err(capability_changed(function, reason)),
+                Err(reason) => return Err(capability_changed(function, reason).into()),
             },
             Stage::Pool {
                 axis,
@@ -218,7 +246,7 @@ pub(super) async fn execute(
             .ok_or_else(|| capability_changed(function, GpuCapabilityReason::ProviderOperation))
             .map(|output| (output, None))?,
         };
-        super::check_cancellation(runtime, function)?;
+        admit_cancellation(runtime, function).map_err(SelectedExecutionFailure::Abandoned)?;
         current = next;
         if !changes_view_layout && current.view().layout() != GpuTensorLayout::Contiguous {
             return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
@@ -229,7 +257,8 @@ pub(super) async fn execute(
                 .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                 .build(),
-            ));
+            )
+            .into());
         }
         if let Some(stages) = recorded.as_mut() {
             stages.push(ResidentStage {
@@ -239,6 +268,7 @@ pub(super) async fn execute(
             });
         }
     }
+    admit_cancellation(runtime, function).map_err(SelectedExecutionFailure::Abandoned)?;
     if current.shape() != plan.output_axes.shape() {
         return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
             current,
@@ -246,13 +276,14 @@ pub(super) async fn execute(
                 function,
                 "resident sequence output differs from admitted axes",
             ),
-        ));
+        )
+        .into());
     }
     crate::builtins::common::gpu_helpers::propagate_output_provenance(
         &mut current,
         std::iter::once(input).chain(consumed_resident_parameters.iter()),
     )?;
-    super::check_cancellation(runtime, function)?;
+    admit_cancellation(runtime, function).map_err(SelectedExecutionFailure::Abandoned)?;
     let trace = recorded.map(|stages| ResidentTrace {
         stages,
         output: current.clone(),
@@ -260,5 +291,24 @@ pub(super) async fn execute(
     Ok(ResidentExecution {
         output: current,
         trace,
+    })
+}
+
+pub(super) fn admit_cancellation(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    if cancellation_requested(runtime) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:Cancelled",
+            format!("{function}: network forward execution was cancelled"),
+        ));
+    }
+    Ok(())
+}
+
+fn cancellation_requested(runtime: Option<&crate::context::RuntimeContext>) -> bool {
+    runtime.map_or_else(crate::interrupt::is_cancelled, |context| {
+        context.is_cancelled()
     })
 }

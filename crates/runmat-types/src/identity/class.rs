@@ -225,6 +225,11 @@ pub mod standard {
     pub const DL_NETWORK: StaticClassIdentity = StaticClassIdentity::new("dlnetwork");
     pub const SERIES_NETWORK: StaticClassIdentity = StaticClassIdentity::new("SeriesNetwork");
     pub const DAG_NETWORK: StaticClassIdentity = StaticClassIdentity::new("DAGNetwork");
+    pub const LINEAR_MODEL: StaticClassIdentity = StaticClassIdentity::new("LinearModel");
+    pub const CLASSIFICATION_TREE: StaticClassIdentity =
+        StaticClassIdentity::new("ClassificationTree");
+    pub const CLASSIFICATION_LINEAR: StaticClassIdentity =
+        StaticClassIdentity::new("ClassificationLinear");
     pub const CALENDAR_DURATION: StaticClassIdentity = StaticClassIdentity::new("calendarDuration");
     pub const TRANSFER_FUNCTION: StaticClassIdentity = StaticClassIdentity::new("tf");
     pub const STATE_SPACE: StaticClassIdentity = StaticClassIdentity::new("ss");

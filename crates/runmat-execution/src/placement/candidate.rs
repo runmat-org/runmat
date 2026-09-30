@@ -43,6 +43,8 @@ pub enum CandidatePreparationState {
     Warm,
     Cold,
     Preparing,
+    /// The preparation owner cannot certify a cache phase for this route.
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

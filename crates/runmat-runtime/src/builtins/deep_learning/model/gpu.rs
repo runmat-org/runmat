@@ -12,6 +12,9 @@ mod pooling;
 pub(in crate::builtins::deep_learning) mod mixed;
 
 pub(super) use admission::{admit_gpu_forward, GpuCapabilityReason, GpuForwardAdmission};
+pub(in crate::builtins::deep_learning) use mixed::{
+    admit_host_route, execute_host_route_selected, AdmittedHostRoute,
+};
 pub(in crate::builtins::deep_learning) use normalization::forward as normalize_network_gpu;
 
 #[cfg(test)]

@@ -1,5 +1,14 @@
 use super::*;
 
+pub(in crate::backend::wgpu::provider::backend) fn elu_shader(
+    precision: NumericPrecision,
+) -> &'static str {
+    match precision {
+        NumericPrecision::F64 => ELU_SHADER_F64,
+        NumericPrecision::F32 => ELU_SHADER_F32,
+    }
+}
+
 impl WgpuProvider {
     pub(crate) fn activation_adjoint_exec(
         &self,

@@ -98,6 +98,8 @@ mod helpers;
 mod pipeline_observation;
 #[path = "pipeline_recipe.rs"]
 mod pipeline_recipe;
+#[path = "preparation/deep_learning.rs"]
+mod deep_learning_preparation;
 #[path = "preparation.rs"]
 mod preparation;
 #[cfg(not(target_arch = "wasm32"))]

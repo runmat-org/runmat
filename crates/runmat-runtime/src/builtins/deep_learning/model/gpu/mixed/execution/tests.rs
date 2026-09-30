@@ -18,6 +18,7 @@ struct CancellingStageProvider {
     cancellation: CancellationSource,
     stages: AtomicUsize,
     outputs: Mutex<Vec<RetirementProbe>>,
+    fail_after_cancel: bool,
 }
 
 impl AccelProvider for CancellingStageProvider {
@@ -55,6 +56,9 @@ impl AccelProvider for CancellingStageProvider {
             self.outputs.lock().unwrap().push(allocation.probe);
             std::future::ready(()).await;
             self.cancellation.cancel(CancellationReason::User);
+            if self.fail_after_cancel {
+                anyhow::bail!("provider ReLU failed after issuing cancellation");
+            }
             Ok(allocation.handle)
         })
     }
@@ -69,6 +73,7 @@ fn cancellation_after_awaited_stage_stops_later_stages_without_publication() {
         cancellation,
         stages: AtomicUsize::new(0),
         outputs: Mutex::new(Vec::new()),
+        fail_after_cancel: false,
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let allocation = provider
@@ -113,9 +118,73 @@ fn cancellation_after_awaited_stage_stops_later_stages_without_publication() {
     let Err(error) = result else {
         panic!("the first awaited stage must cancel before publication")
     };
-    assert_eq!(error.identifier(), Some("Invocation:Cancelled"));
+    assert!(matches!(&error, SelectedExecutionFailure::Abandoned(_)));
+    assert_eq!(
+        error.into_error().identifier(),
+        Some("Invocation:Cancelled")
+    );
     assert_eq!(provider.stages.load(Ordering::SeqCst), 1);
     borrowed_input.allocation_lease().validate_live().unwrap();
+    assert_eq!(allocation.probe.retirements(), 0);
+    let outputs = provider.outputs.lock().unwrap();
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].retirements(), 1);
+}
+
+#[test]
+fn provider_failure_remains_operational_when_cancellation_races_it() {
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(CancellingStageProvider {
+        owner: TestAllocationOwner::new(),
+        cancellation: CancellationSource::new(),
+        stages: AtomicUsize::new(0),
+        outputs: Mutex::new(Vec::new()),
+        fail_after_cancel: true,
+    }));
+    let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let allocation = provider
+        .owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![2.0]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let network = object(
+        "dlnetwork",
+        vec![("Layers", Value::Cell(CellArray::new(vec![], 0, 1).unwrap()))],
+    );
+    let Value::Object(network) = network else {
+        unreachable!()
+    };
+    let plan = Plan {
+        stages: vec![Stage::Relu],
+        output_axes: AxisPlan::for_input(
+            "BC",
+            runmat_builtins::DeepLearningInputKind::Feature,
+            &[1, 1],
+        )
+        .unwrap(),
+        consumed_resident_parameters: Vec::new(),
+    };
+    let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_cancellation_token(provider.cancellation.token());
+    let failure = block_on(execute(
+        &network,
+        &allocation.handle,
+        plan,
+        false,
+        Some(&runtime),
+        "forward",
+    ))
+    .err()
+    .expect("the provider must fail the selected stage");
+    assert!(provider.cancellation.token().is_cancelled());
+    assert!(matches!(&failure, SelectedExecutionFailure::Operational(_)));
+    assert_ne!(failure.into_error().identifier(), Some("RunMat:Cancelled"));
+    assert_eq!(provider.stages.load(Ordering::SeqCst), 1);
     assert_eq!(allocation.probe.retirements(), 0);
     let outputs = provider.outputs.lock().unwrap();
     assert_eq!(outputs.len(), 1);

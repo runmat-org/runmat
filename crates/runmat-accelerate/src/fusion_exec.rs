@@ -316,7 +316,7 @@ fn select_fusion_provider_with_contract(
             execution_ns: execution_units.saturating_mul(100).max(100),
             ..ExecutionCostComponents::default()
         },
-        scratch_bytes: 0,
+        scratch_bytes: Some(0),
         confidence: EstimateConfidence::Low,
         source: EstimateSource::StaticPrior,
     };
@@ -338,7 +338,7 @@ fn select_fusion_provider_with_contract(
             execution_ns: execution_units.saturating_mul(10).max(100),
             ..ExecutionCostComponents::default()
         },
-        scratch_bytes: 0,
+        scratch_bytes: Some(0),
         confidence: EstimateConfidence::Prior,
         source: EstimateSource::StaticPrior,
     };

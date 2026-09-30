@@ -29,10 +29,6 @@ impl AccelProvider for Provider {
         "physical-resource-fixture".into()
     }
     fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
-        assert!(
-            query.outputs.is_empty(),
-            "direct calls infer outputs at the provider"
-        );
         ProviderFeasibility::supported(ProviderResourceEstimate {
             output_bytes: self.output,
             // Deliberately unspecified: this packet does not reinterpret the
@@ -105,7 +101,7 @@ fn cost(ns: u64, scratch_bytes: u64) -> ExecutionCostEstimate {
             execution_ns: ns,
             ..Default::default()
         },
-        scratch_bytes,
+        scratch_bytes: Some(scratch_bytes),
         confidence: EstimateConfidence::High,
         source: EstimateSource::StaticPrior,
     }
@@ -127,6 +123,28 @@ fn plan_with_program(
     scratch: u64,
     program: Option<runmat_accelerate_api::ProviderPreparationProgram<'_>>,
 ) -> LocalPlacementOutcome {
+    plan_with_outputs(provider, capture, automatic, scratch, program, vec![])
+}
+
+fn plan_with_outputs(
+    provider: &Provider,
+    capture: &Rc<Capture>,
+    automatic: bool,
+    scratch: u64,
+    program: Option<runmat_accelerate_api::ProviderPreparationProgram<'_>>,
+    outputs: Vec<ProviderRepresentation>,
+) -> LocalPlacementOutcome {
+    try_plan_with_outputs(provider, capture, automatic, scratch, program, outputs).unwrap()
+}
+
+fn try_plan_with_outputs(
+    provider: &Provider,
+    capture: &Rc<Capture>,
+    automatic: bool,
+    scratch: u64,
+    program: Option<runmat_accelerate_api::ProviderPreparationProgram<'_>>,
+    outputs: Vec<ProviderRepresentation>,
+) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
     let runtime = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
@@ -139,7 +157,7 @@ fn plan_with_program(
             family: ProviderOperationFamily::Elementwise,
             provider_kind: ExecutionCandidateKind::ProviderOperation,
             inputs: &[],
-            outputs: vec![],
+            outputs,
             workload: ProviderWorkload::default(),
             preparation: CandidatePreparationState::Ready,
             preparation_program: program,
@@ -162,7 +180,6 @@ fn plan_with_program(
         },
         PlacementPolicy::default(),
     )
-    .unwrap()
 }
 
 fn is_provider(outcome: LocalPlacementOutcome) -> bool {
@@ -197,8 +214,16 @@ fn observation_scratch_participates_in_admission_before_any_execution() {
         assert_eq!(is_provider(outcome), capacity == 24);
         let requests = observed.requests.borrow();
         let demand = requests[0].graph.nodes[0].candidates[1].resources;
-        assert_eq!(demand.retained_bytes, 8);
-        assert_eq!(demand.scratch_bytes, 16);
+        assert_eq!(demand.retained_bytes, 8.into());
+        assert_eq!(demand.scratch_bytes, 16.into());
+        assert_eq!(
+            requests[0].graph.nodes[0].candidates[0]
+                .resources
+                .retained_bytes,
+            runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoRetainedValueBound
+            )
+        );
     }
 }
 
@@ -229,7 +254,7 @@ fn explicit_unobserved_selection_does_not_price_or_start_fences() {
         panic!("explicit provider selection");
     };
     assert!(!provider_observation);
-    assert_eq!(provider_cost.scratch_bytes, 0);
+    assert_eq!(provider_cost.scratch_bytes, Some(0));
     assert!(capture.requests.borrow().is_empty());
 }
 
@@ -246,9 +271,85 @@ fn physical_output_bytes_reach_budget_even_without_query_output_facts() {
         assert_eq!(is_provider(plan(&provider, &capture, true, 0)), bytes <= 64);
         let requests = capture.requests.borrow();
         let demand = requests[0].graph.nodes[0].candidates[1].resources;
-        assert_eq!(demand.retained_bytes, bytes);
-        assert_eq!(demand.scratch_bytes, 0);
+        assert_eq!(demand.retained_bytes, bytes.into());
+        assert_eq!(demand.scratch_bytes, 0.into());
     }
+}
+
+#[test]
+fn cpu_output_templates_do_not_prove_backing_allocation_bytes() {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderLayout, ProviderResidency, ProviderStorage,
+    };
+    let output = ProviderRepresentation {
+        element_type: ProviderElementType::F64,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: vec![2, 3],
+        residency: ProviderResidency::Host,
+    };
+    let provider = Provider {
+        output: Some(48),
+        capacity: 128,
+    };
+    for template in [
+        output.clone(),
+        ProviderRepresentation {
+            layout: ProviderLayout::Strided,
+            ..output.clone()
+        },
+        ProviderRepresentation {
+            layout: ProviderLayout::Opaque,
+            ..output.clone()
+        },
+        ProviderRepresentation {
+            storage: ProviderStorage::Sparse,
+            ..output
+        },
+    ] {
+        let capture = Rc::new(Capture::default());
+        let _ = plan_with_outputs(&provider, &capture, true, 0, None, vec![template]);
+        assert_eq!(
+            capture.requests.borrow()[0].graph.nodes[0].candidates[0]
+                .resources
+                .retained_bytes,
+            runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoRetainedValueBound
+            )
+        );
+    }
+}
+
+#[test]
+fn overflowing_output_template_is_rejected_before_provider_planning() {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderLayout, ProviderResidency, ProviderStorage,
+    };
+    let capture = Rc::new(Capture::default());
+    let error = try_plan_with_outputs(
+        &Provider {
+            output: Some(1),
+            capacity: 128,
+        },
+        &capture,
+        true,
+        0,
+        None,
+        vec![ProviderRepresentation {
+            element_type: ProviderElementType::F64,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![u64::MAX, 2],
+            residency: ProviderResidency::Host,
+        }],
+    )
+    .err()
+    .expect("unrepresentable output cannot enter the graph");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:Placement:ResourceOverflow")
+    );
+    assert!(capture.requests.borrow().is_empty());
 }
 
 #[test]
@@ -263,7 +364,7 @@ fn known_output_and_scratch_overflow_fails_closed_without_saturation() {
         capture.requests.borrow()[0].graph.nodes[0].candidates[1]
             .resources
             .retained_bytes,
-        u64::MAX
+        u64::MAX.into()
     );
 }
 

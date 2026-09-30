@@ -135,8 +135,26 @@ fn forward_infers_raw_feature_axes_and_floating_output_class() {
             inferred.outputs[0].shape,
             ShapeFact::from(vec![Some(3), Some(4)])
         );
-        assert_eq!(inferred.outputs[0].residency, ResidencyFact::Host);
+        assert_eq!(inferred.outputs[0].residency, ResidencyFact::Unknown);
     }
+}
+
+#[test]
+fn host_origin_data_does_not_prove_forward_output_host_residency() {
+    let mut network = feature_network();
+    let ValueKindFact::Object(object) = &mut network.kind else {
+        unreachable!()
+    };
+    let mut resident_learnables = ValueFact::unknown(DynamicReason::RuntimeValue);
+    resident_learnables.residency = ResidencyFact::Device { provider: None };
+    object
+        .properties
+        .insert("Learnables".into(), resident_learnables);
+    let mut input = numeric(NumericClass::Single);
+    input.residency = ResidencyFact::Host;
+    let inferred = infer(vec![network, input]);
+    assert!(inferred.diagnostics.is_empty());
+    assert_eq!(inferred.outputs[0].residency, ResidencyFact::Unknown);
 }
 
 #[test]

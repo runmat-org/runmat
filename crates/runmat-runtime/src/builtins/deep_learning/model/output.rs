@@ -44,7 +44,16 @@ pub(super) fn present(
         output_axes,
         state_updates,
         trace,
+        runtime,
+        placement,
     } = outcome;
+    if let Some(runtime) = runtime.as_ref().filter(|runtime| runtime.is_cancelled()) {
+        return Err(crate::runtime_error::build_runtime_error(format!(
+            "{function}: execution was cancelled before output publication"
+        ))
+        .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+        .build());
+    }
     if requested_state {
         state::admit_updates(network, &state_updates, function)?;
     }
@@ -153,6 +162,9 @@ pub(super) fn present(
     let mut output = vec![prediction];
     if let Some(state) = state {
         output.push(state);
+    }
+    if let Some(placement) = placement {
+        placement.complete();
     }
     Ok(output)
 }

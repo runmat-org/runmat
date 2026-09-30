@@ -44,7 +44,18 @@ impl RuntimePlacementService for Probe {
                 .resources
                 .memory_available_bytes
                 .is_none_or(|bytes| {
-                    bytes >= vector.resources.retained_bytes + vector.resources.scratch_bytes
+                    match (
+                        vector.resources.retained_bytes,
+                        vector.resources.scratch_bytes,
+                    ) {
+                        (
+                            runmat_execution::ResourceByteBound::Known(retained),
+                            runmat_execution::ResourceByteBound::Known(scratch),
+                        ) => retained
+                            .checked_add(scratch)
+                            .is_some_and(|required| required <= bytes),
+                        _ => false,
+                    }
                 });
         let selected = &node.candidates[usize::from(admit)].descriptor;
         Ok(runmat_execution::PlacementDecision {

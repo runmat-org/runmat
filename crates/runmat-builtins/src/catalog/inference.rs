@@ -4,6 +4,7 @@ use runmat_types::{CallInference, CallRequest};
 mod acceleration_semantics;
 mod array;
 mod distributed;
+pub(in crate::catalog) mod deep_learning;
 pub(in crate::catalog) mod field_path;
 mod introspection_semantics;
 mod logical;

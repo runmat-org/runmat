@@ -71,7 +71,10 @@ fn exact_cache_readiness_is_distinct_from_uncertain_compile_prior_and_fence_serv
         measured_intent.components.execution_ns,
         baseline.components.execution_ns + 4
     );
-    assert_eq!(measured_intent.scratch_bytes, baseline.scratch_bytes + 16);
+    assert_eq!(
+        measured_intent.scratch_bytes,
+        baseline.scratch_bytes.map(|bytes| bytes + 16)
+    );
     assert_eq!(measured_intent.source, EstimateSource::StaticPrior);
     query.context.preparation.as_mut().unwrap().state = Some(CandidatePreparationState::Warm);
     assert_eq!(
@@ -137,7 +140,7 @@ fn weighted_work_is_total_across_chunks_and_empty_work_stays_zero() {
     let empty = wgpu_cost_estimate(&provider, &query(ProviderElementType::F64, 0, Some(0))).cost;
     assert_eq!(empty.components.execution_ns, 0);
     assert_eq!(empty.components.queue_ns, 0);
-    assert_eq!(empty.scratch_bytes, 0);
+    assert_eq!(empty.scratch_bytes, Some(0));
 
     let mut cold_empty = query(ProviderElementType::F32, 0, Some(0));
     cold_empty.preparation = CandidatePreparationState::Cold;
@@ -154,5 +157,5 @@ fn weighted_work_is_total_across_chunks_and_empty_work_stays_zero() {
     assert_eq!(empty.components.download_ns, 0);
     assert_eq!(empty.components.synchronization_ns, 0);
     assert_eq!(empty.components.downstream_ns, 0);
-    assert_eq!(empty.scratch_bytes, 0);
+    assert_eq!(empty.scratch_bytes, Some(0));
 }

@@ -20,14 +20,31 @@ enum ObservationsIn {
     Columns,
 }
 
+#[cfg(test)]
 pub(crate) async fn predict_deep_learning_object(
     network: ObjectInstance,
     xnew: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
-    let requested_state = crate::output_count::current_output_count() == Some(2)
-        && network.class_name.is(DLNETWORK_CLASS);
-    if crate::output_count::current_output_count().is_some_and(|count| {
+    predict_deep_learning_object_in_runtime(
+        None,
+        crate::output_count::current_output_count(),
+        network,
+        xnew,
+        rest,
+    )
+    .await
+}
+
+pub(in crate::builtins) async fn predict_deep_learning_object_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    network: ObjectInstance,
+    xnew: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Vec<Value>> {
+    let requested_state = requested_outputs == Some(2) && network.class_name.is(DLNETWORK_CLASS);
+    if requested_outputs.is_some_and(|count| {
         count
             > if network.class_name.is(DLNETWORK_CLASS) {
                 2
@@ -48,10 +65,11 @@ pub(crate) async fn predict_deep_learning_object(
         if value.class_name.is(DLARRAY_CLASS) && !formatted);
     let input = prepare_input(xnew, observations)?;
     let outcome = execute_network(NetworkExecutionRequest {
-        runtime: None,
+        runtime,
         network: &network,
         input: &input,
         caller: NetworkCaller::Predict,
+        requested_outputs,
         output_layout: if formatted {
             NetworkOutputLayout::Preserve
         } else if unformatted_dlarray {

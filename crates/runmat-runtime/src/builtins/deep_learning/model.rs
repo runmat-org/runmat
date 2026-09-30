@@ -35,7 +35,9 @@ use construction::{layer_slice, parse_network_options};
 use host::{elu_alpha, transpose_2d};
 use properties::normalize_numeric_tensor;
 
-pub(in crate::builtins) use predict::predict_deep_learning_object;
+#[cfg(test)]
+pub(crate) use predict::predict_deep_learning_object;
+pub(in crate::builtins) use predict::predict_deep_learning_object_in_runtime;
 
 pub(in crate::builtins) use construction::{
     is_deep_learning_network_object, layers_from_network_ref, layers_from_network_value,
@@ -278,6 +280,7 @@ async fn forward_in_runtime(
         input: &input,
         caller: execution::NetworkCaller::Forward,
         output_layout: execution::NetworkOutputLayout::Preserve,
+        requested_outputs,
     })
     .await?;
     let mut outputs = output::present(

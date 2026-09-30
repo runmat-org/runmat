@@ -1,5 +1,6 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use runmat_execution::{
     CandidateCostUnavailable, CandidateObservationEvidence, Digest, EstimateSource,
@@ -12,6 +13,7 @@ use thiserror::Error;
 use super::{partition::evaluate_selections, partition::solve_partition, PlacementPolicy};
 mod evidence;
 mod pending;
+mod whole_work;
 
 pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 2;
 const MAX_FEEDBACK_OBSERVATIONS: u64 = 1_048_576;
@@ -160,6 +162,7 @@ pub struct PlacementSession {
     config: PlacementSessionConfig,
     state: RefCell<PlacementSessionState>,
     pending: pending::PendingFeedback,
+    whole_work_probes: Arc<Mutex<BTreeSet<(Digest, String, ExecutionCandidateKind)>>>,
 }
 
 impl Default for PlacementSession {
@@ -174,6 +177,7 @@ impl PlacementSession {
             config,
             state: RefCell::new(PlacementSessionState::default()),
             pending: pending::PendingFeedback::default(),
+            whole_work_probes: Arc::default(),
         }
     }
 
@@ -470,6 +474,22 @@ fn valid_profile_series(series: &PlacementFeedbackSeries) -> bool {
 }
 
 impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
+    fn whole_work_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        provider: Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        Some(super::revision::whole_work(program, provider, self.config))
+    }
+
+    fn select_whole_work(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequest,
+    ) -> Result<runmat_runtime::context::RuntimeWholeWorkSelection, runmat_runtime::RuntimeError>
+    {
+        PlacementSession::select_whole_work(self, request).map_err(runtime_error)
+    }
+
     fn observed_candidate_duration(
         &self,
         signature: &PlacementSignature,
@@ -748,7 +768,7 @@ mod tests {
                         execution_ns: cost_ns,
                         ..ExecutionCostComponents::default()
                     },
-                    scratch_bytes: 0,
+                    scratch_bytes: Some(0),
                     confidence: EstimateConfidence::Exact,
                     source: EstimateSource::Synthetic,
                 },
@@ -761,8 +781,8 @@ mod tests {
             },
             resources: CandidateResourceDemand {
                 cpu_millicores: if kind.is_provider() { 0 } else { 1_000 },
-                retained_bytes,
-                scratch_bytes: 0,
+                retained_bytes: retained_bytes.into(),
+                scratch_bytes: 0.into(),
                 queue_slots: if kind.is_provider() { 1 } else { 0 },
             },
             transactional_results: transactional,
@@ -925,7 +945,7 @@ mod tests {
         let session = PlacementSession::default();
         let mut request = two_node_request("memory", (100_000, 1_000), (100_000, 1_000));
         for node in &mut request.graph.nodes {
-            node.candidates[1].resources.retained_bytes = 2_048;
+            node.candidates[1].resources.retained_bytes = 2_048.into();
         }
         let decision = session.plan(request).unwrap();
         assert!(decision
@@ -942,7 +962,7 @@ mod tests {
         for node in &mut request.graph.nodes {
             node.candidates[1].descriptor.output_residency =
                 CandidateOutputResidency::Mirrored { device_id: 7 };
-            node.candidates[1].resources.retained_bytes = 600;
+            node.candidates[1].resources.retained_bytes = 600.into();
         }
 
         let decision = session.plan(request).unwrap();
@@ -1080,10 +1100,10 @@ mod tests {
         request.resources = resources(1_000);
         request.graph.nodes[0].candidates[1]
             .resources
-            .retained_bytes = 600;
+            .retained_bytes = 600.into();
         request.graph.nodes[1].candidates[1]
             .resources
-            .retained_bytes = 600;
+            .retained_bytes = 600.into();
 
         let decision = session.plan(request).unwrap();
         let provider_count = decision

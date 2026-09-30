@@ -4,13 +4,48 @@ use serde::{Deserialize, Serialize};
 
 use super::{ExecutionCandidateDescriptor, PlacementResourceSnapshot, PlacementSignature};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ResourceBoundUnavailable {
+    NoPeakMemoryBound,
+    NoScratchBound,
+    NoRetainedValueBound,
+}
+
+/// A byte bound for a resource with the matching meaning. A limit on one
+/// allocation is not a bound on peak memory or transient scratch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ResourceByteBound {
+    Known(u64),
+    Unavailable(ResourceBoundUnavailable),
+}
+
+impl From<u64> for ResourceByteBound {
+    fn from(bytes: u64) -> Self {
+        Self::Known(bytes)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CandidateResourceDemand {
     pub cpu_millicores: u32,
-    pub retained_bytes: u64,
-    pub scratch_bytes: u64,
+    pub retained_bytes: ResourceByteBound,
+    pub scratch_bytes: ResourceByteBound,
     pub queue_slots: u32,
+}
+
+impl Default for CandidateResourceDemand {
+    fn default() -> Self {
+        Self {
+            cpu_millicores: 0,
+            retained_bytes: ResourceByteBound::Unavailable(
+                ResourceBoundUnavailable::NoRetainedValueBound,
+            ),
+            scratch_bytes: ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound),
+            queue_slots: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -148,29 +183,7 @@ impl PlacementPlanRequest {
         {
             return Err("placement search limits must be non-zero");
         }
-        let mut provider_ids = BTreeSet::new();
-        for provider in &self.resources.providers {
-            if !provider_ids.insert(provider.device_id) {
-                return Err("provider resource device identities must be unique");
-            }
-            if provider
-                .capacity_bytes
-                .is_some_and(|capacity| provider.live_bytes > capacity)
-                || provider
-                    .scratch_available_bytes
-                    .zip(provider.capacity_bytes)
-                    .is_some_and(|(scratch, capacity)| scratch > capacity)
-                || provider.reclaimable_bytes > provider.live_bytes
-                || provider.queue_depth.is_some() != provider.queue_limit.is_some()
-                || provider
-                    .queue_depth
-                    .zip(provider.queue_limit)
-                    .is_some_and(|(depth, limit)| depth > limit)
-            {
-                return Err("provider resource snapshot is inconsistent");
-            }
-        }
-        Ok(())
+        self.resources.validate()
     }
 }
 
@@ -206,7 +219,7 @@ mod tests {
                         execution_ns: 1,
                         ..ExecutionCostComponents::default()
                     },
-                    scratch_bytes: 0,
+                    scratch_bytes: Some(0),
                     confidence: EstimateConfidence::Exact,
                     source: EstimateSource::Synthetic,
                 },
@@ -215,7 +228,11 @@ mod tests {
                 output_residency: CandidateOutputResidency::Host,
                 guards: Vec::new(),
             },
-            resources: CandidateResourceDemand::default(),
+            resources: CandidateResourceDemand {
+                retained_bytes: 0.into(),
+                scratch_bytes: 0.into(),
+                ..CandidateResourceDemand::default()
+            },
             transactional_results: true,
         }
     }
@@ -271,6 +288,19 @@ mod tests {
         let encoded = serde_json::to_vec(&request).unwrap();
         let decoded: PlacementPlanRequest = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, request);
+        let known = serde_json::to_value(ResourceByteBound::Known(16)).unwrap();
+        assert_eq!(known, 16);
+        let decoded: ResourceByteBound = serde_json::from_value(known).unwrap();
+        assert_eq!(decoded, ResourceByteBound::Known(16));
+        let unavailable = serde_json::to_value(ResourceByteBound::Unavailable(
+            ResourceBoundUnavailable::NoScratchBound,
+        ))
+        .unwrap();
+        assert_eq!(unavailable, "NoScratchBound");
+        assert_eq!(
+            CandidateResourceDemand::default().scratch_bytes,
+            ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound)
+        );
     }
 
     #[test]

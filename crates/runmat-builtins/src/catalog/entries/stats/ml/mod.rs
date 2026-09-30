@@ -2,9 +2,12 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod confusionmat;
+mod predict;
 
 pub use confusionmat::*;
+pub use predict::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(confusionmat::ENTRIES.iter().copied());
+    values.extend(predict::ENTRIES.iter().copied());
 }

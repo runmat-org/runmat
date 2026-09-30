@@ -1,0 +1,321 @@
+//! Executor-neutral evidence before one complete invocation becomes a numeric
+//! placement graph. An absent cost or resource bound is never zero demand.
+
+use std::collections::BTreeSet;
+
+use super::{
+    CandidateCostEvidence, CandidateExecutionLocation, CandidateOutputResidency,
+    CandidatePreparationState, CandidateResourceDemand, ExecutionCandidateKind,
+    PlacementGraphLimits, PlacementResourceSnapshot, PlacementSignature,
+    SelectedExecutionCandidate,
+};
+use crate::Digest;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WholeWorkConstraint {
+    AnyLegal,
+    ProviderRequired { device_id: u32 },
+}
+
+/// One already legal, executable alternative for the same admitted semantic
+/// workload. `route_facts` is candidate-specific: physical stages, transfer,
+/// preparation and output presentation. The common `PlacementSignature`
+/// identifies the workload shared by CPU and provider alternatives.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WholeWorkCandidate {
+    pub kind: ExecutionCandidateKind,
+    pub execution_location: CandidateExecutionLocation,
+    pub preparation: CandidatePreparationState,
+    pub output_residency: CandidateOutputResidency,
+    pub route_facts: Digest,
+    pub cost: CandidateCostEvidence,
+    /// Complete-route resource demand. Unknown byte dimensions remain typed;
+    /// provider allocation-limit preflight is separate from peak-memory facts.
+    pub resources: CandidateResourceDemand,
+    pub transactional_results: bool,
+}
+
+impl WholeWorkCandidate {
+    /// Opaque placement identity derived only from typed route facts. Neither
+    /// user layer labels nor unstable allocation IDs are consulted by policy.
+    pub fn selected(&self, node: &str) -> SelectedExecutionCandidate {
+        let mut encoded = b"runmat.whole-work.candidate.v1\0".to_vec();
+        encoded.push(match self.kind {
+            ExecutionCandidateKind::SharedRuntime => 0,
+            ExecutionCandidateKind::GenericNativeCpu => 1,
+            ExecutionCandidateKind::SpecializedNativeCpu => 2,
+            ExecutionCandidateKind::VectorizedNativeCpu => 3,
+            ExecutionCandidateKind::CpuLibrary => 4,
+            ExecutionCandidateKind::ProviderOperation => 5,
+            ExecutionCandidateKind::ProviderLibrary => 6,
+            ExecutionCandidateKind::ProviderGraph => 7,
+            ExecutionCandidateKind::ProviderFusion => 8,
+        });
+        match self.execution_location {
+            CandidateExecutionLocation::Host => encoded.push(0),
+            CandidateExecutionLocation::Provider { device_id } => {
+                encoded.push(1);
+                encoded.extend_from_slice(&device_id.to_le_bytes());
+            }
+        }
+        encoded.push(match self.preparation {
+            CandidatePreparationState::Ready => 0,
+            CandidatePreparationState::Warm => 1,
+            CandidatePreparationState::Cold => 2,
+            CandidatePreparationState::Preparing => 3,
+            CandidatePreparationState::Unknown => 4,
+        });
+        match self.output_residency {
+            CandidateOutputResidency::Host => encoded.push(0),
+            CandidateOutputResidency::Provider { device_id } => {
+                encoded.push(1);
+                encoded.extend_from_slice(&device_id.to_le_bytes());
+            }
+            CandidateOutputResidency::Mirrored { device_id } => {
+                encoded.push(2);
+                encoded.extend_from_slice(&device_id.to_le_bytes());
+            }
+            CandidateOutputResidency::Unknown => encoded.push(3),
+        }
+        encoded.extend_from_slice(self.route_facts.bytes());
+        SelectedExecutionCandidate {
+            node: node.to_owned(),
+            candidate: Digest::sha256(encoded).to_string(),
+            kind: self.kind,
+        }
+    }
+
+    fn validate(&self) -> Result<(), &'static str> {
+        if self.kind.is_provider()
+            != matches!(
+                self.execution_location,
+                CandidateExecutionLocation::Provider { .. }
+            )
+        {
+            return Err("whole-work candidate kind and location disagree");
+        }
+        match (self.execution_location, self.output_residency) {
+            (
+                CandidateExecutionLocation::Provider {
+                    device_id: execution,
+                },
+                CandidateOutputResidency::Provider { device_id: output }
+                | CandidateOutputResidency::Mirrored { device_id: output },
+            ) if execution != output => {
+                return Err("whole-work output resides on a foreign device");
+            }
+            (
+                CandidateExecutionLocation::Host,
+                CandidateOutputResidency::Provider { .. }
+                | CandidateOutputResidency::Mirrored { .. },
+            ) => {
+                return Err("host whole-work route cannot present an unprepared provider output");
+            }
+            _ => {}
+        }
+        if let CandidateCostEvidence::Estimated(estimate) = self.cost {
+            if estimate.checked_risk_adjusted_ns().is_none() {
+                return Err("whole-work candidate risk-adjusted cost overflows");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WholeWorkPlacementRequest {
+    pub signature: PlacementSignature,
+    pub constraint: WholeWorkConstraint,
+    pub candidates: Vec<WholeWorkCandidate>,
+    pub resources: PlacementResourceSnapshot,
+    pub deterministic: bool,
+    pub require_transactional_results: bool,
+}
+
+impl WholeWorkPlacementRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        self.signature.validate()?;
+        self.resources.validate()?;
+        let limits = PlacementGraphLimits::default();
+        if self.resources.providers.len() > limits.max_providers as usize {
+            return Err("whole-work resources exceed provider limit");
+        }
+        if self.candidates.is_empty()
+            || self.candidates.len() > limits.max_candidates_per_node as usize
+        {
+            return Err("whole-work candidate count is invalid");
+        }
+        let mut identities = BTreeSet::new();
+        for candidate in &self.candidates {
+            candidate.validate()?;
+            if let WholeWorkConstraint::ProviderRequired { device_id } = self.constraint {
+                if candidate.execution_location
+                    != (CandidateExecutionLocation::Provider { device_id })
+                {
+                    return Err("provider-required work contains a host or foreign-device route");
+                }
+            }
+            if !identities.insert(candidate.selected(&self.signature.operation).candidate) {
+                return Err("whole-work candidate route identity is duplicated");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WholeWorkDecisionKind {
+    Compared,
+    Exploratory,
+    ProviderRequired,
+    /// No complete legal host route was offered, so no CPU comparison exists.
+    Uncompared,
+    /// A legal invocation ran while a cohort probe was already in flight.
+    /// The duration can still be recorded, but no cost comparison was made.
+    Unmeasured,
+}
+
+/// Portable result. A process-local probe lease belongs to the runtime service
+/// adapter, not to this contract or its serialized placement evidence.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WholeWorkDecision {
+    pub signature: PlacementSignature,
+    pub selected: SelectedExecutionCandidate,
+    pub kind: WholeWorkDecisionKind,
+    /// Unavailable during exploration/provider-required execution; never a
+    /// fabricated zero or huge number.
+    pub predicted_total_ns: Option<u64>,
+}
+
+/// Outcome of one genuine invocation. Cancellation and abandonment are not
+/// provider failures and must never enter the failure-count profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WholeWorkObservationOutcome {
+    Success,
+    OperationalFailure,
+    Cancelled,
+    Abandoned,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WholeWorkObservation {
+    pub signature: PlacementSignature,
+    pub selected: SelectedExecutionCandidate,
+    pub elapsed_ns: u64,
+    pub outcome: WholeWorkObservationOutcome,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        CandidateCostUnavailable, EstimateConfidence, EstimateSource, ExecutionCostComponents,
+        ExecutionCostEstimate, PlacementRevision, ProgramRevision,
+    };
+
+    fn signature() -> PlacementSignature {
+        PlacementSignature {
+            region: None,
+            operation: "whole-network".into(),
+            runtime_facts: Digest::sha256(b"admitted-workload"),
+            revision: PlacementRevision {
+                program: None::<ProgramRevision>,
+                catalog: Digest::sha256(b"catalog"),
+                compiler: Digest::sha256(b"compiler"),
+                provider: Digest::sha256(b"provider"),
+                policy: Digest::sha256(b"policy"),
+            },
+        }
+    }
+
+    fn candidate(kind: ExecutionCandidateKind, route: &[u8]) -> WholeWorkCandidate {
+        let provider = kind.is_provider();
+        WholeWorkCandidate {
+            kind,
+            execution_location: if provider {
+                CandidateExecutionLocation::Provider { device_id: 7 }
+            } else {
+                CandidateExecutionLocation::Host
+            },
+            preparation: CandidatePreparationState::Warm,
+            output_residency: if provider {
+                CandidateOutputResidency::Provider { device_id: 7 }
+            } else {
+                CandidateOutputResidency::Host
+            },
+            route_facts: Digest::sha256(route),
+            cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
+            resources: CandidateResourceDemand::default(),
+            transactional_results: true,
+        }
+    }
+
+    #[test]
+    fn common_workload_key_retains_distinct_typed_candidate_routes() {
+        let host = candidate(ExecutionCandidateKind::SharedRuntime, b"host");
+        let provider = candidate(ExecutionCandidateKind::ProviderGraph, b"device");
+        let request = WholeWorkPlacementRequest {
+            signature: signature(),
+            constraint: WholeWorkConstraint::AnyLegal,
+            candidates: vec![host.clone(), provider.clone()],
+            resources: PlacementResourceSnapshot::default(),
+            deterministic: true,
+            require_transactional_results: true,
+        };
+        assert!(request.validate().is_ok());
+        assert_ne!(
+            host.selected(&request.signature.operation),
+            provider.selected(&request.signature.operation)
+        );
+        let mut cold = provider;
+        cold.preparation = CandidatePreparationState::Cold;
+        assert_ne!(
+            cold.selected(&request.signature.operation),
+            request.candidates[1].selected(&request.signature.operation)
+        );
+        let mut unknown = request.candidates[1].clone();
+        unknown.preparation = CandidatePreparationState::Unknown;
+        assert_ne!(
+            unknown.selected(&request.signature.operation),
+            request.candidates[1].selected(&request.signature.operation)
+        );
+    }
+
+    #[test]
+    fn provider_required_rejects_host_and_foreign_device_routes() {
+        let request = WholeWorkPlacementRequest {
+            signature: signature(),
+            constraint: WholeWorkConstraint::ProviderRequired { device_id: 7 },
+            candidates: vec![candidate(ExecutionCandidateKind::SharedRuntime, b"host")],
+            resources: PlacementResourceSnapshot::default(),
+            deterministic: true,
+            require_transactional_results: true,
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn candidate_rejects_foreign_output_device_and_host_provider_presentation() {
+        let mut provider = candidate(ExecutionCandidateKind::ProviderGraph, b"provider");
+        provider.output_residency = CandidateOutputResidency::Mirrored { device_id: 8 };
+        assert!(provider.validate().is_err());
+        let mut host = candidate(ExecutionCandidateKind::SharedRuntime, b"host");
+        host.output_residency = CandidateOutputResidency::Provider { device_id: 7 };
+        assert!(host.validate().is_err());
+    }
+
+    #[test]
+    fn risk_adjustment_overflow_is_rejected_before_provider_ranking() {
+        let mut provider = candidate(ExecutionCandidateKind::ProviderGraph, b"provider");
+        provider.cost = CandidateCostEvidence::Estimated(ExecutionCostEstimate {
+            components: ExecutionCostComponents {
+                execution_ns: u64::MAX,
+                ..ExecutionCostComponents::default()
+            },
+            scratch_bytes: Some(0),
+            confidence: EstimateConfidence::Prior,
+            source: EstimateSource::Provider,
+        });
+        assert!(provider.validate().is_err());
+    }
+}

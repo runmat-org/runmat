@@ -48,6 +48,7 @@ fn predict_column_input_returns_batch_major_native_single_scores() {
         network: network_object(&network),
         input: &input,
         caller: NetworkCaller::Predict,
+        requested_outputs: None,
         output_layout: NetworkOutputLayout::ObservationMajor,
     }))
     .unwrap();
@@ -88,6 +89,7 @@ fn caller_identity_selects_integer_compatibility_without_duplicate_numerics() {
         network: network_object(&network),
         input: &input,
         caller: NetworkCaller::Forward,
+        requested_outputs: None,
         output_layout: NetworkOutputLayout::Preserve,
     }))
     .err()
@@ -101,6 +103,7 @@ fn caller_identity_selects_integer_compatibility_without_duplicate_numerics() {
         network: network_object(&network),
         input: &input,
         caller: NetworkCaller::Predict,
+        requested_outputs: None,
         output_layout: NetworkOutputLayout::ObservationMajor,
     }))
     .unwrap();

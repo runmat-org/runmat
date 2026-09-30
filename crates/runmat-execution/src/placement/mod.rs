@@ -3,6 +3,7 @@ mod cost;
 mod decision;
 mod graph;
 mod resource;
+mod whole_work;
 
 pub use candidate::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
@@ -19,6 +20,11 @@ pub use decision::{
 };
 pub use graph::{
     CandidateResourceDemand, PlacementGraph, PlacementGraphCandidate, PlacementGraphEdge,
-    PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest,
+    PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest, ResourceBoundUnavailable,
+    ResourceByteBound,
 };
 pub use resource::{PlacementResourceSnapshot, ProviderResourceSnapshot};
+pub use whole_work::{
+    WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision, WholeWorkDecisionKind,
+    WholeWorkObservation, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
+};

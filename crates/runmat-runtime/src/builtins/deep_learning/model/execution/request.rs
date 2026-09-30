@@ -52,6 +52,8 @@ pub(in crate::builtins::deep_learning) struct NetworkExecutionRequest<'a> {
     pub input: &'a Value,
     pub caller: NetworkCaller,
     pub output_layout: NetworkOutputLayout,
+    /// Canonical invocation arity; absent only for direct embedding callers.
+    pub requested_outputs: Option<usize>,
 }
 
 /// `trace` retains the executor's original physical output geometry. The
@@ -62,6 +64,10 @@ pub(in crate::builtins::deep_learning) struct NetworkExecutionOutcome {
     pub output_axes: AxisPlan,
     pub state_updates: Vec<StateUpdate>,
     pub trace: Option<NetworkTrace>,
+    /// Invocation authority retained only through public presentation.
+    pub runtime: Option<crate::context::RuntimeContext>,
+    /// Process-local observation, completed only after public presentation.
+    pub placement: Option<super::placement::PendingWholeWorkObservation>,
 }
 
 #[cfg(test)]

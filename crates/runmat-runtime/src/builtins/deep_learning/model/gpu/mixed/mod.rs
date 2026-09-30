@@ -2,12 +2,15 @@
 
 mod backward;
 mod execution;
+mod host_origin;
 mod parameters;
 mod physical;
 mod plan;
 mod trace;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod host_origin_tests;
 
 use super::*;
 use crate::builtins::deep_learning::model::admission::resident_input_handle;
@@ -16,19 +19,7 @@ pub(in crate::builtins::deep_learning) use backward::reverse as reverse_resident
 use runmat_accelerate_api::{ProviderActivationAdjoint, ProviderResidentAdjointStage};
 pub(in crate::builtins::deep_learning) use trace::{ResidentExecution, ResidentTrace};
 
-fn check_cancellation(
-    runtime: Option<&crate::context::RuntimeContext>,
-    function: &'static str,
-) -> BuiltinResult<()> {
-    if let Some(runtime) = runtime.filter(|runtime| runtime.is_cancelled()) {
-        return Err(crate::runtime_error::build_runtime_error(format!(
-            "{function}: execution was cancelled"
-        ))
-        .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
-        .build());
-    }
-    Ok(())
-}
+pub(in crate::builtins::deep_learning) use host_origin::execute_host_route_selected;
 
 /// Capture is admitted before the first provider effect. An unsupported
 /// derivative stage is never allowed to run a partial forward pass.
@@ -93,10 +84,14 @@ pub(in crate::builtins::deep_learning::model) async fn forward_with_trace(
                     return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)));
                 }
             }
-            let execution =
-                execution::execute(network, input, plan, capture, runtime, function).await?;
-            check_cancellation(runtime, function)?;
+            let execution = execution::execute(network, input, plan, capture, runtime, function)
+                .await
+                .map_err(execution::SelectedExecutionFailure::into_error)?;
+            execution::admit_cancellation(runtime, function)?;
             Ok(Some(Ok(execution)))
         }
     }
 }
+
+pub(in crate::builtins::deep_learning) use host_origin::admit_host_route;
+pub(in crate::builtins::deep_learning) use plan::AdmittedHostRoute;

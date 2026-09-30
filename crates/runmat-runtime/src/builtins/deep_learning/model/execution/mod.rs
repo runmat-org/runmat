@@ -5,6 +5,7 @@ pub(in crate::builtins::deep_learning) mod host;
 
 mod layout;
 mod network;
+mod placement;
 mod request;
 
 pub(in crate::builtins::deep_learning) use layout::present_host;

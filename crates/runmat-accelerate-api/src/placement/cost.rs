@@ -41,7 +41,7 @@ impl ProviderCostEstimate {
         Self {
             cost: ExecutionCostEstimate {
                 components,
-                scratch_bytes,
+                scratch_bytes: Some(scratch_bytes),
                 confidence: EstimateConfidence::Prior,
                 source: EstimateSource::StaticPrior,
             },

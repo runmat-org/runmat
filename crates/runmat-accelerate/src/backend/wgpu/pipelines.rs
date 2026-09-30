@@ -231,7 +231,7 @@ pub struct PipelineBundle {
 }
 
 impl PipelineBundle {
-    #[cfg(all(test, not(target_arch = "wasm32")))]
+    /// Inspect compilation state without compiling a shader or accessing the device.
     pub(crate) fn is_initialized(&self) -> bool {
         self.compiled.get().is_some()
     }

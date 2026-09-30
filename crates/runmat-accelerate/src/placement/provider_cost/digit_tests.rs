@@ -51,7 +51,7 @@ fn digit_estimator_preserves_chunk_allocations_uniform_uploads_and_static_prior(
     // One output and one live 16-byte uniform, reused across two dispatches.
     assert_eq!(cost.components.allocation_ns, 10_000);
     assert_eq!(cost.components.queue_ns, 20_000);
-    assert_eq!(cost.scratch_bytes, 16);
+    assert_eq!(cost.scratch_bytes, Some(16));
     // Full F64 input plus two 16-byte uniform writes; no control tensor.
     assert_eq!(cost.components.upload_ns, transfer_prior_ns(268_431_400));
     assert_eq!(cost.components.compile_or_prepare_ns, 100_000);
@@ -106,7 +106,7 @@ fn digit_estimator_empty_cold_path_allocates_only_output_without_kernel_or_unifo
                 ..Default::default()
             }
         );
-        assert_eq!(cost.scratch_bytes, 0);
+        assert_eq!(cost.scratch_bytes, Some(0));
         assert_eq!(cost.confidence, EstimateConfidence::Prior);
         assert_eq!(cost.source, EstimateSource::StaticPrior);
     }

@@ -54,7 +54,7 @@ fn plain_cast_prior_prices_actual_staging_params_and_fences_once() {
     assert_eq!(base.components.allocation_ns, 15_000); // upload, result, params
     assert_eq!(base.components.queue_ns, 10_000);
     assert_eq!(base.components.upload_ns, transfer_prior_ns(64 + 16));
-    assert_eq!(base.scratch_bytes, 64 + 16);
+    assert_eq!(base.scratch_bytes, Some(64 + 16));
     request.context.observation = Some(
         runmat_accelerate_api::observation::ProviderObservationOverhead {
             submissions: 1,
@@ -73,7 +73,10 @@ fn plain_cast_prior_prices_actual_staging_params_and_fences_once() {
         base.components.allocation_ns + 5_000
     );
     assert_eq!(observed.components.queue_ns, base.components.queue_ns);
-    assert_eq!(observed.scratch_bytes, base.scratch_bytes + 8);
+    assert_eq!(
+        observed.scratch_bytes,
+        base.scratch_bytes.map(|bytes| bytes + 8)
+    );
     assert_eq!(observed.source, EstimateSource::StaticPrior);
 }
 
@@ -92,6 +95,6 @@ fn alias_and_empty_casts_do_not_pay_for_unused_pipeline_or_submission() {
         assert_eq!(cost.components.compile_or_prepare_ns, 0);
         assert_eq!(cost.components.allocation_ns, allocations * 5_000);
         assert_eq!(cost.components.upload_ns, 0);
-        assert_eq!(cost.scratch_bytes, 0);
+        assert_eq!(cost.scratch_bytes, Some(0));
     }
 }

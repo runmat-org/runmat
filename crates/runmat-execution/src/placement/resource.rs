@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,6 +41,32 @@ pub struct PlacementResourceSnapshot {
 }
 
 impl PlacementResourceSnapshot {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        let mut provider_ids = BTreeSet::new();
+        for provider in &self.providers {
+            if !provider_ids.insert(provider.device_id) {
+                return Err("provider resource device identities must be unique");
+            }
+            if provider
+                .capacity_bytes
+                .is_some_and(|capacity| provider.live_bytes > capacity)
+                || provider
+                    .scratch_available_bytes
+                    .zip(provider.capacity_bytes)
+                    .is_some_and(|(scratch, capacity)| scratch > capacity)
+                || provider.reclaimable_bytes > provider.live_bytes
+                || provider.queue_depth.is_some() != provider.queue_limit.is_some()
+                || provider
+                    .queue_depth
+                    .zip(provider.queue_limit)
+                    .is_some_and(|(depth, limit)| depth > limit)
+            {
+                return Err("provider resource snapshot is inconsistent");
+            }
+        }
+        Ok(())
+    }
+
     pub fn provider(&self, device_id: u32) -> Option<&ProviderResourceSnapshot> {
         self.providers
             .iter()

@@ -34,6 +34,7 @@ pub(in crate::builtins::deep_learning) struct StepDescriptor {
 }
 
 pub(in crate::builtins::deep_learning) struct HostNetworkPlan<'a> {
+    network: &'a ObjectInstance,
     pub(super) input: &'a Value,
     pub(super) parameters: Vec<ParameterView<'a>>,
     pub(super) state: Vec<StateView<'a>>,
@@ -67,12 +68,24 @@ impl<'a> HostNetworkPlan<'a> {
         &self.parameters
     }
 
+    pub(in crate::builtins::deep_learning) fn state_views(&self) -> &[StateView<'a>] {
+        &self.state
+    }
+
+    pub(in crate::builtins::deep_learning) fn function(&self) -> &'static str {
+        self.function
+    }
+
     pub(in crate::builtins::deep_learning) fn execution_precision(&self) -> NumericDType {
         self.precision
     }
 
     pub(in crate::builtins::deep_learning) fn admitted_input(&self) -> &'a Value {
         self.input
+    }
+
+    pub(in crate::builtins::deep_learning) fn admitted_network(&self) -> &'a ObjectInstance {
+        self.network
     }
 
     /// A bounded first resident route. The same admitted geometry is used by
@@ -136,6 +149,7 @@ impl<'a> HostNetworkPlan<'a> {
         let (input_axes, axes, precision, input_payload_kind, steps) =
             admit_layers(&layers.data, first, first_kind, input, &shapes, function)?;
         Ok(Self {
+            network,
             input,
             parameters,
             state,

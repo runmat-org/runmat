@@ -55,6 +55,25 @@ impl Drop for TapeActivation {
     }
 }
 
+#[cfg(test)]
+pub(in crate::builtins::deep_learning) fn with_test_tape<R>(run: impl FnOnce() -> R) -> (R, usize) {
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    let activation = TapeActivation::enter(tape.clone());
+    let result = run();
+    drop(activation);
+    let recorded = tape.borrow().nodes.len();
+    (result, recorded)
+}
+
+#[cfg(test)]
+pub(in crate::builtins::deep_learning) fn test_tape_node_count() -> usize {
+    active_tape()
+        .expect("test tape must be active")
+        .borrow()
+        .nodes
+        .len()
+}
+
 pub(super) struct TapeFuture<F> {
     pub(super) tape: Rc<RefCell<Tape>>,
     pub(super) future: Option<Pin<Box<F>>>,

@@ -165,6 +165,7 @@ pub struct ProviderPipelineObservations {
     pub warm: u64,
     pub cold: u64,
     pub preparing: u64,
+    pub unknown: u64,
 }
 
 #[cfg(test)]

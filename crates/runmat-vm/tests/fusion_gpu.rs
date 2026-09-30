@@ -281,7 +281,7 @@ impl AccelProvider for TestProvider {
                     execution_ns: 1,
                     ..ExecutionCostComponents::default()
                 },
-                scratch_bytes: 0,
+                scratch_bytes: Some(0),
                 confidence: EstimateConfidence::Exact,
                 source: EstimateSource::Provider,
             },

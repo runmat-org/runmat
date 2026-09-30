@@ -24,9 +24,6 @@ use crate::builtins::table::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-pub(crate) const CLASSIFICATION_LINEAR_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("ClassificationLinear");
-
 const FITCLINEAR_NAME: &str = "fitclinear";
 const PREDICT_NAME: &str = "predict";
 const DEFAULT_ITERATIONS: usize = 500;
@@ -1121,7 +1118,7 @@ fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
     }
     let beta_value = beta_value(&models, spec.x.cols)?;
     let bias_value = row_tensor(models.iter().map(|model| model.bias).collect())?;
-    let mut object = ObjectInstance::new(CLASSIFICATION_LINEAR_CLASS.to_string());
+    let mut object = ObjectInstance::new(runmat_types::standard::CLASSIFICATION_LINEAR.to_string());
     object
         .properties
         .insert("Beta".to_string(), beta_value.clone());

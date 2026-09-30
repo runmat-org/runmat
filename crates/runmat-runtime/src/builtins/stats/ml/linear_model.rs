@@ -8,7 +8,8 @@ use runmat_builtins::{
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    ResolveContext, Type, PREDICT_ERROR_INTERNAL as ERROR_PREDICT_INTERNAL,
+    PREDICT_ERROR_INVALID_ARGUMENT as ERROR_PREDICT_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -25,8 +26,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const FITLM_NAME: &str = "fitlm";
 const PREDICT_NAME: &str = "predict";
-const LINEAR_MODEL_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("LinearModel");
 const EPS: f64 = 1.0e-12;
 
 const OUTPUT_MDL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -36,87 +35,6 @@ const OUTPUT_MDL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "LinearModel object containing coefficients, fitted values, residuals, and summary statistics.",
 }];
-
-const OUTPUT_YPRED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ypred",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Predicted response values.",
-}];
-
-const OUTPUT_YPRED_YCI: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ypred",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Predicted response values.",
-    },
-    BuiltinParamDescriptor {
-        name: "yci",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Pointwise confidence intervals for the predicted response.",
-    },
-];
-
-const OUTPUT_LABEL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "label",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Predicted class labels.",
-}];
-
-const OUTPUT_LABEL_SCORE_NODE_CNUM: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Predicted class labels.",
-    },
-    BuiltinParamDescriptor {
-        name: "score",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Posterior probabilities for each class.",
-    },
-    BuiltinParamDescriptor {
-        name: "node",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based terminal node index for each prediction.",
-    },
-    BuiltinParamDescriptor {
-        name: "cnum",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "One-based class number for each predicted label.",
-    },
-];
-
-const OUTPUT_LABEL_SCORE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "label",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Predicted class labels.",
-    },
-    BuiltinParamDescriptor {
-        name: "score",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Classification scores or posterior probabilities.",
-    },
-];
 
 const PARAM_TBL_OR_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "tblOrX",
@@ -142,37 +60,9 @@ const PARAM_REST: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Model specification and name-value options such as Intercept, ResponseVar, PredictorVars, VarNames, Exclude, and Weights.",
 };
 
-const PARAM_PREDICT_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Prediction name-value options such as Alpha, Prediction, and Simultaneous.",
-};
-
-const PARAM_MDL: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "mdl",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Supported fitted model object, such as LinearModel from fitlm, ClassificationTree from fitctree, or ClassificationLinear from fitclinear.",
-};
-
-const PARAM_XNEW: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Xnew",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "New predictor table or matrix.",
-};
-
 const FITLM_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_TBL_OR_X, PARAM_Y_OR_SPEC];
 const FITLM_INPUTS_FULL: [BuiltinParamDescriptor; 3] =
     [PARAM_TBL_OR_X, PARAM_Y_OR_SPEC, PARAM_REST];
-const PREDICT_INPUTS: [BuiltinParamDescriptor; 2] = [PARAM_MDL, PARAM_XNEW];
-const PREDICT_INPUTS_OPTIONS: [BuiltinParamDescriptor; 3] =
-    [PARAM_MDL, PARAM_XNEW, PARAM_PREDICT_OPTIONS];
-
 const FITLM_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "mdl = fitlm(tbl)",
@@ -193,39 +83,6 @@ const FITLM_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         label: "mdl = fitlm(___, Name, Value)",
         inputs: &FITLM_INPUTS_FULL,
         outputs: &OUTPUT_MDL,
-    },
-];
-
-const PREDICT_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "ypred = predict(mdl, Xnew)",
-        inputs: &PREDICT_INPUTS,
-        outputs: &OUTPUT_YPRED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ypred, yci] = predict(mdl, Xnew)",
-        inputs: &PREDICT_INPUTS,
-        outputs: &OUTPUT_YPRED_YCI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[ypred, yci] = predict(mdl, Xnew, Name, Value)",
-        inputs: &PREDICT_INPUTS_OPTIONS,
-        outputs: &OUTPUT_YPRED_YCI,
-    },
-    BuiltinSignatureDescriptor {
-        label: "label = predict(tree, Xnew)",
-        inputs: &PREDICT_INPUTS,
-        outputs: &OUTPUT_LABEL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[label,score,node,cnum] = predict(tree, Xnew)",
-        inputs: &PREDICT_INPUTS,
-        outputs: &OUTPUT_LABEL_SCORE_NODE_CNUM,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[label,score] = predict(linearClassifier, Xnew)",
-        inputs: &PREDICT_INPUTS_OPTIONS,
-        outputs: &OUTPUT_LABEL_SCORE,
     },
 ];
 
@@ -250,28 +107,11 @@ const ERROR_FITLM_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "fitlm: internal error",
 };
 
-const ERROR_PREDICT_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PREDICT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:predict:InvalidArgument"),
-    when: "The model, predictor data, or prediction options are malformed or unsupported.",
-    message: "predict: invalid argument",
-};
-
-const ERROR_PREDICT_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PREDICT.INTERNAL",
-    identifier: Some("RunMat:predict:Internal"),
-    when: "RunMat cannot construct prediction outputs.",
-    message: "predict: internal error",
-};
-
 const FITLM_ERRORS: [BuiltinErrorDescriptor; 3] = [
     ERROR_FITLM_INVALID_ARGUMENT,
     ERROR_FITLM_NUMERICAL,
     ERROR_FITLM_INTERNAL,
 ];
-
-const PREDICT_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ERROR_PREDICT_INVALID_ARGUMENT, ERROR_PREDICT_INTERNAL];
 
 pub const FITLM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &FITLM_SIGNATURES,
@@ -360,18 +200,7 @@ pub const FITLM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 5] = 
     BuiltinIntegerCapabilityDescriptor { form: "mdl = fitlm(...,Intercept=integer_scalar)", inputs: &FITLM_INTEGER_CONTROL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Zero disables and every nonzero exact integer enables the intercept." },
 ];
 
-pub const PREDICT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PREDICT_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PREDICT_ERRORS,
-};
-
 fn fitlm_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-pub(crate) fn predict_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
@@ -1482,7 +1311,7 @@ fn evaluate_term(row: &[f64], term: &[u32]) -> f64 {
 }
 
 fn model_object(spec: FitSpec, fit: OlsFit) -> BuiltinResult<ObjectInstance> {
-    let mut object = ObjectInstance::new(LINEAR_MODEL_CLASS.to_string());
+    let mut object = ObjectInstance::new(runmat_types::standard::LINEAR_MODEL.to_string());
     object.properties.insert(
         "Coefficients".to_string(),
         coefficients_table(&spec.coefficient_names, &fit)?,
@@ -1620,7 +1449,9 @@ fn predict_linear_model(
     options: PredictOptions,
 ) -> BuiltinResult<(Value, Value)> {
     let object = match model {
-        Value::Object(object) if object.class_name == LINEAR_MODEL_CLASS => object,
+        Value::Object(object) if object.class_name.is(runmat_types::standard::LINEAR_MODEL) => {
+            object
+        }
         other => {
             return Err(predict_invalid(format!(
                 "predict: expected LinearModel object, got {other:?}"
@@ -2196,6 +2027,36 @@ mod tests {
         assert_eq!(ypred.shape, vec![2, 1]);
         assert!((ypred.materialize_f64()[0] - 9.0).abs() < 1.0e-10);
         assert!((ypred.materialize_f64()[1] - 11.0).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn registered_predict_preserves_statistical_output_overloads_without_ambient_arity() {
+        let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
+        let y = tensor_value(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
+        let model = block_on(fitlm_builtin(x, vec![y])).unwrap();
+        let args = [model, tensor_value(vec![4.0, 5.0], 2, 1)];
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name("predict");
+        assert_eq!(bindings.len(), 1);
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _ambient_outputs = crate::output_count::push_output_count(Some(3));
+        let predicted = block_on((bindings[0].implementation)(
+            crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
+        ))
+        .unwrap();
+        let Value::OutputList(predicted) = predicted else {
+            panic!("one canonical statistical output expected")
+        };
+        let values = tensor(&predicted[0]);
+        assert_eq!(values.shape, vec![2, 1]);
+        assert!((values.materialize_f64()[0] - 9.0).abs() < 1.0e-10);
+
+        let predicted = block_on((bindings[0].implementation)(
+            crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime), Some(2)),
+        ))
+        .unwrap();
+        assert!(matches!(predicted, Value::OutputList(values) if values.len() == 2));
     }
 
     #[test]

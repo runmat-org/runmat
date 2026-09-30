@@ -6,6 +6,9 @@ use crate::{GpuTensorHandle, GpuTensorView, NumericElementType, ProviderViewStep
 mod route;
 pub use route::{DeepLearningForwardGeometry, DeepLearningForwardRouteError};
 
+#[path = "deep_learning/route_signature.rs"]
+mod route_signature;
+
 /// The physical input to a proposed forward route. A host source describes the
 /// bytes that preparation would upload; it does not authorize or perform that
 /// upload. A resident source retains its real allocation owner for admission.

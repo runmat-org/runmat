@@ -125,7 +125,7 @@ fn placement_derives_route_only_from_admitted_program_not_legacy_workload() {
             execution_ns: 1_000_000,
             ..Default::default()
         },
-        scratch_bytes: 0,
+        scratch_bytes: Some(0),
         confidence: EstimateConfidence::Prior,
         source: EstimateSource::StaticPrior,
     };

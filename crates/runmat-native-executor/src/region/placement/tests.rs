@@ -2,6 +2,14 @@ use super::test_support::*;
 use super::*;
 use runmat_runtime::execution::RuntimeExecutionService;
 use std::rc::Rc;
+
+#[test]
+fn unrepresentable_output_demand_is_rejected_without_a_memory_budget() {
+    // `choose_region` checks this before constructing a placement request;
+    // an absent budget does not turn arithmetic overflow into unknown demand.
+    assert_eq!(checked_output_bytes(u64::MAX, 2), None);
+    assert_eq!(checked_output_bytes(8, 2), Some(16));
+}
 #[test]
 fn absent_authority_is_unavailable_without_disabling_future_choices() {
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));

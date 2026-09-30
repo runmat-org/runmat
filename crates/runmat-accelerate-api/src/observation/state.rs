@@ -418,6 +418,7 @@ impl ProviderOperationRecorder {
                 CandidatePreparationState::Warm => &mut state.pipelines.warm,
                 CandidatePreparationState::Cold => &mut state.pipelines.cold,
                 CandidatePreparationState::Preparing => &mut state.pipelines.preparing,
+                CandidatePreparationState::Unknown => &mut state.pipelines.unknown,
             };
             match count.checked_add(1) {
                 Some(next) => *count = next,

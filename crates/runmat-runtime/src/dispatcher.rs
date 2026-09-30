@@ -148,6 +148,7 @@ fn gather_if_needed_async_impl<'a>(
                     build_runtime_error(format!("gather: {error}"))
                         .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .with_source(ProviderDownloadPayloadMismatch)
                         .build()
                 })
             }
@@ -202,6 +203,20 @@ fn gather_if_needed_async_impl<'a>(
     })
 }
 
+/// A provider-owned download returned bytes that violate the admitted handle.
+/// The public diagnostic remains a RuntimeError; placement can inspect this
+/// source without treating unrelated host allocation failures as GPU failures.
+#[derive(Debug)]
+pub(crate) struct ProviderDownloadPayloadMismatch;
+
+impl std::fmt::Display for ProviderDownloadPayloadMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("provider download payload violates its admitted descriptor")
+    }
+}
+
+impl std::error::Error for ProviderDownloadPayloadMismatch {}
+
 fn provider_payload_mismatch(
     handle: &GpuTensorHandle,
     actual_shape: &[usize],
@@ -213,6 +228,7 @@ fn provider_payload_mismatch(
     ))
     .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .with_source(ProviderDownloadPayloadMismatch)
     .build()
 }
 
@@ -1567,6 +1583,28 @@ mod tests {
         let err = futures::executor::block_on(gather_if_needed_async(&value))
             .expect_err("missing provider should fail closure-captured gather");
         assert_eq!(err.identifier(), Some("RunMat:gather:ProviderUnavailable"));
+    }
+
+    #[test]
+    fn malformed_download_carries_provider_payload_provenance() {
+        let handle = gpu_fixture(vec![1, 1]);
+        let error = super::provider_payload_mismatch(
+            &handle,
+            &[2, 1],
+            "download shape differs from handle".into(),
+        );
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:gpu:ProviderPayloadMismatch")
+        );
+        assert!(error
+            .source
+            .as_deref()
+            .is_some_and(|source| source.is::<super::ProviderDownloadPayloadMismatch>()));
+        let unavailable = crate::build_runtime_error("provider not registered")
+            .with_identifier("RunMat:gather:ProviderUnavailable")
+            .build();
+        assert!(unavailable.source.is_none());
     }
 
     #[test]

@@ -763,6 +763,34 @@ fn preserving_download_rejects_provider_payload_shape_and_class_mismatch() {
 }
 
 #[test]
+fn dispatcher_gather_marks_actual_malformed_provider_downloads() {
+    let _lock = test_support::accel_test_lock();
+    runmat_accelerate::ensure_residency_hooks();
+    for behavior in [DownloadBehavior::WrongShape, DownloadBehavior::WrongClass] {
+        // Provider selection requires a process-lifetime reference, just as a
+        // registered execution provider does. Each fixture owns a distinct device.
+        let provider: &'static ControlledDownloadProvider =
+            Box::leak(Box::new(ControlledDownloadProvider::new(behavior)));
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let allocation = provider.input();
+        runmat_accelerate_api::mark_residency(&allocation.handle);
+        let source = Value::GpuTensor(allocation.handle.clone());
+        let error = block_on(crate::dispatcher::gather_if_needed_async(&source))
+            .expect_err("dispatcher must reject a malformed provider download");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:gpu:ProviderPayloadMismatch")
+        );
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert!(error.source.as_deref().is_some_and(|source| {
+            source.is::<crate::dispatcher::ProviderDownloadPayloadMismatch>()
+        }));
+        drop((error, source, allocation.handle));
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
+}
+
+#[test]
 fn pending_download_drop_preserves_borrowed_allocation_and_residency() {
     use std::future::Future;
     use std::task::{Context, Poll};

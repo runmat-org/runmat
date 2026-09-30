@@ -3,6 +3,12 @@ use super::*;
 const K_CHUNK: usize = 8192;
 const K_CHUNK_SWITCH: usize = 65536;
 
+#[path = "matmul/selection.rs"]
+mod selection;
+pub(in crate::backend::wgpu::provider) use selection::{
+    selected_matmul_pipeline, MatmulPipelineRoute,
+};
+
 #[cfg(test)]
 #[path = "matmul/ownership_tests.rs"]
 mod ownership_tests;
@@ -867,21 +873,14 @@ impl WgpuProvider {
         let n_u32 = u32::try_from(n).map_err(|_| anyhow!("matmul: n exceeds GPU limits"))?;
         let k_u32 = u32::try_from(k).map_err(|_| anyhow!("matmul: k exceeds GPU limits"))?;
 
-        let can_vec4 = self.precision == NumericPrecision::F32
-            && !view_a.transpose
-            && !view_b.transpose
-            && m % 4 == 0
-            && m >= 4
-            && n > 0;
-        let disable_vec4 = std::env::var("RUNMAT_DISABLE_VEC4")
-            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
-            .unwrap_or(false);
-        let use_vec4 = can_vec4 && k < K_CHUNK_SWITCH && !disable_vec4;
-        let enable_chunk = !view_a.transpose && !view_b.transpose && k >= K_CHUNK_SWITCH;
+        let selected_pipeline =
+            selected_matmul_pipeline(self.precision, m, n, k, view_a.transpose, view_b.transpose);
+        let use_vec4 = selected_pipeline == MatmulPipelineRoute::Vec4;
+        let enable_chunk = selected_pipeline == MatmulPipelineRoute::Chunked;
         if debug_matmul {
             log::debug!(
-                "[matmul_debug] can_vec4={} use_vec4={} enable_chunk={} usage={:?}",
-                can_vec4,
+                "[matmul_debug] selected_pipeline={:?} use_vec4={} enable_chunk={} usage={:?}",
+                selected_pipeline,
                 use_vec4,
                 enable_chunk,
                 out_usage

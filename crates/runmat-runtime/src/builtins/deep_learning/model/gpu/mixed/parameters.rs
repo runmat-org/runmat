@@ -10,10 +10,10 @@ use runmat_accelerate_api::{
     ProviderViewCapability, ProviderViewChain, ProviderViewSource, ProviderViewStep,
 };
 
-pub(super) fn consumed_resident_handles(
-    views: &[ParameterView<'_>],
+pub(super) fn consumed_parameter_rows<'v, 'a>(
+    views: &'v [ParameterView<'a>],
     stages: &[super::plan::Stage],
-) -> Vec<GpuTensorHandle> {
+) -> Vec<&'v ParameterView<'a>> {
     let mut consumed = Vec::new();
     for stage in stages {
         let (layer_index, roles): (usize, &[ParameterRole]) = match stage {
@@ -31,12 +31,23 @@ pub(super) fn consumed_resident_handles(
                 .iter()
                 .find(|row| row.key.layer_index == layer_index && row.key.role == *role)
                 .expect("admitted learnable stage has a canonical parameter row");
-            if let Some(Value::GpuTensor(handle)) = row.value.map(forward_data) {
-                consumed.push(handle.clone());
-            }
+            consumed.push(row);
         }
     }
     consumed
+}
+
+pub(super) fn consumed_resident_handles(
+    views: &[ParameterView<'_>],
+    stages: &[super::plan::Stage],
+) -> Vec<GpuTensorHandle> {
+    consumed_parameter_rows(views, stages)
+        .into_iter()
+        .filter_map(|row| match row.value.map(forward_data) {
+            Some(Value::GpuTensor(handle)) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 pub(super) fn has_unsupported_resident_parameters(host: &HostNetworkPlan<'_>) -> bool {

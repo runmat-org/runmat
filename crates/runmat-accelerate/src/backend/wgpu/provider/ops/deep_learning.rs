@@ -4,6 +4,7 @@ use super::*;
 mod admission;
 #[path = "deep_learning/activation.rs"]
 mod activation;
+pub(super) use activation::elu_shader;
 #[cfg(test)]
 #[path = "deep_learning/tests.rs"]
 mod tests;
@@ -140,11 +141,7 @@ impl WgpuProvider {
                         source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader.clone())),
                     });
             let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
-            let pipeline_key = self.compute_pipeline_hash_bytes(
-                shader.as_bytes(),
-                layout_tag,
-                Some(workgroup_size),
-            );
+            let pipeline_key = softmax_rows_pipeline_key(self.precision);
             let pipeline = self.get_or_create_pipeline(
                 emission,
                 pipeline_key,
@@ -1069,6 +1066,14 @@ fn softmax_rows_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 3] {
         },
         count: None,
     })
+}
+
+pub(super) fn softmax_rows_pipeline_key(precision: NumericPrecision) -> u64 {
+    crate::backend::wgpu::cache::key::compute_pipeline_hash_bytes(
+        softmax_rows_shader(precision).as_bytes(),
+        "runmat-softmax-rows-layout",
+        Some(crate::backend::wgpu::config::WORKGROUP_SIZE),
+    )
 }
 
 fn softmax_rows_shader(precision: NumericPrecision) -> String {

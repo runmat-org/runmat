@@ -150,7 +150,9 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderCostQuery,
     ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
-        if crate::placement::floating_cast_unresolved_adaptation(&query.operation) {
+        if query.preparation == runmat_execution::CandidatePreparationState::Unknown
+            || crate::placement::floating_cast_unresolved_adaptation(&query.operation)
+        {
             return None;
         }
         Some(crate::placement::wgpu_cost_estimate(self, query))
@@ -551,6 +553,13 @@ impl AccelProvider for WgpuProvider {
     ) -> Result<Option<runmat_accelerate_api::DeepLearningForwardCapability>> {
         self.deep_learning_forward_route_capability_exec(route)
             .map(Some)
+    }
+
+    fn deep_learning_forward_preparation_snapshot(
+        &self,
+        route: &runmat_accelerate_api::DeepLearningForwardRoute<'_>,
+    ) -> Option<runmat_accelerate_api::ProviderPreparationSnapshot> {
+        self.deep_learning_forward_preparation_snapshot_exec(route)
     }
 
     fn provider_view_chain_capability(

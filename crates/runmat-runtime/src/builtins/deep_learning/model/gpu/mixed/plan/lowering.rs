@@ -126,6 +126,7 @@ pub(super) fn applicable(host: &HostNetworkPlan<'_>, purpose: RoutePurpose) -> b
     let selected = match purpose {
         RoutePurpose::ExistingMixedForward => transformations >= 2 && combines_pool_or_norm,
         RoutePurpose::ResidentTape => true,
+        RoutePurpose::HostPlacement => true,
     };
     selected && !super::super::parameters::has_unsupported_resident_parameters(host)
 }
@@ -159,6 +160,21 @@ pub(in crate::builtins::deep_learning::model::gpu::mixed) fn lower_for_tape(
         host,
         target_axes,
         RoutePurpose::ResidentTape,
+        function,
+    )
+}
+
+pub(in crate::builtins::deep_learning::model::gpu::mixed) fn lower_for_host_placement(
+    network: &ObjectInstance,
+    host: &HostNetworkPlan<'_>,
+    target_axes: &AxisPlan,
+    function: &'static str,
+) -> BuiltinResult<Option<Result<Plan, GpuCapabilityReason>>> {
+    lower_for_purpose(
+        network,
+        host,
+        target_axes,
+        RoutePurpose::HostPlacement,
         function,
     )
 }

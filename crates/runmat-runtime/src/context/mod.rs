@@ -35,6 +35,7 @@ pub use services::{
     RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
     RuntimePlacementFeedbackSource, RuntimePlacementService, RuntimeServiceFuture,
     RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
-    RuntimeSpmdService, RuntimeWorkspaceService,
+    RuntimeSpmdService, RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection,
+    RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;

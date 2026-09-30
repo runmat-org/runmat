@@ -60,7 +60,7 @@ impl NativeExecutor {
                     execution_ns,
                     ..ExecutionCostComponents::default()
                 },
-                scratch_bytes: 0,
+                scratch_bytes: Some(0),
                 confidence,
                 source,
             },

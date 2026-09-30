@@ -24,9 +24,6 @@ use crate::builtins::table::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-pub(crate) const CLASSIFICATION_TREE_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("ClassificationTree");
-
 const FITCTREE_NAME: &str = "fitctree";
 const PREDICT_NAME: &str = "predict";
 const EPS: f64 = 1.0e-12;
@@ -1081,7 +1078,7 @@ fn class_counts(
 }
 
 fn model_object(spec: FitSpec, fit: TreeFit) -> BuiltinResult<ObjectInstance> {
-    let mut object = ObjectInstance::new(CLASSIFICATION_TREE_CLASS.to_string());
+    let mut object = ObjectInstance::new(runmat_types::standard::CLASSIFICATION_TREE.to_string());
     object.properties.insert(
         "ResponseName".to_string(),
         Value::String(spec.response_name),
