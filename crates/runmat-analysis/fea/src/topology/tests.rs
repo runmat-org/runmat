@@ -3,6 +3,37 @@ use runmat_meshing_core::{fixtures, ElementOrder};
 use super::{boundary::project_boundary_face, AnalysisProjection};
 
 #[test]
+fn oblique_both_order_volume_quadrature_reproduces_all_world_affine_gradients() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(order);
+        for node in &mut mesh.topology.nodes {
+            let [x, y, z] = node.coordinates_m;
+            node.coordinates_m = [
+                2.0 * x + y + 3.0 * z + 0.3,
+                4.0 * y + z - 0.7,
+                x + 2.0 * y + 5.0 * z + 1.2,
+            ];
+        }
+        mesh.seal_canonical_digest().unwrap();
+        mesh.validate().unwrap();
+        let projection = AnalysisProjection::derive(&mesh).unwrap();
+        for element in &projection.elements {
+            projection.visit_element_quadrature(element, |point| {
+                for world_axis in 0..3 {
+                    for axis in 0..3 {
+                        let actual = element.node_indices.iter().zip(point.physical_shape_gradients())
+                            .map(|(&node, gradient)| projection.nodes[node].coordinates_m[world_axis] * gradient[axis])
+                            .sum::<f64>();
+                        let expected = if axis == world_axis { 1.0 } else { 0.0 };
+                        assert!((actual - expected).abs() < 1e-12, "order={order:?}, world_axis={world_axis}, axis={axis}, actual={actual}");
+                    }
+                }
+            }).unwrap();
+        }
+    }
+}
+
+#[test]
 fn curved_boundary_face_rejects_a_folded_signed_jacobian() {
     let mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let projection = AnalysisProjection::derive(&mesh).expect("straight Tet10 projection");

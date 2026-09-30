@@ -36,7 +36,7 @@ pub(super) fn invert(matrix: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
     let c00 = matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1];
     let c01 = -(matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0]);
     let c02 = matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0];
-    let c10 = -(matrix[0][1] * matrix[2][2] - matrix[0][2] * matrix[2][0]);
+    let c10 = -(matrix[0][1] * matrix[2][2] - matrix[0][2] * matrix[2][1]);
     let c11 = matrix[0][0] * matrix[2][2] - matrix[0][2] * matrix[2][0];
     let c12 = -(matrix[0][0] * matrix[2][1] - matrix[0][1] * matrix[2][0]);
     let c20 = matrix[0][1] * matrix[1][2] - matrix[0][2] * matrix[1][1];
@@ -64,4 +64,30 @@ pub(super) fn invert(matrix: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
             c22 * inverse_determinant,
         ],
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::invert;
+
+    #[test]
+    fn inverse_reproduces_identity_on_both_sides_for_nonsymmetric_geometry() {
+        // Unequal m20/m21 and nonzero m02 expose the off-diagonal cofactor.
+        let matrices = [
+            [[2.0, 1.0, 3.0], [0.0, 4.0, 1.0], [1.0, 2.0, 5.0]],
+            [[0.0, -1.0, 1.0], [1.0, 0.0, 2.0], [0.0, 0.0, 3.0]],
+        ];
+        for matrix in matrices {
+            let inverse = invert(matrix).unwrap();
+            for (left, right) in [(matrix, inverse), (inverse, matrix)] {
+                for (row, values) in left.iter().enumerate() {
+                    for column in 0..3 {
+                        let actual = (0..3).map(|k| values[k] * right[k][column]).sum::<f64>();
+                        let expected = if row == column { 1.0 } else { 0.0 };
+                        assert!((actual - expected).abs() < 1e-12);
+                    }
+                }
+            }
+        }
+    }
 }
