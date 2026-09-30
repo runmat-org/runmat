@@ -6,6 +6,155 @@ use runmat_types::{
 };
 use std::collections::BTreeMap;
 
+#[test]
+fn nested_cell_gradient_preserves_positions_and_native_leaf_facts() {
+    let leaf = dlarray(ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    ));
+    let nested = ValueFact::proven(
+        ValueKindFact::Cell(runmat_types::CellFact {
+            element: Box::new(leaf.clone()),
+            elements: vec![leaf],
+            elements_complete: true,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Opaque,
+    );
+    let target = ValueFact::proven(
+        ValueKindFact::Cell(runmat_types::CellFact {
+            element: Box::new(ValueFact::unknown(
+                runmat_types::DynamicReason::RuntimeValue,
+            )),
+            elements: vec![nested],
+            elements_complete: true,
+        }),
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Opaque,
+    );
+    let result = crate::infer_catalog_call(
+        &DLGRADIENT_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![dlarray(ValueFact::scalar(ValueKindFact::Logical)), target],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(result.diagnostics.is_empty());
+    let ValueKindFact::Cell(outer) = &result.outputs[0].kind else {
+        panic!("cell gradient")
+    };
+    let ValueKindFact::Cell(inner) = &outer.elements[0].kind else {
+        panic!("nested cell gradient")
+    };
+    let ValueKindFact::Object(leaf) = &inner.elements[0].kind else {
+        panic!("dlarray gradient")
+    };
+    let data = &leaf.properties[crate::DLARRAY_DATA_PROPERTY];
+    assert_eq!(data.numeric().unwrap().class, NumericClass::Single);
+    assert_eq!(data.shape, ShapeFact::from(vec![Some(2), Some(3)]));
+    assert_eq!(data.alias, AliasFact::Unknown);
+    assert!(outer.elements_complete && inner.elements_complete);
+}
+
+#[test]
+fn cell_target_admission_checks_known_members_not_empty_common_facts() {
+    let loss = dlarray(ValueFact::scalar(ValueKindFact::Logical));
+    let invalid = ValueFact::scalar(ValueKindFact::Logical);
+    let cell = |elements: Vec<ValueFact>, elements_complete| {
+        ValueFact::proven(
+            ValueKindFact::Cell(runmat_types::CellFact {
+                element: Box::new(invalid.clone()),
+                elements,
+                elements_complete,
+            }),
+            ShapeFact::from(vec![Some(1), Some(0)]),
+            StorageFact::Opaque,
+        )
+    };
+    let request = |target| CallRequest {
+        arguments: vec![loss.clone(), target],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let empty = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request(cell(vec![], true)));
+    assert!(empty.diagnostics.is_empty());
+    let incomplete =
+        crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request(cell(vec![], false)));
+    assert!(incomplete.diagnostics.is_empty());
+    let mut nonempty = cell(vec![], false);
+    nonempty.shape = ShapeFact::Scalar;
+    let result = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request(nonempty));
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-TARGET"));
+    let text_member = ValueFact::scalar(ValueKindFact::String);
+    let result = crate::infer_catalog_call(
+        &DLGRADIENT_CATALOG_ENTRY,
+        &request(cell(vec![text_member], false)),
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-TARGET"));
+    let invalid_cell = ValueFact::proven(
+        ValueKindFact::Cell(runmat_types::CellFact {
+            element: Box::new(invalid.clone()),
+            elements: vec![invalid],
+            elements_complete: true,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    let result = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request(invalid_cell));
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-TARGET"
+            && diagnostic.argument == Some(1)));
+}
+
+#[test]
+fn discarded_gradient_targets_do_not_emit_admission_diagnostics() {
+    let loss = dlarray(ValueFact::scalar(ValueKindFact::Logical));
+    let mut resident = ValueFact::scalar(ValueKindFact::Logical);
+    resident.residency = ResidencyFact::Device { provider: None };
+    let resident = dlarray(resident);
+    let nested = ValueFact::proven(
+        ValueKindFact::Cell(runmat_types::CellFact {
+            element: Box::new(resident.clone()),
+            elements: vec![resident],
+            elements_complete: true,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    let request = CallRequest {
+        arguments: vec![loss.clone(), loss, nested],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let result = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request);
+    assert!(result.diagnostics.is_empty());
+    let result = crate::infer_catalog_call(
+        &DLGRADIENT_CATALOG_ENTRY,
+        &CallRequest {
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+            ..request
+        },
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-RESIDENCY"
+            && diagnostic.argument == Some(2)));
+}
+
 fn dlarray(data: ValueFact) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {

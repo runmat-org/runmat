@@ -8,6 +8,8 @@ use runmat_types::{
 };
 use std::collections::BTreeMap;
 
+mod targets;
+
 fn traced_dlarray_possible(fact: &ValueFact) -> bool {
     match &fact.kind {
         ValueKindFact::Unknown => true,
@@ -165,18 +167,15 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let mut outputs = Vec::with_capacity(targets);
     for (index, target) in request.arguments.iter().enumerate().skip(1) {
-        if matches!(
-            target.kind,
-            ValueKindFact::Numeric(_) | ValueKindFact::Logical
-        ) {
-            diagnostics.push(argument_error(
-                "RM-DL-DLGRADIENT-TARGET",
-                "targets must be traced dlarray values or supported learnables trees",
-                index,
-            ));
+        let consumed = request
+            .outputs
+            .requested
+            .known_count()
+            .is_none_or(|count| index <= count);
+        if consumed {
+            targets::check(target, index, &mut diagnostics);
         }
-        check_dlarray_data(target, index, &mut diagnostics);
-        outputs.push(gradient_for_target(target));
+        outputs.push(targets::gradient(target));
     }
     finish_fixed_outputs(entry, request, outputs, diagnostics)
 }
