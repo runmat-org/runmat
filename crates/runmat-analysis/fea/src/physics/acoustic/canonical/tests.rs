@@ -510,3 +510,4 @@ fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
         model.excitations.reverse();
     }
 }
+mod periodic;

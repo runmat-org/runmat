@@ -6,6 +6,7 @@ use crate::{
     topology::test_meshes::{quadratic_slab_mesh, slab_mesh},
 };
 use runmat_analysis_core::*;
+mod periodic;
 mod source;
 
 fn workload() -> AcousticHarmonicWorkload {

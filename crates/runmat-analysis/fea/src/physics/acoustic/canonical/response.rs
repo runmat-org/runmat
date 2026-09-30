@@ -5,7 +5,7 @@ use crate::{
     solve::krylov::{restarted_gmres, GmresPolicy},
     topology::AnalysisProjection,
 };
-use std::convert::Infallible;
+mod reduced;
 
 #[derive(Debug, Clone)]
 pub struct CanonicalAcousticResponse {
@@ -34,81 +34,7 @@ pub(super) fn solve(
     policy: AcousticHarmonicPolicy,
 ) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
     let size = assembly.projection.nodes.len();
-    let free = assembly
-        .prescribed
-        .iter()
-        .enumerate()
-        .filter_map(|(i, p)| p.is_none().then_some(i))
-        .collect::<Vec<_>>();
-    let mut real = assembly
-        .prescribed
-        .iter()
-        .map(|p| p.map_or(0.0, |p| p.real))
-        .collect::<Vec<_>>();
-    let mut imaginary = assembly
-        .prescribed
-        .iter()
-        .map(|p| p.map_or(0.0, |p| p.imaginary))
-        .collect::<Vec<_>>();
-    let (lifting_real, lifting_imaginary) = assembly.apply(&real, &imaginary);
-    let mut rhs = free
-        .iter()
-        .map(|&i| assembly.source[i].real - lifting_real[i])
-        .collect::<Vec<_>>();
-    rhs.extend(
-        free.iter()
-            .map(|&i| assembly.source[i].imaginary - lifting_imaginary[i]),
-    );
-    let mut iterations = 0;
-    let mut relative_residual = 0.0;
-    if !free.is_empty() {
-        let count = free.len();
-        let result = restarted_gmres(
-            &rhs,
-            &vec![0.0; rhs.len()],
-            GmresPolicy {
-                relative_tolerance: policy.relative_tolerance,
-                restart: policy.restart,
-                maximum_iterations: policy.maximum_iterations,
-            },
-            |value| {
-                let mut r = vec![0.0; size];
-                let mut im = vec![0.0; size];
-                for (j, &i) in free.iter().enumerate() {
-                    r[i] = value[j];
-                    im[i] = value[j + count];
-                }
-                let (ar, ai) = assembly.apply(&r, &im);
-                let mut value = free.iter().map(|&i| ar[i]).collect::<Vec<_>>();
-                value.extend(free.iter().map(|&i| ai[i]));
-                Ok::<_, Infallible>(value)
-            },
-            |a, b| Ok::<_, Infallible>(a.iter().zip(b).map(|(a, b)| a * b).sum()),
-            crate::is_fea_cancelled,
-        )
-        .expect("validated acoustic block application")
-        .ok_or(AcousticHarmonicError::Breakdown)?;
-        if result.cancelled {
-            return Err(AcousticHarmonicError::Cancelled);
-        }
-        if result.breakdown {
-            return Err(AcousticHarmonicError::Breakdown);
-        }
-        if !result.converged {
-            return Err(AcousticHarmonicError::NotConverged);
-        }
-        let norm = rhs.iter().map(|x| x * x).sum::<f64>().sqrt();
-        relative_residual = if norm == 0.0 {
-            result.residual_norm
-        } else {
-            result.residual_norm / norm
-        };
-        iterations = result.iterations;
-        for (j, &i) in free.iter().enumerate() {
-            real[i] = result.solution[j];
-            imaginary[i] = result.solution[j + count];
-        }
-    }
+    let (real, imaginary, iterations, relative_residual) = reduced::solve(&assembly, policy)?;
     let (ar, ai) = assembly.apply(&real, &imaginary);
     let br = spmv(&assembly.impedance, &real).expect("validated pressure shape");
     let bi = spmv(&assembly.impedance, &imaginary).expect("validated pressure shape");

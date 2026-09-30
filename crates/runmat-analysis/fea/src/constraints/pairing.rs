@@ -16,7 +16,7 @@ use super::vector::{add, cross, dot, magnitude, scale, subtract};
 #[cfg(test)]
 mod tests;
 
-pub(super) fn pair_targets(
+pub(crate) fn pair_targets(
     mesh: &SolverMeshArtifact,
     primary: &ResolvedConstraintTarget,
     secondary: &ResolvedConstraintTarget,

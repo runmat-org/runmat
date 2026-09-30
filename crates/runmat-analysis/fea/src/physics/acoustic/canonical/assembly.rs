@@ -20,6 +20,7 @@ pub(super) struct AcousticAssembly {
     pub source: Vec<ProjectionScalar>,
     pub prescribed: Vec<Option<ProjectionScalar>>,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
+    pub reduction: Option<crate::constraints::AffineConstraintReduction>,
 }
 
 impl AcousticAssembly {
@@ -109,6 +110,7 @@ impl AcousticAssembly {
             ],
             prescribed: vec![None; size],
             source_evidence: Vec::new(),
+            reduction: None,
         })
     }
 

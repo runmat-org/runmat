@@ -232,6 +232,19 @@ pub fn build_acoustic_resource_plan(
     // accumulators are separate from projection. These phase lifetimes are summed, not maxed.
     let vectors = add(mul(nodes, 512)?, mul(elements, 256)?)?;
     let boundaries = mul(count(mesh.topology.boundary_faces.len())?, 512)?;
+    // Shared unit-phase graph/affine recovery, canonical node lookup and target pairing.
+    // At most N matching relations per active authored paired constraint. Include graph,
+    // relation-vector spare capacity and pairing metadata simultaneously; the shared map
+    // has at most four real coefficients per complex node. No dense reduction is built.
+    let periodic_count = count(workload.model.constraints.iter().filter(|constraint| {
+        step.object_is_active(&runmat_analysis_core::StepObjectRef::Constraint(
+            constraint.constraint_id().into())) && matches!(constraint,
+            runmat_analysis_core::AnalysisConstraint::Acoustic(runmat_analysis_core::AcousticConstraint {
+                kind: runmat_analysis_core::AcousticConstraintKind::Periodic(_)
+                    | runmat_analysis_core::AcousticConstraintKind::PhaseShiftedPeriodic(_), ..
+            }))
+    }).count())?;
+    let phase_constraints = add(mul(nodes, 512)?, mul(mul(nodes, periodic_count)?, 128)?)?;
     let evidence = evidence_profile(workload)?;
     // Workload clone/source realization metadata is profiled from the complete authored input;
     // property compilation separately owns its selected material clones.
@@ -247,6 +260,7 @@ pub fn build_acoustic_resource_plan(
         krylov,
         vectors,
         boundaries,
+        phase_constraints,
         metadata,
         evidence.materialization_resident_bytes_estimate,
     ]

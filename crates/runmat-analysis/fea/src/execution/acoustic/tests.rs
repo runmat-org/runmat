@@ -1,4 +1,5 @@
 use super::*;
+mod periodic;
 use crate::{
     fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
     topology::test_meshes::{quadratic_slab_mesh, slab_mesh},

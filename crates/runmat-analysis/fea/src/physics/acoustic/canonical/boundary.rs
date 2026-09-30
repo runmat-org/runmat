@@ -100,9 +100,9 @@ impl AcousticAssembly {
             };
             let AcousticConstraintKind::PrescribedPressure { target, value } = &constraint.kind
             else {
-                return Err(AcousticHarmonicError::Unsupported(
-                    "periodic or Bloch pressure constraints".into(),
-                ));
+                // Paired relations are compiled against the sealed mesh after source
+                // realization, so prescribed values and natural-boundary conflicts are known.
+                continue;
             };
             let value = sample_prescribed_pressure(value, &model.signals, sample)
                 .map_err(|e| AcousticHarmonicError::Boundary(e.to_string()))?;

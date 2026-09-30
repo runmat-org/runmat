@@ -17,6 +17,7 @@ mod mixed;
 mod mixed_surface;
 mod normal;
 mod pairing;
+mod phase;
 mod plan;
 mod rank;
 mod reaction;
@@ -25,6 +26,8 @@ mod result_state;
 mod row;
 mod target;
 mod vector;
+pub(crate) use pairing::pair_targets;
+pub use phase::{build_phase_reduction, UnitPhaseConstraintError, UnitPhaseRelation};
 pub(crate) use target::resolve_nodal_target;
 
 pub use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;

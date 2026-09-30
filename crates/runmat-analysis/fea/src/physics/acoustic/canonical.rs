@@ -7,6 +7,7 @@
 
 mod assembly;
 mod boundary;
+mod periodic;
 mod recovery;
 mod response;
 #[cfg(test)]
@@ -92,7 +93,9 @@ pub enum AcousticHarmonicError {
 /// Solve one explicitly authored acoustic harmonic step on its sealed canonical mesh.
 /// Supports lossless isotropic fluids, prescribed complex pressure, outward normal velocity,
 /// rigid walls and positive real specific impedance. Unspecified exterior faces are rigid.
-/// Periodic/Bloch constraints, incident fields, material damping and radiation fail closed.
+/// Matching translated exterior-face periodic/Bloch constraints use unit-phase pressure
+/// relations. Rotated/nonmatching pairing, incident fields, material damping and radiation
+/// fail closed.
 /// This entry does not advertise workload admission, bounded-resource or release qualification.
 pub fn solve_canonical_harmonic(
     model: &AnalysisModel,
@@ -124,6 +127,7 @@ pub fn solve_canonical_harmonic(
         &excitations,
         sample,
     )?;
+    let assembly = assembly.with_periodic_constraints(mesh, model, step, &excitations)?;
     response::solve(assembly, frequency_hz, policy)
 }
 
