@@ -194,7 +194,7 @@ impl PlacementSession {
         });
         state.tick = state.tick.saturating_add(1);
         let tick = state.tick;
-        apply_feedback_estimates(&mut request, key, tick, &state.feedback);
+        apply_feedback_evidence(&mut request, key, tick, &state.feedback);
         let partition =
             solve_partition(&request, PlacementPolicy::default()).map_err(|message| {
                 PlacementPlanError {
@@ -528,21 +528,21 @@ fn runtime_error(error: PlacementPlanError) -> runmat_runtime::RuntimeError {
         .build()
 }
 
-fn apply_feedback_estimates(
+fn apply_feedback_evidence(
     request: &mut PlacementPlanRequest,
     signature_key: Digest,
     tick: u64,
     feedback: &BTreeMap<(Digest, String, ExecutionCandidateKind), PlacementFeedbackSeries>,
 ) {
     for node in &mut request.graph.nodes {
-        for candidate in &mut node.candidates {
+        node.candidates.retain_mut(|candidate| {
             let key = (
                 signature_key,
                 candidate.descriptor.identity.clone(),
                 candidate.descriptor.kind,
             );
             let Some(series) = feedback.get(&key) else {
-                continue;
+                return true;
             };
             match evidence::from_series(series, tick) {
                 CandidateObservationEvidence::Observed(duration) => {
@@ -556,11 +556,14 @@ fn apply_feedback_estimates(
                 CandidateObservationEvidence::Unavailable(
                     CandidateCostUnavailable::RepeatedFailures { .. },
                 ) if candidate.descriptor.kind.is_provider() => {
-                    candidate.resources.queue_slots = u32::MAX;
+                    // Failure evidence makes this route ineligible. It is not
+                    // a claim about queue capacity or resource demand.
+                    return false;
                 }
                 CandidateObservationEvidence::Unavailable(_) => {}
             }
-        }
+            true
+        });
     }
 }
 
@@ -1456,6 +1459,87 @@ mod tests {
             ),
             E::Unavailable(Missing::RepeatedFailures { failed: 2 })
         );
+    }
+
+    #[test]
+    fn failed_provider_is_ineligible_with_unknown_queue_bounds_until_evidence_stales() {
+        let mut request =
+            two_node_request("failed-eligibility", (100_000, 10_000), (100_000, 10_000));
+        request.resources.providers[0].queue_depth = None;
+        request.resources.providers[0].queue_limit = None;
+        let edge = &mut request.graph.edges[0];
+        edge.host_to_provider_ns = 0;
+        edge.provider_to_host_ns = 0;
+        edge.cross_provider_ns = 0;
+        let failed = &request.graph.nodes[0].candidates[1].descriptor;
+        let failed_label = failed.identity.clone();
+        let failed_kind = failed.kind;
+        request.graph.nodes[1].candidates[0].descriptor.identity = failed_label.clone();
+
+        let session = PlacementSession::default();
+        let initial = session.plan(request.clone()).unwrap();
+        assert!(initial
+            .selections
+            .iter()
+            .all(|selected| selected.kind.is_provider()));
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: request.signature.clone(),
+                    candidate: failed_label.clone(),
+                    kind: failed_kind,
+                    total_elapsed_ns: 0,
+                    succeeded: false,
+                })
+                .unwrap();
+        }
+        let key = request.signature.cache_key();
+        let mut admitted = request.clone();
+        {
+            let mut state = session.state.borrow_mut();
+            apply_feedback_evidence(&mut admitted, key, state.tick, &state.feedback);
+            // A stale cached provider ticket must also fail revalidation.
+            let tick = state.tick;
+            state.decisions.insert(
+                key,
+                CachedDecision {
+                    decision: initial,
+                    resources: request.resources.clone(),
+                    last_used: tick,
+                },
+            );
+        }
+        assert_eq!(admitted.graph.nodes[0].candidates.len(), 1);
+        assert_eq!(
+            admitted.graph.nodes[0].candidates[0].resources.queue_slots,
+            0
+        );
+        assert_eq!(admitted.graph.nodes[1].candidates.len(), 2);
+        assert_eq!(
+            admitted.graph.nodes[1].candidates[1].resources.queue_slots,
+            1
+        );
+
+        let after_failure = session.plan(request.clone()).unwrap();
+        assert!(!after_failure.from_cache);
+        assert!(!after_failure.selections[0].kind.is_provider());
+        assert!(after_failure.selections[1].kind.is_provider());
+
+        let restored = PlacementSession::default();
+        restored
+            .restore_profile(session.profile_snapshot())
+            .unwrap();
+        let restored_plan = restored.plan(request.clone()).unwrap();
+        assert!(!restored_plan.selections[0].kind.is_provider());
+        assert!(restored_plan.selections[1].kind.is_provider());
+
+        let latest = session.profile_snapshot().feedback[0].latest_tick;
+        session.state.borrow_mut().tick = latest + 1_025;
+        let readmitted = session.plan(request).unwrap();
+        assert!(readmitted
+            .selections
+            .iter()
+            .all(|selected| selected.kind.is_provider()));
     }
 
     #[test]
