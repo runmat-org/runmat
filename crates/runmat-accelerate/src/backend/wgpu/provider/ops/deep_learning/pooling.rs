@@ -1,4 +1,5 @@
 use super::*;
+use runmat_accelerate_api::{GpuTensorLayout, GpuTensorView};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -46,9 +47,10 @@ impl WgpuProvider {
     /// permutation used to present a non-identity target axis order.
     pub(crate) fn pool_1d_buffer_demand(
         &self,
-        input_shape: &[usize],
+        input: &GpuTensorView,
         route: &DeepLearningPool1DRoute,
     ) -> Option<u64> {
+        let input_shape = input.shape();
         let pool_size = *input_shape.get(route.reduction.axis_zero_based)?;
         if pool_size == 0 {
             return None;
@@ -58,6 +60,14 @@ impl WgpuProvider {
         let output = output_count.max(1).checked_mul(self.element_size as u64)?;
         let mut total = output;
         if output_count > 0 {
+            // The reduction owner materializes a lazy transpose through
+            // reshape before dispatch. Current forward-route admission
+            // requires a contiguous pool input; retain the complete owner
+            // formula if that admission is extended later.
+            if matches!(input.layout(), GpuTensorLayout::Transpose(_)) {
+                let input_count = u64::try_from(checked_shape_count(input_shape).ok()?).ok()?;
+                total = total.checked_add(self.real_permute_buffer_demand(input_count)?)?;
+            }
             let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
                 .checked_mul(u64::from(
                     crate::backend::wgpu::shaders::deep_learning::POOL_WORKGROUP_SIZE,

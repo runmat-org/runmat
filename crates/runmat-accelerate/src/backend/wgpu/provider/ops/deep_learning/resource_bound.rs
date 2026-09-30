@@ -132,8 +132,8 @@ impl WgpuProvider {
                         *rows as u64,
                     )
                     .ok_or(BufferBoundError::Overflow)?,
-                DeepLearningForwardOperation::Pool1D { input_shape, route } => self
-                    .pool_1d_buffer_demand(input_shape, route)
+                DeepLearningForwardOperation::Pool1D { route, .. } => self
+                    .pool_1d_buffer_demand(input, route)
                     .ok_or(BufferBoundError::Overflow)?,
                 DeepLearningForwardOperation::LayerNorm(request) => {
                     let DeepLearningForwardParameters::LayerNorm { scale, offset } =
@@ -161,9 +161,13 @@ impl WgpuProvider {
                     }
                     demand
                 }
-                // No unknown operation may borrow the incomplete legacy
-                // largest-stage statistic.
-                _ => return Ok(DeepLearningForwardBufferBound::Unavailable),
+                // The admitted route uses View for these layout operations.
+                // If that contract changes, their physical allocation must
+                // be accounted for by the operation owner first.
+                DeepLearningForwardOperation::FeedForward(
+                    DeepLearningFeedForwardStage::Transpose2D { .. }
+                    | DeepLearningFeedForwardStage::Permute2D { .. },
+                ) => return Ok(DeepLearningForwardBufferBound::Unavailable),
             };
             checked_add(&mut total, demand)?;
         }
