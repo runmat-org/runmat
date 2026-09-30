@@ -34,7 +34,7 @@ fn execute_source_with_catalog(source: &str, name: &str) -> Vec<runmat_value::Va
         source_name,
         source_text,
     )]);
-    futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode")
+    interpret(&bytecode).expect("execute bytecode")
 }
 
 fn execute_source_result(
@@ -2173,8 +2173,7 @@ fn mfilename_reads_current_source_context() {
         "/tmp/runmat_vm_mfilename_probe.m".to_string(),
         source_text,
     )]);
-    let vars =
-        futures::executor::block_on(runmat_vm::interpret(&bytecode)).expect("execute bytecode");
+    let vars = interpret(&bytecode).expect("execute bytecode");
     assert!(
         vars.iter().any(|v| {
             matches!(v, runmat_value::Value::String(s) if s == "runmat_vm_mfilename_probe")
