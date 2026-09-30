@@ -272,7 +272,7 @@ impl PlacementSession {
         let key = (signature.cache_key(), candidate.to_owned(), kind);
         state.feedback.get(&key).map_or(
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
-            |series| evidence::from_series(series, state.tick, kind),
+            |series| evidence::from_series(series, state.tick),
         )
     }
 
@@ -544,7 +544,7 @@ fn apply_feedback_estimates(
             let Some(series) = feedback.get(&key) else {
                 continue;
             };
-            match evidence::from_series(series, tick, candidate.descriptor.kind) {
+            match evidence::from_series(series, tick) {
                 CandidateObservationEvidence::Observed(duration) => {
                     candidate.descriptor.cost.components = ExecutionCostComponents {
                         execution_ns: duration.elapsed_ns,
@@ -1174,12 +1174,12 @@ mod tests {
         let initial = session.plan(request.clone()).unwrap();
         assert!(initial.selections[0].kind.is_provider());
         for _ in 1..=2 {
-            for candidate in ["gpu.first", "gpu.second"] {
+            for selected in &initial.selections {
                 session
                     .observe(PlacementFeedback {
                         signature: request.signature.clone(),
-                        candidate: candidate.into(),
-                        kind: ExecutionCandidateKind::ProviderGraph,
+                        candidate: selected.candidate.clone(),
+                        kind: selected.kind,
                         total_elapsed_ns: 250_000,
                         succeeded: true,
                     })
@@ -1195,7 +1195,7 @@ mod tests {
         let encoded = serde_json::to_string(&session.profile_snapshot()).unwrap();
         assert!(encoded.contains("\"total_elapsed_ns\":\""));
         assert!(encoded.contains("\"samples\":\"2\""));
-        assert!(encoded.contains("\"kind\":\"provider_graph\""));
+        assert!(encoded.contains("\"kind\":\"provider_fusion\""));
         let snapshot: PlacementProfileSnapshot = serde_json::from_str(&encoded).unwrap();
         let restored = PlacementSession::default();
         restored.restore_profile(snapshot.clone()).unwrap();
@@ -1207,6 +1207,55 @@ mod tests {
             .unwrap()
             .remove("kind");
         assert!(serde_json::from_value::<PlacementProfileSnapshot>(legacy).is_err());
+    }
+
+    #[test]
+    fn replanning_and_profile_restore_do_not_mix_same_label_across_candidate_kinds() {
+        use runmat_execution::{CandidateCostUnavailable, CandidateObservationEvidence};
+
+        let mut request = two_node_request("kind-separated", (10_000, 100_000), (100_000, 10_000));
+        let edge = &mut request.graph.edges[0];
+        edge.host_to_provider_ns = 0;
+        edge.provider_to_host_ns = 0;
+        edge.cross_provider_ns = 0;
+        let host = &request.graph.nodes[0].candidates[0].descriptor;
+        let shared_label = host.identity.clone();
+        let host_kind = host.kind;
+        let provider = &mut request.graph.nodes[1].candidates[1].descriptor;
+        provider.identity = shared_label.clone();
+        let provider_kind = provider.kind;
+        assert_ne!(host_kind, provider_kind);
+
+        let session = PlacementSession::default();
+        let initial = session.plan(request.clone()).unwrap();
+        assert_eq!(initial.selections[0].kind, host_kind);
+        assert_eq!(initial.selections[1].kind, provider_kind);
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: request.signature.clone(),
+                    candidate: shared_label.clone(),
+                    kind: provider_kind,
+                    total_elapsed_ns: 250_000,
+                    succeeded: true,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            session.observed_candidate_duration(&request.signature, &shared_label, host_kind),
+            CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations)
+        );
+        let replanned = session.plan(request.clone()).unwrap();
+        assert_eq!(replanned.selections[0].kind, host_kind);
+        assert_eq!(replanned.selections[1].kind, host_kind);
+
+        let restored = PlacementSession::default();
+        restored
+            .restore_profile(session.profile_snapshot())
+            .unwrap();
+        let restored_plan = restored.plan(request).unwrap();
+        assert_eq!(restored_plan.selections[0].kind, host_kind);
+        assert_eq!(restored_plan.selections[1].kind, host_kind);
     }
 
     #[test]
@@ -1296,11 +1345,7 @@ mod tests {
         );
         let series = session.profile_snapshot().feedback.pop().unwrap();
         assert_eq!(
-            evidence::from_series(
-                &series,
-                series.latest_tick + 1_025,
-                ExecutionCandidateKind::ProviderGraph
-            ),
+            evidence::from_series(&series, series.latest_tick + 1_025),
             E::Unavailable(Missing::StaleObservations)
         );
         for _ in 0..6 {
@@ -1423,8 +1468,11 @@ mod tests {
         session
             .observe(PlacementFeedback {
                 signature: request.signature.clone(),
-                candidate: "gpu.first".into(),
-                kind: ExecutionCandidateKind::ProviderGraph,
+                candidate: request.graph.nodes[0].candidates[1]
+                    .descriptor
+                    .identity
+                    .clone(),
+                kind: request.graph.nodes[0].candidates[1].descriptor.kind,
                 total_elapsed_ns: 20_000,
                 succeeded: true,
             })
@@ -1449,12 +1497,13 @@ mod tests {
     fn failure_only_feedback_survives_profile_round_trip() {
         let request = two_node_request("failed-profile", (100_000, 20_000), (100_000, 20_000));
         let session = PlacementSession::default();
+        let provider = &request.graph.nodes[0].candidates[1].descriptor;
         for _ in 1..=2 {
             session
                 .observe(PlacementFeedback {
                     signature: request.signature.clone(),
-                    candidate: "gpu.first".into(),
-                    kind: ExecutionCandidateKind::ProviderGraph,
+                    candidate: provider.identity.clone(),
+                    kind: provider.kind,
                     total_elapsed_ns: 0,
                     succeeded: false,
                 })

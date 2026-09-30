@@ -3,7 +3,7 @@
 
 use runmat_execution::{
     CandidateCostUnavailable, CandidateObservationEvidence, EstimateConfidence,
-    ExecutionCandidateKind, ObservedCandidateDuration,
+    ObservedCandidateDuration,
 };
 
 use super::{integer_sqrt, PlacementFeedbackSeries};
@@ -11,14 +11,13 @@ use super::{integer_sqrt, PlacementFeedbackSeries};
 pub(super) fn from_series(
     series: &PlacementFeedbackSeries,
     tick: u64,
-    kind: ExecutionCandidateKind,
 ) -> CandidateObservationEvidence {
     if tick.saturating_sub(series.latest_tick) > 1_024 {
         return CandidateObservationEvidence::Unavailable(
             CandidateCostUnavailable::StaleObservations,
         );
     }
-    if series.failures >= 2 && kind.is_provider() {
+    if series.failures >= 2 && series.kind.is_provider() {
         return CandidateObservationEvidence::Unavailable(
             CandidateCostUnavailable::RepeatedFailures {
                 failed: series.failures,
