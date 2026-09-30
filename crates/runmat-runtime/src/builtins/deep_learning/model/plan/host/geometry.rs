@@ -18,6 +18,7 @@ use crate::builtins::deep_learning::model::{
     topology::{validate_sequential_connections, validate_sequential_topology},
 };
 use crate::BuiltinResult;
+use input::ChannelPolicy;
 pub(super) use input::InputPayloadKind;
 
 pub(super) struct StepDescriptor {
@@ -71,7 +72,8 @@ impl<'a> HostNetworkPlan<'a> {
         let (parameters, state) = resources::views(network, function)?;
         let (shape, precision, format, input_payload_kind) = input::metadata(input, function)?;
         let input_kind = input::kind(first, first_kind, function)?;
-        let input_axes = input::axes(&format, input_kind, shape, input_payload_kind, function)?;
+        let channel_policy = ChannelPolicy::for_layers(&layers.data);
+        let input_axes = input::axes(&format, input_kind, shape, channel_policy, function)?;
         let mut axes = input_axes.clone();
         let mut steps = Vec::with_capacity(layers.data.len());
         for (index, value) in layers.data.iter().enumerate() {
@@ -97,7 +99,7 @@ impl<'a> HostNetworkPlan<'a> {
                 &parameters,
                 &state,
                 precision,
-                input_payload_kind,
+                channel_policy,
                 function,
             )?;
             steps.push(StepDescriptor {

@@ -153,6 +153,133 @@ fn public_formatted_complex_gap_supports_cbt_and_no_channel_sb() {
 }
 
 #[test]
+fn public_real_gap_admits_documented_channel_less_bt_sb_and_sbt_formats() {
+    for (format, shape, input_size, sequence, output_format, output_shape, expected) in [
+        (
+            "BT",
+            vec![2, 3],
+            vec![1.],
+            true,
+            "BU",
+            vec![2, 1],
+            vec![3., 4.],
+        ),
+        (
+            "SB",
+            vec![3, 2],
+            vec![3., 1.],
+            false,
+            "SB",
+            vec![1, 2],
+            vec![2., 5.],
+        ),
+        (
+            "SBT",
+            vec![3, 2, 2],
+            vec![3., 1.],
+            true,
+            "SBT",
+            vec![1, 2, 2],
+            vec![2., 5., 8., 11.],
+        ),
+    ] {
+        let input_size =
+            Value::Tensor(Tensor::new(input_size.clone(), vec![1, input_size.len()]).unwrap());
+        let input_layer = if sequence {
+            block_on(sequence_input_layer_builtin(input_size, vec![])).unwrap()
+        } else {
+            block_on(feature_input_layer_builtin(input_size, vec![])).unwrap()
+        };
+        let network = pooling_network(input_layer);
+        let count = shape.iter().product();
+        let input = object(
+            "dlarray",
+            vec![
+                (
+                    "Data",
+                    Value::Tensor(
+                        Tensor::new((1..=count).map(|x| x as f64).collect(), shape).unwrap(),
+                    ),
+                ),
+                ("Format", Value::String(format.into())),
+                ("Labels", Value::String(format.into())),
+            ],
+        );
+        let Value::Object(output) = block_on(forward_builtin(network, input, vec![])).unwrap()
+        else {
+            panic!("formatted real GAP output expected")
+        };
+        assert_eq!(
+            output.properties.get("Format"),
+            Some(&Value::String(output_format.into()))
+        );
+        let Some(Value::Tensor(result)) = output.properties.get("Data") else {
+            panic!("real GAP tensor expected")
+        };
+        assert_eq!(result.shape, output_shape, "{format}");
+        assert_eq!(result.as_f64_slice().unwrap(), expected, "{format}");
+    }
+}
+
+#[test]
+fn missing_channel_requires_a_global_pool_route_and_singleton_input_size() {
+    let bt = object(
+        "dlarray",
+        vec![
+            (
+                "Data",
+                Value::Tensor(Tensor::new(vec![1.; 6], vec![2, 3]).unwrap()),
+            ),
+            ("Format", Value::String("BT".into())),
+            ("Labels", Value::String("BT".into())),
+        ],
+    );
+    let wrong_size =
+        pooling_network(block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap());
+    assert!(HostNetworkPlan::admit(
+        match &wrong_size {
+            Value::Object(object) => object,
+            _ => unreachable!(),
+        },
+        &bt,
+        "forward"
+    )
+    .is_err());
+
+    let input = block_on(sequence_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+    let relu = block_on(relu_layer_builtin(vec![])).unwrap();
+    let without_pool = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input, relu], 2, 1).unwrap(),
+    )]))
+    .unwrap();
+    let Value::Object(without_pool) = without_pool else {
+        unreachable!()
+    };
+    assert!(HostNetworkPlan::admit(&without_pool, &bt, "forward").is_err());
+
+    let input = block_on(sequence_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+    let pool = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
+    let dense = block_on(fully_connected_layer_builtin(
+        Value::Num(1.0),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::new(vec![1.], vec![1, 1]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::new(vec![0.], vec![1, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let with_channel_dependent_layer = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input, pool, dense], 3, 1).unwrap(),
+    )]))
+    .unwrap();
+    let Value::Object(with_channel_dependent_layer) = with_channel_dependent_layer else {
+        unreachable!()
+    };
+    assert!(HostNetworkPlan::admit(&with_channel_dependent_layer, &bt, "forward").is_err());
+}
+
+#[test]
 fn complex_preparation_shares_cow_payload_and_rejects_real_only_layers_before_effects() {
     let pool_net =
         pooling_network(block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap());

@@ -3,7 +3,7 @@
 use runmat_builtins::DeepLearningAxisLabel;
 use runmat_value::{NumericDType, ObjectInstance};
 
-use super::{input::InputPayloadKind, resources};
+use super::{input::ChannelPolicy, resources};
 use crate::builtins::deep_learning::model::{
     execution::host::{conv, dense, normalization, pooling, recurrent, softmax, Activation},
     parameters::{ParameterRole, ParameterView},
@@ -27,7 +27,7 @@ pub(super) fn admit(
     parameters: &[ParameterView<'_>],
     state: &[StateView<'_>],
     precision: NumericDType,
-    input_payload_kind: InputPayloadKind,
+    channel_policy: ChannelPolicy,
     function: &'static str,
 ) -> BuiltinResult<AxisPlan> {
     match controls {
@@ -46,13 +46,12 @@ pub(super) fn admit(
             if expected.len() != 1 && expected.len() != 2 {
                 return Err(fail(function, "input size must have one or two dimensions"));
             }
-            let channels = if input_payload_kind == InputPayloadKind::Complex
-                && axes.axis_size(DeepLearningAxisLabel::Channel).is_none()
-            {
-                1
-            } else {
-                axes.channel_size()
-                    .map_err(|error| fail(function, format!("invalid channel axis: {error:?}")))?
+            let channels = match axes.axis_size(DeepLearningAxisLabel::Channel) {
+                Some(channels) => channels,
+                None if channel_policy.permits_missing_channel() => 1,
+                None => {
+                    return Err(fail(function, "input requires a channel axis"));
+                }
             };
             if channels != *expected.last().expect("nonempty input size") {
                 return Err(fail(

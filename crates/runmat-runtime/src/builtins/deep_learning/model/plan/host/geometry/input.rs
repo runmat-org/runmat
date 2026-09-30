@@ -22,6 +22,32 @@ pub(in crate::builtins::deep_learning::model::plan::host) enum InputPayloadKind 
     Complex,
 }
 
+/// A missing channel axis represents exactly one channel only on a route
+/// containing global pooling. Other layer routes retain the input-layer C
+/// requirement, independent of whether the data is real or complex.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ChannelPolicy {
+    Required,
+    SingletonForGlobalPooling,
+}
+
+impl ChannelPolicy {
+    pub(super) fn for_layers(layers: &[Value]) -> Self {
+        if layers.iter().skip(1).any(|layer| {
+            matches!(layer, Value::Object(object)
+                if K::from_identity(&object.class_name) == Some(K::GlobalAveragePooling1D))
+        }) {
+            Self::SingletonForGlobalPooling
+        } else {
+            Self::Required
+        }
+    }
+
+    pub(super) const fn permits_missing_channel(self) -> bool {
+        matches!(self, Self::SingletonForGlobalPooling)
+    }
+}
+
 pub(super) fn metadata<'a>(
     input: &'a Value,
     function: &'static str,
@@ -95,13 +121,10 @@ pub(super) fn axes(
     format: &str,
     kind: DeepLearningInputKind,
     shape: &[usize],
-    payload_kind: InputPayloadKind,
+    channel_policy: ChannelPolicy,
     function: &'static str,
 ) -> BuiltinResult<AxisPlan> {
-    // GAP accepts singleton-channel complex spatial/temporal layouts without
-    // an explicit C. Keep this exception typed and route-local: the general
-    // input-layer axis contract continues to require C.
-    if payload_kind == InputPayloadKind::Complex && !format.is_empty() {
+    if channel_policy.permits_missing_channel() && !format.is_empty() {
         let layout = DeepLearningAxisLayout::parse(format, shape.len())
             .map_err(|error| fail(function, format!("invalid input axes: {error:?}")))?;
         let axes = layout.axes();

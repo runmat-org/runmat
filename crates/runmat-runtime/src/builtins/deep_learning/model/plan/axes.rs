@@ -117,9 +117,9 @@ impl AxisPlan {
         Self::new(self.layout.clone(), &shape)
     }
 
-    /// Temporal pooling removes T when B is present. Without B, the public
-    /// CT form retains a singleton U axis. Spatial pooling keeps S singleton,
-    /// including SCBT, where T is not the reduced axis.
+    /// Temporal pooling removes T for CBT. The public CT and BT forms retain
+    /// a singleton U axis. Spatial pooling keeps S singleton, including SCBT,
+    /// where T is not the reduced axis.
     pub(in crate::builtins::deep_learning) fn after_global_average_pooling_1d(
         &self,
     ) -> Result<Self, AxisGeometryError> {
@@ -133,16 +133,17 @@ impl AxisPlan {
             .index(DeepLearningAxisLabel::Time)
             .ok_or(AxisGeometryError::NoPoolingAxis)?;
         let mut shape = self.shape.clone();
-        let mut labels = self.layout.labels().chars().collect::<Vec<_>>();
-        if self.layout.index(DeepLearningAxisLabel::Batch).is_some() {
+        let mut labels = self.layout.axes().to_vec();
+        if self.layout.index(DeepLearningAxisLabel::Batch).is_some()
+            && self.layout.index(DeepLearningAxisLabel::Channel).is_some()
+        {
             shape.remove(time_axis);
             labels.remove(time_axis);
         } else {
             shape[time_axis] = 1;
-            labels[time_axis] = DeepLearningAxisLabel::Unspecified.label();
+            labels[time_axis] = DeepLearningAxisLabel::Unspecified;
         }
-        let layout =
-            DeepLearningAxisLayout::parse(&labels.into_iter().collect::<String>(), shape.len())?;
+        let layout = DeepLearningAxisLayout::from_axes(&labels)?;
         Self::new(layout, &shape)
     }
 
@@ -156,13 +157,17 @@ impl AxisPlan {
     ) -> Result<Self, AxisGeometryError> {
         let batch = self.axis_size(DeepLearningAxisLabel::Batch);
         let time = self.axis_size(DeepLearningAxisLabel::Time);
+        use DeepLearningAxisLabel::{Batch, Channel, Time, Unspecified};
         let (shape, labels) = match (batch, time, sequence) {
-            (Some(batch), Some(time), true) => (vec![output_channels, batch, time], "CBT"),
-            (Some(batch), _, _) => (vec![output_channels, batch], "CB"),
-            (None, Some(time), true) => (vec![output_channels, time], "CT"),
-            (None, _, _) => (vec![output_channels, 1], "CU"),
+            (Some(batch), Some(time), true) => (
+                vec![output_channels, batch, time],
+                vec![Channel, Batch, Time],
+            ),
+            (Some(batch), _, _) => (vec![output_channels, batch], vec![Channel, Batch]),
+            (None, Some(time), true) => (vec![output_channels, time], vec![Channel, Time]),
+            (None, _, _) => (vec![output_channels, 1], vec![Channel, Unspecified]),
         };
-        Self::new(DeepLearningAxisLayout::parse(labels, shape.len())?, &shape)
+        Self::new(DeepLearningAxisLayout::from_axes(&labels)?, &shape)
     }
 
     pub(in crate::builtins::deep_learning) fn offset(
@@ -332,6 +337,16 @@ mod tests {
         let pooled = ct.after_global_average_pooling_1d().unwrap();
         assert_eq!(pooled.layout().labels(), "CU");
         assert_eq!(pooled.shape(), &[2, 1]);
+
+        let bt = AxisPlan::new(layout("BT"), &[2, 4]).unwrap();
+        let pooled = bt.after_global_average_pooling_1d().unwrap();
+        assert_eq!(pooled.layout().labels(), "BU");
+        assert_eq!(pooled.shape(), &[2, 1]);
+
+        let sbt = AxisPlan::new(layout("SBT"), &[4, 2, 3]).unwrap();
+        let pooled = sbt.after_global_average_pooling_1d().unwrap();
+        assert_eq!(pooled.layout().labels(), "SBT");
+        assert_eq!(pooled.shape(), &[1, 2, 3]);
 
         let scb = AxisPlan::for_input("SCB", DeepLearningInputKind::Spatial1d, &[4, 2, 3]).unwrap();
         let pooled = scb.after_global_average_pooling_1d().unwrap();
