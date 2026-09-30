@@ -91,27 +91,68 @@ fn append(
     }
     // Prepared execution precision can differ from the original learnable.
     // Convert only at this explicit derivative-to-parent boundary.
-    let storage = gradient
-        .into_numeric_storage()
-        .map_err(|error| deep_learning_error("dlgradient", error))?;
-    let storage = match (storage, binding.dtype) {
-        (storage @ NumericStorage::F32(_), NumericDType::F32)
-        | (storage @ NumericStorage::F64(_), NumericDType::F64) => storage,
-        (NumericStorage::F32(values), NumericDType::F64) => {
-            NumericStorage::F64(values.into_iter().map(f64::from).collect())
-        }
-        (NumericStorage::F64(values), NumericDType::F32) => {
-            NumericStorage::F32(values.into_iter().map(|value| value as f32).collect())
-        }
-        _ => {
-            return Err(deep_learning_error(
-                "dlgradient",
-                "dlgradient: network adjoints require floating tape parents",
-            ))
-        }
-    };
-    let value = Tensor::from_numeric_storage(storage, shape.clone())
+    let gradient = model::precision::project_owned(gradient, binding.dtype, "dlgradient")?;
+    let value = gradient
+        .reshape(shape.clone())
         .map_err(|error| deep_learning_error("dlgradient", error))?;
     result.push((binding.node, value));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_precision_parent_reshape_preserves_the_native_allocation() {
+        let gradient = Tensor::from_f32(vec![1.25, -2.5], vec![2, 1]).unwrap();
+        let parent = ParentBinding {
+            node: 7,
+            shape: vec![1, 2],
+            dtype: NumericDType::F32,
+        };
+        let mut result = Vec::new();
+        append(&mut result, Some(&parent), gradient.clone()).unwrap();
+        assert_eq!(result[0].0, 7);
+        assert_eq!(result[0].1.shape, [1, 2]);
+        assert_eq!(result[0].1.as_f32_slice().unwrap(), &[1.25, -2.5]);
+        assert!(gradient
+            .host_buffer()
+            .shares_allocation_with(result[0].1.host_buffer()));
+    }
+
+    #[test]
+    fn prepared_single_adjoint_restores_original_double_parent_class() {
+        let parent = ParentBinding {
+            node: 0,
+            shape: vec![2, 1],
+            dtype: NumericDType::F64,
+        };
+        let mut result = Vec::new();
+        append(
+            &mut result,
+            Some(&parent),
+            Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result[0].1.as_f64_slice().unwrap(), &[1.25, -2.5]);
+        assert_eq!(result[0].1.shape, [2, 1]);
+    }
+
+    #[test]
+    fn invalid_parent_size_does_not_publish_an_adjoint() {
+        let parent = ParentBinding {
+            node: 0,
+            shape: vec![3, 1],
+            dtype: NumericDType::F64,
+        };
+        let mut result = Vec::new();
+        assert!(append(
+            &mut result,
+            Some(&parent),
+            Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()
+        )
+        .is_err());
+        assert!(result.is_empty());
+    }
 }
