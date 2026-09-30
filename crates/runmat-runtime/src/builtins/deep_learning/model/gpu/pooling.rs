@@ -102,6 +102,7 @@ pub(super) async fn forward(
     let mut current = validate(
         reduced,
         input,
+        input,
         provider,
         &keep_shape,
         precision,
@@ -115,6 +116,7 @@ pub(super) async fn forward(
         current = validate(
             reshaped,
             &current,
+            input,
             provider,
             source_axes.shape(),
             precision,
@@ -141,6 +143,7 @@ pub(super) async fn forward(
         current = validate(
             reordered,
             &current,
+            input,
             provider,
             target_axes.shape(),
             precision,
@@ -179,16 +182,20 @@ fn presentation_alias_policy(
 
 fn validate(
     output: GpuTensorHandle,
-    input: &GpuTensorHandle,
+    operand: &GpuTensorHandle,
+    original_input: &GpuTensorHandle,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     shape: &[usize],
     precision: Option<ProviderPrecision>,
     alias: GpuOutputAliasPolicy,
     function: &'static str,
 ) -> BuiltinResult<GpuTensorHandle> {
+    // Pooling has already required a fresh allocation. Later metadata views
+    // may share that reduced allocation, but no later provider result may
+    // substitute a view of the caller's original borrowed input.
     if unary_gpu_output_matches_shape(
         &output,
-        input,
+        operand,
         provider,
         shape,
         UnaryGpuOutputContract {
@@ -198,7 +205,8 @@ fn validate(
             logical: false,
             alias,
         },
-    ) {
+    ) && !output.shares_allocation_with(original_input)
+    {
         Ok(output)
     } else {
         Err(reject_gpu_output(
@@ -214,99 +222,4 @@ fn validate(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use runmat_accelerate_api::HostTensorView;
-
-    #[test]
-    fn reshaped_alias_cannot_masquerade_as_nontrivial_gpu_permutation() {
-        crate::builtins::common::test_support::with_test_provider(|provider| {
-            let input = provider
-                .upload(&HostTensorView {
-                    data: &[1., 2., 3., 4., 5., 6.],
-                    shape: &[2, 3],
-                })
-                .unwrap();
-            let source_axes = AxisPlan::new(
-                runmat_builtins::DeepLearningAxisLayout::parse("CB", 2).unwrap(),
-                input.shape(),
-            )
-            .unwrap();
-            let planned = DeepLearningPool1DRoute {
-                reduction: DeepLearningPool1DRequest { axis_zero_based: 0 },
-                result_axis: DeepLearningPool1DResultAxis::KeepSingleton,
-                source_shape: vec![2, 3],
-                target_shape: vec![3, 2],
-                target_to_source: vec![1, 0],
-            };
-            let alias = presentation_alias_policy(&source_axes, &planned);
-            assert_eq!(alias, GpuOutputAliasPolicy::RequireDistinctAllocation);
-            let forged = input
-                .with_view(input.view().clone().with_shape(vec![3, 2]))
-                .unwrap();
-            assert!(validate(
-                forged,
-                &input,
-                provider,
-                &[3, 2],
-                runmat_accelerate_api::handle_precision(&input),
-                alias,
-                "forward",
-            )
-            .is_err());
-        });
-    }
-
-    #[test]
-    fn singleton_axis_permutations_accept_the_same_column_major_allocation() {
-        crate::builtins::common::test_support::with_test_provider(|provider| {
-            for (format, source_shape, order, target_shape) in [
-                ("CB", vec![1, 2], vec![1, 0], vec![2, 1]),
-                ("CBT", vec![2, 1, 3], vec![1, 0, 2], vec![1, 2, 3]),
-            ] {
-                let values = (1..=source_shape.iter().product::<usize>())
-                    .map(|value| value as f64)
-                    .collect::<Vec<_>>();
-                let input = provider
-                    .upload(&HostTensorView {
-                        data: &values,
-                        shape: &source_shape,
-                    })
-                    .unwrap();
-                let source_axes = AxisPlan::new(
-                    runmat_builtins::DeepLearningAxisLayout::parse(format, source_shape.len())
-                        .unwrap(),
-                    &source_shape,
-                )
-                .unwrap();
-                let planned = DeepLearningPool1DRoute {
-                    reduction: DeepLearningPool1DRequest { axis_zero_based: 0 },
-                    result_axis: DeepLearningPool1DResultAxis::KeepSingleton,
-                    source_shape,
-                    target_shape: target_shape.clone(),
-                    target_to_source: order,
-                };
-                let alias = presentation_alias_policy(&source_axes, &planned);
-                assert_eq!(alias, GpuOutputAliasPolicy::AllowInput);
-                let view = input
-                    .with_view(input.view().clone().with_shape(target_shape.clone()))
-                    .unwrap();
-                let accepted = validate(
-                    view,
-                    &input,
-                    provider,
-                    &target_shape,
-                    runmat_accelerate_api::handle_precision(&input),
-                    alias,
-                    "forward",
-                )
-                .unwrap();
-                assert!(accepted.shares_allocation_with(&input));
-                let gathered =
-                    crate::builtins::common::test_support::gather(Value::GpuTensor(accepted))
-                        .unwrap();
-                assert_eq!(gathered.materialize_f64(), values);
-            }
-        });
-    }
-}
+mod tests;
