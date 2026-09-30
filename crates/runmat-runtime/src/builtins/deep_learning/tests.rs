@@ -1072,7 +1072,8 @@ fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
     assert!(
-        err.message.contains("parameters and state must be initialized"),
+        err.message
+            .contains("parameters and state must be initialized"),
         "{err}"
     );
 }

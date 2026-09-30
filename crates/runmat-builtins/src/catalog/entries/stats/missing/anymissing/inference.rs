@@ -1,7 +1,7 @@
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, InferenceDiagnostic,
-    ValueFact, ValueKindFact,
+    infer_call, CallContract, CallInference, CallRequest, InferenceDiagnostic, ValueFact,
+    ValueKindFact,
 };
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {

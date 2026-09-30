@@ -1,9 +1,9 @@
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderCrossentropyMode,
     ProviderCrossentropyRequest,
 };
-#[cfg(test)]
-use runmat_accelerate_api::HostTensorView;
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
