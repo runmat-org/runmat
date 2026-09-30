@@ -1,6 +1,30 @@
 use crate::DeepLearningLayerKind;
 use runmat_types::{ObjectFact, ValueFact, ValueKindFact};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ComplexLayerSupport {
+    Supported,
+    Unsupported,
+    Unknown,
+}
+
+pub(super) fn complex_layer_support(
+    layers: Option<&[(DeepLearningLayerKind, &ObjectFact)]>,
+) -> ComplexLayerSupport {
+    let Some(layers) = layers.filter(|layers| !layers.is_empty()) else {
+        return ComplexLayerSupport::Unknown;
+    };
+    if layers.iter().all(|(kind, _)| {
+        kind.is_input()
+            || *kind == DeepLearningLayerKind::GlobalAveragePooling1D
+            || kind.is_output()
+    }) {
+        ComplexLayerSupport::Supported
+    } else {
+        ComplexLayerSupport::Unsupported
+    }
+}
+
 /// Only a complete, ordered layer collection can support dependent geometry.
 /// An unknown class is not silently treated as a channel-preserving layer.
 pub(super) fn known_layers(

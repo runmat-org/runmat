@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 mod network;
 mod shape;
+use network::ComplexLayerSupport;
 
 fn network_possible(value: &ValueFact) -> bool {
     match &value.kind {
@@ -28,24 +29,38 @@ fn network_possible(value: &ValueFact) -> bool {
     }
 }
 
-fn numeric_result(input: &ValueFact, output_shape: ShapeFact) -> Option<ValueFact> {
-    let class = match &input.kind {
-        ValueKindFact::Numeric(number) if number.domain == NumericDomain::Real => {
+fn numeric_result(
+    input: &ValueFact,
+    output_shape: ShapeFact,
+    complex_layers: ComplexLayerSupport,
+) -> Option<ValueFact> {
+    let (class, domain) = match &input.kind {
+        ValueKindFact::Numeric(number) if number.domain == NumericDomain::Real => (
             if number.class == NumericClass::Single {
                 NumericClass::Single
             } else {
                 NumericClass::Double
+            },
+            NumericDomain::Real,
+        ),
+        ValueKindFact::Numeric(number)
+            if number.domain == NumericDomain::Complex
+                && matches!(number.class, NumericClass::Single | NumericClass::Double) =>
+        {
+            match complex_layers {
+                ComplexLayerSupport::Supported => (number.class, NumericDomain::Complex),
+                ComplexLayerSupport::Unknown => {
+                    return Some(ValueFact::unknown(DynamicReason::RuntimeValue))
+                }
+                ComplexLayerSupport::Unsupported => return None,
             }
         }
-        ValueKindFact::Logical => NumericClass::Double,
+        ValueKindFact::Logical => (NumericClass::Double, NumericDomain::Real),
         ValueKindFact::Unknown => return Some(ValueFact::unknown(DynamicReason::RuntimeValue)),
         _ => return None,
     };
     let mut result = ValueFact::unknown(DynamicReason::RuntimeValue);
-    result.kind = ValueKindFact::Numeric(NumericFact {
-        class,
-        domain: NumericDomain::Real,
-    });
+    result.kind = ValueKindFact::Numeric(NumericFact { class, domain });
     result.shape = output_shape;
     result.storage = StorageFact::Dense;
     result.residency = if input.residency == ResidencyFact::Host {
@@ -151,6 +166,23 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     let layers = network::known_layers(request.arguments.first());
+    let complex_layers = network::complex_layer_support(layers.as_deref());
+    let unsupported_complex_layers = data.as_ref().is_some_and(|fact| {
+        matches!(
+            &fact.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single | NumericClass::Double,
+                domain: NumericDomain::Complex,
+            })
+        ) && complex_layers == ComplexLayerSupport::Unsupported
+    });
+    if unsupported_complex_layers && !unsupported_resident_dlarray {
+        diagnostics.push(argument_error(
+            "RM-DL-FORWARD-COMPLEX-LAYER",
+            "known network layer does not support complex input",
+            1,
+        ));
+    }
     if !dlarray
         && data
             .as_ref()
@@ -167,16 +199,20 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     });
     let output = match data.as_ref().and_then(|data| {
         (!unsupported_storage && !unsupported_resident_dlarray)
-            .then(|| numeric_result(data, shape))
+            .then(|| numeric_result(data, shape, complex_layers))
             .flatten()
     }) {
         Some(numeric) if dlarray => dlarray_result(numeric),
         Some(numeric) => numeric,
         None => {
-            if input.is_some() && !unsupported_storage && !unsupported_resident_dlarray {
+            if input.is_some()
+                && !unsupported_storage
+                && !unsupported_resident_dlarray
+                && !unsupported_complex_layers
+            {
                 diagnostics.push(argument_error(
                     "RM-DL-FORWARD-DATA",
-                    "input must be a real numeric/logical array or a dlarray containing one",
+                    "input must be a supported real or complex numeric/logical array or a dlarray containing one",
                     1,
                 ));
             }
