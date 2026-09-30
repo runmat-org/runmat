@@ -24,6 +24,7 @@ mod host;
 mod initialization;
 pub(in crate::builtins::deep_learning) mod parameters;
 pub(in crate::builtins::deep_learning) mod plan;
+pub(in crate::builtins::deep_learning) mod precision;
 mod properties;
 pub(in crate::builtins::deep_learning) mod state;
 mod table_rows;
@@ -244,31 +245,35 @@ pub(super) async fn forward_builtin(
             .map(|value| layer_slice(value, "forward"))
             .transpose()?
             .unwrap_or(&[]);
-        let gpu_admitted = plan.input_axes().layout().labels() == "BC"
-            && gpu::validate_gpu_forward_layers(layers, handle, "forward").is_ok();
-        if gpu_admitted {
+        let gpu_layout = gpu::GpuForwardLayout::from_axes(plan.input_axes()).filter(|layout| {
+            gpu::validate_gpu_forward_layers(layers, handle, *layout, "forward").is_ok()
+        });
+        if let Some(layout) = gpu_layout {
             let format = dlarray_format(&input);
-            let output = evaluate_network_gpu(network_object, handle, "forward").await?;
-            let wrapped = object(
-                "dlarray",
-                vec![
-                    (
-                        "Data",
-                        crate::builtins::common::gpu_helpers::resident_gpu_value(output)?,
-                    ),
-                    ("Format", Value::String(format.clone())),
-                    ("Labels", Value::String(format)),
-                ],
-            );
-            let prediction = autodiff::annotate_dlarray_value(wrapped)?;
-            return if crate::output_count::current_output_count() == Some(2) {
-                Ok(Value::OutputList(vec![
-                    prediction,
-                    state::publish_updates(network_object, vec![], "forward")?,
-                ]))
-            } else {
-                Ok(prediction)
-            };
+            if let Some(output) =
+                evaluate_network_gpu(network_object, handle, layout, "forward").await?
+            {
+                let wrapped = object(
+                    "dlarray",
+                    vec![
+                        (
+                            "Data",
+                            crate::builtins::common::gpu_helpers::resident_gpu_value(output)?,
+                        ),
+                        ("Format", Value::String(format.clone())),
+                        ("Labels", Value::String(format)),
+                    ],
+                );
+                let prediction = autodiff::annotate_dlarray_value(wrapped)?;
+                return if crate::output_count::current_output_count() == Some(2) {
+                    Ok(Value::OutputList(vec![
+                        prediction,
+                        state::publish_updates(network_object, vec![], "forward")?,
+                    ]))
+                } else {
+                    Ok(prediction)
+                };
+            }
         }
         if runmat_accelerate_api::handle_is_explicit(handle) {
             return Err(unsupported_error("forward", "forward: this network has no resident execution route for an explicit gpuArray input"));

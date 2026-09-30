@@ -1,7 +1,36 @@
 //! Provider-resident forward execution and result ownership validation.
 use super::*;
+use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
+use runmat_builtins::DeepLearningAxisLabel;
 
 mod parameters;
+
+#[cfg(test)]
+mod tests;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GpuForwardLayout {
+    BatchChannels,
+    ChannelsBatch,
+}
+
+impl GpuForwardLayout {
+    pub(super) fn from_axes(axes: &AxisPlan) -> Option<Self> {
+        use DeepLearningAxisLabel::{Batch, Channel};
+        match axes.layout().axes() {
+            [Batch, Channel] => Some(Self::BatchChannels),
+            [Channel, Batch] => Some(Self::ChannelsBatch),
+            _ => None,
+        }
+    }
+
+    fn channels(self, shape: &[usize]) -> usize {
+        match self {
+            Self::BatchChannels => shape[1],
+            Self::ChannelsBatch => shape[0],
+        }
+    }
+}
 
 /// Execute the subset of sequential feed-forward networks for which every
 /// operation is available through the acceleration provider. The complete
@@ -10,8 +39,9 @@ mod parameters;
 pub(super) async fn evaluate_network_gpu(
     object: &ObjectInstance,
     input: &GpuTensorHandle,
+    layout: GpuForwardLayout,
     function: &'static str,
-) -> BuiltinResult<GpuTensorHandle> {
+) -> BuiltinResult<Option<GpuTensorHandle>> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| {
             unsupported_error(
@@ -25,9 +55,30 @@ pub(super) async fn evaluate_network_gpu(
         .map(|value| layer_slice(value, function))
         .transpose()?
         .unwrap_or(&[]);
-    validate_gpu_forward_layers(layers, input, function)?;
+    validate_gpu_forward_layers(layers, input, layout, function)?;
 
-    let mut current = input.clone();
+    // Provider numerical kernels use [B,C]. CB needs an actual resident
+    // transpose; labels alone cannot change its physical interpretation.
+    let mut current = if layout == GpuForwardLayout::ChannelsBatch {
+        match provider.transpose(input) {
+            Ok(output) => validate_layout_transpose(output, input, provider, function)?,
+            Err(error)
+                if runmat_accelerate_api::is_unsupported_provider_operation(&error)
+                    && !runmat_accelerate_api::handle_is_explicit(input) =>
+            {
+                return Ok(None)
+            }
+            Err(error) => {
+                return Err(provider_failure(
+                    function,
+                    "input layout transpose",
+                    error.into(),
+                ))
+            }
+        }
+    } else {
+        input.clone()
+    };
     for layer in layers {
         let Value::Object(layer) = layer else {
             unreachable!("validate_gpu_forward_layers accepts layer objects only");
@@ -77,7 +128,61 @@ pub(super) async fn evaluate_network_gpu(
         &mut current,
         std::iter::once(input).chain(resident_parameters),
     )?;
-    Ok(current)
+    if layout == GpuForwardLayout::ChannelsBatch {
+        let restored = provider
+            .transpose(&current)
+            .map_err(|error| provider_failure(function, "output layout transpose", error.into()))?;
+        let mut restored = validate_layout_transpose(restored, &current, provider, function)?;
+        crate::builtins::common::gpu_helpers::propagate_output_provenance(
+            &mut restored,
+            [input, &current],
+        )?;
+        Ok(Some(restored))
+    } else {
+        Ok(Some(current))
+    }
+}
+
+fn validate_layout_transpose(
+    output: GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    function: &'static str,
+) -> BuiltinResult<GpuTensorHandle> {
+    use crate::builtins::common::gpu_helpers::{
+        unary_gpu_output_matches_shape, GpuOutputAliasPolicy, UnaryGpuOutputContract,
+    };
+    let shape = [input.shape()[1], input.shape()[0]];
+    let alias = if input.shape().iter().any(|extent| *extent > 1) {
+        GpuOutputAliasPolicy::RequireDistinct
+    } else {
+        GpuOutputAliasPolicy::AllowInput
+    };
+    if unary_gpu_output_matches_shape(
+        &output,
+        input,
+        provider,
+        &shape,
+        UnaryGpuOutputContract {
+            storage: GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: None,
+            logical: false,
+            alias,
+        },
+    ) {
+        Ok(output)
+    } else {
+        Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+            output,
+            crate::runtime_error::build_runtime_error(format!(
+                "{function}: provider returned an invalid layout transpose descriptor"
+            ))
+            .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build(),
+        ))
+    }
 }
 
 fn validate_unary_forward_result(
@@ -116,6 +221,7 @@ fn validate_unary_forward_result(
 pub(super) fn validate_gpu_forward_layers(
     layers: &[Value],
     input: &GpuTensorHandle,
+    layout: GpuForwardLayout,
     function: &'static str,
 ) -> BuiltinResult<()> {
     if runmat_accelerate_api::handle_storage(input) != runmat_accelerate_api::GpuTensorStorage::Real
@@ -141,7 +247,7 @@ pub(super) fn validate_gpu_forward_layers(
             format!("{function}: provider-resident forward requires single or double dlarray Data"),
         ));
     }
-    let mut features = input.shape()[1];
+    let mut features = layout.channels(input.shape());
     let mut saw_input = false;
     let mut saw_transform = false;
     for layer in layers {
@@ -183,6 +289,15 @@ pub(super) fn validate_gpu_forward_layers(
                             return Err(unsupported_error(
                                 function,
                                 format!("{function}: {name} belongs to a different provider"),
+                            ));
+                        }
+                        if runmat_accelerate_api::handle_precision(handle)
+                            != runmat_accelerate_api::handle_precision(input)
+                            && runmat_accelerate_api::handle_is_explicit(handle)
+                        {
+                            return Err(unsupported_error(
+                                function,
+                                format!("{function}: explicit resident {name} precision differs from input"),
                             ));
                         }
                     }

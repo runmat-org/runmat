@@ -1,4 +1,5 @@
 //! Provider layouts for consumed fully connected parameters.
+use super::super::precision::project_owned;
 use super::*;
 use crate::builtins::common::gpu_helpers::{
     reject_gpu_output, unary_gpu_output_matches_shape, upload_tensor_protecting_typed,
@@ -70,12 +71,12 @@ pub(super) async fn prepare_bias(
         );
     }
     let bias = prepare_host_parameter(layer, "Bias", function).await?;
-    let row = floating_tensor_from_f64(
-        tensor::tensor_values_f64(&bias),
+    let row = Tensor::from_numeric_storage(
+        bias.into_numeric_storage()
+            .map_err(|error| deep_learning_error(function, error))?,
         shape.to_vec(),
-        input_dtype(input),
-        function,
-    )?;
+    )
+    .map_err(|error| deep_learning_error(function, error))?;
     upload_parameter(provider, row, input, &[input, weights], function)
 }
 
@@ -96,6 +97,13 @@ async fn prepare_host_parameter(
     function: &'static str,
 ) -> BuiltinResult<Tensor> {
     let value = tensor_property_value(layer, name, function)?;
+    if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
+    {
+        return Err(unsupported_error(
+            function,
+            format!("{function}: explicit resident {name} cannot be gathered to prepare a network parameter"),
+        ));
+    }
     let owned = crate::gather_if_needed_async(value).await?;
     crate::builtins::common::tensor::value_into_tensor_for(function, owned)
         .map_err(|error| deep_learning_error(function, format!("{function}: {error}")))
@@ -117,12 +125,7 @@ fn upload_parameter(
     protected: &[&GpuTensorHandle],
     function: &'static str,
 ) -> BuiltinResult<GpuTensorHandle> {
-    let converted = floating_tensor_from_f64(
-        tensor::tensor_values_f64(&tensor),
-        tensor.shape,
-        input_dtype(input),
-        function,
-    )?;
+    let converted = project_owned(tensor, input_dtype(input), function)?;
     upload_tensor_protecting_typed(provider, &converted, protected).map_err(|error| {
         provider_failure(
             function,

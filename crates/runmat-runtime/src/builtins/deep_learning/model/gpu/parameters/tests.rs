@@ -2,6 +2,35 @@ use super::*;
 use futures::executor::block_on;
 
 #[test]
+fn explicit_resident_parameter_never_falls_back_through_host_download() {
+    use runmat_accelerate_api::GpuHandleProvenance;
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let handle = upload_tensor_protecting_typed(provider, &tensor, &[])
+            .unwrap()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        let Value::Object(layer) = object_with_identity(
+            FULLY_CONNECTED_LAYER_CLASS,
+            vec![
+                ("Weights", Value::GpuTensor(handle.clone())),
+                ("OutputSize", Value::Num(1.0)),
+            ],
+        ) else {
+            panic!("layer object expected")
+        };
+        provider.reset_telemetry();
+        let error = block_on(prepare_host_parameter(&layer, "Weights", "forward")).unwrap_err();
+        assert!(error.message.contains("explicit resident Weights"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let retained =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(handle)).unwrap();
+        assert_eq!(retained.numeric_dtype(), NumericDType::F32);
+        assert_eq!(retained.materialize_f64(), vec![1.0, 2.0]);
+    });
+}
+
+#[test]
 fn matching_resident_parameters_do_not_cross_the_host_boundary() {
     use runmat_accelerate_api::{handle_precision, GpuHandleProvenance};
     crate::builtins::common::test_support::with_test_provider(|provider| {

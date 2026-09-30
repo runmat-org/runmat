@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use runmat_accelerate_api::handle_is_explicit;
-use runmat_value::{NumericDType, NumericStorage, Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 use super::controls::Controls;
 use super::geometry::HostNetworkPlan;
@@ -11,6 +11,7 @@ use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use crate::builtins::deep_learning::model::{
     execution::host::network::{self, HostExecutionResult, HostStep, HostValue},
     parameters::ParameterRole,
+    precision::project_owned,
     state::StateRole,
 };
 use crate::builtins::deep_learning::{deep_learning_error, DLARRAY_CLASS};
@@ -53,29 +54,6 @@ async fn host_tensor(value: &Value, function: &'static str) -> BuiltinResult<Ten
         .map_err(|error| fail(function, error))
 }
 
-fn project(tensor: Tensor, dtype: NumericDType, function: &'static str) -> BuiltinResult<Tensor> {
-    if tensor.numeric_dtype() == dtype {
-        return Ok(tensor);
-    }
-    let shape = tensor.shape.clone();
-    let storage = match dtype {
-        NumericDType::F32 => NumericStorage::F32(
-            tensor
-                .into_numeric_storage()
-                .map_err(|error| fail(function, error))?
-                .materialize_f32(),
-        ),
-        NumericDType::F64 => NumericStorage::F64(tensor.materialize_f64()),
-        _ => {
-            return Err(fail(
-                function,
-                "host execution requires single or double precision",
-            ))
-        }
-    };
-    Tensor::from_numeric_storage(storage, shape).map_err(|error| fail(function, error))
-}
-
 impl<'a> HostNetworkPlan<'a> {
     pub(in crate::builtins::deep_learning) async fn prepare(
         self,
@@ -85,7 +63,7 @@ impl<'a> HostNetworkPlan<'a> {
             let value = row
                 .value
                 .ok_or_else(|| fail(self.function, "network has an uninitialized parameter"))?;
-            let prepared = project(
+            let prepared = project_owned(
                 host_tensor(value, self.function).await?,
                 self.precision,
                 self.function,
@@ -94,7 +72,7 @@ impl<'a> HostNetworkPlan<'a> {
         }
         let mut state = HashMap::with_capacity(self.state.len());
         for row in &self.state {
-            let prepared = project(
+            let prepared = project_owned(
                 host_tensor(row.value, self.function).await?,
                 self.precision,
                 self.function,
@@ -118,7 +96,7 @@ impl PreparedHostNetwork<'_> {
         &self,
         input: &Value,
     ) -> BuiltinResult<HostValue> {
-        let tensor = project(
+        let tensor = project_owned(
             host_tensor(input, self.plan.function).await?,
             self.plan.precision,
             self.plan.function,
