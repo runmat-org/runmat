@@ -15,7 +15,9 @@ pub use acoustic::{
 mod accuracy_source;
 mod buckling_result;
 mod buckling_workload;
+mod electrical_static;
 mod error;
+pub use electrical_static::{ElectricalStaticSolverResult, ElectricalStaticWorkload};
 mod field;
 mod field_plan;
 mod field_topology;

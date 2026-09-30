@@ -120,6 +120,9 @@ fn thermal_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRea
 }
 
 fn electromagnetic_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
+    if procedure == AnalysisProcedure::Static {
+        return super::electrical::registered_realizations();
+    }
     if procedure != AnalysisProcedure::HarmonicResponse {
         return Vec::new();
     }

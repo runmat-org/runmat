@@ -163,7 +163,9 @@ const fn method_is_compatible(
             matches!(method, SolverMethod::IncrementalNewtonRaphson)
         }
         TemporalImplementation::ThermalSteadyLinearSolve
-        | TemporalImplementation::ThermalBackwardEuler => {
+        | TemporalImplementation::ThermalBackwardEuler
+        | TemporalImplementation::ElectrostaticPotentialLinearSolve
+        | TemporalImplementation::SteadyConductionPotentialLinearSolve => {
             matches!(
                 method,
                 SolverMethod::AssembledPcg | SolverMethod::MatrixFreePcg

@@ -18,6 +18,11 @@ pub fn admit_nonstructural(
     boundary_transfer: BoundaryTransferImplementation,
     requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
+    if family == PhysicsFamily::Electromagnetic && procedure == AnalysisProcedure::Static {
+        return Err(FeaRunError::InvalidModel(
+            "canonical static electrical admission requires an explicit equation; use admit_canonical_electrical_static".into(),
+        ));
+    }
     let topology = if let Some(mesh) = solver_mesh {
         match mesh.resolved_request.element_order {
             ElementOrder::Tet4 => TopologyImplementation::CanonicalSolverMeshTet4,

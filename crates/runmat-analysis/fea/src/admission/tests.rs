@@ -26,6 +26,7 @@ fn exposed_identities() -> Vec<(PhysicsFamily, AnalysisProcedure)> {
         (PhysicsFamily::Structural, AnalysisProcedure::Nonlinear),
         (PhysicsFamily::Thermal, AnalysisProcedure::Static),
         (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse),
+        (PhysicsFamily::Electromagnetic, AnalysisProcedure::Static),
         (
             PhysicsFamily::Electromagnetic,
             AnalysisProcedure::HarmonicResponse,
@@ -80,7 +81,9 @@ fn procedure_labels_cannot_wrap_incompatible_thermal_or_harmonic_em_math() {
             .remove(0)
             .realization()
             .clone(),
-            FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure,
+            FormulationAdmissionRejectionReason::IncompatibleAxis(
+                runmat_analysis_core::FormulationAxis::SpatialOperator,
+            ),
         ),
     ];
 

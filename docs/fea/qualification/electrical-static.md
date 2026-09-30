@@ -2,8 +2,10 @@
 
 The CPU library entry `physics::electrical::solve_canonical_static` solves distinct
 electrostatic and steady DC conduction equations on canonical Tet4/Tet10 topology.
-This is not the legacy reduced EM edge graph, native authored dispatch, portable
-workload/restart, production resource admission or a release-qualified envelope.
+This is not the legacy reduced EM edge graph, native authored dispatch, restart,
+production resource admission or a release-qualified envelope. A numerical-only portable
+workload/result contract now binds that kernel to its explicit equation, producer,
+source and canonical topology; it does not open scheduler or authored execution.
 
 ## Form and independent references
 
@@ -43,6 +45,13 @@ The physical operator remains unchanged for recovery. Shared scalar connected-co
 nullspace and prepared numerical coercivity evidence are mandatory; resource-limit
 rejection is not convergence or a physics result.
 
+The retained numerical response distinguishes absolute L2 residual from relative residual.
+The latter uses the actual canonical Dirichlet-lifted RHS, not voltage magnitude or the
+unlifted load vector; zero RHS/zero residual is explicitly zero. Shared system preparation
+and electrical residual normalization consume the same RHS owner, without a second matrix
+preparation or coercivity proof. Prescribed-row cold checks allow gauge-add roundoff, not
+an error allowance scaled by the solver tolerance and arbitrary absolute gauge.
+
 Initially supported inputs are prescribed real potential/reference constraints;
 other exterior faces have natural zero flux. Static/harmonic intent is a closed
 typed domain contract with no dummy frequency. Unsupported source actions, explicit
@@ -63,7 +72,39 @@ focused rerun pending. Runtime compilation and strict lint remain pending.
 This is not a full numerical gate pass.
 
 Typed voltage/current/charge/current-density source realization, charged Poisson,
-broader electrical constraints, portable workload/result and cold field identities,
+broader electrical constraints, governed field/state publication,
 authored native dispatch, scheduler/resources/accuracy, process/restart and release
 qualification remain real Stage7 work. Magnetostatics, Maxwell and electrothermal
 coupling are not supplied by this initial scalar envelope.
+
+## Portable numerical contract boundary
+
+`ElectricalStaticWorkload` uses the same input validator as the numerical kernel.
+It admits only fresh singleton static/direct numerical work, with no imported state,
+observation or activation request silently ignored. Complete static-electrical output
+declarations are retained in workload identity, as required by model validation; this
+numerical entry returns physical fields but does not execute semantic publication.
+
+Exact registry identity distinguishes both equations and both element orders. Its scalar
+Galerkin gradient, epsilon/sigma law, static temporal solve and D/energy versus J/Joule
+recovery cannot borrow the harmonic reduced edge graph. Production admission remains closed.
+
+`ElectricalStaticSolverResult` retains SI arrays behind an immutable, validated contract.
+Cold source-bound import checks workload/producer/mesh/projection/order/formulation identity,
+field cardinality and finiteness, equation-specific inventory, numerical closure bounds,
+terminal ownership and weak nodal flux accounting. It also checks prescribed potentials
+against source data and integrated retained densities against canonical element volumes.
+Those consistency checks do not reconstruct fields, assemble an operator or solve again.
+Bare decoding cannot authenticate the external source; consumers must use source-bound import.
+
+This bounded contract is not a resource-admitted solver, numerical receipt/shared accuracy
+evaluation, persisted semantic state, authored process path or restart qualification.
+The previously failed largest Tet10 refinement remains a failed gate, unchanged.
+
+2026-09-30 bounded verification: electrical matrix runs 14 tests, with 13 passing and
+the unchanged largest Tet10 proof-resource gate failing (pivot2265, updates43863736 above
+limit43840305). Final portable contract tests pass5/5, including all four equation/order
+combinations, exact cold arrays/identities, malformed imports, voltage scales1e-6/1e6 and
+constant1e12 gauge substitution. Shared admission and algebra regressions each pass40/40;
+FEA library/tests strict Clippy and scoped formatting pass. Architecture still reports four
+unrelated runtime module-size debts. No resource, process/restart or production pass is inferred.

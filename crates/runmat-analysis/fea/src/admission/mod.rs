@@ -1,3 +1,4 @@
+mod electrical;
 mod identity;
 mod nonstructural;
 mod realizations;
@@ -12,6 +13,8 @@ use runmat_analysis_core::{
 };
 use serde::{Deserialize, Serialize};
 
+pub use electrical::admit_canonical_electrical_static;
+pub(crate) use electrical::realization as canonical_electrical_realization;
 pub use identity::AnalysisRunIdentity;
 pub use nonstructural::admit_nonstructural;
 pub use realizations::{registered_formulations, RegisteredFormulation};

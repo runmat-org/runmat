@@ -9,14 +9,14 @@ use crate::{
 use runmat_analysis_core::*;
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
-fn mesh(order: ElementOrder, cells: usize) -> SolverMeshArtifact {
+pub(crate) fn mesh(order: ElementOrder, cells: usize) -> SolverMeshArtifact {
     match order {
         ElementOrder::Tet4 => slab_mesh(cells),
         ElementOrder::Tet10 => quadratic_slab_mesh(cells),
     }
 }
 
-fn model(equation: StaticElectricalEquation) -> AnalysisModel {
+pub(crate) fn model(equation: StaticElectricalEquation) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.constraints.clear();
     model.boundaries.clear();
@@ -46,7 +46,7 @@ fn model(equation: StaticElectricalEquation) -> AnalysisModel {
     model
 }
 
-fn prescribe(model: &mut AnalysisModel, id: String, target: RegionTarget, volts: f64) {
+pub(crate) fn prescribe(model: &mut AnalysisModel, id: String, target: RegionTarget, volts: f64) {
     model
         .constraints
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {

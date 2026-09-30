@@ -3,11 +3,12 @@ use crate::algebra::{
     spmv, AssembledRealSystem, CanonicalRealOperators, MatrixProperties,
     NullspaceEliminationEvidence, OperatorRole, RealSparseMatrix,
 };
+use crate::solve::backend::linear_algebra::LinearAlgebraBackend;
 use runmat_analysis_core::StaticElectricalEquation;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ElectricalConstitutiveResponse {
     Electrostatics {
         displacement_c_per_m2: Vec<[f64; 3]>,
@@ -46,7 +47,10 @@ pub struct CanonicalElectricalResponse {
     pub nodal_outward_flux: Vec<f64>,
     pub relative_flux_imbalance: f64,
     pub relative_energy_identity_error: f64,
-    pub linear_residual: f64,
+    /// Absolute L2 residual of the dimensionless Dirichlet-lifted system.
+    pub linear_absolute_residual: f64,
+    /// Absolute residual divided by the same lifted RHS norm used by shared PCG.
+    pub linear_relative_residual: f64,
     pub iterations: u32,
 }
 
@@ -125,6 +129,9 @@ pub(super) fn solve(
     )
     .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
     let backend = crate::solve::backend::cpu_reference::CpuReferenceBackend;
+    let lifted_rhs = system.linear_rhs();
+    let rhs_norm = backend.dot(&lifted_rhs, &lifted_rhs).sqrt();
+    drop(lifted_rhs);
     let solution = crate::solve::linear::solve_operator_system_scoped(
         &system,
         crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
@@ -144,6 +151,20 @@ pub(super) fn solve(
             residual: solution.residual_norm,
             diagnostics: solution.diagnostics,
         });
+    }
+    let relative_residual = if rhs_norm > 0.0 {
+        solution.residual_norm / rhs_norm
+    } else if solution.residual_norm == 0.0 {
+        0.0
+    } else {
+        return Err(ElectricalStaticError::Operator(
+            "nonzero residual for zero electrical RHS".into(),
+        ));
+    };
+    if !relative_residual.is_finite() || relative_residual > residual_target {
+        return Err(ElectricalStaticError::Operator(
+            "electrical relative residual target not satisfied".into(),
+        ));
     }
     let increment = solution.solution;
     let potential = increment
@@ -254,7 +275,8 @@ pub(super) fn solve(
         nodal_outward_flux,
         relative_flux_imbalance,
         relative_energy_identity_error,
-        linear_residual: solution.residual_norm,
+        linear_absolute_residual: solution.residual_norm,
+        linear_relative_residual: relative_residual,
         iterations: solution.iterations,
     })
 }

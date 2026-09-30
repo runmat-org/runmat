@@ -180,7 +180,9 @@ impl AssembledRealSystem {
             self.nullspace_evidence.clone(),
         )
     }
-    pub fn prepare_linear(&self) -> Result<PreparedRealLinearSystem, RealSystemError> {
+    /// Canonical Dirichlet-lifted RHS used for both preparation and residual scaling.
+    /// Does not allocate a constrained matrix or perform coercivity work.
+    pub fn linear_rhs(&self) -> Vec<f64> {
         let stiffness = self.operators.stiffness();
         let mut rhs = self.load.clone();
         for (row, rhs_value) in rhs.iter_mut().enumerate() {
@@ -194,6 +196,11 @@ impl AssembledRealSystem {
                 }
             }
         }
+        rhs
+    }
+    pub fn prepare_linear(&self) -> Result<PreparedRealLinearSystem, RealSystemError> {
+        let stiffness = self.operators.stiffness();
+        let rhs = self.linear_rhs();
         let matrix = stiffness
             .with_identity_constraints(&self.constrained_dofs)
             .map_err(|_| RealSystemError::ShapeMismatch)?;

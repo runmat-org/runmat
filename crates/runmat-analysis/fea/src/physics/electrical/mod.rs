@@ -7,14 +7,15 @@ mod boundary;
 mod recovery;
 mod response;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use response::{
     CanonicalElectricalResponse, ElectricalConstitutiveResponse, ElectricalTerminalResponse,
 };
 use runmat_analysis_core::{
     AnalysisModel, AnalysisProcedure, ElectromagneticDomain, FormulationRequirement,
-    IndependentDomain, PhysicsFamily, ProcedureSettings, RestartPolicy, SolutionSpace,
+    IndependentDomain, PhysicsFamily, ProcedureSettings, ProcedureStep, RestartPolicy,
+    SolutionSpace, StateCompleteness, StateKind,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 use thiserror::Error;
@@ -54,6 +55,27 @@ pub fn solve_canonical_static(
     requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
+    let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
+    let Some(ElectromagneticDomain::Static { equation }) = &model.electromagnetic else {
+        unreachable!("validated static electrical domain")
+    };
+    let projection = crate::topology::AnalysisProjection::derive(mesh)
+        .map_err(|error| ElectricalStaticError::Topology(error.to_string()))?;
+    let properties = crate::properties::compile_solid_property_map(model, mesh)
+        .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
+    let assembled = assembly::ElectricalAssembly::assemble(projection, &properties, *equation)?;
+    let assembled = assembled.with_constraints(model, mesh, step)?;
+    response::solve(assembled, *equation, residual_target)
+}
+
+/// Checks intent without allocating topology or assembling an operator. This numerical
+/// entry does not implement sequence execution, observations or state publication.
+pub(crate) fn validate_canonical_input<'a>(
+    model: &'a AnalysisModel,
+    step_id: &str,
+    requirement: FormulationRequirement,
+    residual_target: f64,
+) -> Result<&'a ProcedureStep, ElectricalStaticError> {
     if requirement != FormulationRequirement::Experimental {
         return Err(ElectricalStaticError::Unsupported(
             "production qualification".into(),
@@ -66,7 +88,7 @@ pub fn solve_canonical_static(
     }
     runmat_analysis_core::validate_model(model)
         .map_err(|error| ElectricalStaticError::InvalidInput(error.to_string()))?;
-    let Some(ElectromagneticDomain::Static { equation }) = &model.electromagnetic else {
+    let Some(ElectromagneticDomain::Static { .. }) = &model.electromagnetic else {
         return Err(ElectricalStaticError::InvalidInput(
             "explicit static electrical domain required".into(),
         ));
@@ -84,9 +106,19 @@ pub fn solve_canonical_static(
         || step.settings != ProcedureSettings::None
         || step.restart != RestartPolicy::Fresh
         || !step.state_inputs.is_empty()
+        || step.state_outputs.iter().any(|output| {
+            output.kind != StateKind::ElectromagneticStatic
+                || output.completeness != StateCompleteness::Complete
+        })
+        || !step.observations.is_empty()
+        || !step.activations.is_empty()
+        || model.sequence.steps.len() != 1
+        || !model.sequence.dependencies.is_empty()
+        || !model.sequence.transitions.is_empty()
+        || !model.sequence.branches.is_empty()
     {
         return Err(ElectricalStaticError::Unsupported(
-            "non-fresh static/direct electrical step".into(),
+            "non-standalone static/direct electrical step or unsupported lifecycle".into(),
         ));
     }
     if model.structural.is_some()
@@ -110,11 +142,5 @@ pub fn solve_canonical_static(
             "source actions or explicit natural/Robin boundaries".into(),
         ));
     }
-    let projection = crate::topology::AnalysisProjection::derive(mesh)
-        .map_err(|error| ElectricalStaticError::Topology(error.to_string()))?;
-    let properties = crate::properties::compile_solid_property_map(model, mesh)
-        .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
-    let assembled = assembly::ElectricalAssembly::assemble(projection, &properties, *equation)?;
-    let assembled = assembled.with_constraints(model, mesh, step)?;
-    response::solve(assembled, *equation, residual_target)
+    Ok(step)
 }
