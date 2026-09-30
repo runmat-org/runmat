@@ -3913,8 +3913,8 @@ fn static_method_via_classref_without_class_registry_is_unresolved() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn classes_constructor_and_overloaded_indexing() {
-    // Call Ctor constructor; exercise OverIdx subsref/subsasgn
-    let program = "__register_test_classes(); c = Ctor(7); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); t = call_method(o,'subsref','.', 'k');";
+    // Call Ctor constructor; pass the canonical subscript payload to both methods.
+    let program = "__register_test_classes(); c = Ctor(7); o = new_object('OverIdx'); S = struct('type', '.', 'subs', 'k'); o = call_method(o,'subsasgn',S,5); t = call_method(o,'subsref',S);";
     let vars = execute_source(program);
     assert!(vars
         .iter()
@@ -4884,7 +4884,7 @@ fn expansion_on_non_cell_errors() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn object_cell_expansion_via_subsref() {
-    let program = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','{}', {1}, 42); r = max(o{1}, 5);";
+    let program = "__register_test_classes(); o = new_object('OverIdx'); S = struct('type', '{}', 'subs', {{1}}); o = call_method(o,'subsasgn',S,42); r = max(o{1}, 5);";
     let vars = execute_source(program);
     assert!(vars
         .iter()
@@ -5578,7 +5578,7 @@ fn user_function_does_not_infer_varargout_argument_spread() {
 fn operator_overloading_plus_times_lt_eq() {
     let setup = "__register_test_classes();";
     let program = format!(
-        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3;"
+        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn',struct('type', '.', 'subs', 'k'),5); r1 = o + 3;"
     );
     let vars = execute_source(&program);
     assert!(has_num(&vars, 8.0));
@@ -5588,7 +5588,7 @@ fn operator_overloading_plus_times_lt_eq() {
 fn operator_overloading_elementwise_vs_mtimes_and_mixed() {
     let setup = "__register_test_classes();";
     let program = format!(
-        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); a = o .* 2; b = o * 2; c = 2 .* o; d = 2 * o; s = a + b + c + d;"
+        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn',struct('type', '.', 'subs', 'k'),5); a = o .* 2; b = o * 2; c = 2 .* o; d = 2 * o; s = a + b + c + d;"
     );
     let vars = execute_source(&program);
     assert!(has_num(&vars, 40.0));
@@ -5598,7 +5598,7 @@ fn operator_overloading_elementwise_vs_mtimes_and_mixed() {
 fn operator_overloading_relational_lt_eq() {
     let setup = "__register_test_classes();";
     let program = format!(
-        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); t1 = (o < 10); t2 = (10 < o); t3 = (o == 0); t4 = (0 == o); s = t1 + t2 + t3 + t4;"
+        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn',struct('type', '.', 'subs', 'k'),5); t1 = (o < 10); t2 = (10 < o); t3 = (o == 0); t4 = (0 == o); s = t1 + t2 + t3 + t4;"
     );
     let vars = execute_source(&program);
     assert!(has_num(&vars, 1.0));
@@ -5606,7 +5606,7 @@ fn operator_overloading_relational_lt_eq() {
 
 #[test]
 fn operator_overloading_full_grid_basic() {
-    let setup = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5);";
+    let setup = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn',struct('type', '.', 'subs', 'k'),5);";
     let statements = [
         "a1 = (o ~= 10);",
         "a2 = (10 ~= o);",
@@ -5675,7 +5675,7 @@ fn static_method_resolution_under_wildcard_import() {
 #[test]
 fn operator_overloading_numeric_results_and_bitwise_arrays() {
     // Verify explicit numeric outcomes for OverIdx overloads
-    let program = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3; r2 = o .* 2; r3 = o * 4; a = (o < 10); b = (o == 5);";
+    let program = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn',struct('type', '.', 'subs', 'k'),5); r1 = o + 3; r2 = o .* 2; r3 = o * 4; a = (o < 10); b = (o == 5);";
     let vars = execute_source(program);
     assert!(vars
         .iter()
@@ -5707,7 +5707,7 @@ fn operator_overloading_numeric_results_and_bitwise_arrays() {
 
 #[test]
 fn operator_overloading_left_division_variants() {
-    let setup = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5);";
+    let setup = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn',struct('type', '.', 'subs', 'k'),5);";
     let program = format!(
         "{setup} a = (o .\\ 2); b = (2 .\\ o); c = (o ./ 2); d = (2 ./ o); s = a + b + c + d;",
     );
