@@ -1,8 +1,7 @@
+use super::policy::SparseStorageRule;
 use super::{admission::AdmittedCall, class, BinaryArithmeticInferencePolicy};
 use crate::catalog::inference::{argument_error, finish_fixed};
-use crate::{
-    BinaryArithmeticInferenceRule, BuiltinCatalogEntry, BuiltinInferenceRule, MathInferenceRule,
-};
+use crate::BuiltinCatalogEntry;
 use runmat_types::{
     broadcast_shape, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact,
     NumericDomain, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
@@ -59,12 +58,8 @@ pub(super) fn infer(
     crate::catalog::inference::materialize(&mut output);
     if left.storage == StorageFact::Sparse || right.storage == StorageFact::Sparse {
         let preserves_sparse = matches!(
-            entry.contract.inference_rule,
-            BuiltinInferenceRule::Math(MathInferenceRule::BinaryArithmetic(
-                BinaryArithmeticInferenceRule::Add
-                    | BinaryArithmeticInferenceRule::Subtract
-                    | BinaryArithmeticInferenceRule::Multiply
-            ))
+            policy.sparse_storage,
+            SparseStorageRule::PreserveMatchingSparse
         ) && left.storage == StorageFact::Sparse
             && right.storage == StorageFact::Sparse
             && left.shape.element_count().is_some()

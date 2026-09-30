@@ -4,13 +4,17 @@ mod output;
 mod policy;
 
 #[cfg(test)]
+mod storage_tests;
+
+#[cfg(test)]
 pub(super) mod test_support;
 
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest};
 
 pub(in crate::catalog::entries::math::elementwise::binary_arithmetic) use policy::{
-    BinaryArithmeticInferencePolicy, REAL_RESULT, RUNTIME_DEPENDENT_RESULT,
+    BinaryArithmeticInferencePolicy, MATCHING_SPARSE_REAL_RESULT, REAL_RESULT,
+    RUNTIME_DEPENDENT_RESULT,
 };
 
 pub(super) fn infer(
