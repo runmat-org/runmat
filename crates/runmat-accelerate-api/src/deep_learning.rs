@@ -66,6 +66,12 @@ pub enum DeepLearningFeedForwardStage {
         rows: usize,
         columns: usize,
     },
+    /// Materialize a physical 2-D coordinate permutation, rather than return
+    /// a lazy transposed view consumed by a kernel unaware of view strides.
+    Permute2D {
+        rows: usize,
+        columns: usize,
+    },
     Dense {
         batch: usize,
         input_channels: usize,

@@ -322,6 +322,39 @@ fn singleton_axis_transpose_accepts_a_valid_resident_view() {
 }
 
 #[test]
+fn nonsquare_transpose_accepts_only_a_correct_lazy_layout_on_shared_storage() {
+    use runmat_accelerate_api::{GpuTensorLayout, TransposeInfo};
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                shape: &[2, 3],
+            })
+            .unwrap();
+        let lazy = input
+            .with_view(input.view().clone().with_shape(vec![3, 2]).with_layout(
+                GpuTensorLayout::Transpose(TransposeInfo {
+                    base_rows: 2,
+                    base_cols: 3,
+                }),
+            ))
+            .unwrap();
+        let accepted = super::validate_layout_transpose(lazy, &input, provider, "forward").unwrap();
+        assert!(accepted.shares_allocation_with(&input));
+
+        let forged = input
+            .with_view(input.view().clone().with_shape(vec![3, 2]))
+            .unwrap();
+        let error =
+            super::validate_layout_transpose(forged, &input, provider, "forward").unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:gpu:ProviderPayloadMismatch")
+        );
+    });
+}
+
+#[test]
 fn gpu_route_distinguishes_missing_kernel_from_invalid_feature_geometry() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let input = provider

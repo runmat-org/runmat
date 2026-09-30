@@ -9,8 +9,10 @@ mod parameters;
 mod normalization;
 mod admission;
 mod pooling;
+mod mixed;
 
 pub(super) use admission::{admit_gpu_forward, GpuCapabilityReason, GpuForwardAdmission};
+pub(in crate::builtins::deep_learning) use mixed::forward as forward_mixed_network_gpu;
 pub(in crate::builtins::deep_learning) use normalization::forward as normalize_network_gpu;
 
 #[cfg(test)]
@@ -181,8 +183,27 @@ fn validate_layout_transpose(
     let shape = [input.shape()[1], input.shape()[0]];
     // A singleton axis does not move any element during a 2-D transpose, so
     // a provider may legally return a reshaped view of the same allocation.
-    let alias = if input.shape().iter().all(|extent| *extent > 1) {
-        GpuOutputAliasPolicy::RequireDistinct
+    let alias = if input.shares_allocation_with(&output)
+        && input.shape().iter().all(|extent| *extent > 1)
+    {
+        use runmat_accelerate_api::{GpuTensorLayout, TransposeInfo};
+        let expected = match input.view().layout() {
+            GpuTensorLayout::Contiguous => GpuTensorLayout::Transpose(TransposeInfo {
+                base_rows: input.shape()[0],
+                base_cols: input.shape()[1],
+            }),
+            GpuTensorLayout::Transpose(info)
+                if info.base_rows == output.shape()[0] && info.base_cols == output.shape()[1] =>
+            {
+                GpuTensorLayout::Contiguous
+            }
+            _ => GpuTensorLayout::Contiguous,
+        };
+        if output.view().layout() == expected && input.view().layout() != expected {
+            GpuOutputAliasPolicy::AllowInput
+        } else {
+            GpuOutputAliasPolicy::RequireDistinctAllocation
+        }
     } else {
         GpuOutputAliasPolicy::AllowInput
     };

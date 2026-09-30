@@ -444,7 +444,7 @@ fn classify_layers(
     Ok(None)
 }
 
-fn query_stage(
+pub(super) fn query_stage(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     input: &GpuTensorHandle,
     stage: DeepLearningFeedForwardStage,

@@ -44,6 +44,28 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                 format!("{function}: provider-resident network autodiff is not supported"),
             ));
         }
+        if let Some(mixed) =
+            gpu::forward_mixed_network_gpu(request.network, &plan, handle, &output_axes, function)
+                .await?
+        {
+            match mixed {
+                Ok(output) => {
+                    return Ok(NetworkExecutionOutcome {
+                        data: crate::builtins::common::gpu_helpers::resident_gpu_value(output)?,
+                        output_axes,
+                        state_updates: Vec::new(),
+                        trace: None,
+                    });
+                }
+                Err(reason) if runmat_accelerate_api::handle_is_explicit(handle) => {
+                    return Err(unsupported_error(
+                        function,
+                        format!("{function}: {reason} for an explicit gpuArray input"),
+                    ));
+                }
+                Err(_) => {}
+            }
+        }
         if let Some(normalization) = plan
             .standalone_normalization()
             .map_err(|error| deep_learning_error(function, format!("{function}: {error}")))?

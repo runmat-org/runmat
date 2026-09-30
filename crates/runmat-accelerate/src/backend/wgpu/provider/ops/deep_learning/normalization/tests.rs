@@ -59,6 +59,7 @@ fn planned_normalization_admits_future_geometry_without_provider_effects() {
         epsilon: 1e-5,
     };
     provider.reset_telemetry();
+    let before = provider.telemetry_snapshot();
     assert_eq!(
         provider
             .deep_learning_layer_norm_planned_capability_exec(&anchor, None, None, &request)
@@ -69,8 +70,10 @@ fn planned_normalization_admits_future_geometry_without_provider_effects() {
         .deep_learning_layer_norm_capability_exec(&anchor, None, None, &request)
         .is_err());
     let telemetry = provider.telemetry_snapshot();
-    assert_eq!(telemetry.upload_bytes, 0);
-    assert_eq!(telemetry.download_bytes, 0);
+    assert_eq!(
+        telemetry, before,
+        "capability queries must have no provider effects"
+    );
     anchor.release().unwrap();
 }
 

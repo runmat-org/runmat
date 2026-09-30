@@ -4,6 +4,7 @@ mod controls;
 mod geometry;
 mod prepare;
 
+pub(in crate::builtins::deep_learning) use controls::Controls;
 pub(in crate::builtins::deep_learning) use geometry::{admit_training_geometry, HostNetworkPlan};
 
 impl HostNetworkPlan<'_> {

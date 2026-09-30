@@ -3947,9 +3947,9 @@ impl AccelProvider for InProcessProvider {
             return Ok(C::UnsupportedOperation);
         }
         let valid = match stage {
-            S::Transpose2D { rows, columns } | S::SoftmaxRows { rows, columns } => {
-                rows.checked_mul(columns).is_some()
-            }
+            S::Transpose2D { rows, columns }
+            | S::Permute2D { rows, columns }
+            | S::SoftmaxRows { rows, columns } => rows.checked_mul(columns).is_some(),
             S::Dense {
                 batch,
                 input_channels,

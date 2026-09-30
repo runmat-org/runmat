@@ -292,6 +292,7 @@ mod tests {
             target_to_source: vec![0, 1],
         };
         provider.reset_telemetry();
+        let before = provider.telemetry_snapshot();
         assert_eq!(
             provider
                 .deep_learning_global_average_pool_1d_planned_capability_exec(
@@ -306,8 +307,10 @@ mod tests {
             .deep_learning_global_average_pool_1d_capability_exec(&anchor, &route)
             .is_err());
         let telemetry = provider.telemetry_snapshot();
-        assert_eq!(telemetry.upload_bytes, 0);
-        assert_eq!(telemetry.download_bytes, 0);
+        assert_eq!(
+            telemetry, before,
+            "capability queries must have no provider effects"
+        );
         anchor.release().unwrap();
     }
 

@@ -7,7 +7,9 @@ use runmat_accelerate_api::{
 
 fn stage_extents(stage: S) -> ([usize; 3], usize) {
     match stage {
-        S::Transpose2D { rows, columns } => ([rows, columns, 0], 2),
+        S::Transpose2D { rows, columns } | S::Permute2D { rows, columns } => {
+            ([rows, columns, 0], 2)
+        }
         S::Dense {
             batch,
             input_channels,
@@ -53,7 +55,9 @@ impl WgpuProvider {
             return Ok(C::ResourceLimit);
         }
         let (input_count, output_count) = match stage {
-            S::Transpose2D { rows, columns } | S::SoftmaxRows { rows, columns } => {
+            S::Transpose2D { rows, columns }
+            | S::Permute2D { rows, columns }
+            | S::SoftmaxRows { rows, columns } => {
                 let Some(elements) = rows.checked_mul(columns) else {
                     return Ok(C::ResourceLimit);
                 };
@@ -115,8 +119,13 @@ mod tests {
             })
             .unwrap();
         provider.reset_telemetry();
+        let before = provider.telemetry_snapshot();
         for stage in [
             S::Transpose2D {
+                rows: 2,
+                columns: 1,
+            },
+            S::Permute2D {
                 rows: 2,
                 columns: 1,
             },
@@ -153,8 +162,10 @@ mod tests {
             );
         }
         let telemetry = provider.telemetry_snapshot();
-        assert_eq!(telemetry.upload_bytes, 0);
-        assert_eq!(telemetry.download_bytes, 0);
+        assert_eq!(
+            telemetry, before,
+            "capability queries must have no provider effects"
+        );
         anchor.release().unwrap();
     }
 }

@@ -22,7 +22,7 @@ use crate::BuiltinResult;
 use input::ChannelPolicy;
 pub(super) use input::InputPayloadKind;
 
-pub(super) struct StepDescriptor {
+pub(in crate::builtins::deep_learning) struct StepDescriptor {
     pub index: usize,
     pub kind: K,
     pub controls: Controls,
@@ -58,6 +58,21 @@ fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::Runtim
 }
 
 impl<'a> HostNetworkPlan<'a> {
+    pub(in crate::builtins::deep_learning) fn steps(&self) -> &[StepDescriptor] {
+        &self.steps
+    }
+
+    pub(in crate::builtins::deep_learning) fn has_resident_parameter(&self) -> bool {
+        self.parameters
+            .iter()
+            .filter_map(|row| row.value)
+            .any(|value| {
+                matches!(
+                    crate::builtins::deep_learning::model::admission::forward_data(value),
+                    Value::GpuTensor(_)
+                )
+            })
+    }
     /// A bounded first resident route. The same admitted geometry is used by
     /// host execution; future composed device stages consume these steps.
     pub(in crate::builtins::deep_learning) fn standalone_normalization(

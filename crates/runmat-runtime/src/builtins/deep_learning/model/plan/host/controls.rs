@@ -10,7 +10,7 @@ use crate::builtins::deep_learning::{
 use crate::BuiltinResult;
 
 #[derive(Clone, Copy)]
-pub(super) enum Controls {
+pub(in crate::builtins::deep_learning) enum Controls {
     Input { min_length: usize },
     Dense,
     Convolution(conv::ConvOptions),
