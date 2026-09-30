@@ -120,46 +120,49 @@ impl LossWeights {
         })?;
         let pred_labels = data_format.axes();
         let weight_labels = weights_format.axes();
+        let mut varying_axes = Vec::with_capacity(weight_labels.len());
+        for (weight_dim, label) in weight_labels.iter().enumerate() {
+            if *label == Axis::Unspecified {
+                continue;
+            }
+            let occurrence = weight_labels[..weight_dim]
+                .iter()
+                .filter(|candidate| *candidate == label)
+                .count();
+            let pred_dim = pred_labels
+                .iter()
+                .enumerate()
+                .filter(|(_, pred_label)| *pred_label == label)
+                .nth(occurrence)
+                .map(|(index, _)| index)
+                .ok_or_else(|| {
+                    deep_learning_error(
+                        "crossentropy",
+                        format!(
+                            "crossentropy: WeightsFormat label '{}' is not present in DataFormat",
+                            label.label()
+                        ),
+                    )
+                })?;
+            let weight_extent = self.shape[weight_dim];
+            if weight_extent != 1 && weight_extent != prediction_shape[pred_dim] {
+                return Err(deep_learning_error(
+                    "crossentropy",
+                    "crossentropy: WeightsFormat dimensions are not compatible with DataFormat",
+                ));
+            }
+            if weight_extent > 1 {
+                varying_axes.push((pred_dim, weight_dim));
+            }
+        }
         let pred_strides = column_major_strides(prediction_shape);
         let weight_strides = column_major_strides(&self.shape);
         let mut out = Vec::with_capacity(prediction_len);
         for pred_idx in 0..prediction_len {
             let mut weight_idx = 0usize;
-            for (weight_dim, label) in weight_labels.iter().enumerate() {
-                if *label == Axis::Unspecified {
-                    continue;
-                }
-                let occurrence = weight_labels[..weight_dim]
-                    .iter()
-                    .filter(|candidate| *candidate == label)
-                    .count();
-                let pred_dim = pred_labels
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, pred_label)| *pred_label == label)
-                    .nth(occurrence)
-                    .map(|(index, _)| index)
-                    .ok_or_else(|| {
-                        deep_learning_error(
-                            "crossentropy",
-                            format!(
-                                "crossentropy: WeightsFormat label '{}' is not present in DataFormat",
-                                label.label()
-                            ),
-                        )
-                    })?;
-                let pred_extent = prediction_shape[pred_dim];
-                let weight_extent = self.shape[weight_dim];
-                if weight_extent != 1 && weight_extent != pred_extent {
-                    return Err(deep_learning_error(
-                        "crossentropy",
-                        "crossentropy: WeightsFormat dimensions are not compatible with DataFormat",
-                    ));
-                }
-                if weight_extent > 1 {
-                    let coord = (pred_idx / pred_strides[pred_dim]) % pred_extent;
-                    weight_idx += coord * weight_strides[weight_dim];
-                }
+            for &(pred_dim, weight_dim) in &varying_axes {
+                let coord = (pred_idx / pred_strides[pred_dim]) % prediction_shape[pred_dim];
+                weight_idx += coord * weight_strides[weight_dim];
             }
             out.push(self.data[weight_idx]);
         }
