@@ -1,5 +1,6 @@
 use super::{
-    DeepLearningLayerKind, DeepLearningLayerOption, LayerOptionDefault, LayerOptionExecution,
+    DeepLearningDenseOperationDimension, DeepLearningLayerKind, DeepLearningLayerOption,
+    LayerOptionDefault, LayerOptionExecution,
 };
 
 impl DeepLearningLayerOption {
@@ -32,9 +33,9 @@ impl DeepLearningLayerOption {
                 O::SplitComplexInputs,
             ) => Some(D::Bool(false)),
             (DeepLearningLayerKind::SequenceInput, O::MinLength) => Some(D::Number(1.0)),
-            (DeepLearningLayerKind::FullyConnected, O::OperationDimension) => {
-                Some(D::Text("spatial-channel"))
-            }
+            (DeepLearningLayerKind::FullyConnected, O::OperationDimension) => Some(D::Text(
+                DeepLearningDenseOperationDimension::SpatialChannel.canonical_name(),
+            )),
             (
                 DeepLearningLayerKind::FullyConnected
                 | DeepLearningLayerKind::Lstm
@@ -99,7 +100,7 @@ impl DeepLearningLayerOption {
             O::OperationDimension if matches!(kind, DeepLearningLayerKind::LayerNormalization) => {
                 None
             }
-            O::OperationDimension => Some(&["spatial-channel"]),
+            O::OperationDimension => Some(DeepLearningDenseOperationDimension::NAMES),
             O::Padding => Some(super::DeepLearningConvolutionPaddingMode::NAMES),
             O::PaddingValue => Some(super::DeepLearningConvolutionPaddingValueMode::NAMES),
             O::InputSize | O::NumChannels => Some(&["auto"]),

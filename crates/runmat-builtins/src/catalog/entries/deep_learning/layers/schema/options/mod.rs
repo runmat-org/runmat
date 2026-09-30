@@ -12,6 +12,7 @@ mod recurrent;
 pub use convolution::{
     DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
 };
+pub use dense::DeepLearningDenseOperationDimension;
 pub use normalization::DeepLearningNormalizationAxes;
 pub use recurrent::{
     DeepLearningRecurrentGateActivation, DeepLearningRecurrentOutputMode,

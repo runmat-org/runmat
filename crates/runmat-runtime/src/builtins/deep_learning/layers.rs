@@ -112,8 +112,9 @@ pub(super) async fn fully_connected_layer_builtin(
     let mut options = rest;
     if options.first().is_some_and(|value| {
         is_numeric_scalar(value)
-            || scalar_text(value, "fullyConnectedLayer")
-                .is_ok_and(|text| text.eq_ignore_ascii_case("spatial-channel"))
+            || scalar_text(value, "fullyConnectedLayer").is_ok_and(|text| {
+                runmat_builtins::DeepLearningDenseOperationDimension::from_name(&text).is_some()
+            })
     }) {
         let dimension = options.remove(0);
         options.splice(

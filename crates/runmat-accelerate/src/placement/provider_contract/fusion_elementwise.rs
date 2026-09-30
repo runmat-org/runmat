@@ -67,7 +67,7 @@ fn analyze(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<Result<PhysicalWork, ProviderFeasibility>> {
-    if query.operation.0 != "fusion.elementwise" {
+    if query.operation.0 != fusion_operation_token(&FusionKind::ElementwiseChain) {
         return None;
     }
     let reject = |code, reason| Some(Err(ProviderFeasibility::rejected(code, reason)));
@@ -425,7 +425,10 @@ fn analyze(
     let mut snapshot = dense_capability_snapshot(
         provider,
         1,
-        &[("fusion.elementwise", ProviderOperationFamily::Fusion)],
+        &[(
+            fusion_operation_token(&FusionKind::ElementwiseChain),
+            ProviderOperationFamily::Fusion,
+        )],
     );
     if !snapshot.element_types.contains(&ProviderElementType::F32) {
         snapshot.element_types.push(ProviderElementType::F32);

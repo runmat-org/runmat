@@ -12,9 +12,9 @@ pub use axes::*;
 pub use identity::DeepLearningLayerKind;
 pub use options::{
     DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
-    DeepLearningLayerOption, DeepLearningNormalizationAxes, DeepLearningRecurrentGateActivation,
-    DeepLearningRecurrentOutputMode, DeepLearningRecurrentStateActivation, LayerOptionDefault,
-    LayerOptionExecution,
+    DeepLearningDenseOperationDimension, DeepLearningLayerOption, DeepLearningNormalizationAxes,
+    DeepLearningRecurrentGateActivation, DeepLearningRecurrentOutputMode,
+    DeepLearningRecurrentStateActivation, LayerOptionDefault, LayerOptionExecution,
 };
 pub use properties::DeepLearningLayerStructuralProperty;
 
@@ -96,6 +96,20 @@ mod tests {
             O::Weights.execution_for(K::Convolution1D),
             LayerOptionExecution::PendingExecution
         );
+    }
+
+    #[test]
+    fn dense_operation_dimension_is_distinct_from_normalization_axes() {
+        use DeepLearningDenseOperationDimension as D;
+        assert_eq!(D::from_name("SPATIAL-CHANNEL"), Some(D::SpatialChannel));
+        assert_eq!(D::from_name("batch-excluded"), None);
+        assert_eq!(D::NAMES, &[D::SpatialChannel.canonical_name()]);
+        assert_eq!(
+            DeepLearningLayerOption::OperationDimension
+                .text_values_for(DeepLearningLayerKind::FullyConnected),
+            Some(D::NAMES)
+        );
+        assert!(DeepLearningNormalizationAxes::from_name("batch-excluded").is_some());
     }
 
     #[test]

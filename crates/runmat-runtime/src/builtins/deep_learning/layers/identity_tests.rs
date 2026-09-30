@@ -145,6 +145,19 @@ fn fully_connected_positional_operation_dimension_is_not_an_option_name() {
         Some(&Value::String("dense".into()))
     );
 
+    let upper = block_on(fully_connected_layer_builtin(
+        Value::Num(4.0),
+        vec![Value::String("SPATIAL-CHANNEL".into())],
+    ))
+    .expect("case-insensitive positional dimension");
+    let Value::Object(upper) = upper else {
+        panic!("fully connected layer")
+    };
+    assert_eq!(
+        upper.properties.get("OperationDimension"),
+        Some(&Value::String("SPATIAL-CHANNEL".into()))
+    );
+
     let duplicate = block_on(fully_connected_layer_builtin(
         Value::Num(4.0),
         vec![

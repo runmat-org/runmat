@@ -1,5 +1,8 @@
 use super::DeepLearningLayerOption as O;
 
+mod operation_dimension;
+pub use operation_dimension::DeepLearningDenseOperationDimension;
+
 pub(super) const fn supports(option: O) -> bool {
     matches!(
         option,

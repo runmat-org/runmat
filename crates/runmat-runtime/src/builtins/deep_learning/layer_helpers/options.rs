@@ -1,8 +1,9 @@
 use super::*;
 use runmat_builtins::{
     DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
-    DeepLearningNormalizationAxes, DeepLearningRecurrentGateActivation,
-    DeepLearningRecurrentOutputMode, DeepLearningRecurrentStateActivation,
+    DeepLearningDenseOperationDimension, DeepLearningNormalizationAxes,
+    DeepLearningRecurrentGateActivation, DeepLearningRecurrentOutputMode,
+    DeepLearningRecurrentStateActivation,
 };
 
 /// Materialize only structural controls consumed on the host. Data, state,
@@ -128,14 +129,14 @@ pub(in crate::builtins::deep_learning) fn validate(
         }
         O::OperationDimension => {
             if let Ok(text) = scalar_text(value, function) {
-                let valid = if matches!(kind, DeepLearningLayerKind::LayerNormalization) {
-                    DeepLearningNormalizationAxes::from_name(&text).is_some()
-                } else {
-                    option
-                        .text_values_for(kind)
-                        .unwrap()
-                        .iter()
-                        .any(|allowed| text.eq_ignore_ascii_case(allowed))
+                let valid = match kind {
+                    DeepLearningLayerKind::LayerNormalization => {
+                        DeepLearningNormalizationAxes::from_name(&text).is_some()
+                    }
+                    DeepLearningLayerKind::FullyConnected => {
+                        DeepLearningDenseOperationDimension::from_name(&text).is_some()
+                    }
+                    _ => false,
                 };
                 if !valid {
                     return Err(invalid_value(function, label));

@@ -13,7 +13,7 @@ use super::{
     PlacementCorrelationId, PlacementEventKind, PlacementVariant,
 };
 
-pub fn fusion_operation_token(kind: &FusionKind) -> &'static str {
+pub const fn fusion_operation_token(kind: &FusionKind) -> &'static str {
     match kind {
         FusionKind::ElementwiseChain => "fusion.elementwise",
         FusionKind::Reduction => "fusion.reduction",

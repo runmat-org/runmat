@@ -1,3 +1,5 @@
+use super::fusion::fusion_operation_token;
+use crate::fusion::FusionKind;
 use runmat_accelerate_api::{
     AccelProvider, ProviderCapabilityOperation, ProviderCapabilitySnapshot,
     ProviderConcurrencyCapabilities, ProviderElementType, ProviderFeasibility,
@@ -27,15 +29,30 @@ const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ("legacy.elementwise", ProviderOperationFamily::Elementwise),
     ("legacy.reduction", ProviderOperationFamily::Reduction),
     ("legacy.matmul", ProviderOperationFamily::MatrixMultiply),
-    ("fusion.elementwise", ProviderOperationFamily::Fusion),
-    ("fusion.matmul_epilogue", ProviderOperationFamily::Fusion),
-    ("fusion.centered_gram", ProviderOperationFamily::Fusion),
     (
-        "fusion.power_step_normalize",
+        fusion_operation_token(&FusionKind::ElementwiseChain),
         ProviderOperationFamily::Fusion,
     ),
-    ("fusion.explained_variance", ProviderOperationFamily::Fusion),
-    ("fusion.image_normalize", ProviderOperationFamily::Fusion),
+    (
+        fusion_operation_token(&FusionKind::MatmulEpilogue),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::CenteredGram),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::PowerStepNormalize),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::ExplainedVariance),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::ImageNormalize),
+        ProviderOperationFamily::Fusion,
+    ),
 ];
 
 #[cfg(feature = "wgpu")]
@@ -45,16 +62,34 @@ const WGPU_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ("legacy.elementwise", ProviderOperationFamily::Elementwise),
     ("legacy.reduction", ProviderOperationFamily::Reduction),
     ("legacy.matmul", ProviderOperationFamily::MatrixMultiply),
-    ("fusion.elementwise", ProviderOperationFamily::Fusion),
-    ("fusion.reduction", ProviderOperationFamily::Fusion),
-    ("fusion.matmul_epilogue", ProviderOperationFamily::Fusion),
-    ("fusion.centered_gram", ProviderOperationFamily::Fusion),
     (
-        "fusion.power_step_normalize",
+        fusion_operation_token(&FusionKind::ElementwiseChain),
         ProviderOperationFamily::Fusion,
     ),
-    ("fusion.explained_variance", ProviderOperationFamily::Fusion),
-    ("fusion.image_normalize", ProviderOperationFamily::Fusion),
+    (
+        fusion_operation_token(&FusionKind::Reduction),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::MatmulEpilogue),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::CenteredGram),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::PowerStepNormalize),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::ExplainedVariance),
+        ProviderOperationFamily::Fusion,
+    ),
+    (
+        fusion_operation_token(&FusionKind::ImageNormalize),
+        ProviderOperationFamily::Fusion,
+    ),
 ];
 
 pub(crate) fn tensor_representation(
@@ -489,6 +524,31 @@ mod tests {
         }
     }
     use super::*;
+
+    #[test]
+    fn advertised_fusion_operations_use_canonical_kind_identity() {
+        let known = [
+            FusionKind::ElementwiseChain,
+            FusionKind::Reduction,
+            FusionKind::MatmulEpilogue,
+            FusionKind::CenteredGram,
+            FusionKind::ImageNormalize,
+            FusionKind::PowerStepNormalize,
+            FusionKind::ExplainedVariance,
+        ];
+        let check = |operations: &[(&str, ProviderOperationFamily)]| {
+            for (operation, family) in operations {
+                if matches!(*family, ProviderOperationFamily::Fusion) {
+                    assert!(known
+                        .iter()
+                        .any(|kind| *operation == fusion_operation_token(kind)));
+                }
+            }
+        };
+        check(IN_PROCESS_OPERATIONS);
+        #[cfg(feature = "wgpu")]
+        check(WGPU_OPERATIONS);
+    }
     use runmat_accelerate_api::{
         ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderStorage,
         ProviderWorkload,
