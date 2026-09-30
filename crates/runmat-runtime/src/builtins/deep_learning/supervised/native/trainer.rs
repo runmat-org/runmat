@@ -192,6 +192,7 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
     let classes = admitted_target.classes_value()?;
     let domain = prediction_domain(layers);
     let factors = FactorPlan::admit(layers, function)?;
+    admit_training_cancellation(runtime, function)?;
     // Target preparation is deliberately ahead of initializer callbacks: a
     // malformed numerical target cannot consume random draws or user effects.
     let full_target = admitted_target.prepare(geometry.precision).await?;
@@ -217,7 +218,7 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
         order.reverse();
     }
     for epoch in 0..config.max_epochs {
-        admit_training_cancellation(function)?;
+        admit_training_cancellation(runtime, function)?;
         if matches!(config.shuffle, ShuffleMode::EveryEpoch) {
             let amount = epoch % order.len();
             order.rotate_left(amount);
@@ -225,7 +226,7 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
         let mut epoch_loss = 0.0;
         let mut seen = 0usize;
         for indices in order.chunks(config.mini_batch_size) {
-            admit_training_cancellation(function)?;
+            admit_training_cancellation(runtime, function)?;
             iteration = iteration
                 .checked_add(1)
                 .ok_or_else(|| fail(function, "iteration count overflow"))?;
@@ -284,7 +285,7 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
         losses.push(epoch_loss);
         progress::epoch(epoch + 1, config.max_epochs, epoch_loss, config.verbose);
     }
-    admit_training_cancellation(function)?;
+    admit_training_cancellation(runtime, function)?;
     attach_training_result(
         &mut network,
         classes,

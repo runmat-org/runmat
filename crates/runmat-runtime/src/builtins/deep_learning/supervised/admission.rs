@@ -32,8 +32,13 @@ pub(super) fn admit_training_observations(
     Ok(())
 }
 
-pub(super) fn admit_training_cancellation(function: &'static str) -> BuiltinResult<()> {
-    if crate::interrupt::is_cancelled() {
+pub(super) fn admit_training_cancellation(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    if runtime.map_or_else(crate::interrupt::is_cancelled, |runtime| {
+        runtime.is_cancelled()
+    }) {
         return Err(crate::runtime_error::semantic_error(
             "RunMat:Cancelled",
             format!("{function}: training was cancelled"),
