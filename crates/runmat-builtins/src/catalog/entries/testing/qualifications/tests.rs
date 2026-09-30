@@ -4,6 +4,12 @@ use runmat_types::{
     ValueFact, ValueKindFact,
 };
 
+struct InferenceCase {
+    entry: &'static BuiltinCatalogEntry,
+    arguments: Vec<ValueFact>,
+    infer: fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+}
+
 fn call(arguments: Vec<ValueFact>, outputs: usize) -> CallRequest {
     CallRequest {
         arguments,
@@ -32,38 +38,39 @@ fn five_qualifications_return_host_empty_double_when_used_as_expressions() {
     let actual = ValueFact::scalar(ValueKindFact::Logical);
     let expected = actual.clone();
     let constraint = ValueFact::unknown(DynamicReason::RuntimeValue);
-    let cases: &[(
-        &BuiltinCatalogEntry,
-        Vec<ValueFact>,
-        fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
-    )] = &[
-        (
-            &ASSERT_EQUAL_CATALOG_ENTRY,
-            vec![receiver.clone(), actual.clone(), expected.clone()],
-            inference::assert_equal,
-        ),
-        (
-            &ASSERT_THAT_CATALOG_ENTRY,
-            vec![receiver.clone(), actual.clone(), constraint],
-            inference::assert_that,
-        ),
-        (
-            &ASSERT_TRUE_CATALOG_ENTRY,
-            vec![receiver.clone(), actual.clone()],
-            inference::assert_true,
-        ),
-        (
-            &ASSUME_EQUAL_CATALOG_ENTRY,
-            vec![receiver.clone(), actual.clone(), expected],
-            inference::assume_equal,
-        ),
-        (
-            &ASSUME_TRUE_CATALOG_ENTRY,
-            vec![receiver, actual],
-            inference::assume_true,
-        ),
+    let cases = &[
+        InferenceCase {
+            entry: &ASSERT_EQUAL_CATALOG_ENTRY,
+            arguments: vec![receiver.clone(), actual.clone(), expected.clone()],
+            infer: inference::assert_equal,
+        },
+        InferenceCase {
+            entry: &ASSERT_THAT_CATALOG_ENTRY,
+            arguments: vec![receiver.clone(), actual.clone(), constraint],
+            infer: inference::assert_that,
+        },
+        InferenceCase {
+            entry: &ASSERT_TRUE_CATALOG_ENTRY,
+            arguments: vec![receiver.clone(), actual.clone()],
+            infer: inference::assert_true,
+        },
+        InferenceCase {
+            entry: &ASSUME_EQUAL_CATALOG_ENTRY,
+            arguments: vec![receiver.clone(), actual.clone(), expected],
+            infer: inference::assume_equal,
+        },
+        InferenceCase {
+            entry: &ASSUME_TRUE_CATALOG_ENTRY,
+            arguments: vec![receiver, actual],
+            infer: inference::assume_true,
+        },
     ];
-    for (entry, arguments, infer) in cases {
+    for InferenceCase {
+        entry,
+        arguments,
+        infer,
+    } in cases
+    {
         let result = infer(&call(arguments.to_vec(), 1), entry);
         assert!(
             result.diagnostics.is_empty(),

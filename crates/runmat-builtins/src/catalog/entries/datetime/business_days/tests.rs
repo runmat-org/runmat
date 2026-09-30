@@ -15,6 +15,11 @@ fn numeric(shape: ShapeFact) -> ValueFact {
     )
 }
 
+struct InferenceCase {
+    entry: &'static BuiltinCatalogEntry,
+    infer: fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+}
+
 fn call(args: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
     CallRequest {
         arguments: args,
@@ -80,16 +85,25 @@ fn business_date_facts_preserve_known_shapes_and_host_residency() {
     assert_eq!(mask.outputs[0].kind, ValueKindFact::Logical);
     assert_eq!(mask.outputs[0].shape, three.shape);
 
-    let inferencers: &[(
-        &BuiltinCatalogEntry,
-        fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
-    )] = &[
-        (&DAYS252BUS_CATALOG_ENTRY, inference::days252bus),
-        (&DAYSDIF_CATALOG_ENTRY, inference::daysdif),
-        (&FBUSDATE_CATALOG_ENTRY, inference::fbusdate),
-        (&LBUSDATE_CATALOG_ENTRY, inference::lbusdate),
+    let inferencers = &[
+        InferenceCase {
+            entry: &DAYS252BUS_CATALOG_ENTRY,
+            infer: inference::days252bus,
+        },
+        InferenceCase {
+            entry: &DAYSDIF_CATALOG_ENTRY,
+            infer: inference::daysdif,
+        },
+        InferenceCase {
+            entry: &FBUSDATE_CATALOG_ENTRY,
+            infer: inference::fbusdate,
+        },
+        InferenceCase {
+            entry: &LBUSDATE_CATALOG_ENTRY,
+            infer: inference::lbusdate,
+        },
     ];
-    for (entry, infer) in inferencers {
+    for InferenceCase { entry, infer } in inferencers {
         let result = infer(
             &call(
                 vec![scalar.clone(), three.clone()],

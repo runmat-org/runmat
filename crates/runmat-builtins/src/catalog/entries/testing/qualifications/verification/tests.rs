@@ -4,6 +4,12 @@ use runmat_types::{
     RequestedOutputCount, ShapeFact, ValueFact, ValueKindFact,
 };
 
+struct InferenceCase {
+    entry: &'static BuiltinCatalogEntry,
+    arguments: Vec<ValueFact>,
+    infer: fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+}
+
 fn call(arguments: Vec<ValueFact>, outputs: usize) -> CallRequest {
     CallRequest {
         arguments,
@@ -18,58 +24,59 @@ fn unknown() -> ValueFact {
 
 #[test]
 fn verification_entries_infer_empty_double_and_method_only_host_execution() {
-    let cases: &[(
-        &BuiltinCatalogEntry,
-        Vec<ValueFact>,
-        fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
-    )] = &[
-        (
-            &VERIFY_EMPTY_CATALOG_ENTRY,
-            vec![unknown(), unknown()],
-            inference::verify_empty,
-        ),
-        (
-            &VERIFY_EQUAL_CATALOG_ENTRY,
-            vec![unknown(), unknown(), unknown()],
-            inference::verify_equal,
-        ),
-        (
-            &VERIFY_FALSE_CATALOG_ENTRY,
-            vec![unknown(), unknown()],
-            inference::verify_false,
-        ),
-        (
-            &VERIFY_GREATER_THAN_CATALOG_ENTRY,
-            vec![unknown(), unknown(), unknown()],
-            inference::verify_greater_than,
-        ),
-        (
-            &VERIFY_LESS_THAN_CATALOG_ENTRY,
-            vec![unknown(), unknown(), unknown()],
-            inference::verify_less_than,
-        ),
-        (
-            &VERIFY_NOT_EMPTY_CATALOG_ENTRY,
-            vec![unknown(), unknown()],
-            inference::verify_not_empty,
-        ),
-        (
-            &VERIFY_NOT_EQUAL_CATALOG_ENTRY,
-            vec![unknown(), unknown(), unknown()],
-            inference::verify_not_equal,
-        ),
-        (
-            &VERIFY_THAT_CATALOG_ENTRY,
-            vec![unknown(), unknown(), unknown()],
-            inference::verify_that,
-        ),
-        (
-            &VERIFY_TRUE_CATALOG_ENTRY,
-            vec![unknown(), unknown()],
-            inference::verify_true,
-        ),
+    let cases = &[
+        InferenceCase {
+            entry: &VERIFY_EMPTY_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown()],
+            infer: inference::verify_empty,
+        },
+        InferenceCase {
+            entry: &VERIFY_EQUAL_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown(), unknown()],
+            infer: inference::verify_equal,
+        },
+        InferenceCase {
+            entry: &VERIFY_FALSE_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown()],
+            infer: inference::verify_false,
+        },
+        InferenceCase {
+            entry: &VERIFY_GREATER_THAN_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown(), unknown()],
+            infer: inference::verify_greater_than,
+        },
+        InferenceCase {
+            entry: &VERIFY_LESS_THAN_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown(), unknown()],
+            infer: inference::verify_less_than,
+        },
+        InferenceCase {
+            entry: &VERIFY_NOT_EMPTY_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown()],
+            infer: inference::verify_not_empty,
+        },
+        InferenceCase {
+            entry: &VERIFY_NOT_EQUAL_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown(), unknown()],
+            infer: inference::verify_not_equal,
+        },
+        InferenceCase {
+            entry: &VERIFY_THAT_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown(), unknown()],
+            infer: inference::verify_that,
+        },
+        InferenceCase {
+            entry: &VERIFY_TRUE_CATALOG_ENTRY,
+            arguments: vec![unknown(), unknown()],
+            infer: inference::verify_true,
+        },
     ];
-    for (entry, arguments, infer) in cases {
+    for InferenceCase {
+        entry,
+        arguments,
+        infer,
+    } in cases
+    {
         assert_eq!(
             entry.descriptor.completion_policy,
             BuiltinCompletionPolicy::MethodOnly
