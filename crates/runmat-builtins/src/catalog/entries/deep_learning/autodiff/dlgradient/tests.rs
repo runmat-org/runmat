@@ -22,7 +22,7 @@ fn dlarray(data: ValueFact) -> ValueFact {
 
 #[test]
 fn traced_dlarray_target_preserves_known_data_class_and_shape() {
-    let data = ValueFact::proven(
+    let mut data = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Single,
             domain: NumericDomain::Real,
@@ -46,6 +46,9 @@ fn traced_dlarray_target_preserves_known_data_class_and_shape() {
         panic!("dlarray gradient")
     };
     assert_eq!(object.runtime_class, Some(standard::DL_ARRAY.owned()));
+    // Gradient class/shape survive, but repeated targets can share the tape's
+    // cached allocation; exclusive ownership is not inherited from the input.
+    data.alias = AliasFact::Unknown;
     assert_eq!(object.properties[crate::DLARRAY_DATA_PROPERTY], data);
 }
 
