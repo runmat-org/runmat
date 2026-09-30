@@ -244,7 +244,8 @@ fn gpu_route_distinguishes_missing_kernel_from_invalid_feature_geometry() {
         )
         .unwrap();
         let sequence = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
-        let unsupported = super::admit_gpu_forward(&[sequence], &input, &axes, "forward").unwrap();
+        let unsupported =
+            super::admit_gpu_forward(&[sequence], &input, &axes, &axes, &axes, "forward").unwrap();
         assert!(matches!(
             unsupported,
             super::GpuForwardAdmission::UnsupportedCapability(
@@ -256,7 +257,8 @@ fn gpu_route_distinguishes_missing_kernel_from_invalid_feature_geometry() {
         let relu = block_on(relu_layer_builtin(vec![])).unwrap();
         provider.reset_telemetry();
         let error =
-            super::admit_gpu_forward(&[feature, relu], &input, &axes, "forward").unwrap_err();
+            super::admit_gpu_forward(&[feature, relu], &input, &axes, &axes, &axes, "forward")
+                .unwrap_err();
         assert!(error.message().contains("3 features"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
@@ -284,11 +286,56 @@ fn gpu_route_keeps_supported_fully_connected_execution_ready() {
         };
         provider.reset_telemetry();
         assert!(matches!(
-            super::admit_gpu_forward(&layers.data, &input, &axes, "forward").unwrap(),
+            super::admit_gpu_forward(&layers.data, &input, &axes, &axes, &axes, "forward").unwrap(),
             super::GpuForwardAdmission::Ready(super::GpuForwardLayout::BatchChannels)
         ));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+    });
+}
+
+#[test]
+fn global_pool_requires_whole_route_capability_before_any_provider_effect() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let values = (1..=24).map(f64::from).collect::<Vec<_>>();
+        let input = provider
+            .upload(&HostTensorView {
+                data: &values,
+                shape: &[2, 3, 4],
+            })
+            .unwrap();
+        let axes = AxisPlan::new(
+            runmat_builtins::DeepLearningAxisLayout::parse("CBT", 3).unwrap(),
+            input.shape(),
+        )
+        .unwrap();
+        let source = axes.after_global_average_pooling_1d().unwrap();
+        let target = AxisPlan::new(
+            runmat_builtins::DeepLearningAxisLayout::parse("BC", 2).unwrap(),
+            &[3, 2],
+        )
+        .unwrap();
+        let sequence = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+        let pool = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
+        provider.reset_telemetry();
+        let result = super::admit_gpu_forward(
+            &[sequence, pool],
+            &input,
+            &axes,
+            &source,
+            &target,
+            "forward",
+        )
+        .unwrap();
+        assert!(matches!(
+            result,
+            super::GpuForwardAdmission::UnsupportedCapability(
+                super::GpuCapabilityReason::ProviderOperation
+            )
+        ));
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.upload_bytes, 0);
+        assert_eq!(telemetry.download_bytes, 0);
     });
 }
 
@@ -340,7 +387,8 @@ fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
         );
         provider.reset_telemetry();
         let error =
-            super::admit_gpu_forward(&[feature, dense], &input, &axes, "forward").unwrap_err();
+            super::admit_gpu_forward(&[feature, dense], &input, &axes, &axes, &axes, "forward")
+                .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:gpu:ProviderPayloadMismatch")

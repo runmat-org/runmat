@@ -10,6 +10,75 @@ struct Pool1DParams {
 }
 
 impl WgpuProvider {
+    pub(crate) fn deep_learning_global_average_pool_1d_capability_exec(
+        &self,
+        input: &GpuTensorHandle,
+        route: &DeepLearningPool1DRoute,
+    ) -> Result<DeepLearningPool1DCapability> {
+        let entry = self.get_entry_raw(input)?;
+        ensure!(
+            input.shape() == entry.shape
+                && input.physical().element_type() == entry.element_type
+                && input.physical().storage() == entry.storage
+                && entry.storage == GpuTensorStorage::Real
+                && !entry.logical
+                && entry.integer_type().is_none()
+                && entry.precision == self.precision,
+            "deep-learning pooling input descriptor does not match a provider-owned floating buffer"
+        );
+        let shape = input.shape();
+        let axis = route.reduction.axis_zero_based;
+        ensure!(axis < shape.len(), "pool axis exceeds input rank");
+        let pool_size = shape[axis];
+        ensure!(pool_size > 0, "cannot pool an empty axis");
+        let total = checked_shape_count(shape)?;
+        ensure!(total == entry.len, "pooling input shape/storage mismatch");
+        let output_count = total / pool_size;
+        ensure!(
+            checked_shape_count(&route.source_shape)? == output_count,
+            "pooling source shape does not match reduced element count"
+        );
+        let rank = route.source_shape.len();
+        ensure!(
+            route.target_to_source.len() == rank && route.target_shape.len() == rank,
+            "pooling presentation rank mismatch"
+        );
+        let mut seen = vec![false; rank];
+        for (target_axis, &source_axis) in route.target_to_source.iter().enumerate() {
+            ensure!(source_axis < rank, "pooling presentation axis out of range");
+            ensure!(!seen[source_axis], "pooling presentation repeats an axis");
+            seen[source_axis] = true;
+            ensure!(
+                route.target_shape[target_axis] == route.source_shape[source_axis],
+                "pooling presentation shape does not match its permutation"
+            );
+        }
+        let needs_permutation = route
+            .target_to_source
+            .iter()
+            .enumerate()
+            .any(|(target, &source)| target != source);
+        let stride = checked_shape_count(&shape[..axis])?;
+        if total > u32::MAX as usize
+            || pool_size > u32::MAX as usize
+            || stride > u32::MAX as usize
+            || output_count > u32::MAX as usize
+            || (needs_permutation
+                && (rank > crate::backend::wgpu::params::PERMUTE_MAX_RANK
+                    || route
+                        .source_shape
+                        .iter()
+                        .any(|&size| size > u32::MAX as usize)
+                    || route
+                        .target_shape
+                        .iter()
+                        .any(|&size| size > u32::MAX as usize)))
+        {
+            return Ok(DeepLearningPool1DCapability::ResourceLimit);
+        }
+        Ok(DeepLearningPool1DCapability::Ready)
+    }
+
     pub(crate) fn deep_learning_global_average_pool_1d_exec(
         &self,
         input: &GpuTensorHandle,
@@ -114,4 +183,11 @@ impl WgpuProvider {
         })??;
         self.register_existing_buffer(output, output_shape, output_count as usize)
     }
+}
+
+fn checked_shape_count(shape: &[usize]) -> Result<usize> {
+    shape
+        .iter()
+        .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+        .ok_or_else(|| anyhow!("pooling shape product overflows"))
 }

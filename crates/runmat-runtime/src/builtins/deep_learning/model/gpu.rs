@@ -67,10 +67,27 @@ pub(super) async fn evaluate_network_gpu(
         .map(|value| layer_slice(value, function))
         .transpose()?
         .unwrap_or(&[]);
-    admission::require_gpu_forward_layers(layers, input, layout, input_axes, function)?;
+    admission::require_gpu_forward_layers(
+        layers,
+        input,
+        layout,
+        input_axes,
+        source_axes,
+        target_axes,
+        function,
+    )?;
 
     if let GpuForwardLayout::GlobalPool { axis } = layout {
-        return pooling::forward(provider, input, axis, source_axes, target_axes, function).await;
+        return pooling::forward(
+            provider,
+            input,
+            axis,
+            input_axes,
+            source_axes,
+            target_axes,
+            function,
+        )
+        .await;
     }
 
     // Provider numerical kernels use [B,C]. CB needs an actual resident
@@ -135,7 +152,7 @@ pub(super) async fn evaluate_network_gpu(
     let resident_parameters = consumed_parameters.flat_map(|layer| {
         [ParameterRole::Weights, ParameterRole::Bias]
             .into_iter()
-            .filter_map(move |role| resident_parameter_handle(layer, role.name()))
+            .filter_map(move |role| resident_parameter_handle(layer, role))
     });
     crate::builtins::common::gpu_helpers::propagate_output_provenance(
         &mut current,
@@ -238,9 +255,9 @@ fn validate_unary_forward_result(
 
 fn resident_parameter_handle<'a>(
     layer: &'a ObjectInstance,
-    name: &str,
+    role: ParameterRole,
 ) -> Option<&'a GpuTensorHandle> {
-    let value = layer.properties.get(name)?;
+    let value = layer.properties.get(role.name())?;
     match value {
         Value::GpuTensor(handle) => Some(handle),
         Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => {

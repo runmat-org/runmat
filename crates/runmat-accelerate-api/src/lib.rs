@@ -31,7 +31,9 @@ mod provider_execution;
 mod covariance;
 pub use covariance::CovarianceWeightDomainError;
 mod deep_learning;
-pub use deep_learning::DeepLearningPool1DRequest;
+pub use deep_learning::{
+    DeepLearningPool1DCapability, DeepLearningPool1DRequest, DeepLearningPool1DRoute,
+};
 pub use provider_execution::{
     ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,
 };
@@ -3462,6 +3464,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _request: DeepLearningPool1DRequest,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("deep-learning global-average-pool-1d not supported by provider")
+    }
+    /// Pure whole-route admission. An error denotes an invalid owner or
+    /// malformed descriptor; unsupported valid work is a typed capability.
+    fn deep_learning_global_average_pool_1d_capability(
+        &self,
+        _input: &GpuTensorHandle,
+        _route: &DeepLearningPool1DRoute,
+    ) -> anyhow::Result<DeepLearningPool1DCapability> {
+        Ok(DeepLearningPool1DCapability::UnsupportedOperation)
     }
     /// Reduce moments across multiple zero-based dimensions in one device pass.
     /// Returns mean (E[x]) and mean of squares (E[x^2]).

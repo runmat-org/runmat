@@ -15,7 +15,7 @@ pub(super) async fn prepare_weights(
     input: &GpuTensorHandle,
     function: &'static str,
 ) -> BuiltinResult<GpuTensorHandle> {
-    if let Some(handle) = matching_resident_parameter(layer, "Weights", input) {
+    if let Some(handle) = matching_resident_parameter(layer, ParameterRole::Weights, input) {
         let matrix = if handle.shape().len() == 1 {
             let shape = [1, handle.shape()[0]];
             let view = provider.reshape(handle, &shape).map_err(|error| {
@@ -43,7 +43,7 @@ pub(super) async fn prepare_weights(
         };
         return validate_parameter_result(transposed, &matrix, provider, &shape, alias, function);
     }
-    let weights = prepare_host_parameter(layer, "Weights", function).await?;
+    let weights = prepare_host_parameter(layer, ParameterRole::Weights, function).await?;
     let transposed = transpose_2d(&weights, function)?;
     upload_parameter(provider, transposed, input, &[input], function)
 }
@@ -57,7 +57,7 @@ pub(super) async fn prepare_bias(
     function: &'static str,
 ) -> BuiltinResult<GpuTensorHandle> {
     let shape = [1, width];
-    if let Some(handle) = matching_resident_parameter(layer, "Bias", input) {
+    if let Some(handle) = matching_resident_parameter(layer, ParameterRole::Bias, input) {
         let row = provider
             .reshape(handle, &shape)
             .map_err(|error| provider_failure(function, "resident bias reshape", error.into()))?;
@@ -70,7 +70,7 @@ pub(super) async fn prepare_bias(
             function,
         );
     }
-    let bias = prepare_host_parameter(layer, "Bias", function).await?;
+    let bias = prepare_host_parameter(layer, ParameterRole::Bias, function).await?;
     let row = Tensor::from_numeric_storage(
         bias.into_numeric_storage()
             .map_err(|error| deep_learning_error(function, error))?,
@@ -82,10 +82,10 @@ pub(super) async fn prepare_bias(
 
 fn matching_resident_parameter<'a>(
     layer: &'a ObjectInstance,
-    name: &str,
+    role: ParameterRole,
     input: &GpuTensorHandle,
 ) -> Option<&'a GpuTensorHandle> {
-    resident_parameter_handle(layer, name).filter(|handle| {
+    resident_parameter_handle(layer, role).filter(|handle| {
         runmat_accelerate_api::handle_precision(handle)
             == runmat_accelerate_api::handle_precision(input)
     })
@@ -93,9 +93,10 @@ fn matching_resident_parameter<'a>(
 
 async fn prepare_host_parameter(
     layer: &ObjectInstance,
-    name: &str,
+    role: ParameterRole,
     function: &'static str,
 ) -> BuiltinResult<Tensor> {
+    let name = role.name();
     let value = tensor_property_value(layer, name, function)?;
     if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
     {

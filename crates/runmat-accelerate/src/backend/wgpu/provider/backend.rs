@@ -8,9 +8,10 @@ use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
     AccelContextHandle, AccelContextKind, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
     ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
-    CovarianceOptions, DeepLearningPool1DRequest, FindDirection, FspecialRequest, GpuTensorHandle,
-    GpuTensorStorage, HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions,
-    IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest, ProviderAdamUpdateRequest,
+    CovarianceOptions, DeepLearningPool1DCapability, DeepLearningPool1DRequest,
+    DeepLearningPool1DRoute, FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage,
+    HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions, IsMemberResult,
+    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderAdamUpdateRequest,
     ProviderAdamUpdateResult, ProviderBandwidth, ProviderBlackScholesPriceRequest,
     ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
     ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,

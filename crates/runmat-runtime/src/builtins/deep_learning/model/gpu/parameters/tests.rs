@@ -20,7 +20,12 @@ fn explicit_resident_parameter_never_falls_back_through_host_download() {
             panic!("layer object expected")
         };
         provider.reset_telemetry();
-        let error = block_on(prepare_host_parameter(&layer, "Weights", "forward")).unwrap_err();
+        let error = block_on(prepare_host_parameter(
+            &layer,
+            ParameterRole::Weights,
+            "forward",
+        ))
+        .unwrap_err();
         assert!(error.message.contains("explicit resident Weights"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         let retained =

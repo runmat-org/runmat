@@ -3,43 +3,84 @@ use crate::builtins::common::gpu_helpers::{
     propagate_output_provenance, reject_gpu_output, unary_gpu_output_matches_shape,
     GpuOutputAliasPolicy, UnaryGpuOutputContract,
 };
-use runmat_accelerate_api::DeepLearningPool1DRequest;
+use runmat_accelerate_api::{DeepLearningPool1DRequest, DeepLearningPool1DRoute};
+
+pub(super) fn route(
+    input_axes: &AxisPlan,
+    source_axes: &AxisPlan,
+    target_axes: &AxisPlan,
+    axis: usize,
+    function: &'static str,
+) -> BuiltinResult<DeepLearningPool1DRoute> {
+    let Some(&pool_size) = input_axes.shape().get(axis) else {
+        return Err(deep_learning_error(
+            function,
+            "pool axis exceeds admitted input rank",
+        ));
+    };
+    if pool_size == 0 {
+        return Err(deep_learning_error(
+            function,
+            "cannot average an empty pool axis",
+        ));
+    }
+    let expected_source = input_axes
+        .after_global_average_pooling_1d()
+        .map_err(|error| {
+            deep_learning_error(
+                function,
+                format!("{function}: invalid pooling axes: {error:?}"),
+            )
+        })?;
+    if source_axes != &expected_source {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: pooled output geometry differs from admitted axes"),
+        ));
+    }
+    let lowering = source_axes
+        .lower_to(target_axes.layout())
+        .map_err(|error| {
+            deep_learning_error(
+                function,
+                format!("{function}: invalid GPU output axes: {error:?}"),
+            )
+        })?;
+    if lowering.target_shape() != target_axes.shape() {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: presented output shape differs from admitted axes"),
+        ));
+    }
+    Ok(DeepLearningPool1DRoute {
+        reduction: DeepLearningPool1DRequest {
+            axis_zero_based: axis,
+        },
+        source_shape: source_axes.shape().to_vec(),
+        target_shape: target_axes.shape().to_vec(),
+        target_to_source: lowering.target_to_source().to_vec(),
+    })
+}
 
 pub(super) async fn forward(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     input: &GpuTensorHandle,
     axis: usize,
+    input_axes: &AxisPlan,
     source_axes: &AxisPlan,
     target_axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let planned = route(input_axes, source_axes, target_axes, axis, function)?;
     let precision = runmat_accelerate_api::handle_precision(input);
     let mut keep_shape = input.shape().to_vec();
     keep_shape[axis] = 1;
-    let reduced = match provider
-        .deep_learning_global_average_pool_1d(
-            input,
-            DeepLearningPool1DRequest {
-                axis_zero_based: axis,
-            },
-        )
+    let reduced = provider
+        .deep_learning_global_average_pool_1d(input, planned.reduction)
         .await
-    {
-        Ok(output) => output,
-        Err(error)
-            if runmat_accelerate_api::is_unsupported_provider_operation(&error)
-                && !runmat_accelerate_api::handle_is_explicit(input) =>
-        {
-            return Ok(None);
-        }
-        Err(error) => {
-            return Err(provider_failure(
-                function,
-                "resident global average pooling",
-                error.into(),
-            ));
-        }
-    };
+        .map_err(|error| {
+            provider_failure(function, "resident global average pooling", error.into())
+        })?;
     let mut current = validate(
         reduced,
         input,
@@ -63,31 +104,21 @@ pub(super) async fn forward(
             function,
         )?;
     }
-    if source_axes != target_axes {
-        let lowering = source_axes
-            .lower_to(target_axes.layout())
+    if planned
+        .target_to_source
+        .iter()
+        .enumerate()
+        .any(|(target, &source)| target != source)
+    {
+        let reordered = provider
+            .permute(&current, &planned.target_to_source)
             .map_err(|error| {
-                deep_learning_error(
-                    function,
-                    format!("{function}: invalid GPU output axes: {error:?}"),
-                )
-            })?;
-        let reordered = match provider.permute(&current, lowering.target_to_source()) {
-            Ok(output) => output,
-            Err(error)
-                if runmat_accelerate_api::is_unsupported_provider_operation(&error)
-                    && !runmat_accelerate_api::handle_is_explicit(input) =>
-            {
-                return Ok(None);
-            }
-            Err(error) => {
-                return Err(provider_failure(
+                provider_failure(
                     function,
                     "resident pooled output presentation",
                     error.into(),
-                ));
-            }
-        };
+                )
+            })?;
         current = validate(
             reordered,
             &current,

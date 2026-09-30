@@ -1,7 +1,8 @@
 #![cfg(feature = "wgpu")]
 
 use runmat_accelerate_api::{
-    AccelProvider, DeepLearningPool1DRequest, GpuTensorStorage, HostTensorView, ProviderPrecision,
+    AccelProvider, DeepLearningPool1DCapability, DeepLearningPool1DRequest,
+    DeepLearningPool1DRoute, GpuTensorStorage, HostTensorView, ProviderPrecision,
 };
 
 #[tokio::test]
@@ -35,6 +36,28 @@ async fn stable_resident_global_pool_retains_precision_shape_owner_and_special_v
             .unwrap();
         let before = input.wire_descriptor();
         provider.reset_telemetry();
+        let mut source_shape = shape.clone();
+        source_shape[axis] = 1;
+        let route = DeepLearningPool1DRoute {
+            reduction: DeepLearningPool1DRequest {
+                axis_zero_based: axis,
+            },
+            target_shape: source_shape.clone(),
+            target_to_source: (0..source_shape.len()).collect(),
+            source_shape,
+        };
+        assert_eq!(
+            provider
+                .deep_learning_global_average_pool_1d_capability(&input, &route)
+                .unwrap(),
+            DeepLearningPool1DCapability::Ready
+        );
+        let mut malformed = route.clone();
+        malformed.target_to_source.fill(0);
+        assert!(provider
+            .deep_learning_global_average_pool_1d_capability(&input, &malformed)
+            .is_err());
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         let output = provider
             .deep_learning_global_average_pool_1d(
                 &input,

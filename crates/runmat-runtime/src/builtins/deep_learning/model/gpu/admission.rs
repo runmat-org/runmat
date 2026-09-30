@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::builtins::deep_learning::model::parameters::ParameterRole;
+use runmat_accelerate_api::DeepLearningPool1DCapability;
 use runmat_types::ClassIdentity;
 use std::fmt;
 
@@ -96,6 +97,32 @@ fn classify_global_pool(
     Ok(Ok(axis))
 }
 
+fn admit_global_pool_route(
+    layers: &[Value],
+    input: &GpuTensorHandle,
+    input_axes: &AxisPlan,
+    source_axes: &AxisPlan,
+    target_axes: &AxisPlan,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    function: &'static str,
+) -> BuiltinResult<Result<usize, GpuCapabilityReason>> {
+    let axis = match classify_global_pool(layers, input, input_axes, function)? {
+        Ok(axis) => axis,
+        Err(reason) => return Ok(Err(reason)),
+    };
+    let route = super::pooling::route(input_axes, source_axes, target_axes, axis, function)?;
+    let capability = provider
+        .deep_learning_global_average_pool_1d_capability(input, &route)
+        .map_err(|error| provider_failure(function, "resident pooling admission", error.into()))?;
+    match capability {
+        DeepLearningPool1DCapability::Ready => Ok(Ok(axis)),
+        DeepLearningPool1DCapability::UnsupportedOperation => {
+            Ok(Err(GpuCapabilityReason::ProviderOperation))
+        }
+        DeepLearningPool1DCapability::ResourceLimit => Ok(Err(GpuCapabilityReason::ResourceLimit)),
+    }
+}
+
 #[derive(Debug)]
 pub(in crate::builtins::deep_learning::model) enum GpuForwardAdmission {
     Ready(GpuForwardLayout),
@@ -111,6 +138,7 @@ pub(in crate::builtins::deep_learning::model) enum GpuCapabilityReason {
     Layer(ClassIdentity),
     NoSupportedTransform,
     ProviderOperation,
+    ResourceLimit,
 }
 
 impl fmt::Display for GpuCapabilityReason {
@@ -145,6 +173,10 @@ impl fmt::Display for GpuCapabilityReason {
                 formatter,
                 "provider does not implement a required resident operation"
             ),
+            Self::ResourceLimit => write!(
+                formatter,
+                "provider cannot execute this resident pooling geometry within its device limits"
+            ),
         }
     }
 }
@@ -168,12 +200,22 @@ pub(in crate::builtins::deep_learning::model) fn admit_gpu_forward(
     layers: &[Value],
     input: &GpuTensorHandle,
     axes: &AxisPlan,
+    source_axes: &AxisPlan,
+    target_axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<GpuForwardAdmission> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| invalid_owner(function, GpuOperand::Input))?;
     if has_global_pool(layers) {
-        return match classify_global_pool(layers, input, axes, function)? {
+        return match admit_global_pool_route(
+            layers,
+            input,
+            axes,
+            source_axes,
+            target_axes,
+            provider,
+            function,
+        )? {
             Ok(axis) => Ok(GpuForwardAdmission::Ready(GpuForwardLayout::GlobalPool {
                 axis,
             })),
@@ -197,12 +239,22 @@ pub(super) fn require_gpu_forward_layers(
     input: &GpuTensorHandle,
     layout: GpuForwardLayout,
     axes: &AxisPlan,
+    source_axes: &AxisPlan,
+    target_axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<()> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| invalid_owner(function, GpuOperand::Input))?;
     if let GpuForwardLayout::GlobalPool { axis } = layout {
-        return match classify_global_pool(layers, input, axes, function)? {
+        return match admit_global_pool_route(
+            layers,
+            input,
+            axes,
+            source_axes,
+            target_axes,
+            provider,
+            function,
+        )? {
             Ok(admitted) if admitted == axis => Ok(()),
             Ok(_) => Err(deep_learning_error(
                 function,
@@ -263,7 +315,7 @@ fn classify_layers(
             Some(ForwardLayerKind::FullyConnected) if saw_input => {
                 features = fully_connected_output_width(layer, features, function)?;
                 for role in [ParameterRole::Weights, ParameterRole::Bias] {
-                    if let Some(handle) = resident_parameter_handle(layer, role.name()) {
+                    if let Some(handle) = resident_parameter_handle(layer, role) {
                         let owner =
                             crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
                                 .ok_or_else(|| {

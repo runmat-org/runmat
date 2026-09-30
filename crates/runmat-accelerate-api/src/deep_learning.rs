@@ -8,3 +8,22 @@
 pub struct DeepLearningPool1DRequest {
     pub axis_zero_based: usize,
 }
+
+/// The complete device-side presentation required after a pooling reduction.
+/// `source_shape` is the logical post-pool shape (possibly with the reduced
+/// axis removed); `target_to_source` maps each final axis to that source axis.
+/// Providers inspect this without allocating or dispatching any work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeepLearningPool1DRoute {
+    pub reduction: DeepLearningPool1DRequest,
+    pub source_shape: Vec<usize>,
+    pub target_shape: Vec<usize>,
+    pub target_to_source: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepLearningPool1DCapability {
+    Ready,
+    UnsupportedOperation,
+    ResourceLimit,
+}
