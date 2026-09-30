@@ -6,7 +6,9 @@ use super::*;
 
 mod schema;
 mod table;
+mod publication;
 
+pub(in crate::builtins::deep_learning) use publication::{publish_updates, StateUpdate};
 pub(in crate::builtins::deep_learning) use schema::{StateKey, StateRole};
 
 pub(super) const STORAGE_PROPERTY: &str = "_State";
@@ -73,13 +75,7 @@ pub(in crate::builtins) fn project(
     network: &ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<Value> {
-    // Admission is shared with execution's borrowed view; publishing a table
-    // must not become a separate interpretation of state identities or storage.
-    let (keys, values): (Vec<_>, Vec<_>) = view(network, function)?
-        .into_iter()
-        .map(|row| (row.key, super::parameters::public_value(Some(row.value))))
-        .unzip();
-    table::table(&keys, values, function)
+    publish_updates(network, Vec::<StateUpdate>::new(), function)
 }
 
 pub(in crate::builtins) fn apply(
@@ -116,7 +112,7 @@ pub(in crate::builtins) fn apply(
 mod tests {
     use super::*;
 
-    fn recurrent_network() -> ObjectInstance {
+    pub(super) fn recurrent_network() -> ObjectInstance {
         let mut layer = ObjectInstance::new(runmat_builtins::LSTM_LAYER_CLASS.owned());
         layer
             .properties
