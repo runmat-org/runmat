@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 #[test]
 fn only_external_workspace_mutation_requests_reconciliation() {
     let (function, input) = fixture(Value::Num(1.0));
-    let state = NativeWorkspaceState::new(&function, input).unwrap();
+    let state = NativeWorkspaceState::new(&function, input, Default::default()).unwrap();
     assert!(!state.needs_reconciliation());
     state.synchronize_local(0, Value::Num(2.0)).unwrap();
     assert!(!state.needs_reconciliation());
@@ -64,7 +64,7 @@ fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
 }
 
 fn error(function: &NativeFunction, input: NativeWorkspaceInput) -> String {
-    match NativeWorkspaceState::new(function, input) {
+    match NativeWorkspaceState::new(function, input, Default::default()) {
         Ok(_) => panic!("invalid binding accepted"),
         Err(error) => error.to_string(),
     }
@@ -75,7 +75,7 @@ fn caller_snapshot_nan_payload_is_retained_without_copying_storage() {
     let bits = 0xfff8_0000_0000_0042;
     let tensor = Tensor::new(vec![f64::from_bits(bits), -0.0], vec![1, 2]).unwrap();
     let (function, input) = fixture(Value::Tensor(tensor.clone()));
-    let state = NativeWorkspaceState::new(&function, input).unwrap();
+    let state = NativeWorkspaceState::new(&function, input, Default::default()).unwrap();
     let Value::Tensor(actual) = state.initial_value(0).unwrap() else {
         panic!("tensor value");
     };
@@ -132,7 +132,40 @@ fn unassigned_local_may_be_absent_and_unreferenced_caller_values_are_retained() 
     input.bindings.clear();
     input.values.clear();
     input.values.insert("ambient".into(), Value::Num(2.0));
-    let state = NativeWorkspaceState::new(&function, input).unwrap();
+    let state = NativeWorkspaceState::new(&function, input, Default::default()).unwrap();
     assert!(state.initial_value(0).is_none());
     assert_eq!(state.snapshot().unwrap().values["ambient"], Value::Num(2.0));
+}
+
+#[test]
+fn dynamic_assignment_publishes_active_global_and_clear_unbinds_only_the_frame() {
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    futures::executor::block_on(runtime.scope(async {
+        let (function, input) = fixture(Value::Num(7.0));
+        let aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
+        aliases.declare_named(0, "missing".into());
+        runmat_runtime::workspace::session::store_global_named("missing", Value::Num(7.0));
+        let state = NativeWorkspaceState::new(&function, input, aliases.clone()).unwrap();
+        let service = state.service();
+        service.assign("missing", Value::Num(8.0)).unwrap();
+        assert_eq!(
+            runmat_runtime::workspace::session::global_value("missing"),
+            Some(Value::Num(8.0))
+        );
+        service.remove("missing").unwrap();
+        assert_eq!(aliases.name_for_slot(0), None);
+        service.assign("missing", Value::Num(9.0)).unwrap();
+        assert_eq!(
+            runmat_runtime::workspace::session::global_value("missing"),
+            Some(Value::Num(8.0))
+        );
+        service.clear().unwrap();
+        assert_eq!(state.snapshot().unwrap().values.len(), 0);
+        assert_eq!(
+            runmat_runtime::workspace::session::global_value("missing"),
+            Some(Value::Num(8.0))
+        );
+    }));
 }

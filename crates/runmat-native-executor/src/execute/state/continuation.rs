@@ -161,7 +161,7 @@ impl HostState {
             .interpreter_resume_supported(site)
             .then(|| self.interpreter_resume_points.get(&frame.point).copied())
             .flatten();
-        let materialized = MaterializedFrame::from_native(
+        let mut materialized = MaterializedFrame::from_native(
             frame,
             NativeMaterializationContext {
                 phase: site.phase,
@@ -170,7 +170,7 @@ impl HostState {
                 supplied_inputs: self.supplied_inputs,
                 requested_outputs: self.requested_outputs,
                 missing_input_locals: self.missing_input_locals.clone(),
-                global_bindings: self.global_bindings.clone(),
+                global_bindings: self.global_bindings.snapshot().into_iter().collect(),
                 persistent_bindings: self.persistent_bindings.clone(),
             },
             |value| {
@@ -187,6 +187,18 @@ impl HostState {
                 }
             },
         )?;
+        // A nested invocation can change a global after this frame's last SSA
+        // definition. Override only its materialized local, leaving any other
+        // local or already-evaluated operand sharing that SSA value untouched.
+        for local in &mut materialized.locals {
+            if let Some(reference) = self.declared_global_reference(local.local.0 as usize)? {
+                local.value = if reference.is_null() {
+                    None
+                } else {
+                    Some(self.arena.get(reference)?.clone())
+                };
+            }
+        }
         self.pending_deoptimization = Some(materialized.clone());
         Ok(materialized)
     }

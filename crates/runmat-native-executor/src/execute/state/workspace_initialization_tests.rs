@@ -7,6 +7,87 @@ use std::{rc::Rc, sync::Arc};
 #[path = "workspace_initialization_tests/sync_completion.rs"]
 mod sync_completion;
 
+#[test]
+fn declared_global_reads_follow_nested_session_writes() {
+    runmat_gc::gc_test_context(|| {
+        let mut state = omitted_input_state();
+        let runtime = state.runtime.clone();
+        let _scope = runtime.enter();
+        state.declare_global(0, "x".into()).unwrap();
+        let unchanged = state.local_reference(0).unwrap();
+        assert_eq!(state.local_reference(0).unwrap(), unchanged);
+        runmat_runtime::workspace::session::store_global_named("x", Value::Num(7.0));
+        let value = crate::execute::operand::materialize_operand(
+            &mut state,
+            &runmat_mir::MirOperand::Local(runmat_mir::MirLocalId(0)),
+        )
+        .unwrap();
+        assert_eq!(value, Value::Num(7.0));
+        assert_eq!(state.assignment_root(0, false).unwrap(), Value::Num(7.0));
+
+        let reference = state.arena.insert(Value::Num(9.0));
+        state.set_local(0, reference).unwrap();
+        assert_eq!(
+            runmat_runtime::workspace::session::global_value("x"),
+            Some(Value::Num(9.0))
+        );
+        state.set_local(0, NativeValueRef::NULL).unwrap();
+        let restored = state.local_reference(0).unwrap();
+        assert_eq!(state.arena.get(restored).unwrap(), &Value::Num(9.0));
+    });
+}
+
+#[test]
+fn missing_canonical_global_replaces_an_old_frame_snapshot_with_empty() {
+    runmat_gc::gc_test_context(|| {
+        let mut state = omitted_input_state();
+        let runtime = state.runtime.clone();
+        let _scope = runtime.enter();
+        state.declare_global(0, "x".into()).unwrap();
+        let old = state.arena.insert(Value::Num(9.0));
+        state.set_local(0, old).unwrap();
+        let refreshed = state
+            .replace_local_from_global(
+                0,
+                None,
+                runmat_runtime::workspace::session::GlobalRevision::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            state.arena.get(refreshed).unwrap(),
+            &empty_workspace_value()
+        );
+        assert_ne!(refreshed, old);
+    });
+}
+
+#[test]
+fn global_deoptimization_refreshes_only_the_alias_not_a_shared_ssa_operand() {
+    runmat_gc::gc_test_context(|| {
+        let mut state = omitted_input_state();
+        let runtime = state.runtime.clone();
+        let _scope = runtime.enter();
+        state.declare_global(0, "x".into()).unwrap();
+        let old = state.arena.insert(Value::Num(1.0));
+        state.set_local(0, old).unwrap();
+        state.values.insert(NativeValueId(1), old);
+        let terminator = state.function.blocks[0].terminator.clone();
+        let mut frame = terminator.frame_state.clone();
+        frame.locals.push(NativeFrameLocal {
+            local: NativeLocalId(0),
+            value: NativeValueId(1),
+        });
+        frame.operands.push(NativeValueId(1));
+
+        runmat_runtime::workspace::session::store_global_named("x", Value::Num(7.0));
+        let materialized = state
+            .materialize_deoptimization(&frame, &terminator.site)
+            .unwrap();
+        assert_eq!(materialized.locals[0].value, Some(Value::Num(7.0)));
+        assert_eq!(materialized.operands, vec![Value::Num(1.0)]);
+    });
+}
+
 fn omitted_input_state() -> HostState {
     let point = ProgramPointId {
         function: ProgramFunctionId(0),
@@ -88,7 +169,7 @@ fn omitted_input_state() -> HostState {
     .0
 }
 
-fn missing_error(state: &HostState) {
+fn missing_error(state: &mut HostState) {
     assert!(
         matches!(state.assignment_root(0, true), Err(NativeExecutorError::Runtime(error)) if error.identifier() == Some("RunMat:NotEnoughInputs"))
     );
@@ -98,9 +179,9 @@ fn missing_error(state: &HostState) {
 fn non_null_write_initializes_an_omitted_input_and_deopt_metadata() {
     runmat_gc::gc_test_context(|| {
         let mut state = omitted_input_state();
-        missing_error(&state);
+        missing_error(&mut state);
         state.set_local(0, NativeValueRef::NULL).unwrap();
-        missing_error(&state);
+        missing_error(&mut state);
         let reference = state
             .arena
             .insert(Value::Struct(runmat_value::StructValue::new()));
@@ -126,7 +207,7 @@ fn workspace_reconciliation_records_initialization_but_not_absence() {
     runmat_gc::gc_test_context(|| {
         let mut state = omitted_input_state();
         state.reconcile_workspace().unwrap();
-        missing_error(&state);
+        missing_error(&mut state);
         state
             .workspace
             .as_ref()

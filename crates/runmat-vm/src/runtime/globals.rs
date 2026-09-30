@@ -1,6 +1,7 @@
 use crate::bytecode::instr::Instr;
 use crate::bytecode::program::Bytecode;
 use crate::runtime::workspace::refresh_workspace_state;
+use runmat_runtime::workspace::bindings::{FrameGlobalBinding, FrameGlobalBindings};
 use runmat_value::Value;
 use std::collections::HashMap;
 
@@ -12,6 +13,16 @@ pub fn get_global_value(name: &str) -> Option<Value> {
     runmat_runtime::workspace::session::global_value(name)
 }
 
+pub fn current_bound_value(bindings: &FrameGlobalBindings, slot: usize) -> Option<Value> {
+    match bindings.binding_for_slot(slot) {
+        Some(FrameGlobalBinding::Named(name)) => get_global_value(&name),
+        Some(FrameGlobalBinding::LegacySlot) => {
+            runmat_runtime::workspace::session::global_slot_value(slot)
+        }
+        None => None,
+    }
+}
+
 pub fn collect_thread_roots() -> Vec<Value> {
     runmat_runtime::workspace::session::roots()
 }
@@ -19,13 +30,25 @@ pub fn collect_thread_roots() -> Vec<Value> {
 pub fn update_global_store(
     stored_index: usize,
     stored_value: &Value,
-    global_aliases: &HashMap<usize, String>,
+    global_aliases: &FrameGlobalBindings,
 ) {
-    runmat_runtime::workspace::session::update_global_slot(
-        stored_index,
-        global_aliases.get(&stored_index).map(String::as_str),
-        stored_value,
-    );
+    match global_aliases.binding_for_slot(stored_index) {
+        Some(FrameGlobalBinding::Named(alias)) => {
+            runmat_runtime::workspace::session::update_global_slot(
+                stored_index,
+                Some(&alias),
+                stored_value,
+            );
+        }
+        Some(FrameGlobalBinding::LegacySlot) => {
+            runmat_runtime::workspace::session::update_global_slot(
+                stored_index,
+                None,
+                stored_value,
+            );
+        }
+        None => {}
+    }
 }
 
 pub fn update_persistent_local_store(func_name: &str, stored_offset: usize, stored_value: &Value) {
@@ -36,8 +59,13 @@ pub fn update_persistent_local_store(func_name: &str, stored_offset: usize, stor
     );
 }
 
-pub fn declare_global(indices: Vec<usize>, vars: &mut Vec<Value>) {
+pub fn declare_global(
+    indices: Vec<usize>,
+    vars: &mut Vec<Value>,
+    global_aliases: &FrameGlobalBindings,
+) {
     for i in indices {
+        global_aliases.declare_legacy_slot(i);
         let val_opt = runmat_runtime::workspace::session::global_slot_value(i);
         if let Some(v) = val_opt {
             if i >= vars.len() {
@@ -54,7 +82,7 @@ pub fn declare_global_named(
     indices: Vec<usize>,
     names: Vec<String>,
     vars: &mut Vec<Value>,
-    global_aliases: &mut HashMap<usize, String>,
+    global_aliases: &FrameGlobalBindings,
 ) {
     for (pos, i) in indices.into_iter().enumerate() {
         let name = names
@@ -71,7 +99,7 @@ pub fn declare_global_named(
             refresh_workspace_state(vars);
         }
         runmat_runtime::workspace::session::bind_global_slot(i, &name);
-        global_aliases.insert(i, name);
+        global_aliases.declare_named(i, name);
     }
 }
 

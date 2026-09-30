@@ -66,7 +66,7 @@ pub struct DispatchState<'a> {
     pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,
     pub last_exception: &'a mut Option<runmat_value::MException>,
     pub imports: &'a mut Vec<(Vec<String>, bool)>,
-    pub global_aliases: &'a mut HashMap<usize, String>,
+    pub global_aliases: &'a runmat_runtime::workspace::bindings::FrameGlobalBindings,
     pub persistent_aliases: &'a mut HashMap<usize, String>,
     pub missing_input_slots: &'a mut HashSet<usize>,
     pub pc: &'a mut usize,
@@ -784,15 +784,15 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadVar(index) => {
-            if let Some(alias) = global_aliases.get(index) {
-                if let Some(global_value) = crate::runtime::globals::get_global_value(alias) {
-                    if *index >= vars.len() {
-                        vars.resize(*index + 1, Value::Num(0.0));
-                        refresh_workspace_state(vars);
-                    }
-                    vars[*index] = global_value;
+            if let Some(global_value) =
+                crate::runtime::globals::current_bound_value(global_aliases, *index)
+            {
+                if *index >= vars.len() {
+                    vars.resize(*index + 1, Value::Num(0.0));
                     refresh_workspace_state(vars);
                 }
+                vars[*index] = global_value;
+                refresh_workspace_state(vars);
             }
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
@@ -827,15 +827,15 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadVarForIndexAssignment(index) | Instr::LoadVarForStructAssignment(index) => {
-            if let Some(alias) = global_aliases.get(index) {
-                if let Some(global_value) = crate::runtime::globals::get_global_value(alias) {
-                    if *index >= vars.len() {
-                        vars.resize(*index + 1, Value::Num(0.0));
-                        refresh_workspace_state(vars);
-                    }
-                    vars[*index] = global_value;
+            if let Some(global_value) =
+                crate::runtime::globals::current_bound_value(global_aliases, *index)
+            {
+                if *index >= vars.len() {
+                    vars.resize(*index + 1, Value::Num(0.0));
                     refresh_workspace_state(vars);
                 }
+                vars[*index] = global_value;
+                refresh_workspace_state(vars);
             }
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
@@ -1020,7 +1020,7 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::DeclareGlobal(indices) => {
-            crate::runtime::globals::declare_global(indices.clone(), vars);
+            crate::runtime::globals::declare_global(indices.clone(), vars, global_aliases);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

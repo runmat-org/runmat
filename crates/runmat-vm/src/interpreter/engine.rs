@@ -15,6 +15,7 @@ pub fn prepare_workspace_guard(
     vars: &mut Vec<Value>,
     initial_assigned_var_count: usize,
     initially_unassigned_slots: &HashSet<usize>,
+    global_aliases: runmat_runtime::workspace::bindings::FrameGlobalBindings,
 ) -> Option<WorkspaceStateGuard> {
     let pending_state = take_pending_workspace_state();
     let guard = pending_state.map(|(names, assigned)| {
@@ -22,7 +23,7 @@ pub fn prepare_workspace_guard(
             .into_iter()
             .filter(|name| names.contains_key(name))
             .collect();
-        set_workspace_state(names, filtered_assigned, vars)
+        set_workspace_state(names, filtered_assigned, vars, global_aliases.clone())
     });
     if guard.is_some() {
         refresh_workspace_state(vars);
@@ -39,7 +40,7 @@ pub fn prepare_workspace_guard(
             assigned.insert(name.clone());
         }
     }
-    let guard = set_transient_workspace_state(names, assigned, vars);
+    let guard = set_transient_workspace_state(names, assigned, vars, global_aliases);
     refresh_workspace_state(vars);
     Some(guard)
 }

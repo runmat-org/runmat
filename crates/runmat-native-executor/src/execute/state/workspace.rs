@@ -16,8 +16,58 @@ impl HostState {
         }
     }
 
+    pub(in crate::execute) fn local_reference(
+        &mut self,
+        slot: usize,
+    ) -> NativeExecutorResult<NativeValueRef> {
+        let reference = self
+            .locals
+            .get(slot)
+            .copied()
+            .ok_or_else(|| NativeExecutorError::Host("native local is out of bounds".into()))?;
+        let Some(name) = self.global_bindings.name_for_slot(slot) else {
+            return Ok(reference);
+        };
+        let revision = runmat_runtime::workspace::session::global_revision();
+        if self.global_seen_revision.get(&slot) == Some(&revision) {
+            return Ok(reference);
+        }
+        // A nested invocation can update this alias without touching this frame's
+        // local slot. The session global, not the last SSA/local snapshot, owns it.
+        let value = runmat_runtime::workspace::session::global_value(&name);
+        self.replace_local_from_global(slot, value, revision)
+    }
+
+    fn replace_local_from_global(
+        &mut self,
+        slot: usize,
+        value: Option<Value>,
+        revision: runmat_runtime::workspace::session::GlobalRevision,
+    ) -> NativeExecutorResult<NativeValueRef> {
+        let value = value.unwrap_or_else(empty_workspace_value);
+        let refreshed = self.arena.insert(value);
+        self.locals[slot] = refreshed;
+        if let Some(workspace) = &self.workspace {
+            workspace.synchronize_local(slot, self.arena.get(refreshed)?.clone())?;
+        }
+        self.record_local_initialization(slot, refreshed);
+        self.global_seen_revision.insert(slot, revision);
+        Ok(refreshed)
+    }
+
+    pub(in crate::execute) fn declared_global_reference(
+        &mut self,
+        slot: usize,
+    ) -> NativeExecutorResult<Option<NativeValueRef>> {
+        self.global_bindings
+            .name_for_slot(slot)
+            .is_some()
+            .then(|| self.local_reference(slot))
+            .transpose()
+    }
+
     pub(in crate::execute) fn assignment_root(
-        &self,
+        &mut self,
         slot: usize,
         create_struct: bool,
     ) -> NativeExecutorResult<Value> {
@@ -32,9 +82,7 @@ impl HostState {
             )
             .into());
         }
-        let reference = self.locals.get(slot).copied().ok_or_else(|| {
-            NativeExecutorError::Host("assignment root local is out of bounds".into())
-        })?;
+        let reference = self.local_reference(slot)?;
         if reference.is_null() && create_struct {
             return Ok(Value::Struct(runmat_value::StructValue::new()));
         }
@@ -47,6 +95,9 @@ impl HostState {
             .get_mut(slot)
             .ok_or_else(|| NativeExecutorError::Host("native local is out of bounds".into()))?;
         *local = value;
+        if value.is_null() {
+            self.global_seen_revision.remove(&slot);
+        }
         if !value.is_null() {
             if let Some(workspace) = &self.workspace {
                 workspace.synchronize_local(slot, self.arena.get(value)?.clone())?;
@@ -79,6 +130,7 @@ impl HostState {
                 NativeExecutorError::Host("native workspace local is out of bounds".into())
             })?;
             *local = reference;
+            self.global_seen_revision.remove(&slot);
             self.record_local_initialization(slot, reference);
         }
         if let Some(workspace) = &self.workspace {
@@ -109,7 +161,7 @@ impl HostState {
                 "native local cannot be both global and persistent".into(),
             ));
         }
-        self.global_bindings.insert(slot, name.clone());
+        self.global_bindings.declare_named(slot, name.clone());
         let value = runmat_runtime::workspace::session::global_value(&name)
             .unwrap_or_else(empty_workspace_value);
         let reference = self.arena.insert(value);
@@ -117,7 +169,7 @@ impl HostState {
     }
 
     pub fn declare_persistent(&mut self, slot: usize, name: String) -> NativeExecutorResult<()> {
-        if self.global_bindings.contains_key(&slot) {
+        if self.global_bindings.name_for_slot(slot).is_some() {
             return Err(NativeExecutorError::Host(
                 "native local cannot be both global and persistent".into(),
             ));
@@ -139,8 +191,10 @@ impl HostState {
             return Ok(());
         }
         let value = self.arena.get(reference)?.clone();
-        if let Some(name) = self.global_bindings.get(&slot) {
-            runmat_runtime::workspace::session::store_global_named(name, value.clone());
+        if let Some(name) = self.global_bindings.name_for_slot(slot) {
+            runmat_runtime::workspace::session::store_global_named(&name, value.clone());
+            self.global_seen_revision
+                .insert(slot, runmat_runtime::workspace::session::global_revision());
         }
         if let Some(name) = self.persistent_bindings.get(&slot) {
             runmat_runtime::workspace::session::store_persistent_named(

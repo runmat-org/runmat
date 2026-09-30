@@ -1,3 +1,4 @@
+use runmat_runtime::workspace::bindings::{FrameGlobalBinding, FrameGlobalBindings};
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::cell::RefCell;
@@ -46,6 +47,7 @@ struct WorkspaceState {
 
 struct WorkspaceFrame {
     state: WorkspaceState,
+    global_aliases: FrameGlobalBindings,
     vars_ptr: *mut Vec<Value>,
     vars_snapshot: Vec<Value>,
     publish_on_drop: bool,
@@ -266,16 +268,18 @@ pub fn set_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
+    global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
-    set_workspace_state_with_publish(names, assigned, vars, true)
+    set_workspace_state_with_publish(names, assigned, vars, true, global_aliases)
 }
 
 pub fn set_transient_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
+    global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
-    set_workspace_state_with_publish(names, assigned, vars, false)
+    set_workspace_state_with_publish(names, assigned, vars, false, global_aliases)
 }
 
 fn set_workspace_state_with_publish(
@@ -283,6 +287,7 @@ fn set_workspace_state_with_publish(
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
     publish_on_drop: bool,
+    global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
     let mut slot_lifecycle = HashMap::new();
     for (name, idx) in &names {
@@ -297,6 +302,7 @@ fn set_workspace_state_with_publish(
     let owner = current_owner();
     with_stack_mut(owner, |stack| {
         stack.push(WorkspaceFrame {
+            global_aliases,
             state: WorkspaceState {
                 names,
                 assigned,
@@ -397,6 +403,7 @@ pub fn workspace_clear() -> Result<(), String> {
         }
         ws.names.clear();
         ws.assigned.clear();
+        frame.global_aliases.unbind_all();
         frame.vars_snapshot = vars.clone();
         ws.data_ptr = vars.as_ptr();
         ws.len = vars.len();
@@ -416,6 +423,7 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
                 *value = Value::Num(0.0);
             }
             ws.assigned.remove(name);
+            frame.global_aliases.unbind_slot(idx);
             mark_slot_unassigned(ws, idx, name.to_string());
             frame.vars_snapshot = vars.clone();
             ws.data_ptr = vars.as_ptr();
@@ -485,6 +493,15 @@ pub fn replace_workspace_target_vars_and_state(
         let target_vars = unsafe { &mut *frame.vars_ptr };
         *target_vars = vars;
         frame.vars_snapshot = target_vars.clone();
+        for (slot, binding) in frame.global_aliases.snapshot() {
+            let still_named = match binding {
+                FrameGlobalBinding::Named(name) => names.get(&name) == Some(&slot),
+                FrameGlobalBinding::LegacySlot => names.values().any(|active| *active == slot),
+            };
+            if !still_named {
+                frame.global_aliases.unbind_slot(slot);
+            }
+        }
         frame.state.names = names;
         frame.state.assigned = assigned;
         frame.state.slot_lifecycle =
@@ -530,6 +547,15 @@ fn set_workspace_variable_in_frame(
         vars.resize(idx + 1, Value::Num(0.0));
     }
     vars[idx] = value;
+    match frame.global_aliases.binding_for_slot(idx) {
+        Some(FrameGlobalBinding::Named(bound)) if bound == name => {
+            runmat_runtime::workspace::session::store_global_named(name, vars[idx].clone());
+        }
+        Some(FrameGlobalBinding::LegacySlot) => {
+            runmat_runtime::workspace::session::update_global_slot(idx, None, &vars[idx]);
+        }
+        Some(FrameGlobalBinding::Named(_)) | None => {}
+    }
     frame.vars_snapshot = vars.clone();
     ws.data_ptr = vars.as_ptr();
     ws.len = vars.len();
@@ -614,7 +640,12 @@ mod tests {
 
         let mut vars = Vec::new();
         {
-            let _guard = set_workspace_state(HashMap::new(), HashSet::new(), &mut vars);
+            let _guard = set_workspace_state(
+                HashMap::new(),
+                HashSet::new(),
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
             f(&mut vars);
         }
 
@@ -627,7 +658,12 @@ mod tests {
             let mut vars = vec![Value::String(label.into())];
             let names = HashMap::from([(String::from("value"), 0)]);
             let assigned = HashSet::from([String::from("value")]);
-            let _guard = set_transient_workspace_state(names, assigned, &mut vars);
+            let _guard = set_transient_workspace_state(
+                names,
+                assigned,
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
             let mut yielded = false;
             std::future::poll_fn(move |_| {
                 if yielded {
@@ -696,7 +732,8 @@ mod tests {
         let assigned = HashSet::from(["x".to_string()]);
 
         {
-            let _guard = set_workspace_state(names, assigned, &mut vars);
+            let _guard =
+                set_workspace_state(names, assigned, &mut vars, FrameGlobalBindings::default());
             workspace_clear().unwrap();
 
             assert_eq!(vars.len(), 3);
@@ -731,7 +768,12 @@ mod tests {
         let mut vars = Vec::new();
         let _ = take_updated_workspace_state();
         {
-            let _guard = set_workspace_state(HashMap::new(), HashSet::new(), &mut vars);
+            let _guard = set_workspace_state(
+                HashMap::new(),
+                HashSet::new(),
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
             set_workspace_variable("x", Value::Num(1.0), &mut vars).unwrap();
             set_workspace_variable("z", Value::Num(9.0), &mut vars).unwrap();
             workspace_remove("x").unwrap();
@@ -746,5 +788,38 @@ mod tests {
         assert!(snapshot.assigned.contains("x"));
         assert!(snapshot.assigned.contains("z"));
         assert_eq!(snapshot.vars[0], Value::Num(42.0));
+    }
+
+    #[test]
+    fn dynamic_assignment_publishes_active_global_but_clear_only_unbinds_frame() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        futures::executor::block_on(runtime.scope(async {
+            let aliases = FrameGlobalBindings::default();
+            aliases.declare_named(0, "alpha".into());
+            runmat_runtime::workspace::session::store_global_named("alpha", Value::Num(7.0));
+            let mut vars = vec![Value::Num(7.0)];
+            let _guard = set_workspace_state(
+                HashMap::from([("alpha".into(), 0)]),
+                HashSet::from(["alpha".into()]),
+                &mut vars,
+                aliases.clone(),
+            );
+            workspace_assign("alpha", Value::Num(8.0)).unwrap();
+            assert_eq!(
+                runmat_runtime::workspace::session::global_value("alpha"),
+                Some(Value::Num(8.0))
+            );
+            workspace_remove("alpha").unwrap();
+            assert_eq!(aliases.name_for_slot(0), None);
+            workspace_assign("alpha", Value::Num(9.0)).unwrap();
+            assert_eq!(
+                runmat_runtime::workspace::session::global_value("alpha"),
+                Some(Value::Num(8.0)),
+                "ordinary clear removes the frame binding, not the global value"
+            );
+            assert_eq!(vars[0], Value::Num(9.0));
+        }));
     }
 }

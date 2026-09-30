@@ -5,6 +5,7 @@ use log::debug;
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
+use runmat_runtime::workspace::bindings::FrameGlobalBindings;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -51,7 +52,7 @@ pub struct InterpreterResumeState {
     pub supplied_inputs: usize,
     pub requested_outputs: usize,
     pub missing_input_slots: HashSet<usize>,
-    pub global_aliases: HashMap<usize, String>,
+    pub global_aliases: HashMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
     pub persistent_aliases: HashMap<usize, String>,
     pub side_effect_epoch: u64,
 }
@@ -75,7 +76,7 @@ pub struct InterpreterState {
     pub try_stack: Vec<ActiveTryHandler>,
     pub last_exception: Option<runmat_value::MException>,
     pub imports: Vec<(Vec<String>, bool)>,
-    pub global_aliases: HashMap<usize, String>,
+    pub global_aliases: FrameGlobalBindings,
     pub persistent_aliases: HashMap<usize, String>,
     pub missing_input_slots: HashSet<usize>,
     pub current_function_name: String,
@@ -156,7 +157,7 @@ impl InterpreterState {
             try_stack: Vec::new(),
             last_exception: None,
             imports: Vec::new(),
-            global_aliases: HashMap::new(),
+            global_aliases: FrameGlobalBindings::default(),
             persistent_aliases: HashMap::new(),
             missing_input_slots: HashSet::new(),
             vars,

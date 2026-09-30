@@ -8,6 +8,7 @@ use runmat_hir::{EnvironmentEffect, WorkspaceEffect};
 use runmat_mir::{MirLocalId, MirStmtKind};
 use runmat_native_codegen::NativeInstruction;
 use runmat_runtime::context::RuntimeWorkspaceService;
+use runmat_runtime::workspace::bindings::FrameGlobalBindings;
 use runmat_types::BindingId;
 use runmat_value::Value;
 
@@ -61,12 +62,14 @@ pub(super) struct NativeWorkspaceState {
     externally_mutated: Rc<Cell<bool>>,
     local_names: BTreeMap<usize, String>,
     publish: bool,
+    global_aliases: FrameGlobalBindings,
 }
 
 impl NativeWorkspaceState {
     pub(super) fn new(
         function: &runmat_native_codegen::NativeFunction,
         input: NativeWorkspaceInput,
+        global_aliases: FrameGlobalBindings,
     ) -> NativeExecutorResult<Self> {
         let local_names = function
             .locals
@@ -123,10 +126,14 @@ impl NativeWorkspaceState {
             externally_mutated: Rc::new(Cell::new(false)),
             local_names,
             publish: true,
+            global_aliases,
         })
     }
 
-    pub(super) fn function_frame(function: &runmat_native_codegen::NativeFunction) -> Self {
+    pub(super) fn function_frame(
+        function: &runmat_native_codegen::NativeFunction,
+        global_aliases: FrameGlobalBindings,
+    ) -> Self {
         let local_names = function
             .locals
             .iter()
@@ -138,6 +145,7 @@ impl NativeWorkspaceState {
             externally_mutated: Rc::new(Cell::new(false)),
             local_names,
             publish: false,
+            global_aliases,
         }
     }
 
@@ -145,6 +153,8 @@ impl NativeWorkspaceState {
         Rc::new(NativeWorkspaceService {
             values: Rc::clone(&self.values),
             externally_mutated: Rc::clone(&self.externally_mutated),
+            global_aliases: self.global_aliases.clone(),
+            local_names: self.local_names.clone(),
         })
     }
 
@@ -215,6 +225,8 @@ fn workspace_borrow_error(error: std::cell::BorrowMutError) -> runmat_runtime::R
 struct NativeWorkspaceService {
     values: Rc<RefCell<BTreeMap<String, RootedWorkspaceValue>>>,
     externally_mutated: Rc<Cell<bool>>,
+    global_aliases: FrameGlobalBindings,
+    local_names: BTreeMap<usize, String>,
 }
 
 impl RuntimeWorkspaceService for NativeWorkspaceService {
@@ -244,12 +256,20 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), runmat_runtime::RuntimeError> {
+        let publish_global = self
+            .local_names
+            .iter()
+            .any(|(slot, local)| local == name && self.global_aliases.is_bound(*slot, name));
+        let global_value = publish_global.then(|| value.clone());
         let rooted = RootedWorkspaceValue::new(value).map_err(|error| *error)?;
         let previous = self
             .values
             .try_borrow_mut()
             .map_err(workspace_borrow_error)?
             .insert(name.to_string(), rooted);
+        if let Some(value) = global_value {
+            runmat_runtime::workspace::session::store_global_named(name, value);
+        }
         self.externally_mutated.set(true);
         drop(previous);
         Ok(())
@@ -263,6 +283,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
                 .map_err(workspace_borrow_error)?,
         );
         self.externally_mutated.set(true);
+        self.global_aliases.unbind_all();
         drop(previous);
         Ok(())
     }
@@ -274,6 +295,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .map_err(workspace_borrow_error)?
             .remove(name);
         self.externally_mutated.set(true);
+        self.global_aliases.unbind_name(name);
         drop(previous);
         Ok(())
     }

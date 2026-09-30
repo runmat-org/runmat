@@ -508,7 +508,9 @@ async fn interpret_resume_inner(
     state.completion_boundary = resume.completion_boundary;
     state.completion_assigned_slots = Some(assigned_slots);
     state.missing_input_slots = resume.missing_input_slots;
-    state.global_aliases = resume.global_aliases;
+    state.global_aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::from_snapshot(
+        resume.global_aliases,
+    );
     state.persistent_aliases = resume.persistent_aliases;
     register_class_metadata(&bytecode.instructions[..resume.pc])?;
     for instruction in &bytecode.instructions[..resume.pc] {
@@ -611,7 +613,7 @@ async fn run_interpreter_inner(
         mut try_stack,
         mut last_exception,
         mut imports,
-        mut global_aliases,
+        global_aliases,
         mut persistent_aliases,
         mut missing_input_slots,
         current_function_name,
@@ -707,6 +709,7 @@ async fn run_interpreter_inner(
         &mut vars,
         initial_assigned_var_count,
         &bytecode.initially_unassigned_slots,
+        global_aliases.clone(),
     );
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
     let mut sequence_register = interp_dispatch::SequenceState::default();
@@ -921,7 +924,7 @@ async fn run_interpreter_inner(
                     try_stack: &mut try_stack,
                     last_exception: &mut last_exception,
                     imports: &mut imports,
-                    global_aliases: &mut global_aliases,
+                    global_aliases: &global_aliases,
                     persistent_aliases: &mut persistent_aliases,
                     missing_input_slots: &mut missing_input_slots,
                     pc: &mut pc,

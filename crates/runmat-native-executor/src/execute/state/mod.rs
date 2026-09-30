@@ -74,7 +74,8 @@ pub(super) struct HostState {
     pub current_request: Option<runmat_runtime::native::NativeSiteRequest>,
     resume_target: Option<runmat_runtime::native::NativeSiteRequest>,
     current_block: Option<NativeBlockId>,
-    global_bindings: BTreeMap<usize, String>,
+    global_bindings: runmat_runtime::workspace::bindings::FrameGlobalBindings,
+    global_seen_revision: BTreeMap<usize, runmat_runtime::workspace::session::GlobalRevision>,
     persistent_bindings: BTreeMap<usize, String>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
     loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
@@ -166,10 +167,14 @@ impl HostState {
             .zip(&prepared.fixed)
             .filter_map(|(local, value)| value.is_none().then_some(*local))
             .collect();
+        let global_bindings = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
         let workspace = if let Some(input) = workspace {
-            super::workspace::NativeWorkspaceState::new(&function, input)?
+            super::workspace::NativeWorkspaceState::new(&function, input, global_bindings.clone())?
         } else {
-            super::workspace::NativeWorkspaceState::function_frame(&function)
+            super::workspace::NativeWorkspaceState::function_frame(
+                &function,
+                global_bindings.clone(),
+            )
         };
         let ports = runtime
             .service_ports()
@@ -281,7 +286,8 @@ impl HostState {
             current_request: None,
             resume_target: None,
             current_block: None,
-            global_bindings: BTreeMap::new(),
+            global_bindings,
+            global_seen_revision: BTreeMap::new(),
             persistent_bindings: BTreeMap::new(),
             active_exception_handlers: Vec::new(),
             next_await_continuation: 1,

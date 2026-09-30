@@ -208,6 +208,22 @@ async fn resume_interpreter(
             })
             .collect::<Result<std::collections::HashMap<_, _>, _>>()
     };
+    let global_aliases = frame
+        .global_bindings
+        .into_iter()
+        .map(|(local, binding)| {
+            layout
+                .mir_local_slots
+                .get(&runmat_mir::MirLocalId(local))
+                .map(|slot| (slot.0, binding))
+                .ok_or_else(|| {
+                    super::error::stage(
+                        "NativeDeoptimization",
+                        "native global binding has no canonical VM slot",
+                    )
+                })
+        })
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
     let missing_input_slots = frame
         .missing_input_locals
         .iter()
@@ -231,7 +247,7 @@ async fn resume_interpreter(
         supplied_inputs: frame.supplied_inputs,
         requested_outputs: frame.requested_outputs,
         missing_input_slots,
-        global_aliases: aliases(frame.global_bindings)?,
+        global_aliases,
         persistent_aliases: aliases(frame.persistent_bindings)?,
         side_effect_epoch: frame.site.side_effect_epoch,
     };
