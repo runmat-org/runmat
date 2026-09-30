@@ -1164,7 +1164,7 @@ fn canonical_forward_uses_invocation_outputs_and_cancellation() {
     runtime.set_error_namespace("Invocation");
     let source = CancellationSource::new();
     source.cancel(CancellationReason::User);
-    let cancelled = runtime.with_cancellation_token(source.token());
+    let cancelled = runtime.clone().with_cancellation_token(source.token());
     let error = block_on((bindings[0].implementation)(
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(cancelled), Some(1)),
     ))
