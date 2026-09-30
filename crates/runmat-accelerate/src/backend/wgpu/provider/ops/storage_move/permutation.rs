@@ -11,9 +11,8 @@ impl WgpuProvider {
         if elements == 0 {
             return Some(output);
         }
-        let capacity = u64::from(crate::backend::wgpu::config::elementwise_chunk_capacity(
-            self.workgroup_config.scalar,
-        )?);
+        let capacity =
+            crate::backend::wgpu::config::elementwise_chunk_capacity(self.workgroup_config.scalar)?;
         output.checked_add(
             elements
                 .div_ceil(capacity)
