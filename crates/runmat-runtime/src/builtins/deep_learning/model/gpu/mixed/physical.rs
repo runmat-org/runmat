@@ -14,6 +14,16 @@ use runmat_accelerate_api::{
     NumericElementType, ProviderViewStep,
 };
 use runmat_builtins::DeepLearningAxisLabel;
+use runmat_value::NumericDType;
+
+pub(super) fn admitted_source(host: &HostNetworkPlan<'_>) -> Option<DeepLearningForwardSource<'_>> {
+    let element_type = match host.execution_precision() {
+        NumericDType::F32 => NumericElementType::F32,
+        NumericDType::F64 => NumericElementType::F64,
+        _ => return None,
+    };
+    source(host.admitted_input(), element_type)
+}
 
 fn source<'a>(
     value: &'a Value,
@@ -77,12 +87,14 @@ fn step(operation: Operation, parameters: Bindings) -> DeepLearningForwardStep {
 /// admitted per-stage sequence for representable operands.
 pub(super) fn from_plan<'a, 'h: 'a>(
     host: &HostNetworkPlan<'h>,
-    input: &'a GpuTensorHandle,
     plan: &Plan,
     function: &'static str,
 ) -> BuiltinResult<Option<DeepLearningForwardRoute<'a>>> {
-    let element_type = input.physical().element_type();
-    let mut view = input.view().clone();
+    let Some(input) = admitted_source(host) else {
+        return Ok(None);
+    };
+    let element_type = input.element_type();
+    let mut view = input.view();
     let mut parameters = Vec::new();
     let mut steps = Vec::with_capacity(plan.stages.len());
     for selected in &plan.stages {
@@ -270,7 +282,7 @@ pub(super) fn from_plan<'a, 'h: 'a>(
         ));
     }
     let route = DeepLearningForwardRoute {
-        input: DeepLearningForwardSource::Resident(input),
+        input,
         parameters,
         steps,
         output_view: view,

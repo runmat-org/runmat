@@ -45,8 +45,7 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
             ));
         }
         if let Some(mixed) =
-            gpu::forward_mixed_network_gpu(request.network, &plan, handle, &output_axes, function)
-                .await?
+            gpu::forward_mixed_network_gpu(request.network, &plan, &output_axes, function).await?
         {
             match mixed {
                 Ok(output) => {
