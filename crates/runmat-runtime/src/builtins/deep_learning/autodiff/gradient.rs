@@ -23,13 +23,13 @@ pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
             ),
         ));
     }
+    validate_host_tape_dlarray_data(&loss)?;
     let Some(loss_node) = dlarray_node_id(&loss) else {
         return Err(deep_learning_error(
             "dlgradient",
             "dlgradient: loss must be a traced dlarray value produced inside dlfeval",
         ));
     };
-    validate_host_tape_dlarray_data(&loss)?;
     let loss_tensor = value_for_node(loss_node)?;
     if tensor::tensor_element_len(&loss_tensor) != 1 {
         return Err(deep_learning_error(
@@ -58,13 +58,13 @@ pub(super) fn gradient_tree_for_target(
 ) -> BuiltinResult<Value> {
     match target {
         Value::Object(object) if object.class_name == DLARRAY_CLASS => {
+            validate_host_tape_dlarray_data(target)?;
             let Some(id) = dlarray_node_id(target) else {
                 return Err(deep_learning_error(
                     "dlgradient",
                     "dlgradient: target dlarray was not traced inside the active dlfeval",
                 ));
             };
-            validate_host_tape_dlarray_data(target)?;
             let tensor = if let Some(tensor) = gradients.get(&id).cloned() {
                 tensor
             } else {

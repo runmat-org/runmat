@@ -1069,7 +1069,11 @@ fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
         vec![],
     ))
     .unwrap_err();
-    assert!(err.message.contains("layer is missing Weights"));
+    assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+    assert!(
+        err.message.contains("parameters and state must be initialized"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -1215,7 +1219,7 @@ fn predict_observations_in_columns_reads_typed_integer_storage_exactly() {
 #[test]
 fn forward_preserves_dlarray_wrapper() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
-    let data = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    let data = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
     let dl = block_on(dlarray_builtin(data, vec![Value::String("CB".into())])).unwrap();
     let out = block_on(forward_builtin(net, dl, vec![])).unwrap();
     let Value::Object(object) = out else {
@@ -1727,7 +1731,9 @@ fn dlgradient_returns_dlnetwork_learnable_gradients() {
     let Value::Tensor(weight_data) = weight_grad.properties.get("Data").unwrap() else {
         panic!("expected tensor weight gradient");
     };
-    assert_eq!(weight_data.materialize_f64(), vec![4.0, 4.0, 6.0, 6.0]);
+    // CB columns are samples (1,3) and (2,4). A summed output has unit
+    // upstream adjoints, so each output row receives channel sums (3,7).
+    assert_eq!(weight_data.materialize_f64(), vec![3.0, 3.0, 7.0, 7.0]);
     let Value::Object(bias_grad) = &values.data[1] else {
         panic!("expected dlarray bias gradient");
     };
