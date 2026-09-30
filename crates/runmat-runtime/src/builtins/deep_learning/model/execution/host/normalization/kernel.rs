@@ -6,8 +6,18 @@ use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use super::geometry::{Geometry, NormalizationError, NormalizationOptions};
 
 pub(in crate::builtins::deep_learning) enum NormalizationStatsData {
-    F32 { mean: Vec<f32>, inv_std: Vec<f32> },
-    F64 { mean: Vec<f64>, inv_std: Vec<f64> },
+    F32 {
+        scale: Vec<f32>,
+        mean_scaled: Vec<f32>,
+        inv_std_scaled: Vec<f32>,
+        inv_std_input: Vec<f32>,
+    },
+    F64 {
+        scale: Vec<f64>,
+        mean_scaled: Vec<f64>,
+        inv_std_scaled: Vec<f64>,
+        inv_std_input: Vec<f64>,
+    },
 }
 
 pub(in crate::builtins::deep_learning) struct NormalizationStats {
@@ -38,20 +48,32 @@ pub(in crate::builtins::deep_learning) fn forward(
         scale.as_f32_slice(),
         offset.as_f32_slice(),
     ) {
-        let (values, mean, inv_std) = forward_values(x, gamma, beta, &geometry);
+        let (values, scale, mean_scaled, inv_std_scaled, inv_std_input) =
+            forward_values(x, gamma, beta, &geometry);
         (
             Tensor::from_numeric_storage(NumericStorage::F32(values), input.shape.clone()),
-            NormalizationStatsData::F32 { mean, inv_std },
+            NormalizationStatsData::F32 {
+                scale,
+                mean_scaled,
+                inv_std_scaled,
+                inv_std_input,
+            },
         )
     } else if let (Some(x), Some(gamma), Some(beta)) = (
         input.as_f64_slice(),
         scale.as_f64_slice(),
         offset.as_f64_slice(),
     ) {
-        let (values, mean, inv_std) = forward_values(x, gamma, beta, &geometry);
+        let (values, scale, mean_scaled, inv_std_scaled, inv_std_input) =
+            forward_values(x, gamma, beta, &geometry);
         (
             Tensor::from_numeric_storage(NumericStorage::F64(values), input.shape.clone()),
-            NormalizationStatsData::F64 { mean, inv_std },
+            NormalizationStatsData::F64 {
+                scale,
+                mean_scaled,
+                inv_std_scaled,
+                inv_std_input,
+            },
         )
     } else {
         return Err(NormalizationError::UnsupportedPrecision);
@@ -74,30 +96,52 @@ fn forward_values<T: Real>(
     gamma: &[T],
     beta: &[T],
     g: &Geometry,
-) -> (Vec<T>, Vec<T>, Vec<T>) {
-    let mut mean = vec![T::zero(); g.groups];
+) -> (Vec<T>, Vec<T>, Vec<T>, Vec<T>, Vec<T>) {
+    // Scale before accumulating. For finite near-limit inputs, the mean and
+    // normalized output can be finite even when their unscaled sum or variance
+    // would overflow in the input precision.
+    let sqrt_epsilon = T::from_f64(g.epsilon).sqrt();
+    let mut scale = vec![sqrt_epsilon; g.groups];
+    for (index, &value) in x.iter().enumerate() {
+        let (group, _) = g.group_and_channel(index);
+        if value.abs() > scale[group] {
+            scale[group] = value.abs();
+        }
+    }
+    let mut mean_scaled = vec![T::zero(); g.groups];
     let mut variance = vec![T::zero(); g.groups];
-    let mut inv_std = vec![T::zero(); g.groups];
+    let mut inv_std_scaled = vec![T::zero(); g.groups];
+    let mut inv_std_input = vec![T::zero(); g.groups];
     let count = T::from_f64(g.group_size as f64);
     for (index, &value) in x.iter().enumerate() {
         let (group, _) = g.group_and_channel(index);
-        mean[group] += value;
+        mean_scaled[group] += value / scale[group];
     }
-    for value in &mut mean {
+    for value in &mut mean_scaled {
         *value = *value / count;
     }
     for (index, &value) in x.iter().enumerate() {
         let (group, _) = g.group_and_channel(index);
-        let delta = value - mean[group];
+        let delta = value / scale[group] - mean_scaled[group];
         variance[group] += delta * delta;
     }
-    for (index, value) in inv_std.iter_mut().enumerate() {
-        *value = T::one() / (variance[index] / count + T::from_f64(g.epsilon)).sqrt();
+    for index in 0..g.groups {
+        let epsilon_ratio = sqrt_epsilon / scale[index];
+        let denominator = (variance[index] / count + epsilon_ratio * epsilon_ratio).sqrt();
+        if denominator == T::zero() {
+            // Epsilon can disappear only after scaling by an extreme finite
+            // input. Zero scaled variance means every represented xhat is zero.
+            inv_std_input[index] = T::one() / sqrt_epsilon;
+        } else {
+            inv_std_scaled[index] = T::one() / denominator;
+            inv_std_input[index] = inv_std_scaled[index] / scale[index];
+        }
     }
     let mut output = vec![T::zero(); x.len()];
     for (index, &value) in x.iter().enumerate() {
         let (group, channel) = g.group_and_channel(index);
-        output[index] = (value - mean[group]) * inv_std[group] * gamma[channel] + beta[channel];
+        let normalized = (value / scale[group] - mean_scaled[group]) * inv_std_scaled[group];
+        output[index] = normalized * gamma[channel] + beta[channel];
     }
-    (output, mean, inv_std)
+    (output, scale, mean_scaled, inv_std_scaled, inv_std_input)
 }

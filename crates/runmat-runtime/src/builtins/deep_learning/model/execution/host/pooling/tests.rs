@@ -1,4 +1,4 @@
-use runmat_builtins::DeepLearningInputKind;
+use runmat_builtins::{DeepLearningAxisLayout, DeepLearningInputKind};
 use runmat_value::{NumericStorage, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
@@ -113,4 +113,101 @@ fn pool_adjoint_matches_finite_difference_and_rejects_empty_axis() {
         forward(&empty, &axes("CBT", &empty.shape)),
         Err(PoolError::EmptyPool)
     ));
+}
+
+#[test]
+fn documented_no_channel_formats_pool_their_spatial_or_time_axis() {
+    for (format, shape, expected_format, expected_shape, expected) in [
+        ("SB", vec![3, 2], "SB", vec![1, 2], vec![2., 5.]),
+        ("BT", vec![2, 3], "BU", vec![2, 1], vec![3., 4.]),
+        (
+            "SBT",
+            vec![3, 2, 2],
+            "SBT",
+            vec![1, 2, 2],
+            vec![2., 5., 8., 11.],
+        ),
+    ] {
+        let count = shape.iter().product();
+        let input = Tensor::new((1..=count).map(|v| v as f64).collect(), shape.clone()).unwrap();
+        let layout = DeepLearningAxisLayout::parse(format, shape.len()).unwrap();
+        let axes = AxisPlan::new(layout, &shape).unwrap();
+        let result = forward(&input, &axes).unwrap();
+        assert_eq!(result.axes.layout().labels(), expected_format);
+        assert_eq!(result.tensor.shape, expected_shape);
+        assert_eq!(result.tensor.as_f64_slice().unwrap(), expected);
+        let dy = Tensor::new(vec![1.; expected.len()], expected_shape).unwrap();
+        let dx = backward(&dy, &axes).unwrap();
+        assert!(dx.as_f64_slice().unwrap().iter().all(|v| *v == 1. / 3.));
+    }
+}
+
+#[test]
+fn finite_extreme_means_remain_finite_without_widening_or_raw_sum_overflow() {
+    let axes = axes("CT", &[1, 2]);
+    for (input, expected) in [
+        (vec![2.0e38_f32, 2.0e38_f32], 2.0e38_f32),
+        (vec![2.0e38_f32, -2.0e38_f32], 0.0_f32),
+    ] {
+        let tensor = Tensor::from_f32(input, vec![1, 2]).unwrap();
+        let result = forward(&tensor, &axes).unwrap();
+        assert_eq!(result.tensor.as_f32_slice().unwrap(), &[expected]);
+    }
+    let tensor = Tensor::new(vec![1.0e308, -1.0e308], vec![1, 2]).unwrap();
+    assert_eq!(
+        forward(&tensor, &axes)
+            .unwrap()
+            .tensor
+            .as_f64_slice()
+            .unwrap(),
+        &[0.]
+    );
+}
+
+#[test]
+fn nonsquare_spatial_sequence_and_unbatched_adjoint_match_independent_finite_differences() {
+    for (format, shape) in [("SCT", vec![3, 2, 4]), ("SCBT", vec![3, 2, 2, 4])] {
+        let count: usize = shape.iter().product();
+        let x: Vec<f64> = (0..count).map(|index| index as f64 * 0.3 - 2.0).collect();
+        let axes = axes(format, &shape);
+        let input = Tensor::new(x.clone(), shape.clone()).unwrap();
+        let result = forward(&input, &axes).unwrap();
+        let output_shape = result.tensor.shape.clone();
+        let dy_values: Vec<f64> = (0..result.tensor.len())
+            .map(|i| i as f64 * 0.2 + 0.5)
+            .collect();
+        let dy = Tensor::new(dy_values.clone(), output_shape).unwrap();
+        let dx = backward(&dy, &axes).unwrap();
+        let h = 1.0e-6;
+        for index in 0..count {
+            let mut plus = x.clone();
+            plus[index] += h;
+            let mut minus = x.clone();
+            minus[index] -= h;
+            let objective = |values: Vec<f64>| -> f64 {
+                let tensor = Tensor::new(values, shape.clone()).unwrap();
+                forward(&tensor, &axes)
+                    .unwrap()
+                    .tensor
+                    .as_f64_slice()
+                    .unwrap()
+                    .iter()
+                    .zip(&dy_values)
+                    .map(|(value, grad)| value * grad)
+                    .sum()
+            };
+            let expected = (objective(plus) - objective(minus)) / (2. * h);
+            assert!((dx.as_f64_slice().unwrap()[index] - expected).abs() < 1.0e-9);
+        }
+    }
+}
+
+#[test]
+fn empty_batch_retains_zero_elements_without_dividing_by_zero() {
+    let input = Tensor::new(vec![], vec![2, 0, 3]).unwrap();
+    let axes = axes("CBT", &input.shape);
+    let result = forward(&input, &axes).unwrap();
+    assert_eq!(result.tensor.shape, vec![2, 0]);
+    let dy = Tensor::new(vec![], vec![2, 0]).unwrap();
+    assert_eq!(backward(&dy, &axes).unwrap().shape, input.shape);
 }

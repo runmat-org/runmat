@@ -41,18 +41,51 @@ pub(in crate::builtins::deep_learning) fn backward(
         scale.as_f32_slice(),
         output_gradient.as_f32_slice(),
     ) {
-        (NormalizationStatsData::F32 { mean, inv_std }, Some(x), Some(gamma), Some(dy))
-            if mean.len() == geometry.groups && inv_std.len() == geometry.groups =>
+        (
+            NormalizationStatsData::F32 {
+                scale,
+                mean_scaled,
+                inv_std_scaled,
+                inv_std_input,
+            },
+            Some(x),
+            Some(gamma),
+            Some(dy),
+        ) if scale.len() == geometry.groups
+            && mean_scaled.len() == geometry.groups
+            && inv_std_scaled.len() == geometry.groups
+            && inv_std_input.len() == geometry.groups =>
         {
-            let (dx, dgamma, dbeta) = backward_values(x, gamma, dy, mean, inv_std, &geometry);
+            let (dx, dgamma, dbeta) = backward_values(
+                x,
+                gamma,
+                dy,
+                scale,
+                mean_scaled,
+                inv_std_scaled,
+                inv_std_input,
+                &geometry,
+            );
             (
                 NumericStorage::F32(dx),
                 NumericStorage::F32(dgamma),
                 NumericStorage::F32(dbeta),
             )
         }
-        (NormalizationStatsData::F64 { mean, inv_std }, _, _, _)
-            if mean.len() == geometry.groups && inv_std.len() == geometry.groups =>
+        (
+            NormalizationStatsData::F64 {
+                scale,
+                mean_scaled,
+                inv_std_scaled,
+                inv_std_input,
+            },
+            _,
+            _,
+            _,
+        ) if scale.len() == geometry.groups
+            && mean_scaled.len() == geometry.groups
+            && inv_std_scaled.len() == geometry.groups
+            && inv_std_input.len() == geometry.groups =>
         {
             let (Some(x), Some(gamma), Some(dy)) = (
                 input.as_f64_slice(),
@@ -61,7 +94,16 @@ pub(in crate::builtins::deep_learning) fn backward(
             ) else {
                 return Err(NormalizationError::UnsupportedPrecision);
             };
-            let (dx, dgamma, dbeta) = backward_values(x, gamma, dy, mean, inv_std, &geometry);
+            let (dx, dgamma, dbeta) = backward_values(
+                x,
+                gamma,
+                dy,
+                scale,
+                mean_scaled,
+                inv_std_scaled,
+                inv_std_input,
+                &geometry,
+            );
             (
                 NumericStorage::F64(dx),
                 NumericStorage::F64(dgamma),
@@ -84,8 +126,10 @@ fn backward_values<T: Real>(
     x: &[T],
     gamma: &[T],
     dy: &[T],
-    mean: &[T],
-    inv_std: &[T],
+    scale: &[T],
+    mean_scaled: &[T],
+    inv_std_scaled: &[T],
+    inv_std_input: &[T],
     g: &Geometry,
 ) -> (Vec<T>, Vec<T>, Vec<T>) {
     let mut dgamma = vec![T::zero(); g.channels];
@@ -94,7 +138,7 @@ fn backward_values<T: Real>(
     let mut sum_dxhat_xhat = vec![T::zero(); g.groups];
     for (index, &value) in x.iter().enumerate() {
         let (group, channel) = g.group_and_channel(index);
-        let xhat = (value - mean[group]) * inv_std[group];
+        let xhat = (value / scale[group] - mean_scaled[group]) * inv_std_scaled[group];
         let dxhat = dy[index] * gamma[channel];
         dgamma[channel] += dy[index] * xhat;
         dbeta[channel] += dy[index];
@@ -105,9 +149,9 @@ fn backward_values<T: Real>(
     let mut dx = vec![T::zero(); x.len()];
     for (index, &value) in x.iter().enumerate() {
         let (group, channel) = g.group_and_channel(index);
-        let xhat = (value - mean[group]) * inv_std[group];
+        let xhat = (value / scale[group] - mean_scaled[group]) * inv_std_scaled[group];
         let dxhat = dy[index] * gamma[channel];
-        dx[index] = inv_std[group] / count
+        dx[index] = inv_std_input[group] / count
             * (count * dxhat - sum_dxhat[group] - xhat * sum_dxhat_xhat[group]);
     }
     (dx, dgamma, dbeta)

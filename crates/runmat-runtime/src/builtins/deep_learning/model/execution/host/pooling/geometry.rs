@@ -17,7 +17,7 @@ impl std::fmt::Display for PoolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnsupportedLayout => f.write_str(
-                "globalAveragePooling1dLayer requires CT, CBT, SC, SCB, SCT, or SCBT axes",
+                "globalAveragePooling1dLayer requires a supported spatial or time axis layout",
             ),
             Self::UnsupportedPrecision => {
                 f.write_str("globalAveragePooling1dLayer requires real single or double data")
@@ -49,7 +49,7 @@ impl Geometry {
         let format = axes.layout().labels();
         if !matches!(
             format.as_str(),
-            "CT" | "CBT" | "SC" | "SCB" | "SCT" | "SCBT"
+            "CT" | "CBT" | "SC" | "SCB" | "SCT" | "SCBT" | "BT" | "SB" | "SBT"
         ) {
             return Err(PoolError::UnsupportedLayout);
         }

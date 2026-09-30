@@ -245,3 +245,135 @@ fn empty_overflow_and_precision_mismatch_reject_before_allocation() {
         Err(ConvError::ShapeOverflow)
     ));
 }
+
+#[test]
+fn multichannel_spatial_sequence_stride_dilation_and_repeated_padding_adjoints() {
+    let cases = [
+        (
+            "SCBT",
+            vec![3, 2, 2, 2],
+            ConvOptions {
+                stride: 1,
+                dilation: 1,
+                padding: Padding::Explicit { left: 2, right: 2 },
+                padding_value: PaddingValue::Replicate,
+            },
+        ),
+        (
+            "SCBT",
+            vec![3, 2, 2, 2],
+            ConvOptions {
+                stride: 1,
+                dilation: 1,
+                padding: Padding::Explicit { left: 2, right: 2 },
+                padding_value: PaddingValue::SymmetricIncludeEdge,
+            },
+        ),
+        (
+            "SCBT",
+            vec![3, 2, 2, 2],
+            ConvOptions {
+                stride: 1,
+                dilation: 1,
+                padding: Padding::Explicit { left: 2, right: 2 },
+                padding_value: PaddingValue::SymmetricExcludeEdge,
+            },
+        ),
+        (
+            "CBT",
+            vec![2, 2, 5],
+            ConvOptions {
+                stride: 2,
+                dilation: 2,
+                padding: Padding::Same,
+                padding_value: PaddingValue::Constant(0.7),
+            },
+        ),
+    ];
+    for (format, shape, options) in cases {
+        let x: Vec<f64> = (0..shape.iter().product::<usize>())
+            .map(|i| (i as f64 * 0.23) - 1.4)
+            .collect();
+        let w: Vec<f64> = (0..12).map(|i| (i as f64 * 0.17) - 0.8).collect();
+        let b = vec![0.3, -0.4];
+        let axes = axes(format, &shape);
+        let input = Tensor::new(x.clone(), shape.clone()).unwrap();
+        let weights = Tensor::new(w.clone(), vec![3, 2, 2]).unwrap();
+        let bias = Tensor::new(b.clone(), vec![1, 2]).unwrap();
+        let output = forward(&input, &weights, &bias, &axes, options).unwrap();
+        let output_shape = output.tensor.shape.clone();
+        let dy: Vec<f64> = (0..output.tensor.len())
+            .map(|i| (i as f64 * 0.11) - 0.7)
+            .collect();
+        let gradient = Tensor::new(dy.clone(), output_shape).unwrap();
+        let adjoints = backward(&input, &weights, &bias, &gradient, &axes, options).unwrap();
+        let objective = |x: &[f64], w: &[f64], b: &[f64]| -> f64 {
+            let input = Tensor::new(x.to_vec(), shape.clone()).unwrap();
+            let weights = Tensor::new(w.to_vec(), vec![3, 2, 2]).unwrap();
+            let bias = Tensor::new(b.to_vec(), vec![1, 2]).unwrap();
+            forward(&input, &weights, &bias, &axes, options)
+                .unwrap()
+                .tensor
+                .as_f64_slice()
+                .unwrap()
+                .iter()
+                .zip(&dy)
+                .map(|(y, grad)| y * grad)
+                .sum()
+        };
+        let h = 1.0e-6;
+        for index in 0..x.len() {
+            let mut plus = x.clone();
+            plus[index] += h;
+            let mut minus = x.clone();
+            minus[index] -= h;
+            let expected = (objective(&plus, &w, &b) - objective(&minus, &w, &b)) / (2. * h);
+            assert!(
+                (adjoints.input.as_f64_slice().unwrap()[index] - expected).abs() < 1.0e-7,
+                "{format} input index {index}"
+            );
+        }
+        for index in 0..w.len() {
+            let mut plus = w.clone();
+            plus[index] += h;
+            let mut minus = w.clone();
+            minus[index] -= h;
+            let expected = (objective(&x, &plus, &b) - objective(&x, &minus, &b)) / (2. * h);
+            assert!(
+                (adjoints.weights.as_f64_slice().unwrap()[index] - expected).abs() < 1.0e-7,
+                "{format} weight index {index}"
+            );
+        }
+        for index in 0..b.len() {
+            let mut plus = b.clone();
+            plus[index] += h;
+            let mut minus = b.clone();
+            minus[index] -= h;
+            let expected = (objective(&x, &w, &plus) - objective(&x, &w, &minus)) / (2. * h);
+            assert!(
+                (adjoints.bias.as_f64_slice().unwrap()[index] - expected).abs() < 1.0e-7,
+                "{format} bias index {index}"
+            );
+        }
+    }
+}
+
+#[test]
+fn empty_batch_retains_zero_output_and_zero_parameter_gradients() {
+    let input = Tensor::new(vec![], vec![3, 2, 0]).unwrap();
+    let weights = Tensor::new(vec![1.; 12], vec![3, 2, 2]).unwrap();
+    let bias = Tensor::new(vec![0., 0.], vec![1, 2]).unwrap();
+    let axes = axes("SCB", &input.shape);
+    let result = forward(&input, &weights, &bias, &axes, valid()).unwrap();
+    assert_eq!(result.tensor.shape, vec![1, 2, 0]);
+    let gradient = Tensor::new(vec![], result.tensor.shape).unwrap();
+    let adjoints = backward(&input, &weights, &bias, &gradient, &axes, valid()).unwrap();
+    assert_eq!(adjoints.input.shape, input.shape);
+    assert!(adjoints
+        .weights
+        .as_f64_slice()
+        .unwrap()
+        .iter()
+        .all(|value| *value == 0.));
+    assert_eq!(adjoints.bias.as_f64_slice().unwrap(), &[0., 0.]);
+}

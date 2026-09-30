@@ -42,10 +42,30 @@ fn forward_values<T: Real>(values: &[T], geometry: &Geometry) -> Vec<T> {
     for (output_linear, target) in output.iter_mut().enumerate() {
         let base = geometry.input_base_offset(output_linear);
         let mut sum = T::zero();
+        let mut finite_overflow = false;
         for pool_index in 0..geometry.pool_size {
-            sum += values[geometry.input_offset(base, pool_index)];
+            let value = values[geometry.input_offset(base, pool_index)];
+            let next = sum + value;
+            if sum.is_finite() && value.is_finite() && !next.is_finite() {
+                finite_overflow = true;
+                break;
+            }
+            sum = next;
         }
-        *target = sum / divisor;
+        if finite_overflow {
+            // Recompute only the exceptional finite range case. The ordinary
+            // sum/divide path keeps the existing rounding and throughput.
+            let mut mean = T::zero();
+            for pool_index in 0..geometry.pool_size {
+                let count = T::from_f64((pool_index + 1) as f64);
+                let previous_weight = T::from_f64(pool_index as f64) / count;
+                mean = mean * previous_weight
+                    + values[geometry.input_offset(base, pool_index)] / count;
+            }
+            *target = mean;
+        } else {
+            *target = sum / divisor;
+        }
     }
     output
 }

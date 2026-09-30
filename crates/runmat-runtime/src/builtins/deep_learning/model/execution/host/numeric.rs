@@ -14,6 +14,8 @@ pub(super) trait Real:
     fn zero() -> Self;
     fn one() -> Self;
     fn from_f64(value: f64) -> Self;
+    fn abs(self) -> Self;
+    fn is_finite(self) -> bool;
     fn sqrt(self) -> Self;
 }
 
@@ -26,6 +28,12 @@ impl Real for f32 {
     }
     fn from_f64(value: f64) -> Self {
         value as f32
+    }
+    fn abs(self) -> Self {
+        self.abs()
+    }
+    fn is_finite(self) -> bool {
+        self.is_finite()
     }
     fn sqrt(self) -> Self {
         self.sqrt()
@@ -41,6 +49,12 @@ impl Real for f64 {
     }
     fn from_f64(value: f64) -> Self {
         value
+    }
+    fn abs(self) -> Self {
+        self.abs()
+    }
+    fn is_finite(self) -> bool {
+        self.is_finite()
     }
     fn sqrt(self) -> Self {
         self.sqrt()

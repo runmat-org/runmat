@@ -120,10 +120,23 @@ impl Geometry {
         scale: &Tensor,
         offset: &Tensor,
     ) -> Result<(), NormalizationError> {
+        // OperationDimension changes the reduction, not the learnable
+        // parameters' channel-only geometry. Input kind selects the physical
+        // orientation of the canonical Scale/Offset row or column.
+        let parameter_shape = if self
+            .axes
+            .layout()
+            .index(DeepLearningAxisLabel::Spatial)
+            .is_some()
+        {
+            [1, self.channels]
+        } else {
+            [self.channels, 1]
+        };
         if input.shape.as_slice() != self.axes.shape()
             || input.len() != self.axes.element_count()
-            || scale.len() != self.channels
-            || offset.len() != self.channels
+            || scale.shape.as_slice() != parameter_shape.as_slice()
+            || offset.shape.as_slice() != parameter_shape.as_slice()
         {
             return Err(NormalizationError::ShapeMismatch);
         }
