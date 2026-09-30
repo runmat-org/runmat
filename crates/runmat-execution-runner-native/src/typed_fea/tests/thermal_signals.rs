@@ -128,18 +128,29 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
     else {
         panic!("expected a checked thermal study")
     };
-    // This test does not relax the native whole-root family admission gate.
-    assert!(crate::typed_fea::preparation::prepare_study(
+    let authored = crate::typed_fea::preparation::prepare_study(
         &checked,
         resolved.clone(),
         &[],
         "thermal-test",
-        &Default::default()
+        &Default::default(),
     )
-    .await
-    .err()
-    .expect("native authored thermal entry must remain rejected")
-    .contains("UNSUPPORTED_PHYSICS_FAMILY"));
+    .await;
+    #[cfg(not(feature = "occt-native"))]
+    {
+        let error = authored.err().expect("exact geometry provider is required");
+        assert!(
+            error.contains("OCCT"),
+            "unexpected preparation rejection: {error}"
+        );
+    }
+    #[cfg(feature = "occt-native")]
+    assert!(matches!(
+        authored
+            .expect("prepare standalone authored thermal study")
+            .root,
+        crate::PreparedFeaStudyRoot::Thermal(_)
+    ));
     let realized = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, &[])

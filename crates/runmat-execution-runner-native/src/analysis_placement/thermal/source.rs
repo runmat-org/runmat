@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_execution::{
-    prepare_thermal_study_root, CompletedThermalStudy, ThermalPrestressSource,
+    import_thermal_study_completion, prepare_thermal_study_root, CompletedThermalStudy,
 };
 use runmat_analysis_fea::results::field::RecoveredFieldPartition;
 use runmat_execution::{
@@ -106,16 +106,16 @@ impl<S: CacheImport + Send + Sync> ThermalStudySource for RetainedThermalSource<
         )
     }
     fn authenticate(&self, candidate: &ThermalStudyCompletion) -> Result<(), String> {
-        let replay = ThermalPrestressSource::import(
+        let replay = import_thermal_study_completion(
             self,
             self.completed.preparation(),
             self.completed.result_closures().to_vec(),
         )
         .map_err(|error| error.to_string())?;
-        if replay.completed() != &self.completed {
+        if replay != self.completed {
             return Err("thermal completion differs from authenticated replay".into());
         }
-        let expected = completion(replay.completed())?;
+        let expected = completion(&replay)?;
         if &expected != candidate {
             return Err("runtime thermal completion differs from authenticated replay".into());
         }
@@ -165,7 +165,7 @@ fn completion(completed: &CompletedThermalStudy) -> Result<ThermalStudyCompletio
     })
 }
 
-pub(super) fn convert(
+pub(crate) fn convert(
     completed: CompletedThermalStudy,
     store: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(ThermalStudyCompletion, ThermalStudyObjectSource), String> {

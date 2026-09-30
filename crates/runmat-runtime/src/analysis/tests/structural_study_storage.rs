@@ -614,11 +614,22 @@ fn study_evidence_rejects_symlink_targets_and_owned_directories() {
 #[test]
 fn remote_completion_uses_a_new_artifact_key_for_the_numbered_schema() {
     let _guard = analysis_test_guard();
-    let identity = StructuralStudyCompletionIdentity::new("admitted-run").unwrap();
+    let identity = AnalysisStudyCompletionIdentity::new("admitted-run").unwrap();
     let study_digest = runmat_execution::Digest::sha256(b"authored-study");
     let step_id = &sample_model().sequence.steps[0].step_id;
-    let current = identity.local_run_id(study_digest, step_id);
-    assert_eq!(current, identity.local_run_id(study_digest, step_id));
+    let current = identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
+        study_digest,
+        step_id,
+    );
+    assert_eq!(
+        current,
+        identity.local_run_id(
+            runmat_analysis_core::PhysicsFamily::Structural,
+            study_digest,
+            step_id
+        )
+    );
 
     let previous_numbered = runmat_execution::Digest::sha256(
         [

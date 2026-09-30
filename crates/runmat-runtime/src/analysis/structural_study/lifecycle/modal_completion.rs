@@ -431,7 +431,7 @@ pub(super) fn complete_structural_modal(
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     authored_workload: runmat_analysis_fea::execution::StructuralModalWorkload,
     numerical: StructuralStudyModalNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let [step] = intent.steps.as_slice() else {
         return Err(intent_completion_error(
@@ -442,8 +442,11 @@ pub(super) fn complete_structural_modal(
             "structural modal completion requires exactly one authored procedure step",
         ));
     };
-    let assigned_run_id = completion_identity
-        .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
+    let assigned_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
+        intent.authored_study_digest,
+        &step.procedure_step.step_id,
+    );
     complete_modal_study(
         prepared_completion(intent, resolved_model, persisted_mesh),
         solver_mesh,
@@ -463,7 +466,7 @@ pub(super) fn complete_structural_modal_transient(
         runmat_analysis_fea::execution::StructuralStepWorkload,
     >,
     numerical: StructuralStudyModalTransientNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let [modal_step, transient_step] = intent.steps.as_slice() else {
         return Err(intent_completion_error(
@@ -475,10 +478,12 @@ pub(super) fn complete_structural_modal_transient(
         ));
     };
     let modal_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
         intent.authored_study_digest,
         &modal_step.procedure_step.step_id,
     );
     let transient_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
         intent.authored_study_digest,
         &transient_step.procedure_step.step_id,
     );

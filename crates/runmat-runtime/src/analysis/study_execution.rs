@@ -265,6 +265,44 @@ pub(super) fn execute_study_step(
     }
 }
 
+/// Retain only complete finite host fields when publishing an in-process study state.
+pub(super) fn collect_semantic_state_fields(
+    run: &AnalysisRunResult,
+) -> Vec<runmat_analysis_core::AnalysisField> {
+    super::collect_analysis_result_fields(run)
+        .into_iter()
+        .filter(|field| match &field.values {
+            runmat_analysis_core::AnalysisFieldValues::HostF64(values) => {
+                !values.is_empty()
+                    && values.iter().all(|value| value.is_finite())
+                    && field
+                        .shape
+                        .iter()
+                        .try_fold(1_usize, |count, extent| count.checked_mul(*extent))
+                        == Some(values.len())
+            }
+            runmat_analysis_core::AnalysisFieldValues::DeviceRef(_) => false,
+        })
+        .collect()
+}
+
+/// Bind an in-process study state to its admitted mesh, or its explicit synthetic model.
+pub(super) fn in_process_study_topology_digest(
+    prepared: &super::PreparedStudySequence,
+) -> Result<runmat_execution::Digest, OperationErrorEnvelope> {
+    if let Some(path) = prepared.solver_mesh_artifact_path.as_deref() {
+        let mesh =
+            super::solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path))
+                .map_err(|error| super::study_sequence_contract_error(&prepared.context, error))?;
+        return Ok(runmat_execution::Digest::from_bytes(
+            *mesh.canonical_digest.bytes(),
+        ));
+    }
+    let bytes = serde_json::to_vec(&prepared.model)
+        .map_err(|error| super::study_sequence_contract_error(&prepared.context, error))?;
+    Ok(runmat_execution::Digest::sha256(bytes))
+}
+
 fn solver_model(model: &AnalysisModel, authored_step: &ProcedureStep) -> AnalysisModel {
     let mut step = authored_step.clone();
     step.state_inputs.clear();

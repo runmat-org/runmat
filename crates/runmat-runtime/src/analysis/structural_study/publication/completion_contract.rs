@@ -52,3 +52,52 @@ pub(in crate::analysis) enum CompletedStudyStepRun {
     StructuralResponseSpectrum(Box<CompletedStructuralResponseSpectrumStep>),
     StructuralRandomResponse(Box<CompletedStructuralRandomResponseStep>),
 }
+
+/// Reuse the shared thermal carrier for a genuine singleton study, without a structural suffix.
+pub(in crate::analysis) fn standalone_thermal_completion(
+    context: OperationContext,
+    authored_study_digest: runmat_execution::Digest,
+    thermal: crate::analysis::ThermalStudyCompletion,
+    source: crate::analysis::ThermalStudyObjectSource,
+    run: OperationEnvelope<AnalysisRunResult>,
+    options: crate::analysis::AnalysisThermalRunOptions,
+    mesh: crate::analysis::meshing::ResolvedStudyMesh,
+) -> PreparedStudyCompletion {
+    let step = thermal.compiled.model.sequence.steps[0].clone();
+    let execution = AnalysisExecutionStep {
+        step_id: step.step_id.clone(),
+        backend: thermal.workload.backend,
+        requirement: thermal.workload.formulation_requirement,
+        solver_options: AnalysisSolverOptions::ThermalDiffusion(options.clone()),
+    };
+    PreparedStudyCompletion {
+        context,
+        study_id: thermal.compiled.study_id.clone(),
+        study_fingerprint: authored_study_digest.to_string(),
+        authored_study_digest,
+        model: thermal.compiled.model.clone(),
+        steps: Vec::new(),
+        operation_sequence: vec![
+            crate::analysis::execution_dispatch::AnalysisOperation::Thermal
+                .version()
+                .into(),
+        ],
+        solver_mesh_artifact_path: mesh.artifact_path,
+        meshing_evidence_artifact_path: mesh.evidence_path,
+        thermal_prefix: Some(Box::new(ThermalPrefixCompletion {
+            authored: PreparedStudyStep {
+                authored_execution: execution,
+                procedure_step: step.clone(),
+            },
+            completed: CompletedStudyStep {
+                step_id: step.step_id,
+                solver_result_identity: thermal.manifest.identity(),
+                run: CompletedStudyStepRun::Standard(Box::new(run)),
+                resolved_solver_options: AnalysisSolverOptions::ThermalDiffusion(options),
+            },
+            states: thermal.states.clone(),
+            observation_source: source,
+            thermal: Box::new(thermal),
+        })),
+    }
+}

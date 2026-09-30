@@ -78,18 +78,22 @@ mod solver_mesh_artifact;
 mod source;
 pub mod storage;
 mod structural_study;
+mod study_completion_identity;
 mod study_contract;
 mod study_execution;
 mod study_placement;
 mod study_result;
+mod study_result_manifest;
 mod study_sweep;
 mod thermal_execution;
+mod thermal_study_publication;
 mod typed_study_publication;
 pub use response_study_result::{
     StructuralStudyModalResponseSpectrumNumericalResult,
     StructuralStudyRandomResponseNumericalResult,
 };
 pub use thermal_execution::analysis_run_thermal_with_options_op;
+pub use thermal_study_publication::publish_thermal_study_result;
 pub mod value_admission;
 
 #[cfg(test)]
@@ -106,20 +110,23 @@ use structural_study::run_evidence_stage;
 pub use structural_study::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure, PreparedStructuralStudy, PreparedStructuralStudyIntent,
-    StructuralStudyCompletionIdentity, StructuralStudyExecutionFailure,
-    StructuralStudyExecutionOutcome, STRUCTURAL_STUDY_INTENT_MAX_BYTES,
+    StructuralStudyExecutionFailure, StructuralStudyExecutionOutcome,
+    STRUCTURAL_STUDY_INTENT_MAX_BYTES,
 };
 use structural_study::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
     study_evidence_root, CompletedStudyStep, CompletedStudyStepRun, PreparedStudySequence,
     PreparedStudyStep,
 };
+pub use study_completion_identity::AnalysisStudyCompletionIdentity;
 pub use study_contract::analysis_study_content_digest;
 use study_contract::{
     sanitize_study_sweep_id, study_fingerprint, study_fingerprint_from_digest, study_issue_message,
     study_operation_sequence, validate_study_issue_codes,
 };
-use study_execution::execute_study_step;
+use study_execution::{
+    collect_semantic_state_fields, execute_study_step, in_process_study_topology_digest,
+};
 pub use study_placement::{
     analysis_execute_structural_study_with_placement,
     analysis_execute_structural_sweep_with_placement, StructuralStudyPlacementEntry,
@@ -1880,39 +1887,6 @@ fn semantic_state_payload(
             fields: collect_semantic_state_fields(run),
         })
     }
-}
-
-fn collect_semantic_state_fields(run: &AnalysisRunResult) -> Vec<AnalysisField> {
-    collect_analysis_result_fields(run)
-        .into_iter()
-        .filter(|field| match &field.values {
-            runmat_analysis_core::AnalysisFieldValues::HostF64(values) => {
-                !values.is_empty()
-                    && values.iter().all(|value| value.is_finite())
-                    && field
-                        .shape
-                        .iter()
-                        .try_fold(1_usize, |count, extent| count.checked_mul(*extent))
-                        == Some(values.len())
-            }
-            runmat_analysis_core::AnalysisFieldValues::DeviceRef(_) => false,
-        })
-        .collect()
-}
-
-fn in_process_study_topology_digest(
-    prepared: &PreparedStudySequence,
-) -> Result<runmat_execution::Digest, OperationErrorEnvelope> {
-    if let Some(path) = prepared.solver_mesh_artifact_path.as_deref() {
-        let mesh = solver_mesh_artifact::load_solver_mesh_artifact(std::path::Path::new(path))
-            .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
-        return Ok(runmat_execution::Digest::from_bytes(
-            *mesh.canonical_digest.bytes(),
-        ));
-    }
-    let bytes = serde_json::to_vec(&prepared.model)
-        .map_err(|error| study_sequence_contract_error(&prepared.context, error))?;
-    Ok(runmat_execution::Digest::sha256(bytes))
 }
 
 fn study_sequence_contract_error(

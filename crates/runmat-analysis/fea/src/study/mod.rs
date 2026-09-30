@@ -34,7 +34,8 @@ pub use product::{
     StructuralStudyProductInput,
 };
 pub use thermal_planning::{
-    plan_thermal_step, plan_thermal_study, ThermalStudyPlanningError, ThermalStudyPlanningPolicy,
+    plan_thermal_step, plan_thermal_study, thermal_step_initial_selection_supported,
+    ThermalStudyPlanningError, ThermalStudyPlanningPolicy,
 };
 pub use thermal_product::{
     build_thermal_study_product, ThermalStudyProduct, ThermalStudyProductError,

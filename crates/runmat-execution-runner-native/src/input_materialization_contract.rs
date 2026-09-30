@@ -1,10 +1,14 @@
 //! Transport representation shared by geometry-derived and pre-meshed study roots.
 
+use std::collections::BTreeSet;
+
+use runmat_analysis_core::RealizedStudy;
 use runmat_analysis_execution::{
     PreparedGeneratorChunk, PreparedGeneratorProgram, PreparedInputMaterialization,
     PreparedNumericalMaterialization, PreparedSignalMaterialization,
 };
 use runmat_execution::value::ValueRef;
+use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{ProgramExecutionDescriptor, ProgramExecutionRequest};
 use serde::{Deserialize, Serialize};
 
@@ -157,6 +161,70 @@ fn prepared_program(
             .collect(),
         input_references: input_references.to_vec(),
     }
+}
+
+pub(crate) fn validate_input_materialization_inventory(
+    study: &RealizedStudy,
+    materializations: &[PreparedInputMaterialization],
+    revision: &ProgramRevision,
+) -> NativeExecutionResult<()> {
+    let models = study
+        .included_models
+        .iter()
+        .chain(std::iter::once(&study.model))
+        .collect::<Vec<_>>();
+    let mut signals = models
+        .iter()
+        .flat_map(|model| &model.signals)
+        .filter(|signal| signal.generator().is_some());
+    let mut responses = models
+        .iter()
+        .flat_map(|model| &model.response_spectra)
+        .filter(|spectrum| spectrum.ordinates.generator().is_some());
+    let mut random = models
+        .iter()
+        .flat_map(|model| &model.random_excitations)
+        .filter(|spectrum| spectrum.spectral_density.generator().is_some());
+    let expected_count =
+        signals.clone().count() + responses.clone().count() + random.clone().count();
+    if expected_count != materializations.len() {
+        return Err(protocol(
+            "study input materializations differ from its authored generator inventory",
+        ));
+    }
+    let mut identities = BTreeSet::new();
+    for prepared in materializations {
+        prepared.validate().map_err(protocol)?;
+        let (materialization_revision, identity, authored_matches) = match prepared {
+            PreparedInputMaterialization::Signal(prepared) => (
+                &prepared.admitted.program_revision,
+                prepared.admitted.materialization_identity.digest(),
+                signals.next() == Some(&prepared.authored),
+            ),
+            PreparedInputMaterialization::Numerical(prepared) => {
+                let authored_matches = match &prepared.authored {
+                    runmat_analysis_execution::NumericalGeneratorSource::ResponseSpectrum(
+                        spectrum,
+                    ) => responses.next() == Some(spectrum.as_ref()),
+                    runmat_analysis_execution::NumericalGeneratorSource::RandomSpectrum(
+                        spectrum,
+                    ) => random.next() == Some(spectrum.as_ref()),
+                };
+                (
+                    &prepared.admitted.invocation.program_revision,
+                    prepared.admitted.materialization_identity.digest(),
+                    authored_matches,
+                )
+            }
+        };
+        if materialization_revision != revision || !authored_matches || !identities.insert(identity)
+        {
+            return Err(protocol(
+                "study input materialization inventory is inconsistent or duplicated",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {

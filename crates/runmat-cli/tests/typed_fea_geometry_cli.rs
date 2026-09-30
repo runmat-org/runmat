@@ -3,6 +3,8 @@
 use std::fs;
 use std::process::Command;
 
+use runmat_meshing_core::CanonicalMeshingContract;
+use runmat_runtime::analysis::storage::{AnalysisArtifactStore, FilesystemAnalysisArtifactStore};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -68,10 +70,8 @@ end
     let checked: Value = serde_json::from_slice(&checked.stdout).unwrap();
     assert_eq!(checked["status"], "valid");
     assert_eq!(checked["rootModule"], "project/src/main.fea");
-    assert_eq!(
-        checked["roots"],
-        serde_json::json!([{ "kind": "study", "id": "response" }])
-    );
+    assert_eq!(checked["program"]["studies"].as_array().unwrap().len(), 1);
+    assert_eq!(checked["program"]["studies"][0]["study_id"], "response");
 
     let first = runmat(
         &project,
@@ -140,6 +140,214 @@ end
         .as_str()
         .expect("repeat publication must expose its result manifest");
     assert!(project.path().join(repeated_manifest).is_file());
+}
+
+#[test]
+fn authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium() {
+    for quadratic in [false, true] {
+        for transient in [false, true] {
+            let project = TempDir::new().unwrap();
+            let source_root = project.path().join("src");
+            fs::create_dir(&source_root).unwrap();
+            fs::write(
+                project.path().join("runmat.toml"),
+                "[package]\nname = \"typed-thermal\"\n\n[sources]\nroots = [\"src\"]\n\n[runtime.fea]\nartifact_root = \"artifacts\"\nstudy_artifact_root = \"study-artifacts\"\n",
+            )
+            .unwrap();
+            fs::write(
+                source_root.join("makePart.m"),
+                "function part = makePart()\npart = geometry.finish(geometry.box(1, 1, 1));\nend\n",
+            )
+            .unwrap();
+            let mut source = include_str!("fixtures/typed_box_thermal.fea").to_owned();
+            if quadratic {
+                source = source.replace("order = linear", "order = quadratic");
+            }
+            if transient {
+                source = source.replace("thermal steady {}", "thermal transient {\nstart_time = 0 s\nend_time = 1 s\ntime_step = 0.25 s\ninitial_conditions = [model.initial.uniform_start]\n}");
+            }
+            fs::write(source_root.join("main.fea"), source).unwrap();
+            let output = runmat(
+                &project,
+                &[
+                    "fea",
+                    "run",
+                    "src/main.fea",
+                    "--study",
+                    "response",
+                    "--json",
+                ],
+            );
+            assert!(
+                output.status.success(),
+                "thermal quadratic={quadratic} transient={transient}: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(summary["root_id"], "response");
+            assert_eq!(
+                summary["procedure"],
+                if transient {
+                    "thermal_transient"
+                } else {
+                    "thermal_steady"
+                }
+            );
+            let run_ids = summary["step_run_ids"].as_array().unwrap();
+            assert_eq!(run_ids.len(), 1);
+            assert!(
+                summary["nodes"].as_u64().unwrap() > 0 && summary["elements"].as_u64().unwrap() > 0
+            );
+            let manifest_path = summary["result_manifest_artifact_path"].as_str().unwrap();
+            let manifest: Value =
+                serde_json::from_slice(&fs::read(project.path().join(manifest_path)).unwrap())
+                    .unwrap();
+            assert!(
+                manifest.is_object(),
+                "persisted thermal manifest must reopen as typed JSON"
+            );
+            let meshes = fs::read_dir(project.path().join("artifacts/meshes"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.to_string_lossy().ends_with(".solver-mesh.cbor"))
+                .collect::<Vec<_>>();
+            assert_eq!(meshes.len(), 1);
+            let mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
+                &fs::read(&meshes[0]).unwrap(),
+            )
+            .unwrap();
+            mesh.validate().unwrap();
+            let mesh_digest = mesh
+                .canonical_digest
+                .bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            assert_eq!(summary["mesh_digest"], mesh_digest);
+            assert!(mesh
+                .topology
+                .volume_elements
+                .iter()
+                .all(|element| element.order
+                    == if quadratic {
+                        runmat_meshing_core::ElementOrder::Tet10
+                    } else {
+                        runmat_meshing_core::ElementOrder::Tet4
+                    }));
+            assert_eq!(
+                summary["nodes"].as_u64().unwrap() as usize,
+                mesh.topology.nodes.len()
+            );
+            assert_eq!(
+                summary["elements"].as_u64().unwrap() as usize,
+                mesh.topology.volume_elements.len()
+            );
+            // Fresh store instance after child-process exit: no in-memory producer fields survive.
+            let store = FilesystemAnalysisArtifactStore::new(project.path().join("artifacts"));
+            let retained = store
+                .load_run(run_ids[0].as_str().unwrap())
+                .unwrap()
+                .unwrap();
+            let render = retained.render_topology.as_ref().unwrap();
+            assert_eq!(
+                render.volume_element_count,
+                mesh.topology.volume_elements.len()
+            );
+            for render_mesh in &render.meshes {
+                for (vertex, index) in render_mesh
+                    .vertices
+                    .iter()
+                    .zip(&render_mesh.vertex_volume_node_indices)
+                {
+                    if let Some(index) = index {
+                        assert_eq!(*vertex, mesh.topology.nodes[*index].coordinates_m);
+                    }
+                }
+            }
+            assert!(retained.modal_results.is_none() && retained.nonlinear_results.is_none());
+            let thermal = retained.thermal_results.unwrap();
+            assert_eq!(
+                thermal.temperature_snapshots.len(),
+                if transient { 5 } else { 1 }
+            );
+            if transient {
+                assert_eq!(thermal.time_points_s, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+            }
+            for field in &thermal.temperature_snapshots {
+                assert_eq!(
+                    field.shape.iter().product::<usize>(),
+                    mesh.topology.nodes.len()
+                );
+                assert!(field
+                    .as_host_f64()
+                    .unwrap()
+                    .iter()
+                    .all(|t| t.is_finite() && (t - 300.0).abs() < 1e-8));
+            }
+            for field in thermal
+                .temperature_gradient_snapshots
+                .iter()
+                .chain(&thermal.heat_flux_snapshots)
+            {
+                assert!(field
+                    .as_host_f64()
+                    .unwrap()
+                    .iter()
+                    .all(|value| value.is_finite() && value.abs() < 1e-8));
+            }
+            let repeated = runmat(
+                &project,
+                &[
+                    "fea",
+                    "run",
+                    "src/main.fea",
+                    "--study",
+                    "response",
+                    "--json",
+                ],
+            );
+            assert!(
+                repeated.status.success(),
+                "repeat thermal failed: {}",
+                String::from_utf8_lossy(&repeated.stderr)
+            );
+            let repeated: Value = serde_json::from_slice(&repeated.stdout).unwrap();
+            for key in [
+                "mesh_digest",
+                "study_definition_digest",
+                "nodes",
+                "elements",
+            ] {
+                assert_eq!(repeated[key], summary[key], "thermal repeat changed {key}");
+            }
+            let repeated_manifest: Value = serde_json::from_slice(
+                &fs::read(
+                    project
+                        .path()
+                        .join(repeated["result_manifest_artifact_path"].as_str().unwrap()),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                repeated_manifest["workload_digest"],
+                manifest["workload_digest"]
+            );
+            // Distinct execution evidence must not collide with the immutable first run.
+            if repeated_manifest["numerical_evidence"]["root"]
+                != manifest["numerical_evidence"]["root"]
+            {
+                assert_ne!(repeated["step_run_ids"], summary["step_run_ids"]);
+            } else {
+                assert_eq!(repeated["step_run_ids"], summary["step_run_ids"]);
+            }
+            assert!(store
+                .load_run(run_ids[0].as_str().unwrap())
+                .unwrap()
+                .is_some());
+        }
+    }
 }
 
 const STUDY: &str = r#"

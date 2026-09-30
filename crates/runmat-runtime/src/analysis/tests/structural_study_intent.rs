@@ -376,7 +376,7 @@ fn structural_buckling_completion_publishes_ordinary_runtime_results() {
                 buckling_numerical_receipt: buckling_receipt,
             },
         )),
-        StructuralStudyCompletionIdentity::new("server-run-buckling").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-buckling").unwrap(),
     )
     .expect("buckling result should enter ordinary study publication");
 
@@ -570,7 +570,7 @@ fn structural_prestressed_modal_completion_publishes_exact_state_and_modes() {
                 modal_numerical_receipt: modal_receipt,
             },
         )),
-        StructuralStudyCompletionIdentity::new("server-run-prestressed-modal").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-prestressed-modal").unwrap(),
     )
     .expect("prestressed-modal result should enter ordinary study publication");
 
@@ -788,7 +788,7 @@ fn structural_modal_intent_recovers_and_publishes_all_mode_shapes_without_resolv
                 numerical_receipt,
             },
         )),
-        StructuralStudyCompletionIdentity::new("server-run-modal").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-modal").unwrap(),
     )
     .expect("portable modal result should enter normal study publication");
 
@@ -1033,7 +1033,7 @@ fn modal_transient_intent_publishes_the_exact_basis_and_both_runtime_results() {
                 transient_numerical_receipt,
             },
         )),
-        StructuralStudyCompletionIdentity::new("server-run-modal-transient").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-modal-transient").unwrap(),
     )
     .expect("modal-transient result should enter normal study publication");
 
@@ -1138,7 +1138,7 @@ fn structural_study_intent_completes_a_partitioned_direct_transient_with_state()
                 numerical_receipt,
             },
         )),
-        StructuralStudyCompletionIdentity::new("server-run-direct-transient").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-direct-transient").unwrap(),
     )
     .expect("partitioned direct transient should enter normal study publication");
 
@@ -1241,14 +1241,14 @@ fn structural_study_intent_completion_reenters_shared_quality_and_persistence() 
         intent,
         meshing_output,
         numerical_result,
-        StructuralStudyCompletionIdentity::new("server-run-completion").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-completion").unwrap(),
     )
     .expect("remote study result should reenter runtime completion");
     let retried = analysis_complete_structural_study_intent_op(
         retry_intent,
         retry_mesh,
         retry_result,
-        StructuralStudyCompletionIdentity::new("server-run-completion").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-completion").unwrap(),
     )
     .expect("retrying one server allocation should converge on its completed run");
 
@@ -1326,7 +1326,7 @@ fn structural_study_intent_completion_rejects_a_different_geometry_source() {
         intent,
         meshing_output,
         numerical_result,
-        StructuralStudyCompletionIdentity::new("server-run-source-mismatch").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-source-mismatch").unwrap(),
     )
     .expect_err("a mesh from another geometry source must fail closed");
     assert_eq!(
@@ -1363,7 +1363,7 @@ fn structural_study_intent_completion_rejects_a_different_meshing_request() {
         intent,
         meshing_output,
         numerical_result,
-        StructuralStudyCompletionIdentity::new("server-run-request-mismatch").unwrap(),
+        AnalysisStudyCompletionIdentity::new("server-run-request-mismatch").unwrap(),
     )
     .expect_err("a mesh from another canonical request must fail closed");
     assert_eq!(

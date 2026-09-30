@@ -10,7 +10,9 @@ use thiserror::Error;
 use super::CompiledAnalysisStudy;
 use crate::{execution::ThermalWorkload, ComputeBackend, ThermalProcedureControl};
 
+mod initial_selection;
 mod sources;
+pub use initial_selection::thermal_step_initial_selection_supported;
 #[cfg(test)]
 mod tests;
 
@@ -128,8 +130,7 @@ fn authored_controls<'a>(
             .branches
             .iter()
             .any(|branch| branch.consumer_steps.contains(&step.step_id))
-        || !step.activations.is_empty()
-        || !step.state_inputs.is_empty()
+        || !initial_selection::supported(model, step)
         || step.restart != RestartPolicy::Fresh
         || step
             .state_outputs
@@ -211,7 +212,7 @@ fn validate_sources(
 pub enum ThermalStudyPlanningError {
     #[error("thermal planning policy differs from the compiled formulation requirement")]
     FormulationRequirementMismatch,
-    #[error("thermal planning requires a fresh independent step without inbound state or lifecycle controls; standalone planning additionally requires a single-step sequence")]
+    #[error("thermal planning requires a fresh independent step with only authored physical thermal initial selection; standalone planning additionally requires a single-step sequence")]
     UnsupportedSequence,
     #[error("thermal step selection must identify exactly one authored step: {0}")]
     InvalidSelection(String),

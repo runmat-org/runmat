@@ -188,8 +188,8 @@ pub(in crate::analysis) fn run_evidence_stage(run_id: &str) -> String {
 
 mod completion_contract;
 pub(in crate::analysis) use completion_contract::{
-    study_completion_from_prepared, CompletedStudyStep, CompletedStudyStepRun,
-    PreparedStudyCompletion, ThermalPrefixCompletion,
+    standalone_thermal_completion, study_completion_from_prepared, CompletedStudyStep,
+    CompletedStudyStepRun, PreparedStudyCompletion, ThermalPrefixCompletion,
 };
 
 pub(in crate::analysis) struct CompletedStructuralResponseSpectrumStep {

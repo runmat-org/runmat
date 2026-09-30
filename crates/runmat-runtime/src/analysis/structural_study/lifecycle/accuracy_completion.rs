@@ -4,7 +4,7 @@ use runmat_analysis_fea::results::accuracy::{
 
 use crate::analysis::{QualityGate, QualityReason, QualityReasonCode, RunStatus};
 
-pub(super) fn validate_publication_chain(
+pub(in crate::analysis) fn validate_publication_chain(
     workload_digest: runmat_execution::Digest,
     expected_primary_phase: &runmat_analysis_fea::planning::resource::FeaResourcePhase,
     accuracy: &AccuracyArtifact,
@@ -31,7 +31,7 @@ pub(super) fn validate_publication_chain(
     Ok(())
 }
 
-pub(super) struct CompletedAccuracy {
+pub(in crate::analysis) struct CompletedAccuracy {
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
     pub solver_convergence: QualityGate,
@@ -39,7 +39,7 @@ pub(super) struct CompletedAccuracy {
     pub quality_reasons: Vec<QualityReason>,
 }
 
-pub(super) fn classify_accuracy(artifact: &AccuracyArtifact) -> CompletedAccuracy {
+pub(in crate::analysis) fn classify_accuracy(artifact: &AccuracyArtifact) -> CompletedAccuracy {
     let status = artifact.evaluation().report().status;
     let publication_allowed = artifact.gate().decision == PublicationDecision::Allow;
     let numerically_acceptable = status == AccuracyStatus::Satisfied;

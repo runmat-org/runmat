@@ -8,7 +8,7 @@ use runmat_analysis_fea::{
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
-pub(super) fn validate(
+pub(in crate::analysis) fn validate(
     completed: &ThermalStudyCompletion,
     mesh: &SolverMeshArtifact,
 ) -> Result<(), String> {

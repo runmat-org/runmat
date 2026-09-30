@@ -53,8 +53,10 @@ impl ThermalWorkload {
             .ok_or_else(|| {
                 invalid("thermal workload requires exactly one explicitly selected step".into())
             })?;
-        if step.family != PhysicsFamily::Thermal || !step.activations.is_empty() {
-            return Err(invalid("portable thermal workload requires standalone thermal physics without lifecycle activations".into()));
+        if step.family != PhysicsFamily::Thermal
+            || !crate::study::thermal_step_initial_selection_supported(step)
+        {
+            return Err(invalid("portable thermal workload requires thermal physics with only authored physical thermal initial selection".into()));
         }
         crate::pipeline::thermal::validate_step(step, self.procedure)
             .map_err(|error| invalid(error.to_string()))?;

@@ -274,7 +274,7 @@ pub(super) fn complete_structural_buckling(
         runmat_analysis_fea::execution::StructuralStepWorkload,
     >,
     numerical: crate::analysis::StructuralStudyBucklingNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let [preload_step, buckling_step] = intent.steps.as_slice() else {
         return Err(intent_completion_error(
@@ -286,10 +286,12 @@ pub(super) fn complete_structural_buckling(
         ));
     };
     let preload_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
         intent.authored_study_digest,
         &preload_step.procedure_step.step_id,
     );
     let buckling_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
         intent.authored_study_digest,
         &buckling_step.procedure_step.step_id,
     );

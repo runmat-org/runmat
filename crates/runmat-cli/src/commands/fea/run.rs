@@ -12,9 +12,16 @@ use crate::commands::job::secret::SavedOutputIntent;
 use crate::commands::job::submit::{PreparedRemoteExecution, RemoteSubmissionOptions};
 use crate::presentation;
 
-use super::preparation::{prepare_study, FeaComputeAllocation};
-use super::result_presentation::{local_summary, print_fea_result, print_sweep_result};
+use super::preparation::{
+    ensure_remote_structural, prepare_study, require_remote_root, FeaComputeAllocation,
+};
+use super::result_presentation::{
+    completed_summary, print_completed_fea_result, print_sweep_result,
+};
 use super::source::NativeCheckedFeaSource;
+
+mod remote_study;
+use remote_study::execute_study_remotely;
 
 pub(super) async fn execute(
     _path: PathBuf,
@@ -68,7 +75,7 @@ async fn execute_study(
             else {
                 bail!("selected study resolved to a sweep during native execution");
             };
-            print_fea_result(
+            print_completed_fea_result(
                 &completed.case_id,
                 &completed.result,
                 &completed.publication,
@@ -126,7 +133,7 @@ async fn execute_sweep(
             };
             let summaries = completed
                 .iter()
-                .map(|case| local_summary(&case.case_id, &case.result, &case.publication))
+                .map(|case| completed_summary(&case.case_id, &case.result, &case.publication))
                 .collect::<Result<Vec<_>>>()?;
             print_sweep_result(&sweep.sweep.sweep_id, &summaries, json)
         }
@@ -154,6 +161,7 @@ async fn execute_sweep_remotely(
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
+    ensure_remote_structural(&sweep.study.study.sequence)?;
     let frozen = source
         .frozen_project
         .as_ref()
@@ -271,7 +279,7 @@ async fn prepare_sweep_root(
             config,
         )
         .await?;
-        studies.push(prepared.root);
+        studies.push(require_remote_root(prepared.root)?);
     }
     let revision = studies
         .first()
@@ -307,94 +315,6 @@ async fn prepare_sweep_root(
         },
     )?;
     Ok(PreparedTypedSweep { root, revision })
-}
-
-async fn execute_study_remotely(
-    source: &NativeCheckedFeaSource,
-    study: ResolvedAnalysisStudy,
-    inputs: Vec<AuthoredStudyInputBinding>,
-    target: RemoteExecutionTarget,
-    compute: FeaComputeAllocation,
-    config: &RunMatRuntimeConfig,
-    json: bool,
-) -> Result<()> {
-    let frozen = source
-        .frozen_project
-        .as_ref()
-        .context("remote typed FEA requires an enclosing frozen RunMat project")?;
-    let placeholder = prepare_study(
-        source,
-        study.clone(),
-        &inputs,
-        "bundle-sizing-authority",
-        &compute,
-        config,
-    )
-    .await?;
-    let saved_expectation = placeholder.root.result_expectation();
-    let study_id = placeholder.realized.study_id.clone();
-    let revision = placeholder.revision.clone();
-    let mut builder =
-        ExecutionBundleBuilder::native(frozen, revision.clone())?.with_compiled_package_closure();
-    for program in placeholder.root.required_programs() {
-        builder = builder.with_materialized_program(
-            program.recipe.clone(),
-            program.artifact.form,
-            program.artifact.executable_bytes.clone(),
-        );
-    }
-    let mut bundle_archive = Vec::new();
-    write_bundle(
-        &builder.build()?,
-        &mut bundle_archive,
-        ArchiveLimits::default(),
-    )?;
-    let bundle_size = bundle_archive.len();
-    let revision_for_root = revision.clone();
-    let committed = crate::commands::job::submit::submit_scoped(
-        revision.clone(),
-        bundle_size,
-        |run_id| {
-            let root = placeholder
-                .root
-                .rebind_artifact_access(super::preparation::artifact_access(run_id))?;
-            let remote = super::remote::prepare_typed_remote_execution(
-                root,
-                revision_for_root,
-                bundle_archive,
-            )?;
-            Ok::<PreparedRemoteExecution, anyhow::Error>(remote)
-        },
-        RemoteSubmissionOptions {
-            project: target.project,
-            cluster: target.cluster,
-            queue: target.queue,
-            trust_identity: target.trust_identity,
-            idempotency_key: target.idempotency_key,
-            workers: target.workers.max(1),
-            accelerator: compute.accelerators.first().cloned(),
-            on_run_created: None,
-            output_intent: SavedOutputIntent::FeaStudy {
-                study_id,
-                expectation: Box::new(saved_expectation),
-            },
-        },
-    )
-    .await?;
-    if target.detach {
-        if json {
-            println!("{}", serde_json::to_string(&committed)?);
-        } else {
-            println!(
-                "{} {} ({})",
-                presentation::stdout().success("FEA job"),
-                committed.id,
-                committed.state
-            );
-        }
-        return Ok(());
-    }
-    crate::commands::job::attach::attach(&committed.id, false, json).await
 }
 
 struct ResolvedFeaExecution {

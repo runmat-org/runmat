@@ -38,6 +38,7 @@ mod input_materialization;
 mod input_materialization_contract;
 mod local_store;
 mod local_structural_study;
+mod local_study_geometry;
 mod materialized_project;
 mod meshing_evaluator;
 mod meshing_host;
@@ -217,10 +218,11 @@ pub use structural_study_root::{
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
 pub use typed_fea::{
     checked_fea_artifact_access, materialize_checked_fea_study_geometry, prepare_checked_fea_study,
-    MaterializedFeaGeometry, PreparedFeaStudy,
+    MaterializedFeaGeometry, PreparedAuthoredThermalStudy, PreparedFeaStudy, PreparedFeaStudyRoot,
 };
 pub use typed_fea::{
-    execute_checked_fea_locally, CompletedLocalFeaCase, LocalFeaExecution,
-    LocalFeaExecutionOptions, LocalFeaMeshObserver, LocalFeaProgressObserver,
+    execute_checked_fea_locally, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,
+    CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,
+    LocalFeaProgressObserver,
 };
 pub use worker::run_worker_stdio;

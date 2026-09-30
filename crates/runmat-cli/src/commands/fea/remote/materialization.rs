@@ -135,7 +135,7 @@ fn publish_materialized_result(
     result: &runmat_runtime::analysis::StructuralStudyResult,
     run_id: &str,
 ) -> Result<AnalysisStudyRunData> {
-    let publication = runmat_runtime::analysis::StructuralStudyCompletionIdentity::new(run_id)
+    let publication = runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(run_id)
         .map_err(anyhow::Error::msg)?;
     runmat_runtime::analysis::publish_structural_study_result(
         result,
@@ -194,7 +194,7 @@ pub(crate) fn materialize_remote_outputs(
             region_aliases: result.region_resolution.aliases,
         },
         numerical,
-        runmat_runtime::analysis::StructuralStudyCompletionIdentity::new(run_id)
+        runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(run_id)
             .map_err(anyhow::Error::msg)?,
     )
     .map_err(super::super::report_operation_error)
@@ -252,7 +252,7 @@ pub(crate) fn materialize_remote_sweep_outputs(
         .zip(intents)
         .map(|(entry, intent)| match entry.terminal {
             ExactStructuralSweepTerminal::Succeeded(result) => {
-                let completion = runmat_runtime::analysis::StructuralStudyCompletionIdentity::new(
+                let completion = runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(
                     format!("{run_id}_study_{}", entry.study_index),
                 )
                 .map_err(anyhow::Error::msg)?;

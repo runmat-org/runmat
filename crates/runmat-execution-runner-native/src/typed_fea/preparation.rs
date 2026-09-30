@@ -8,8 +8,17 @@ use runmat_execution_artifact::ArtifactAccess;
 
 use super::LocalFeaExecutionOptions;
 
+mod admission;
+mod thermal;
+pub use thermal::PreparedAuthoredThermalStudy;
+
+pub enum PreparedFeaStudyRoot {
+    Structural(crate::PreparedStructuralStudyRoot),
+    Thermal(PreparedAuthoredThermalStudy),
+}
+
 pub struct PreparedFeaStudy {
-    pub root: crate::PreparedStructuralStudyRoot,
+    pub root: PreparedFeaStudyRoot,
     pub workers: u32,
     pub revision: ProgramRevision,
     pub realized: RealizedStudy,
@@ -22,7 +31,7 @@ pub async fn prepare_study(
     authority: &str,
     options: &LocalFeaExecutionOptions,
 ) -> Result<PreparedFeaStudy, String> {
-    ensure_structural_execution_boundary(&resolved)?;
+    let family = admission::select_family(&resolved.study.sequence)?;
     let realized: RealizedStudy = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
@@ -97,50 +106,70 @@ pub async fn prepare_study(
     .map_err(|error| error.to_string())?;
     let input_materializations =
         super::input::prepare_input_materializations(source, &realized).await?;
-    let root = crate::prepare_structural_study_root(crate::StructuralStudyRootPreparation {
-        program_revision: revision.clone(),
-        artifact_access: access,
-        authored_study_digest,
-        frozen_project_digest: source
-            .frozen_project()
-            .map(|project| Digest::from_bytes(*project.graph_digest().bytes())),
-        study: realized.clone(),
-        materials: resolved.material_catalog,
-        planning: runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
-            backend: options.backend,
-            formulation_requirement: resolved.study.formulation_requirement,
-            numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
-        },
-        local_execution,
-        analysis_accelerator_requests: options.accelerators.clone(),
-        input_materializations,
-        geometry_meshing,
-    })
-    .map_err(|error| error.to_string())?;
+    let frozen_project_digest = source
+        .frozen_project()
+        .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
+    let root = match family {
+        admission::PreparedFamily::Thermal => {
+            let input_materializations = input_materializations
+                .into_iter()
+                .map(|materialization| {
+                    materialization
+                        .rebind(&access)
+                        .map_err(|error| error.to_string())
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            crate::input_materialization_contract::validate_input_materialization_inventory(
+                &realized,
+                &input_materializations,
+                &revision,
+            )
+            .map_err(|error| error.to_string())?;
+            PreparedFeaStudyRoot::Thermal(PreparedAuthoredThermalStudy {
+                geometry_meshing,
+                authored_study_digest,
+                frozen_project_digest,
+                study: realized.clone(),
+                materials: resolved.material_catalog,
+                program_revision: revision.clone(),
+                artifact_access: access,
+                input_materializations,
+                planning: runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
+                    backend: options.backend,
+                    formulation_requirement: resolved.study.formulation_requirement,
+                },
+                local_execution,
+                analysis_accelerator_requests: options.accelerators.clone(),
+            })
+        }
+        admission::PreparedFamily::Structural => PreparedFeaStudyRoot::Structural(
+            crate::prepare_structural_study_root(crate::StructuralStudyRootPreparation {
+                program_revision: revision.clone(),
+                artifact_access: access,
+                authored_study_digest,
+                frozen_project_digest,
+                study: realized.clone(),
+                materials: resolved.material_catalog,
+                planning: runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
+                    backend: options.backend,
+                    formulation_requirement: resolved.study.formulation_requirement,
+                    numerics:
+                        runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
+                },
+                local_execution,
+                analysis_accelerator_requests: options.accelerators.clone(),
+                input_materializations,
+                geometry_meshing,
+            })
+            .map_err(|error| error.to_string())?,
+        ),
+    };
     Ok(PreparedFeaStudy {
         root,
         workers,
         revision,
         realized,
     })
-}
-
-fn ensure_structural_execution_boundary(
-    resolved: &runmat_analysis_language::ResolvedAnalysisStudy,
-) -> Result<(), String> {
-    let unsupported = resolved
-        .study
-        .sequence
-        .steps
-        .iter()
-        .find(|step| step.family != runmat_analysis_core::PhysicsFamily::Structural);
-    if let Some(step) = unsupported {
-        return Err(format!(
-            "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution does not yet dispatch {:?}/{:?} for step `{}`",
-            step.family, step.procedure, step.step_id.0
-        ));
-    }
-    Ok(())
 }
 
 pub(super) fn program_revision(

@@ -3,6 +3,9 @@ use serde::Serialize;
 
 use crate::presentation;
 
+mod local;
+pub(super) use local::{completed_summary, print_completed_fea_result};
+
 #[derive(Serialize)]
 pub(super) struct LocalRunSummary {
     root_id: String,
@@ -53,6 +56,10 @@ pub(crate) fn print_fea_result(
     json: bool,
 ) -> Result<()> {
     let summary = local_summary(study_id, completed, publication)?;
+    print_summary(study_id, summary, json)
+}
+
+fn print_summary(study_id: &str, summary: LocalRunSummary, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
         return Ok(());

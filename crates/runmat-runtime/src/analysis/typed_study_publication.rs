@@ -5,18 +5,18 @@
 //! it must not reconstruct authoring defaults or change a workload.
 
 use runmat_analysis_core::ProcedureStepId;
-use runmat_analysis_fea::execution::StructuralStudyWorkloads;
 use runmat_execution::Digest;
 
 mod publication_options;
 
+use super::study_result_manifest::StudyResultManifest;
 use publication_options::publication_steps;
 
 use super::structural_study::{
     analysis_complete_structural_study_intent_op, PreparedStructuralStudyIntent,
 };
 use super::{
-    execution_operation, AnalysisStudyRunData, StructuralStudyCompletionIdentity,
+    execution_operation, AnalysisStudyCompletionIdentity, AnalysisStudyRunData,
     StructuralStudyResult,
 };
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
@@ -28,7 +28,7 @@ use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvel
 pub fn publish_structural_study_result(
     result: &StructuralStudyResult,
     context: OperationContext,
-    publication_identity: StructuralStudyCompletionIdentity,
+    publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let compiled = result.compiled();
     let study_definition_digest = result
@@ -81,75 +81,29 @@ pub fn publish_structural_study_result(
         result.numerical().clone(),
         publication_identity,
     )?;
-    let result_manifest = StructuralStudyResultManifest::from_result(
-        result,
-        study_definition_digest,
-        published.data.clone(),
-    )
-    .map_err(|message| {
-        typed_publication_error(
-            &OperationContext::new(published.trace_id.clone(), published.request_id.clone()),
-            &compiled.study_id,
-            message,
-        )
-    })?;
     let published_context =
         OperationContext::new(published.trace_id.clone(), published.request_id.clone());
-    let manifest_value = serde_json::to_value(&result_manifest).map_err(|error| {
-        typed_publication_error(
-            &published_context,
-            &compiled.study_id,
-            format!("failed to encode typed study result manifest: {error}"),
-        )
-    })?;
-    let manifest_path = super::structural_study::persist_content_addressed_study_evidence(
-        &study_definition_digest.to_string(),
-        "study-result-manifest",
-        manifest_value,
+    let invalid =
+        |message| typed_publication_error(&published_context, &compiled.study_id, message);
+    let result_manifest = StudyResultManifest::new(
+        result.compiled(),
+        result
+            .workloads()
+            .canonical_digest()
+            .map_err(|error| invalid(error.to_string()))?,
+        result.workloads().clone(),
+        result.mesh(),
+        result.meshing_evidence(),
+        StructuralStudyNumericalEvidence::from_result(result.numerical(), study_definition_digest)
+            .map_err(invalid)?,
+        published.data.clone(),
     )
-    .map_err(|message| typed_publication_error(&published_context, &compiled.study_id, message))?;
+    .map_err(invalid)?;
+    let manifest_path = result_manifest.persist().map_err(|message| {
+        typed_publication_error(&published_context, &compiled.study_id, message)
+    })?;
     published.data.result_manifest_artifact_path = Some(manifest_path);
     Ok(published)
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StructuralStudyResultManifest {
-    schema_version: u16,
-    study_definition_digest: Digest,
-    compiled: runmat_analysis_fea::study::CompiledAnalysisStudy,
-    workload_digest: Digest,
-    workloads: StructuralStudyWorkloads,
-    solver_mesh_digest: runmat_meshing_core::StableDigest,
-    meshing_evidence: runmat_meshing_core::MeshingEvidence,
-    numerical_evidence: StructuralStudyNumericalEvidence,
-    public_run: AnalysisStudyRunData,
-}
-
-impl StructuralStudyResultManifest {
-    fn from_result(
-        result: &StructuralStudyResult,
-        study_definition_digest: Digest,
-        public_run: AnalysisStudyRunData,
-    ) -> Result<Self, String> {
-        Ok(Self {
-            schema_version: 1,
-            study_definition_digest,
-            compiled: result.compiled().clone(),
-            workload_digest: result
-                .workloads()
-                .canonical_digest()
-                .map_err(|error| error.to_string())?,
-            workloads: result.workloads().clone(),
-            solver_mesh_digest: result.mesh().canonical_digest,
-            meshing_evidence: result.meshing_evidence().clone(),
-            numerical_evidence: StructuralStudyNumericalEvidence::from_result(
-                result.numerical(),
-                study_definition_digest,
-            )?,
-            public_run,
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

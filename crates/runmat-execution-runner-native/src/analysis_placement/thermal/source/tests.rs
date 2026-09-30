@@ -7,6 +7,7 @@ use crate::StructuralSequenceExecutionPolicy;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
 use runmat_meshing_core::ElementOrder;
 mod observation_queries;
+mod standalone_publication;
 
 #[derive(Clone)]
 struct DownloadedThermalObjects(BTreeMap<Digest, Vec<u8>>);
@@ -253,7 +254,7 @@ fn run(observation_policy: Option<runmat_analysis_core::PartialAccessPolicy>, or
             Some("thermal-prefix-test".into()),
             Some("publication".into()),
         ),
-        runmat_runtime::analysis::StructuralStudyCompletionIdentity::new(format!(
+        runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
             "thermal-prefix-{}",
             directory.path().display()
         ))

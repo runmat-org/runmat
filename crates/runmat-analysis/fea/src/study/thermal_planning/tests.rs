@@ -2,6 +2,8 @@ use super::*;
 use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
 use runmat_meshing_core::StableDigest;
 
+mod initial_selection;
+
 fn compiled(step: ProcedureStep) -> CompiledAnalysisStudy {
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);

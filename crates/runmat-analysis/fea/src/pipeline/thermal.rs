@@ -167,8 +167,10 @@ pub(crate) fn validate_step(
             "thermal controls require a matching direct procedure step".into(),
         ));
     }
-    if step.restart != RestartPolicy::Fresh || !step.state_inputs.is_empty() {
-        return Err(FeaRunError::InvalidModel("thermal execution does not yet bind upstream state or restart checkpoints; a fresh step without state inputs is required".into()));
+    if step.restart != RestartPolicy::Fresh
+        || !crate::study::thermal_step_initial_selection_supported(step)
+    {
+        return Err(FeaRunError::InvalidModel("thermal execution requires a fresh step with only authored physical thermal initial selection, not upstream state or restart checkpoints".into()));
     }
     Ok(())
 }

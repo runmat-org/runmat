@@ -14,7 +14,7 @@ use super::{
     StructuralStudyNumericalResult,
 };
 
-mod lifecycle;
+pub(in crate::analysis) mod lifecycle;
 mod publication;
 
 pub use lifecycle::{
@@ -32,6 +32,7 @@ pub(super) use lifecycle::{
     prepare_structural_prestressed_modal_template, prepare_structural_random_response_template,
     prepare_structural_response_spectrum_template,
 };
+pub(super) use publication::standalone_thermal_completion;
 pub(super) use publication::{
     complete_study_run, persist_content_addressed_study_evidence, study_completion_from_prepared,
     study_evidence_root, CompletedStudyStep, CompletedStudyStepRun,
@@ -41,51 +42,7 @@ pub(super) use publication::{persist_immutable_study_evidence, run_evidence_stag
 
 pub const STRUCTURAL_STUDY_INTENT_MAX_BYTES: usize = 64 * 1024 * 1024;
 
-/// Server allocation identity used to fence local materialization of a remote study result.
-///
-/// The server remains content-blind: this value names an admitted execution and is combined with
-/// the authored study digest before it becomes a deterministic local run identifier.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructuralStudyCompletionIdentity(String);
-
-impl StructuralStudyCompletionIdentity {
-    pub fn new(server_run_id: impl Into<String>) -> Result<Self, String> {
-        let server_run_id = server_run_id.into();
-        if server_run_id.is_empty()
-            || server_run_id.len() > 512
-            || !server_run_id.is_ascii()
-            || server_run_id.trim() != server_run_id
-            || server_run_id.chars().any(char::is_control)
-        {
-            return Err("remote structural study completion identity is invalid".into());
-        }
-        Ok(Self(server_run_id))
-    }
-
-    pub(super) fn local_run_id(
-        &self,
-        authored_study_digest: runmat_execution::Digest,
-        step_id: &ProcedureStepId,
-    ) -> String {
-        let digest = runmat_execution::Digest::sha256(
-            [
-                // The schema belongs in the immutable key. A format change must not collide
-                // with an older artifact from the same admitted execution.
-                b"runmat-remote-structural-study-completion/v2\0".as_slice(),
-                super::storage::ARTIFACT_SCHEMA_VERSION.as_bytes(),
-                b"\0".as_slice(),
-                self.0.as_bytes(),
-                authored_study_digest.bytes(),
-                step_id.as_str().as_bytes(),
-            ]
-            .concat(),
-        );
-        format!(
-            "run_remote_{}",
-            digest.to_string().trim_start_matches("sha256:")
-        )
-    }
-}
+use super::AnalysisStudyCompletionIdentity;
 
 #[derive(Debug, Clone)]
 pub(super) struct PreparedStudySequence {

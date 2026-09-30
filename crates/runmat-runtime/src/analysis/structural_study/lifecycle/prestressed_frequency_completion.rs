@@ -356,7 +356,7 @@ pub(super) fn complete_structural_prestressed_frequency(
         runmat_analysis_fea::execution::StructuralStepWorkload,
     >,
     numerical: crate::analysis::StructuralStudyPrestressedFrequencyNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let (preload_step, modal_step, frequency_step) = match (
         &numerical.reduction,
@@ -385,15 +385,21 @@ pub(super) fn complete_structural_prestressed_frequency(
         }
     };
     let preload_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
         intent.authored_study_digest,
         &preload_step.procedure_step.step_id,
     );
     let frequency_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
         intent.authored_study_digest,
         &frequency_step.procedure_step.step_id,
     );
     let modal_run_id = modal_step.map(|step| {
-        completion_identity.local_run_id(intent.authored_study_digest, &step.procedure_step.step_id)
+        completion_identity.local_run_id(
+            runmat_analysis_core::PhysicsFamily::Structural,
+            intent.authored_study_digest,
+            &step.procedure_step.step_id,
+        )
     });
     let prepared = PreparedStudyCompletion {
         thermal_prefix: None,

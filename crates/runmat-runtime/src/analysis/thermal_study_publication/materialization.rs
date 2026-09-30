@@ -3,7 +3,7 @@ use crate::analysis::ThermalStudyCompletion;
 use crate::analysis::*;
 use runmat_analysis_fea::results::field::reconstruct_recovered_field;
 
-pub(super) fn admit(
+pub(in crate::analysis) fn admit(
     completed: &ThermalStudyCompletion,
     source: &crate::analysis::ThermalStudyObjectSource,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
@@ -13,7 +13,7 @@ pub(super) fn admit(
 ) -> Result<crate::operations::OperationEnvelope<AnalysisRunResult>, String> {
     let manifest = &completed.manifest;
     manifest.validate().map_err(|error| error.to_string())?;
-    super::super::accuracy_completion::validate_publication_chain(
+    crate::analysis::structural_study::lifecycle::accuracy_completion::validate_publication_chain(
         completed.host_workload_digest,
         &runmat_analysis_fea::planning::resource::FeaResourcePhase::ThermalSolve(
             manifest.source_workload,
@@ -23,7 +23,10 @@ pub(super) fn admit(
         &completed.terminal_usage,
         &completed.publication,
     )?;
-    let accuracy = super::super::accuracy_completion::classify_accuracy(&completed.accuracy);
+    let accuracy =
+        crate::analysis::structural_study::lifecycle::accuracy_completion::classify_accuracy(
+            &completed.accuracy,
+        );
     let mut histories: [Vec<runmat_analysis_core::AnalysisField>; 4] =
         std::array::from_fn(|_| Vec::new());
     for entries in &manifest.fields {

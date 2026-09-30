@@ -9,8 +9,8 @@ use super::publication::{
     complete_study_run, CompletedStudyStep, CompletedStudyStepRun, PreparedStudyCompletion,
 };
 use super::{
-    PreparedStructuralStudyIntent, PreparedStructuralStudyIntentStep,
-    StructuralStudyCompletionIdentity,
+    AnalysisStudyCompletionIdentity, PreparedStructuralStudyIntent,
+    PreparedStructuralStudyIntentStep,
 };
 use crate::analysis::frequency_result::admit_structural_frequency_result;
 use crate::analysis::{
@@ -25,7 +25,7 @@ use crate::analysis::{
     ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
-mod accuracy_completion;
+pub(in crate::analysis) mod accuracy_completion;
 mod buckling_completion;
 mod errors;
 mod modal_completion;
@@ -38,6 +38,7 @@ mod random_response_completion;
 mod response_spectrum_completion;
 mod statistical_persistence;
 mod thermal_completion;
+pub use errors::structural_study_execution_failure;
 use errors::{completion_error, intent_completion_error};
 
 pub(in crate::analysis) use buckling_completion::complete_buckling_study;
@@ -79,7 +80,7 @@ pub fn analysis_complete_structural_study_intent_op(
     intent: PreparedStructuralStudyIntent,
     meshing_output: crate::meshing::MeshingExecutionOutput,
     result: StructuralStudyNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     intent.validate().map_err(|message| {
         intent_completion_error(
@@ -327,7 +328,7 @@ fn complete_structural_frequency(
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     authored_workload: runmat_analysis_fea::execution::StructuralFrequencyWorkload,
     numerical: crate::analysis::StructuralStudyFrequencyNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let [step] = intent.steps.as_slice() else {
         return Err(intent_completion_error(
@@ -339,8 +340,11 @@ fn complete_structural_frequency(
         ));
     };
     let step = step.clone();
-    let assigned_run_id = completion_identity
-        .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
+    let assigned_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
+        intent.authored_study_digest,
+        &step.procedure_step.step_id,
+    );
     complete_frequency_study(
         PreparedStudyCompletion {
             thermal_prefix: None,
@@ -518,7 +522,7 @@ fn complete_linear_sequence(
         runmat_analysis_fea::execution::StructuralLinearWorkload,
     >,
     result: StructuralStudySequenceNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let mut numerical_by_step = BTreeMap::new();
     for step in result.steps {
@@ -579,8 +583,11 @@ fn complete_linear_sequence(
             options: options.clone(),
             context: intent.context.clone(),
         };
-        let assigned_run_id = completion_identity
-            .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
+        let assigned_run_id = completion_identity.local_run_id(
+            runmat_analysis_core::PhysicsFamily::Structural,
+            intent.authored_study_digest,
+            &step.procedure_step.step_id,
+        );
         let run = analysis_admit_linear_static_run_with_id(
             prepared_linear,
             numerical.result.run,
@@ -644,7 +651,7 @@ fn complete_direct_transient(
     solver_mesh: runmat_meshing_core::SolverMeshArtifact,
     mut workload: runmat_analysis_fea::execution::StructuralTransientWorkload,
     result: StructuralStudyTransientNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     if result.step_id != workload.step_id {
         return Err(intent_completion_error(
@@ -696,8 +703,11 @@ fn complete_direct_transient(
         )
     })?;
     options.solver_mesh_artifact_path = persisted_mesh.artifact_path.clone();
-    let assigned_run_id = completion_identity
-        .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
+    let assigned_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
+        intent.authored_study_digest,
+        &step.procedure_step.step_id,
+    );
     let run = analysis_admit_transient_run_with_id(
         workload.backend,
         options.clone(),
@@ -792,32 +802,4 @@ fn complete_direct_transient(
         states,
         result.frozen_project_digest,
     )
-}
-
-/// Maps a placement-owned terminal failure into the structural-study operation contract.
-pub fn structural_study_execution_failure(
-    intent: &PreparedStructuralStudyIntent,
-    failure: super::StructuralStudyExecutionFailure,
-) -> OperationErrorEnvelope {
-    let (error_code, error_type, severity, message) = match failure {
-        super::StructuralStudyExecutionFailure::Failed(message) => (
-            "RM.FEA.RUN_STUDY.REMOTE_EXECUTION_FAILED",
-            OperationErrorType::Backend,
-            OperationErrorSeverity::Error,
-            message,
-        ),
-        super::StructuralStudyExecutionFailure::Cancelled => (
-            "RM.FEA.RUN_STUDY.EXECUTION_CANCELLED",
-            OperationErrorType::Cancelled,
-            OperationErrorSeverity::Error,
-            "structural study execution was cancelled".to_string(),
-        ),
-        super::StructuralStudyExecutionFailure::Indeterminate(message) => (
-            "RM.FEA.RUN_STUDY.REMOTE_EXECUTION_INDETERMINATE",
-            OperationErrorType::Internal,
-            OperationErrorSeverity::Fatal,
-            message,
-        ),
-    };
-    intent_completion_error(intent, error_code, error_type, severity, message)
 }

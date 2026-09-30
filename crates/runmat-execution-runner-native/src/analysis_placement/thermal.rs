@@ -6,6 +6,7 @@ use runmat_runtime::analysis::{
     StructuralStudyPrestressedModalFrequencyReductionResult,
 };
 mod source;
+pub(crate) use source::convert as convert_completed_thermal_study;
 pub use source::thermal_study_completion_from_source;
 
 pub(super) async fn execute(

@@ -2,20 +2,11 @@
 
 use runmat_analysis_fea::study::StructuralStudyProductInput;
 use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
-use runmat_execution::value::{ValuePayload, ValueRefKind};
-use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::ProgramExecutionResponse;
-use runmat_meshing_core::CacheAdmissionDecision;
-use runmat_meshing_execution::{
-    execute_exact_meshing_dag_async, import_exact_geometry_input, prepare_exact_geometry_input,
-    ExactMeshingDagRun, MeshingRunEvidenceContext,
-};
 
 use crate::{
-    execute_structural_workloads_locally, NativeExactMeshingExecutor, NativeExecutionConfig,
-    NativeExecutionError, NativeExecutionResult, NativeGeometryMaterializationLimits,
-    NativeProgramSession, PreparedStructuralStudyRoot,
+    execute_structural_workloads_locally, NativeExecutionConfig, NativeExecutionError,
+    NativeExecutionResult, PreparedStructuralStudyRoot,
 };
 
 #[derive(Clone, Default)]
@@ -53,7 +44,7 @@ pub async fn execute_prepared_structural_study_locally(
 }
 
 pub async fn execute_prepared_structural_study_locally_with_observers(
-    mut config: NativeExecutionConfig,
+    config: NativeExecutionConfig,
     prepared: PreparedStructuralStudyRoot,
     workers: u32,
     observers: LocalStructuralStudyObservers,
@@ -80,132 +71,18 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
     prepared.write_to(&mut composition_store)?;
 
     let decoded = crate::decode_structural_study_root(&request, &composition_store)?;
-    let geometry_meshing =
-        crate::decode_geometry_meshing_root(&decoded.geometry_meshing, &composition_store)?;
-    let (geometry_request, _) = runmat_analysis_execution::decode_geometry_materialization_program(
-        &geometry_meshing.geometry,
-        &composition_store,
+    let crate::local_study_geometry::LocalStudyGeometry {
+        output,
+        meshing,
+        analysis_config,
+    } = crate::local_study_geometry::execute_local_study_geometry(
+        config,
+        &decoded.geometry_meshing,
         &decoded.artifact_access,
-    )
-    .map_err(protocol)?;
-    let response = crate::execute_geometry_materialization_program_request(
-        &geometry_meshing.geometry,
         &mut composition_store,
-        NativeGeometryMaterializationLimits { inventory },
-    );
-    let output_root = materialization_output_root(response)?;
-    let output = runmat_analysis_execution::import_geometry_materialization_output(
-        &composition_store,
-        &output_root,
-        &decoded.artifact_access,
-    )
-    .map_err(protocol)?;
-    output
-        .validate_against(&geometry_request)
-        .map_err(protocol)?;
-    emit_local_progress(
         &observers,
-        OPERATION,
-        FeaProgressPhase::GeometryLoad,
-        FeaProgressStatus::Completed,
-        "Study geometry loaded",
-        Some(1),
-        Some(1),
-    );
-    emit_local_progress(
-        &observers,
-        OPERATION,
-        FeaProgressPhase::RegionResolution,
-        FeaProgressStatus::Completed,
-        "Geometry regions resolved against admitted topology",
-        Some(output.regions.len() as u64),
-        Some(output.regions.len() as u64),
-    );
-
-    emit_local_progress(
-        &observers,
-        OPERATION,
-        FeaProgressPhase::MeshPrep,
-        FeaProgressStatus::Started,
-        "Generating the analysis mesh",
-        None,
-        None,
-    );
-    let exact = import_exact_geometry_input(
-        &composition_store,
-        output.document.clone(),
-        &output.geometry_root,
-        decoded.artifact_access.clone(),
-        inventory,
     )
-    .map_err(protocol)?;
-    let mut meshing_request = geometry_meshing.request.meshing_request;
-    if !crate::exact_geometry_admission::same_requested_tolerance(
-        &meshing_request.tolerance,
-        &output.document.tolerance,
-    ) {
-        return Err(protocol(
-            "meshing request tolerance differs from materialized exact geometry",
-        ));
-    }
-    meshing_request.tolerance = output.document.tolerance;
-
-    let analysis_config = config.clone();
-    config.enable_exact_meshing(
-        &output.document,
-        &meshing_request,
-        Some(&output.platform.capability_cohort),
-    )?;
-    let session = NativeProgramSession::new(config)?;
-    let mut session_store = session.object_store();
-    for object in &exact.geometry_objects().objects {
-        session_store.write_verified(object).map_err(protocol)?;
-    }
-    let geometry = prepare_exact_geometry_input(
-        exact.geometry_objects().clone(),
-        decoded.artifact_access.clone(),
-        inventory,
-    )
-    .map_err(protocol)?;
-    let mut executor =
-        NativeExactMeshingExecutor::new(&session, crate::MeshingExecutionPolicy::default())
-            .map_err(protocol)?;
-    let meshing = execute_exact_meshing_dag_async(
-        ExactMeshingDagRun {
-            geometry: &geometry,
-            request: meshing_request,
-            artifact_access: decoded.artifact_access.clone(),
-            capability_cohort: Some(output.platform.capability_cohort.clone()),
-            program_revision: request.recipe.program_revision.clone(),
-            preferred_edges_per_partition: geometry_meshing.request.preferred_edges_per_partition,
-            preferred_faces_per_partition: geometry_meshing.request.preferred_faces_per_partition,
-            inventory_limits: inventory,
-            evidence: MeshingRunEvidenceContext {
-                platform: output.platform,
-                sizing: Vec::new(),
-                cache_admission: CacheAdmissionDecision::Admitted,
-            },
-        },
-        &mut executor,
-    )
-    .await
-    .map_err(protocol)?;
-    if let Some(observer) = observers.mesh.as_ref() {
-        observer(&meshing.artifact);
-    }
-    emit_local_progress(
-        &observers,
-        OPERATION,
-        FeaProgressPhase::MeshPrep,
-        FeaProgressStatus::Completed,
-        format!(
-            "Analysis mesh ready: {} nodes, {} elements",
-            meshing.artifact.topology.nodes.len(),
-            meshing.artifact.topology.volume_elements.len()
-        ),
-        Some(meshing.artifact.topology.volume_elements.len() as u64),
-        Some(meshing.artifact.topology.volume_elements.len() as u64),
-    );
+    .await?;
 
     emit_local_progress(
         &observers,
@@ -311,7 +188,7 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
     Ok(result)
 }
 
-fn emit_local_progress(
+pub(crate) fn emit_local_progress(
     observers: &LocalStructuralStudyObservers,
     operation: impl Into<String>,
     phase: FeaProgressPhase,
@@ -338,25 +215,6 @@ fn emit_local_progress(
     runmat_analysis_fea::emit_fea_progress(event.clone());
     if let Some(observer) = observers.progress.as_ref() {
         observer(event);
-    }
-}
-
-fn materialization_output_root(
-    response: ProgramExecutionResponse,
-) -> NativeExecutionResult<runmat_execution::value::ValueRef> {
-    match response {
-        ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } => match outputs.as_slice() {
-            [ValuePayload::Object(reference)] if reference.kind == ValueRefKind::ResultObject => {
-                Ok(reference.as_ref().clone())
-            }
-            _ => Err(protocol(
-                "geometry materialization returned an invalid output root",
-            )),
-        },
-        ProgramExecutionResponse::Failure { message } => Err(protocol(message)),
-        ProgramExecutionResponse::Success { .. } => Err(protocol(
-            "geometry materialization returned an inline output",
-        )),
     }
 }
 

@@ -3,7 +3,7 @@ use super::*;
 use crate::analysis::ThermalStudyCompletion;
 use runmat_analysis_fea::execution::{StructuralStepWorkload, StructuralStudyWorkloads};
 
-mod thermal_run;
+use crate::analysis::thermal_study_publication::materialization as thermal_run;
 
 pub(super) fn complete(
     intent: PreparedStructuralStudyIntent,
@@ -14,7 +14,7 @@ pub(super) fn complete(
     thermal: ThermalStudyCompletion,
     thermal_source: crate::analysis::ThermalStudyObjectSource,
     structural: StructuralStudyNumericalResult,
-    identity: StructuralStudyCompletionIdentity,
+    identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let invalid = |message| {
         intent_completion_error(
@@ -47,12 +47,25 @@ pub(super) fn complete(
     .map_err(invalid)?;
     let (preload, consumers) =
         crate::analysis::study_result::thermal::structural_steps(&structural).map_err(invalid)?;
-    let thermal_run_id =
-        identity.local_run_id(intent.authored_study_digest, &thermal.workload.step_id);
-    let preload_run_id = identity.local_run_id(intent.authored_study_digest, &preload);
+    let thermal_run_id = identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Thermal,
+        intent.authored_study_digest,
+        &thermal.workload.step_id,
+    );
+    let preload_run_id = identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
+        intent.authored_study_digest,
+        &preload,
+    );
     let consumer_run_ids = consumers
         .iter()
-        .map(|step| identity.local_run_id(intent.authored_study_digest, step))
+        .map(|step| {
+            identity.local_run_id(
+                runmat_analysis_core::PhysicsFamily::Structural,
+                intent.authored_study_digest,
+                step,
+            )
+        })
         .collect::<Vec<_>>();
     let mut steps = intent
         .steps

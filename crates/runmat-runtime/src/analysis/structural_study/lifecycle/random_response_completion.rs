@@ -11,7 +11,7 @@ pub(super) fn complete_structural_random_response(
         runmat_analysis_fea::execution::StructuralStepWorkload,
     >,
     numerical: crate::analysis::StructuralStudyRandomResponseNumericalResult,
-    completion_identity: StructuralStudyCompletionIdentity,
+    completion_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let [modal_step, response_step] = intent.steps.as_slice() else {
         return Err(intent_completion_error(
@@ -23,10 +23,12 @@ pub(super) fn complete_structural_random_response(
         ));
     };
     let modal_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
         intent.authored_study_digest,
         &modal_step.procedure_step.step_id,
     );
     let response_run_id = completion_identity.local_run_id(
+        runmat_analysis_core::PhysicsFamily::Structural,
         intent.authored_study_digest,
         &response_step.procedure_step.step_id,
     );
