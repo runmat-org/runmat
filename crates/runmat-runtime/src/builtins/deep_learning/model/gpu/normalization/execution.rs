@@ -1,4 +1,3 @@
-use super::super::admission::{invalid_owner, GpuOperand};
 use super::super::*;
 use super::validation::validate_output;
 use crate::builtins::common::gpu_helpers::propagate_output_provenance;
@@ -47,34 +46,12 @@ pub(in crate::builtins::deep_learning) async fn forward(
             "admitted normalization stage no longer matches network Layers",
         ));
     };
-    let scale = parameter(layer, ParameterRole::Scale);
-    let offset = parameter(layer, ParameterRole::Offset);
-    for (role, resident) in [
-        (ParameterRole::Scale, scale),
-        (ParameterRole::Offset, offset),
-    ] {
-        if let Some(resident) = resident {
-            let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(resident)
-                .ok_or_else(|| invalid_owner(function, GpuOperand::Parameter(role)))?;
-            if !runmat_accelerate_api::same_provider_instance(provider, owner) {
-                return Err(invalid_owner(function, GpuOperand::Parameter(role)));
-            }
-            if runmat_accelerate_api::handle_precision(resident)
-                != runmat_accelerate_api::handle_precision(input)
-            {
-                if runmat_accelerate_api::handle_is_explicit(resident) {
-                    return Err(unsupported_error(
-                        function,
-                        format!(
-                            "{function}: explicit resident {} precision differs from input",
-                            role.name()
-                        ),
-                    ));
-                }
-                return Ok(Err(GpuCapabilityReason::ParameterPrecision(role)));
-            }
-        }
-    }
+    let parameters = match super::admit_parameters(layer, provider, input, function)? {
+        Ok(parameters) => parameters,
+        Err(reason) => return Ok(Err(reason)),
+    };
+    let scale = parameters.scale;
+    let offset = parameters.offset;
     let request = stage.geometry.resident_request();
     let capability = provider
         .deep_learning_layer_norm_capability(input, scale, offset, &request)

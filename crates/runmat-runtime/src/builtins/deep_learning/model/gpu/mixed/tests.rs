@@ -153,12 +153,27 @@ fn normalization_then_relu() -> Value {
     .unwrap()
 }
 
+fn replace_normalization_parameter(
+    network: &mut runmat_value::ObjectInstance,
+    role: ParameterRole,
+    value: Value,
+) {
+    let Value::Cell(layers) = network.properties.get_mut("Layers").unwrap() else {
+        unreachable!()
+    };
+    let Value::Object(layer) = &mut layers.data[1] else {
+        unreachable!()
+    };
+    layer.properties.insert(role.name().into(), value);
+}
+
 #[test]
-fn later_single_relu_capability_rejects_mixed_route_before_effects() {
+fn mixed_normalization_admits_resident_parameters_before_effects() {
     struct LaterStageProbe {
         device: u32,
         effects: AtomicUsize,
         reject_relu: AtomicBool,
+        affine_operands: AtomicUsize,
     }
     impl AccelProvider for LaterStageProbe {
         fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
@@ -181,10 +196,19 @@ fn later_single_relu_capability_rejects_mixed_route_before_effects() {
         fn deep_learning_layer_norm_planned_capability(
             &self,
             _: &GpuTensorHandle,
-            _: Option<&GpuTensorHandle>,
-            _: Option<&GpuTensorHandle>,
+            scale: Option<&GpuTensorHandle>,
+            offset: Option<&GpuTensorHandle>,
             _: &DeepLearningLayerNormRequest,
         ) -> anyhow::Result<DeepLearningLayerNormCapability> {
+            for parameter in [scale, offset].into_iter().flatten() {
+                parameter.allocation_lease().validate_live()?;
+                assert_eq!(parameter.shape(), &[2, 1]);
+                assert_eq!(parameter.device_id(), self.device);
+            }
+            self.affine_operands.store(
+                usize::from(scale.is_some()) + usize::from(offset.is_some()),
+                Ordering::SeqCst,
+            );
             Ok(DeepLearningLayerNormCapability::Ready)
         }
         fn deep_learning_feed_forward_stage_capability(
@@ -220,6 +244,7 @@ fn later_single_relu_capability_rejects_mixed_route_before_effects() {
         device: owner.device_id(),
         effects: AtomicUsize::new(0),
         reject_relu: AtomicBool::new(true),
+        affine_operands: AtomicUsize::new(0),
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let input = object(
@@ -261,4 +286,104 @@ fn later_single_relu_capability_rejects_mixed_route_before_effects() {
     assert_eq!(ready.stages.len(), 2);
     assert_eq!(ready.output_axes, *host.output_axes());
     assert_eq!(provider.effects.load(Ordering::SeqCst), 0);
+
+    use runmat_accelerate_api::{GpuHandleProvenance, NumericElementType};
+    let scale = owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let offset = owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let mut resident_network = network.clone();
+    for (role, allocation) in [
+        (ParameterRole::Scale, &scale),
+        (ParameterRole::Offset, &offset),
+    ] {
+        replace_normalization_parameter(
+            &mut resident_network,
+            role,
+            Value::GpuTensor(
+                allocation
+                    .handle
+                    .clone()
+                    .with_provenance(GpuHandleProvenance::Explicit)
+                    .unwrap(),
+            ),
+        );
+    }
+    let host = HostNetworkPlan::admit(&resident_network, &input, "forward").unwrap();
+    let Some(Ok(ready)) = plan::admit(
+        &resident_network,
+        &host,
+        &allocated.handle,
+        host.output_axes(),
+        "forward",
+    )
+    .unwrap() else {
+        panic!("resident normalization parameters must reach planned admission")
+    };
+    assert_eq!(provider.affine_operands.load(Ordering::SeqCst), 2);
+    assert_eq!(ready.consumed_resident_parameters.len(), 2);
+    assert!(ready
+        .consumed_resident_parameters
+        .iter()
+        .all(runmat_accelerate_api::handle_is_explicit));
+    assert_eq!(provider.effects.load(Ordering::SeqCst), 0);
+
+    let double_scale = owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    for explicit in [false, true] {
+        let mut mismatch = resident_network.clone();
+        let handle = if explicit {
+            double_scale
+                .handle
+                .clone()
+                .with_provenance(GpuHandleProvenance::Explicit)
+                .unwrap()
+        } else {
+            double_scale.handle.clone()
+        };
+        replace_normalization_parameter(
+            &mut mismatch,
+            ParameterRole::Scale,
+            Value::GpuTensor(handle),
+        );
+        let host = HostNetworkPlan::admit(&mismatch, &input, "forward").unwrap();
+        provider.affine_operands.store(0, Ordering::SeqCst);
+        let result = plan::admit(
+            &mismatch,
+            &host,
+            &allocated.handle,
+            host.output_axes(),
+            "forward",
+        );
+        if explicit {
+            assert!(result.is_err(), "explicit precision cannot silently gather");
+        } else {
+            assert!(matches!(
+                result.unwrap(),
+                Some(Err(GpuCapabilityReason::ParameterPrecision(
+                    ParameterRole::Scale
+                )))
+            ));
+        }
+        assert_eq!(provider.affine_operands.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.effects.load(Ordering::SeqCst), 0);
+    }
+    let malformed = owner
+        .allocate_zeroed(vec![3, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    replace_normalization_parameter(
+        &mut resident_network,
+        ParameterRole::Scale,
+        Value::GpuTensor(malformed.handle.clone()),
+    );
+    assert!(HostNetworkPlan::admit(&resident_network, &input, "forward").is_err());
+    assert_eq!(provider.affine_operands.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.effects.load(Ordering::SeqCst), 0);
+    assert_eq!(malformed.probe.retirements(), 0);
+    for allocation in [&allocated, &scale, &offset, &double_scale] {
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
 }

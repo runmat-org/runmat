@@ -4,7 +4,7 @@ use super::super::*;
 use crate::builtins::deep_learning::model::{
     admission::forward_data,
     parameters::{ParameterRole, ParameterView},
-    plan::host::HostNetworkPlan,
+    plan::host::{Controls, HostNetworkPlan},
 };
 use runmat_accelerate_api::{
     ProviderViewCapability, ProviderViewChain, ProviderViewSource, ProviderViewStep,
@@ -39,12 +39,27 @@ pub(super) fn consumed_resident_handles(
     consumed
 }
 
-pub(super) fn has_other_resident_parameters(host: &HostNetworkPlan<'_>) -> bool {
+pub(super) fn has_unsupported_resident_parameters(host: &HostNetworkPlan<'_>) -> bool {
     host.parameter_views().iter().any(|row| {
-        !matches!(row.key.role, ParameterRole::Weights | ParameterRole::Bias)
-            && row
-                .value
-                .is_some_and(|value| matches!(forward_data(value), Value::GpuTensor(_)))
+        if !row
+            .value
+            .is_some_and(|value| matches!(forward_data(value), Value::GpuTensor(_)))
+        {
+            return false;
+        }
+        !host.steps().iter().any(|step| {
+            step.index == row.key.layer_index
+                && matches!(
+                    (&step.controls, row.key.role),
+                    (
+                        Controls::Dense,
+                        ParameterRole::Weights | ParameterRole::Bias
+                    ) | (
+                        Controls::Normalization(_),
+                        ParameterRole::Scale | ParameterRole::Offset
+                    )
+                )
+        })
     })
 }
 

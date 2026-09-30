@@ -194,7 +194,7 @@ pub(super) fn admit(
     });
     if transformations < 2
         || !combines_pool_or_norm
-        || parameters::has_other_resident_parameters(host)
+        || parameters::has_unsupported_resident_parameters(host)
     {
         return Ok(None);
     }
@@ -349,8 +349,21 @@ pub(super) fn admit(
                     Err(_) => return Ok(Some(Err(GpuCapabilityReason::AxisLayout))),
                 };
                 let request = geometry.resident_request();
+                let Some(Value::Object(layer)) = layers.data.get(step.index) else {
+                    unreachable!("host plan admitted normalization layer")
+                };
+                let affine =
+                    match normalization::admit_parameters(layer, provider, input, function)? {
+                        Ok(parameters) => parameters,
+                        Err(reason) => return Ok(Some(Err(reason))),
+                    };
                 let capability = provider
-                    .deep_learning_layer_norm_planned_capability(input, None, None, &request)
+                    .deep_learning_layer_norm_planned_capability(
+                        input,
+                        affine.scale,
+                        affine.offset,
+                        &request,
+                    )
                     .map_err(|error| {
                         provider_failure(function, "resident normalization admission", error.into())
                     })?;
