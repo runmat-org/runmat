@@ -4,8 +4,8 @@ use super::*;
 use runmat_accelerate_api::{
     DeepLearningFeedForwardCapability, DeepLearningForwardCapability, DeepLearningForwardOperation,
     DeepLearningForwardResources, DeepLearningForwardRoute, DeepLearningForwardSource,
-    DeepLearningLayerNormCapability, DeepLearningPool1DCapability, NumericElementType,
-    ProviderViewCapability, ProviderViewChain, ProviderViewSource,
+    DeepLearningLayerNormCapability, DeepLearningPool1DCapability, ProviderViewCapability,
+    ProviderViewChain, ProviderViewSource,
 };
 use std::collections::HashSet;
 
@@ -224,7 +224,7 @@ mod tests {
     use runmat_accelerate_api::{
         AccelProvider, DeepLearningFeedForwardStage, DeepLearningForwardParameter,
         DeepLearningForwardParameters, DeepLearningForwardStep, GpuTensorView, HostNumericDataView,
-        HostNumericTensorView, ProviderViewStep,
+        HostNumericTensorView, NumericElementType, ProviderViewStep,
     };
 
     fn element_type(provider: &WgpuProvider) -> NumericElementType {
