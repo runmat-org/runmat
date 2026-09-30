@@ -1,5 +1,6 @@
 //! Provider-resident forward execution and result ownership validation.
 use super::execution::NetworkOutputLayout;
+use super::parameters::ParameterRole;
 use super::*;
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use runmat_builtins::DeepLearningAxisLabel;
@@ -7,7 +8,7 @@ use runmat_builtins::DeepLearningAxisLabel;
 mod parameters;
 mod admission;
 
-pub(super) use admission::{admit_gpu_forward, GpuForwardAdmission};
+pub(super) use admission::{admit_gpu_forward, GpuCapabilityReason, GpuForwardAdmission};
 
 #[cfg(test)]
 mod tests;
@@ -122,9 +123,9 @@ pub(super) async fn evaluate_network_gpu(
             .then_some(layer)
     });
     let resident_parameters = consumed_parameters.flat_map(|layer| {
-        ["Weights", "Bias"]
+        [ParameterRole::Weights, ParameterRole::Bias]
             .into_iter()
-            .filter_map(move |name| resident_parameter_handle(layer, name))
+            .filter_map(move |role| resident_parameter_handle(layer, role.name()))
     });
     crate::builtins::common::gpu_helpers::propagate_output_provenance(
         &mut current,

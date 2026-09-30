@@ -76,9 +76,7 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
         if runmat_accelerate_api::handle_is_explicit(handle) {
             let detail = match route {
                 gpu::GpuForwardAdmission::UnsupportedCapability(reason) => reason,
-                gpu::GpuForwardAdmission::Ready(_) => {
-                    "provider does not implement a required resident operation".into()
-                }
+                gpu::GpuForwardAdmission::Ready(_) => gpu::GpuCapabilityReason::ProviderOperation,
             };
             return Err(unsupported_error(
                 function,

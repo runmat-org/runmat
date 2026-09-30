@@ -244,9 +244,12 @@ fn gpu_route_distinguishes_missing_kernel_from_invalid_feature_geometry() {
         )
         .unwrap();
         let sequence = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+        let unsupported = super::admit_gpu_forward(&[sequence], &input, &axes, "forward").unwrap();
         assert!(matches!(
-            super::admit_gpu_forward(&[sequence], &input, &axes, "forward").unwrap(),
-            super::GpuForwardAdmission::UnsupportedCapability(_)
+            unsupported,
+            super::GpuForwardAdmission::UnsupportedCapability(
+                super::GpuCapabilityReason::Layer(identity)
+            ) if identity.is(runmat_builtins::DeepLearningLayerKind::SequenceInput.class())
         ));
 
         let feature = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
@@ -287,6 +290,20 @@ fn gpu_route_keeps_supported_fully_connected_execution_ready() {
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
     });
+}
+
+#[test]
+fn gpu_capability_reason_keeps_identity_typed_until_diagnostic_rendering() {
+    let identity = runmat_builtins::DeepLearningLayerKind::Convolution1D
+        .class()
+        .owned();
+    let reason = super::GpuCapabilityReason::Layer(identity.clone());
+    assert_eq!(reason, super::GpuCapabilityReason::Layer(identity));
+    assert!(reason.to_string().contains("Convolution1DLayer"));
+    assert_eq!(
+        super::GpuCapabilityReason::ProviderOperation.to_string(),
+        "provider does not implement a required resident operation"
+    );
 }
 
 #[test]

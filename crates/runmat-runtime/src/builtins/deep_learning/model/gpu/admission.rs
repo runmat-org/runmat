@@ -2,11 +2,76 @@
 //! host execution; malformed geometry or an invalid resident owner does not.
 
 use super::*;
+use crate::builtins::deep_learning::model::parameters::ParameterRole;
+use runmat_types::ClassIdentity;
+use std::fmt;
 
 #[derive(Debug)]
 pub(in crate::builtins::deep_learning::model) enum GpuForwardAdmission {
     Ready(GpuForwardLayout),
-    UnsupportedCapability(String),
+    UnsupportedCapability(GpuCapabilityReason),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::builtins::deep_learning::model) enum GpuCapabilityReason {
+    AxisLayout,
+    InputStorage,
+    InputRank,
+    InputPrecision,
+    Layer(ClassIdentity),
+    NoSupportedTransform,
+    ProviderOperation,
+}
+
+impl fmt::Display for GpuCapabilityReason {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AxisLayout => write!(
+                formatter,
+                "provider-resident forward does not support this axis layout"
+            ),
+            Self::InputStorage => write!(
+                formatter,
+                "provider-resident forward requires real dlarray Data"
+            ),
+            Self::InputRank => write!(
+                formatter,
+                "provider-resident forward requires 2-D dlarray Data"
+            ),
+            Self::InputPrecision => write!(
+                formatter,
+                "provider-resident forward requires single or double dlarray Data"
+            ),
+            Self::Layer(identity) => write!(
+                formatter,
+                "provider-resident forward does not yet support layer type '{}'",
+                identity.display_name()
+            ),
+            Self::NoSupportedTransform => write!(
+                formatter,
+                "provider-resident forward requires a supported transform layer"
+            ),
+            Self::ProviderOperation => write!(
+                formatter,
+                "provider does not implement a required resident operation"
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum GpuOperand {
+    Input,
+    Parameter(ParameterRole),
+}
+
+impl fmt::Display for GpuOperand {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Input => formatter.write_str("input"),
+            Self::Parameter(role) => formatter.write_str(role.name()),
+        }
+    }
 }
 
 pub(in crate::builtins::deep_learning::model) fn admit_gpu_forward(
@@ -16,10 +81,10 @@ pub(in crate::builtins::deep_learning::model) fn admit_gpu_forward(
     function: &'static str,
 ) -> BuiltinResult<GpuForwardAdmission> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
-        .ok_or_else(|| invalid_owner(function, "input"))?;
+        .ok_or_else(|| invalid_owner(function, GpuOperand::Input))?;
     let Some(layout) = GpuForwardLayout::from_axes(axes) else {
         return Ok(GpuForwardAdmission::UnsupportedCapability(
-            "provider-resident forward does not support this axis layout".into(),
+            GpuCapabilityReason::AxisLayout,
         ));
     };
     match classify_layers(layers, input, layout, provider, function)? {
@@ -36,7 +101,7 @@ pub(super) fn require_gpu_forward_layers(
     function: &'static str,
 ) -> BuiltinResult<()> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
-        .ok_or_else(|| invalid_owner(function, "input"))?;
+        .ok_or_else(|| invalid_owner(function, GpuOperand::Input))?;
     if let Some(reason) = classify_layers(layers, input, layout, provider, function)? {
         return Err(unsupported_error(function, format!("{function}: {reason}")));
     }
@@ -51,23 +116,17 @@ fn classify_layers(
     layout: GpuForwardLayout,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     function: &'static str,
-) -> BuiltinResult<Option<String>> {
+) -> BuiltinResult<Option<GpuCapabilityReason>> {
     if runmat_accelerate_api::handle_storage(input) != GpuTensorStorage::Real {
-        return Ok(Some(
-            "provider-resident forward requires real dlarray Data".into(),
-        ));
+        return Ok(Some(GpuCapabilityReason::InputStorage));
     }
     if input.shape().len() != 2 {
-        return Ok(Some(
-            "provider-resident forward requires 2-D dlarray Data".into(),
-        ));
+        return Ok(Some(GpuCapabilityReason::InputRank));
     }
     if runmat_accelerate_api::handle_precision(input).is_none()
         || runmat_accelerate_api::handle_is_logical(input)
     {
-        return Ok(Some(
-            "provider-resident forward requires single or double dlarray Data".into(),
-        ));
+        return Ok(Some(GpuCapabilityReason::InputPrecision));
     }
     let mut features = layout.channels(input.shape());
     let mut saw_input = false;
@@ -94,13 +153,15 @@ fn classify_layers(
             }
             Some(ForwardLayerKind::FullyConnected) if saw_input => {
                 features = fully_connected_output_width(layer, features, function)?;
-                for name in ["Weights", "Bias"] {
-                    if let Some(handle) = resident_parameter_handle(layer, name) {
+                for role in [ParameterRole::Weights, ParameterRole::Bias] {
+                    if let Some(handle) = resident_parameter_handle(layer, role.name()) {
                         let owner =
                             crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-                                .ok_or_else(|| invalid_owner(function, name))?;
+                                .ok_or_else(|| {
+                                    invalid_owner(function, GpuOperand::Parameter(role))
+                                })?;
                         if !runmat_accelerate_api::same_provider_instance(provider, owner) {
-                            return Err(invalid_owner(function, name));
+                            return Err(invalid_owner(function, GpuOperand::Parameter(role)));
                         }
                         if runmat_accelerate_api::handle_precision(handle)
                             != runmat_accelerate_api::handle_precision(input)
@@ -108,7 +169,10 @@ fn classify_layers(
                         {
                             return Err(unsupported_error(
                                 function,
-                                format!("{function}: explicit resident {name} precision differs from input"),
+                                format!(
+                                    "{function}: explicit resident {} precision differs from input",
+                                    role.name()
+                                ),
                             ));
                         }
                     }
@@ -126,10 +190,7 @@ fn classify_layers(
                 // The host plan has already admitted the complete network.
                 // Its later geometry is not the channel count of this GPU
                 // subset once an unimplemented layer changes that geometry.
-                return Ok(Some(format!(
-                    "provider-resident forward does not yet support layer type '{}'",
-                    layer.class_name
-                )));
+                return Ok(Some(GpuCapabilityReason::Layer(layer.class_name.clone())));
             }
         }
     }
@@ -140,14 +201,12 @@ fn classify_layers(
         ));
     }
     if !saw_transform {
-        return Ok(Some(
-            "provider-resident forward requires a supported transform layer".into(),
-        ));
+        return Ok(Some(GpuCapabilityReason::NoSupportedTransform));
     }
     Ok(None)
 }
 
-fn invalid_owner(function: &'static str, operand: &str) -> crate::RuntimeError {
+fn invalid_owner(function: &'static str, operand: GpuOperand) -> crate::RuntimeError {
     crate::runtime_error::build_runtime_error(format!(
         "{function}: resident {operand} has no compatible live provider owner"
     ))
