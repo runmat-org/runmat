@@ -56,6 +56,7 @@ fn every_accuracy_source_honors_its_authored_resident_ceiling() {
         AccuracySourceKind::StructuralModalResponseSpectrum,
         AccuracySourceKind::StructuralRandomResponse,
         AccuracySourceKind::Thermal,
+        AccuracySourceKind::AcousticHarmonic,
     ] {
         let baseline = build(&request(kind, 8 * 1024 * 1024 * 1024)).unwrap();
         let required = baseline.request.memory_bytes;

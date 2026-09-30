@@ -7,8 +7,8 @@ use runmat_analysis_execution::{
     prepare_analysis_objects, rederive_acoustic_harmonic_resource_plan,
 };
 use runmat_analysis_fea::execution::{
-    AcousticHarmonicWorkload, AnalysisNumericalObjectKind, ExecutionPlanIdentity,
-    NumericalPlanIdentity, SequenceIdentity, StepIdentity,
+    AcousticHarmonicWorkload, AcousticNumericalReceiptArtifact, AnalysisNumericalObjectKind,
+    ExecutionPlanIdentity, NumericalPlanIdentity, SequenceIdentity, StepIdentity,
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::Digest;
@@ -28,6 +28,7 @@ pub(super) fn execute(
         || invocation.host.workload.outputs
             != vec![
                 AnalysisNumericalObjectKind::SolverResult,
+                AnalysisNumericalObjectKind::NumericalReceipt,
                 AnalysisNumericalObjectKind::StatePublicationProfiles,
             ]
     {
@@ -94,6 +95,7 @@ pub(super) fn execute(
     }
     let policy = invocation.output_policy;
     let result = workload.execute(&mesh)?;
+    let receipt = AcousticNumericalReceiptArtifact::new(&workload, &result, &mesh)?;
     let bytes = result.canonical_bytes()?;
     let bound = runmat_analysis_fea::planning::resource::acoustic_harmonic_result_payload_bytes_upper_bound(&workload, &mesh)?;
     if bytes.len() as u64 > bound {
@@ -133,6 +135,11 @@ pub(super) fn execute(
     )?;
     Ok(vec![
         AnalysisKernelOutput::prepared(objects),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::NumericalReceipt,
+            receipt.identity().digest(),
+            receipt.canonical_bytes()?,
+        ),
         AnalysisKernelOutput::prepared(profile_objects),
     ])
 }

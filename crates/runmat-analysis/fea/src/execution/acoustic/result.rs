@@ -258,6 +258,12 @@ impl AcousticHarmonicSolverResult {
     pub fn source_workload(&self) -> AnalysisWorkloadIdentity {
         self.data.source_workload
     }
+    pub fn relative_residual(&self) -> f64 {
+        self.data.relative_residual
+    }
+    pub fn power_relative_error(&self) -> f64 {
+        self.data.power_relative_error
+    }
     pub fn frequency(&self) -> Frequency {
         self.data.frequency
     }

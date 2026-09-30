@@ -597,6 +597,8 @@ fn execute_accuracy_evaluation(
             matches!(
                 input.manifest.kind,
                 AnalysisNumericalObjectKind::ThermalWorkload
+                    | AnalysisNumericalObjectKind::AcousticHarmonicWorkload
+                    | AnalysisNumericalObjectKind::SolverResult
                     | AnalysisNumericalObjectKind::Mesh
                     | AnalysisNumericalObjectKind::AccuracySourceContext
                     | AnalysisNumericalObjectKind::SolverInvocation

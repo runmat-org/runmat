@@ -80,6 +80,17 @@ fn facts(
             transport_closure_bytes_upper_bound: ByteCount(profiles + 2048),
             construction_resident_bytes_admission_budget: ByteCount(profiles * 16),
         },
+        receipt_output: PreparedOutputResourceFacts {
+            encoded_payload_bytes_upper_bound: ByteCount(
+                crate::execution::ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
+            ),
+            transport_closure_bytes_upper_bound: ByteCount(
+                crate::execution::ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES + 2048,
+            ),
+            construction_resident_bytes_admission_budget: ByteCount(
+                crate::execution::ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES * 16,
+            ),
+        },
         output_set: PreparedOutputSetResourceFacts {
             encoded_bytes_upper_bound: ByteCount(2048),
         },
@@ -92,6 +103,13 @@ fn canonical_results_fit_admitted_tet4_tet10_payload_and_policy_identity_is_dete
         let workload = workload();
         let prepared = facts(&workload, &mesh);
         let result = workload.execute(&mesh).unwrap();
+        let receipt =
+            crate::execution::AcousticNumericalReceiptArtifact::new(&workload, &result, &mesh)
+                .unwrap();
+        assert!(
+            receipt.canonical_bytes().unwrap().len() as u64
+                <= prepared.receipt_output.encoded_payload_bytes_upper_bound.0
+        );
         assert!(
             result.canonical_bytes().unwrap().len() as u64
                 <= prepared.result_output.encoded_payload_bytes_upper_bound.0
@@ -107,6 +125,12 @@ fn canonical_results_fit_admitted_tet4_tet10_payload_and_policy_identity_is_dete
                     .0
         );
         let plan = build_acoustic_resource_plan(&workload, &mesh, prepared.clone()).unwrap();
+        assert_eq!(
+            plan.input
+                .demand
+                .output_facts(AnalysisNumericalObjectKind::NumericalReceipt),
+            Some(&prepared.receipt_output)
+        );
         assert_eq!(
             plan,
             build_acoustic_resource_plan(&workload, &mesh, prepared).unwrap()
@@ -130,7 +154,7 @@ fn canonical_results_fit_admitted_tet4_tet10_payload_and_policy_identity_is_dete
 fn acoustic_prepared_byte_facts_and_production_fail_closed() {
     let mut workload = workload();
     let mesh = slab_mesh(1);
-    for field in 0..8 {
+    for field in 0..11 {
         let mut prepared = facts(&workload, &mesh);
         match field {
             0 => prepared.inputs.encoded_payload_bytes.0 -= 1,
@@ -154,10 +178,22 @@ fn acoustic_prepared_byte_facts_and_production_fail_closed() {
                     .transport_closure_bytes_upper_bound
                     .0 = u64::MAX
             }
-            _ => {
+            7 => {
                 prepared
                     .state_profiles_output
                     .construction_resident_bytes_admission_budget = ByteCount(0)
+            }
+            8 => prepared.receipt_output.encoded_payload_bytes_upper_bound.0 -= 1,
+            9 => {
+                prepared
+                    .receipt_output
+                    .construction_resident_bytes_admission_budget = ByteCount(0)
+            }
+            _ => {
+                prepared
+                    .receipt_output
+                    .transport_closure_bytes_upper_bound
+                    .0 = u64::MAX
             }
         }
         assert!(build_acoustic_resource_plan(&workload, &mesh, prepared).is_err());

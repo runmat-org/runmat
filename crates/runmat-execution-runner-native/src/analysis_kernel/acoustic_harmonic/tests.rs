@@ -17,6 +17,7 @@ use runmat_execution::{ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
+mod accuracy;
 mod publication;
 mod sweep;
 
@@ -155,7 +156,7 @@ fn native_acoustic_cold_inputs_and_result_are_transport_independent() {
                     .unwrap(),
                 })
                 .unwrap();
-            assert_eq!(outputs.len(), 2);
+            assert_eq!(outputs.len(), 3);
             let objects = outputs
                 .into_iter()
                 .next()

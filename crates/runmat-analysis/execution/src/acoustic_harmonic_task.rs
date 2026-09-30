@@ -94,6 +94,7 @@ pub fn prepare_acoustic_harmonic_task(
             .collect(),
         vec![
             AnalysisNumericalObjectKind::SolverResult,
+            AnalysisNumericalObjectKind::NumericalReceipt,
             AnalysisNumericalObjectKind::StatePublicationProfiles,
         ],
         capabilities,

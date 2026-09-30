@@ -4,7 +4,8 @@ use crate::{
     PreparedAcousticHarmonicTask, PreparedAnalysisObjects,
 };
 use runmat_analysis_fea::execution::{
-    AcousticHarmonicSolverResult, AcousticHarmonicWorkload, AnalysisNumericalObjectKind,
+    AcousticHarmonicSolverResult, AcousticHarmonicWorkload, AcousticNumericalReceiptArtifact,
+    AnalysisNumericalObjectKind,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution_artifact::{
@@ -16,6 +17,8 @@ pub struct ImportedAcousticHarmonicResult {
     pub result: AcousticHarmonicSolverResult,
     pub objects: PreparedAnalysisObjects,
     pub source_profiles: PreparedAnalysisObjects,
+    pub numerical_receipt: AcousticNumericalReceiptArtifact,
+    pub numerical_receipt_objects: PreparedAnalysisObjects,
 }
 
 pub fn import_acoustic_harmonic_result(
@@ -26,12 +29,13 @@ pub fn import_acoustic_harmonic_result(
 ) -> AnalysisBridgeResult<ImportedAcousticHarmonicResult> {
     response.validate_against(&prepared.program.request)?;
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
-    let [output, profiles] = output_set.manifest.outputs.as_slice() else {
+    let [output, receipt, profiles] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
-            "acoustic task requires exactly one result and publication-profile catalog".into(),
+            "acoustic task requires exact result, receipt and publication-profile outputs".into(),
         ));
     };
     if output.kind != AnalysisNumericalObjectKind::SolverResult
+        || receipt.kind != AnalysisNumericalObjectKind::NumericalReceipt
         || profiles.kind != AnalysisNumericalObjectKind::StatePublicationProfiles
     {
         return Err(AnalysisBridgeError::Identity(
@@ -56,8 +60,21 @@ pub fn import_acoustic_harmonic_result(
         &prepared.host.artifact_access,
         limits,
     )?;
+    let numerical_receipt_objects = import_analysis_objects(
+        source,
+        &receipt.root,
+        AnalysisNumericalObjectKind::NumericalReceipt,
+        receipt.logical_identity,
+        receipt.payload_digest,
+        &prepared.host.artifact_access,
+        limits,
+    )?;
     let mut references =
         objects.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+    references.extend(
+        numerical_receipt_objects
+            .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
+    );
     references.extend(
         source_profiles
             .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
@@ -106,6 +123,16 @@ pub fn import_acoustic_harmonic_result(
             "acoustic result logical identity differs",
         ));
     }
+    let numerical_receipt = AcousticNumericalReceiptArtifact::from_canonical_bytes(
+        &numerical_receipt_objects.payload(),
+    )?;
+    numerical_receipt.validate_against(&workload, &result, &mesh)?;
+    if numerical_receipt.identity().digest() != numerical_receipt_objects.manifest.logical_identity
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "acoustic receipt logical identity differs",
+        ));
+    }
     let catalog = runmat_analysis_fea::execution::StatePublicationProfiles::from_canonical_bytes(
         &source_profiles.payload(),
     )?;
@@ -120,5 +147,7 @@ pub fn import_acoustic_harmonic_result(
         result,
         objects,
         source_profiles,
+        numerical_receipt,
+        numerical_receipt_objects,
     })
 }

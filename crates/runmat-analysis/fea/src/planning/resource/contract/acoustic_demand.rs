@@ -15,6 +15,7 @@ pub struct AcousticHarmonicResourceDemand {
     pub numerical_reservation_bytes: ByteCount,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
+    pub receipt_output: PreparedOutputResourceFacts,
     pub state_profiles_output: PreparedOutputResourceFacts,
     pub state_profiles_resident_bytes: ByteCount,
 }

@@ -11,6 +11,9 @@ impl FeaResourceDemand {
             (Self::AcousticHarmonic(demand), AnalysisNumericalObjectKind::SolverResult) => {
                 Some(&demand.result_output)
             }
+            (Self::AcousticHarmonic(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
+                Some(&demand.receipt_output)
+            }
             (
                 Self::AcousticHarmonic(demand),
                 AnalysisNumericalObjectKind::StatePublicationProfiles,

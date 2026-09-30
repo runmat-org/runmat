@@ -23,6 +23,10 @@ pub(in crate::execution) use fields::{
 mod publication;
 mod result;
 pub use result::AcousticHarmonicSolverResult;
+mod receipt;
+pub use receipt::{
+    AcousticNumericalReceipt, AcousticNumericalReceiptArtifact, ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod sweep;
 pub use sweep::{AcousticFrequencyResult, AcousticFrequencyWorkload};
 #[cfg(test)]

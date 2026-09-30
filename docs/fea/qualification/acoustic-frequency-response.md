@@ -37,6 +37,31 @@ remote task scheduling, GPU/cooperative distribution, measured resource/accuracy
 release gates and full Stage 8 production qualification remain open. Existing
 failed local-radiation convergence gates are unchanged and remain failed.
 
+## Accepted numerical receipt and shared accuracy
+
+Each canonical harmonic task now emits three exact outputs: accepted fields,
+an `AcousticNumericalReceiptArtifact`, and publication profiles. The receipt binds
+the exact numerical workload, retained result, producer, mesh, frequency and
+accepted solver/power targets. It does not reconstruct lost fields or repeat the
+solve. A separate bounded 64 KiB receipt transport envelope is included in shared
+resource model revision 41.
+
+Shared accuracy admission requires the original workload, canonical mesh and
+retained result, and authenticates the exact authored acceptance plan. The receipt
+supports only global algebraic residual and equation-based power conservation.
+Mandatory spatial, field or frequency convergence evidence remains unavailable;
+these metrics are not an independent accuracy certificate. Missing, duplicate or
+substituted source objects and rehashed foreign requirements are rejected.
+
+This closes an accuracy/publication prerequisite, not whole-study authored
+dispatch, observations, process restart or Stage 8 production qualification.
+
+Receipt verification on 2026-09-30: canonical receipt tests pass 2/2, acoustic
+resource tests 4/4 and the full bridge library 92/92. Native acoustic tests pass
+11/11, including Tet4/Tet10 ×1024/8192-byte cold filesystem solve→receipt→shared
+accuracy and the retained frequency/publication paths. These are native serial
+execution/cold-import witnesses, not failed-process restart evidence.
+
 Verification on 2026-09-30: portable acoustic tests pass 7/7; native acoustic tests
 pass 10/10, including the sweep matrix. FEA all-target strict Clippy passes;
 native all-target strict Clippy with `--no-deps` passes. The joint dependency-inclusive

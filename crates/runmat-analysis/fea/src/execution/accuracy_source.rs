@@ -3,14 +3,16 @@ use runmat_analysis_core::{ErrorContributionKind, RequiredAccuracyEvidence};
 use crate::results::accuracy::{AccuracyEvidence, AccuracyEvidenceScope, AccuracyMeasure};
 
 use super::{
-    AccuracyEvaluationRequest, AccuracySourceKind, AnalysisExecutionError, AnalysisExecutionResult,
-    AnalysisWorkloadIdentity, SolverResultIdentity, StructuralLinearNumericalReceiptArtifact,
+    AccuracyEvaluationRequest, AccuracySourceKind, AcousticNumericalReceiptArtifact,
+    AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity,
+    SolverResultIdentity, StructuralLinearNumericalReceiptArtifact,
     StructuralModalResponseSpectrumNumericalReceipt, StructuralRandomResponseNumericalReceipt,
     ThermalNumericalReceiptArtifact,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccuracySourceReceipt {
+    AcousticHarmonic(AcousticNumericalReceiptArtifact),
     Thermal(ThermalNumericalReceiptArtifact),
     StructuralLinear(StructuralLinearNumericalReceiptArtifact),
     StructuralModalResponseSpectrum(StructuralModalResponseSpectrumNumericalReceipt),
@@ -23,6 +25,9 @@ impl AccuracySourceReceipt {
         bytes: &[u8],
     ) -> AnalysisExecutionResult<Self> {
         let receipt = match kind {
+            AccuracySourceKind::AcousticHarmonic => Self::AcousticHarmonic(
+                AcousticNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
+            ),
             AccuracySourceKind::Thermal => Self::Thermal(
                 ThermalNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
             ),
@@ -44,6 +49,7 @@ impl AccuracySourceReceipt {
 
     pub const fn kind(&self) -> AccuracySourceKind {
         match self {
+            Self::AcousticHarmonic(_) => AccuracySourceKind::AcousticHarmonic,
             Self::Thermal(_) => AccuracySourceKind::Thermal,
             Self::StructuralLinear(_) => AccuracySourceKind::StructuralLinear,
             Self::StructuralModalResponseSpectrum(_) => {
@@ -55,6 +61,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
         match self {
+            Self::AcousticHarmonic(receipt) => receipt.source_workload(),
             Self::Thermal(receipt) => receipt.source_workload,
             Self::StructuralLinear(receipt) => receipt.source_workload,
             Self::StructuralModalResponseSpectrum(receipt) => receipt.source_workload(),
@@ -64,6 +71,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_result(&self) -> SolverResultIdentity {
         match self {
+            Self::AcousticHarmonic(receipt) => receipt.source_result(),
             Self::Thermal(receipt) => receipt.source_result(),
             Self::StructuralLinear(receipt) => receipt.source_result(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.source_result(),
@@ -73,6 +81,7 @@ impl AccuracySourceReceipt {
 
     pub const fn identity(&self) -> super::NumericalReceiptIdentity {
         match self {
+            Self::AcousticHarmonic(receipt) => receipt.identity(),
             Self::Thermal(receipt) => receipt.identity(),
             Self::StructuralLinear(receipt) => receipt.identity(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.identity(),
@@ -84,6 +93,7 @@ impl AccuracySourceReceipt {
         &self,
         request: &AccuracyEvaluationRequest,
     ) -> AnalysisExecutionResult<Vec<AccuracyEvidence>> {
+        self.validate()?;
         if self.kind() != request.source_kind || self.source_result() != request.source_result {
             return Err(AnalysisExecutionError::Identity(
                 "accuracy receipt differs from its admitted request",
@@ -96,9 +106,30 @@ impl AccuracySourceReceipt {
                 ));
             }
         }
+        if let Self::AcousticHarmonic(receipt) = self {
+            if receipt.receipt().producer != request.producer {
+                return Err(AnalysisExecutionError::Identity(
+                    "acoustic accuracy receipt differs from requested producer",
+                ));
+            }
+        }
         let mut evidence = Vec::new();
         for criterion in &request.plan.criteria {
             let measured = match self {
+                Self::AcousticHarmonic(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound => {
+                    Some((receipt.receipt().relative_residual,
+                        "accepted reduced real-block Helmholtz residual Euclidean norm divided by the reduced right-hand-side Euclidean norm; zero right-hand-side norm uses the absolute residual norm; algebraic equation satisfaction only, not spatial convergence or field accuracy"))
+                }
+                Self::AcousticHarmonic(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ConservationBalance => {
+                    Some((receipt.receipt().power_relative_error,
+                        "absolute mean input-minus-impedance-loss power divided by max(sum of nodal apparent source power magnitudes including prescribed-pressure reactions, absolute impedance loss); zero scale gives zero error with no dimensional floor; equation-based power conservation only, not field accuracy"))
+                }
                 Self::Thermal(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic
@@ -172,6 +203,7 @@ impl AccuracySourceReceipt {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
+            Self::AcousticHarmonic(receipt) => receipt.validate(),
             Self::Thermal(receipt) => receipt.validate(),
             Self::StructuralLinear(receipt) => receipt.validate(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.validate_source(),

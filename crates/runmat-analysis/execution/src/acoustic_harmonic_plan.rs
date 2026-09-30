@@ -60,6 +60,7 @@ pub fn rederive_acoustic_harmonic_resource_plan(
         inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
         result_output,
         state_profiles_output,
+        receipt_output: projected_acoustic_receipt_output(policy)?,
         output_set: projected_output_set_resource_facts(),
     };
     Ok(build_acoustic_resource_plan(workload, mesh, facts)?)
@@ -98,6 +99,7 @@ pub fn prepare_acoustic_harmonic_inputs(
         inputs: prepared_input_resource_facts(&inputs)?,
         result_output,
         state_profiles_output,
+        receipt_output: projected_acoustic_receipt_output(policy)?,
         output_set: projected_output_set_resource_facts(),
     };
     let resource_plan = build_acoustic_resource_plan(workload, mesh, facts)?;
@@ -105,6 +107,16 @@ pub fn prepare_acoustic_harmonic_inputs(
         inputs,
         resource_plan,
     })
+}
+
+fn projected_acoustic_receipt_output(
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts> {
+    let mut profiler = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
+    profiler.push(runmat_analysis_fea::execution::ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES)?;
+    let output = profiler.finish(AnalysisNumericalObjectKind::NumericalReceipt)?;
+    crate::thermal_execution::require_inventory(&output, policy.inventory_limits())?;
+    projected_transport_output_resource_facts(&output)
 }
 
 fn projected_acoustic_harmonic_output(

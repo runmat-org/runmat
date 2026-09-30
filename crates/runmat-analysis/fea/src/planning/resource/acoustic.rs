@@ -23,6 +23,7 @@ mod tests;
 pub struct PreparedAcousticResourceFacts {
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
+    pub receipt_output: PreparedOutputResourceFacts,
     pub state_profiles_output: PreparedOutputResourceFacts,
     pub output_set: PreparedOutputSetResourceFacts,
 }
@@ -152,6 +153,8 @@ pub fn build_acoustic_resource_plan(
     )?;
     if prepared.inputs.encoded_payload_bytes.0 != input_bytes
         || prepared.result_output.encoded_payload_bytes_upper_bound.0 != payload_bound
+        || prepared.receipt_output.encoded_payload_bytes_upper_bound.0
+            != crate::execution::ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES
         || prepared
             .state_profiles_output
             .encoded_payload_bytes_upper_bound
@@ -264,6 +267,7 @@ pub fn build_acoustic_resource_plan(
             numerical_reservation_bytes: ByteCount(reservation),
             inputs: prepared.inputs,
             result_output: prepared.result_output,
+            receipt_output: prepared.receipt_output,
             state_profiles_output: prepared.state_profiles_output,
             state_profiles_resident_bytes: ByteCount(
                 state_profiles.materialization_resident_bytes_estimate,

@@ -9,7 +9,8 @@ mod accuracy;
 mod acoustic;
 pub use acoustic::{
     AcousticFrequencyResult, AcousticFrequencyWorkload, AcousticHarmonicSolverResult,
-    AcousticHarmonicWorkload,
+    AcousticHarmonicWorkload, AcousticNumericalReceipt, AcousticNumericalReceiptArtifact,
+    ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod accuracy_source;
 mod buckling_result;

@@ -155,7 +155,9 @@ fn acoustic_publication_rejects_foreign_source_and_understated_profile() {
         .into_iter()
         .map(|output| output.into_prepared(1024, limits).unwrap());
     let result_objects = objects.next().unwrap();
-    let profile_objects = objects.next().unwrap();
+    let profile_objects = objects
+        .find(|objects| objects.manifest.kind == AnalysisNumericalObjectKind::StatePublicationProfiles)
+        .unwrap();
     let result =
         AcousticHarmonicSolverResult::from_canonical_bytes(&result_objects.payload()).unwrap();
     let request = result.state_publication_requests().unwrap().remove(0);

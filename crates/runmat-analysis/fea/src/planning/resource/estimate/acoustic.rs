@@ -15,6 +15,9 @@ pub(super) fn build_acoustic_plan(
         || demand.krylov_restart_upper_bound.0 > demand.block_dimension_upper_bound.0
         || demand.numerical_reservation_bytes.0 == 0
         || demand.state_profiles_resident_bytes.0 == 0
+        || demand.receipt_output.encoded_payload_bytes_upper_bound.0 != crate::execution::ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES
+        || demand.receipt_output.construction_resident_bytes_admission_budget
+            < demand.receipt_output.transport_closure_bytes_upper_bound
         || !input.worker.accelerators.is_empty()
         // Content-addressed repeated chunks can make unique transport smaller than logical
         // payload. The bridge/worker derive its exact closure; decoded residency is separate.
@@ -39,7 +42,11 @@ pub(super) fn build_acoustic_plan(
             .0,
         "acoustic retained input transport",
     )?);
-    let outputs = [&demand.result_output, &demand.state_profiles_output];
+    let outputs = [
+        &demand.result_output,
+        &demand.receipt_output,
+        &demand.state_profiles_output,
+    ];
     build_host_phase_resource_plan(
         input,
         HostPhaseAccounting::host_only(

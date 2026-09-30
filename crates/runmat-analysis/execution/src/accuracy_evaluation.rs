@@ -28,7 +28,8 @@ pub struct AccuracyPreparation {
     pub source_numerical_receipt: PreparedAnalysisObjects,
     pub source_observations: Option<ObservationPublicationCatalog>,
     /// Original numerical intent and topology, not copies reconstructed from a result catalog.
-    /// Thermal evaluations require ThermalWorkload and Mesh. Structural evaluations require
+    /// Thermal evaluations require ThermalWorkload and Mesh. Acoustic evaluations require
+    /// AcousticHarmonicWorkload, Mesh and the retained SolverResult. Structural evaluations require
     /// the original solver/assembly workload and its Mesh input when present. Preparation adds
     /// the producing host contract, which the worker authenticates against the receipt.
     pub source_context_inputs: Vec<PreparedAnalysisObjects>,
@@ -60,6 +61,7 @@ pub fn prepare_accuracy(
     preparation.solve_host.validate()?;
     let expected_work_kind = match preparation.source_kind {
         AccuracySourceKind::Thermal => AnalysisWorkKind::SolveThermal,
+        AccuracySourceKind::AcousticHarmonic => AnalysisWorkKind::SolveAcousticHarmonic,
         AccuracySourceKind::StructuralLinear => AnalysisWorkKind::Solve,
         AccuracySourceKind::StructuralModalResponseSpectrum => {
             AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult
@@ -117,7 +119,10 @@ pub fn prepare_accuracy(
         preparation.formulation_requirement,
         preparation.step.accuracy.clone(),
     )?;
-    if preparation.source_kind != AccuracySourceKind::Thermal {
+    if !matches!(
+        preparation.source_kind,
+        AccuracySourceKind::Thermal | AccuracySourceKind::AcousticHarmonic
+    ) {
         preparation.source_context_inputs.push(
             crate::accuracy_source_context::prepare_accuracy_source_contract(
                 &preparation.solve_host.workload,
@@ -143,12 +148,14 @@ pub fn prepare_accuracy(
         ),
     ];
     let source_context_start = inputs.len();
-    inputs.extend(
-        preparation
-            .source_context_inputs
-            .into_iter()
-            .map(|input| (input, ValueRefKind::DriverObject)),
-    );
+    inputs.extend(preparation.source_context_inputs.into_iter().map(|input| {
+        let kind = if input.manifest.kind == AnalysisNumericalObjectKind::SolverResult {
+            ValueRefKind::ResultObject
+        } else {
+            ValueRefKind::DriverObject
+        };
+        (input, kind)
+    }));
     let source_context_end = inputs.len();
     if let Some(observations) = &preparation.source_observations {
         let bytes = observations
@@ -234,6 +241,21 @@ pub fn prepare_accuracy(
 
 fn receipt_matches_solve(receipt: &AccuracySourceReceipt, host: &AnalysisHostWorkload) -> bool {
     match receipt {
+        AccuracySourceReceipt::AcousticHarmonic(acoustic) => {
+            let mut workloads = host.workload.inputs.iter().filter(|input| {
+                input.kind == AnalysisNumericalObjectKind::AcousticHarmonicWorkload
+            });
+            let mut meshes = host
+                .workload
+                .inputs
+                .iter()
+                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
+            matches!(workloads.next(), Some(input) if input.logical_identity == acoustic.source_workload().digest())
+                && workloads.next().is_none()
+                && matches!(meshes.next(), Some(input) if input.logical_identity == acoustic.receipt().topology_digest)
+                && meshes.next().is_none()
+                && acoustic.receipt().producer == host.workload.step
+        }
         AccuracySourceReceipt::Thermal(thermal) => {
             let inputs_of_kind = |kind| {
                 host.workload
