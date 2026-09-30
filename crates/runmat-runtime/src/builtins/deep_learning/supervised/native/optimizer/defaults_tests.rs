@@ -100,14 +100,7 @@ fn recurrent_step_oracle<T: Real>() {
     let mut config = config_with_decay(None);
     config.solver = Solver::Sgdm;
     config.momentum = 0.0;
-    let (updated, slot) = run(
-        &[T::one(); 16],
-        &[T::one(); 16],
-        None,
-        &config,
-        &factors,
-        1,
-    );
+    let (updated, slot) = run(&[T::one(); 16], &[T::one(); 16], None, &config, &factors, 1);
     assert!(matches!(slot, SolverSlot::Sgdm { .. }));
     // InputWeights is [4 gates × 2 units, 2 input channels], column-major.
     let expected = [1.0, 0.9, 0.6, 0.7];
