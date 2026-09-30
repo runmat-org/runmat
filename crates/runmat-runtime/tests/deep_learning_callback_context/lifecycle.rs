@@ -247,7 +247,11 @@ fn pending_dlfeval_retains_borrowed_resident_until_result_is_released() {
             weak_resident.acquire().is_ok(),
             "suspended callback owns input"
         );
-        assert!(weak_allocation.acquire().is_some());
+        weak_allocation
+            .acquire()
+            .expect("suspended callback retains its allocation lease")
+            .validate_live()
+            .unwrap();
         assert_eq!(retirement.retirements(), 0);
         let Poll::Ready(Ok(Value::GpuTensor(output))) = poll_once(&mut future) else {
             panic!("callback must publish the resident alias");
@@ -257,7 +261,11 @@ fn pending_dlfeval_retains_borrowed_resident_until_result_is_released() {
         // the original view's weak reference, owns the shared allocation.
         assert_eq!(output.allocation_identity(), identity);
         output.allocation_lease().validate_live().unwrap();
-        assert!(weak_allocation.acquire().is_some());
+        assert!(output.allocation_lease().shares_allocation_with(
+            &weak_allocation
+                .acquire()
+                .expect("published output retains the original allocation lease")
+        ));
         assert_eq!(retirement.retirements(), 0);
         drop(output);
         drop(runtime);

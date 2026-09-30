@@ -129,7 +129,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, kind: LayerKind) ->
     if matches!(kind, LayerKind::FullyConnected) {
         if let Some(dimension) = request.arguments.get(1) {
             let documented_text = request.literals.literal_string_at(1).is_some_and(|value| {
-                DeepLearningDenseOperationDimension::from_name(value).is_some()
+                DeepLearningDenseOperationDimension::from_name(&value).is_some()
             });
             if documented_text || matches!(dimension.kind, ValueKindFact::Numeric(_)) {
                 options_start = Some(2);
