@@ -9,6 +9,7 @@ mod arithmetic;
 mod dimensional_extrema;
 mod median;
 mod dot;
+mod matmul;
 mod imfilter;
 #[cfg(test)]
 mod owning_routes;
@@ -9168,37 +9169,7 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            // Only support 2D shapes for reference provider
-            if a.shape().len() != 2 || b.shape().len() != 2 {
-                return Err(anyhow::anyhow!("matmul: only 2D supported"));
-            }
-            let (ar, ac) = (a.shape()[0], a.shape()[1]);
-            let (br, bc) = (b.shape()[0], b.shape()[1]);
-            if ac != br {
-                return Err(anyhow::anyhow!("matmul: inner dims must agree"));
-            }
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let bbuf = guard
-                .get(b)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
-            let mut out = vec![0.0; ar * bc];
-            // Column-major multiplication
-            for j in 0..bc {
-                for i in 0..ar {
-                    let mut sum = 0.0;
-                    for k in 0..ac {
-                        sum += abuf[i + k * ar] * bbuf[k + j * br];
-                    }
-                    out[i + j * ar] = sum;
-                }
-            }
-            drop(guard);
-            self.allocate_tensor_with_storage(out, vec![ar, bc], GpuTensorStorage::Real)
-        })
+        Box::pin(async move { matmul::multiply(self, a, b) })
     }
 
     fn matmul_epilogue<'a>(
