@@ -11,6 +11,8 @@ use crate::indexing::plan::IndexPlan;
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
+mod growth;
+
 pub fn shape(value: &Value) -> Option<Vec<usize>> {
     match value {
         Value::Object(_) | Value::HandleObject(_) => Some(vec![1, 1]),
@@ -43,15 +45,30 @@ pub fn assign_scalar_indices(
     rhs: Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    let mut array = as_array(base)?;
-    match indices {
-        [index] => assign_linear(&mut array, *index, rhs, delete),
-        [row, column] => assign_subscript(&mut array, *row, *column, rhs, delete),
-        _ => Err(semantic_error(
+    let array = as_array(base)?;
+    if !matches!(indices.len(), 1 | 2) {
+        return Err(semantic_error(
             "UnsupportedAssignmentRank",
             "Object assignment supports one or two scalar subscripts",
-        )),
+        ));
     }
+    if delete && indices.len() == 2 {
+        return Err(semantic_error(
+            "UnsupportedDeletion",
+            "Object-array deletion with two scalar subscripts is not supported",
+        ));
+    }
+    let selectors = indices
+        .iter()
+        .copied()
+        .map(crate::indexing::selectors::SliceSelector::Scalar)
+        .collect::<Vec<_>>();
+    let plan = if delete {
+        crate::indexing::plan::build_index_plan(&selectors, indices.len(), array.shape())?
+    } else {
+        crate::indexing::plan::build_assignment_plan(&selectors, indices.len(), array.shape())?
+    };
+    assign_with_plan(Value::ObjectArray(array), &plan, rhs, delete)
 }
 
 pub fn assign_with_plan(
@@ -65,119 +82,8 @@ pub fn assign_with_plan(
         return delete_with_plan(array, plan, &rhs);
     }
     let rhs_values = assignment_values(&rhs, array.class_name(), plan.indices.len())?;
-    let mut data = array.data().to_vec();
-    for (index, value) in plan.indices.iter().zip(rhs_values) {
-        let destination = data.get_mut(*index as usize).ok_or_else(|| {
-            semantic_error("IndexOutOfBounds", "Object array index is out of bounds")
-        })?;
-        *destination = value;
-    }
-    finish_array(array.class_name(), data, array.shape().to_vec())
-}
-
-fn assign_linear(
-    array: &mut ObjectArray,
-    index: usize,
-    rhs: Value,
-    delete: bool,
-) -> Result<Value, RuntimeError> {
-    if index == 0 {
-        return Err(semantic_error(
-            "IndexOutOfBounds",
-            "Object array index is out of bounds",
-        ));
-    }
-    if delete {
-        return delete_linear(array.clone(), index, &rhs);
-    }
-    let value = assignment_scalar(&rhs, array.class_name())?;
-    let mut data = array.data().to_vec();
-    let mut shape = array.shape().to_vec();
-    match index.cmp(&data.len()) {
-        std::cmp::Ordering::Less | std::cmp::Ordering::Equal => data[index - 1] = value,
-        std::cmp::Ordering::Greater if index == data.len() + 1 => {
-            let rows = shape.first().copied().unwrap_or(1);
-            let columns = shape.get(1).copied().unwrap_or(1);
-            if rows == 1 {
-                shape[1] = index;
-            } else if columns == 1 {
-                shape[0] = index;
-            } else {
-                return Err(semantic_error(
-                    "IndexOutOfBounds",
-                    "Linear object-array growth is only defined for vectors",
-                ));
-            }
-            data.push(value);
-        }
-        std::cmp::Ordering::Greater => {
-            return Err(semantic_error(
-                "ObjectArrayDefaultConstructionRequired",
-                "Object-array growth with gaps requires a default constructor",
-            ));
-        }
-    }
-    finish_array(array.class_name(), data, shape)
-}
-
-fn assign_subscript(
-    array: &mut ObjectArray,
-    row: usize,
-    column: usize,
-    rhs: Value,
-    delete: bool,
-) -> Result<Value, RuntimeError> {
-    if delete {
-        return Err(semantic_error(
-            "UnsupportedDeletion",
-            "Object-array deletion with two scalar subscripts is not supported",
-        ));
-    }
-    let rows = array.shape().first().copied().unwrap_or(1);
-    let columns = array.shape().get(1).copied().unwrap_or(1);
-    if row == 0 || column == 0 || row > rows || column > columns {
-        return Err(semantic_error(
-            "ObjectArrayDefaultConstructionRequired",
-            "Object-array dimensional growth requires a default constructor",
-        ));
-    }
-    let offset = (row - 1) + (column - 1) * rows;
-    let value = assignment_scalar(&rhs, array.class_name())?;
-    let mut data = array.data().to_vec();
-    data[offset] = value;
-    finish_array(array.class_name(), data, array.shape().to_vec())
-}
-
-fn delete_linear(array: ObjectArray, index: usize, rhs: &Value) -> Result<Value, RuntimeError> {
-    if !is_empty_delete_rhs(rhs) {
-        return Err(semantic_error(
-            "DeletionRequiresEmptyRhs",
-            "Indexed deletion requires an empty right-hand side",
-        ));
-    }
-    let rows = array.shape().first().copied().unwrap_or(1);
-    let columns = array.shape().get(1).copied().unwrap_or(1);
-    if rows != 1 && columns != 1 {
-        return Err(semantic_error(
-            "UnsupportedDeletion",
-            "Linear object-array deletion is only defined for vectors",
-        ));
-    }
-    if index > array.len() {
-        return Err(semantic_error(
-            "IndexOutOfBounds",
-            "Object array index is out of bounds",
-        ));
-    }
-    let class_name = array.class_name().clone();
-    let mut data = array.into_data();
-    data.remove(index - 1);
-    let shape = if rows == 1 {
-        vec![1, data.len()]
-    } else {
-        vec![data.len(), 1]
-    };
-    finish_array(&class_name, data, shape)
+    let data = growth::assign(&array, plan, rhs_values)?;
+    finish_array(array.class_name(), data, plan.base_shape.clone())
 }
 
 fn delete_with_plan(

@@ -4158,35 +4158,55 @@ fn call_method_nonobject_receiver_errors_with_identifier_contract() {
 }
 
 #[test]
-fn subsref_nonobject_receiver_errors_with_identifier_contract() {
-    let err = execute_source_result("subsref(1, '()', {1});")
-        .expect_err("non-object subsref receiver should fail");
-    assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
-}
-
-#[test]
-fn subsasgn_nonobject_receiver_errors_with_identifier_contract() {
-    let err = execute_source_result("subsasgn(1, '()', {1}, 2);")
-        .expect_err("non-object subsasgn receiver should fail");
-    assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
-}
-
-#[test]
-fn subsref_missing_protocol_errors_with_identifier_contract() {
-    let err = execute_source_result(
-        "__register_test_classes(); p = new_object('Point'); subsref(p, '()', {1});",
+fn public_subsref_uses_default_numeric_indexing() {
+    let values = execute_source_result(
+        "a = [10, 20]; S = struct('type', '()', 'subs', {{2}}); result = subsref(a, S);",
     )
-    .expect_err("object without subsref protocol should fail");
-    assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+    .expect("public subsref supports default numeric indexing");
+    assert!(has_num(&values, 20.0));
 }
 
 #[test]
-fn subsasgn_missing_protocol_errors_with_identifier_contract() {
-    let err = execute_source_result(
-        "__register_test_classes(); p = new_object('Point'); subsasgn(p, '()', {1}, 2);",
+fn public_subsasgn_uses_default_numeric_indexing() {
+    let values = execute_source_result("a = [10, 20]; S = struct('type', '()', 'subs', {{2}}); a = subsasgn(a, S, 99); result = a(2); untouched = a(1);")
+        .expect("public subsasgn supports default numeric indexing");
+    assert!(has_num(&values, 99.0));
+    assert!(has_num(&values, 10.0));
+}
+
+#[test]
+fn public_subsref_uses_default_object_indexing_without_overload() {
+    let values = execute_source_result(
+        "__register_test_classes(); p = new_object('Point'); p.x = 13; S = struct('type', '()', 'subs', {{1}}); q = subsref(p, S); result = q.x;",
     )
-    .expect_err("object without subsasgn protocol should fail");
-    assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
+    .expect("object without subsref overload uses default indexing");
+    assert!(has_object_class(&values, "Point"));
+    assert!(has_num(&values, 13.0));
+}
+
+#[test]
+fn public_subsasgn_uses_default_object_indexing_without_overload() {
+    let values = execute_source_result(
+        "__register_test_classes(); p = new_object('Point'); q = new_object('Point'); q.x = 77; S = struct('type', '()', 'subs', {{2}}); p = subsasgn(p, S, q); count = numel(p); second = p(2); first = p(1); assigned = second.x; untouched = first.x;",
+    )
+    .expect("object without subsasgn overload uses default homogeneous array assignment");
+    assert!(has_num(&values, 2.0));
+    assert!(has_num(&values, 77.0));
+    assert!(has_num(&values, 0.0));
+}
+
+#[test]
+fn public_subsref_rejects_invalid_subscript_payload_with_owned_identifier() {
+    let err = execute_source_result("subsref(1, struct('type', '()', 'subs', 1));")
+        .expect_err("parentheses subscript payload must be a cell array");
+    assert_eq!(err.identifier(), Some("RunMat:InvalidObjectSubscriptPath"));
+}
+
+#[test]
+fn public_subsasgn_rejects_invalid_subscript_payload_with_owned_identifier() {
+    let err = execute_source_result("subsasgn(1, struct('type', '()', 'subs', 1), 2);")
+        .expect_err("parentheses subscript payload must be a cell array");
+    assert_eq!(err.identifier(), Some("RunMat:InvalidObjectSubscriptPath"));
 }
 
 #[test]
