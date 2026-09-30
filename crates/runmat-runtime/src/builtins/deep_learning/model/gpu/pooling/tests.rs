@@ -162,7 +162,7 @@ fn presentation_cannot_substitute_the_original_borrowed_allocation() {
 #[ignore = "requires an actual compatible WGPU adapter"]
 fn public_forward_and_predict_keep_pooling_resident_with_correct_axes() {
     use futures::executor::block_on;
-    use runmat_accelerate_api::{handle_provenance, GpuHandleProvenance};
+    use runmat_accelerate_api::{handle_provenance, AccelProvider, GpuHandleProvenance};
     use runmat_value::CellArray;
 
     let _guard = crate::builtins::common::test_support::accel_test_lock();

@@ -1551,6 +1551,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     #[ignore = "requires an actual WGPU adapter; run the explicit hardware gate"]
     fn dot_wgpu_matches_cpu() {
+        use runmat_accelerate_api::AccelProvider;
+
         let _guard = test_support::accel_test_lock();
         let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
