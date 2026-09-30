@@ -86,6 +86,13 @@ fn static_network_identity_and_layer_geometry_follow_known_collection() {
         variables.fields["Value"].kind,
         ValueKindFact::Cell(_)
     ));
+    let ValueKindFact::Object(state) = &network.properties["State"].kind else {
+        panic!("State must be inferred as a table object")
+    };
+    assert_eq!(
+        state.runtime_class,
+        Some(runmat_types::standard::TABLE.owned())
+    );
 }
 
 #[test]
@@ -111,6 +118,34 @@ fn dependent_learnables_accessors_preserve_table_and_network_facts() {
     );
     let set = crate::infer_catalog_call(
         &property_access::SET_LEARNABLES_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![network.clone(), get.outputs[0].clone()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+    );
+    assert!(set.diagnostics.is_empty());
+    assert_eq!(set.outputs[0].kind, network.kind);
+}
+
+#[test]
+fn dependent_state_accessors_preserve_table_and_network_facts() {
+    let network = infer(vec![layer()], vec![LiteralValue::Unknown])
+        .outputs
+        .remove(0);
+    let get = crate::infer_catalog_call(
+        &state_access::GET_STATE_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![network.clone()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+    );
+    assert!(get.diagnostics.is_empty());
+    assert!(matches!(&get.outputs[0].kind, ValueKindFact::Object(table)
+        if table.runtime_class == Some(runmat_types::standard::TABLE.owned())));
+    let set = crate::infer_catalog_call(
+        &state_access::SET_STATE_CATALOG_ENTRY,
         &CallRequest {
             arguments: vec![network.clone(), get.outputs[0].clone()],
             literals: LiteralContext::default(),

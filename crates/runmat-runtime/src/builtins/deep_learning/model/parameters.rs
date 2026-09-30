@@ -11,9 +11,23 @@ mod validation;
 mod view;
 
 use schema::{ParameterKey, ParameterRole, ParameterShape, ParameterView};
+pub(super) use validation::numeric_payload_shape;
 use validation::{empty_parameter, parameter_data, validate_parameter};
 use view::view;
 
 pub(in crate::builtins) use projection::project;
+pub(super) use projection::public_value;
 pub(in crate::builtins) use update::apply;
 pub(in crate::builtins) use view::validate_matching_networks;
+
+pub(super) fn all_filled(network: &ObjectInstance, function: &'static str) -> BuiltinResult<bool> {
+    for parameter in view(network, function)? {
+        let Some(value) = parameter.value else {
+            return Ok(false);
+        };
+        if empty_parameter(parameter_data(value, function)?) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}

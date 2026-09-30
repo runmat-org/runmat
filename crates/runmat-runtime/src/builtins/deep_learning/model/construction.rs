@@ -96,6 +96,7 @@ pub(in crate::builtins) fn network_object(
         .cloned()
         .map(|name| vec![name])
         .unwrap_or_default();
+    let initial_state = super::state::initial(&layers, function)?;
     let layers_cell = CellArray::new(layers, layer_count, 1)
         .map(Value::Cell)
         .map_err(|err| deep_learning_error(function, err))?;
@@ -122,7 +123,7 @@ pub(in crate::builtins) fn network_object(
             )?,
         ),
         ("Connections".to_string(), Value::Struct(StructValue::new())),
-        ("State".to_string(), Value::Struct(StructValue::new())),
+        (super::state::STORAGE_PROPERTY.to_string(), initial_state),
         ("Initialized".to_string(), Value::Bool(true)),
         (
             "SupportedExecution".to_string(),
@@ -138,7 +139,21 @@ pub(in crate::builtins) fn network_object(
         properties.push((name, value));
     }
     super::super::class_registration::ensure_network_class_registered(class_name);
-    Ok(super::object_with_identity(class_name, properties))
+    let mut network = super::object_with_identity(class_name, properties);
+    let Value::Object(object) = &mut network else {
+        unreachable!("network constructor creates an object")
+    };
+    let requested_initialize = matches!(
+        object.properties.get("Initialized"),
+        Some(Value::Bool(true))
+    );
+    let initialized = requested_initialize
+        && super::parameters::all_filled(object, function)?
+        && super::state::all_filled(object, function)?;
+    object
+        .properties
+        .insert("Initialized".into(), Value::Bool(initialized));
+    Ok(network)
 }
 
 pub(super) struct NetworkOptions {

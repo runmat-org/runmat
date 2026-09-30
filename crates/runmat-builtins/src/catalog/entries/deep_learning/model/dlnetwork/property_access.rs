@@ -79,7 +79,7 @@ const GET_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     description: "Network parameters are stored once in Layers. The Learnables table is derived when read; its resident values retain their GPU leases without a download.",
     keywords: &["dlnetwork", "Learnables", "parameters"], related: &["dlnetwork", "dlupdate"],
     sections: &[BuiltinDocumentationSection { heading: "Parameter ownership", paragraphs: &[
-        "Layer and Parameter are string-array columns. Value is a cell column of dlarray values, with an empty value for an uninitialized parameter. Rows appear in layer order, with Weights before Bias for each fully connected layer.",
+        "Layer and Parameter are string-array columns. Value is a cell column of dlarray values, with an empty value for an uninitialized parameter. Rows appear in layer order. Supported roles include fully connected and convolutional Weights/Bias, recurrent InputWeights/RecurrentWeights/Bias, and normalization Scale/Offset.",
         "Reading Learnables does not update the network. Assignment to the dependent property uses set.Learnables and validates the complete table before replacing any parameter.",
         "RunMat also exposes this projection on its SeriesNetwork and DAGNetwork values; this is a RunMat extension, not a claim that MATLAB publishes a Learnables property on those classes.",
         "This supported parameter subset is real numeric. Complex learnables are not currently admitted; they are not coerced to real values.",
@@ -133,8 +133,8 @@ fn get_inference(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInfe
             .properties
             .get("Learnables")
             .cloned()
-            .unwrap_or_else(super::inference::learnables_table_fact),
-        _ => super::inference::learnables_table_fact(),
+            .unwrap_or_else(super::inference::network_rows_table_fact),
+        _ => super::inference::network_rows_table_fact(),
     };
     crate::catalog::inference::finish_fixed(entry, request, result, diagnostics)
 }

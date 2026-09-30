@@ -1,7 +1,7 @@
 //! User-facing Learnables table derived from canonical layer values.
 use super::*;
 
-fn public_value(value: Option<&Value>) -> Value {
+pub(in crate::builtins::deep_learning::model) fn public_value(value: Option<&Value>) -> Value {
     let Some(value) = value else {
         return Value::Tensor(Tensor::new(vec![], vec![0, 0]).expect("empty parameter shape"));
     };

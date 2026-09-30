@@ -2,59 +2,6 @@
 use super::*;
 use std::collections::HashMap;
 
-fn table_column<'a>(
-    table: &'a ObjectInstance,
-    name: &'static str,
-    function: &'static str,
-) -> BuiltinResult<&'a CellArray> {
-    let variables = crate::builtins::table::table_variables_ref(table)
-        .map_err(|error| deep_learning_error(function, error.to_string()))?
-        .ok_or_else(|| {
-            deep_learning_error(
-                function,
-                format!("{function}: Learnables table is missing Variables"),
-            )
-        })?;
-    match variables.fields.get(name) {
-        Some(Value::Cell(cell)) if cell.shape == [cell.data.len(), 1] => Ok(cell),
-        _ => Err(deep_learning_error(
-            function,
-            format!("{function}: Learnables.{name} must be a column cell array"),
-        )),
-    }
-}
-
-fn text_column(
-    table: &ObjectInstance,
-    name: &'static str,
-    function: &'static str,
-) -> BuiltinResult<Vec<String>> {
-    let variables = crate::builtins::table::table_variables_ref(table)
-        .map_err(|error| deep_learning_error(function, error.to_string()))?
-        .ok_or_else(|| {
-            deep_learning_error(
-                function,
-                format!("{function}: Learnables table is missing Variables"),
-            )
-        })?;
-    match variables.fields.get(name) {
-        Some(Value::StringArray(array)) if array.shape == [array.data.len(), 1] => {
-            Ok(array.data.clone())
-        }
-        // A cell-of-text column is a RunMat input extension for older callers;
-        // the public projection emits string-array columns.
-        Some(Value::Cell(cell)) if cell.shape == [cell.data.len(), 1] => cell
-            .data
-            .iter()
-            .map(|value| scalar_text(value, function))
-            .collect(),
-        _ => Err(deep_learning_error(
-            function,
-            format!("{function}: Learnables.{name} must be a string column"),
-        )),
-    }
-}
-
 /// All metadata and replacement values are admitted before the owned network is changed.
 /// A failed replacement leaves its input network and GPU leases untouched.
 pub(in crate::builtins) fn apply(
@@ -68,25 +15,11 @@ pub(in crate::builtins) fn apply(
             format!("{function}: Learnables must be a table"),
         ));
     };
-    if !crate::builtins::table::is_tabular_object(&table) {
-        return Err(deep_learning_error(
-            function,
-            format!("{function}: Learnables must be a table"),
-        ));
-    }
-    let columns = crate::builtins::table::table_variable_names_from_object(&table)
-        .map_err(|error| deep_learning_error(function, error.to_string()))?;
-    if columns != ["Layer", "Parameter", "Value"] {
-        return Err(deep_learning_error(
-            function,
-            format!(
-                "{function}: Learnables must have Layer, Parameter, Value columns in that order"
-            ),
-        ));
-    }
-    let layer_names = text_column(&table, "Layer", function)?;
-    let parameter_names = text_column(&table, "Parameter", function)?;
-    let values = table_column(&table, "Value", function)?;
+    super::super::table_rows::require_columns(&table, "Learnables", function)?;
+    let layer_names = super::super::table_rows::text(&table, "Learnables", "Layer", function)?;
+    let parameter_names =
+        super::super::table_rows::text(&table, "Learnables", "Parameter", function)?;
+    let values = super::super::table_rows::values(&table, "Learnables", function)?;
     let parameters = view(&network, function)?;
     if layer_names.len() != parameters.len()
         || parameter_names.len() != parameters.len()
@@ -155,6 +88,7 @@ pub(in crate::builtins) fn apply(
             layer.properties.insert(key.role.name().into(), value);
         }
     }
+    initialized &= super::super::state::all_filled(&network, function)?;
     network
         .properties
         .insert("Initialized".into(), Value::Bool(initialized));

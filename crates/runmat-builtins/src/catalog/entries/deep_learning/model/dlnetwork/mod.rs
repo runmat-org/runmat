@@ -7,6 +7,7 @@ mod contract;
 mod documentation;
 mod inference;
 mod property_access;
+mod state_access;
 #[cfg(test)]
 mod tests;
 
@@ -16,6 +17,8 @@ pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &DLNETWORK_CATALOG_ENTRY,
     &property_access::GET_LEARNABLES_CATALOG_ENTRY,
     &property_access::SET_LEARNABLES_CATALOG_ENTRY,
+    &state_access::GET_STATE_CATALOG_ENTRY,
+    &state_access::SET_STATE_CATALOG_ENTRY,
 ];
 
 pub const DLNETWORK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {

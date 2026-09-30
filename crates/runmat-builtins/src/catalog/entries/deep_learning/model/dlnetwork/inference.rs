@@ -130,7 +130,7 @@ fn empty_struct() -> ValueFact {
     )))
 }
 
-pub(super) fn learnables_table_fact() -> ValueFact {
+pub(super) fn network_rows_table_fact() -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
@@ -251,8 +251,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             text(ShapeFact::from(vec![Some(1), Some(1)])),
         ),
         ("Connections".into(), empty_struct()),
-        ("Learnables".into(), learnables_table_fact()),
-        ("State".into(), empty_struct()),
+        ("Learnables".into(), network_rows_table_fact()),
+        ("State".into(), network_rows_table_fact()),
         (
             "Initialized".into(),
             ValueFact::scalar(ValueKindFact::Logical),

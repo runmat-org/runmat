@@ -42,7 +42,6 @@ pub(in crate::builtins) fn ensure_network_class_registered(
             "InputNames",
             "OutputNames",
             "Connections",
-            "State",
             "Initialized",
             "Initialize",
             "SupportedExecution",
@@ -64,19 +63,33 @@ pub(in crate::builtins) fn ensure_network_class_registered(
             );
         }
         properties.insert(
-            "Learnables".into(),
+            super::model::state_storage_property().into(),
             crate::class_registry::RuntimeProperty {
-                name: "Learnables".into(),
+                name: super::model::state_storage_property().into(),
                 is_static: false,
                 is_constant: false,
-                is_dependent: true,
-                get_access: MemberAccess::Public,
-                set_access: MemberAccess::Public,
+                is_dependent: false,
+                get_access: MemberAccess::Private,
+                set_access: MemberAccess::Private,
                 default_value: None,
             },
         );
+        for name in ["Learnables", "State"] {
+            properties.insert(
+                name.into(),
+                crate::class_registry::RuntimeProperty {
+                    name: name.into(),
+                    is_static: false,
+                    is_constant: false,
+                    is_dependent: true,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Public,
+                    default_value: None,
+                },
+            );
+        }
         let mut methods = HashMap::new();
-        for name in ["get.Learnables", "set.Learnables"] {
+        for name in ["get.Learnables", "set.Learnables", "get.State", "set.State"] {
             methods.insert(
                 name.into(),
                 crate::class_registry::RuntimeMethod {

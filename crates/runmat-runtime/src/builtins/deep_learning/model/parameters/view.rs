@@ -1,6 +1,71 @@
 //! Borrowed parameter enumeration and cross-network topology admission.
 use super::*;
+use runmat_builtins::DeepLearningLayerKind;
 use std::collections::HashSet;
+
+#[derive(Clone, Copy)]
+enum InputGeometry {
+    Feature,
+    VectorSequence,
+    SpatialSequence,
+}
+
+fn push_parameter<'a>(
+    out: &mut Vec<ParameterView<'a>>,
+    layer: &'a ObjectInstance,
+    layer_index: usize,
+    layer_name: &str,
+    role: ParameterRole,
+    expected_shape: ParameterShape,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    let value = layer.properties.get(role.name());
+    if let Some(value) = value {
+        validate_parameter(value, &expected_shape, role, function)?;
+    }
+    out.push(ParameterView {
+        key: ParameterKey {
+            layer_index,
+            layer_name: layer_name.to_string(),
+            role,
+        },
+        value,
+        expected_shape,
+    });
+    Ok(())
+}
+
+fn width_option(
+    layer: &ObjectInstance,
+    property: &'static str,
+    channels: Option<usize>,
+    function: &'static str,
+) -> BuiltinResult<Option<usize>> {
+    match layer.properties.get(property) {
+        None => Ok(channels),
+        Some(Value::String(value)) if value.eq_ignore_ascii_case("auto") => Ok(channels),
+        Some(value) => {
+            let declared = positive_usize(value, function, property)?;
+            if channels.is_some_and(|known| known != declared) {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: {property} conflicts with the preceding layer"),
+                ));
+            }
+            Ok(Some(declared))
+        }
+    }
+}
+
+fn layer_metadata_matches(left: &ObjectInstance, right: &ObjectInstance) -> bool {
+    let metadata = |(name, _): &(&String, &Value)| ParameterRole::parse(name.as_str()).is_none();
+    left.class_name == right.class_name
+        && left
+            .properties
+            .iter()
+            .filter(metadata)
+            .eq(right.properties.iter().filter(metadata))
+}
 
 fn layers<'a>(network: &'a ObjectInstance, function: &'static str) -> BuiltinResult<&'a [Value]> {
     let stored = network.properties.get("Layers").ok_or_else(|| {
@@ -42,14 +107,15 @@ pub(super) fn view<'a>(
             format!("{function}: layer names must be unique"),
         ));
     }
-    let mut width = None;
+    let mut channels = None;
+    let mut input_geometry = None;
     let mut out = Vec::new();
     for (index, layer) in layers.iter().enumerate() {
         let Value::Object(layer) = layer else {
             unreachable!("validated layers")
         };
-        match ForwardLayerKind::from_identity(&layer.class_name) {
-            Some(ForwardLayerKind::FeatureInput) => {
+        match DeepLearningLayerKind::from_identity(&layer.class_name) {
+            Some(DeepLearningLayerKind::FeatureInput | DeepLearningLayerKind::SequenceInput) => {
                 // A vector InputSize can be stored by deferred construction;
                 // it does not give one flattened execution width here.
                 let input_size = layer.properties.get("InputSize").ok_or_else(|| {
@@ -59,47 +125,143 @@ pub(super) fn view<'a>(
                     )
                 })?;
                 let dimensions = numeric_vector(input_size, function, "InputSize")?;
-                width = if dimensions.len() == 1 {
-                    Some(dimensions[0])
-                } else {
-                    None
+                input_geometry = match DeepLearningLayerKind::from_identity(&layer.class_name) {
+                    Some(DeepLearningLayerKind::FeatureInput) => Some(InputGeometry::Feature),
+                    _ if dimensions.len() == 1 => Some(InputGeometry::VectorSequence),
+                    _ => Some(InputGeometry::SpatialSequence),
+                };
+                channels = match input_geometry {
+                    Some(InputGeometry::Feature | InputGeometry::VectorSequence) => {
+                        (dimensions.len() == 1).then_some(dimensions[0])
+                    }
+                    Some(InputGeometry::SpatialSequence) => dimensions.last().copied(),
+                    None => None,
                 };
             }
-            Some(ForwardLayerKind::FullyConnected) => {
+            Some(DeepLearningLayerKind::FullyConnected) => {
                 let output_width = positive_property_usize(&layer, "OutputSize", function)?;
                 for (role, expected_shape) in [
                     (
                         ParameterRole::Weights,
-                        ParameterShape {
+                        ParameterShape::Matrix {
                             rows: output_width,
-                            columns: width,
+                            columns: channels,
+                        },
+                    ),
+                    (ParameterRole::Bias, ParameterShape::Elements(output_width)),
+                ] {
+                    push_parameter(
+                        &mut out,
+                        layer,
+                        index,
+                        &names[index],
+                        role,
+                        expected_shape,
+                        function,
+                    )?;
+                }
+                channels = Some(output_width);
+            }
+            Some(DeepLearningLayerKind::Convolution1D) => {
+                let filter = positive_property_usize(layer, "FilterSize", function)?;
+                let filters = positive_property_usize(layer, "NumFilters", function)?;
+                channels = width_option(layer, "NumChannels", channels, function)?;
+                push_parameter(
+                    &mut out,
+                    layer,
+                    index,
+                    &names[index],
+                    ParameterRole::Weights,
+                    ParameterShape::Dimensions(vec![Some(filter), channels, Some(filters)]),
+                    function,
+                )?;
+                push_parameter(
+                    &mut out,
+                    layer,
+                    index,
+                    &names[index],
+                    ParameterRole::Bias,
+                    ParameterShape::Dimensions(vec![Some(1), Some(filters)]),
+                    function,
+                )?;
+                channels = Some(filters);
+            }
+            Some(DeepLearningLayerKind::Lstm | DeepLearningLayerKind::Bilstm) => {
+                channels = width_option(layer, "InputSize", channels, function)?;
+                let units = positive_property_usize(layer, "NumHiddenUnits", function)?;
+                let bidirectional = matches!(
+                    DeepLearningLayerKind::from_identity(&layer.class_name),
+                    Some(DeepLearningLayerKind::Bilstm)
+                );
+                let gates = units
+                    .checked_mul(if bidirectional { 8 } else { 4 })
+                    .ok_or_else(|| {
+                        deep_learning_error(
+                            function,
+                            format!("{function}: recurrent parameter shape overflows"),
+                        )
+                    })?;
+                for (role, shape) in [
+                    (
+                        ParameterRole::InputWeights,
+                        ParameterShape::Matrix {
+                            rows: gates,
+                            columns: channels,
+                        },
+                    ),
+                    (
+                        ParameterRole::RecurrentWeights,
+                        ParameterShape::Matrix {
+                            rows: gates,
+                            columns: Some(units),
                         },
                     ),
                     (
                         ParameterRole::Bias,
-                        ParameterShape {
-                            rows: output_width,
-                            columns: Some(1),
-                        },
+                        ParameterShape::Dimensions(vec![Some(gates), Some(1)]),
                     ),
                 ] {
-                    let value = layer.properties.get(role.name());
-                    if let Some(value) = value {
-                        validate_parameter(value, &expected_shape, role, function)?;
-                    }
-                    out.push(ParameterView {
-                        key: ParameterKey {
-                            layer_index: index,
-                            layer_name: names[index].clone(),
-                            role,
-                        },
-                        value,
-                        expected_shape,
-                    });
+                    push_parameter(&mut out, layer, index, &names[index], role, shape, function)?;
                 }
-                width = Some(output_width);
+                channels = units.checked_mul(if bidirectional { 2 } else { 1 });
             }
-            _ => {}
+            Some(DeepLearningLayerKind::LayerNormalization) => {
+                channels = width_option(layer, "NumChannels", channels, function)?;
+                let shape = match input_geometry {
+                    Some(InputGeometry::SpatialSequence) => vec![Some(1), channels],
+                    _ => vec![channels, Some(1)],
+                };
+                for role in [ParameterRole::Scale, ParameterRole::Offset] {
+                    push_parameter(
+                        &mut out,
+                        layer,
+                        index,
+                        &names[index],
+                        role,
+                        ParameterShape::Dimensions(shape.clone()),
+                        function,
+                    )?;
+                }
+            }
+            Some(DeepLearningLayerKind::GlobalAveragePooling1D) => {
+                input_geometry = match input_geometry {
+                    Some(InputGeometry::SpatialSequence) => Some(InputGeometry::VectorSequence),
+                    _ => Some(InputGeometry::Feature),
+                };
+            }
+            Some(
+                DeepLearningLayerKind::Relu
+                | DeepLearningLayerKind::Elu
+                | DeepLearningLayerKind::Softmax
+                | DeepLearningLayerKind::ClassificationOutput
+                | DeepLearningLayerKind::RegressionOutput,
+            ) => {}
+            None => {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: unsupported layer class '{}'", layer.class_name),
+                ));
+            }
         }
     }
     Ok(out)
@@ -128,10 +290,7 @@ pub(in crate::builtins) fn validate_matching_networks(
                 let (Value::Object(left), Value::Object(right)) = (left, right) else {
                     return true;
                 };
-                left.class_name != right.class_name
-                    || left.properties.get("Name") != right.properties.get("Name")
-                    || left.properties.get("InputSize") != right.properties.get("InputSize")
-                    || left.properties.get("OutputSize") != right.properties.get("OutputSize")
+                !layer_metadata_matches(left, right)
             })
         {
             return Err(deep_learning_error(

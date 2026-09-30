@@ -22,6 +22,8 @@ mod gpu;
 mod host;
 mod parameters;
 mod properties;
+mod state;
+mod table_rows;
 mod topology;
 
 use admission::{
@@ -43,6 +45,11 @@ pub(in crate::builtins) use construction::{
 pub(in crate::builtins) use parameters::{
     apply as apply_learnables, project as project_learnables, validate_matching_networks,
 };
+pub(in crate::builtins) use state::{apply as apply_state, project as project_state};
+
+pub(crate) const fn state_storage_property() -> &'static str {
+    state::STORAGE_PROPERTY
+}
 
 #[runtime_builtin(
     name = "get.Learnables",
@@ -87,6 +94,48 @@ pub(super) async fn set_learnables_builtin(
         ));
     };
     apply_learnables(network, learnables, "set.Learnables")
+}
+
+#[runtime_builtin(
+    name = "get.State",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::deep_learning::model"
+)]
+pub(super) async fn get_state_builtin(network: Value) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+        return Err(deep_learning_error(
+            "get.State",
+            "get.State: at most one output is supported",
+        ));
+    }
+    let Value::Object(network) = network else {
+        return Err(deep_learning_error(
+            "get.State",
+            "get.State: expected network object",
+        ));
+    };
+    project_state(&network, "get.State")
+}
+
+#[runtime_builtin(
+    name = "set.State",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::deep_learning::model"
+)]
+pub(super) async fn set_state_builtin(network: Value, state: Value) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+        return Err(deep_learning_error(
+            "set.State",
+            "set.State: at most one output is supported",
+        ));
+    }
+    let Value::Object(network) = network else {
+        return Err(deep_learning_error(
+            "set.State",
+            "set.State: expected network object",
+        ));
+    };
+    apply_state(network, state, "set.State")
 }
 pub(in crate::builtins) use host::predict_deep_learning_object;
 pub(in crate::builtins) use properties::{
