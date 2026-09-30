@@ -30,6 +30,7 @@ fn workspace(values: BTreeMap<String, Value>) -> NativeWorkspaceState {
             values,
             ..Default::default()
         },
+        FrameGlobalBindings::default(),
     )
     .unwrap()
 }

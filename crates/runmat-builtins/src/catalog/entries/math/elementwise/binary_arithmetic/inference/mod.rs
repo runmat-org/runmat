@@ -4,6 +4,9 @@ mod output;
 mod policy;
 
 #[cfg(test)]
+mod admission_tests;
+
+#[cfg(test)]
 mod storage_tests;
 
 #[cfg(test)]

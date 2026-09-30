@@ -3,7 +3,9 @@ use crate::{
     infer_catalog_call, LDIVIDE_CATALOG_ENTRY, MINUS_CATALOG_ENTRY, PLUS_CATALOG_ENTRY,
     POWER_CATALOG_ENTRY, RDIVIDE_CATALOG_ENTRY, TIMES_CATALOG_ENTRY,
 };
-use runmat_types::{NumericClass, NumericDomain, ResidencyFact, StorageFact};
+use runmat_types::{
+    NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact, ValueKindFact,
+};
 
 #[test]
 fn sparse_storage_policy_is_selected_by_each_identity_contract() {
@@ -56,5 +58,33 @@ fn preserving_sparse_requires_known_matching_operand_shapes() {
             let inferred = infer_catalog_call(entry, &request(vec![sparse.clone(), other]));
             assert_eq!(inferred.outputs[0].storage, StorageFact::Unknown);
         }
+    }
+}
+
+#[test]
+fn sparse_storage_is_not_inferred_as_a_dense_or_scalar_buffer() {
+    for entry in [
+        &PLUS_CATALOG_ENTRY,
+        &MINUS_CATALOG_ENTRY,
+        &TIMES_CATALOG_ENTRY,
+    ] {
+        let name = entry.identity.name;
+        for shape in [&[Some(1), Some(1)][..], &[Some(2), Some(3)][..]] {
+            let mut sparse = numeric(NumericClass::Double, NumericDomain::Real, shape);
+            sparse.storage = StorageFact::Sparse;
+            let inferred =
+                infer_catalog_call(entry, &request(vec![sparse.clone(), sparse.clone()]));
+            assert_eq!(inferred.outputs[0].storage, StorageFact::Sparse, "{name}");
+            let scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }));
+            let mixed = infer_catalog_call(entry, &request(vec![sparse, scalar]));
+            assert_eq!(mixed.outputs[0].storage, StorageFact::Unknown, "{name}");
+        }
+        let mut unknown = numeric(NumericClass::Double, NumericDomain::Real, &[None, None]);
+        unknown.storage = StorageFact::Sparse;
+        let inferred = infer_catalog_call(entry, &request(vec![unknown.clone(), unknown]));
+        assert_eq!(inferred.outputs[0].storage, StorageFact::Unknown, "{name}");
     }
 }
