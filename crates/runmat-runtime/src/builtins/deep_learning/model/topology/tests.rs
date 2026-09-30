@@ -17,6 +17,33 @@ fn collection(layers: Vec<Value>) -> Value {
 }
 
 #[test]
+fn every_canonical_layer_is_recognized_without_claiming_executable_forms() {
+    for kind in runmat_builtins::DeepLearningLayerKind::ALL {
+        let layer = object_with_identity(kind.class(), Vec::<(String, Value)>::new());
+        validate_forward_layers(&[layer], "set.State")
+            .expect("parameter and state inspection recognize every exposed layer class");
+    }
+}
+
+#[test]
+fn sequence_and_feature_inputs_share_the_single_input_topology_rule() {
+    let sequence = || {
+        object_with_identity(
+            runmat_builtins::DeepLearningLayerKind::SequenceInput.class(),
+            Vec::<(String, Value)>::new(),
+        )
+    };
+    for layers in [
+        vec![input(), sequence()],
+        vec![sequence(), input()],
+        vec![transform(), sequence()],
+    ] {
+        let error = validate_sequential_topology(&layers, "dlnetwork").unwrap_err();
+        assert!(error.to_string().contains("first and only input layer"));
+    }
+}
+
+#[test]
 fn constructor_and_resident_forward_reject_invalid_order_before_provider_access() {
     let output = block_on(layers::regression_layer_builtin(vec![])).unwrap();
     for layers in [

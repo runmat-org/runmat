@@ -3,9 +3,11 @@
 //! Runtime values and learned parameter payloads remain in `runmat-runtime`;
 //! this schema is usable by static analysis without linking an executor.
 
+mod axes;
 mod identity;
 mod options;
 
+pub use axes::*;
 pub use identity::DeepLearningLayerKind;
 pub use options::{
     DeepLearningLayerOption, DeepLearningNormalizationAxes, LayerOptionDefault,

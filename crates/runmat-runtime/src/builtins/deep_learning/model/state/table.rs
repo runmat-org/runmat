@@ -24,7 +24,10 @@ fn table(keys: &[StateKey], values: Vec<Value>, function: &'static str) -> Built
     .map_err(|error| deep_learning_error(function, error.to_string()))
 }
 
-pub(super) fn initial(layers: &[Value], function: &'static str) -> BuiltinResult<Value> {
+pub(in crate::builtins::deep_learning::model) fn initial(
+    layers: &[Value],
+    function: &'static str,
+) -> BuiltinResult<Value> {
     let keys = schema::keys(layers, function)?;
     let mut values = Vec::with_capacity(keys.len());
     for key in &keys {

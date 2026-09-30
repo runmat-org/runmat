@@ -27,6 +27,14 @@ pub enum DeepLearningLayerKind {
 }
 
 impl DeepLearningLayerKind {
+    pub const fn is_input(self) -> bool {
+        matches!(self, Self::FeatureInput | Self::SequenceInput)
+    }
+
+    pub const fn is_output(self) -> bool {
+        matches!(self, Self::ClassificationOutput | Self::RegressionOutput)
+    }
+
     pub const ALL: [Self; 13] = [
         Self::FeatureInput,
         Self::SequenceInput,

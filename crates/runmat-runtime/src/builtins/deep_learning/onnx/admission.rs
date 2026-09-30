@@ -158,9 +158,12 @@ fn preflight_layers(
                 ))
             }
             Some(_) => {
-                return Err(deep_learning_error(
+                return Err(unsupported_error(
                     EXPORT_ONNX,
-                    "exportONNXNetwork: network must start with a featureInputLayer",
+                    format!(
+                        "exportONNXNetwork: layer type '{}' has no supported ONNX lowering",
+                        layer.class_name
+                    ),
                 ))
             }
             None => {

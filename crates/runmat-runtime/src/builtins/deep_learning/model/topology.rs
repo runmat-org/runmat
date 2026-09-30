@@ -60,10 +60,10 @@ pub(in crate::builtins) fn validate_sequential_topology(
         let Some(kind) = ForwardLayerKind::from_identity(&object.class_name) else {
             continue;
         };
-        if index != 0 && kind == ForwardLayerKind::FeatureInput {
+        if index != 0 && kind.is_input() {
             return Err(deep_learning_error(
                 function,
-                format!("{function}: featureInputLayer must be the first and only input layer"),
+                format!("{function}: an input layer must be the first and only input layer"),
             ));
         }
         if kind.is_output() && index + 1 != layers.len() {

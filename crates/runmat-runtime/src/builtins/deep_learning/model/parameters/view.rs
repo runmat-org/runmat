@@ -60,11 +60,44 @@ fn width_option(
 fn layer_metadata_matches(left: &ObjectInstance, right: &ObjectInstance) -> bool {
     let metadata = |(name, _): &(&String, &Value)| ParameterRole::parse(name.as_str()).is_none();
     left.class_name == right.class_name
+        && left.properties.iter().filter(metadata).count()
+            == right.properties.iter().filter(metadata).count()
         && left
             .properties
             .iter()
             .filter(metadata)
-            .eq(right.properties.iter().filter(metadata))
+            .all(|(name, value)| right.properties.get(name) == Some(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_comparison_uses_keys_and_values_not_hash_map_iteration_order() {
+        let mut left = ObjectInstance::new(DeepLearningLayerKind::FullyConnected.class().owned());
+        left.properties
+            .insert("Name".into(), Value::String("dense".into()));
+        left.properties
+            .insert("Description".into(), Value::String("projection".into()));
+        left.properties.insert("OutputSize".into(), Value::Num(2.0));
+        left.properties.insert("InputSize".into(), Value::Num(3.0));
+        left.properties.insert("Weights".into(), Value::Num(1.0));
+        for _ in 0..32 {
+            let mut right = ObjectInstance::new(left.class_name.clone());
+            for (name, value) in left.properties.iter() {
+                right.properties.insert(name.clone(), value.clone());
+            }
+            right.properties.insert("Weights".into(), Value::Num(9.0));
+            assert!(layer_metadata_matches(&left, &right));
+            right
+                .properties
+                .insert("OutputSize".into(), Value::Num(4.0));
+            assert!(!layer_metadata_matches(&left, &right));
+            right.properties.remove("OutputSize");
+            assert!(!layer_metadata_matches(&left, &right));
+        }
+    }
 }
 
 fn layers<'a>(network: &'a ObjectInstance, function: &'static str) -> BuiltinResult<&'a [Value]> {
@@ -139,7 +172,7 @@ pub(super) fn view<'a>(
                 };
             }
             Some(DeepLearningLayerKind::FullyConnected) => {
-                let output_width = positive_property_usize(&layer, "OutputSize", function)?;
+                let output_width = positive_property_usize(layer, "OutputSize", function)?;
                 for (role, expected_shape) in [
                     (
                         ParameterRole::Weights,

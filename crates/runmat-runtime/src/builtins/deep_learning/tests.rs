@@ -1579,9 +1579,12 @@ fn export_onnx_network_rejects_unexportable_forms_deterministically() {
         Value::String(path.to_string_lossy().into_owned()),
     ]))
     .unwrap_err();
-    assert!(err
-        .message
-        .contains("is not supported for RunMat forward execution"));
+    assert!(err.message.contains("has no supported ONNX lowering"));
+    assert_eq!(err.identifier(), Some("RunMat:deepLearning:Unsupported"));
+    assert!(
+        !path.exists(),
+        "unsupported lowering must not create a file"
+    );
 
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
     let _guard = crate::output_count::push_output_count(Some(1));
@@ -1788,16 +1791,28 @@ fn dlgradient_rejects_gpu_backed_dlarray_autodiff_with_provider_gap() {
 }
 
 #[test]
-fn dlnetwork_rejects_layers_without_forward_support() {
+fn deferred_recurrent_network_preserves_canonical_parameters_and_state() {
     let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let lstm = block_on(lstm_layer_builtin(Value::Num(4.0), vec![])).unwrap();
-    let err = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let network = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, lstm], 2, 1).unwrap(),
     )]))
-    .unwrap_err();
-    assert!(err
-        .message
-        .contains("is not supported for RunMat forward execution"));
+    .expect("recognized recurrent layers remain constructible before parameter initialization");
+    let Value::Object(network) = network else {
+        panic!("network expected");
+    };
+    assert_eq!(
+        network.properties.get("Initialized"),
+        Some(&Value::Bool(false))
+    );
+    let learnables = super::model::project_learnables(&network, "get.Learnables").unwrap();
+    assert!(
+        matches!(learnables, Value::Object(table) if table.class_name.is(runmat_types::standard::TABLE))
+    );
+    let state = block_on(super::model::get_state_builtin(Value::Object(network))).unwrap();
+    assert!(
+        matches!(state, Value::Object(table) if table.class_name.is(runmat_types::standard::TABLE))
+    );
 }
 
 fn regression_training_layers() -> Value {
