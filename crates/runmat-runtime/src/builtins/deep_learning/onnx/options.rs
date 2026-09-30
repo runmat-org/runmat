@@ -68,34 +68,42 @@ pub(super) fn parse_export_options(
 
 pub(super) fn validate_option(key: ExportOnnxOptionKey, value: &Value) -> BuiltinResult<()> {
     if let Value::GpuTensor(handle) = value {
-        if key.accepts_integer_extension() {
-            let scalar = handle
-                .shape()
-                .iter()
-                .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
-                == Some(1);
-            let numeric = runmat_accelerate_api::handle_precision(handle).is_some()
-                || runmat_accelerate_api::handle_integer_type(handle).is_some();
-            let logical = runmat_accelerate_api::handle_is_logical(handle);
-            let admitted_class = match key.value_role() {
-                ExportOnnxOptionValueRole::PositiveInteger => numeric && !logical,
-                ExportOnnxOptionValueRole::LogicalFlag => logical || numeric,
-                ExportOnnxOptionValueRole::SingleName => unreachable!("name control excluded"),
-            };
-            if scalar
-                && runmat_accelerate_api::handle_storage(handle)
-                    == runmat_accelerate_api::GpuTensorStorage::Real
-                && admitted_class
-            {
-                return Ok(());
+        match key.value_role() {
+            ExportOnnxOptionValueRole::SingleName => {
+                // Names are host text. Fall through to the ordinary text
+                // decoder, which reports the existing class error before
+                // any resident value is downloaded.
             }
-            return Err(deep_learning_error(
-                EXPORT_ONNX,
-                format!(
-                    "exportONNXNetwork: {} must have supported real scalar storage",
-                    key.canonical_name().to_ascii_lowercase()
-                ),
-            ));
+            role @ (ExportOnnxOptionValueRole::PositiveInteger
+            | ExportOnnxOptionValueRole::LogicalFlag) => {
+                let scalar = handle
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
+                    == Some(1);
+                let numeric = runmat_accelerate_api::handle_precision(handle).is_some()
+                    || runmat_accelerate_api::handle_integer_type(handle).is_some();
+                let logical = runmat_accelerate_api::handle_is_logical(handle);
+                let admitted_class = if role == ExportOnnxOptionValueRole::PositiveInteger {
+                    numeric && !logical
+                } else {
+                    logical || numeric
+                };
+                if scalar
+                    && runmat_accelerate_api::handle_storage(handle)
+                        == runmat_accelerate_api::GpuTensorStorage::Real
+                    && admitted_class
+                {
+                    return Ok(());
+                }
+                return Err(deep_learning_error(
+                    EXPORT_ONNX,
+                    format!(
+                        "exportONNXNetwork: {} must have supported real scalar storage",
+                        key.canonical_name().to_ascii_lowercase()
+                    ),
+                ));
+            }
         }
     }
     match key {

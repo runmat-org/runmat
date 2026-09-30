@@ -322,6 +322,36 @@ mod tests {
     }
 
     #[test]
+    fn resident_name_control_uses_text_admission_not_numeric_extension_policy() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let name = provider
+                .upload(&HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let weights = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0],
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            provider.reset_telemetry();
+            let error = futures::executor::block_on(admit_export_call(vec![
+                network(Value::GpuTensor(weights.clone()), Value::Num(1.0)),
+                Value::String("unused.onnx".into()),
+                Value::String("InputNames".into()),
+                Value::GpuTensor(name.clone()),
+            ]))
+            .unwrap_err();
+            assert!(error.message.contains("InputNames"), "{error}");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            name.allocation_lease().validate_live().unwrap();
+            weights.allocation_lease().validate_live().unwrap();
+        });
+    }
+
+    #[test]
     fn unknown_and_known_invalid_options_precede_learnable_download() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let weights = provider
