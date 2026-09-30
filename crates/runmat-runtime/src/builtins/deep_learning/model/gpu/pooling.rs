@@ -156,12 +156,21 @@ fn presentation_alias_policy(
     source_axes: &AxisPlan,
     route: &DeepLearningPool1DRoute,
 ) -> GpuOutputAliasPolicy {
-    if route
+    // In column-major storage, moving only singleton axes changes metadata
+    // but not the linear element order. Materialization is necessary exactly
+    // when the relative order of non-singleton source axes changes.
+    let mut last_non_singleton = None;
+    let reorders_data = route
         .target_to_source
         .iter()
-        .enumerate()
-        .any(|(target, &source)| target != source && source_axes.shape()[source] > 1)
-    {
+        .copied()
+        .filter(|&source| source_axes.shape()[source] > 1)
+        .any(|source| {
+            let out_of_order = last_non_singleton.is_some_and(|previous| source < previous);
+            last_non_singleton = Some(source);
+            out_of_order
+        });
+    if reorders_data {
         GpuOutputAliasPolicy::RequireDistinctAllocation
     } else {
         GpuOutputAliasPolicy::AllowInput
@@ -245,6 +254,59 @@ mod tests {
                 "forward",
             )
             .is_err());
+        });
+    }
+
+    #[test]
+    fn singleton_axis_permutations_accept_the_same_column_major_allocation() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            for (format, source_shape, order, target_shape) in [
+                ("CB", vec![1, 2], vec![1, 0], vec![2, 1]),
+                ("CBT", vec![2, 1, 3], vec![1, 0, 2], vec![1, 2, 3]),
+            ] {
+                let values = (1..=source_shape.iter().product::<usize>())
+                    .map(|value| value as f64)
+                    .collect::<Vec<_>>();
+                let input = provider
+                    .upload(&HostTensorView {
+                        data: &values,
+                        shape: &source_shape,
+                    })
+                    .unwrap();
+                let source_axes = AxisPlan::new(
+                    runmat_builtins::DeepLearningAxisLayout::parse(format, source_shape.len())
+                        .unwrap(),
+                    &source_shape,
+                )
+                .unwrap();
+                let planned = DeepLearningPool1DRoute {
+                    reduction: DeepLearningPool1DRequest { axis_zero_based: 0 },
+                    result_axis: DeepLearningPool1DResultAxis::KeepSingleton,
+                    source_shape,
+                    target_shape: target_shape.clone(),
+                    target_to_source: order,
+                };
+                let alias = presentation_alias_policy(&source_axes, &planned);
+                assert_eq!(alias, GpuOutputAliasPolicy::AllowInput);
+                let view = input
+                    .with_view(input.view().clone().with_shape(target_shape.clone()))
+                    .unwrap();
+                let accepted = validate(
+                    view,
+                    &input,
+                    provider,
+                    &target_shape,
+                    runmat_accelerate_api::handle_precision(&input),
+                    alias,
+                    "forward",
+                )
+                .unwrap();
+                assert!(accepted.shares_allocation_with(&input));
+                let gathered =
+                    crate::builtins::common::test_support::gather(Value::GpuTensor(accepted))
+                        .unwrap();
+                assert_eq!(gathered.materialize_f64(), values);
+            }
         });
     }
 }
