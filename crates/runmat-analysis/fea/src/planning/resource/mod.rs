@@ -2,11 +2,17 @@
 
 mod accuracy;
 mod acoustic;
+mod electrical_static;
 pub use acoustic::{
     acoustic_harmonic_result_payload_bytes_upper_bound, build_acoustic_resource_plan,
     PreparedAcousticResourceFacts,
 };
 pub use contract::AcousticHarmonicResourceDemand;
+pub use contract::ElectricalStaticResourceDemand;
+pub use electrical_static::{
+    build_electrical_static_resource_plan, electrical_static_result_payload_bytes_upper_bound,
+    electrical_static_solver_admission, PreparedElectricalStaticResourceFacts,
+};
 mod result_publication;
 mod state_publication;
 pub use contract::ResultPublicationResourceDemand;

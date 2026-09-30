@@ -14,6 +14,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
+mod admitted;
 mod result;
 pub use result::ElectricalStaticSolverResult;
 #[cfg(test)]

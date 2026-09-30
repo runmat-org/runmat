@@ -1,6 +1,7 @@
 mod accuracy;
 mod acoustic;
 mod common;
+mod electrical_static;
 mod result_publication;
 mod state_publication;
 use common::validate_common;
@@ -51,6 +52,12 @@ pub fn build_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
+        (
+            FeaResourcePhase::ElectricalStatic(workload),
+            FeaResourceDemand::ElectricalStatic(demand),
+        ) if *workload == demand.workload => {
+            electrical_static::build_electrical_static_plan(input.clone(), demand)
+        }
         (
             FeaResourcePhase::AcousticHarmonic(workload),
             FeaResourceDemand::AcousticHarmonic(demand),

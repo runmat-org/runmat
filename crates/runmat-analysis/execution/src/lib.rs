@@ -60,6 +60,11 @@ mod structural_modal_transient_study;
 mod structural_prestress_producer;
 pub use structural_prestress_producer::ThermalPrestressSource;
 mod acoustic_harmonic_plan;
+mod electrical_static_plan;
+pub use electrical_static_plan::{
+    prepare_electrical_static_inputs, rederive_electrical_static_resource_plan,
+    PreparedElectricalStaticInputs,
+};
 mod acoustic_harmonic_result;
 mod acoustic_harmonic_task;
 mod acoustic_state_profiles;

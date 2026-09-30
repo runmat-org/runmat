@@ -97,7 +97,7 @@ against source data and integrated retained densities against canonical element 
 Those consistency checks do not reconstruct fields, assemble an operator or solve again.
 Bare decoding cannot authenticate the external source; consumers must use source-bound import.
 
-This bounded contract is not a resource-admitted solver, numerical receipt/shared accuracy
+This bounded contract is not scheduler allocation, numerical receipt/shared accuracy
 evaluation, persisted semantic state, authored process path or restart qualification.
 The previously failed largest Tet10 refinement remains a failed gate, unchanged.
 
@@ -108,3 +108,34 @@ combinations, exact cold arrays/identities, malformed imports, voltage scales1e-
 constant1e12 gauge substitution. Shared admission and algebra regressions each pass40/40;
 FEA library/tests strict Clippy and scoped formatting pass. Architecture still reports four
 unrelated runtime module-size debts. No resource, process/restart or production pass is inferred.
+
+## Requested-heap admission and transport boundary
+
+`build_electrical_static_resource_plan` binds both scalar equations and orders to the
+same canonical topology and shared solver-work envelope. It reserves physical/normalized/
+constrained matrix lifetimes, property/projection preparation, proof and vector work,
+field recovery, canonical result construction and shared transport closure. Checked raw
+node incidence establishes the proof support without numerical matrix assembly or physical
+quadrature allocation. The support-preparation ceiling is checked before its allocation;
+the final requested heap must also fit the authored accuracy ceiling. Resource-estimation
+model revision42 distinguishes this admission contract.
+
+`execute_with_resource_plan` rederives the complete plan before numerical assembly and
+passes its exact policy to the shared scoped solver. A correctly hashed but altered policy
+is not authority. The bridge prepares ordinary shared workload/mesh objects and validates
+the imported plan plus exact input closures and chunk policy. Retained result fields are
+source-bound on cold import; they are not calculated again.
+
+This is a local numerical requested-heap contract, not measured peak RSS, scheduler
+allocation, native authored execution, a numerical receipt or semantic publication.
+Those gates remain closed. The pre-existing largest Tet10 physics/proof gate is unchanged;
+neither resource ceilings nor independent accuracy requirements are relaxed.
+
+2026-09-30 retention evidence: the three resource checks pass, including both equations/
+orders with free interior nodes, exact source-bound admission, valid-hash policy substitution,
+payload bounds, malformed facts/overflow, one-byte-below total-memory rejection and support
+budget rejection before invalid geometry. The bridge matrix verifies two chunk policies,
+canonical input substitution rejection and identical cold retained fields; the full bridge
+suite passes103/103. Strict FEA/bridge all-target Clippy passes without suppression, scoped
+format and whitespace pass. Architecture still reports only the four unrelated runtime debts.
+No measured-residency, scheduler, publication, restart or production claim follows.

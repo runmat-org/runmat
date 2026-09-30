@@ -58,6 +58,7 @@ pub(super) fn solve(
     assembly: ElectricalAssembly,
     equation: StaticElectricalEquation,
     residual_target: f64,
+    admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
     let count = assembly.projection.nodes.len();
     let constrained = assembly
@@ -140,7 +141,7 @@ pub(super) fn solve(
         None,
         crate::solve::linear::ScopedLinearSolveSettings {
             plan: crate::planning::resource::LocalExecutionPlan::serial(),
-            admission: None,
+            admission,
             relative_tolerance: residual_target,
         },
     )

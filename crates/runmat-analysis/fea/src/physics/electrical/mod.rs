@@ -55,6 +55,17 @@ pub fn solve_canonical_static(
     requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
+    solve_canonical_static_with_admission(model, mesh, step_id, requirement, residual_target, None)
+}
+
+pub(crate) fn solve_canonical_static_with_admission(
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+    step_id: &str,
+    requirement: FormulationRequirement,
+    residual_target: f64,
+    admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
+) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
     let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
     let Some(ElectromagneticDomain::Static { equation }) = &model.electromagnetic else {
         unreachable!("validated static electrical domain")
@@ -65,7 +76,7 @@ pub fn solve_canonical_static(
         .map_err(|error| ElectricalStaticError::Material(error.to_string()))?;
     let assembled = assembly::ElectricalAssembly::assemble(projection, &properties, *equation)?;
     let assembled = assembled.with_constraints(model, mesh, step)?;
-    response::solve(assembled, *equation, residual_target)
+    response::solve(assembled, *equation, residual_target, admission)
 }
 
 /// Checks intent without allocating topology or assembling an operator. This numerical
