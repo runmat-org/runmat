@@ -209,7 +209,7 @@ impl WgpuProvider {
         Ok(DeepLearningForwardCapability::Ready(
             DeepLearningForwardResources {
                 output_bytes: geometry.output_bytes,
-                largest_intermediate_bytes: geometry.largest_intermediate_bytes,
+                largest_stage_value_bytes: geometry.largest_stage_value_bytes,
                 known_normalization_scratch_bytes: scratch_bytes,
                 upload_bytes,
                 resident_bytes,

@@ -70,9 +70,9 @@ pub struct DeepLearningForwardRoute<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeepLearningForwardResources {
     pub output_bytes: u64,
-    /// Largest physical intermediate or view materialization established by
-    /// the route. This is not a complete concurrent-memory estimate.
-    pub largest_intermediate_bytes: u64,
+    /// Largest single physical stage value, including input and output. This
+    /// is not a newly allocated intermediate or concurrent-memory estimate.
+    pub largest_stage_value_bytes: u64,
     /// Known normalization work buffer demand. Other provider-private buffers
     /// are not represented here; shared placement must not treat this as peak.
     pub known_normalization_scratch_bytes: u64,

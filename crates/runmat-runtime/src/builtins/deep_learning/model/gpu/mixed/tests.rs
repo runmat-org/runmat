@@ -250,7 +250,7 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
             } else {
                 DeepLearningForwardCapability::Ready(DeepLearningForwardResources {
                     output_bytes: geometry.output_bytes,
-                    largest_intermediate_bytes: geometry.largest_intermediate_bytes,
+                    largest_stage_value_bytes: geometry.largest_stage_value_bytes,
                     known_normalization_scratch_bytes: 0,
                     upload_bytes: 0,
                     resident_bytes: 0,

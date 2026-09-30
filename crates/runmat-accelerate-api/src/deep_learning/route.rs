@@ -13,9 +13,9 @@ pub enum DeepLearningForwardRouteError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeepLearningForwardGeometry {
     pub output_bytes: u64,
-    /// Largest single intermediate or view materialization. This is not a
-    /// whole-route peak and does not include provider-private scratch.
-    pub largest_intermediate_bytes: u64,
+    /// Largest single stage value, including input and output. This is not
+    /// a newly allocated intermediate or whole-route peak.
+    pub largest_stage_value_bytes: u64,
     /// The verified physical view immediately before each operation.
     pub stage_inputs: Vec<GpuTensorView>,
 }
@@ -231,7 +231,7 @@ impl DeepLearningForwardRoute<'_> {
         }
         Ok(DeepLearningForwardGeometry {
             output_bytes: bytes(view.shape(), element)?,
-            largest_intermediate_bytes: largest,
+            largest_stage_value_bytes: largest,
             stage_inputs,
         })
     }
