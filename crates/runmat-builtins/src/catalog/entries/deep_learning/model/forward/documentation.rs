@@ -24,17 +24,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("forward"),
     slug: Some("forward"),
-    summary: "Evaluate a supported sequential network on numeric observations.",
-    description: "`forward(net, X)` executes supported feed-forward layers. Rows of `X` are observations and columns are features. A `dlarray` input produces a `dlarray` output with its format metadata retained.",
+    summary: "Evaluate a sequential network on numeric or formatted observations.",
+    description: "`forward(net, X)` evaluates the network's admitted layer sequence. Raw feature matrices use rows for observations and columns for channels; sequence and spatial inputs use the declared input layer's axis convention. A `dlarray` input retains its format in the output. `[Y, state] = forward(net, X)` also returns updated recurrent State without mutating `net`.",
     keywords: &["forward", "dlnetwork", "deep learning", "predict", "GPU"],
     related: &["dlnetwork", "dlarray", "dlfeval", "dlgradient", "predict"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Supported execution",
             paragraphs: &[
-                "A supported sequence begins with `featureInputLayer` and can use `fullyConnectedLayer`, `reluLayer`, `eluLayer`, and `softmaxLayer`, followed by classification or regression output metadata. Supplied fully connected weights and bias are consumed. Missing parameters from an `Initialize=false` network fail at execution. The output has one row per observation and as many columns as the final feature width.",
-                "Host `double` inputs return `double`; host `single` inputs return `single`. In RunMat mode, typed integer predictors produce `double` results. Integer fully connected parameters are converted for the floating-point calculation; with floating predictors, results retain the predictor's `single` or `double` class. Wide integer values can round at this numerical boundary. Host logical input produces `double`. The `dlarray` wrapper retains its input format. Name-value execution options, recurrent state outputs, branches, custom layers, and unsupported input geometry are rejected.",
-                "Inside `dlfeval`, supported host `dlarray` inputs and fully connected learnables can participate in the active differentiation tape. This is limited to the implemented layer sequence, not general network training.",
+                "A sequence begins with an input layer and proceeds through admitted channel transforms, convolution, recurrent, normalization, pooling, and activation layers. The output shape follows the input's semantic axes and each consumed layer option. Output layers provide classification or regression metadata. Missing parameters from an `Initialize=false` network fail before execution.",
+                "Host `double` inputs return `double`; host `single` inputs return `single`. In RunMat mode, typed integer predictors produce `double` results. Consumed integer learnables are converted for the floating-point calculation; with floating predictors, results retain the predictor's `single` or `double` class. Wide integer values can round at this numerical boundary. Host logical input produces `double`. The `dlarray` wrapper retains its input format. Unsupported options, branches, custom layers, and invalid geometry are rejected before execution.",
+                "Inside `dlfeval`, admitted host `dlarray` inputs and learnables can participate in the differentiation tape. `[Y, state]` projects the updated canonical Layer/Parameter/Value table; the value network passed to `forward` remains unchanged.",
             ],
         },
         BuiltinDocumentationSection {
@@ -61,7 +61,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "formatted-dlarray",
             title: "Preserve a dlarray format",
-            program: "net = dlnetwork({featureInputLayer(2); fullyConnectedLayer(1)}); x = dlarray(single([1 2]), 'CB'); y = forward(net, x); fprintf('%d\\n', size(y.Data, 2));",
+            program: "net = dlnetwork({featureInputLayer(2); fullyConnectedLayer(1)}); x = dlarray(single([1; 2]), 'CB'); y = forward(net, x); fprintf('%d\\n', size(y.Data, 2));",
             display_output: Some("1"),
             compatibility: BuiltinExampleCompatibility::RunMat,
             harness: BuiltinExampleHarness::Portable,
@@ -76,7 +76,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "Are observations stored in rows or columns?",
-            answer: "Rows are observations and columns are features for this `forward` form.",
+            answer: "Raw feature matrices use rows for observations and columns for channels. Formatted dlarray and sequence or spatial inputs follow their semantic axis labels and input layer.",
         },
         BuiltinDocumentationFaq {
             question: "Does a GPU-backed dlarray have to gather?",
@@ -84,7 +84,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationFaq {
             question: "Can forward return network state as a second output?",
-            answer: "No. This sequential subset has one output and does not implement recurrent state output.",
+            answer: "Yes. `[Y, state] = forward(net, X)` returns a canonical State table. `net` is not mutated; pass or assign the returned state explicitly for subsequent recurrent execution.",
         },
     ],
     links: &[

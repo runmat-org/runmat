@@ -32,6 +32,46 @@ fn layer() -> ValueFact {
 }
 
 #[test]
+fn arbitrary_layer_namespace_identity_is_not_treated_as_supported() {
+    let unsupported = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(
+                StaticClassIdentity::new("nnet.cnn.layer.CustomFutureLayer").owned(),
+            ),
+            properties: BTreeMap::new(),
+            properties_complete: false,
+            handle_semantics: Some(false),
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    let inferred = infer(vec![unsupported], vec![LiteralValue::Unknown]);
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLNETWORK-LAYERS"));
+}
+
+#[test]
+fn complete_layer_cell_with_conflicting_geometry_is_diagnosed() {
+    let layers = ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(layer()),
+            elements: vec![layer()],
+            elements_complete: true,
+        }),
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Dense,
+    );
+    let inferred = infer(vec![layers], vec![LiteralValue::Unknown]);
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLNETWORK-LAYERS"));
+}
+
+#[test]
 fn static_network_identity_and_layer_geometry_follow_known_collection() {
     let result = infer(
         vec![ValueFact::proven(

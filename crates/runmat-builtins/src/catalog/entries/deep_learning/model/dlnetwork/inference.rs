@@ -1,22 +1,22 @@
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
-    BuiltinCatalogEntry,
+    BuiltinCatalogEntry, DeepLearningLayerKind,
 };
 use runmat_types::{
     standard, CallInference, CallRequest, CellFact, DynamicReason, ObjectFact, ShapeFact,
-    StaticClassIdentity, StaticClassNamespace, StorageFact, StructFact, ValueFact, ValueKindFact,
+    StaticClassIdentity, StorageFact, StructFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
 const LAYER_GRAPH: StaticClassIdentity = StaticClassIdentity::new("nnet.cnn.LayerGraph");
-const LAYER_NAMESPACE: StaticClassNamespace = StaticClassNamespace::new("nnet.cnn.layer");
-
 fn cell_layers_possible(cell: &CellFact) -> bool {
-    let possible = |fact: &ValueFact| {
-        matches!(
-            &fact.kind,
-            ValueKindFact::Unknown | ValueKindFact::Object(_)
-        )
+    let possible = |fact: &ValueFact| match &fact.kind {
+        ValueKindFact::Unknown => true,
+        ValueKindFact::Object(object) => object
+            .runtime_class
+            .as_ref()
+            .is_none_or(|identity| DeepLearningLayerKind::from_identity(identity).is_some()),
+        _ => false,
     };
     possible(&cell.element) && cell.elements.iter().all(possible)
 }
@@ -24,7 +24,20 @@ fn cell_layers_possible(cell: &CellFact) -> bool {
 fn layers_count(value: &ValueFact) -> Result<Option<usize>, ()> {
     match &value.kind {
         ValueKindFact::Unknown => Ok(None),
-        ValueKindFact::Cell(cell) if cell_layers_possible(cell) => Ok(value.shape.element_count()),
+        ValueKindFact::Cell(cell) if cell_layers_possible(cell) => {
+            if cell.elements_complete {
+                if value
+                    .shape
+                    .element_count()
+                    .is_some_and(|count| count != cell.elements.len())
+                {
+                    return Err(());
+                }
+                Ok(Some(cell.elements.len()))
+            } else {
+                Ok(value.shape.element_count())
+            }
+        }
         ValueKindFact::Cell(_) => Err(()),
         ValueKindFact::Object(object) if object.runtime_class.is_none() => Ok(None),
         ValueKindFact::Object(object)
@@ -51,10 +64,9 @@ fn layers_count(value: &ValueFact) -> Result<Option<usize>, ()> {
             }
         }
         ValueKindFact::Object(object)
-            if object
-                .runtime_class
-                .as_ref()
-                .is_none_or(|class| class.is_in_namespace(LAYER_NAMESPACE)) =>
+            if object.runtime_class.as_ref().is_some_and(|identity| {
+                DeepLearningLayerKind::from_identity(identity).is_some()
+            }) =>
         {
             Ok(Some(1))
         }
@@ -131,6 +143,10 @@ fn empty_struct() -> ValueFact {
 }
 
 pub(super) fn network_rows_table_fact() -> ValueFact {
+    state_rows_table_fact(None)
+}
+
+pub(super) fn state_rows_table_fact(rows: Option<usize>) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
@@ -139,9 +155,9 @@ pub(super) fn network_rows_table_fact() -> ValueFact {
                 "__table_variables".into(),
                 ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
                     BTreeMap::from([
-                        ("Layer".into(), text(column(None))),
-                        ("Parameter".into(), text(column(None))),
-                        ("Value".into(), cell(column(None))),
+                        ("Layer".into(), text(column(rows))),
+                        ("Parameter".into(), text(column(rows))),
+                        ("Value".into(), cell(column(rows))),
                     ]),
                     true,
                 ))),

@@ -13,26 +13,44 @@ const INPUTS: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Observations in rows and features in columns, or a dlarray with such Data.",
+        description: "Raw features, sequence or spatial data in the declared input layer's axis convention, or a formatted dlarray.",
     },
 ];
-const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const OUTPUT_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Numeric scores, or a dlarray preserving input format and residency.",
-}];
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = forward(net, X)",
-    inputs: &INPUTS,
-    outputs: &OUTPUTS,
-}];
+    description: "Numeric output, or a dlarray retaining its semantic input format; placement depends on execution route.",
+};
+const OUTPUTS: [BuiltinParamDescriptor; 1] = [OUTPUT_Y];
+const OUTPUTS_WITH_STATE: [BuiltinParamDescriptor; 2] = [
+    OUTPUT_Y,
+    BuiltinParamDescriptor {
+        name: "state",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Canonical Layer/Parameter/Value table of updated recurrent state; the input network is unchanged.",
+    },
+];
+const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = forward(net, X)",
+        inputs: &INPUTS,
+        outputs: &OUTPUTS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Y, state] = forward(net, X)",
+        inputs: &INPUTS,
+        outputs: &OUTPUTS_WITH_STATE,
+    },
+];
 
 pub const FORWARD_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.INVALID_INPUT",
     identifier: Some("RunMat:deepLearning:InvalidInput"),
-    when: "The network or input data is invalid, layer dimensions or parameters disagree, options are supplied, numerical normalization fails, or more than one output is requested.",
+    when: "The network or input data is invalid, layer dimensions or parameters disagree, options are supplied, numerical normalization fails, or more than two outputs are requested.",
     message: "forward received invalid network or input data",
 };
 pub const FORWARD_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

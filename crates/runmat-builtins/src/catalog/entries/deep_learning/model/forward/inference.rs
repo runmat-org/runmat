@@ -1,12 +1,16 @@
 use crate::{
-    catalog::inference::{argument_error, finish_fixed},
-    BuiltinCatalogEntry, FULLY_CONNECTED_LAYER_CLASS,
+    catalog::inference::{argument_error, finish_fixed_outputs},
+    BuiltinCatalogEntry,
 };
 use runmat_types::{
-    standard, CallInference, CallRequest, DynamicReason, NumericClass, NumericDomain, NumericFact,
-    ObjectFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    standard, CallInference, CallRequest, CertaintyFact, ContiguityFact, DynamicReason, LayoutFact,
+    NumericClass, NumericDomain, NumericFact, ObjectFact, ResidencyFact, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact, ViewFact,
 };
 use std::collections::BTreeMap;
+
+mod network;
+mod shape;
 
 fn network_possible(value: &ValueFact) -> bool {
     match &value.kind {
@@ -24,63 +28,58 @@ fn network_possible(value: &ValueFact) -> bool {
     }
 }
 
-fn known_output_width(network: Option<&ValueFact>) -> Option<usize> {
-    let ValueKindFact::Object(network) = &network?.kind else {
-        return None;
-    };
-    let ValueKindFact::Cell(layers) = &network.properties.get("Layers")?.kind else {
-        return None;
-    };
-    if !layers.elements_complete {
-        return None;
-    }
-    let mut width = None;
-    for layer in &layers.elements {
-        let ValueKindFact::Object(layer) = &layer.kind else {
-            return None;
-        };
-        let class = layer.runtime_class.as_ref()?;
-        if class.is(FULLY_CONNECTED_LAYER_CLASS) {
-            width = layer
-                .properties
-                .get("Weights")?
-                .shape
-                .known_dims()
-                .and_then(|dims| dims.first().copied().flatten());
-        }
-    }
-    width
-}
-
-fn numeric_result(input: &ValueFact, output_width: Option<usize>) -> Option<ValueFact> {
+fn numeric_result(input: &ValueFact, output_shape: ShapeFact) -> Option<ValueFact> {
     let class = match &input.kind {
         ValueKindFact::Numeric(number) if number.domain == NumericDomain::Real => {
-            match number.class {
-                NumericClass::Single => NumericClass::Single,
-                _ => NumericClass::Double,
+            if number.class == NumericClass::Single {
+                NumericClass::Single
+            } else {
+                NumericClass::Double
             }
         }
         ValueKindFact::Logical => NumericClass::Double,
         ValueKindFact::Unknown => return Some(ValueFact::unknown(DynamicReason::RuntimeValue)),
         _ => return None,
     };
-    let rows = input
-        .shape
-        .known_dims()
-        .and_then(|dims| match dims.as_slice() {
-            [_] => Some(1),
-            [rows, ..] => *rows,
-            [] => Some(0),
-        });
-    let shape = ShapeFact::from(vec![rows, output_width]);
-    Some(ValueFact::proven(
-        ValueKindFact::Numeric(NumericFact {
-            class,
-            domain: NumericDomain::Real,
-        }),
-        shape,
-        StorageFact::Dense,
-    ))
+    let mut result = ValueFact::unknown(DynamicReason::RuntimeValue);
+    result.kind = ValueKindFact::Numeric(NumericFact {
+        class,
+        domain: NumericDomain::Real,
+    });
+    result.shape = output_shape;
+    result.storage = StorageFact::Dense;
+    result.residency = if input.residency == ResidencyFact::Host {
+        ResidencyFact::Host
+    } else {
+        ResidencyFact::Unknown
+    };
+    result.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
+    result.view = ViewFact::Unknown;
+    result.layout = LayoutFact::Unknown;
+    result.contiguity = ContiguityFact::Unknown;
+    Some(result)
+}
+
+fn dlarray_result(mut data: ValueFact) -> ValueFact {
+    // A fact cannot promise that an optional provider route will be selected.
+    data.residency = ResidencyFact::Unknown;
+    let shape = data.shape.clone();
+    let mut wrapper = ValueFact::unknown(DynamicReason::RuntimeValue);
+    wrapper.kind = ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(standard::DL_ARRAY.owned()),
+        properties: BTreeMap::from([
+            (crate::DLARRAY_DATA_PROPERTY.into(), data),
+            ("Format".into(), ValueFact::scalar(ValueKindFact::String)),
+            ("Labels".into(), ValueFact::scalar(ValueKindFact::String)),
+        ]),
+        properties_complete: false,
+        handle_semantics: Some(false),
+    });
+    wrapper.shape = shape;
+    wrapper.storage = StorageFact::Opaque;
+    wrapper.residency = ResidencyFact::Host;
+    wrapper
 }
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -123,16 +122,6 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
         _ => (input.cloned(), false),
     };
-    if data
-        .as_ref()
-        .is_some_and(|fact| fact.shape.rank().is_some_and(|rank| rank > 2))
-    {
-        diagnostics.push(argument_error(
-            "RM-DL-FORWARD-SHAPE",
-            "forward requires two-dimensional observations-by-features input",
-            1,
-        ));
-    }
     let unsupported_storage = data
         .as_ref()
         .is_some_and(|fact| fact.storage == StorageFact::Sparse);
@@ -146,20 +135,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let unsupported_resident_dlarray = dlarray
         && data.as_ref().is_some_and(|fact| {
             matches!(&fact.residency, ResidencyFact::Device { .. })
-                && matches!(
+                && !matches!(
                     &fact.kind,
-                    ValueKindFact::Logical
-                        | ValueKindFact::Numeric(NumericFact {
-                            class: NumericClass::Int8
-                                | NumericClass::Int16
-                                | NumericClass::Int32
-                                | NumericClass::Int64
-                                | NumericClass::UInt8
-                                | NumericClass::UInt16
-                                | NumericClass::UInt32
-                                | NumericClass::UInt64,
-                            ..
-                        })
+                    ValueKindFact::Numeric(NumericFact {
+                        class: NumericClass::Single | NumericClass::Double,
+                        domain: NumericDomain::Real
+                    })
                 )
         });
     if unsupported_resident_dlarray {
@@ -169,34 +150,27 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             1,
         ));
     }
-    let output_width = known_output_width(request.arguments.first());
+    let layers = network::known_layers(request.arguments.first());
+    if !dlarray
+        && data
+            .as_ref()
+            .is_some_and(|data| shape::invalid_raw_geometry(data, layers.as_deref()))
+    {
+        diagnostics.push(argument_error(
+            "RM-DL-FORWARD-SHAPE",
+            "input rank is incompatible with the network's input layer",
+            1,
+        ));
+    }
+    let shape = data.as_ref().map_or(ShapeFact::Unknown, |data| {
+        shape::output_shape(data, dlarray, layers.as_deref())
+    });
     let output = match data.as_ref().and_then(|data| {
         (!unsupported_storage && !unsupported_resident_dlarray)
-            .then(|| numeric_result(data, output_width))
+            .then(|| numeric_result(data, shape))
             .flatten()
     }) {
-        Some(mut numeric) if dlarray => {
-            if let Some(data) = data.as_ref() {
-                numeric.residency = data.residency.clone();
-            }
-            let shape = numeric.shape.clone();
-            let properties = BTreeMap::from([
-                (crate::DLARRAY_DATA_PROPERTY.into(), numeric),
-                ("Format".into(), ValueFact::scalar(ValueKindFact::String)),
-                ("Labels".into(), ValueFact::scalar(ValueKindFact::String)),
-            ]);
-            ValueFact::proven(
-                ValueKindFact::Object(ObjectFact {
-                    class: None,
-                    runtime_class: Some(standard::DL_ARRAY.owned()),
-                    properties,
-                    properties_complete: false,
-                    handle_semantics: Some(false),
-                }),
-                shape,
-                StorageFact::Opaque,
-            )
-        }
+        Some(numeric) if dlarray => dlarray_result(numeric),
         Some(numeric) => numeric,
         None => {
             if input.is_some() && !unsupported_storage && !unsupported_resident_dlarray {
@@ -209,5 +183,17 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ValueFact::unknown(DynamicReason::RuntimeValue)
         }
     };
-    finish_fixed(entry, request, output, diagnostics)
+    let state_rows = layers.as_ref().and_then(|layers| {
+        layers
+            .iter()
+            .all(|(kind, _)| {
+                !matches!(
+                    kind,
+                    crate::DeepLearningLayerKind::Lstm | crate::DeepLearningLayerKind::Bilstm
+                )
+            })
+            .then_some(0)
+    });
+    let state = super::super::dlnetwork::state_rows_table_fact(state_rows);
+    finish_fixed_outputs(entry, request, vec![output, state], diagnostics)
 }

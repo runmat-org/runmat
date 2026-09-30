@@ -12,6 +12,7 @@ mod state_access;
 mod tests;
 
 pub use contract::{DLNETWORK_DESCRIPTOR, DLNETWORK_INVALID_INPUT};
+pub(super) use inference::state_rows_table_fact;
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &DLNETWORK_CATALOG_ENTRY,
