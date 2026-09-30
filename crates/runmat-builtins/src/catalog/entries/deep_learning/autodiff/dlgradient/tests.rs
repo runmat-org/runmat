@@ -154,7 +154,7 @@ fn discarded_gradient_targets_do_not_emit_admission_diagnostics() {
     assert!(!dynamic
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-RESIDENCY"));
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-CLASS"));
     let result = crate::infer_catalog_call(
         &DLGRADIENT_CATALOG_ENTRY,
         &CallRequest {
@@ -165,7 +165,7 @@ fn discarded_gradient_targets_do_not_emit_admission_diagnostics() {
     assert!(result
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-RESIDENCY"
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-CLASS"
             && diagnostic.argument == Some(2)));
 }
 
@@ -209,9 +209,10 @@ fn traced_dlarray_target_preserves_known_data_class_and_shape() {
         panic!("dlarray gradient")
     };
     assert_eq!(object.runtime_class, Some(standard::DL_ARRAY.owned()));
-    // Gradient class/shape survive, but repeated targets can share the tape's
-    // cached allocation; exclusive ownership is not inherited from the input.
+    // Gradient class/shape survive, but loss-graph placement and repeated
+    // target ownership cannot be inferred from the target's host Data.
     data.alias = AliasFact::Unknown;
+    data.residency = ResidencyFact::Unknown;
     assert_eq!(object.properties[crate::DLARRAY_DATA_PROPERTY], data);
 }
 
@@ -275,7 +276,7 @@ fn logical_target_gradient_is_double_and_complex_data_is_not_admitted() {
 }
 
 #[test]
-fn known_resident_data_is_diagnosed_without_claiming_a_device_gradient() {
+fn resident_data_is_conservative_without_blanket_rejection_or_proven_device_gradient() {
     let loss = dlarray(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
         domain: NumericDomain::Real,
@@ -295,7 +296,7 @@ fn known_resident_data_is_diagnosed_without_claiming_a_device_gradient() {
         outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
     };
     let result = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request);
-    assert!(result
+    assert!(!result
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-RESIDENCY"));
@@ -303,8 +304,10 @@ fn known_resident_data_is_diagnosed_without_claiming_a_device_gradient() {
         panic!("gradient wrapper")
     };
     let gradient = &object.properties[crate::DLARRAY_DATA_PROPERTY];
-    assert_eq!(gradient.kind, ValueKindFact::Unknown);
+    assert_eq!(gradient.numeric().unwrap().class, NumericClass::Single);
+    assert_eq!(gradient.shape, ShapeFact::from(vec![Some(1), Some(3)]));
     assert_eq!(gradient.residency, ResidencyFact::Unknown);
+    assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
 
     let result = crate::infer_catalog_call(
         &DLGRADIENT_CATALOG_ENTRY,
@@ -316,14 +319,14 @@ fn known_resident_data_is_diagnosed_without_claiming_a_device_gradient() {
             ..request
         },
     );
-    assert!(result
+    assert!(!result
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-RESIDENCY"));
 }
 
 #[test]
-fn host_gradient_is_new_dense_storage_and_known_invalid_data_is_not_preserved() {
+fn target_class_and_shape_are_known_but_loss_graph_controls_gradient_residency() {
     let loss = dlarray(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
         domain: NumericDomain::Real,
@@ -349,7 +352,8 @@ fn host_gradient_is_new_dense_storage_and_known_invalid_data_is_not_preserved() 
     };
     let gradient = &object.properties[crate::DLARRAY_DATA_PROPERTY];
     assert_eq!(gradient.storage, StorageFact::Dense);
-    assert_eq!(gradient.residency, ResidencyFact::Host);
+    assert_eq!(gradient.residency, ResidencyFact::Unknown);
+    assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
     assert_eq!(gradient.shape, ShapeFact::from(vec![Some(2), Some(2)]));
     assert_eq!(gradient.alias, AliasFact::Unknown);
     assert_eq!(gradient.view, ViewFact::Materialized);
@@ -420,6 +424,40 @@ fn host_gradient_is_new_dense_storage_and_known_invalid_data_is_not_preserved() 
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-DATA"));
     assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn resident_loss_with_host_parameter_target_does_not_prove_host_gradient() {
+    let mut loss_data = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    }));
+    loss_data.residency = ResidencyFact::Device { provider: None };
+    let parameter_data = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    );
+    let result = crate::infer_catalog_call(
+        &DLGRADIENT_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![dlarray(loss_data), dlarray(parameter_data)],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(result.diagnostics.is_empty());
+    let ValueKindFact::Object(wrapper) = &result.outputs[0].kind else {
+        panic!("dlarray gradient expected")
+    };
+    let data = &wrapper.properties[crate::DLARRAY_DATA_PROPERTY];
+    assert_eq!(data.numeric().unwrap().class, NumericClass::Single);
+    assert_eq!(data.shape, ShapeFact::from(vec![Some(1), Some(2)]));
+    assert_eq!(data.residency, ResidencyFact::Unknown);
+    assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
 }
 
 #[test]

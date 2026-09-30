@@ -22,10 +22,10 @@ fn traced_dlarray_possible(fact: &ValueFact) -> bool {
 }
 
 fn known_unsupported_data(data: &ValueFact) -> bool {
-    matches!(data.residency, ResidencyFact::Device { .. })
-        || data.storage == StorageFact::Sparse
+    data.storage == StorageFact::Sparse
         || match &data.kind {
-            ValueKindFact::Unknown | ValueKindFact::Logical => false,
+            ValueKindFact::Unknown => false,
+            ValueKindFact::Logical => matches!(data.residency, ResidencyFact::Device { .. }),
             ValueKindFact::Numeric(number) => {
                 !matches!(number.class, NumericClass::Double | NumericClass::Single)
                     || number.domain != runmat_types::NumericDomain::Real
@@ -55,13 +55,7 @@ fn check_dlarray_data(
         }
         return;
     };
-    if matches!(data.residency, ResidencyFact::Device { .. }) {
-        diagnostics.push(argument_error(
-            "RM-DL-DLGRADIENT-RESIDENCY",
-            "provider-resident dlarray Data cannot be differentiated by the host tape",
-            index,
-        ));
-    } else if data.storage == StorageFact::Sparse {
+    if data.storage == StorageFact::Sparse {
         diagnostics.push(argument_error(
             "RM-DL-DLGRADIENT-STORAGE",
             "sparse dlarray Data cannot be differentiated by the host tape",
@@ -70,7 +64,7 @@ fn check_dlarray_data(
     } else if known_unsupported_data(data) {
         diagnostics.push(argument_error(
             "RM-DL-DLGRADIENT-CLASS",
-            "dlarray Data must be real double, single, or logical host data",
+            "dlarray Data must be real double or single, or supported host logical data",
             index,
         ));
     }
@@ -109,8 +103,10 @@ fn gradient_for_target(target: &ValueFact) -> ValueFact {
         };
         // Repeated targets and shared learnables can clone the same CoW tape
         // gradient into more than one output. Its class and allocation layout
-        // are known, but exclusive allocation ownership is not.
+        // are known, but exclusive allocation ownership and placement depend
+        // on the executed loss graph, not on the target's original Data.
         gradient_data.alias = AliasFact::Unknown;
+        gradient_data.residency = ResidencyFact::Unknown;
         properties.insert(crate::DLARRAY_DATA_PROPERTY.into(), gradient_data);
     }
     for name in ["Format", "Labels"] {
@@ -129,6 +125,7 @@ fn gradient_for_target(target: &ValueFact) -> ValueFact {
         target.shape.clone(),
         StorageFact::Opaque,
     );
+    // The dlarray wrapper remains a host object even when Data is resident.
     result.residency = ResidencyFact::Host;
     result
 }

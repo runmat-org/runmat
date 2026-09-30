@@ -11,4 +11,5 @@ pub(in crate::builtins::deep_learning) use layout::present_host;
 pub(in crate::builtins::deep_learning) use network::execute_network;
 pub(in crate::builtins::deep_learning) use request::{
     NetworkCaller, NetworkExecutionOutcome, NetworkExecutionRequest, NetworkOutputLayout,
+    NetworkTrace,
 };

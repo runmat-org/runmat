@@ -132,7 +132,7 @@ pub(in crate::builtins::deep_learning::model) enum GpuForwardAdmission {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::builtins::deep_learning::model) enum GpuCapabilityReason {
+pub(in crate::builtins::deep_learning) enum GpuCapabilityReason {
     AxisLayout,
     InputStorage,
     InputRank,

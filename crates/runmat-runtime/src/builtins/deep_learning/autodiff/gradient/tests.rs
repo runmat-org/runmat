@@ -50,7 +50,7 @@ fn gradient_for_public_table(network: Value, state: bool) -> (Value, Value) {
     };
     let (_, _, values) = table_columns(&table);
     let loss = dlarray_sum_builtin(values[0].clone(), vec![Value::String("all".into())]).unwrap();
-    let gradient = block_on(dlgradient_builtin(loss, vec![table.clone()])).unwrap();
+    let gradient = block_on(dlgradient_direct(loss, vec![table.clone()])).unwrap();
     (table, gradient)
 }
 
@@ -195,7 +195,7 @@ fn public_parameter_table_names_are_metadata_not_builtin_role_authority() {
             roles.into_iter().map(String::from).collect(),
             values,
         );
-        let gradient = block_on(dlgradient_builtin(loss, vec![target.clone()])).unwrap();
+        let gradient = block_on(dlgradient_direct(loss, vec![target.clone()])).unwrap();
         let (layers, roles, _) = table_columns(&target);
         let (gradient_layers, gradient_roles, values) = table_columns(&gradient);
         assert_eq!(gradient_layers, layers);
@@ -266,7 +266,7 @@ fn parameter_table_column_order_does_not_change_target_admission() {
             columns,
         )
         .unwrap();
-        let gradient = block_on(dlgradient_builtin(loss, vec![target])).unwrap();
+        let gradient = block_on(dlgradient_direct(loss, vec![target])).unwrap();
         let Value::Object(table) = &gradient else {
             panic!("table gradient expected")
         };

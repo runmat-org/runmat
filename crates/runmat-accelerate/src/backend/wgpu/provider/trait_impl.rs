@@ -13,6 +13,25 @@ use runmat_accelerate_api::{
 };
 
 impl AccelProvider for WgpuProvider {
+    fn resident_network_adjoint_supported(
+        &self,
+        stages: &[runmat_accelerate_api::ProviderResidentAdjointStage],
+        precision: ProviderPrecision,
+    ) -> bool {
+        let matching_precision = matches!(
+            (self.precision, precision),
+            (NumericPrecision::F32, ProviderPrecision::F32)
+                | (NumericPrecision::F64, ProviderPrecision::F64)
+        );
+        matching_precision
+            && stages.iter().all(|stage| match stage {
+                runmat_accelerate_api::ProviderResidentAdjointStage::Dense => true,
+                runmat_accelerate_api::ProviderResidentAdjointStage::Activation(operation) => {
+                    self.activation_adjoint_supported(*operation, precision)
+                }
+                runmat_accelerate_api::ProviderResidentAdjointStage::SoftmaxRows => true,
+            })
+    }
     fn elementwise_geometry(&self) -> Option<runmat_accelerate_api::ProviderElementwiseGeometry> {
         Some(runmat_accelerate_api::ProviderElementwiseGeometry {
             workgroup_size: self.workgroup_config.scalar,
@@ -1074,12 +1093,49 @@ impl AccelProvider for WgpuProvider {
         )
     }
 
+    fn activation_relu<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.relu_exec(a) })
+    }
+
     fn activation_elu<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         alpha: f64,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.elu_exec(a, alpha) })
+    }
+
+    fn activation_adjoint_supported(
+        &self,
+        operation: runmat_accelerate_api::ProviderActivationAdjoint,
+        precision: ProviderPrecision,
+    ) -> bool {
+        let precision_matches = matches!(
+            (self.precision, precision),
+            (NumericPrecision::F32, ProviderPrecision::F32)
+                | (NumericPrecision::F64, ProviderPrecision::F64)
+        );
+        precision_matches
+            && match operation {
+                runmat_accelerate_api::ProviderActivationAdjoint::Relu => true,
+                runmat_accelerate_api::ProviderActivationAdjoint::Elu { alpha } => {
+                    alpha.is_finite()
+                        && alpha >= 0.0
+                        && (self.precision != NumericPrecision::F32 || (alpha as f32).is_finite())
+                }
+            }
+    }
+
+    fn activation_adjoint<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        upstream: &'a GpuTensorHandle,
+        operation: runmat_accelerate_api::ProviderActivationAdjoint,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.activation_adjoint_exec(input, upstream, operation) })
     }
 
     fn activation_softmax_rows<'a>(

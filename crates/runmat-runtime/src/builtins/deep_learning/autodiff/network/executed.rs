@@ -1,4 +1,4 @@
-//! Tape bindings for an already executed, immutable host network trace.
+//! Tape bindings for an already executed network result and its immutable trace.
 use super::super::*;
 use model::execution::host::network::{HostExecutionResult, HostTrace, HostValue};
 use model::execution::NetworkCaller;
@@ -204,8 +204,30 @@ pub(in crate::builtins::deep_learning) fn annotate_outputs(
     Ok((prediction, Some(state)))
 }
 
-fn attach(value: Value, node: usize, caller: NetworkCaller) -> BuiltinResult<Value> {
+fn attach(mut value: Value, node: usize, caller: NetworkCaller) -> BuiltinResult<Value> {
     let function = caller.function();
+    if let Value::Object(object) = &mut value {
+        if object.class_name.is(DLARRAY_CLASS) {
+            if let Some(Value::GpuTensor(handle)) = object.properties.get("Data") {
+                let super::super::tape::NodeValue::Resident(recorded) =
+                    super::super::tape::node_value(node)?
+                else {
+                    return Err(deep_learning_error(
+                        function,
+                        format!("{function}: resident result has no resident tape node"),
+                    ));
+                };
+                if handle.view_identity() != recorded.view_identity() {
+                    return Err(deep_learning_error(
+                        function,
+                        format!("{function}: resident result differs from its tape node"),
+                    ));
+                }
+                attach_node_to_object(object, node);
+                return Ok(value);
+            }
+        }
+    }
     let payload = Payload::parse(value, function)?;
     Ok(wrap_result(&payload, payload.tensor.clone(), Some(node)))
 }

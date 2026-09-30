@@ -3,20 +3,56 @@ use runmat_builtins::DeepLearningParameterTableColumn as Column;
 use std::collections::HashMap;
 
 mod parameter_table;
+pub(in crate::builtins::deep_learning::autodiff) mod resident;
+
+enum GradientSource<'a> {
+    Host(&'a HashMap<usize, Tensor>),
+    Resident(&'a HashMap<usize, runmat_accelerate_api::GpuTensorHandle>),
+}
 
 #[runtime_builtin(
     name = "dlgradient",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::deep_learning::autodiff::gradient"
 )]
-pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn dlgradient_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    loss: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    dlgradient_in_runtime(runtime.as_ref(), requested_outputs, loss, rest).await
+}
+
+#[cfg(test)]
+pub(in crate::builtins::deep_learning) async fn dlgradient_direct(
+    loss: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    dlgradient_in_runtime(
+        None,
+        crate::output_count::current_output_count(),
+        loss,
+        rest,
+    )
+    .await
+}
+
+async fn dlgradient_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    loss: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(deep_learning_error(
             "dlgradient",
             "dlgradient: expected at least one dlarray, learnables, or dlnetwork target",
         ));
     }
-    let requested = crate::output_count::current_output_count().unwrap_or(1);
+    let requested = requested_outputs.unwrap_or(1);
     if requested > rest.len() {
         return Err(deep_learning_error(
             "dlgradient",
@@ -26,15 +62,20 @@ pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
             ),
         ));
     }
-    validate_host_tape_dlarray_data(&loss)?;
+    validate_tape_dlarray_data(&loss)?;
     let Some(loss_node) = dlarray_node_id(&loss) else {
         return Err(deep_learning_error(
             "dlgradient",
             "dlgradient: loss must be a traced dlarray value produced inside dlfeval",
         ));
     };
-    let loss_tensor = value_for_node(loss_node)?;
-    if tensor::tensor_element_len(&loss_tensor) != 1 {
+    let loss_value = super::tape::node_value(loss_node)?;
+    if loss_value
+        .shape()
+        .iter()
+        .try_fold(1usize, |n, &v| n.checked_mul(v))
+        != Some(1)
+    {
         return Err(deep_learning_error(
             "dlgradient",
             "dlgradient: loss must be scalar",
@@ -43,10 +84,24 @@ pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
     for target in rest.iter().take(requested) {
         targets::validate(target)?;
     }
-    let gradients = backward(loss_node)?;
+    resident::admit_cancellation(runtime)?;
+    let host_gradients;
+    let resident_gradients;
+    let gradients = match loss_value {
+        super::tape::NodeValue::Host(_) => {
+            host_gradients = backward(loss_node)?;
+            GradientSource::Host(&host_gradients)
+        }
+        super::tape::NodeValue::Resident(_) => {
+            resident_gradients = resident::backward(runtime, loss_node).await?;
+            GradientSource::Resident(&resident_gradients)
+        }
+    };
     let mut outputs = Vec::with_capacity(requested);
+    resident::admit_cancellation(runtime)?;
     for target in rest.iter().take(requested) {
-        outputs.push(gradient_tree_for_target(target, &gradients)?);
+        outputs.push(gradient_tree_for_target_impl(target, &gradients)?);
+        resident::admit_cancellation(runtime)?;
     }
     if requested == 1 {
         Ok(outputs.remove(0))
@@ -62,35 +117,52 @@ use backward::backward;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
 pub(super) fn gradient_tree_for_target(
     target: &Value,
     gradients: &HashMap<usize, Tensor>,
 ) -> BuiltinResult<Value> {
+    gradient_tree_for_target_impl(target, &GradientSource::Host(gradients))
+}
+
+fn gradient_tree_for_target_impl(
+    target: &Value,
+    gradients: &GradientSource<'_>,
+) -> BuiltinResult<Value> {
     match target {
         Value::Object(object) if object.class_name == DLARRAY_CLASS => {
-            validate_host_tape_dlarray_data(target)?;
+            validate_tape_dlarray_data(target)?;
             let Some(id) = dlarray_node_id(target) else {
                 return Err(deep_learning_error(
                     "dlgradient",
                     "dlgradient: target dlarray was not traced inside the active dlfeval",
                 ));
             };
-            let tensor = if let Some(tensor) = gradients.get(&id).cloned() {
-                tensor
-            } else {
-                let target_tensor = host_tensor_from_value(target, "dlgradient", "target")?;
-                floating_tensor_from_f64(
-                    vec![0.0; tensor::tensor_element_len(&target_tensor)],
-                    target_tensor.shape.clone(),
-                    target_tensor.numeric_dtype(),
-                    "dlgradient",
-                )?
+            let data = match gradients {
+                GradientSource::Host(values) => Value::Tensor(if let Some(tensor) = values.get(&id).cloned() {
+                    tensor
+                } else {
+                    let target_tensor = host_tensor_from_value(target, "dlgradient", "target")?;
+                    floating_tensor_from_f64(
+                        vec![0.0; tensor::tensor_element_len(&target_tensor)],
+                        target_tensor.shape.clone(),
+                        target_tensor.numeric_dtype(),
+                        "dlgradient",
+                    )?
+                }),
+                GradientSource::Resident(values) => {
+                    if let Some(handle) = values.get(&id) {
+                        Value::GpuTensor(handle.clone())
+                    } else {
+                        zero_for_unconnected_resident_target(target)?
+                    }
+                }
             };
             let (format, labels) = dlarray_format_and_labels(target);
             Ok(super::super::object_with_identity(
                 DLARRAY_CLASS,
                 vec![
-                    ("Data", Value::Tensor(tensor)),
+                    ("Data", data),
                     ("Format", format),
                     ("Labels", labels),
                 ],
@@ -110,7 +182,7 @@ pub(super) fn gradient_tree_for_target(
                 .map_err(|err| deep_learning_error("dlgradient", err.to_string()))?;
             let mut updated = StructValue::new();
             for (name, value) in variables.fields {
-                updated.insert(name, gradient_tree_for_target(&value, gradients)?);
+                updated.insert(name, gradient_tree_for_target_impl(&value, gradients)?);
             }
             crate::builtins::table::table_replace_variables_like(object, updated)
                 .map_err(|err| deep_learning_error("dlgradient", err.to_string()))
@@ -121,24 +193,24 @@ pub(super) fn gradient_tree_for_target(
                 let value = st.fields.get(Column::Value.name()).ok_or_else(|| {
                     deep_learning_error("dlgradient", "dlgradient: learnables tree is missing Value")
                 })?;
-                out.insert(Column::Value.name(), gradient_tree_for_target(value, gradients)?);
+                out.insert(Column::Value.name(), gradient_tree_for_target_impl(value, gradients)?);
                 return Ok(Value::Struct(out));
             }
             let mut out = StructValue::new();
             for (name, value) in &st.fields {
-                out.insert(name.clone(), gradient_tree_for_target(value, gradients)?);
+                out.insert(name.clone(), gradient_tree_for_target_impl(value, gradients)?);
             }
             Ok(Value::Struct(out))
         }
         Value::StructArray(array) => array
             .clone()
-            .try_map_values(|value| gradient_tree_for_target(&value, gradients))
+            .try_map_values(|value| gradient_tree_for_target_impl(&value, gradients))
             .map(Value::StructArray),
         Value::Cell(cell) => {
             let data = cell
                 .data
                 .iter()
-                .map(|value| gradient_tree_for_target(value, gradients))
+                .map(|value| gradient_tree_for_target_impl(value, gradients))
                 .collect::<BuiltinResult<Vec<_>>>()?;
             CellArray::new_with_shape(data, cell.shape.clone())
                 .map(Value::Cell)
@@ -153,13 +225,13 @@ pub(super) fn gradient_tree_for_target(
 
 fn gradient_network_table(
     table: &ObjectInstance,
-    gradients: &HashMap<usize, Tensor>,
+    gradients: &GradientSource<'_>,
 ) -> BuiltinResult<Value> {
     let values = parameter_table::values(table, "dlgradient")?.expect("parameter table schema");
     let gradients = values
         .data
         .iter()
-        .map(|value| gradient_tree_for_target(value, gradients))
+        .map(|value| gradient_tree_for_target_impl(value, gradients))
         .collect::<BuiltinResult<Vec<_>>>()?;
     let mut variables = crate::builtins::table::table_variables(table)
         .map_err(|error| deep_learning_error("dlgradient", error.to_string()))?;
@@ -174,18 +246,77 @@ fn gradient_network_table(
         .map_err(|error| deep_learning_error("dlgradient", error.to_string()))
 }
 
-fn validate_host_tape_dlarray_data(value: &Value) -> BuiltinResult<()> {
+fn zero_for_unconnected_resident_target(target: &Value) -> BuiltinResult<Value> {
+    let Value::Object(object) = target else {
+        unreachable!("gradient target admission requires a dlarray")
+    };
+    match object.properties.get("Data") {
+        Some(Value::GpuTensor(handle)) => {
+            let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+                .ok_or_else(|| {
+                    deep_learning_error("dlgradient", "dlgradient: target resident owner retired")
+                })?;
+            let mut zero = provider.fill_like(handle, 0.0).map_err(|error| {
+                crate::runtime_error::with_provider_execution_source(
+                    deep_learning_error(
+                        "dlgradient",
+                        "dlgradient: resident zero allocation failed",
+                    ),
+                    error.into(),
+                )
+            })?;
+            use crate::builtins::common::gpu_helpers::{
+                reject_gpu_output, unary_gpu_output_matches, GpuOutputAliasPolicy,
+                UnaryGpuOutputContract,
+            };
+            if !unary_gpu_output_matches(
+                &zero,
+                handle,
+                provider,
+                UnaryGpuOutputContract {
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    precision: runmat_accelerate_api::handle_precision(handle),
+                    integer: None,
+                    logical: false,
+                    alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
+                },
+            ) {
+                return Err(reject_gpu_output(
+                    zero,
+                    deep_learning_error(
+                        "dlgradient",
+                        "dlgradient: invalid resident zero descriptor",
+                    ),
+                ));
+            }
+            crate::builtins::common::gpu_helpers::propagate_output_provenance(
+                &mut zero,
+                std::iter::once(handle),
+            )?;
+            Ok(Value::GpuTensor(zero))
+        }
+        _ => {
+            let tensor = host_tensor_from_value(target, "dlgradient", "target")?;
+            Ok(Value::Tensor(floating_tensor_from_f64(
+                vec![0.0; tensor::tensor_element_len(&tensor)],
+                tensor.shape.clone(),
+                tensor.numeric_dtype(),
+                "dlgradient",
+            )?))
+        }
+    }
+}
+
+fn validate_tape_dlarray_data(value: &Value) -> BuiltinResult<()> {
     let Value::Object(object) = value else {
         return Ok(());
     };
     if object.class_name == DLARRAY_CLASS {
         match object.properties.get("Data") {
-            Some(Value::GpuTensor(_)) => {
-                return Err(unsupported_error(
-                    "dlgradient",
-                    "dlgradient: provider-resident dlarray Data requires unavailable tape kernels",
-                ));
-            }
+            Some(Value::GpuTensor(handle))
+                if runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                    && runmat_accelerate_api::handle_precision(handle).is_some() => {}
             Some(Value::SparseTensor(_)) => {
                 return Err(deep_learning_error(
                     "dlgradient",
@@ -201,7 +332,7 @@ fn validate_host_tape_dlarray_data(value: &Value) -> BuiltinResult<()> {
             Some(_) => {
                 return Err(deep_learning_error(
                     "dlgradient",
-                    "dlgradient: dlarray Data must be real double, single, or logical host data",
+                    "dlgradient: dlarray Data must be real double, single, or logical numerical storage",
                 ));
             }
             None => {

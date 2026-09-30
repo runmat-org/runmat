@@ -4,7 +4,7 @@ use super::*;
 pub(super) fn validate(target: &Value) -> BuiltinResult<()> {
     match target {
         Value::Object(object) if object.class_name.is(DLARRAY_CLASS) => {
-            validate_host_tape_dlarray_data(target)?;
+            validate_tape_dlarray_data(target)?;
             if dlarray_node_id(target).is_none() {
                 return Err(deep_learning_error(
                     "dlgradient",

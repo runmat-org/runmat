@@ -90,10 +90,10 @@ fn two_recurrent_traces_share_one_upstream_parent_without_losing_either_adjoint(
         let second_record = record_for(&second_outputs[0], &tape);
         assert!(!Rc::ptr_eq(&first_record, &second_record));
         let loss = squared_joint_loss(first_outputs.into_iter().chain(second_outputs));
-        let gradient = block_on(dlgradient_builtin(loss.clone(), vec![x.clone()])).unwrap();
+        let gradient = block_on(dlgradient_direct(loss.clone(), vec![x.clone()])).unwrap();
         assert_eq!(first_record.reverse_calls.get(), 1);
         assert_eq!(second_record.reverse_calls.get(), 1);
-        let repeated = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+        let repeated = block_on(dlgradient_direct(loss, vec![x])).unwrap();
         assert_eq!(first_record.reverse_calls.get(), 2);
         assert_eq!(second_record.reverse_calls.get(), 2);
         assert_eq!(tensor(&gradient), tensor(&repeated));
@@ -152,7 +152,7 @@ fn aliased_input_and_initial_hidden_state_accumulate_to_one_parent() {
             "input and HiddenState must retain the same tape parent"
         );
         let loss = squared_joint_loss(outputs);
-        let gradient = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+        let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
         assert_eq!(record.reverse_calls.get(), 1);
         tensor(&gradient).materialize_f64()
     };
@@ -226,7 +226,7 @@ fn prepared_single_reverse_restores_each_double_learnable_and_initial_state_pare
                 .into_iter()
                 .map(|(role, target)| {
                     let gradient =
-                        block_on(dlgradient_builtin(loss.clone(), vec![target.clone()])).unwrap();
+                        block_on(dlgradient_direct(loss.clone(), vec![target.clone()])).unwrap();
                     assert_eq!(tensor(&gradient).numeric_dtype(), NumericDType::F64);
                     assert_eq!(tensor(&gradient).shape, tensor(&target).shape);
                     (role, tensor(&target).clone(), tensor(&gradient).clone())

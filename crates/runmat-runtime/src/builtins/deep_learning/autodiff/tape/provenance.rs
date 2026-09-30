@@ -4,8 +4,9 @@
 //! Scalars and logical arrays need their source identity retained because
 //! converting them to a numerical tensor creates a different allocation.
 
-use runmat_value::{IntValue, LogicalArray, NumericDType, Tensor, Value};
+use runmat_value::{IntValue, LogicalArray, NumericDType, Value};
 
+use super::NodeValue;
 use super::DLARRAY_CLASS;
 
 pub(super) enum DataProvenance {
@@ -14,6 +15,7 @@ pub(super) enum DataProvenance {
     Integer(IntValue),
     Boolean(bool),
     Logical(LogicalArray),
+    Resident(runmat_accelerate_api::GpuHandleIdentity),
 }
 
 impl DataProvenance {
@@ -24,16 +26,18 @@ impl DataProvenance {
             Value::Int(value) => Some(Self::Integer(value.clone())),
             Value::Bool(value) => Some(Self::Boolean(*value)),
             Value::LogicalArray(value) => Some(Self::Logical(value.clone())),
+            Value::GpuTensor(value) => Some(Self::Resident(value.view_identity())),
             _ => None,
         }
     }
 
-    pub(super) fn matches(&self, value: &Value, node: &Tensor) -> bool {
+    pub(super) fn matches(&self, value: &Value, node: &NodeValue) -> bool {
         let Some(value) = effective_data(value) else {
             return false;
         };
         match (self, value) {
-            (Self::Dense, Value::Tensor(current)) => {
+            (Self::Dense, Value::Tensor(current)) if node.host().is_some() => {
+                let node = node.host().expect("host provenance guards host node");
                 current.shape == node.shape
                     && current.numeric_dtype() == node.numeric_dtype()
                     && current
@@ -42,22 +46,27 @@ impl DataProvenance {
             }
             (Self::Number(bits), Value::Num(current)) => {
                 current.to_bits() == *bits
-                    && node.shape == [1, 1]
-                    && node.numeric_dtype() == NumericDType::F64
+                    && node.shape() == [1, 1]
+                    && node.numeric_dtype() == Some(NumericDType::F64)
             }
             (Self::Integer(original), Value::Int(current)) => {
-                current == original && node.shape == [1, 1]
+                current == original && node.shape() == [1, 1]
             }
             (Self::Boolean(original), Value::Bool(current)) => {
                 current == original
-                    && node.shape == [1, 1]
-                    && node.numeric_dtype() == NumericDType::F64
+                    && node.shape() == [1, 1]
+                    && node.numeric_dtype() == Some(NumericDType::F64)
             }
             (Self::Logical(original), Value::LogicalArray(current)) => {
                 current.shape == original.shape
-                    && current.shape == node.shape
-                    && node.numeric_dtype() == NumericDType::F64
+                    && current.shape == node.shape()
+                    && node.numeric_dtype() == Some(NumericDType::F64)
                     && current.data.shares_allocation_with(&original.data)
+            }
+            (Self::Resident(identity), Value::GpuTensor(current)) => {
+                matches!(node, NodeValue::Resident(recorded) if recorded.view_identity() == *identity)
+                    && current.view_identity() == *identity
+                    && current.shape() == node.shape()
             }
             _ => false,
         }

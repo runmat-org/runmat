@@ -3,7 +3,14 @@
 use runmat_value::{ObjectInstance, Value};
 
 use super::host::network::HostTrace;
-use crate::builtins::deep_learning::model::{plan::axes::AxisPlan, state::StateUpdate};
+use crate::builtins::deep_learning::model::{
+    gpu::mixed::ResidentTrace, plan::axes::AxisPlan, state::StateUpdate,
+};
+
+pub(in crate::builtins::deep_learning) enum NetworkTrace {
+    Host(HostTrace),
+    Resident(ResidentTrace),
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::builtins::deep_learning) enum NetworkCaller {
@@ -54,7 +61,7 @@ pub(in crate::builtins::deep_learning) struct NetworkExecutionOutcome {
     pub data: Value,
     pub output_axes: AxisPlan,
     pub state_updates: Vec<StateUpdate>,
-    pub trace: Option<HostTrace>,
+    pub trace: Option<NetworkTrace>,
 }
 
 #[cfg(test)]

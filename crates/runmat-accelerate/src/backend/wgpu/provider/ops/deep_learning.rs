@@ -2,6 +2,11 @@ use super::*;
 
 #[path = "deep_learning/admission.rs"]
 mod admission;
+#[path = "deep_learning/activation.rs"]
+mod activation;
+#[cfg(test)]
+#[path = "deep_learning/tests.rs"]
+mod tests;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -66,8 +71,8 @@ impl WgpuProvider {
             .checked_add(std::mem::size_of::<crate::backend::wgpu::params::FusionParams>() as u64)
     }
 
-    /// Exact upper bound for explicit softmax output, error/readback buffers,
-    /// and one immutable params buffer for every submitted row chunk.
+    /// Exact upper bound for the explicit softmax output and one immutable
+    /// params buffer for every submitted row chunk.
     pub(crate) fn softmax_rows_buffer_demand(&self, elements: u64, rows: u64) -> Option<u64> {
         let output = elements.max(1).checked_mul(self.element_size as u64)?;
         if elements == 0 {
@@ -76,37 +81,13 @@ impl WgpuProvider {
         let chunks = rows.div_ceil(u64::from(
             crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
         ));
-        output
-            .checked_add(2 * std::mem::size_of::<u32>() as u64)?
-            .checked_add(chunks.checked_mul(std::mem::size_of::<SoftmaxRowsParams>() as u64)?)
-    }
-
-    pub(crate) fn elu_exec(&self, input: &GpuTensorHandle, alpha: f64) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(input)?;
-        ensure!(
-            entry.storage != GpuTensorStorage::ComplexInterleaved
-                && runmat_accelerate_api::handle_storage(input)
-                    != GpuTensorStorage::ComplexInterleaved,
-            "activation_elu: complex inputs are not supported"
-        );
-        let alpha_tensor = self.fill_exec(&entry.shape, alpha)?;
-        let shader = match self.precision {
-            NumericPrecision::F64 => ELU_SHADER_F64,
-            NumericPrecision::F32 => ELU_SHADER_F32,
-        };
-        let result = self.fused_elementwise_with_telemetry_exec(
-            shader,
-            &[input.clone(), alpha_tensor.clone()],
-            &entry.shape,
-            entry.len,
-        );
-        drop(alpha_tensor);
-        result
+        output.checked_add(chunks.checked_mul(std::mem::size_of::<SoftmaxRowsParams>() as u64)?)
     }
 
     /// Execute one stable softmax reduction per column-major matrix row. The
-    /// output remains device-resident; only the error flag is read back so an
-    /// invalid normalization can retain CPU-compatible error semantics.
+    /// output remains device-resident. Undefined nonfinite rows produce NaNs,
+    /// matching host softmax. A finite nonempty row contains an exp(0) term,
+    /// so its normalization sum is positive without a device readback.
     pub(crate) fn softmax_rows_exec(&self, input: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(input)?;
         ensure!(
@@ -121,7 +102,9 @@ impl WgpuProvider {
         let rows = entry.shape[0];
         let cols = entry.shape[1];
         ensure!(
-            rows <= u32::MAX as usize && cols <= u32::MAX as usize,
+            rows <= u32::MAX as usize
+                && cols <= u32::MAX as usize
+                && entry.len <= u32::MAX as usize,
             "activation_softmax_rows: tensor shape exceeds GPU dispatch limits"
         );
         let output = self.with_emission(|emission, _| {
@@ -130,15 +113,7 @@ impl WgpuProvider {
         if entry.len == 0 {
             return self.register_existing_buffer(output, entry.shape, 0);
         }
-        let (staging, error_size) = self.with_emission(|emission, pending| -> Result<_> {
-            let error_buffer =
-                emission
-                    .device()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-softmax-rows-error"),
-                        contents: bytes_of(&0u32),
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                    });
+        self.with_emission(|emission, pending| -> Result<_> {
             let shader = softmax_rows_shader(self.precision);
             let layout_tag = "runmat-softmax-rows-layout";
             let bind_layout = self.cached_bind_group_layout(emission, layout_tag, |emission| {
@@ -210,10 +185,6 @@ impl WgpuProvider {
                                 binding: 2,
                                 resource: params.as_entire_binding(),
                             },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: error_buffer.as_entire_binding(),
-                            },
                         ],
                     });
                 let workgroups = (rows - row_offset).min(chunk_rows) as u32;
@@ -227,38 +198,8 @@ impl WgpuProvider {
                     "runmat-softmax-rows-pass",
                 )?;
             }
-            let error_size = std::mem::size_of::<u32>() as u64;
-            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-softmax-rows-error-staging"),
-                size: error_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-softmax-rows-error-copy"),
-                    });
-            encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
-            self.submit(emission, pending, encoder)?;
-            Ok((staging, error_size))
+            Ok(())
         })??;
-        let code = self
-            .map_readback_bytes_sync(staging, error_size, "softmax_rows")
-            .and_then(|bytes| {
-                Ok(u32::from_le_bytes(
-                    bytes
-                        .get(..4)
-                        .ok_or_else(|| anyhow!("activation_softmax_rows: short error readback"))?
-                        .try_into()
-                        .map_err(|_| anyhow!("activation_softmax_rows: invalid error readback"))?,
-                ))
-            })?;
-        ensure!(
-            code == 0,
-            "activation_softmax_rows: softmax produced invalid normalization"
-        );
         self.register_existing_buffer(output, entry.shape, entry.len)
     }
 
@@ -1107,7 +1048,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     )
 }
 
-fn softmax_rows_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 4] {
+fn softmax_rows_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 3] {
     std::array::from_fn(|binding| wgpu::BindGroupLayoutEntry {
         binding: binding as u32,
         visibility: wgpu::ShaderStages::COMPUTE,
@@ -1143,19 +1084,13 @@ const MAX_FINITE_SOFTMAX: {ty} = {ty}({max_finite});
 
 struct Tensor {{ data: array<{ty}> }};
 struct Params {{ rows: u32, cols: u32, row_offset: u32, pad0: u32 }};
-struct ErrorState {{ code: atomic<u32> }};
 
 @group(0) @binding(0) var<storage, read> input: Tensor;
 @group(0) @binding(1) var<storage, read_write> output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
-@group(0) @binding(3) var<storage, read_write> errors: ErrorState;
 
 var<workgroup> scratch: array<{ty}, {workgroup}>;
 var<workgroup> denominator: {ty};
-
-fn is_finite_softmax(value: {ty}) -> bool {{
-  return (value == value) && (abs(value) < MAX_FINITE_SOFTMAX);
-}}
 
 @compute @workgroup_size({workgroup})
 fn main(
@@ -1169,6 +1104,7 @@ fn main(
   loop {{
     if (column >= params.cols) {{ break; }}
     local_max = max(local_max, input.data[row + column * params.rows]);
+    if (params.cols - column <= {workgroup}u) {{ break; }}
     column = column + {workgroup}u;
   }}
   scratch[lane] = local_max;
@@ -1190,6 +1126,7 @@ fn main(
     let value = exp(input.data[row + column * params.rows] - row_max);
     output.data[row + column * params.rows] = value;
     local_sum = local_sum + value;
+    if (params.cols - column <= {workgroup}u) {{ break; }}
     column = column + {workgroup}u;
   }}
   scratch[lane] = local_sum;
@@ -1203,9 +1140,6 @@ fn main(
   }}
   if (lane == 0u) {{
     denominator = scratch[0u];
-    if (!(is_finite_softmax(denominator) && denominator > {ty}(0.0))) {{
-      atomicMax(&errors.code, 1u);
-    }}
   }}
   workgroupBarrier();
 
@@ -1213,6 +1147,7 @@ fn main(
   loop {{
     if (column >= params.cols) {{ break; }}
     output.data[row + column * params.rows] = output.data[row + column * params.rows] / denominator;
+    if (params.cols - column <= {workgroup}u) {{ break; }}
     column = column + {workgroup}u;
   }}
 }}
@@ -1222,36 +1157,6 @@ fn main(
         workgroup = workgroup,
     )
 }
-
-const ELU_SHADER_F64: &str = r#"
-struct Tensor { data: array<f64> };
-struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
-@group(0) @binding(0) var<storage, read> input0: Tensor;
-@group(0) @binding(1) var<storage, read> alpha: Tensor;
-@group(0) @binding(2) var<storage, read_write> output: Tensor;
-@group(0) @binding(3) var<uniform> params: Params;
-@compute @workgroup_size(@WG@)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let idx = gid.x; if (idx >= params.len) { return; }
-  let value = input0.data[idx];
-  output.data[idx] = select(alpha.data[idx] * (exp(value) - f64(1.0)), value, value > f64(0.0));
-}
-"#;
-
-const ELU_SHADER_F32: &str = r#"
-struct Tensor { data: array<f32> };
-struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
-@group(0) @binding(0) var<storage, read> input0: Tensor;
-@group(0) @binding(1) var<storage, read> alpha: Tensor;
-@group(0) @binding(2) var<storage, read_write> output: Tensor;
-@group(0) @binding(3) var<uniform> params: Params;
-@compute @workgroup_size(@WG@)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let idx = gid.x; if (idx >= params.len) { return; }
-  let value = input0.data[idx];
-  output.data[idx] = select(alpha.data[idx] * (exp(value) - 1.0), value, value > 0.0);
-}
-"#;
 
 fn adam_update_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 9] {
     std::array::from_fn(|binding| {
@@ -1368,248 +1273,4 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         max_finite = max_finite,
         workgroup = workgroup,
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
-    use runmat_accelerate_api::{
-        AccelProvider, HostTensorView, ProviderAdamUpdateRequest, ProviderCrossentropyMode,
-        ProviderCrossentropyRequest,
-    };
-
-    #[test]
-    fn adam_update_wgpu_returns_resident_outputs() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
-            return;
-        };
-
-        let shape = [1usize, 3usize];
-        let parameters = provider
-            .upload(&HostTensorView {
-                data: &[1.0, 2.0, 3.0],
-                shape: &shape,
-            })
-            .expect("upload parameters");
-        let gradient = provider
-            .upload(&HostTensorView {
-                data: &[0.1, -0.2, 0.3],
-                shape: &shape,
-            })
-            .expect("upload gradient");
-
-        let result = provider
-            .adam_update(&ProviderAdamUpdateRequest {
-                parameters: &parameters,
-                gradient: &gradient,
-                average_grad: None,
-                average_sq_grad: None,
-                iteration: 1,
-                learn_rate: 0.01,
-                gradient_decay_factor: 0.9,
-                squared_gradient_decay_factor: 0.999,
-                epsilon: 1.0e-8,
-            })
-            .expect("adam update");
-
-        let updated =
-            pollster::block_on(provider.download(&result.parameters)).expect("download params");
-        let avg =
-            pollster::block_on(provider.download(&result.average_grad)).expect("download avg");
-        let avg_sq = pollster::block_on(provider.download(&result.average_sq_grad))
-            .expect("download avg sq");
-
-        assert_eq!(updated.shape, shape);
-        assert_eq!(avg.shape, shape);
-        assert_eq!(avg_sq.shape, shape);
-        let tol = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
-        };
-        let expected_updated = [0.990000001, 2.0099999995, 2.9900000003333334];
-        let expected_avg = [0.01, -0.02, 0.03];
-        let expected_avg_sq = [0.00001, 0.00004, 0.00009];
-        for idx in 0..shape[1] {
-            assert!(
-                (updated.data[idx] - expected_updated[idx]).abs() < tol,
-                "updated lane {idx}: got {}, expected {}",
-                updated.data[idx],
-                expected_updated[idx]
-            );
-            assert!(
-                (avg.data[idx] - expected_avg[idx]).abs() < tol,
-                "avg lane {idx}: got {}, expected {}",
-                avg.data[idx],
-                expected_avg[idx]
-            );
-            assert!(
-                (avg_sq.data[idx] - expected_avg_sq[idx]).abs() < tol,
-                "avg sq lane {idx}: got {}, expected {}",
-                avg_sq.data[idx],
-                expected_avg_sq[idx]
-            );
-        }
-
-        for handle in [
-            parameters,
-            gradient,
-            result.parameters,
-            result.average_grad,
-            result.average_sq_grad,
-        ] {
-            handle.release().unwrap();
-        }
-    }
-
-    #[test]
-    fn elu_wgpu_matches_cpu_branch_semantics() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
-            return;
-        };
-        let shape = [2usize, 2usize];
-        let input = provider
-            .upload(&HostTensorView {
-                data: &[-2.0, 0.0, 3.0, f64::NAN],
-                shape: &shape,
-            })
-            .expect("upload input");
-        let output =
-            pollster::block_on(provider.activation_elu(&input, 1.25)).expect("resident ELU");
-        let actual = pollster::block_on(provider.download(&output)).expect("download output");
-        let expected = [1.25 * ((-2.0_f64).exp() - 1.0), 0.0, 3.0, f64::NAN];
-        let tolerance = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
-        };
-        assert_eq!(actual.shape, shape);
-        for (actual, expected) in actual.data.iter().zip(expected) {
-            assert!(
-                (actual - expected).abs() < tolerance || (actual.is_nan() && expected.is_nan()),
-                "got {actual}, expected {expected}"
-            );
-        }
-        input.release().unwrap();
-        output.release().unwrap();
-    }
-
-    #[test]
-    fn softmax_rows_wgpu_is_stable_and_resident() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
-            return;
-        };
-        let shape = [2usize, 3usize];
-        let input = provider
-            .upload(&HostTensorView {
-                // Column-major rows: [1000, 0] and [1001, -1] and [999, 1].
-                data: &[1000.0, 0.0, 1001.0, -1.0, 999.0, 1.0],
-                shape: &shape,
-            })
-            .expect("upload input");
-        let output =
-            pollster::block_on(provider.activation_softmax_rows(&input)).expect("resident softmax");
-        let actual = pollster::block_on(provider.download(&output)).expect("download output");
-        let tolerance = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
-        };
-        let e = std::f64::consts::E;
-        let expected = [
-            1.0 / (1.0 + e + 1.0 / e),
-            1.0 / (1.0 + 1.0 / e + e),
-            e / (1.0 + e + 1.0 / e),
-            (1.0 / e) / (1.0 + 1.0 / e + e),
-            (1.0 / e) / (1.0 + e + 1.0 / e),
-            e / (1.0 + 1.0 / e + e),
-        ];
-        assert_eq!(actual.shape, shape);
-        for (actual, expected) in actual.data.iter().zip(expected) {
-            assert!(
-                (actual - expected).abs() < tolerance,
-                "got {actual}, expected {expected}"
-            );
-        }
-        input.release().unwrap();
-        output.release().unwrap();
-    }
-
-    #[test]
-    fn softmax_rows_wgpu_reports_invalid_normalization() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
-            return;
-        };
-        let shape = [1usize, 2usize];
-        let input = provider
-            .upload(&HostTensorView {
-                data: &[f64::INFINITY, 0.0],
-                shape: &shape,
-            })
-            .expect("upload input");
-        let error = pollster::block_on(provider.activation_softmax_rows(&input))
-            .expect_err("infinite input must not produce a normalization");
-        assert!(error
-            .to_string()
-            .contains("softmax produced invalid normalization"));
-        input.release().unwrap();
-    }
-
-    #[test]
-    fn crossentropy_wgpu_returns_resident_loss_terms() {
-        let Ok(provider) = register_wgpu_provider(WgpuProviderOptions::default()) else {
-            return;
-        };
-
-        let shape = [1usize, 2usize];
-        let predictions = provider
-            .upload(&HostTensorView {
-                data: &[0.8, 0.2],
-                shape: &shape,
-            })
-            .expect("upload predictions");
-        let targets = provider
-            .upload(&HostTensorView {
-                data: &[1.0, 0.0],
-                shape: &shape,
-            })
-            .expect("upload targets");
-        let weights = provider
-            .upload(&HostTensorView {
-                data: &[2.0, 3.0],
-                shape: &shape,
-            })
-            .expect("upload weights");
-        let mask = provider
-            .upload(&HostTensorView {
-                data: &[1.0, 0.0],
-                shape: &shape,
-            })
-            .expect("upload mask");
-
-        let result = provider
-            .crossentropy_terms(&ProviderCrossentropyRequest {
-                predictions: &predictions,
-                targets: &targets,
-                weights: Some(&weights),
-                mask: Some(&mask),
-                mode: ProviderCrossentropyMode::MultiLabel,
-            })
-            .expect("crossentropy terms");
-        let losses = pollster::block_on(provider.download(&result.losses)).expect("download");
-        assert_eq!(losses.shape, shape);
-        let tol = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1.0e-5,
-        };
-        let expected = [-2.0 * 0.8_f64.ln(), 0.0];
-        for (idx, actual) in losses.data.iter().enumerate() {
-            assert!(
-                (*actual - expected[idx]).abs() < tol,
-                "loss lane {idx}: got {actual}, expected {}",
-                expected[idx]
-            );
-        }
-
-        for handle in [predictions, targets, weights, mask, result.losses] {
-            handle.release().unwrap();
-        }
-    }
 }

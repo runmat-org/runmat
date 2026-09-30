@@ -1,31 +1,102 @@
 //! Typed whole-route plan for composed resident forward stages.
 
+mod backward;
 mod execution;
 mod parameters;
 mod physical;
 mod plan;
+mod trace;
 #[cfg(test)]
 mod tests;
 
 use super::*;
 use crate::builtins::deep_learning::model::admission::resident_input_handle;
 use crate::builtins::deep_learning::model::plan::host::HostNetworkPlan;
+pub(in crate::builtins::deep_learning) use backward::reverse as reverse_resident;
+use runmat_accelerate_api::{ProviderActivationAdjoint, ProviderResidentAdjointStage};
+pub(in crate::builtins::deep_learning) use trace::{ResidentExecution, ResidentTrace};
 
-pub(in crate::builtins::deep_learning) async fn forward(
+fn check_cancellation(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    if let Some(runtime) = runtime.filter(|runtime| runtime.is_cancelled()) {
+        return Err(crate::runtime_error::build_runtime_error(format!(
+            "{function}: execution was cancelled"
+        ))
+        .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+        .build());
+    }
+    Ok(())
+}
+
+/// Capture is admitted before the first provider effect. An unsupported
+/// derivative stage is never allowed to run a partial forward pass.
+pub(in crate::builtins::deep_learning::model) async fn forward_with_trace(
     network: &ObjectInstance,
     host: &HostNetworkPlan<'_>,
     target_axes: &AxisPlan,
+    capture: bool,
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &'static str,
-) -> BuiltinResult<Option<Result<GpuTensorHandle, GpuCapabilityReason>>> {
-    match plan::admit(network, host, target_axes, function)? {
+) -> BuiltinResult<Option<Result<ResidentExecution, GpuCapabilityReason>>> {
+    let admitted = if capture {
+        plan::admit_for_tape(network, host, target_axes, function)?
+    } else {
+        plan::admit(network, host, target_axes, function)?
+    };
+    match admitted {
         None => Ok(None),
         Some(Err(reason)) => Ok(Some(Err(reason))),
         Some(Ok(plan)) => {
             let input = resident_input_handle(host.admitted_input())
                 .expect("resident route admitted the bound network input");
-            Ok(Some(Ok(
-                execution::execute(network, input, plan, function).await?
-            )))
+            if capture {
+                let provider =
+                    crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
+                        .ok_or_else(|| {
+                            admission::invalid_owner(function, admission::GpuOperand::Input)
+                        })?;
+                let precision =
+                    runmat_accelerate_api::handle_precision(input).ok_or_else(|| {
+                        deep_learning_error(
+                            function,
+                            "resident tape input has no floating precision",
+                        )
+                    })?;
+                let mut reverse_stages = Vec::new();
+                for stage in &plan.stages {
+                    match stage {
+                        plan::Stage::Materialize | plan::Stage::Transpose { .. } => {}
+                        plan::Stage::Dense { .. } => {
+                            reverse_stages.push(ProviderResidentAdjointStage::Dense)
+                        }
+                        plan::Stage::Relu => {
+                            reverse_stages.push(ProviderResidentAdjointStage::Activation(
+                                ProviderActivationAdjoint::Relu,
+                            ))
+                        }
+                        plan::Stage::Elu { alpha } => {
+                            reverse_stages.push(ProviderResidentAdjointStage::Activation(
+                                ProviderActivationAdjoint::Elu { alpha: *alpha },
+                            ))
+                        }
+                        plan::Stage::Softmax => {
+                            reverse_stages.push(ProviderResidentAdjointStage::SoftmaxRows)
+                        }
+                        plan::Stage::Normalize { .. } | plan::Stage::Pool { .. } => {
+                            return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)));
+                        }
+                    }
+                }
+                if !provider.resident_network_adjoint_supported(&reverse_stages, precision) {
+                    return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)));
+                }
+            }
+            let execution =
+                execution::execute(network, input, plan, capture, runtime, function).await?;
+            check_cancellation(runtime, function)?;
+            Ok(Some(Ok(execution)))
         }
     }
 }

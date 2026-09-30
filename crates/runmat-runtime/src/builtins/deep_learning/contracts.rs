@@ -25,8 +25,8 @@ pub(super) const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescr
 pub(super) const ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.UNSUPPORTED",
     identifier: Some("RunMat:deepLearning:Unsupported"),
-    when: "The requested operation requires training, autodiff, export, or UI infrastructure outside this compatibility slice.",
-    message: "deep learning operation is not supported in this slice",
+    when: "The requested form, precision, placement, or provider capability is not supported for this operation.",
+    message: "deep learning operation is not supported for these inputs",
 };
 
 pub(super) const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_UNSUPPORTED];

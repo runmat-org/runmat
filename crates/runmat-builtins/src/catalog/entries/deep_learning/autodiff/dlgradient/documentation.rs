@@ -18,7 +18,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("dlgradient"),
     slug: Some("dlgradient"),
     summary: "Differentiate a scalar dlarray loss recorded inside dlfeval.",
-    description: "`dlgradient(loss, targets...)` walks the active host reverse-mode tape. Each requested output is a gradient for the corresponding traced target; a dlarray target produces a dlarray gradient, while supported learnables structures preserve their Layer and Parameter metadata and replace Value leaves.",
+    description: "`dlgradient(loss, targets...)` walks the active reverse-mode tape. Each requested output is a gradient for the corresponding traced target; a dlarray target produces a dlarray gradient, while supported learnables structures preserve their Layer and Parameter metadata and replace Value leaves.",
     keywords: &["dlgradient", "deep learning", "automatic differentiation", "custom training"],
     related: &["dlarray", "dlfeval", "dlnetwork", "forward"],
     sections: &[
@@ -33,8 +33,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Current limits and residency",
             paragraphs: &[
-                "Scalar broadcasting has a reverse reduction. General higher-rank implicit-expansion gradient reduction, custom layers, sparse or complex differentiation, and provider-resident tape kernels are not implemented. A GPU-backed dlarray can still be wrapped without download outside an active tape, but differentiation rejects that input instead of silently gathering it.",
-                "The callback and tape are execution state: nested callbacks keep separate graphs, and suspension does not expose one callback's tape to another invocation. Gradients are computed on the host; ordinary gpuArray arithmetic outside this tape retains its separate provider behavior.",
+                "Scalar broadcasting has a reverse reduction. General higher-rank implicit-expansion gradient reduction, custom layers, and sparse or complex differentiation are not implemented. A scalar output of an executed provider-resident network can be differentiated through admitted fully connected, ReLU, ELU, and softmax stages in real single or double precision. Connected resident operations without an adjoint are rejected before reverse provider work; disconnected targets receive zero gradients. Provider capability and exact ownership are checked without gathering explicit GPU data.",
+                "The callback and tape are execution state: nested callbacks keep separate graphs, and suspension does not expose one callback's tape to another invocation. Host tape primitives and the bounded resident network route have separate adjoints; generic resident arithmetic, other resident network layers, resident precision casts, and GPU trainnet are not yet supported by this route.",
             ],
         },
     ],
@@ -55,7 +55,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "Can I differentiate a GPU-backed dlarray?",
-            answer: "Not with this host tape. RunMat reports a provider-kernel gap rather than downloading the wrapped array implicitly.",
+            answer: "For an admitted scalar provider-resident network output, the current resident tape differentiates fully connected, ReLU, ELU, and softmax stages in real single or double precision. Other connected resident operations report a provider-adjoint gap; explicit GPU data are not implicitly downloaded.",
         },
         BuiltinDocumentationFaq {
             question: "What does dlgradient return for network learnables?",

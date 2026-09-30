@@ -14,10 +14,10 @@ use runmat_accelerate_api::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
 
-mod admission;
+pub(in crate::builtins::deep_learning) mod admission;
 mod construction;
 pub(in crate::builtins::deep_learning) mod execution;
-mod gpu;
+pub(in crate::builtins::deep_learning) mod gpu;
 mod host;
 mod initialization;
 mod output;

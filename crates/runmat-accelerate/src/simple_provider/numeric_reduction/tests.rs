@@ -1,0 +1,137 @@
+use super::*;
+use futures::executor::block_on;
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorView, HostLogicalTensorView, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorView, TransposeInfo,
+};
+
+#[test]
+fn native_single_reductions_preserve_class_dimensions_and_physical_transpose() {
+    let provider = InProcessProvider::new();
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1., 2., 3., 4., 5., 6.]),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    provider.reset_telemetry();
+    for (dim, shape, values) in [
+        (0, &[1, 3][..], &[3., 7., 11.][..]),
+        (1, &[2, 1][..], &[9., 12.][..]),
+    ] {
+        let before = provider.telemetry_snapshot().download_bytes;
+        let result = block_on(provider.reduce_sum_dim(&input, dim)).unwrap();
+        assert_eq!(provider.telemetry_snapshot().download_bytes, before);
+        assert_eq!(result.shape(), shape);
+        assert_eq!(result.physical().element_type(), NumericElementType::F32);
+        assert_eq!(
+            block_on(provider.download_numeric(&result)).unwrap().data,
+            HostNumericDataOwned::F32(values.to_vec())
+        );
+    }
+    assert!(input
+        .with_view(
+            GpuTensorView::contiguous(vec![3, 2]).with_layout(GpuTensorLayout::Transpose(
+                TransposeInfo {
+                    base_rows: 2,
+                    base_cols: 3,
+                }
+            ),)
+        )
+        .is_err());
+    // This provider owns a physical transpose, not an admitted lazy view.
+    let transposed = provider.transpose(&input).unwrap();
+    let before = provider.telemetry_snapshot().download_bytes;
+    let result = block_on(provider.reduce_sum_dim(&transposed, 0)).unwrap();
+    assert_eq!(provider.telemetry_snapshot().download_bytes, before);
+    assert_eq!(result.shape(), &[1, 2]);
+    assert_eq!(
+        block_on(provider.download_numeric(&result)).unwrap().data,
+        HostNumericDataOwned::F32(vec![9., 12.])
+    );
+    assert!(input.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
+fn double_logical_and_empty_reductions_keep_existing_contract() {
+    let provider = InProcessProvider::new();
+    let logical = provider
+        .upload_logical(&HostLogicalTensorView {
+            data: &[1, 0, 1, 1, 0, 1],
+            shape: &[2, 3],
+        })
+        .unwrap();
+    let result = block_on(provider.reduce_sum_dim(&logical, 0)).unwrap();
+    assert_eq!(result.shape(), &[1, 3]);
+    assert!(!runmat_accelerate_api::handle_is_logical(&result));
+    assert_eq!(
+        block_on(provider.download_numeric(&result)).unwrap().data,
+        HostNumericDataOwned::F64(vec![1., 2., 1.])
+    );
+    let empty = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[]),
+            shape: &[0, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let result = block_on(provider.reduce_sum_dim(&empty, 0)).unwrap();
+    assert_eq!(result.shape(), &[1, 3]);
+    assert_eq!(
+        block_on(provider.download_numeric(&result)).unwrap().data,
+        HostNumericDataOwned::F32(vec![0., 0., 0.])
+    );
+    let foreign = InProcessProvider::new()
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.]),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(block_on(provider.reduce_sum_dim(&foreign, 0)).is_err());
+}
+
+#[test]
+fn native_double_both_dimensions_and_empty_second_axis_have_exact_geometry() {
+    let provider = InProcessProvider::new();
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1., 2., 3., 4., 5., 6.]),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    provider.reset_telemetry();
+    for (dim, shape, expected) in [
+        (0, &[1, 3][..], &[3., 7., 11.][..]),
+        (1, &[2, 1][..], &[9., 12.][..]),
+    ] {
+        let output = block_on(provider.reduce_sum_dim(&input, dim)).unwrap();
+        assert_eq!(output.shape(), shape);
+        assert_eq!(output.physical().element_type(), NumericElementType::F64);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(
+            block_on(provider.download_numeric(&output)).unwrap().data,
+            HostNumericDataOwned::F64(expected.to_vec())
+        );
+        provider.reset_telemetry();
+    }
+
+    let empty = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[]),
+            shape: &[2, 0],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    for (dim, shape, expected) in [(0, &[1, 0][..], &[][..]), (1, &[2, 1][..], &[0., 0.][..])] {
+        let output = block_on(provider.reduce_sum_dim(&empty, dim)).unwrap();
+        assert_eq!(output.shape(), shape);
+        assert_eq!(output.physical().element_type(), NumericElementType::F64);
+        assert_eq!(
+            block_on(provider.download_numeric(&output)).unwrap().data,
+            HostNumericDataOwned::F64(expected.to_vec())
+        );
+    }
+}

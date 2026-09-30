@@ -1,5 +1,8 @@
 use super::super::*;
-use super::{dlarray_object_node_id, push_source_node};
+use super::{
+    attach_node_to_object, dlarray_object_node_id, push_resident_source_node, push_source_node,
+    NodeValue,
+};
 
 mod network;
 use network::annotate_network_object;
@@ -76,13 +79,27 @@ fn annotate_dlarray_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
         .properties
         .get("Data")
         .ok_or_else(|| deep_learning_error("dlarray", "dlarray: traced object is missing Data"))?;
-    let tensor = host_tensor_from_value(data, "dlarray", "Data")?;
-    annotate_dlarray_object_with_tensor(object, tensor)
+    let value = match data {
+        Value::GpuTensor(handle) => {
+            if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_precision(handle).is_none()
+            {
+                return Err(deep_learning_error(
+                    "dlarray",
+                    "dlarray: resident tape source requires real single or double storage",
+                ));
+            }
+            NodeValue::Resident(handle.clone())
+        }
+        _ => NodeValue::Host(host_tensor_from_value(data, "dlarray", "Data")?),
+    };
+    annotate_dlarray_object_with_value(object, value)
 }
 
-fn annotate_dlarray_object_with_tensor(
+fn annotate_dlarray_object_with_value(
     object: &mut ObjectInstance,
-    tensor: Tensor,
+    value: NodeValue,
 ) -> BuiltinResult<()> {
     if dlarray_object_node_id(object).is_some() {
         return Ok(());
@@ -91,20 +108,10 @@ fn annotate_dlarray_object_with_tensor(
         .properties
         .get("Data")
         .ok_or_else(|| deep_learning_error("dlarray", "dlarray: traced object is missing Data"))?;
-    let node = push_source_node(tensor, data)?;
-    let tape_id = active_tape()
-        .expect("node insertion requires active tape")
-        .borrow()
-        .id;
-    object.properties.insert(
-        AD_NODE_PROPERTY.to_string(),
-        Value::Int(IntValue::U64(
-            u64::try_from(node).expect("node index fits u64"),
-        )),
-    );
-    object.properties.insert(
-        AD_TAPE_PROPERTY.to_string(),
-        Value::Int(IntValue::U64(tape_id)),
-    );
+    let node = match value {
+        NodeValue::Host(tensor) => push_source_node(tensor, data)?,
+        NodeValue::Resident(handle) => push_resident_source_node(handle)?,
+    };
+    attach_node_to_object(object, node);
     Ok(())
 }

@@ -46,22 +46,39 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
     let active_tape = autodiff::tape_is_active();
     if let Some(handle) = resident_input_handle(request.input) {
         if active_tape {
-            return Err(unsupported_error(
+            autodiff::admit_resident_tape_parents(
+                request.network,
+                request.input,
+                handle,
                 function,
-                format!("{function}: provider-resident network autodiff is not supported"),
-            ));
+            )?;
         }
-        if let Some(mixed) =
-            gpu::forward_mixed_network_gpu(request.network, &plan, &output_axes, function).await?
+        if let Some(mixed) = gpu::mixed::forward_with_trace(
+            request.network,
+            &plan,
+            &output_axes,
+            active_tape,
+            request.runtime,
+            function,
+        )
+        .await?
         {
             match mixed {
-                Ok(output) => {
+                Ok(execution) => {
                     return Ok(NetworkExecutionOutcome {
-                        data: crate::builtins::common::gpu_helpers::resident_gpu_value(output)?,
+                        data: crate::builtins::common::gpu_helpers::resident_gpu_value(
+                            execution.output,
+                        )?,
                         output_axes,
                         state_updates: Vec::new(),
-                        trace: None,
+                        trace: execution.trace.map(NetworkTrace::Resident),
                     });
+                }
+                Err(reason) if active_tape => {
+                    return Err(unsupported_error(
+                        function,
+                        format!("{function}: resident network adjoint is unavailable: {reason}"),
+                    ));
                 }
                 Err(reason) if runmat_accelerate_api::handle_is_explicit(handle) => {
                     return Err(unsupported_error(
@@ -71,6 +88,12 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                 }
                 Err(_) => {}
             }
+        }
+        if active_tape {
+            return Err(unsupported_error(
+                function,
+                format!("{function}: resident network adjoint is unavailable for this route"),
+            ));
         }
         if let Some(normalization) = plan
             .standalone_normalization()
@@ -172,7 +195,7 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
         // The immutable trace remains in the executor's axes. `forward`
         // preserves those axes; `predict` currently returns raw scores and
         // does not publish an autodiff node for a reordered result.
-        trace: result.trace,
+        trace: result.trace.map(NetworkTrace::Host),
     })
 }
 

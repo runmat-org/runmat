@@ -9,6 +9,22 @@ use provenance::DataProvenance;
 
 pub(super) const AD_NODE_PROPERTY: &str = "__runmat_ad_node";
 pub(super) const AD_TAPE_PROPERTY: &str = "__runmat_ad_tape";
+
+pub(super) fn attach_node_to_object(object: &mut ObjectInstance, node: usize) {
+    let tape_id = active_tape()
+        .expect("recorded node requires active tape")
+        .borrow()
+        .id;
+    object.properties.insert(
+        AD_NODE_PROPERTY.into(),
+        Value::Int(IntValue::U64(
+            u64::try_from(node).expect("node index fits u64"),
+        )),
+    );
+    object
+        .properties
+        .insert(AD_TAPE_PROPERTY.into(), Value::Int(IntValue::U64(tape_id)));
+}
 static NEXT_TAPE_ID: AtomicU64 = AtomicU64::new(1);
 
 runmat_thread_local::runmat_thread_local! {
@@ -85,13 +101,51 @@ impl Tape {
 }
 
 pub(super) struct Node {
-    pub(super) value: Tensor,
+    pub(super) value: NodeValue,
     pub(super) kind: NodeKind,
     provenance: DataProvenance,
 }
 
+/// One physical numerical payload. A resident node never owns a fictitious
+/// host tensor or a mirrored copy of its device contents.
+#[derive(Clone, Debug)]
+pub(super) enum NodeValue {
+    Host(Tensor),
+    Resident(runmat_accelerate_api::GpuTensorHandle),
+}
+
+impl NodeValue {
+    pub(super) fn shape(&self) -> &[usize] {
+        match self {
+            Self::Host(value) => &value.shape,
+            Self::Resident(value) => value.shape(),
+        }
+    }
+
+    pub(super) fn numeric_dtype(&self) -> Option<NumericDType> {
+        match self {
+            Self::Host(value) => Some(value.numeric_dtype()),
+            Self::Resident(value) => match runmat_accelerate_api::handle_precision(value) {
+                Some(runmat_accelerate_api::ProviderPrecision::F32) => Some(NumericDType::F32),
+                Some(runmat_accelerate_api::ProviderPrecision::F64) => Some(NumericDType::F64),
+                None => None,
+            },
+        }
+    }
+
+    pub(super) fn host(&self) -> Option<&Tensor> {
+        match self {
+            Self::Host(value) => Some(value),
+            Self::Resident(_) => None,
+        }
+    }
+}
+
 pub(super) enum NodeKind {
     Leaf,
+    ResidentNetwork {
+        execution: Rc<super::network::ResidentTapeRecord>,
+    },
     Network {
         execution: Rc<super::network::NetworkTapeRecord>,
         output: super::network::NetworkOutput,
@@ -201,7 +255,15 @@ pub(super) fn dlarray_object_node_id(object: &ObjectInstance) -> Option<usize> {
 }
 
 pub(super) fn push_node(value: Tensor, kind: NodeKind) -> BuiltinResult<usize> {
-    push_node_with_provenance(value, kind, DataProvenance::Dense)
+    push_node_with_provenance(NodeValue::Host(value), kind, DataProvenance::Dense)
+}
+
+pub(super) fn push_resident_node(
+    value: runmat_accelerate_api::GpuTensorHandle,
+    kind: NodeKind,
+) -> BuiltinResult<usize> {
+    let provenance = DataProvenance::Resident(value.view_identity());
+    push_node_with_provenance(NodeValue::Resident(value), kind, provenance)
 }
 
 pub(super) fn push_source_node(value: Tensor, data: &Value) -> BuiltinResult<usize> {
@@ -211,11 +273,17 @@ pub(super) fn push_source_node(value: Tensor, data: &Value) -> BuiltinResult<usi
             "dlarray: tape source has unsupported Data storage",
         )
     })?;
-    push_node_with_provenance(value, NodeKind::Leaf, provenance)
+    push_node_with_provenance(NodeValue::Host(value), NodeKind::Leaf, provenance)
+}
+
+pub(super) fn push_resident_source_node(
+    value: runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<usize> {
+    push_resident_node(value, NodeKind::Leaf)
 }
 
 fn push_node_with_provenance(
-    value: Tensor,
+    value: NodeValue,
     kind: NodeKind,
     provenance: DataProvenance,
 ) -> BuiltinResult<usize> {
@@ -243,7 +311,33 @@ pub(super) fn value_for_node(id: usize) -> BuiltinResult<Tensor> {
         )
     })?;
     let value = tape.borrow().nodes.get(id).map(|node| node.value.clone());
-    value.ok_or_else(|| deep_learning_error("dlgradient", "dlgradient: invalid tape node"))
+    match value {
+        Some(NodeValue::Host(value)) => Ok(value),
+        Some(NodeValue::Resident(_)) => Err(deep_learning_error(
+            "dlgradient",
+            "dlgradient: expected host tape node storage",
+        )),
+        None => Err(deep_learning_error(
+            "dlgradient",
+            "dlgradient: invalid tape node",
+        )),
+    }
+}
+
+pub(super) fn node_value(id: usize) -> BuiltinResult<NodeValue> {
+    let tape = active_tape().ok_or_else(|| {
+        deep_learning_error(
+            "dlgradient",
+            "dlgradient: no active automatic differentiation tape",
+        )
+    })?;
+    let value = tape
+        .borrow()
+        .nodes
+        .get(id)
+        .map(|node| node.value.clone())
+        .ok_or_else(|| deep_learning_error("dlgradient", "dlgradient: invalid tape node"));
+    value
 }
 
 pub(super) fn push_binary_node(

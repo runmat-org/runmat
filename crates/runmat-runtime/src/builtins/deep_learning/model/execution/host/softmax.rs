@@ -235,4 +235,28 @@ mod tests {
             .iter()
             .all(|v| v.abs() < 1e-14));
     }
+
+    #[test]
+    fn nonfinite_channel_rows_propagate_nan_at_both_precisions() {
+        let shape = [2, 1];
+        let axes = AxisPlan::new(DeepLearningAxisLayout::parse("CB", 2).unwrap(), &shape).unwrap();
+        for values in [[f64::NAN, 1.0], [f64::INFINITY, 0.0]] {
+            let double = Tensor::new(values.to_vec(), shape.to_vec()).unwrap();
+            let single =
+                Tensor::from_f32(values.map(|value| value as f32).to_vec(), shape.to_vec())
+                    .unwrap();
+            assert!(forward(&double, &axes)
+                .unwrap()
+                .as_f64_slice()
+                .unwrap()
+                .iter()
+                .all(|value| value.is_nan()));
+            assert!(forward(&single, &axes)
+                .unwrap()
+                .as_f32_slice()
+                .unwrap()
+                .iter()
+                .all(|value| value.is_nan()));
+        }
+    }
 }

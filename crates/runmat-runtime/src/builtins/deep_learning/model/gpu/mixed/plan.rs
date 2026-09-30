@@ -9,7 +9,14 @@ use crate::builtins::deep_learning::model::plan::normalization::NormalizationSta
 use runmat_accelerate_api::GpuTensorLayout;
 
 pub(super) use admission::admit;
+pub(super) use admission::admit_for_tape;
 pub(super) use lowering::lower;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RoutePurpose {
+    ExistingMixedForward,
+    ResidentTape,
+}
 
 pub(super) enum Stage {
     Materialize,

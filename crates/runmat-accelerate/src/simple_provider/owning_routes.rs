@@ -135,7 +135,7 @@ fn linear_indexing_distinguishes_unsupported_storage_from_invalid_owner() {
 }
 
 #[test]
-fn fill_like_and_flip_keep_class_or_explicitly_request_typed_fallback() {
+fn fill_like_preserves_single_and_flip_requests_typed_fallback() {
     let provider = InProcessProvider::new();
     let single = provider
         .upload_numeric(&HostNumericTensorView {
@@ -144,9 +144,13 @@ fn fill_like_and_flip_keep_class_or_explicitly_request_typed_fallback() {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &provider.fill_like(&single, 2.0).unwrap_err()
-    ));
+    let single_filled = provider.fill_like(&single, 2.0).unwrap();
+    assert_eq!(
+        block_on(provider.download_numeric(&single_filled))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F32(vec![2.0, 2.0])
+    );
     assert!(runmat_accelerate_api::is_unsupported_provider_operation(
         &provider.flip(&single, &[1]).unwrap_err()
     ));
@@ -162,9 +166,13 @@ fn fill_like_and_flip_keep_class_or_explicitly_request_typed_fallback() {
         block_on(provider.download(&ones)).unwrap().data,
         vec![1.0; 2]
     );
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &provider.ones_like(&single).unwrap_err()
-    ));
+    let single_ones = provider.ones_like(&single).unwrap();
+    assert_eq!(
+        block_on(provider.download_numeric(&single_ones))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F32(vec![1.0, 1.0])
+    );
     assert_eq!(
         block_on(provider.download(&filled)).unwrap().data,
         vec![3.0; 2]

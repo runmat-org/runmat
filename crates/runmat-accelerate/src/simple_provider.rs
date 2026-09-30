@@ -10,6 +10,8 @@ mod dimensional_extrema;
 mod median;
 mod dot;
 mod matmul;
+mod numeric_reduction;
+mod deep_learning_activation;
 mod imfilter;
 #[cfg(test)]
 mod owning_routes;
@@ -3908,6 +3910,20 @@ fn simple_trapezoid(
 }
 
 impl AccelProvider for InProcessProvider {
+    fn resident_network_adjoint_supported(
+        &self,
+        stages: &[runmat_accelerate_api::ProviderResidentAdjointStage],
+        precision: ProviderPrecision,
+    ) -> bool {
+        matches!(precision, ProviderPrecision::F32 | ProviderPrecision::F64)
+            && stages.iter().all(|stage| match stage {
+                runmat_accelerate_api::ProviderResidentAdjointStage::Dense
+                | runmat_accelerate_api::ProviderResidentAdjointStage::SoftmaxRows => true,
+                runmat_accelerate_api::ProviderResidentAdjointStage::Activation(operation) => {
+                    self.activation_adjoint_supported(*operation, precision)
+                }
+            })
+    }
     fn deep_learning_feed_forward_stage_capability(
         &self,
         anchor: &GpuTensorHandle,
@@ -3938,12 +3954,7 @@ impl AccelProvider for InProcessProvider {
                 Some(runmat_accelerate_api::ProviderPrecision::F64)
             )
         );
-        if !native
-            || matches!(
-                stage,
-                S::Relu { .. } | S::Elu { .. } | S::SoftmaxRows { .. }
-            ) && matches!(payload, InProcessNumericData::F32(_))
-        {
+        if !native {
             return Ok(C::UnsupportedOperation);
         }
         let valid = match stage {
@@ -5314,18 +5325,23 @@ impl AccelProvider for InProcessProvider {
                 "fill_like: prototype is not a live owned allocation"
             );
         }
-        if prototype.physical().element_type() != NumericElementType::F64
-            || prototype.physical().storage() != GpuTensorStorage::Real
-            || prototype.view().is_logical()
+        if prototype.physical().storage() != GpuTensorStorage::Real || prototype.view().is_logical()
         {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
                 "fill_like: non-native class requires typed host construction",
             ));
         }
-        self.allocate_tensor(
-            vec![value; logical_len_for_shape("fill_like", prototype.shape())?],
-            prototype.shape().to_vec(),
-        )
+        let len = logical_len_for_shape("fill_like", prototype.shape())?;
+        let data = match prototype.physical().element_type() {
+            NumericElementType::F32 => InProcessNumericData::F32(vec![value as f32; len]),
+            NumericElementType::F64 => InProcessNumericData::F64(vec![value; len]),
+            _ => {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "fill_like: native floating class is required",
+                ))
+            }
+        };
+        self.allocate_numeric_data(data, prototype.shape().to_vec(), GpuTensorStorage::Real)
     }
 
     fn zeros_integer_like(
@@ -7216,76 +7232,51 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn activation_relu<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.native_relu(a) })
+    }
+
     fn activation_elu<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         alpha: f64,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            ensure!(
-                runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::Real,
-                "activation_elu: complex inputs are not supported"
-            );
-            let guard = registry(self.device_id).lock().unwrap();
-            let input = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out = input
-                .iter()
-                .map(|&value| {
-                    if value > 0.0 {
-                        value
-                    } else {
-                        alpha * (value.exp() - 1.0)
-                    }
-                })
-                .collect();
-            drop(guard);
-            self.allocate_tensor(out, a.shape().to_vec())
-        })
+        Box::pin(async move { self.native_elu(a, alpha) })
+    }
+
+    fn activation_adjoint_supported(
+        &self,
+        operation: runmat_accelerate_api::ProviderActivationAdjoint,
+        precision: ProviderPrecision,
+    ) -> bool {
+        matches!(precision, ProviderPrecision::F32 | ProviderPrecision::F64)
+            && match operation {
+                runmat_accelerate_api::ProviderActivationAdjoint::Relu => true,
+                runmat_accelerate_api::ProviderActivationAdjoint::Elu { alpha } => {
+                    alpha.is_finite()
+                        && alpha >= 0.0
+                        && (precision != ProviderPrecision::F32 || (alpha as f32).is_finite())
+                }
+            }
+    }
+
+    fn activation_adjoint<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        upstream: &'a GpuTensorHandle,
+        operation: runmat_accelerate_api::ProviderActivationAdjoint,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.native_activation_adjoint(input, upstream, operation) })
     }
 
     fn activation_softmax_rows<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            ensure!(
-                runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::Real,
-                "activation_softmax_rows: complex inputs are not supported"
-            );
-            ensure!(
-                a.shape().len() == 2,
-                "activation_softmax_rows: input must be a 2-D tensor"
-            );
-            let rows = a.shape()[0];
-            let cols = a.shape()[1];
-            let guard = registry(self.device_id).lock().unwrap();
-            let input = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let mut out = vec![0.0; input.len()];
-            for row in 0..rows {
-                let max_value = (0..cols)
-                    .map(|col| input[row + col * rows])
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let mut denom = 0.0;
-                for col in 0..cols {
-                    let value = (input[row + col * rows] - max_value).exp();
-                    out[row + col * rows] = value;
-                    denom += value;
-                }
-                ensure!(
-                    denom.is_finite() && denom > 0.0,
-                    "activation_softmax_rows: softmax produced invalid normalization"
-                );
-                for col in 0..cols {
-                    out[row + col * rows] /= denom;
-                }
-            }
-            drop(guard);
-            self.allocate_tensor(out, a.shape().to_vec())
-        })
+        Box::pin(async move { self.native_softmax_rows(a) })
     }
 
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
@@ -8305,48 +8296,7 @@ impl AccelProvider for InProcessProvider {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
                 return self.reduce_integer_sum_native_dim(a, dim).await;
             }
-            if a.shape().len() != 2 {
-                return Err(anyhow::anyhow!("reduce_sum_dim: only 2D supported"));
-            }
-            let rows = a.shape()[0];
-            let cols = a.shape()[1];
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let (out, shape) = match dim {
-                0 => {
-                    // sum over rows -> 1 x cols
-                    let mut v = vec![0.0f64; cols];
-                    for c in 0..cols {
-                        let mut s = 0.0;
-                        for r in 0..rows {
-                            s += abuf[r + c * rows];
-                        }
-                        v[c] = s;
-                    }
-                    (v, vec![1, cols])
-                }
-                1 => {
-                    // sum over cols -> rows x 1
-                    let mut v = vec![0.0f64; rows];
-                    for r in 0..rows {
-                        let mut s = 0.0;
-                        for c in 0..cols {
-                            s += abuf[r + c * rows];
-                        }
-                        v[r] = s;
-                    }
-                    (v, vec![rows, 1])
-                }
-                _ => {
-                    return Err(anyhow::anyhow!(
-                        "reduce_sum_dim: only dims 0 or 1 supported"
-                    ))
-                }
-            };
-            drop(guard);
-            self.allocate_tensor_with_storage(out, shape, GpuTensorStorage::Real)
+            self.native_sum_dim(a, dim)
         })
     }
 

@@ -159,7 +159,7 @@ pub(super) fn node_dtype(
     fallback: NumericDType,
 ) -> NumericDType {
     id.and_then(|id| nodes.get(id))
-        .map(|node| node.value.numeric_dtype())
+        .and_then(|node| node.value.numeric_dtype())
         .unwrap_or(fallback)
 }
 
@@ -172,20 +172,7 @@ pub(super) fn wrap_result(payload: &Payload, tensor: Tensor, node: Option<usize>
     out.properties
         .insert("Labels".to_string(), payload.labels.clone());
     if let Some(id) = node {
-        out.properties.insert(
-            AD_NODE_PROPERTY.to_string(),
-            Value::Int(IntValue::U64(
-                u64::try_from(id).expect("node index fits u64"),
-            )),
-        );
-        let tape_id = active_tape()
-            .expect("recorded output requires active tape")
-            .borrow()
-            .id;
-        out.properties.insert(
-            AD_TAPE_PROPERTY.to_string(),
-            Value::Int(IntValue::U64(tape_id)),
-        );
+        attach_node_to_object(&mut out, id);
     }
     Value::Object(out)
 }

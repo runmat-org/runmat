@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::deep_learning::autodiff::{
     array_methods::{dlarray_plus_builtin, dlarray_sum_builtin, dlarray_times_builtin},
-    gradient::dlgradient_builtin,
+    gradient::dlgradient_direct,
     tape::{Tape, TapeActivation},
 };
 use crate::builtins::deep_learning::{model::forward_builtin, object};
@@ -163,8 +163,8 @@ fn public_forward_tape_uses_every_numerical_layer_and_matches_finite_differences
                     vec![Value::String("all".into())],
                 )
                 .unwrap();
-                let first = block_on(dlgradient_builtin(loss.clone(), vec![x.clone()])).unwrap();
-                let second = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+                let first = block_on(dlgradient_direct(loss.clone(), vec![x.clone()])).unwrap();
+                let second = block_on(dlgradient_direct(loss, vec![x])).unwrap();
                 assert_eq!(tensor(&first), tensor(&second), "repeat reverse {kind:?}");
                 assert_eq!(tensor(&first).numeric_dtype(), dtype);
                 assert_eq!(tensor(&first).shape, [2, 1, 3]);
@@ -229,7 +229,7 @@ fn feature_input_and_both_output_layers_preserve_the_public_tape() {
             vec![Value::String("all".into())],
         )
         .unwrap();
-        let gradient = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+        let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
         assert_eq!(tensor(&gradient).as_f32_slice().unwrap(), &[2.0, -4.0]);
     }
 }
@@ -289,7 +289,7 @@ fn returned_recurrent_state_is_an_output_of_the_shared_forward_trace() {
                 assert!(Rc::ptr_eq(state_trace, prediction_trace));
             }
             let loss = dlarray_sum_builtin(hidden, vec![Value::String("all".into())]).unwrap();
-            let gradient = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+            let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
             tensor(&gradient).materialize_f64()
         };
         for index in 0..data.len() {
@@ -367,9 +367,9 @@ fn joint_prediction_hidden_and_cell_loss_runs_one_reverse_per_shared_trace() {
                     losses.next().unwrap(),
                 )
                 .unwrap();
-                let first = block_on(dlgradient_builtin(loss.clone(), vec![x.clone()])).unwrap();
+                let first = block_on(dlgradient_direct(loss.clone(), vec![x.clone()])).unwrap();
                 assert_eq!(execution.reverse_calls.get(), 1);
-                let second = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+                let second = block_on(dlgradient_direct(loss, vec![x])).unwrap();
                 assert_eq!(execution.reverse_calls.get(), 2);
                 assert_eq!(tensor(&first), tensor(&second));
                 assert_eq!(tensor(&first).numeric_dtype(), dtype);

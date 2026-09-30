@@ -42,7 +42,7 @@ fn rank_changing_predict_inverts_observation_major_axes_in_the_shared_reverse() 
                 vec![Value::String("all".into())],
             )
             .unwrap();
-            let gradient = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+            let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
             assert_eq!(tensor(&gradient).shape, [2, 3, 4]);
             assert_eq!(tensor(&gradient).numeric_dtype(), dtype);
             tensor(&gradient).materialize_f64()

@@ -5,7 +5,7 @@ use runmat_value::{ObjectInstance, Value};
 
 use super::execution::{
     host::network::{HostExecutionResult, HostValue},
-    NetworkCaller, NetworkExecutionOutcome,
+    NetworkCaller, NetworkExecutionOutcome, NetworkTrace,
 };
 use super::host::dlarray_format;
 use super::{object, state, DLARRAY_CLASS};
@@ -48,37 +48,61 @@ pub(super) fn present(
     if requested_state {
         state::admit_updates(network, &state_updates, function)?;
     }
-    let (data, state_updates, nodes) = if trace.is_some() {
-        let value = match data {
-            Value::Tensor(tensor) => HostValue::Real(tensor),
-            Value::ComplexTensor(tensor) => HostValue::Complex(tensor),
-            _ => {
+    let (data, state_updates, nodes) = match trace {
+        Some(NetworkTrace::Host(trace)) => {
+            let value = match data {
+                Value::Tensor(tensor) => HostValue::Real(tensor),
+                Value::ComplexTensor(tensor) => HostValue::Complex(tensor),
+                _ => {
+                    return Err(deep_learning_error(
+                        function,
+                        format!("{function}: host trace requires a host numerical output"),
+                    ))
+                }
+            };
+            let mut execution = HostExecutionResult {
+                value,
+                axes: output_axes.clone(),
+                trace: Some(trace),
+                next_state: state_updates,
+            };
+            let nodes = autodiff::record_network_execution(
+                network,
+                input,
+                &mut execution,
+                requested_state,
+                presentation.caller(),
+            )?;
+            let data = match execution.value {
+                HostValue::Real(tensor) => Value::Tensor(tensor),
+                HostValue::Complex(tensor) => Value::ComplexTensor(tensor),
+            };
+            (data, execution.next_state, Some(nodes))
+        }
+        Some(NetworkTrace::Resident(trace)) => {
+            let Value::GpuTensor(output) = &data else {
                 return Err(deep_learning_error(
                     function,
-                    format!("{function}: host trace requires a host numerical output"),
-                ))
+                    format!("{function}: resident trace requires a resident numerical output"),
+                ));
+            };
+            if !state_updates.is_empty() {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: resident State trace is not available"),
+                ));
             }
-        };
-        let mut execution = HostExecutionResult {
-            value,
-            axes: output_axes.clone(),
-            trace,
-            next_state: state_updates,
-        };
-        let nodes = autodiff::record_network_execution(
-            network,
-            input,
-            &mut execution,
-            requested_state,
-            presentation.caller(),
-        )?;
-        let data = match execution.value {
-            HostValue::Real(tensor) => Value::Tensor(tensor),
-            HostValue::Complex(tensor) => Value::ComplexTensor(tensor),
-        };
-        (data, execution.next_state, Some(nodes))
-    } else {
-        (data, state_updates, None)
+            let nodes = autodiff::record_resident_network_execution(
+                network,
+                input,
+                output,
+                trace,
+                output_axes.clone(),
+                presentation.caller(),
+            )?;
+            (data, state_updates, Some(nodes))
+        }
+        None => (data, state_updates, None),
     };
     let is_dlarray = matches!(input, Value::Object(object) if object.class_name.is(DLARRAY_CLASS));
     let has_prediction_node = nodes

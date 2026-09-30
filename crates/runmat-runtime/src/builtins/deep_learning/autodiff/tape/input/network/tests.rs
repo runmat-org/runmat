@@ -315,7 +315,12 @@ fn public_learnables_setter_cannot_reuse_a_tag_after_data_replacement() {
     assert_eq!(dlarray_node_id(rows[0].value.unwrap()), None);
     assert_eq!(dlarray_node_id(rows[1].value.unwrap()), Some(1));
     assert_eq!(
-        tape.borrow().nodes[old_node].value.as_f32_slice().unwrap(),
+        tape.borrow().nodes[old_node]
+            .value
+            .host()
+            .unwrap()
+            .as_f32_slice()
+            .unwrap(),
         &[1.0; 4]
     );
     annotate_network_object(&mut updated).unwrap();
@@ -404,13 +409,13 @@ fn all_integer_classes_including_empty_storage_are_rejected_as_derivative_parent
         admit_derivative_parent(&tensor(&[1, 1], true), "Weights")
             .unwrap()
             .numeric_dtype(),
-        NumericDType::F32
+        Some(NumericDType::F32)
     );
     assert_eq!(
         admit_derivative_parent(&tensor(&[1, 1], false), "Weights")
             .unwrap()
             .numeric_dtype(),
-        NumericDType::F64
+        Some(NumericDType::F64)
     );
 }
 

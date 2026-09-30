@@ -915,6 +915,22 @@ pub enum ProviderPrecision {
     F64,
 }
 
+/// Numerical derivative of an already executed resident activation.
+/// Forward input and upstream gradient retain their native physical class.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProviderActivationAdjoint {
+    Relu,
+    Elu { alpha: f64 },
+}
+
+/// Operations required to reverse one admitted resident network route.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProviderResidentAdjointStage {
+    Dense,
+    Activation(ProviderActivationAdjoint),
+    SoftmaxRows,
+}
+
 /// Declares how provider-owned GPU handles may cross async spawn boundaries.
 ///
 /// This is a runtime/provider policy surface (not a semantic type fact) used by
@@ -1512,6 +1528,15 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
 
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: AcceleratorThreadBound {
+    /// Read-only whole-route derivative capability. `false` means the runtime
+    /// must reject before executing the corresponding network forward pass.
+    fn resident_network_adjoint_supported(
+        &self,
+        _stages: &[ProviderResidentAdjointStage],
+        _precision: ProviderPrecision,
+    ) -> bool {
+        false
+    }
     /// Upload a canonical host logical value through shared admission.
     fn upload_logical(
         &self,
@@ -2811,6 +2836,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_exp not supported by provider")
     }
+    /// Apply ReLU while preserving NaN inputs, including their native precision.
+    fn activation_relu<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("activation_relu not supported by provider")
+    }
     /// Apply an exponential linear unit activation with the supplied alpha.
     fn activation_elu<'a>(
         &'a self,
@@ -2818,6 +2850,24 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _alpha: f64,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("activation_elu not supported by provider")
+    }
+    /// Pure capability query used before any forward or backward provider
+    /// effects. Backends must not report support for a precision they cannot
+    /// execute without gathering or relabeling.
+    fn activation_adjoint_supported(
+        &self,
+        _operation: ProviderActivationAdjoint,
+        _precision: ProviderPrecision,
+    ) -> bool {
+        false
+    }
+    fn activation_adjoint<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _upstream: &'a GpuTensorHandle,
+        _operation: ProviderActivationAdjoint,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("activation_adjoint not supported by provider")
     }
     /// Normalize each row of a real two-dimensional tensor with stable softmax.
     fn activation_softmax_rows<'a>(

@@ -254,7 +254,38 @@ pub(in crate::builtins::deep_learning::model::gpu::mixed) fn admit(
     target_axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<Option<Result<Plan, GpuCapabilityReason>>> {
-    if !super::lowering::applicable(host) {
+    admit_for_purpose(
+        network,
+        host,
+        target_axes,
+        RoutePurpose::ExistingMixedForward,
+        function,
+    )
+}
+
+pub(in crate::builtins::deep_learning::model::gpu::mixed) fn admit_for_tape(
+    network: &ObjectInstance,
+    host: &HostNetworkPlan<'_>,
+    target_axes: &AxisPlan,
+    function: &'static str,
+) -> BuiltinResult<Option<Result<Plan, GpuCapabilityReason>>> {
+    admit_for_purpose(
+        network,
+        host,
+        target_axes,
+        RoutePurpose::ResidentTape,
+        function,
+    )
+}
+
+fn admit_for_purpose(
+    network: &ObjectInstance,
+    host: &HostNetworkPlan<'_>,
+    target_axes: &AxisPlan,
+    purpose: RoutePurpose,
+    function: &'static str,
+) -> BuiltinResult<Option<Result<Plan, GpuCapabilityReason>>> {
+    if !super::lowering::applicable(host, purpose) {
         return Ok(None);
     }
     let Some(input) = resident_input_handle(host.admitted_input()) else {
@@ -282,7 +313,13 @@ pub(in crate::builtins::deep_learning::model::gpu::mixed) fn admit(
     {
         return Ok(Some(Err(GpuCapabilityReason::InputPrecision)));
     }
-    let Some(plan) = super::lower(network, host, target_axes, function)? else {
+    let lowered = match purpose {
+        RoutePurpose::ExistingMixedForward => super::lower(network, host, target_axes, function)?,
+        RoutePurpose::ResidentTape => {
+            super::lowering::lower_for_tape(network, host, target_axes, function)?
+        }
+    };
+    let Some(plan) = lowered else {
         return Ok(None);
     };
     let plan = match plan {

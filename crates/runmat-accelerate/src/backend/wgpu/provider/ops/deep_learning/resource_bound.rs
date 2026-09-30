@@ -86,6 +86,8 @@ impl WgpuProvider {
                             .ok_or(BufferBoundError::Overflow)?
                     }
                 }
+                // ReLU uses one fused unary output and one per-chunk uniform;
+                // the scalar-op bound has the same aligned buffer geometry.
                 DeepLearningForwardOperation::FeedForward(DeepLearningFeedForwardStage::Relu {
                     elements,
                 }) => self

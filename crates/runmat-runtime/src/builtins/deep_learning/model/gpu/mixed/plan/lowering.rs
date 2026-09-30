@@ -111,7 +111,7 @@ fn semantic_shape_matches(semantic: &AxisPlan, physical: &AxisPlan) -> bool {
         .is_ok_and(|lowering| lowering.target_shape() == physical.shape())
 }
 
-pub(super) fn applicable(host: &HostNetworkPlan<'_>) -> bool {
+pub(super) fn applicable(host: &HostNetworkPlan<'_>, purpose: RoutePurpose) -> bool {
     let steps = host.steps();
     let transformations = steps
         .iter()
@@ -123,9 +123,11 @@ pub(super) fn applicable(host: &HostNetworkPlan<'_>) -> bool {
             Controls::Normalization(_) | Controls::Pooling
         )
     });
-    transformations >= 2
-        && combines_pool_or_norm
-        && !super::super::parameters::has_unsupported_resident_parameters(host)
+    let selected = match purpose {
+        RoutePurpose::ExistingMixedForward => transformations >= 2 && combines_pool_or_norm,
+        RoutePurpose::ResidentTape => true,
+    };
+    selected && !super::super::parameters::has_unsupported_resident_parameters(host)
 }
 
 /// Return `None` for networks owned by the existing standalone routes. A
@@ -137,7 +139,38 @@ pub(in crate::builtins::deep_learning::model::gpu::mixed) fn lower(
     target_axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<Option<Result<Plan, GpuCapabilityReason>>> {
-    if !applicable(host) {
+    lower_for_purpose(
+        network,
+        host,
+        target_axes,
+        RoutePurpose::ExistingMixedForward,
+        function,
+    )
+}
+
+pub(in crate::builtins::deep_learning::model::gpu::mixed) fn lower_for_tape(
+    network: &ObjectInstance,
+    host: &HostNetworkPlan<'_>,
+    target_axes: &AxisPlan,
+    function: &'static str,
+) -> BuiltinResult<Option<Result<Plan, GpuCapabilityReason>>> {
+    lower_for_purpose(
+        network,
+        host,
+        target_axes,
+        RoutePurpose::ResidentTape,
+        function,
+    )
+}
+
+fn lower_for_purpose(
+    network: &ObjectInstance,
+    host: &HostNetworkPlan<'_>,
+    target_axes: &AxisPlan,
+    purpose: RoutePurpose,
+    function: &'static str,
+) -> BuiltinResult<Option<Result<Plan, GpuCapabilityReason>>> {
+    if !applicable(host, purpose) {
         return Ok(None);
     }
     let steps = host.steps();

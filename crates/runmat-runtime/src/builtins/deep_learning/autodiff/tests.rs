@@ -424,9 +424,8 @@ fn repeated_single_target_gradients_accumulate_without_class_mismatch() {
     .unwrap();
     let product = dlarray_times_builtin(input.clone(), input.clone()).unwrap();
     let loss = dlarray_sum_builtin(product, vec![Value::String("all".into())]).unwrap();
-    let Value::Object(gradient) =
-        futures::executor::block_on(dlgradient_builtin(loss, vec![input]))
-            .expect("repeated single gradient")
+    let Value::Object(gradient) = futures::executor::block_on(dlgradient_direct(loss, vec![input]))
+        .expect("repeated single gradient")
     else {
         panic!("dlarray gradient")
     };
@@ -452,7 +451,7 @@ fn sum_all_accepts_character_and_string_text_with_typed_gradients() {
         let squared = dlarray_times_builtin(input.clone(), input.clone()).unwrap();
         let loss = dlarray_sum_builtin(squared, vec![option]).unwrap();
         let Value::Object(gradient) =
-            futures::executor::block_on(dlgradient_builtin(loss, vec![input])).unwrap()
+            futures::executor::block_on(dlgradient_direct(loss, vec![input])).unwrap()
         else {
             panic!("dlarray gradient")
         };
@@ -549,7 +548,7 @@ fn gradient_output_arity_rejects_before_nested_provider_access() {
         let nested = Value::Cell(CellArray::new(vec![Value::GpuTensor(resident)], 1, 1).unwrap());
         provider.reset_telemetry();
         let _outputs = crate::output_count::push_output_count(Some(2));
-        let error = futures::executor::block_on(dlgradient_builtin(dlarray(1.0), vec![nested]))
+        let error = futures::executor::block_on(dlgradient_direct(dlarray(1.0), vec![nested]))
             .expect_err("one target cannot provide two outputs");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -561,7 +560,7 @@ fn gradient_does_not_turn_an_untraced_loss_into_a_new_leaf() {
     let tape = Rc::new(RefCell::new(Tape::new()));
     let _activation = TapeActivation::enter(tape.clone());
     let target = annotate_dlarray_value(dlarray(2.0)).expect("traced target");
-    let error = futures::executor::block_on(dlgradient_builtin(dlarray(3.0), vec![target]))
+    let error = futures::executor::block_on(dlgradient_direct(dlarray(3.0), vec![target]))
         .expect_err("loss must be produced on tape");
     assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
     assert_eq!(tape.borrow().nodes.len(), 1);
@@ -580,7 +579,7 @@ fn gradient_nested_resident_target_rejects_without_gather() {
         let loss = annotate_dlarray_value(dlarray(1.0)).expect("traced loss");
         let nested = Value::Cell(CellArray::new(vec![Value::GpuTensor(resident)], 1, 1).unwrap());
         provider.reset_telemetry();
-        let error = futures::executor::block_on(dlgradient_builtin(loss, vec![nested]))
+        let error = futures::executor::block_on(dlgradient_direct(loss, vec![nested]))
             .expect_err("untraced resident target");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -611,8 +610,8 @@ fn gradient_rejects_traced_values_mutated_to_resident_data_without_gather() {
         computed.insert(target_id, Tensor::new(vec![1.0], vec![1, 1]).unwrap());
         provider.reset_telemetry();
         let error = super::gradient::gradient_tree_for_target(&target, &computed)
-            .expect_err("a cached gradient cannot bypass resident Data rejection");
-        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+            .expect_err("a cached gradient cannot bypass edited Data provenance");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
 
         let Value::Object(object) = &mut target else {
             panic!("dlarray target")
@@ -631,9 +630,9 @@ fn gradient_rejects_traced_values_mutated_to_resident_data_without_gather() {
         object
             .properties
             .insert("Data".into(), Value::GpuTensor(resident));
-        let error = futures::executor::block_on(dlgradient_builtin(resident_loss, vec![target]))
-            .expect_err("a traced loss cannot bypass resident Data rejection");
-        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+        let error = futures::executor::block_on(dlgradient_direct(resident_loss, vec![target]))
+            .expect_err("a traced loss cannot bypass edited Data provenance");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }

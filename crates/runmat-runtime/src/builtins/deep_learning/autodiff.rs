@@ -20,9 +20,10 @@ pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity = super::DLARR
 mod tape;
 #[cfg(test)]
 use tape::annotate_tree;
+#[cfg(test)]
+use tape::AD_NODE_PROPERTY;
 use tape::{
-    active_tape, push_binary_node, push_node, value_for_node, Node, NodeKind, AD_NODE_PROPERTY,
-    AD_TAPE_PROPERTY,
+    active_tape, attach_node_to_object, push_binary_node, push_node, value_for_node, Node, NodeKind,
 };
 pub(super) use tape::{annotate_dlarray_value, dlarray_node_id, tape_is_active, with_tape_context};
 mod value;
@@ -33,7 +34,7 @@ use value::{
 };
 pub(crate) mod gradient;
 #[cfg(test)]
-pub(super) use gradient::dlgradient_builtin;
+pub(super) use gradient::dlgradient_direct;
 
 pub(crate) mod array_methods;
 #[cfg(test)]
@@ -43,7 +44,10 @@ pub(super) use array_methods::{
 };
 
 mod network;
-pub(super) use network::{annotate_network_outputs, record_network_execution};
+pub(in crate::builtins::deep_learning) use network::admit_resident_tape_parents;
+pub(super) use network::{
+    annotate_network_outputs, record_network_execution, record_resident_network_execution,
+};
 
 #[cfg(test)]
 mod tests;

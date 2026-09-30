@@ -3,7 +3,12 @@
 
 use super::super::*;
 use super::plan::{Plan, Stage};
+use super::trace::{ResidentExecution, ResidentStage, ResidentStageKind, ResidentTrace};
 use runmat_accelerate_api::GpuTensorLayout;
+
+#[cfg(test)]
+#[path = "execution/tests.rs"]
+mod tests;
 
 fn materialize_view(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
@@ -64,19 +69,27 @@ pub(super) async fn execute(
     network: &ObjectInstance,
     input: &GpuTensorHandle,
     plan: Plan,
+    capture: bool,
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &'static str,
-) -> BuiltinResult<GpuTensorHandle> {
+) -> BuiltinResult<ResidentExecution> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| admission::invalid_owner(function, admission::GpuOperand::Input))?;
     let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
         unreachable!("host plan admitted Layers")
     };
     let mut current = input.clone();
+    let mut recorded = capture.then(|| Vec::with_capacity(plan.stages.len()));
     let consumed_resident_parameters = plan.consumed_resident_parameters;
     for stage in plan.stages {
+        super::check_cancellation(runtime, function)?;
         let changes_view_layout = matches!(&stage, Stage::Transpose { .. });
-        current = match stage {
-            Stage::Materialize => materialize_view(provider, &current, function)?,
+        let stage_input = recorded.as_ref().map(|_| current.clone());
+        let (next, kind) = match stage {
+            Stage::Materialize => (
+                materialize_view(provider, &current, function)?,
+                Some(ResidentStageKind::Materialize),
+            ),
             Stage::Transpose {
                 output_axes,
                 output_layout,
@@ -126,19 +139,31 @@ pub(super) async fn execute(
                         .build(),
                     ));
                 }
-                output
+                (output, Some(ResidentStageKind::Transpose { materialize }))
             }
             Stage::Dense { layer_index } => {
                 let Value::Object(layer) = &layers.data[layer_index] else {
                     unreachable!("host plan admitted layer objects")
                 };
-                fully_connected_forward_gpu(provider, current, layer, function).await?
+                let (output, weights) =
+                    fully_connected_forward_with_weights_gpu(provider, current, layer, function)
+                        .await?;
+                (
+                    output,
+                    Some(ResidentStageKind::Dense {
+                        layer_index,
+                        weights,
+                    }),
+                )
             }
             Stage::Relu => {
-                let output = provider.scalar_max(&current, 0.0).map_err(|error| {
+                let output = provider.activation_relu(&current).await.map_err(|error| {
                     provider_failure(function, "planned resident ReLU", error.into())
                 })?;
-                validate_unary_forward_result(output, &current, provider, function)?
+                (
+                    validate_unary_forward_result(output, &current, provider, function)?,
+                    Some(ResidentStageKind::Relu),
+                )
             }
             Stage::Elu { alpha } => {
                 let output = provider
@@ -147,7 +172,10 @@ pub(super) async fn execute(
                     .map_err(|error| {
                         provider_failure(function, "planned resident ELU", error.into())
                     })?;
-                validate_unary_forward_result(output, &current, provider, function)?
+                (
+                    validate_unary_forward_result(output, &current, provider, function)?,
+                    Some(ResidentStageKind::Elu { alpha }),
+                )
             }
             Stage::Softmax => {
                 let output = provider
@@ -156,7 +184,10 @@ pub(super) async fn execute(
                     .map_err(|error| {
                         provider_failure(function, "planned resident Softmax", error.into())
                     })?;
-                validate_unary_forward_result(output, &current, provider, function)?
+                (
+                    validate_unary_forward_result(output, &current, provider, function)?,
+                    Some(ResidentStageKind::Softmax),
+                )
             }
             Stage::Normalize { stage } => match normalization::forward(
                 network,
@@ -167,7 +198,7 @@ pub(super) async fn execute(
             )
             .await?
             {
-                Ok(output) => output,
+                Ok(output) => (output, None),
                 Err(reason) => return Err(capability_changed(function, reason)),
             },
             Stage::Pool {
@@ -184,8 +215,11 @@ pub(super) async fn execute(
                 function,
             )
             .await?
-            .ok_or_else(|| capability_changed(function, GpuCapabilityReason::ProviderOperation))?,
+            .ok_or_else(|| capability_changed(function, GpuCapabilityReason::ProviderOperation))
+            .map(|output| (output, None))?,
         };
+        super::check_cancellation(runtime, function)?;
+        current = next;
         if !changes_view_layout && current.view().layout() != GpuTensorLayout::Contiguous {
             return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
                 current,
@@ -196,6 +230,13 @@ pub(super) async fn execute(
                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                 .build(),
             ));
+        }
+        if let Some(stages) = recorded.as_mut() {
+            stages.push(ResidentStage {
+                kind: kind.expect("capture admission excludes unsupported adjoints"),
+                input: stage_input.expect("capture retains its stage input"),
+                output: current.clone(),
+            });
         }
     }
     if current.shape() != plan.output_axes.shape() {
@@ -211,5 +252,13 @@ pub(super) async fn execute(
         &mut current,
         std::iter::once(input).chain(consumed_resident_parameters.iter()),
     )?;
-    Ok(current)
+    super::check_cancellation(runtime, function)?;
+    let trace = recorded.map(|stages| ResidentTrace {
+        stages,
+        output: current.clone(),
+    });
+    Ok(ResidentExecution {
+        output: current,
+        trace,
+    })
 }

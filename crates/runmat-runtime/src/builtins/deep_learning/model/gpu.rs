@@ -9,10 +9,9 @@ mod parameters;
 mod normalization;
 mod admission;
 mod pooling;
-mod mixed;
+pub(in crate::builtins::deep_learning) mod mixed;
 
 pub(super) use admission::{admit_gpu_forward, GpuCapabilityReason, GpuForwardAdmission};
-pub(in crate::builtins::deep_learning) use mixed::forward as forward_mixed_network_gpu;
 pub(in crate::builtins::deep_learning) use normalization::forward as normalize_network_gpu;
 
 #[cfg(test)]
@@ -118,7 +117,8 @@ pub(super) async fn evaluate_network_gpu(
             current = fully_connected_forward_gpu(provider, current, layer, function).await?;
         } else if layer.class_name.is(super::RELU_LAYER_CLASS) {
             let output = provider
-                .scalar_max(&current, 0.0)
+                .activation_relu(&current)
+                .await
                 .map_err(|err| provider_failure(function, "provider-resident ReLU", err.into()))?;
             current = validate_unary_forward_result(output, &current, provider, function)?;
         } else if layer.class_name.is(super::ELU_LAYER_CLASS) {
@@ -293,6 +293,21 @@ async fn fully_connected_forward_gpu(
     layer: &ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<GpuTensorHandle> {
+    Ok(
+        fully_connected_forward_with_weights_gpu(provider, current, layer, function)
+            .await?
+            .0,
+    )
+}
+
+/// Return the very same prepared weight view consumed by the forward matmul.
+/// A tape must never reconstruct that view from a subsequently mutated layer.
+async fn fully_connected_forward_with_weights_gpu(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    current: GpuTensorHandle,
+    layer: &ObjectInstance,
+    function: &'static str,
+) -> BuiltinResult<(GpuTensorHandle, GpuTensorHandle)> {
     let precision = runmat_accelerate_api::handle_precision(&current).ok_or_else(|| {
         unsupported_error(
             function,
@@ -330,7 +345,7 @@ async fn fully_connected_forward_gpu(
         precision,
         function,
     )?;
-    Ok(output)
+    Ok((output, weights_handle))
 }
 
 fn provider_failure(
@@ -347,7 +362,7 @@ fn provider_failure(
     )
 }
 
-fn validate_binary_forward_result(
+pub(in crate::builtins::deep_learning) fn validate_binary_forward_result(
     output: GpuTensorHandle,
     left: &GpuTensorHandle,
     right: &GpuTensorHandle,

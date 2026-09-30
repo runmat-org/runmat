@@ -57,7 +57,7 @@ fn admitted_resource_bounds_are_effect_free() {
     };
     assert_eq!(
         softmax_resources.new_buffer_bytes_upper_bound,
-        DeepLearningForwardBufferBound::Known(2 * 6 * class.element_size() as u64 + 8 + 16),
+        DeepLearningForwardBufferBound::Known(2 * 6 * class.element_size() as u64 + 16),
     );
     let mut elu = host.clone();
     elu.steps[0].operation =

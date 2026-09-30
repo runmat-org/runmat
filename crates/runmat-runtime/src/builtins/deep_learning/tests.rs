@@ -27,7 +27,7 @@ async fn deep_learning_square_grad_helper(x: Value) -> crate::BuiltinResult<Valu
     let y = crate::call_builtin_async("times", &[x.clone(), x.clone()]).await?;
     let loss = crate::call_builtin_async("sum", &[y, Value::String("all".into())]).await?;
     let _guard = crate::output_count::push_output_count(Some(1));
-    let grad = super::autodiff::dlgradient_builtin(loss.clone(), vec![x]).await?;
+    let grad = super::autodiff::dlgradient_direct(loss.clone(), vec![x]).await?;
     Ok(Value::OutputList(vec![loss, grad]))
 }
 
@@ -43,7 +43,7 @@ async fn deep_learning_square_grad_helper(x: Value) -> crate::BuiltinResult<Valu
 async fn deep_learning_network_grad_helper(net: Value, x: Value) -> crate::BuiltinResult<Value> {
     let y = forward_builtin(net.clone(), x, vec![]).await?;
     let loss = super::autodiff::dlarray_sum_builtin(y, vec![Value::String("all".into())])?;
-    super::autodiff::dlgradient_builtin(loss, vec![net]).await
+    super::autodiff::dlgradient_direct(loss, vec![net]).await
 }
 
 fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Value {
