@@ -209,8 +209,8 @@ impl Geometry {
                 )
             }
             Padding::Same => {
-                let output_len =
-                    input_len / options.stride + usize::from(input_len % options.stride != 0);
+                let output_len = input_len / options.stride
+                    + usize::from(!input_len.is_multiple_of(options.stride));
                 let required = (output_len - 1)
                     .checked_mul(options.stride)
                     .and_then(|start| start.checked_add(effective_filter))

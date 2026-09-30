@@ -101,7 +101,7 @@ pub(in crate::builtins::deep_learning) fn backward(
                 HostValue::Real(dy),
                 StepCache::Softmax(y),
             ) => (
-                HostValue::Real(softmax::backward(&y, dy, &record.input_axes)?),
+                HostValue::Real(softmax::backward(y, dy, &record.input_axes)?),
                 StepGradients::None,
             ),
             (

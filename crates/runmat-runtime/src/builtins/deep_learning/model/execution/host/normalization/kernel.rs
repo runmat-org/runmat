@@ -33,6 +33,14 @@ pub(in crate::builtins::deep_learning) struct NormalizationOutput {
     pub stats: NormalizationStats,
 }
 
+struct ForwardValues<T> {
+    output: Vec<T>,
+    scale: Vec<T>,
+    mean_scaled: Vec<T>,
+    inv_std_scaled: Vec<T>,
+    inv_std_input: Vec<T>,
+}
+
 pub(in crate::builtins::deep_learning) fn forward(
     input: &Tensor,
     scale: &Tensor,
@@ -47,10 +55,15 @@ pub(in crate::builtins::deep_learning) fn forward(
         scale.as_f32_slice(),
         offset.as_f32_slice(),
     ) {
-        let (values, scale, mean_scaled, inv_std_scaled, inv_std_input) =
-            forward_values(x, gamma, beta, &geometry);
+        let ForwardValues {
+            output,
+            scale,
+            mean_scaled,
+            inv_std_scaled,
+            inv_std_input,
+        } = forward_values(x, gamma, beta, &geometry);
         (
-            Tensor::from_numeric_storage(NumericStorage::F32(values), input.shape.clone()),
+            Tensor::from_numeric_storage(NumericStorage::F32(output), input.shape.clone()),
             NormalizationStatsData::F32 {
                 scale,
                 mean_scaled,
@@ -63,10 +76,15 @@ pub(in crate::builtins::deep_learning) fn forward(
         scale.as_f64_slice(),
         offset.as_f64_slice(),
     ) {
-        let (values, scale, mean_scaled, inv_std_scaled, inv_std_input) =
-            forward_values(x, gamma, beta, &geometry);
+        let ForwardValues {
+            output,
+            scale,
+            mean_scaled,
+            inv_std_scaled,
+            inv_std_input,
+        } = forward_values(x, gamma, beta, &geometry);
         (
-            Tensor::from_numeric_storage(NumericStorage::F64(values), input.shape.clone()),
+            Tensor::from_numeric_storage(NumericStorage::F64(output), input.shape.clone()),
             NormalizationStatsData::F64 {
                 scale,
                 mean_scaled,
@@ -89,12 +107,7 @@ pub(in crate::builtins::deep_learning) fn forward(
     })
 }
 
-fn forward_values<T: Real>(
-    x: &[T],
-    gamma: &[T],
-    beta: &[T],
-    g: &Geometry,
-) -> (Vec<T>, Vec<T>, Vec<T>, Vec<T>, Vec<T>) {
+fn forward_values<T: Real>(x: &[T], gamma: &[T], beta: &[T], g: &Geometry) -> ForwardValues<T> {
     // Scale before accumulating. For finite near-limit inputs, the mean and
     // normalized output can be finite even when their unscaled sum or variance
     // would overflow in the input precision.
@@ -141,5 +154,11 @@ fn forward_values<T: Real>(
         let normalized = (value / scale[group] - mean_scaled[group]) * inv_std_scaled[group];
         output[index] = normalized * gamma[channel] + beta[channel];
     }
-    (output, scale, mean_scaled, inv_std_scaled, inv_std_input)
+    ForwardValues {
+        output,
+        scale,
+        mean_scaled,
+        inv_std_scaled,
+        inv_std_input,
+    }
 }

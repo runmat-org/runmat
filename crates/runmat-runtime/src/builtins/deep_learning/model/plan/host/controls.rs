@@ -23,7 +23,7 @@ pub(super) enum Controls {
     Output,
 }
 
-fn value<'a>(layer: &'a ObjectInstance, kind: K, option: O) -> Option<&'a Value> {
+fn value(layer: &ObjectInstance, kind: K, option: O) -> Option<&Value> {
     layer
         .properties
         .iter()

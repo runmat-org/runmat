@@ -22,9 +22,7 @@ pub(in crate::builtins::deep_learning) fn admit(
     Ok(geometry::Geometry::from_shapes(axes, parameters, dtype, options)?.output_axes)
 }
 
-fn required_slice<'a, T>(
-    slice: Option<Option<&'a [T]>>,
-) -> Result<Option<&'a [T]>, RecurrentError> {
+fn required_slice<T>(slice: Option<Option<&[T]>>) -> Result<Option<&[T]>, RecurrentError> {
     slice
         .map(|value| value.ok_or(RecurrentError::UnsupportedPrecision))
         .transpose()

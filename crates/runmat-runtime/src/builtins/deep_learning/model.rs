@@ -274,15 +274,14 @@ pub(super) async fn forward_builtin(
         output_axes.layout().labels()
     };
     let prediction = if wrap_dlarray {
-        let wrapped = object(
+        object(
             "dlarray",
             vec![
                 ("Data", data),
                 ("Format", Value::String(format.clone())),
                 ("Labels", Value::String(format)),
             ],
-        );
-        wrapped
+        )
     } else {
         data
     };

@@ -109,7 +109,7 @@ fn values<T: Real>(input: &[T], operation: Activation) -> Vec<T> {
         .iter()
         .map(|&value| match operation {
             Activation::Relu => {
-                if value != value || value > T::zero() {
+                if value.is_nan() || value > T::zero() {
                     value
                 } else {
                     T::zero()
@@ -134,7 +134,7 @@ fn derivatives<T: Real>(input: &[T], dy: &[T], operation: Activation) -> Vec<T> 
             gradient
                 * match operation {
                     Activation::Relu => {
-                        if value != value {
+                        if value.is_nan() {
                             value
                         } else if value > T::zero() {
                             T::one()
