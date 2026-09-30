@@ -33,7 +33,7 @@ mod topology;
 use admission::{forward_data, gpu_backed_dlarray_handle, require_network_object};
 use construction::{layer_slice, parse_network_options};
 use gpu::evaluate_network_gpu;
-use host::{dlarray_format, elu_alpha, floating_tensor_from_f64, transpose_2d};
+use host::{dlarray_format, elu_alpha, transpose_2d};
 use plan::host::HostNetworkPlan;
 use properties::normalize_numeric_tensor;
 
