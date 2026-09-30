@@ -252,7 +252,7 @@ fn invalid_epsilon_empty_reduction_and_dtype_reject() {
             &empty,
             &Tensor::new(vec![], vec![0, 1]).unwrap(),
             &Tensor::new(vec![], vec![0, 1]).unwrap(),
-            &axes("CB", &empty.shape),
+            &self::axes("CB", &empty.shape),
             options(DeepLearningNormalizationAxes::Auto)
         ),
         Err(NormalizationError::EmptyReduction)

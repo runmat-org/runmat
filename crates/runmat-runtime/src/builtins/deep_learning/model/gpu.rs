@@ -7,7 +7,7 @@ use runmat_builtins::DeepLearningAxisLabel;
 mod parameters;
 mod admission;
 
-pub(super) use admission::{admit_gpu_forward, validate_gpu_forward_layers, GpuForwardAdmission};
+pub(super) use admission::{admit_gpu_forward, GpuForwardAdmission};
 
 #[cfg(test)]
 mod tests;
@@ -86,7 +86,7 @@ pub(super) async fn evaluate_network_gpu(
     };
     for layer in layers {
         let Value::Object(layer) = layer else {
-            unreachable!("validate_gpu_forward_layers accepts layer objects only");
+            unreachable!("GPU admission accepts layer objects only");
         };
         if layer.class_name.is(super::FULLY_CONNECTED_LAYER_CLASS) {
             current = fully_connected_forward_gpu(provider, current, layer, function).await?;

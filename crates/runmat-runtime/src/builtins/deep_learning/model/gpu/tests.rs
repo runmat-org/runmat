@@ -5,6 +5,7 @@ use runmat_accelerate_api::{
 };
 use runmat_value::{CellArray, NumericDType, Tensor, Value};
 
+use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use crate::builtins::deep_learning::{layers::*, model::*, object};
 
 fn dense_network() -> Value {

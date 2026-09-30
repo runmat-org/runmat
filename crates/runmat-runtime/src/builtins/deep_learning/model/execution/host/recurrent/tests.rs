@@ -3,7 +3,7 @@ use runmat_value::{NumericDType, NumericStorage, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 
-use super::forward::RecurrentTrace;
+use super::forward::{RecurrentOutput, RecurrentTrace};
 use super::gates::{gate_derivative, state, state_derivative};
 use super::*;
 

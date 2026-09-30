@@ -7,7 +7,6 @@ use runmat_value::{Tensor, Value};
 
 use super::controls::Controls;
 use super::geometry::{HostNetworkPlan, InputPayloadKind};
-use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use crate::builtins::deep_learning::model::{
     execution::host::network::{self, HostExecutionResult, HostStep, HostValue},
     parameters::ParameterRole,
@@ -88,10 +87,6 @@ impl<'a> HostNetworkPlan<'a> {
 }
 
 impl PreparedHostNetwork<'_> {
-    pub(in crate::builtins::deep_learning) fn output_axes(&self) -> &AxisPlan {
-        &self.plan.output_axes
-    }
-
     pub(in crate::builtins::deep_learning) async fn prepare_input(
         &self,
         input: &Value,

@@ -12,9 +12,7 @@ use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, ProviderExecutionError, ProviderPrecision,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    CellArray, NumericDType, NumericStorage, ObjectInstance, StructValue, Tensor, Value,
-};
+use runmat_value::{CellArray, NumericDType, ObjectInstance, StructValue, Tensor, Value};
 
 mod admission;
 mod construction;
@@ -25,17 +23,18 @@ mod initialization;
 pub(in crate::builtins::deep_learning) mod parameters;
 pub(in crate::builtins::deep_learning) mod plan;
 pub(in crate::builtins::deep_learning) mod precision;
+mod predict;
 mod properties;
 pub(in crate::builtins::deep_learning) mod state;
 mod table_rows;
 mod topology;
 
-use admission::{forward_data, gpu_backed_dlarray_handle, require_network_object};
+use admission::require_network_object;
 use construction::{layer_slice, parse_network_options};
-use gpu::evaluate_network_gpu;
 use host::{dlarray_format, elu_alpha, transpose_2d};
-use plan::host::HostNetworkPlan;
 use properties::normalize_numeric_tensor;
+
+pub(in crate::builtins) use predict::predict_deep_learning_object;
 
 pub(in crate::builtins) use construction::{
     is_deep_learning_network_object, layers_from_network_ref, layers_from_network_value,
@@ -137,7 +136,6 @@ pub(super) async fn set_state_builtin(network: Value, state: Value) -> BuiltinRe
     };
     apply_state(network, state, "set.State")
 }
-pub(in crate::builtins) use host::predict_deep_learning_object;
 pub(in crate::builtins) use properties::{
     feature_input_width, fully_connected_output_width, positive_property_usize, tensor_property,
     tensor_property_value,
@@ -223,79 +221,57 @@ pub(super) async fn forward_builtin(
         ));
     }
     let network_object = require_network_object(&network, "forward")?;
-    if autodiff::tape_is_active() && gpu_backed_dlarray_handle(&input).is_some() {
-        return Err(unsupported_error(
-            "forward",
-            "forward: provider-resident network autodiff is not supported",
-        ));
-    }
-    let plan = HostNetworkPlan::admit(network_object, &input, "forward")?;
-    if crate::builtins::common::validation::value_has_native_integer_class(forward_data(&input))
-        || plan.has_integer_parameter()
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &runmat_builtins::FORWARD_INTEGER_EXTENSION,
-            "forward",
-        )?;
-    }
-    if let Some(handle) = gpu_backed_dlarray_handle(&input) {
-        let layers = network_object
-            .properties
-            .get("Layers")
-            .map(|value| layer_slice(value, "forward"))
-            .transpose()?
-            .unwrap_or(&[]);
-        let gpu_layout = gpu::GpuForwardLayout::from_axes(plan.input_axes()).filter(|layout| {
-            gpu::validate_gpu_forward_layers(layers, handle, *layout, "forward").is_ok()
-        });
-        if let Some(layout) = gpu_layout {
-            let format = dlarray_format(&input);
-            if let Some(output) =
-                evaluate_network_gpu(network_object, handle, layout, "forward").await?
-            {
-                let wrapped = object(
-                    "dlarray",
-                    vec![
-                        (
-                            "Data",
-                            crate::builtins::common::gpu_helpers::resident_gpu_value(output)?,
-                        ),
-                        ("Format", Value::String(format.clone())),
-                        ("Labels", Value::String(format)),
-                    ],
-                );
-                let prediction = autodiff::annotate_dlarray_value(wrapped)?;
-                return if crate::output_count::current_output_count() == Some(2) {
-                    Ok(Value::OutputList(vec![
-                        prediction,
-                        state::publish_updates(network_object, vec![], "forward")?,
-                    ]))
-                } else {
-                    Ok(prediction)
-                };
-            }
-        }
-        if runmat_accelerate_api::handle_is_explicit(handle) {
-            return Err(unsupported_error("forward", "forward: this network has no resident execution route for an explicit gpuArray input"));
-        }
-    }
+    let requested_state = crate::output_count::current_output_count() == Some(2);
     let wrap_dlarray =
         matches!(&input, Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS));
     let original_format = dlarray_format(&input);
-    let prepared = plan.prepare().await?;
-    let host_input = prepared.prepare_input(&input).await?;
-    let mut result = prepared.execute(host_input, autodiff::tape_is_active())?;
-    let requested_state = crate::output_count::current_output_count() == Some(2);
-    let nodes =
-        autodiff::record_network_execution(network_object, &input, &mut result, requested_state)?;
+    let execution::NetworkExecutionOutcome {
+        data,
+        output_axes,
+        state_updates,
+        trace,
+    } = execution::execute_network(execution::NetworkExecutionRequest {
+        network: network_object,
+        input: &input,
+        caller: execution::NetworkCaller::Forward,
+        output_layout: execution::NetworkOutputLayout::Preserve,
+    })
+    .await?;
+    let (data, state_updates, nodes) = if trace.is_some() {
+        let value = match data {
+            Value::Tensor(tensor) => execution::host::network::HostValue::Real(tensor),
+            Value::ComplexTensor(tensor) => execution::host::network::HostValue::Complex(tensor),
+            _ => {
+                return Err(deep_learning_error(
+                    "forward",
+                    "forward: host trace requires a host numerical output",
+                ))
+            }
+        };
+        let mut result = execution::host::network::HostExecutionResult {
+            value,
+            axes: output_axes.clone(),
+            trace,
+            next_state: state_updates,
+        };
+        let nodes = autodiff::record_network_execution(
+            network_object,
+            &input,
+            &mut result,
+            requested_state,
+        )?;
+        let data = match result.value {
+            execution::host::network::HostValue::Real(tensor) => Value::Tensor(tensor),
+            execution::host::network::HostValue::Complex(tensor) => Value::ComplexTensor(tensor),
+        };
+        (data, result.next_state, Some(nodes))
+    } else {
+        (data, state_updates, None)
+    };
     let format = if original_format.is_empty() {
         original_format
     } else {
-        prepared.output_axes().layout().labels()
-    };
-    let data = match result.value {
-        execution::host::network::HostValue::Real(tensor) => Value::Tensor(tensor),
-        execution::host::network::HostValue::Complex(tensor) => Value::ComplexTensor(tensor),
+        output_axes.layout().labels()
     };
     let prediction = if wrap_dlarray {
         let wrapped = object(
@@ -313,14 +289,18 @@ pub(super) async fn forward_builtin(
     let state = if requested_state {
         Some(state::publish_updates(
             network_object,
-            result.next_state,
+            state_updates,
             "forward",
         )?)
     } else {
         None
     };
-    let (prediction, state) =
-        autodiff::annotate_network_outputs(network_object, prediction, state, nodes)?;
+    let (prediction, state) = match nodes {
+        Some(nodes) => {
+            autodiff::annotate_network_outputs(network_object, prediction, state, nodes)?
+        }
+        None => (prediction, state),
+    };
     match state {
         Some(state) => Ok(Value::OutputList(vec![prediction, state])),
         None => Ok(prediction),

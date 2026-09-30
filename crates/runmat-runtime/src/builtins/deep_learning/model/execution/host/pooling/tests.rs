@@ -110,7 +110,7 @@ fn pool_adjoint_matches_finite_difference_and_rejects_empty_axis() {
     }
     let empty = Tensor::new(vec![], vec![2, 1, 0]).unwrap();
     assert!(matches!(
-        forward(&empty, &axes("CBT", &empty.shape)),
+        forward(&empty, &self::axes("CBT", &empty.shape)),
         Err(PoolError::EmptyPool)
     ));
 }

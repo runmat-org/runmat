@@ -78,17 +78,3 @@ pub(in crate::builtins) fn validate_sequential_topology(
     }
     Ok(())
 }
-
-/// Deferred construction can omit an input layer; executable forward cannot.
-pub(super) fn require_feature_input(layers: &[Value], function: &'static str) -> BuiltinResult<()> {
-    if matches!(layers.first(), Some(Value::Object(layer))
-        if ForwardLayerKind::from_identity(&layer.class_name) == Some(ForwardLayerKind::FeatureInput))
-    {
-        Ok(())
-    } else {
-        Err(deep_learning_error(
-            function,
-            format!("{function}: network must start with a featureInputLayer"),
-        ))
-    }
-}

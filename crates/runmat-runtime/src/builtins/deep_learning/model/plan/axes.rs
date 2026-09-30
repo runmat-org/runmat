@@ -95,15 +95,6 @@ impl AxisPlan {
         self.layout.index(label).map(|axis| self.shape[axis])
     }
 
-    pub(in crate::builtins::deep_learning) fn channel_size(
-        &self,
-    ) -> Result<usize, AxisGeometryError> {
-        self.axis_size(DeepLearningAxisLabel::Channel)
-            .ok_or(AxisGeometryError::MissingAxis(
-                DeepLearningAxisLabel::Channel,
-            ))
-    }
-
     /// A channel transform retains the physical order of every axis.
     pub(in crate::builtins::deep_learning) fn with_channel_extent(
         &self,

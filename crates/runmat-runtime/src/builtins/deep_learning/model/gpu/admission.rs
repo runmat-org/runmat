@@ -4,12 +4,12 @@
 use super::*;
 
 #[derive(Debug)]
-pub(super) enum GpuForwardAdmission {
+pub(in crate::builtins::deep_learning::model) enum GpuForwardAdmission {
     Ready(GpuForwardLayout),
     UnsupportedCapability(String),
 }
 
-pub(super) fn admit_gpu_forward(
+pub(in crate::builtins::deep_learning::model) fn admit_gpu_forward(
     layers: &[Value],
     input: &GpuTensorHandle,
     axes: &AxisPlan,
@@ -41,16 +41,6 @@ pub(super) fn require_gpu_forward_layers(
         return Err(unsupported_error(function, format!("{function}: {reason}")));
     }
     Ok(())
-}
-
-// Retained until the public forward wrapper is replaced by the shared route.
-pub(super) fn validate_gpu_forward_layers(
-    layers: &[Value],
-    input: &GpuTensorHandle,
-    layout: GpuForwardLayout,
-    function: &'static str,
-) -> BuiltinResult<()> {
-    require_gpu_forward_layers(layers, input, layout, function)
 }
 
 /// None means ready; Some is strictly a missing GPU capability. All invalid
