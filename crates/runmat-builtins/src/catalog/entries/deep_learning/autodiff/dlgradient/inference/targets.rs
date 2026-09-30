@@ -69,7 +69,7 @@ pub(super) fn gradient(target: &ValueFact) -> ValueFact {
             if object
                 .runtime_class
                 .as_ref()
-                .is_some_and(|class| runmat_types::standard::is_tabular(class)) =>
+                .is_some_and(runmat_types::standard::is_tabular) =>
         {
             tables::gradient(target, object)
         }
@@ -103,7 +103,7 @@ pub(super) fn check(target: &ValueFact, index: usize, diagnostics: &mut Vec<Infe
             if object
                 .runtime_class
                 .as_ref()
-                .is_some_and(|class| runmat_types::standard::is_tabular(class)) =>
+                .is_some_and(runmat_types::standard::is_tabular) =>
         {
             tables::check(object, index, diagnostics);
         }

@@ -253,10 +253,10 @@ fn validate_unary_forward_result(
     }
 }
 
-fn resident_parameter_handle<'a>(
-    layer: &'a ObjectInstance,
+fn resident_parameter_handle(
+    layer: &ObjectInstance,
     role: ParameterRole,
-) -> Option<&'a GpuTensorHandle> {
+) -> Option<&GpuTensorHandle> {
     let value = layer.properties.get(role.name())?;
     match value {
         Value::GpuTensor(handle) => Some(handle),
