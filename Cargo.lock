@@ -7532,6 +7532,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stacker",
+ "tempfile",
  "tracing",
  "wasm-bindgen-test",
 ]

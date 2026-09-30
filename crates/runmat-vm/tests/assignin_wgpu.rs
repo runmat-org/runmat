@@ -3,12 +3,12 @@ mod test_helpers;
 
 #[test]
 #[cfg(feature = "wgpu")]
+#[ignore = "requires an actual WGPU adapter; unavailable hardware fails when explicitly run"]
 fn assignin_wgpu_preserves_exact_resident_integer_value() {
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
 
-    if register_wgpu_provider(WgpuProviderOptions::default()).is_err() {
-        return;
-    }
+    register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual WGPU adapter required for assignin qualification");
     let vars = test_helpers::execute_source(
         "base = uint64(9007199254740992); source_gpu = gpuArray([base + uint64(1) intmax('uint64')]); assignin('base','assigned_gpu',source_gpu); copied = evalin('base','gather(assigned_gpu)');",
     )

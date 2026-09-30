@@ -18,9 +18,6 @@ impl AccelProvider for CountingProvider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("preflight must not download") })
     }
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        panic!("no allocation exists")
-    }
     fn device_info(&self) -> String {
         "preflight counter".into()
     }

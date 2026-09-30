@@ -52,8 +52,8 @@ fn strict_dot_store_updates_existing_handle_without_setfield_extension() {
             Value::Num(0.0);
             bytecode
                 .var_names
-                .iter()
-                .map(|(slot, _)| *slot + 1)
+                .keys()
+                .map(|slot| *slot + 1)
                 .max()
                 .unwrap()
         ];

@@ -864,7 +864,7 @@ impl AccelProvider for TestProvider {
                 .into_iter()
                 .map(|value| value as f32)
                 .collect::<Vec<_>>();
-            runmat_accelerate_api::upload_numeric_protecting(
+            Ok(runmat_accelerate_api::upload_numeric_protecting(
                 self,
                 &HostNumericTensorView {
                     data: HostNumericDataView::F32(&single),
@@ -872,7 +872,7 @@ impl AccelProvider for TestProvider {
                     storage: runmat_accelerate_api::GpuTensorStorage::Real,
                 },
                 &[input],
-            )
+            )?)
         })
     }
 
