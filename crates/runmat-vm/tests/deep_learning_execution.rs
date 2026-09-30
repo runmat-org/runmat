@@ -33,15 +33,15 @@ fn compiled_prediction_reverse_inverts_rank_changing_output_presentation() {
         net = dlnetwork({sequenceInputLayer(2); globalAveragePooling1dLayer()});
         x = dlarray(single(reshape(1:24, 2, 3, 4)));
         [loss, gradient] = dlfeval(@weightedPrediction, net, x);
-        assert(strcmp(class(loss.Data), 'single'));
-        assert(strcmp(class(gradient.Data), 'single'));
-        assert(loss.Data == single(275));
+        assert(strcmp(class(loss.Data), 'single'), 'weighted loss must retain single');
+        assert(strcmp(class(gradient.Data), 'single'), 'prediction gradient must retain single');
+        assert(loss.Data == single(275), 'weighted prediction loss must equal 275');
         expected = repmat(single([1 2 3; 4 5 6]) / single(4), 1, 1, 4);
-        assert(isequal(size(gradient.Data), [2 3 4]));
-        assert(isequal(gradient.Data, expected));
+        assert(isequal(size(gradient.Data), [2 3 4]), 'prediction gradient must restore CBT geometry');
+        assert(isequal(gradient.Data, expected), 'prediction gradient must invert the presentation permutation');
         function [loss, gradient] = weightedPrediction(net, x)
             prediction = predict(net, x);
-            assert(isempty(prediction.Format));
+            assert(strcmp(prediction.Format, ''), 'unformatted prediction must remain unformatted');
             weights = dlarray(single([1 4; 2 5; 3 6]));
             loss = sum(prediction .* weights, 'all');
             gradient = dlgradient(loss, x);
