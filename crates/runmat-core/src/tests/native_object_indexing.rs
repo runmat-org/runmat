@@ -1,0 +1,72 @@
+//! Public object-subscript behavior through actual hot native execution.
+
+use crate::{execute_text_request_for_testing, RunMatSession};
+use runmat_jit::tiering::TieringConfig;
+use runmat_value::Value;
+
+fn assert_hot(setup: &str, source: &str, expected: &[(&str, Value)]) {
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(true, false).unwrap();
+        session.set_native_tiering_config_for_testing(TieringConfig {
+            generic_hot_threshold: 1,
+            specialized_hot_threshold: 100,
+            deterministic: true,
+            ..Default::default()
+        });
+        if !setup.is_empty() {
+            let outcome = execute_text_request_for_testing(&mut session, setup).unwrap();
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        }
+        let mut native_calls = 0;
+        for _ in 0..5 {
+            let outcome = execute_text_request_for_testing(&mut session, source).unwrap();
+            assert!(outcome.error.is_none(), "{:?}", outcome.error);
+            native_calls += usize::from(outcome.used_jit);
+            for (name, value) in expected {
+                assert_eq!(session.get_variables().get(*name), Some(value), "{name}");
+            }
+        }
+        assert!(
+            native_calls >= 2,
+            "public indexing must execute native code"
+        );
+    });
+}
+
+#[test]
+fn native_public_subscript_numeric_defaults_preserve_values() {
+    assert_hot(
+        "",
+        "values = [10, 20]; S = struct('type', '()', 'subs', {{2}}); selected = subsref(values, S); changed = subsasgn(values, S, 99); assigned = changed(2); untouched = changed(1);",
+        &[
+            ("selected", Value::Num(20.0)),
+            ("assigned", Value::Num(99.0)),
+            ("untouched", Value::Num(10.0)),
+        ],
+    );
+}
+
+#[test]
+fn native_public_subscript_object_growth_uses_canonical_scatter() {
+    assert_hot(
+        "__register_test_classes();",
+        "p = new_object('Point'); q = new_object('Point'); q.x = 77; S = struct('type', '()', 'subs', {{2}}); p = subsasgn(p, S, q); count = numel(p); second = p(2); first = p(1); assigned = second.x; untouched = first.x;",
+        &[
+            ("count", Value::Num(2.0)),
+            ("assigned", Value::Num(77.0)),
+            ("untouched", Value::Num(0.0)),
+        ],
+    );
+}
+
+#[test]
+fn native_public_subscript_rejects_malformed_selector_with_owning_identifier() {
+    assert_hot(
+        "",
+        "S = struct('type', '()', 'subs', 42); read_id = ''; write_id = ''; try\nselected = subsref([10,20], S);\ncatch err\nread_id = err.identifier;\nend\ntry\nchanged = subsasgn([10,20], S, 99);\ncatch err\nwrite_id = err.identifier;\nend",
+        &[
+            ("read_id", Value::String("RunMat:InvalidObjectSubscriptPath".into())),
+            ("write_id", Value::String("RunMat:InvalidObjectSubscriptPath".into())),
+        ],
+    );
+}

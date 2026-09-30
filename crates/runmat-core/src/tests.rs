@@ -11,6 +11,9 @@ mod native_definition_identity;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_deep_learning.rs"]
 mod native_deep_learning;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_object_indexing.rs"]
+mod native_object_indexing;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
