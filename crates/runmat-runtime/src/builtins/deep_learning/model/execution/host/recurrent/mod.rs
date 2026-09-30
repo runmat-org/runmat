@@ -7,7 +7,9 @@ mod gates;
 mod geometry;
 
 pub(in crate::builtins::deep_learning) use backward::{backward, RecurrentGradients};
-pub(in crate::builtins::deep_learning) use forward::{forward, RecurrentOutput, RecurrentTrace};
+pub(in crate::builtins::deep_learning) use forward::{
+    forward, RecurrentBackwardCache, RecurrentOutput,
+};
 pub(in crate::builtins::deep_learning) use geometry::{
     Activation, GateActivation, OutputMode, RecurrentError, RecurrentOptions,
 };

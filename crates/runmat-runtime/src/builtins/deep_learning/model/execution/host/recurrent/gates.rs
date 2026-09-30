@@ -18,6 +18,8 @@ pub(super) trait Real:
     fn exp(self) -> Self;
     fn tanh(self) -> Self;
     fn abs(self) -> Self;
+    fn is_nan(self) -> bool;
+    fn is_infinite(self) -> bool;
 }
 
 macro_rules! impl_real {
@@ -40,6 +42,12 @@ macro_rules! impl_real {
             }
             fn abs(self) -> Self {
                 self.abs()
+            }
+            fn is_nan(self) -> bool {
+                self.is_nan()
+            }
+            fn is_infinite(self) -> bool {
+                self.is_infinite()
             }
         }
     };
@@ -74,9 +82,19 @@ pub(super) fn gate_row(direction: usize, gate: Gate, unit: usize, hidden_size: u
 pub(super) fn state<T: Real>(kind: Activation, value: T) -> T {
     match kind {
         Activation::Tanh => value.tanh(),
-        Activation::Softsign => value / (T::one() + value.abs()),
+        Activation::Softsign => {
+            if value.is_infinite() {
+                if value > T::zero() {
+                    T::one()
+                } else {
+                    -T::one()
+                }
+            } else {
+                value / (T::one() + value.abs())
+            }
+        }
         Activation::Relu => {
-            if value > T::zero() {
+            if value.is_nan() || value > T::zero() {
                 value
             } else {
                 T::zero()
@@ -89,11 +107,13 @@ pub(super) fn state_derivative<T: Real>(kind: Activation, value: T, activated: T
     match kind {
         Activation::Tanh => T::one() - activated * activated,
         Activation::Softsign => {
-            let denom = T::one() + value.abs();
-            T::one() / (denom * denom)
+            let reciprocal = T::one() / (T::one() + value.abs());
+            reciprocal * reciprocal
         }
         Activation::Relu => {
-            if value > T::zero() {
+            if value.is_nan() {
+                value
+            } else if value > T::zero() {
                 T::one()
             } else {
                 T::zero()
@@ -130,7 +150,9 @@ pub(super) fn gate_derivative<T: Real>(kind: GateActivation, preactivation: T, a
     match kind {
         GateActivation::Sigmoid => activated * (T::one() - activated),
         GateActivation::HardSigmoid => {
-            if preactivation > T::from_f64(-2.5) && preactivation < T::from_f64(2.5) {
+            if preactivation.is_nan() {
+                preactivation
+            } else if preactivation > T::from_f64(-2.5) && preactivation < T::from_f64(2.5) {
                 T::from_f64(0.2)
             } else {
                 T::zero()

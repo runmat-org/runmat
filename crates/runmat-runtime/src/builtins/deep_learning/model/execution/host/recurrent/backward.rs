@@ -2,7 +2,7 @@ use runmat_value::{NumericStorage, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 
-use super::forward::{trace_index, RecurrentOutput, RecurrentTrace};
+use super::forward::{trace_index, RecurrentBackwardCache, RecurrentTrace};
 use super::gates::{gate_derivative, gate_row, state, state_derivative, Gate, Real};
 use super::geometry::{Geometry, OutputMode, RecurrentError, RecurrentOptions};
 use super::required_slice;
@@ -27,7 +27,7 @@ pub(in crate::builtins::deep_learning) fn backward(
     initial_cell: Option<&Tensor>,
     axes: &AxisPlan,
     options: RecurrentOptions,
-    forward: &RecurrentOutput,
+    cache: &RecurrentBackwardCache,
     output_gradient: &Tensor,
     terminal_hidden_gradient: Option<&Tensor>,
     terminal_cell_gradient: Option<&Tensor>,
@@ -42,11 +42,10 @@ pub(in crate::builtins::deep_learning) fn backward(
         axes,
         options,
     )?;
-    if forward.tensor.shape != g.output_shape
-        || output_gradient.shape != g.output_shape
-        || forward.axes != g.output_axes
+    if output_gradient.shape != g.output_shape
+        || &cache.source_axes != axes
+        || cache.output_axes != g.output_axes
         || output_gradient.numeric_dtype() != input.numeric_dtype()
-        || forward.tensor.numeric_dtype() != input.numeric_dtype()
     {
         return Err(RecurrentError::Invalid(
             "forward output and gradient must match admitted recurrent shape, axes, and class",
@@ -64,10 +63,9 @@ pub(in crate::builtins::deep_learning) fn backward(
         }
     }
     let expected_trace_len = 9 * g.directions * g.options.hidden_size * g.batches * g.steps;
-    let trace_len = match &forward.trace {
-        Some(RecurrentTrace::F32(values)) => values.len(),
-        Some(RecurrentTrace::F64(values)) => values.len(),
-        None => 0,
+    let trace_len = match &cache.trace {
+        RecurrentTrace::F32(values) => values.len(),
+        RecurrentTrace::F64(values) => values.len(),
     };
     if trace_len != expected_trace_len {
         return Err(RecurrentError::Invalid(
@@ -79,9 +77,9 @@ pub(in crate::builtins::deep_learning) fn backward(
         input_weights.as_f32_slice(),
         recurrent_weights.as_f32_slice(),
         output_gradient.as_f32_slice(),
-        &forward.trace,
+        &cache.trace,
     ) {
-        (Some(x), Some(w), Some(r), Some(dy), Some(RecurrentTrace::F32(trace))) => {
+        (Some(x), Some(w), Some(r), Some(dy), RecurrentTrace::F32(trace)) => {
             let h0 = required_slice(initial_hidden.map(Tensor::as_f32_slice))?;
             let c0 = required_slice(initial_cell.map(Tensor::as_f32_slice))?;
             let dh_terminal = required_slice(terminal_hidden_gradient.map(Tensor::as_f32_slice))?;
@@ -102,9 +100,9 @@ pub(in crate::builtins::deep_learning) fn backward(
             input_weights.as_f64_slice(),
             recurrent_weights.as_f64_slice(),
             output_gradient.as_f64_slice(),
-            &forward.trace,
+            &cache.trace,
         ) {
-            (Some(x), Some(w), Some(r), Some(dy), Some(RecurrentTrace::F64(trace))) => {
+            (Some(x), Some(w), Some(r), Some(dy), RecurrentTrace::F64(trace)) => {
                 let h0 = required_slice(initial_hidden.map(Tensor::as_f64_slice))?;
                 let c0 = required_slice(initial_cell.map(Tensor::as_f64_slice))?;
                 let dh_terminal =
@@ -199,6 +197,9 @@ fn backward_values<T: Real>(
             }
             let mut dh_previous = vec![T::zero(); hidden_size];
             let mut dc_previous = vec![T::zero(); hidden_size];
+            let mut prior_hidden = vec![T::zero(); hidden_size];
+            let mut prior_cell = vec![T::zero(); hidden_size];
+            let mut input_offsets = vec![0usize; g.input_channels];
             for reverse_step in 0..g.steps {
                 let time = if direction == 0 {
                     g.steps - 1 - reverse_step
@@ -215,13 +216,25 @@ fn backward_values<T: Real>(
                 } else {
                     (time + 1).min(g.steps - 1)
                 };
-                for hidden in 0..hidden_size {
-                    let state_index = g.state_offset(direction, hidden, batch);
-                    let previous_cell = if first_step {
+                for previous in 0..hidden_size {
+                    let state_index = g.state_offset(direction, previous, batch);
+                    prior_cell[previous] = if first_step {
                         c0.map_or(T::zero(), |state| state[state_index])
                     } else {
-                        traced(trace, g, 8, direction, batch, prior_time, hidden)
+                        traced(trace, g, 8, direction, batch, prior_time, previous)
                     };
+                    prior_hidden[previous] = if first_step {
+                        h0.map_or(T::zero(), |state| state[state_index])
+                    } else {
+                        let prior_o = traced(trace, g, 7, direction, batch, prior_time, previous);
+                        prior_o * state(g.options.state_activation, prior_cell[previous])
+                    };
+                }
+                for (channel, offset) in input_offsets.iter_mut().enumerate() {
+                    *offset = g.input_offset(channel, batch, time);
+                }
+                for hidden in 0..hidden_size {
+                    let previous_cell = prior_cell[hidden];
                     let i = traced(trace, g, 4, direction, batch, time, hidden);
                     let f = traced(trace, g, 5, direction, batch, time, hidden);
                     let candidate = traced(trace, g, 6, direction, batch, time, hidden);
@@ -279,23 +292,12 @@ fn backward_values<T: Real>(
                     ] {
                         let row = gate_row(direction, gate, hidden, hidden_size);
                         db[row] += gradient;
-                        for channel in 0..g.input_channels {
-                            let input_index = g.input_offset(channel, batch, time);
+                        for (channel, &input_index) in input_offsets.iter().enumerate() {
                             dw[row + channel * rows] += gradient * x[input_index];
                             dx[input_index] += gradient * w[row + channel * rows];
                         }
                         for previous in 0..hidden_size {
-                            let previous_state_index = g.state_offset(direction, previous, batch);
-                            let h_prev = if first_step {
-                                h0.map_or(T::zero(), |state| state[previous_state_index])
-                            } else {
-                                let prior_cell =
-                                    traced(trace, g, 8, direction, batch, prior_time, previous);
-                                let prior_o =
-                                    traced(trace, g, 7, direction, batch, prior_time, previous);
-                                prior_o * state(g.options.state_activation, prior_cell)
-                            };
-                            dr[row + previous * rows] += gradient * h_prev;
+                            dr[row + previous * rows] += gradient * prior_hidden[previous];
                             dh_previous[previous] += gradient * r[row + previous * rows];
                         }
                     }

@@ -14,10 +14,16 @@ pub(in crate::builtins::deep_learning) struct RecurrentOutput {
     pub axes: AxisPlan,
     pub hidden_state: Tensor,
     pub cell_state: Tensor,
-    pub trace: Option<RecurrentTrace>,
+    pub cache: Option<RecurrentBackwardCache>,
 }
 
-pub(in crate::builtins::deep_learning) enum RecurrentTrace {
+pub(in crate::builtins::deep_learning) struct RecurrentBackwardCache {
+    pub(super) source_axes: AxisPlan,
+    pub(super) output_axes: AxisPlan,
+    pub(super) trace: RecurrentTrace,
+}
+
+pub(super) enum RecurrentTrace {
     F32(Vec<f32>),
     F64(Vec<f64>),
 }
@@ -90,6 +96,11 @@ pub(in crate::builtins::deep_learning) fn forward(
         return Err(RecurrentError::UnsupportedPrecision);
     };
     let state_shape = vec![g.directions * options.hidden_size, g.batches];
+    let cache = trace.map(|trace| RecurrentBackwardCache {
+        source_axes: axes.clone(),
+        output_axes: g.output_axes.clone(),
+        trace,
+    });
     Ok(RecurrentOutput {
         tensor: Tensor::from_numeric_storage(output, g.output_shape.clone())
             .map_err(RecurrentError::Storage)?,
@@ -98,7 +109,7 @@ pub(in crate::builtins::deep_learning) fn forward(
             .map_err(RecurrentError::Storage)?,
         cell_state: Tensor::from_numeric_storage(cell, state_shape)
             .map_err(RecurrentError::Storage)?,
-        trace,
+        cache,
     })
 }
 
@@ -134,12 +145,16 @@ pub(super) fn forward_values<T: Real>(
             let mut pre = vec![T::zero(); GATE_COUNT * hidden_size];
             let mut h_next = vec![T::zero(); hidden_size];
             let mut c_next = vec![T::zero(); hidden_size];
+            let mut input_offsets = vec![0usize; g.input_channels];
             for step in 0..g.steps {
                 let time = if direction == 0 {
                     step
                 } else {
                     g.steps - 1 - step
                 };
+                for (channel, offset) in input_offsets.iter_mut().enumerate() {
+                    *offset = g.input_offset(channel, batch, time);
+                }
                 for (gate_number, gate_kind) in
                     [Gate::Input, Gate::Forget, Gate::Candidate, Gate::Output]
                         .iter()
@@ -148,9 +163,8 @@ pub(super) fn forward_values<T: Real>(
                     for hidden in 0..hidden_size {
                         let row = gate_row(direction, *gate_kind, hidden, hidden_size);
                         let mut sum = b[row];
-                        for channel in 0..g.input_channels {
-                            sum +=
-                                w[row + channel * rows] * x[g.input_offset(channel, batch, time)];
+                        for (channel, &input_index) in input_offsets.iter().enumerate() {
+                            sum += w[row + channel * rows] * x[input_index];
                         }
                         for previous in 0..hidden_size {
                             sum += r[row + previous * rows] * h_prev[previous];
