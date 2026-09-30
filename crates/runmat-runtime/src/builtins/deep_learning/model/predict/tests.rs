@@ -1,6 +1,6 @@
 use futures::executor::block_on;
 use runmat_accelerate_api::{GpuHandleProvenance, HostTensorView};
-use runmat_value::{CellArray, Tensor, Value};
+use runmat_value::{CellArray, IntegerStorage, Tensor, Value};
 
 use super::*;
 use crate::builtins::deep_learning::layers::{
@@ -141,4 +141,23 @@ fn explicit_column_observations_return_batch_major_scores_without_download() {
             crate::builtins::common::test_support::gather(Value::GpuTensor(output)).unwrap();
         assert_eq!(gathered.materialize_f64(), vec![0.5, 2.5, 4.5]);
     });
+}
+
+#[test]
+fn documented_integer_predictors_do_not_inherit_forward_extension_gate() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let input = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::I32(vec![1, 3, 2, 4]), vec![2, 2]).unwrap(),
+    );
+    let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        network(),
+        input,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Tensor(output) = output else {
+        panic!("host score tensor expected")
+    };
+    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.materialize_f64(), vec![0.5, 2.5]);
 }
