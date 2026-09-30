@@ -53,14 +53,20 @@ pub(in crate::builtins::deep_learning) async fn adamupdate_builtin(
     let has_gpu_input = args
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)));
+    let has_explicit_gpu_input = args
+        .iter()
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu);
     if has_gpu_input {
         preflight_adam_host_operands(&args)?;
     }
     let options = if has_gpu_input {
         match try_adamupdate_gpu(&args)? {
             Some(eval) => return eval.output(),
+            None if has_explicit_gpu_input => return Err(explicit_gpu_fallback_error()),
             None => AdamUpdateArgs::parse(gather_args(args).await?)?,
         }
+    } else if has_explicit_gpu_input {
+        return Err(explicit_gpu_fallback_error());
     } else {
         AdamUpdateArgs::parse(args)?
     };
@@ -80,6 +86,14 @@ pub(in crate::builtins::deep_learning) async fn adamupdate_builtin(
             format!("adamupdate: requested {requested} outputs, but at most 3 are supported"),
         )),
     }
+}
+
+fn explicit_gpu_fallback_error() -> crate::RuntimeError {
+    super::super::errors::descriptor_error(
+        "adamupdate",
+        "adamupdate: explicit gpuArray inputs require a supported resident Adam provider path",
+        &runmat_builtins::ADAMUPDATE_UNSUPPORTED,
+    )
 }
 
 /// Reject known host errors before a mixed-residency fallback downloads a

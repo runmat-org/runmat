@@ -84,14 +84,24 @@ pub(super) async fn crossentropy_builtin(
         )?;
     }
     admission::preflight_host_decidable(&predictions, &targets, &rest)?;
+    let explicit_gpu_input = std::iter::once(&predictions)
+        .chain(std::iter::once(&targets))
+        .chain(rest.iter())
+        .any(crate::builtins::common::validation::value_contains_explicit_gpu);
     let has_gpu = matches!(&predictions, Value::GpuTensor(_))
         || matches!(&targets, Value::GpuTensor(_))
         || rest
             .iter()
             .any(|value| matches!(value, Value::GpuTensor(_)));
+    if explicit_gpu_input && !has_gpu {
+        return Err(explicit_gpu_fallback_error());
+    }
     let (predictions, targets) = if has_gpu {
         if let Some(value) = try_crossentropy_gpu(&predictions, &targets, &rest).await? {
             return Ok(value);
+        }
+        if explicit_gpu_input {
+            return Err(explicit_gpu_fallback_error());
         }
         let mut gathered = gather_args(vec![predictions, targets]).await?;
         (gathered.remove(0), gathered.remove(0))
@@ -157,4 +167,12 @@ pub(super) async fn crossentropy_builtin(
         }
         CrossentropyReduction::None => predictions.materialize_array(weighted_losses, false),
     }
+}
+
+fn explicit_gpu_fallback_error() -> crate::RuntimeError {
+    super::errors::descriptor_error(
+        "crossentropy",
+        "crossentropy: explicit gpuArray inputs require a supported resident cross-entropy provider path",
+        &runmat_builtins::CROSSENTROPY_UNSUPPORTED,
+    )
 }

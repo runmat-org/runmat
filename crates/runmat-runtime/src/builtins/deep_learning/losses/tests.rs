@@ -1,5 +1,6 @@
 use super::*;
 use futures::executor::block_on;
+use runmat_accelerate_api::GpuHandleProvenance;
 use runmat_value::IntegerStorage;
 
 #[test]
@@ -98,5 +99,117 @@ fn invalid_host_target_rejects_before_provider_execution() {
         .expect_err("invalid target probability");
         assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn explicit_resident_weights_keep_unreduced_losses_resident_and_explicit() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let predictions = provider
+            .upload(&HostTensorView {
+                data: &[0.8, 0.2],
+                shape: &shape,
+            })
+            .unwrap();
+        let targets = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0],
+                shape: &shape,
+            })
+            .unwrap();
+        let weights = provider
+            .upload(&HostTensorView {
+                data: &[2.0, 3.0],
+                shape: &shape,
+            })
+            .unwrap()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        provider.reset_telemetry();
+        let output = block_on(crossentropy_builtin(
+            Value::GpuTensor(predictions.clone()),
+            Value::GpuTensor(targets.clone()),
+            vec![
+                Value::GpuTensor(weights.clone()),
+                Value::String("ClassificationMode".into()),
+                Value::String("multi-label".into()),
+                Value::String("Reduction".into()),
+                Value::String("none".into()),
+            ],
+        ))
+        .unwrap();
+        let Value::GpuTensor(handle) = &output else {
+            panic!("expected resident losses")
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(handle));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let losses = crate::builtins::common::test_support::gather(output).unwrap();
+        assert!((losses.materialize_f64()[0] + 2.0 * 0.8_f64.ln()).abs() < 1e-12);
+        assert!((losses.materialize_f64()[1] + 3.0 * 0.8_f64.ln()).abs() < 1e-12);
+        for input in [&predictions, &targets, &weights] {
+            assert!(input.allocation_lease().validate_live().is_ok());
+        }
+    });
+}
+
+#[test]
+fn explicit_unsupported_normalization_rejects_without_download_while_automatic_falls_back() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let predictions = provider
+            .upload(&HostTensorView {
+                data: &[0.8, 0.2],
+                shape: &shape,
+            })
+            .unwrap();
+        let targets = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0],
+                shape: &shape,
+            })
+            .unwrap();
+        let explicit = predictions
+            .clone()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        let options = || {
+            vec![
+                Value::String("ClassificationMode".into()),
+                Value::String("multi-label".into()),
+                Value::String("Mask".into()),
+                Value::LogicalArray(
+                    runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap(),
+                ),
+                Value::String("NormalizationFactor".into()),
+                Value::String("mask-included".into()),
+            ]
+        };
+        provider.reset_telemetry();
+        let error = block_on(crossentropy_builtin(
+            Value::GpuTensor(explicit),
+            Value::GpuTensor(targets.clone()),
+            options(),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(predictions.allocation_lease().validate_live().is_ok());
+        assert!(targets.allocation_lease().validate_live().is_ok());
+
+        provider.reset_telemetry();
+        let result = block_on(crossentropy_builtin(
+            Value::GpuTensor(predictions),
+            Value::GpuTensor(targets),
+            options(),
+        ))
+        .unwrap();
+        let Value::Num(loss) = result else {
+            panic!("expected host fallback scalar")
+        };
+        assert!((loss + 0.8_f64.ln()).abs() < 1e-12);
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
     });
 }

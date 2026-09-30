@@ -1,5 +1,5 @@
 use super::*;
-use runmat_accelerate_api::{ProviderExecutionError, ProviderPrecision};
+use runmat_accelerate_api::{NumericUploadError, ProviderExecutionError, ProviderPrecision};
 
 pub(super) async fn try_crossentropy_gpu(
     predictions: &Value,
@@ -35,7 +35,7 @@ pub(super) async fn try_crossentropy_gpu(
         ));
     }
 
-    let Some(options) = GpuCrossentropyOptions::from_args(rest.to_vec(), predictions.shape())?
+    let Some(mut options) = GpuCrossentropyOptions::from_args(rest.to_vec(), predictions.shape())?
     else {
         return Ok(None);
     };
@@ -63,56 +63,56 @@ pub(super) async fn try_crossentropy_gpu(
     validate_live(predictions)?;
     validate_live(targets)?;
 
-    let mut temporary_inputs = Vec::new();
-    let weights = match materialize_gpu_loss_factor(
-        provider,
-        options.weights.as_ref(),
-        predictions.shape(),
-        "weights",
-        &mut temporary_inputs,
-    ) {
-        Ok(handle) => handle,
-        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
-            return Ok(None)
-        }
-        Err(err) => return Err(provider_error(err)),
-    };
-    let mask = match materialize_gpu_loss_factor(
-        provider,
-        options.mask.as_ref(),
-        predictions.shape(),
-        "mask",
-        &mut temporary_inputs,
-    ) {
-        Ok(handle) => handle,
-        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
-            return Ok(None)
-        }
-        Err(err) => return Err(provider_error(err)),
-    };
-
-    for factor in [weights.as_ref(), mask.as_ref()].into_iter().flatten() {
-        if runmat_accelerate_api::handle_storage(factor) != GpuTensorStorage::Real
-            || runmat_accelerate_api::handle_is_logical(factor)
-            || runmat_accelerate_api::handle_precision(factor) != precision
-            || crate::builtins::common::gpu_helpers::exact_provider_for_handle(factor)
+    for factor in [options.weights.as_ref(), options.mask.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        let GpuLossFactor::Resident(handle) = factor else {
+            continue;
+        };
+        if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle) != precision
+            || crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
                 .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
         {
             return Ok(None);
         }
-        validate_live(factor)?;
-    }
-    for temporary in &temporary_inputs {
-        validate_result_handle(
-            temporary,
-            predictions.shape(),
-            precision,
-            provider,
-            &[predictions, targets],
-        )?;
+        validate_live(handle)?;
     }
 
-    let result = match provider.crossentropy_terms(&ProviderCrossentropyRequest {
+    let mut protected = vec![predictions, targets];
+    if let Some(GpuLossFactor::Resident(handle)) = options.mask.as_ref() {
+        protected.push(handle);
+    }
+    let weights = match materialize_gpu_loss_factor(
+        provider,
+        options.weights.take(),
+        predictions.shape(),
+        precision.expect("real prediction precision was admitted"),
+        "weights",
+        &protected,
+    )? {
+        MaterializedFactor::Ready(handle) => handle,
+        MaterializedFactor::Unsupported => return Ok(None),
+    };
+    protected = vec![predictions, targets];
+    if let Some(handle) = weights.as_ref() {
+        protected.push(handle);
+    }
+    let mask = match materialize_gpu_loss_factor(
+        provider,
+        options.mask.take(),
+        predictions.shape(),
+        precision.expect("real prediction precision was admitted"),
+        "mask",
+        &protected,
+    )? {
+        MaterializedFactor::Ready(handle) => handle,
+        MaterializedFactor::Unsupported => return Ok(None),
+    };
+
+    let mut result = match provider.crossentropy_terms(&ProviderCrossentropyRequest {
         predictions,
         targets,
         weights: weights.as_ref(),
@@ -139,6 +139,10 @@ pub(super) async fn try_crossentropy_gpu(
         provider,
         &borrowed.into_iter().flatten().collect::<Vec<_>>(),
     )?;
+    crate::builtins::common::gpu_helpers::propagate_output_provenance(
+        &mut result.losses,
+        borrowed.into_iter().flatten(),
+    )?;
 
     match options.reduction {
         CrossentropyReduction::None => Ok(Some(
@@ -152,13 +156,9 @@ pub(super) async fn try_crossentropy_gpu(
                 }
                 Err(err) => return Err(provider_error(err)),
             };
-            validate_result_handle(
-                &sum,
-                &[1, 1],
-                precision,
-                provider,
-                &[predictions, targets, &result.losses],
-            )?;
+            let mut sum_protected = vec![predictions, targets, &result.losses];
+            sum_protected.extend(factor_handles.into_iter().flatten());
+            validate_result_handle(&sum, &[1, 1], precision, provider, &sum_protected)?;
             let scalar = match provider.read_scalar(&sum, 0) {
                 Ok(value) => value / options.normalization_denominator(len, predictions.shape())?,
                 Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
@@ -347,31 +347,67 @@ impl GpuLossFactor {
     }
 }
 
+enum MaterializedFactor {
+    Ready(Option<GpuTensorHandle>),
+    Unsupported,
+}
+
 fn materialize_gpu_loss_factor(
     provider: &dyn AccelProvider,
-    factor: Option<&GpuLossFactor>,
+    factor: Option<GpuLossFactor>,
     shape: &[usize],
+    precision: ProviderPrecision,
     label: &'static str,
-    temporary_inputs: &mut Vec<GpuTensorHandle>,
-) -> anyhow::Result<Option<GpuTensorHandle>> {
+    protected: &[&GpuTensorHandle],
+) -> BuiltinResult<MaterializedFactor> {
     match factor {
-        Some(GpuLossFactor::Resident(handle)) => Ok(Some(handle.clone())),
+        Some(GpuLossFactor::Resident(handle)) => Ok(MaterializedFactor::Ready(Some(handle))),
         Some(GpuLossFactor::Host(data)) => {
-            let expected = shape
-                .iter()
-                .try_fold(1usize, |product, dimension| product.checked_mul(*dimension))
-                .ok_or_else(|| {
-                    anyhow::anyhow!("{label} element count exceeds addressable storage")
-                })?;
-            anyhow::ensure!(
-                data.len() == expected,
-                "{label} length does not match prediction shape"
-            );
-            let handle = provider.upload(&HostTensorView { data, shape })?;
-            temporary_inputs.push(handle.clone());
-            Ok(Some(handle))
+            let dtype = match precision {
+                ProviderPrecision::F32 => NumericDType::F32,
+                ProviderPrecision::F64 => NumericDType::F64,
+            };
+            let tensor = Tensor::new_with_dtype(data, shape.to_vec(), dtype).map_err(|error| {
+                deep_learning_error(
+                    "crossentropy",
+                    format!("crossentropy: {label} cannot be represented with prediction shape: {error}"),
+                )
+            })?;
+            if !(0..tensor.len()).all(|index| {
+                tensor
+                    .numeric_value_at(index)
+                    .is_some_and(runmat_value::NumericScalar::is_finite)
+            }) {
+                return Err(deep_learning_error(
+                    "crossentropy",
+                    format!("crossentropy: {label} is not finite in the prediction precision"),
+                ));
+            }
+            let handle = match crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+                provider, &tensor, protected,
+            ) {
+                Ok(handle) => handle,
+                Err(NumericUploadError::Provider(error))
+                    if runmat_accelerate_api::is_unsupported_provider_operation(&error) =>
+                {
+                    return Ok(MaterializedFactor::Unsupported);
+                }
+                Err(NumericUploadError::Provider(error)) => return Err(provider_error(error)),
+                Err(error) => {
+                    return Err(crate::build_runtime_error(format!(
+                        "crossentropy: invalid {label} upload: {error}"
+                    ))
+                    .with_builtin("crossentropy")
+                    .with_identifier("RunMat:deepLearning:InvalidInput")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .with_source(error)
+                    .build());
+                }
+            };
+            validate_result_handle(&handle, shape, Some(precision), provider, protected)?;
+            Ok(MaterializedFactor::Ready(Some(handle)))
         }
-        None => Ok(None),
+        None => Ok(MaterializedFactor::Ready(None)),
     }
 }
 
@@ -430,6 +466,7 @@ fn validate_result_handle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
 
     #[test]
     fn operational_error_with_unsupported_words_does_not_become_fallback() {
@@ -465,6 +502,71 @@ mod tests {
                 validate_result_handle(&result, &[2, 1], precision, provider, &[&input]).is_err()
             );
             validate_result_handle(&result, &[1, 2], precision, provider, &[&input]).unwrap();
+        });
+    }
+
+    #[test]
+    fn host_factor_upload_uses_prediction_precision_and_keeps_borrowed_inputs_live() {
+        crate::builtins::common::test_support::with_f32_test_provider(|provider| {
+            let shape = [1usize, 2usize];
+            let predictions = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&[0.8, 0.2]),
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            provider.reset_telemetry();
+            let result = materialize_gpu_loss_factor(
+                provider,
+                Some(GpuLossFactor::Host(vec![2.0, 3.0])),
+                &shape,
+                ProviderPrecision::F32,
+                "weights",
+                &[&predictions],
+            )
+            .unwrap();
+            let MaterializedFactor::Ready(Some(weights)) = result else {
+                panic!("expected resident factor")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&weights),
+                Some(ProviderPrecision::F32)
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            let gathered =
+                crate::builtins::common::test_support::gather(Value::GpuTensor(weights)).unwrap();
+            assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
+            assert_eq!(gathered.materialize_f64(), vec![2.0, 3.0]);
+            assert!(predictions.allocation_lease().validate_live().is_ok());
+        });
+    }
+
+    #[test]
+    fn invalid_f32_factor_is_rejected_before_upload_or_borrowed_input_download() {
+        crate::builtins::common::test_support::with_f32_test_provider(|provider| {
+            let shape = [1usize, 1usize];
+            let predictions = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data: HostNumericDataView::F32(&[0.8]),
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            provider.reset_telemetry();
+            let error = materialize_gpu_loss_factor(
+                provider,
+                Some(GpuLossFactor::Host(vec![f64::MAX])),
+                &shape,
+                ProviderPrecision::F32,
+                "weights",
+                &[&predictions],
+            )
+            .err()
+            .expect("f32 overflow must reject");
+            assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(predictions.allocation_lease().validate_live().is_ok());
         });
     }
 }

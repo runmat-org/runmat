@@ -56,7 +56,13 @@ pub const CROSSENTROPY_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescr
     when: "Input class, shape, finite values, target range, weights, mask, option list, or requested output count is invalid.",
     message: "crossentropy: invalid prediction, target, weighting, or option input",
 };
-const ERRORS: [BuiltinErrorDescriptor; 1] = [CROSSENTROPY_INVALID_INPUT];
+pub const CROSSENTROPY_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DEEP_LEARNING.UNSUPPORTED",
+    identifier: Some("RunMat:deepLearning:Unsupported"),
+    when: "An explicit gpuArray input has no supported resident provider form; automatic residency alone may use the admitted host fallback.",
+    message: "crossentropy: explicit gpuArray requires a supported resident provider path",
+};
+const ERRORS: [BuiltinErrorDescriptor; 2] = [CROSSENTROPY_INVALID_INPUT, CROSSENTROPY_UNSUPPORTED];
 pub const CROSSENTROPY_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "crossentropy-integer-numeric-input",
     mode: BuiltinExtensionMode::RunMatOnly,

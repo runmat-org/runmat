@@ -3,7 +3,9 @@
 use super::*;
 
 fn host_payload(value: &Value, label: &'static str) -> BuiltinResult<Option<LossPayload>> {
-    if matches!(value, Value::GpuTensor(_)) {
+    if matches!(value, Value::GpuTensor(_))
+        || crate::builtins::common::validation::value_contains_explicit_gpu(value)
+    {
         Ok(None)
     } else {
         LossPayload::parse(value, label).map(Some)

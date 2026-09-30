@@ -49,7 +49,7 @@ pub const ADAMUPDATE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescrip
 pub const ADAMUPDATE_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DEEP_LEARNING.UNSUPPORTED",
     identifier: Some("RunMat:deepLearning:Unsupported"),
-    when: "A provider-owned input cannot be updated on its provider and the supported fallback cannot materialize it.",
+    when: "An explicit gpuArray input has no supported resident provider path, or a provider-owned input cannot be updated and its permitted automatic fallback cannot materialize it.",
     message: "adamupdate: provider-backed optimizer update is unavailable",
 };
 const ERRORS: [BuiltinErrorDescriptor; 2] = [ADAMUPDATE_INVALID_INPUT, ADAMUPDATE_UNSUPPORTED];

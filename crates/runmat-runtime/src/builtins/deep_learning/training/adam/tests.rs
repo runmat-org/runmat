@@ -2,7 +2,8 @@ use super::*;
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
-    GpuTensorStorage, HostNumericDataView, HostNumericTensorView, HostTensorView,
+    GpuHandleProvenance, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
+    HostTensorView,
 };
 use runmat_value::{IntValue, IntegerStorage};
 use std::error::Error;
@@ -174,6 +175,89 @@ fn adamupdate_gpu_inputs_return_resident_outputs() {
         assert_close(avg_sq.materialize_f64()[0], 0.00001);
         assert_close(avg_sq.materialize_f64()[1], 0.00004);
         assert_close(avg_sq.materialize_f64()[2], 0.00009);
+    });
+}
+
+#[test]
+fn adamupdate_resident_results_inherit_explicit_input_intent() {
+    test_support::with_test_provider(|provider| {
+        let shape = [1usize, 1usize];
+        let parameters = provider
+            .upload(&HostTensorView {
+                data: &[2.0],
+                shape: &shape,
+            })
+            .unwrap()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        let gradient = provider
+            .upload(&HostTensorView {
+                data: &[1.0],
+                shape: &shape,
+            })
+            .unwrap();
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        provider.reset_telemetry();
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let result = block_on(adamupdate_builtin(vec![
+            Value::GpuTensor(parameters.clone()),
+            Value::GpuTensor(gradient.clone()),
+            empty.clone(),
+            empty,
+            Value::Num(1.0),
+        ]))
+        .unwrap();
+        let Value::OutputList(values) = result else {
+            panic!("expected three results")
+        };
+        for value in &values {
+            let Value::GpuTensor(handle) = value else {
+                panic!("expected resident result")
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(handle));
+        }
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let updated = test_support::gather(values[0].clone()).unwrap();
+        assert_close(updated.materialize_f64()[0], 1.99900000001);
+        assert!(parameters.allocation_lease().validate_live().is_ok());
+        assert!(gradient.allocation_lease().validate_live().is_ok());
+    });
+}
+
+#[test]
+fn adamupdate_explicit_single_rejects_unsupported_provider_without_download() {
+    test_support::with_test_provider(|provider| {
+        let shape = [1usize, 2usize];
+        let parameters = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.0, 2.0]),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        let gradient = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&[0.1, -0.2]),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        provider.reset_telemetry();
+        let error = block_on(adamupdate_builtin(vec![
+            Value::GpuTensor(parameters.clone()),
+            Value::GpuTensor(gradient.clone()),
+            empty.clone(),
+            empty,
+            Value::Num(1.0),
+        ]))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(parameters.allocation_lease().validate_live().is_ok());
+        assert!(gradient.allocation_lease().validate_live().is_ok());
     });
 }
 

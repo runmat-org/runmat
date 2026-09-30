@@ -8,12 +8,28 @@ pub(super) struct AdamUpdateGpuEval {
 }
 
 impl AdamUpdateGpuEval {
-    fn from_provider(result: ProviderAdamUpdateResult) -> Self {
-        Self {
+    fn from_provider(
+        mut result: ProviderAdamUpdateResult,
+        request: &ProviderAdamUpdateRequest<'_>,
+    ) -> BuiltinResult<Self> {
+        let inputs = [
+            Some(request.parameters),
+            Some(request.gradient),
+            request.average_grad,
+            request.average_sq_grad,
+        ];
+        for output in [
+            &mut result.parameters,
+            &mut result.average_grad,
+            &mut result.average_sq_grad,
+        ] {
+            gpu_helpers::propagate_output_provenance(output, inputs.iter().copied().flatten())?;
+        }
+        Ok(Self {
             parameters: result.parameters,
             average_grad: result.average_grad,
             average_sq_grad: result.average_sq_grad,
-        }
+        })
     }
 
     pub(super) fn output(self) -> BuiltinResult<Value> {
@@ -153,7 +169,7 @@ pub(super) fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpd
     match provider.adam_update(&request) {
         Ok(result) => {
             validate_adam_gpu_result(&result, &request, provider)?;
-            Ok(Some(AdamUpdateGpuEval::from_provider(result)))
+            Ok(Some(AdamUpdateGpuEval::from_provider(result, &request)?))
         }
         Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => Ok(None),
         Err(err) => Err(adam_provider_error(err)),

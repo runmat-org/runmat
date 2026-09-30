@@ -28,7 +28,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Provider-backed arrays",
             paragraphs: &[
                 "Matching plain real gpuArray parameters, gradients, and resident moment arrays use the acceleration provider's Adam hook. Empty host moment arrays are initialized on device; successful provider execution returns provider-owned gpuArray outputs without downloading the full arrays.",
-                "A provider without a compatible Adam hook can fall back to a host update by gathering the operands. Host dlarray is supported, but GPU-backed dlarray wrappers, model parameter structures, and training-loop callbacks are not supported by this function. Placement therefore depends on the admitted operands and provider capability; it is not statically guaranteed to remain on device.",
+                "When a provider does not support the admitted Adam form, automatically resident inputs can fall back to a host update by gathering the operands. An explicit `gpuArray` input instead rejects without downloading, preserving its device intent. Successful resident results inherit explicit intent when any consumed resident input is explicit. Host dlarray is supported, but GPU-backed dlarray wrappers, model parameter structures, and training-loop callbacks are not supported by this function.",
             ],
         },
     ],
@@ -53,7 +53,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinDocumentationFaq {
             question: "Does an update of gpuArray inputs always stay on the GPU?",
-            answer: "No. Matching real arrays use the provider hook when available. An unsupported provider path may gather for the host fallback; successful provider execution keeps its outputs resident.",
+            answer: "Automatically resident inputs may gather for a supported host fallback. An explicitly created gpuArray requires a supported resident provider path and otherwise rejects without gathering; successful resident outputs retain explicit input intent.",
         },
     ],
     links: &[
