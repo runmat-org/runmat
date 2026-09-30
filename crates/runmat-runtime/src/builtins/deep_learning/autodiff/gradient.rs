@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::HashMap;
 
+mod parameter_table;
+
 #[runtime_builtin(
     name = "dlgradient",
     binding_variant = "default",
@@ -100,7 +102,7 @@ pub(super) fn gradient_tree_for_target(
             gradient_network_table(&table, gradients)
         }
         Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
-            if model::gradient_values(object, "dlgradient")?.is_some() {
+            if parameter_table::values(object, "dlgradient")?.is_some() {
                 return gradient_network_table(object, gradients);
             }
             let variables = crate::builtins::table::table_variables(object)
@@ -152,7 +154,7 @@ fn gradient_network_table(
     table: &ObjectInstance,
     gradients: &HashMap<usize, Tensor>,
 ) -> BuiltinResult<Value> {
-    let values = model::gradient_values(table, "dlgradient")?.expect("network table schema");
+    let values = parameter_table::values(table, "dlgradient")?.expect("parameter table schema");
     let gradients = values
         .data
         .iter()

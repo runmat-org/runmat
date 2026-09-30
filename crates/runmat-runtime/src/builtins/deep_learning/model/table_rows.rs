@@ -1,40 +1,6 @@
 //! Borrowed columns for the public network Learnables and State tables.
 use super::*;
 
-/// Admit the public parameter-table schema for differentiation. Other tables
-/// retain recursive differentiation. Layer and Parameter are opaque string
-/// metadata, not execution roles: custom names and repeated labels are valid.
-/// Applying a table to a network remains the canonical parameter/State owner's
-/// responsibility, with its own typed role and row-identity admission.
-pub(in crate::builtins::deep_learning) fn gradient_values<'a>(
-    table: &'a ObjectInstance,
-    function: &'static str,
-) -> BuiltinResult<Option<&'a CellArray>> {
-    let columns = crate::builtins::table::table_variable_names_from_object(table)
-        .map_err(|error| deep_learning_error(function, error.to_string()))?;
-    if columns != ["Layer", "Parameter", "Value"] {
-        return Ok(None);
-    }
-    let fields = &variables(table, "network parameter", function)?.fields;
-    let column = |name| match fields.get(name) {
-        Some(Value::StringArray(array)) if array.shape == [array.data.len(), 1] => Ok(array),
-        _ => Err(deep_learning_error(
-            function,
-            format!("{function}: {name} must be a string column in a network parameter table"),
-        )),
-    };
-    let layers = column("Layer")?;
-    let roles = column("Parameter")?;
-    let values = values(table, "network parameter", function)?;
-    if layers.data.len() != roles.data.len() || layers.data.len() != values.data.len() {
-        return Err(deep_learning_error(
-            function,
-            format!("{function}: network parameter table columns have different row counts"),
-        ));
-    }
-    Ok(Some(values))
-}
-
 fn variables<'a>(
     table: &'a ObjectInstance,
     property: &str,

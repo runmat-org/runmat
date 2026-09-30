@@ -26,7 +26,7 @@ pub(super) fn validate(target: &Value) -> BuiltinResult<()> {
             Ok(())
         }
         Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
-            if let Some(values) = model::gradient_values(object, "dlgradient")? {
+            if let Some(values) = parameter_table::values(object, "dlgradient")? {
                 return validate_values(values.data.iter());
             }
             let variables = crate::builtins::table::table_variables_ref(object)
