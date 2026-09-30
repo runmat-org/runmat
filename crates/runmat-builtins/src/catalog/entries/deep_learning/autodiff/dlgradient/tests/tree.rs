@@ -7,7 +7,7 @@ fn single(shape: &[usize]) -> ValueFact {
             class: NumericClass::Single,
             domain: NumericDomain::Real,
         }),
-        ShapeFact::from(shape.iter().copied().map(Some).collect()),
+        ShapeFact::from(shape.iter().copied().map(Some).collect::<Vec<_>>()),
         StorageFact::Dense,
     ))
 }
