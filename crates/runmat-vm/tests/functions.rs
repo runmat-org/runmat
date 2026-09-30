@@ -3914,7 +3914,7 @@ fn classes_constructor_and_overloaded_indexing() {
 fn classes_property_access_attributes() {
     // Private get already covered by existing test; ensure private set is rejected with
     // an access-control diagnostic.
-    let err = execute_source_result(
+    let err = execute_source_result_with_extensions(
         "__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);",
     )
     .expect_err("private property set should error");
@@ -4753,7 +4753,7 @@ fn object_saveobj_loadobj_script_surface() {
         saved_by = getfield(payload, 'saved_by');
         restored = classref('OverIdx').loadobj(payload);
     "#;
-    let vars = execute_source(program);
+    let vars = execute_source_with_extensions(program);
     assert!(
         vars.iter()
             .any(|v| matches!(v, runmat_value::Value::String(s) if s == "OverIdx.saveobj")),
@@ -4812,7 +4812,7 @@ fn findobj_script_surface_finds_graphics_handles() {
 fn classdef_with_attributes_enforced() {
     // Define class A with private get and public set on property p, then enforce via getfield/setfield
     let src = "classdef A\n  properties(GetAccess=private, SetAccess=public)\n    p\n  end\nend\n a = new_object('A'); a = setfield(a,'p',5); try; v = getfield(a,'p'); catch e; ok=1; end";
-    let vars = execute_source(src);
+    let vars = execute_source_with_extensions(src);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
