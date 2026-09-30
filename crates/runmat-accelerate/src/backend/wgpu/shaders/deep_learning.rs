@@ -15,8 +15,7 @@ struct Params {
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn is_special(value: $SCALAR$) -> bool {
-  // x - x is NaN exactly for infinities; x != x detects NaNs.
-  return value != value || (value - value) != (value - value);
+  $SPECIAL$
 }
 
 @compute @workgroup_size($WG$)
@@ -35,26 +34,28 @@ fn main(@builtin(local_invocation_id) lane: vec3<u32>, @builtin(workgroup_id) gr
   var index = 0u;
   while (index < params.pool_size) {
     let value = input.data[base + index * params.inner_stride];
-    let next = sum + value;
-    if (!is_special(sum) && !is_special(value) && is_special(next)) {
+    let same_sign = (sum > 0.0 && value > 0.0) || (sum < 0.0 && value < 0.0);
+    if (!is_special(sum) && !is_special(value) && same_sign &&
+        abs(sum) > $MAX_FINITE$ - abs(value)) {
       overflow = true;
       break;
     }
-    sum = next;
+    sum = sum + value;
     index = index + 1u;
   }
   if (!overflow) {
     output.data[column] = sum / $SCALAR$(params.pool_size);
     return;
   }
-  // Match the host overflow branch in the input precision, without a
-  // widened mirror. This recurrence never materializes an overflowing sum.
+  // Recompute a weighted mean in the input precision, without a widened
+  // mirror. Explicit fused arithmetic avoids an overflowing numerator;
+  // backend rounding can differ from the host's separate multiply/add.
   var mean: $SCALAR$ = 0.0;
   index = 0u;
   while (index < params.pool_size) {
     let count = $SCALAR$(index + 1u);
     let previous_weight = $SCALAR$(index) / count;
-    mean = mean * previous_weight + input.data[base + index * params.inner_stride] / count;
+    mean = fma(mean, previous_weight, input.data[base + index * params.inner_stride] / count);
     index = index + 1u;
   }
   output.data[column] = mean;
@@ -62,11 +63,21 @@ fn main(@builtin(local_invocation_id) lane: vec3<u32>, @builtin(workgroup_id) gr
 "#;
 
 pub fn stable_pool_1d(precision: super::super::types::NumericPrecision) -> String {
-    let scalar = match precision {
-        super::super::types::NumericPrecision::F32 => "f32",
-        super::super::types::NumericPrecision::F64 => "f64",
+    let (scalar, special, max_finite) = match precision {
+        super::super::types::NumericPrecision::F32 => (
+            "f32",
+            "return (bitcast<u32>(value) & 0x7f800000u) == 0x7f800000u;",
+            "3.4028234663852886e38",
+        ),
+        super::super::types::NumericPrecision::F64 => (
+            "f64",
+            "return (bitcast<vec2<u32>>(value).y & 0x7ff00000u) == 0x7ff00000u;",
+            "1.7976931348623157e308",
+        ),
     };
     STABLE_POOL_1D
         .replace("$SCALAR$", scalar)
+        .replace("$SPECIAL$", special)
+        .replace("$MAX_FINITE$", max_finite)
         .replace("$WG$", &POOL_WORKGROUP_SIZE.to_string())
 }

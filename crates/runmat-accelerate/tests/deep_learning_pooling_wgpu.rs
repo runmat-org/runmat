@@ -93,8 +93,16 @@ async fn stable_resident_global_pool_retains_precision_shape_owner_and_special_v
     }
 
     let large = if single { 2.0e38 } else { 1.0e308 };
+    let maximum = if single {
+        f64::from(f32::MAX)
+    } else {
+        f64::MAX
+    };
     for (values, finite_expected) in [
         (vec![large, large], Some(large)),
+        (vec![maximum, maximum], Some(maximum)),
+        (vec![maximum / 2.0, maximum / 2.0], Some(maximum / 2.0)),
+        (vec![maximum, maximum, -maximum], Some(maximum / 3.0)),
         (vec![large, -large], Some(0.0)),
         (vec![f64::INFINITY, 1.0], None),
         (vec![f64::INFINITY, f64::NEG_INFINITY], None),
@@ -103,7 +111,7 @@ async fn stable_resident_global_pool_retains_precision_shape_owner_and_special_v
         let input = provider
             .upload(&HostTensorView {
                 data: &values,
-                shape: &[2, 1],
+                shape: &[values.len(), 1],
             })
             .unwrap();
         let output = provider
