@@ -970,7 +970,8 @@ fn forward_rejects_host_known_late_matrix_error_before_resident_input_download()
         provider.reset_telemetry();
         let err = block_on(forward_builtin(net, Value::GpuTensor(input), vec![])).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
-        assert!(err.message.contains("Weights must be outputSize-by-2"));
+        assert!(err.message.contains("Weights has shape [1, 3]"));
+        assert!(err.message.contains("expected Matrix"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }
@@ -1240,15 +1241,23 @@ fn forward_preserves_dlarray_wrapper() {
 fn forward_runs_fully_connected_gpu_dlarray_without_host_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
-        let cpu_input = Value::Tensor(Tensor::new(vec![1.0, 2.0, -1.0, 0.5], vec![2, 2]).unwrap());
-        let cpu = block_on(forward_builtin(net.clone(), cpu_input, vec![])).unwrap();
-        let Value::Tensor(expected) = cpu else {
-            panic!("expected CPU tensor output");
+        let values = [1.0, 2.0, -1.0, 0.5, 3.0, -2.0];
+        let shape = [2usize, 3usize]; // CB: two channels, three observations.
+        let cpu_input = block_on(dlarray_builtin(
+            Value::Tensor(Tensor::new(values.to_vec(), shape.to_vec()).unwrap()),
+            vec![Value::String("CB".into())],
+        ))
+        .unwrap();
+        let Value::Object(cpu) = block_on(forward_builtin(net.clone(), cpu_input, vec![])).unwrap()
+        else {
+            panic!("expected CPU dlarray output");
         };
-        let shape = [2usize, 2usize];
+        let Some(Value::Tensor(expected)) = cpu.properties.get("Data") else {
+            panic!("expected CPU tensor data");
+        };
         let handle = provider
             .upload(&HostTensorView {
-                data: &[1.0, 2.0, -1.0, 0.5],
+                data: &values,
                 shape: &shape,
             })
             .expect("upload");
@@ -1363,17 +1372,21 @@ fn forward_runs_arbitrary_alpha_elu_gpu_dlarray_with_cpu_parity() {
 fn forward_runs_softmax_gpu_dlarray_without_host_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
-        let values = [1.0, 2.0, -1.0, 0.5];
-        let cpu = block_on(forward_builtin(
-            net.clone(),
-            Value::Tensor(Tensor::new(values.to_vec(), vec![2, 2]).unwrap()),
-            vec![],
+        let values = [1.0, 2.0, -1.0, 0.5, 3.0, -2.0];
+        let shape = [2usize, 3usize]; // CB: two channels, three observations.
+        let cpu_input = block_on(dlarray_builtin(
+            Value::Tensor(Tensor::new(values.to_vec(), shape.to_vec()).unwrap()),
+            vec![Value::String("CB".into())],
         ))
-        .expect("CPU forward");
-        let Value::Tensor(expected) = cpu else {
-            panic!("expected CPU tensor output");
+        .unwrap();
+        let Value::Object(cpu) =
+            block_on(forward_builtin(net.clone(), cpu_input, vec![])).expect("CPU forward")
+        else {
+            panic!("expected CPU dlarray output");
         };
-        let shape = [2usize, 2usize];
+        let Some(Value::Tensor(expected)) = cpu.properties.get("Data") else {
+            panic!("expected CPU tensor data");
+        };
         let handle = provider
             .upload(&HostTensorView {
                 data: &values,
@@ -1438,7 +1451,7 @@ fn forward_reports_invalid_gpu_softmax_without_host_gather() {
 fn forward_rejects_complex_gpu_dlarray_before_dense_dispatch() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
-        let shape = [1usize, 2usize];
+        let shape = [2usize, 1usize]; // CB: admitted channel extent is two.
         let handle = provider
             .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
                 data: runmat_accelerate_api::HostNumericDataView::F64(&[1.0, 0.0, 2.0, 0.0]),
@@ -1455,7 +1468,10 @@ fn forward_rejects_complex_gpu_dlarray_before_dense_dispatch() {
 
         let err = block_on(forward_builtin(net, dl, vec![])).unwrap_err();
 
-        assert!(err.to_string().contains("real dlarray input"));
+        assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert!(err
+            .message()
+            .contains("input must contain supported numeric data"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }

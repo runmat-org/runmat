@@ -332,6 +332,10 @@ fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
             vec![
                 ("OutputSize", Value::Num(1.0)),
                 ("Weights", Value::GpuTensor(foreign.handle.clone())),
+                (
+                    "Bias",
+                    Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+                ),
             ],
         );
         provider.reset_telemetry();
@@ -342,6 +346,42 @@ fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
             Some("RunMat:gpu:ProviderPayloadMismatch")
         );
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(foreign.probe.retirements(), 0);
+
+        // The public route's canonical parameter preflight is earlier than
+        // GPU placement and owns the unsupported resident descriptor error.
+        let mut network = dense_network();
+        let Value::Object(network_object) = &mut network else {
+            panic!("network object expected")
+        };
+        let Some(Value::Cell(layers)) = network_object.properties.get_mut("Layers") else {
+            panic!("network layers expected")
+        };
+        let Value::Object(layer) = &mut layers.data[1] else {
+            panic!("dense layer expected")
+        };
+        layer
+            .properties
+            .insert("Weights".into(), Value::GpuTensor(foreign.handle.clone()));
+        let resident_input = object(
+            "dlarray",
+            vec![
+                ("Data", Value::GpuTensor(input)),
+                ("Format", Value::String("BC".into())),
+                ("Labels", Value::String("BC".into())),
+            ],
+        );
+        provider.reset_telemetry();
+        let public_error = block_on(forward_builtin(network, resident_input, vec![])).unwrap_err();
+        assert_eq!(
+            public_error.identifier(),
+            Some("RunMat:deepLearning:InvalidInput")
+        );
+        assert!(public_error
+            .message()
+            .contains("Weights has an unsupported resident owner or class"));
         assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert_eq!(foreign.probe.retirements(), 0);
