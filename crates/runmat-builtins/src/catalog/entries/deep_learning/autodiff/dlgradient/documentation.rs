@@ -26,13 +26,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Traced inputs and outputs",
             paragraphs: &[
                 "Call `dlgradient` from a `dlfeval` callback. The loss must be a scalar dlarray produced on that callback's tape; a separate dlarray constructed outside the traced calculation is not a substitute. Request no more gradient outputs than supplied targets. A target can be a traced dlarray, supported dlnetwork learnables, or a structure/table/cell tree containing traced dlarray leaves.",
-                "The current host tape records dlarray plus, minus, elementwise times and rdivide, matrix mtimes, scalar `sum(..., 'all')`, and supported dlnetwork forward chains of fully connected, ReLU, ELU, and softmax layers. A real double or single target keeps its class, geometry, Format, and Labels. Logical Data are admitted through the arithmetic 0/1-to-double boundary and produce double gradients.",
+                "Parameter tables use string Layer and Parameter columns and a cell Value column. Only Value is differentiated; metadata is preserved, including custom parameter names and repeated labels. Assigning gradients or values to a network separately validates that network\'s canonical typed parameter roles.",
+                "The current host tape records dlarray plus, minus, elementwise times and rdivide, matrix mtimes, scalar `sum(..., 'all')`, and admitted sequential network operations: fully connected, convolution1d, LSTM/BiLSTM, layer normalization, global average pooling, ReLU, ELU, and softmax. Prediction and requested recurrent State outputs share the execution trace. A real double or single target keeps its class, geometry, Format, and Labels. Logical Data are admitted through the arithmetic 0/1-to-double boundary and produce double gradients.",
             ],
         },
         BuiltinDocumentationSection {
             heading: "Current limits and residency",
             paragraphs: &[
-                "Scalar broadcasting has a reverse reduction. General higher-rank implicit-expansion gradient reduction, custom/recurrent/stateful layers, sparse or complex differentiation, and provider-resident tape kernels are not implemented. A GPU-backed dlarray can still be wrapped without download outside an active tape, but differentiation rejects that input instead of silently gathering it.",
+                "Scalar broadcasting has a reverse reduction. General higher-rank implicit-expansion gradient reduction, custom layers, sparse or complex differentiation, and provider-resident tape kernels are not implemented. A GPU-backed dlarray can still be wrapped without download outside an active tape, but differentiation rejects that input instead of silently gathering it.",
                 "The callback and tape are execution state: nested callbacks keep separate graphs, and suspension does not expose one callback's tape to another invocation. Gradients are computed on the host; ordinary gpuArray arithmetic outside this tape retains its separate provider behavior.",
             ],
         },

@@ -1,17 +1,11 @@
 //! Borrowed columns for the public network Learnables and State tables.
 use super::*;
-use std::collections::HashSet;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum GradientRole {
-    Learnable(parameters::ParameterRole),
-    State(state::StateRole),
-}
-
-/// Admit the public Learnables/State table shape for differentiation. Other
-/// tables keep the general recursive table behavior in the autodiff caller.
-/// A table claiming this exact schema must have valid metadata; its Layer and
-/// Parameter columns are identities, not differentiation targets.
+/// Admit the public parameter-table schema for differentiation. Other tables
+/// retain recursive differentiation. Layer and Parameter are opaque string
+/// metadata, not execution roles: custom names and repeated labels are valid.
+/// Applying a table to a network remains the canonical parameter/State owner's
+/// responsibility, with its own typed role and row-identity admission.
 pub(in crate::builtins::deep_learning) fn gradient_values<'a>(
     table: &'a ObjectInstance,
     function: &'static str,
@@ -37,34 +31,6 @@ pub(in crate::builtins::deep_learning) fn gradient_values<'a>(
             function,
             format!("{function}: network parameter table columns have different row counts"),
         ));
-    }
-    let mut family = None;
-    let mut seen = HashSet::with_capacity(layers.data.len());
-    for (layer, role) in layers.data.iter().zip(&roles.data) {
-        let role = if let Some(role) = parameters::ParameterRole::parse(role) {
-            GradientRole::Learnable(role)
-        } else if let Some(role) = state::StateRole::parse(role) {
-            GradientRole::State(role)
-        } else {
-            return Err(deep_learning_error(
-                function,
-                format!("{function}: unknown network parameter role '{role}'"),
-            ));
-        };
-        let is_state = matches!(role, GradientRole::State(_));
-        if family.is_some_and(|prior| prior != is_state) {
-            return Err(deep_learning_error(
-                function,
-                format!("{function}: Learnables and State roles cannot share a table"),
-            ));
-        }
-        family = Some(is_state);
-        if !seen.insert((layer, role)) {
-            return Err(deep_learning_error(
-                function,
-                format!("{function}: duplicate network parameter row identity"),
-            ));
-        }
     }
     Ok(Some(values))
 }

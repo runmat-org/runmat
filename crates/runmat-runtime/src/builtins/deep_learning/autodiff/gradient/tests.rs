@@ -164,20 +164,56 @@ fn network_table(layers: Vec<String>, roles: Vec<String>, values: Vec<Value>) ->
 }
 
 #[test]
-fn canonical_table_metadata_rejects_unknown_mixed_and_duplicate_roles() {
+fn public_parameter_table_names_are_metadata_not_builtin_role_authority() {
     for (layers, roles) in [
-        (vec!["dense"], vec!["MadeUpRole"]),
+        (vec!["custom"], vec!["CustomCoefficient"]),
         (vec!["dense", "memory"], vec!["Weights", "CellState"]),
         (vec!["dense", "dense"], vec!["Weights", "Weights"]),
     ] {
-        let len = roles.len();
+        let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+        let values = roles
+            .iter()
+            .map(|_| {
+                annotate_tree(super::super::super::object_with_identity(
+                    DLARRAY_CLASS,
+                    vec![
+                        (
+                            "Data",
+                            Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+                        ),
+                        ("Format", Value::String(String::new())),
+                        ("Labels", Value::String(String::new())),
+                    ],
+                ))
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let loss =
+            dlarray_sum_builtin(values[0].clone(), vec![Value::String("all".into())]).unwrap();
         let target = network_table(
             layers.into_iter().map(String::from).collect(),
             roles.into_iter().map(String::from).collect(),
-            vec![Value::Num(1.0); len],
+            values,
         );
-        let error = gradient_tree_for_target(&target, &HashMap::new()).unwrap_err();
-        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        let gradient = block_on(dlgradient_builtin(loss, vec![target.clone()])).unwrap();
+        let (layers, roles, _) = table_columns(&target);
+        let (gradient_layers, gradient_roles, values) = table_columns(&gradient);
+        assert_eq!(gradient_layers, layers);
+        assert_eq!(gradient_roles, roles);
+        for (index, value) in values.iter().enumerate() {
+            let Value::Object(array) = value else {
+                panic!("gradient dlarray expected")
+            };
+            let Some(Value::Tensor(data)) = array.properties.get("Data") else {
+                panic!("gradient tensor expected")
+            };
+            assert_eq!(data.numeric_dtype(), NumericDType::F32);
+            assert_eq!(data.shape, [1, 1]);
+            assert_eq!(
+                data.as_f32_slice().unwrap(),
+                &[if index == 0 { 1.0 } else { 0.0 }]
+            );
+        }
     }
 }
 
