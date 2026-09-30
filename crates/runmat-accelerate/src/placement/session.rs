@@ -1381,7 +1381,7 @@ mod tests {
             E::Unavailable(Missing::NoObservations)
         );
         session.invalidate(PlacementInvalidation::Provider {
-            digest: signature.revision.provider.clone(),
+            digest: signature.revision.provider,
         });
         assert_eq!(
             session.observed_candidate_duration(
