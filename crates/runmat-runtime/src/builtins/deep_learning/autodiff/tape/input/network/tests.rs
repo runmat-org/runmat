@@ -47,8 +47,13 @@ fn layer(kind: DeepLearningLayerKind, name: &str, fields: &[(&str, Value)]) -> V
 }
 
 fn network(layers: Vec<Value>) -> ObjectInstance {
+    network_with_initialize(layers, true)
+}
+
+fn network_with_initialize(layers: Vec<Value>, initialize: bool) -> ObjectInstance {
+    let options = BTreeMap::from([("Initialize".into(), Value::Bool(initialize))]);
     let Value::Object(object) =
-        model::network_object(model::DLNETWORK_CLASS, layers, BTreeMap::new(), "dlfeval").unwrap()
+        model::network_object(model::DLNETWORK_CLASS, layers, options, "dlfeval").unwrap()
     else {
         panic!("network object expected")
     };
@@ -414,21 +419,24 @@ fn every_integer_last_parameter_is_rejected_before_any_earlier_leaf() {
     for (count, shape) in [(2, vec![2, 1]), (0, vec![0, 0])] {
         for storage in integer_storages(count) {
             let dtype = storage.numeric_dtype();
-            let mut network = network(vec![
-                layer(
-                    DeepLearningLayerKind::SequenceInput,
-                    "input",
-                    &[("InputSize", Value::Num(2.0))],
-                ),
-                layer(
-                    DeepLearningLayerKind::LayerNormalization,
-                    "norm",
-                    &[
-                        ("Scale", tensor(&[2, 1], true)),
-                        ("Offset", integer_tensor(storage, shape.clone())),
-                    ],
-                ),
-            ]);
+            let mut network = network_with_initialize(
+                vec![
+                    layer(
+                        DeepLearningLayerKind::SequenceInput,
+                        "input",
+                        &[("InputSize", Value::Num(2.0))],
+                    ),
+                    layer(
+                        DeepLearningLayerKind::LayerNormalization,
+                        "norm",
+                        &[
+                            ("Scale", tensor(&[2, 1], true)),
+                            ("Offset", integer_tensor(storage, shape.clone())),
+                        ],
+                    ),
+                ],
+                count != 0,
+            );
             let before = network.clone();
             let tape = Rc::new(RefCell::new(Tape::new()));
             let _activation = TapeActivation::enter(tape.clone());
@@ -450,25 +458,28 @@ fn every_integer_last_state_row_is_rejected_before_any_parameter_or_state_leaf()
     for (count, shape) in [(3, vec![3, 1]), (0, vec![0, 0])] {
         for storage in integer_storages(count) {
             let dtype = storage.numeric_dtype();
-            let mut network = network(vec![
-                layer(
-                    DeepLearningLayerKind::SequenceInput,
-                    "input",
-                    &[("InputSize", Value::Num(2.0))],
-                ),
-                layer(
-                    DeepLearningLayerKind::Lstm,
-                    "lstm",
-                    &[
-                        ("NumHiddenUnits", Value::Num(3.0)),
-                        ("InputWeights", tensor(&[12, 2], true)),
-                        ("RecurrentWeights", tensor(&[12, 3], true)),
-                        ("Bias", tensor(&[12, 1], true)),
-                        ("HiddenState", tensor(&[3, 1], true)),
-                        ("CellState", integer_tensor(storage, shape.clone())),
-                    ],
-                ),
-            ]);
+            let mut network = network_with_initialize(
+                vec![
+                    layer(
+                        DeepLearningLayerKind::SequenceInput,
+                        "input",
+                        &[("InputSize", Value::Num(2.0))],
+                    ),
+                    layer(
+                        DeepLearningLayerKind::Lstm,
+                        "lstm",
+                        &[
+                            ("NumHiddenUnits", Value::Num(3.0)),
+                            ("InputWeights", tensor(&[12, 2], true)),
+                            ("RecurrentWeights", tensor(&[12, 3], true)),
+                            ("Bias", tensor(&[12, 1], true)),
+                            ("HiddenState", tensor(&[3, 1], true)),
+                            ("CellState", integer_tensor(storage, shape.clone())),
+                        ],
+                    ),
+                ],
+                count != 0,
+            );
             let before = network.clone();
             let tape = Rc::new(RefCell::new(Tape::new()));
             let _activation = TapeActivation::enter(tape.clone());

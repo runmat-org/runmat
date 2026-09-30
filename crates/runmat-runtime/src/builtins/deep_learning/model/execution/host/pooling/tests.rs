@@ -178,7 +178,16 @@ fn nonsquare_spatial_sequence_and_unbatched_adjoint_match_independent_finite_dif
             .collect();
         let dy = Tensor::new(dy_values.clone(), output_shape).unwrap();
         let dx = backward(&dy, &axes).unwrap();
-        let h = 1.0e-6;
+        // S is the leading axis in both cases, so column-major groups of
+        // three inputs each contribute exactly one third of their output's
+        // cotangent. This oracle is independent of the pooling geometry code.
+        for (index, &value) in dx.as_f64_slice().unwrap().iter().enumerate() {
+            assert_eq!(value, dy_values[index / shape[0]] / shape[0] as f64);
+        }
+        // The pooled objective is linear in each input. A larger central
+        // difference step has no truncation penalty here and avoids losing
+        // small perturbations when the full objective is accumulated.
+        let h = 1.0e-4;
         for index in 0..count {
             let mut plus = x.clone();
             plus[index] += h;

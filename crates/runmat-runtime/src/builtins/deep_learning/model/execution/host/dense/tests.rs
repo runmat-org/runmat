@@ -20,13 +20,13 @@ fn non_square_bc_and_cb_match_independent_linear_oracle() {
     let b = Tensor::new(vec![11., 13.], vec![2, 1]).unwrap();
     let bc = Tensor::new(vec![1., 4., 2., 5., 3., 6.], vec![3, 2]).unwrap();
     let cb = Tensor::new(vec![1., 3., 4., 5., 2., 6.], vec![2, 3]).unwrap();
-    // BC samples are (1,5), (4,2), (3,6). CB samples are (1,3), (4,5), (2,6).
+    // BC samples are (1,5), (4,3), (2,6). CB samples are (1,3), (4,5), (2,6).
     let y_bc = forward(&bc, &w, &b, &axes("BC", &bc.shape)).unwrap();
     let y_cb = forward(&cb, &w, &b, &axes("CB", &cb.shape)).unwrap();
     assert_eq!(y_bc.tensor.shape, vec![3, 2]);
     assert_eq!(
         y_bc.tensor.as_f64_slice().unwrap(),
-        &[28., 25., 35., 53., 47., 70.]
+        &[28., 28., 33., 53., 54., 65.]
     );
     assert_eq!(y_cb.tensor.shape, vec![2, 3]);
     assert_eq!(

@@ -70,6 +70,7 @@ fn public_raw_complex_sequence_gap_retains_double_and_input_storage() {
 
 #[test]
 fn public_formatted_complex_gap_supports_cbt_and_no_channel_sb() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let vector =
         pooling_network(block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap());
     let values = (1..=12)
@@ -154,6 +155,7 @@ fn public_formatted_complex_gap_supports_cbt_and_no_channel_sb() {
 
 #[test]
 fn public_real_gap_admits_documented_channel_less_bt_sb_and_sbt_formats() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     for (format, shape, input_size, sequence, output_format, output_shape, expected) in [
         (
             "BT",
@@ -377,9 +379,10 @@ fn single_input_projects_double_parameters_only_at_execution_boundary() {
 
 #[test]
 fn stateless_two_output_forward_publishes_canonical_empty_state() {
+    let network = network();
     let _count = crate::output_count::push_output_count(Some(2));
     let input = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
-    let Value::OutputList(outputs) = block_on(forward_builtin(network(), input, vec![])).unwrap()
+    let Value::OutputList(outputs) = block_on(forward_builtin(network, input, vec![])).unwrap()
     else {
         panic!("[Y, state] result expected")
     };
