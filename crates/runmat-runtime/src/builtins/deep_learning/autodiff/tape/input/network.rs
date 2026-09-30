@@ -4,6 +4,7 @@
 //! every existing payload has passed host tape admission.
 
 use super::*;
+use runmat_value::NumericDType;
 
 struct AdmittedParameter {
     key: model::parameters::ParameterKey,
@@ -26,7 +27,7 @@ pub(super) fn annotate_network_object(network: &mut ObjectInstance) -> BuiltinRe
         .into_iter()
         .filter_map(|entry| entry.value.map(|value| (entry.key, value)))
         .map(|(key, value)| {
-            let tensor = host_tensor_from_value(value, "dlfeval", key.role.name())?;
+            let tensor = admit_derivative_parent(value, key.role.name())?;
             Ok(AdmittedParameter {
                 key,
                 value: value.clone(),
@@ -37,7 +38,7 @@ pub(super) fn annotate_network_object(network: &mut ObjectInstance) -> BuiltinRe
     let state = state
         .into_iter()
         .map(|entry| {
-            let tensor = host_tensor_from_value(entry.value, "dlfeval", entry.key.role.name())?;
+            let tensor = admit_derivative_parent(entry.value, entry.key.role.name())?;
             Ok(AdmittedState {
                 key: entry.key,
                 value: entry.value.clone(),
@@ -68,6 +69,24 @@ pub(super) fn annotate_network_object(network: &mut ObjectInstance) -> BuiltinRe
     model::parameters::install_annotated(network, parameters);
     model::state::install_annotated(network, state);
     Ok(())
+}
+
+/// Canonical model storage also admits exact integers for forward execution.
+/// A tape leaf is narrower: its parent must support floating derivatives.
+fn admit_derivative_parent(value: &Value, label: &str) -> BuiltinResult<Tensor> {
+    let tensor = host_tensor_from_value(value, "dlfeval", label)?;
+    if !matches!(
+        tensor.numeric_dtype(),
+        NumericDType::F32 | NumericDType::F64
+    ) {
+        return Err(deep_learning_error(
+            "dlfeval",
+            format!(
+                "dlfeval: {label} automatic differentiation requires single or double parent storage; explicitly convert the value before differentiation"
+            ),
+        ));
+    }
+    Ok(tensor)
 }
 
 fn annotate_payload(value: Value, tensor: Tensor) -> BuiltinResult<Value> {

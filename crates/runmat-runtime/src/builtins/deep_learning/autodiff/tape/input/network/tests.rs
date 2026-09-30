@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use crate::builtins::deep_learning::autodiff::tape::{Tape, TapeActivation};
 use runmat_builtins::DeepLearningLayerKind;
-use runmat_value::NumericDType;
+use runmat_value::{IntegerStorage, NumericDType};
 
 fn tensor(shape: &[usize], single: bool) -> Value {
     let count = shape.iter().product();
@@ -15,6 +15,23 @@ fn tensor(shape: &[usize], single: bool) -> Value {
     } else {
         Value::Tensor(Tensor::new(vec![1.0; count], shape.to_vec()).unwrap())
     }
+}
+
+fn integer_storages(count: usize) -> [IntegerStorage; 8] {
+    [
+        IntegerStorage::I8(vec![1; count]),
+        IntegerStorage::I16(vec![1; count]),
+        IntegerStorage::I32(vec![1; count]),
+        IntegerStorage::I64(vec![1; count]),
+        IntegerStorage::U8(vec![1; count]),
+        IntegerStorage::U16(vec![1; count]),
+        IntegerStorage::U32(vec![1; count]),
+        IntegerStorage::U64(vec![1; count]),
+    ]
+}
+
+fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
+    Value::Tensor(Tensor::new_integer(storage, shape).unwrap())
 }
 
 fn layer(kind: DeepLearningLayerKind, name: &str, fields: &[(&str, Value)]) -> Value {
@@ -239,6 +256,114 @@ fn invalid_last_parameter_is_rejected_before_creating_any_leaf() {
         last.properties.get("Offset"),
         Some(&Value::String("invalid".into()))
     );
+}
+
+#[test]
+fn all_integer_classes_including_empty_storage_are_rejected_as_derivative_parents() {
+    for (count, shape) in [(1, vec![1, 1]), (0, vec![0, 0])] {
+        for storage in integer_storages(count) {
+            let dtype = storage.numeric_dtype();
+            let value = integer_tensor(storage, shape.clone());
+            let tape = Rc::new(RefCell::new(Tape::new()));
+            let _activation = TapeActivation::enter(tape.clone());
+            let error = admit_derivative_parent(&value, "Weights").unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("single or double parent storage"),
+                "{dtype:?}: {error}"
+            );
+            assert!(tape.borrow().nodes.is_empty(), "{dtype:?}");
+        }
+    }
+    assert_eq!(
+        admit_derivative_parent(&tensor(&[1, 1], true), "Weights")
+            .unwrap()
+            .numeric_dtype(),
+        NumericDType::F32
+    );
+    assert_eq!(
+        admit_derivative_parent(&tensor(&[1, 1], false), "Weights")
+            .unwrap()
+            .numeric_dtype(),
+        NumericDType::F64
+    );
+}
+
+#[test]
+fn every_integer_last_parameter_is_rejected_before_any_earlier_leaf() {
+    for (count, shape) in [(2, vec![2, 1]), (0, vec![0, 0])] {
+        for storage in integer_storages(count) {
+            let dtype = storage.numeric_dtype();
+            let mut network = network(vec![
+                layer(
+                    DeepLearningLayerKind::SequenceInput,
+                    "input",
+                    &[("InputSize", Value::Num(2.0))],
+                ),
+                layer(
+                    DeepLearningLayerKind::LayerNormalization,
+                    "norm",
+                    &[
+                        ("Scale", tensor(&[2, 1], true)),
+                        ("Offset", integer_tensor(storage, shape.clone())),
+                    ],
+                ),
+            ]);
+            let before = network.clone();
+            let tape = Rc::new(RefCell::new(Tape::new()));
+            let _activation = TapeActivation::enter(tape.clone());
+            let error = annotate_network_object(&mut network).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("single or double parent storage"),
+                "{dtype:?}: {error}"
+            );
+            assert!(tape.borrow().nodes.is_empty(), "{dtype:?}");
+            assert_eq!(network.properties, before.properties, "{dtype:?}");
+        }
+    }
+}
+
+#[test]
+fn every_integer_last_state_row_is_rejected_before_any_parameter_or_state_leaf() {
+    for (count, shape) in [(3, vec![3, 1]), (0, vec![0, 0])] {
+        for storage in integer_storages(count) {
+            let dtype = storage.numeric_dtype();
+            let mut network = network(vec![
+                layer(
+                    DeepLearningLayerKind::SequenceInput,
+                    "input",
+                    &[("InputSize", Value::Num(2.0))],
+                ),
+                layer(
+                    DeepLearningLayerKind::Lstm,
+                    "lstm",
+                    &[
+                        ("NumHiddenUnits", Value::Num(3.0)),
+                        ("InputWeights", tensor(&[12, 2], true)),
+                        ("RecurrentWeights", tensor(&[12, 3], true)),
+                        ("Bias", tensor(&[12, 1], true)),
+                        ("HiddenState", tensor(&[3, 1], true)),
+                        ("CellState", integer_tensor(storage, shape.clone())),
+                    ],
+                ),
+            ]);
+            let before = network.clone();
+            let tape = Rc::new(RefCell::new(Tape::new()));
+            let _activation = TapeActivation::enter(tape.clone());
+            let error = annotate_network_object(&mut network).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("single or double parent storage"),
+                "{dtype:?}: {error}"
+            );
+            assert!(tape.borrow().nodes.is_empty(), "{dtype:?}");
+            assert_eq!(network.properties, before.properties, "{dtype:?}");
+        }
+    }
 }
 
 #[test]
