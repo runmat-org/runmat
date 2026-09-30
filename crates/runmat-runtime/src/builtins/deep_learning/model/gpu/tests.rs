@@ -208,3 +208,22 @@ fn malformed_transpose_result_rejects_only_returned_reference() {
         assert_eq!(retained.materialize_f64(), source);
     });
 }
+
+#[test]
+fn singleton_axis_transpose_accepts_a_valid_resident_view() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let source = [2.0, 3.0, 5.0];
+        let input = provider
+            .upload(&HostTensorView {
+                data: &source,
+                shape: &[3, 1],
+            })
+            .unwrap();
+        let view = provider.reshape(&input, &[1, 3]).unwrap();
+        let output = super::validate_layout_transpose(view, &input, provider, "forward").unwrap();
+        let gathered =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(output)).unwrap();
+        assert_eq!(gathered.shape, vec![1, 3]);
+        assert_eq!(gathered.materialize_f64(), source);
+    });
+}

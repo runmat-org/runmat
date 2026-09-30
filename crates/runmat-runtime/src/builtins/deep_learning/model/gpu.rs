@@ -153,7 +153,9 @@ fn validate_layout_transpose(
         unary_gpu_output_matches_shape, GpuOutputAliasPolicy, UnaryGpuOutputContract,
     };
     let shape = [input.shape()[1], input.shape()[0]];
-    let alias = if input.shape().iter().any(|extent| *extent > 1) {
+    // A singleton axis does not move any element during a 2-D transpose, so
+    // a provider may legally return a reshaped view of the same allocation.
+    let alias = if input.shape().iter().all(|extent| *extent > 1) {
         GpuOutputAliasPolicy::RequireDistinct
     } else {
         GpuOutputAliasPolicy::AllowInput
