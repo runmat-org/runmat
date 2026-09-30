@@ -6,6 +6,12 @@ mod prepare;
 
 pub(in crate::builtins::deep_learning) use geometry::HostNetworkPlan;
 
+impl HostNetworkPlan<'_> {
+    pub(in crate::builtins::deep_learning) fn output_axes(&self) -> &super::axes::AxisPlan {
+        &self.output_axes
+    }
+}
+
 use crate::builtins::deep_learning::deep_learning_error;
 use crate::builtins::deep_learning::model::execution::host::network::{
     self, HostBackwardResult, HostTrace, HostValue,

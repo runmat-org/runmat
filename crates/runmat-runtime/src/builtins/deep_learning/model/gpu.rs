@@ -1,4 +1,5 @@
 //! Provider-resident forward execution and result ownership validation.
+use super::execution::NetworkOutputLayout;
 use super::*;
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use runmat_builtins::DeepLearningAxisLabel;
@@ -40,6 +41,7 @@ pub(super) async fn evaluate_network_gpu(
     object: &ObjectInstance,
     input: &GpuTensorHandle,
     layout: GpuForwardLayout,
+    output_layout: NetworkOutputLayout,
     function: &'static str,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
@@ -128,7 +130,7 @@ pub(super) async fn evaluate_network_gpu(
         &mut current,
         std::iter::once(input).chain(resident_parameters),
     )?;
-    if layout == GpuForwardLayout::ChannelsBatch {
+    if layout == GpuForwardLayout::ChannelsBatch && output_layout == NetworkOutputLayout::Preserve {
         let restored = provider
             .transpose(&current)
             .map_err(|error| provider_failure(function, "output layout transpose", error.into()))?;
@@ -274,9 +276,15 @@ pub(super) fn validate_gpu_forward_layers(
             }
             Some(ForwardLayerKind::FullyConnected) if saw_input => {
                 features = fully_connected_output_width(layer, features, function)?;
-                let provider =
-                    crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
-                        .expect("GPU input provider resolved before layer validation");
+                let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(
+                    input,
+                )
+                .ok_or_else(|| {
+                    unsupported_error(
+                        function,
+                        format!("{function}: no acceleration provider owns the GPU dlarray input"),
+                    )
+                })?;
                 for name in ["Weights", "Bias"] {
                     if let Some(handle) = resident_parameter_handle(layer, name) {
                         let owner =

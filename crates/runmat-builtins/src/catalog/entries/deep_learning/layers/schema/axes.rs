@@ -118,16 +118,27 @@ impl DeepLearningAxisLayout {
                 rank,
             });
         }
-        let mut axes = Vec::with_capacity(rank);
-        for label in labels {
-            let kind = DeepLearningAxisLabel::from_label(label)
-                .ok_or(DeepLearningAxisError::InvalidLabel(label))?;
-            if kind.unique() && axes.contains(&kind) {
-                return Err(DeepLearningAxisError::DuplicateLabel(label));
+        let axes = labels
+            .into_iter()
+            .map(|label| {
+                DeepLearningAxisLabel::from_label(label)
+                    .ok_or(DeepLearningAxisError::InvalidLabel(label))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Self::from_axes(&axes)
+    }
+
+    /// Construct an internal layout from semantic labels without serializing
+    /// them through display text. Public format parsing delegates here too.
+    pub fn from_axes(axes: &[DeepLearningAxisLabel]) -> Result<Self, DeepLearningAxisError> {
+        let mut admitted = Vec::with_capacity(axes.len());
+        for &axis in axes {
+            if axis.unique() && admitted.contains(&axis) {
+                return Err(DeepLearningAxisError::DuplicateLabel(axis.label()));
             }
-            axes.push(kind);
+            admitted.push(axis);
         }
-        Ok(Self { axes })
+        Ok(Self { axes: admitted })
     }
 
     /// Empty format means unformatted input; its convention is selected by
@@ -296,6 +307,17 @@ mod tests {
 
     #[test]
     fn malformed_labels_and_unsupported_defaults_reject() {
+        use DeepLearningAxisLabel::{Batch, Channel, Spatial};
+        assert_eq!(
+            DeepLearningAxisLayout::from_axes(&[Batch, Channel, Spatial])
+                .unwrap()
+                .axes(),
+            &[Batch, Channel, Spatial]
+        );
+        assert_eq!(
+            DeepLearningAxisLayout::from_axes(&[Channel, Batch, Channel]),
+            Err(DeepLearningAxisError::DuplicateLabel('C'))
+        );
         assert_eq!(
             DeepLearningAxisLayout::parse("CC", 2),
             Err(DeepLearningAxisError::DuplicateLabel('C'))

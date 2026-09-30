@@ -1,0 +1,108 @@
+//! One admitted execution route for public network callers.
+//!
+//! Whole-network geometry, option, parameter, state, and input admission is
+//! complete before provider access or host materialization. Callers adapt
+//! wrappers, requested outputs, and public compatibility policy separately.
+
+use runmat_value::Value;
+
+use super::{layout, request::*};
+use crate::builtins::deep_learning::model::{
+    admission::{forward_data, gpu_backed_dlarray_handle},
+    execution::host::network::HostValue,
+    gpu::{self, evaluate_network_gpu},
+    plan::host::HostNetworkPlan,
+};
+use crate::builtins::deep_learning::{autodiff, unsupported_error};
+use crate::BuiltinResult;
+
+pub(in crate::builtins::deep_learning) async fn execute_network(
+    request: NetworkExecutionRequest<'_>,
+) -> BuiltinResult<NetworkExecutionOutcome> {
+    let function = request.caller.function();
+    let plan = HostNetworkPlan::admit(request.network, request.input, function)?;
+    let output_axes = layout::target_axes(plan.output_axes(), request.output_layout, function)?;
+    if request.caller == NetworkCaller::Forward
+        && (crate::builtins::common::validation::value_has_native_integer_class(forward_data(
+            request.input,
+        )) || plan.has_integer_parameter())
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &runmat_builtins::FORWARD_INTEGER_EXTENSION,
+            function,
+        )?;
+    }
+    let active_tape = autodiff::tape_is_active();
+    if let Some(handle) = gpu_backed_dlarray_handle(request.input) {
+        if active_tape {
+            return Err(unsupported_error(
+                function,
+                format!("{function}: provider-resident network autodiff is not supported"),
+            ));
+        }
+        let Some(Value::Cell(layers)) = request.network.properties.get("Layers") else {
+            unreachable!("whole-network admission validated Layers")
+        };
+        let route = gpu::GpuForwardLayout::from_axes(plan.input_axes()).filter(|layout| {
+            gpu::validate_gpu_forward_layers(&layers.data, handle, *layout, function).is_ok()
+        });
+        if let Some(layout) = route {
+            if let Some(output) = evaluate_network_gpu(
+                request.network,
+                handle,
+                layout,
+                request.output_layout,
+                function,
+            )
+            .await?
+            {
+                if output.shape() != output_axes.shape() {
+                    return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(
+                        output,
+                        crate::build_runtime_error(format!(
+                            "{function}: provider output shape differs from admitted output axes"
+                        ))
+                        .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build(),
+                    ));
+                }
+                return Ok(NetworkExecutionOutcome {
+                    data: crate::builtins::common::gpu_helpers::resident_gpu_value(output)?,
+                    output_axes,
+                    state_updates: Vec::new(),
+                    trace: None,
+                });
+            }
+        }
+        if runmat_accelerate_api::handle_is_explicit(handle) {
+            return Err(unsupported_error(
+                function,
+                format!(
+                    "{function}: this network has no resident execution route for an explicit gpuArray input"
+                ),
+            ));
+        }
+    }
+
+    let prepared = plan.prepare().await?;
+    let host_input = prepared.prepare_input(request.input).await?;
+    let result = prepared.execute(host_input, active_tape)?;
+    let value = layout::present_host(result.value, &result.axes, &output_axes, function)?;
+    let data = match value {
+        HostValue::Real(tensor) => Value::Tensor(tensor),
+        HostValue::Complex(tensor) => Value::ComplexTensor(tensor),
+    };
+    Ok(NetworkExecutionOutcome {
+        data,
+        output_axes,
+        state_updates: result.next_state,
+        // The immutable trace remains in the executor's axes. `forward`
+        // preserves those axes; `predict` currently returns raw scores and
+        // does not publish an autodiff node for a reordered result.
+        trace: result.trace,
+    })
+}
+
+#[cfg(test)]
+mod tests;

@@ -221,12 +221,6 @@ impl AxisLowering {
         &self.shape
     }
 
-    pub(in crate::builtins::deep_learning) fn inverse_permutation(
-        &self,
-    ) -> DeepLearningAxisPermutation {
-        self.permutation.inverse()
-    }
-
     pub(in crate::builtins::deep_learning) fn source_offset(
         &self,
         target_indices: &[usize],
@@ -296,7 +290,7 @@ mod tests {
             assert_eq!(bc_result, expected[batch]);
             assert_eq!(cb_result, expected[batch]);
         }
-        assert_eq!(cb_view.inverse_permutation().target_to_source(), &[1, 0]);
+        assert_eq!(cb_view.permutation.inverse().target_to_source(), &[1, 0]);
         assert_eq!(cb_view.source_offset_linear(3).unwrap(), 1);
     }
 
@@ -307,7 +301,7 @@ mod tests {
         let btc = cbt.lower_to(&layout("BTC")).unwrap();
         assert_eq!(btc.target_shape(), &[3, 4, 2]);
         assert_eq!(btc.source_offset(&[2, 3, 1]).unwrap(), 23);
-        assert_eq!(btc.inverse_permutation().target_to_source(), &[2, 0, 1]);
+        assert_eq!(btc.permutation.inverse().target_to_source(), &[2, 0, 1]);
     }
 
     #[test]
