@@ -2,3 +2,4 @@
 
 pub(in crate::builtins::deep_learning) mod axes;
 pub(in crate::builtins::deep_learning) mod options;
+pub(in crate::builtins::deep_learning) mod host;

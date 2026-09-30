@@ -73,6 +73,16 @@ impl Geometry {
         {
             return Err(DenseError::UnsupportedPrecision);
         }
+        Self::from_shapes(axes, &weights.shape, &bias.shape)
+    }
+
+    /// The identical geometry used by execution, without allocating a fake
+    /// intermediate tensor during whole-network preflight.
+    pub fn from_shapes(
+        axes: &AxisPlan,
+        weights_shape: &[usize],
+        bias_shape: &[usize],
+    ) -> Result<Self, DenseError> {
         use DeepLearningAxisLabel::{Batch as B, Channel as C, Time as T};
         if !matches!(
             axes.layout().axes(),
@@ -88,18 +98,23 @@ impl Geometry {
                 .ok_or(DenseError::Invalid(
                     "fullyConnectedLayer needs a channel axis",
                 ))?;
-        let input_channels = input.shape[channel_axis];
+        let input_channels = axes.shape()[channel_axis];
         if input_channels == 0
-            || weights.shape.len() != 2
-            || weights.shape[0] == 0
-            || weights.shape[1] != input_channels
+            || weights_shape.len() != 2
+            || weights_shape[0] == 0
+            || weights_shape[1] != input_channels
         {
             return Err(DenseError::Invalid(
                 "fullyConnectedLayer Weights must be output-by-input channels",
             ));
         }
-        let output_channels = weights.shape[0];
-        if bias.len() != output_channels || bias.shape.len() > 2 {
+        let output_channels = weights_shape[0];
+        if bias_shape.len() > 2
+            || bias_shape
+                .iter()
+                .try_fold(1usize, |n, dim| n.checked_mul(*dim))
+                != Some(output_channels)
+        {
             return Err(DenseError::Invalid(
                 "fullyConnectedLayer Bias must contain one value per output channel",
             ));
@@ -156,4 +171,12 @@ impl Geometry {
     pub fn weight_offset(&self, output: usize, input: usize) -> usize {
         output + input * self.output_channels
     }
+}
+
+pub(in crate::builtins::deep_learning) fn admit(
+    axes: &AxisPlan,
+    weights_shape: &[usize],
+    bias_shape: &[usize],
+) -> Result<AxisPlan, DenseError> {
+    Ok(Geometry::from_shapes(axes, weights_shape, bias_shape)?.output_axes)
 }

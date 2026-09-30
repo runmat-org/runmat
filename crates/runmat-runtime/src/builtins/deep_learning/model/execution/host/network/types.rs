@@ -1,6 +1,7 @@
 use runmat_value::{ComplexTensor, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
+use crate::builtins::deep_learning::model::state::StateUpdate;
 
 use super::super::{activation, conv, dense, normalization, pooling, recurrent, softmax};
 
@@ -43,18 +44,6 @@ pub(in crate::builtins::deep_learning) enum HostStep<'a> {
     RegressionOutput,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::builtins::deep_learning) enum StateRole {
-    Hidden,
-    Cell,
-}
-
-pub(in crate::builtins::deep_learning) struct StateUpdate {
-    pub step_index: usize,
-    pub role: StateRole,
-    pub value: Tensor,
-}
-
 pub(in crate::builtins::deep_learning) struct HostExecutionResult {
     pub value: HostValue,
     pub axes: AxisPlan,
@@ -69,10 +58,95 @@ pub(in crate::builtins::deep_learning) struct HostTrace {
 
 pub(super) struct StepRecord {
     pub step_index: usize,
+    pub step: PinnedStep,
     pub input: HostValue,
     pub input_axes: AxisPlan,
     pub output_axes: AxisPlan,
     pub cache: StepCache,
+}
+
+/// Arc/CoW-backed immutable forward parameter snapshot. This is a tape
+/// lifetime pin, not a second mutable network parameter authority.
+pub(super) enum PinnedStep {
+    FullyConnected {
+        weights: Tensor,
+        bias: Tensor,
+    },
+    Relu,
+    Elu {
+        alpha: f64,
+    },
+    Softmax,
+    Convolution1d {
+        weights: Tensor,
+        bias: Tensor,
+        options: conv::ConvOptions,
+    },
+    LayerNormalization {
+        scale: Tensor,
+        offset: Tensor,
+        options: normalization::NormalizationOptions,
+    },
+    GlobalAveragePooling1d,
+    Recurrent {
+        input_weights: Tensor,
+        recurrent_weights: Tensor,
+        bias: Tensor,
+        initial_hidden: Option<Tensor>,
+        initial_cell: Option<Tensor>,
+        options: recurrent::RecurrentOptions,
+    },
+}
+
+impl PinnedStep {
+    pub fn capture(step: &HostStep<'_>) -> Option<Self> {
+        Some(match step {
+            HostStep::Input | HostStep::ClassificationOutput | HostStep::RegressionOutput => {
+                return None
+            }
+            HostStep::FullyConnected { weights, bias } => Self::FullyConnected {
+                weights: (**weights).clone(),
+                bias: (**bias).clone(),
+            },
+            HostStep::Relu => Self::Relu,
+            HostStep::Elu { alpha } => Self::Elu { alpha: *alpha },
+            HostStep::Softmax => Self::Softmax,
+            HostStep::Convolution1d {
+                weights,
+                bias,
+                options,
+            } => Self::Convolution1d {
+                weights: (**weights).clone(),
+                bias: (**bias).clone(),
+                options: *options,
+            },
+            HostStep::LayerNormalization {
+                scale,
+                offset,
+                options,
+            } => Self::LayerNormalization {
+                scale: (**scale).clone(),
+                offset: (**offset).clone(),
+                options: *options,
+            },
+            HostStep::GlobalAveragePooling1d => Self::GlobalAveragePooling1d,
+            HostStep::Recurrent {
+                input_weights,
+                recurrent_weights,
+                bias,
+                initial_hidden,
+                initial_cell,
+                options,
+            } => Self::Recurrent {
+                input_weights: (**input_weights).clone(),
+                recurrent_weights: (**recurrent_weights).clone(),
+                bias: (**bias).clone(),
+                initial_hidden: initial_hidden.map(|tensor| (*tensor).clone()),
+                initial_cell: initial_cell.map(|tensor| (*tensor).clone()),
+                options: *options,
+            },
+        })
+    }
 }
 
 pub(super) enum StepCache {

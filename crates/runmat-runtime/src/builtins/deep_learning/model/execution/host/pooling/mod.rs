@@ -7,11 +7,15 @@ mod kernel;
 mod mean;
 
 pub(in crate::builtins::deep_learning) use backward::backward;
-pub(in crate::builtins::deep_learning) use complex::{
-    backward_complex, forward_complex, ComplexPoolOutput,
-};
+pub(in crate::builtins::deep_learning) use complex::{backward_complex, forward_complex};
 pub(in crate::builtins::deep_learning) use geometry::PoolError;
-pub(in crate::builtins::deep_learning) use kernel::{forward, PoolOutput};
+pub(in crate::builtins::deep_learning) use kernel::forward;
+
+pub(in crate::builtins::deep_learning) fn admit(
+    axes: &crate::builtins::deep_learning::model::plan::axes::AxisPlan,
+) -> Result<crate::builtins::deep_learning::model::plan::axes::AxisPlan, PoolError> {
+    Ok(geometry::Geometry::new(axes)?.output)
+}
 
 #[cfg(test)]
 mod complex_tests;

@@ -97,9 +97,9 @@ impl Geometry {
         axes: &AxisPlan,
         options: ConvOptions,
     ) -> Result<Self, ConvError> {
-        if axes.shape() != input.shape.as_slice() || options.stride == 0 || options.dilation == 0 {
+        if axes.shape() != input.shape.as_slice() || input.len() != axes.element_count() {
             return Err(ConvError::Invalid(
-                "input axes and positive stride/dilation must match the input",
+                "input axes and payload must match the input",
             ));
         }
         if !matches!(input.numeric_dtype(), NumericDType::F32 | NumericDType::F64)
@@ -107,6 +107,30 @@ impl Geometry {
             || input.numeric_dtype() != bias.numeric_dtype()
         {
             return Err(ConvError::UnsupportedPrecision);
+        }
+        Self::from_shapes(
+            axes,
+            &weights.shape,
+            &bias.shape,
+            input.numeric_dtype(),
+            options,
+        )
+    }
+
+    pub fn from_shapes(
+        axes: &AxisPlan,
+        weights_shape: &[usize],
+        bias_shape: &[usize],
+        dtype: NumericDType,
+        options: ConvOptions,
+    ) -> Result<Self, ConvError> {
+        if !matches!(dtype, NumericDType::F32 | NumericDType::F64)
+            || options.stride == 0
+            || options.dilation == 0
+        {
+            return Err(ConvError::Invalid(
+                "positive stride/dilation and floating precision are required",
+            ));
         }
         let labels = axes.layout().labels();
         if !matches!(
@@ -129,31 +153,29 @@ impl Geometry {
             .layout()
             .index(DeepLearningAxisLabel::Spatial)
             .and_then(|_| axes.layout().index(DeepLearningAxisLabel::Time));
-        let input_len = input.shape[span_axis];
-        let input_channels = input.shape[channel_axis];
+        let input_len = axes.shape()[span_axis];
+        let input_channels = axes.shape()[channel_axis];
         if input_len == 0 || input_channels == 0 {
             return Err(ConvError::Invalid(
                 "convolution requires a nonempty spatial/time and channel axis",
             ));
         }
-        if weights.shape.len() != 3
-            || weights.shape[0] == 0
-            || weights.shape[1] != input_channels
-            || weights.shape[2] == 0
+        if weights_shape.len() != 3
+            || weights_shape[0] == 0
+            || weights_shape[1] != input_channels
+            || weights_shape[2] == 0
         {
             return Err(ConvError::Invalid(
                 "Weights must be FilterSize-by-NumChannels-by-NumFilters",
             ));
         }
-        let filter_size = weights.shape[0];
-        let output_channels = weights.shape[2];
-        if bias.shape != [1, output_channels] {
+        let filter_size = weights_shape[0];
+        let output_channels = weights_shape[2];
+        if bias_shape != [1, output_channels] {
             return Err(ConvError::Invalid("Bias must be 1-by-NumFilters"));
         }
         if let PaddingValue::Constant(value) = options.padding_value {
-            if !value.is_finite()
-                || (input.numeric_dtype() == NumericDType::F32 && !(value as f32).is_finite())
-            {
+            if !value.is_finite() || (dtype == NumericDType::F32 && !(value as f32).is_finite()) {
                 return Err(ConvError::Invalid("PaddingValue must be finite"));
             }
         }
@@ -208,12 +230,12 @@ impl Geometry {
                 .and_then(|start| start.checked_add(effective_filter - 1))
                 .ok_or(ConvError::ShapeOverflow)?;
         }
-        let mut output_shape = input.shape.clone();
+        let mut output_shape = axes.shape().to_vec();
         output_shape[span_axis] = output_len;
         output_shape[channel_axis] = output_channels;
-        let (input_strides, input_elements) = strides(&input.shape)?;
+        let (input_strides, input_elements) = strides(axes.shape())?;
         let (output_strides, output_elements) = strides(&output_shape)?;
-        if input_elements != input.len() {
+        if input_elements != axes.element_count() {
             return Err(ConvError::Invalid("input payload does not match its shape"));
         }
         Ok(Self {
@@ -230,8 +252,8 @@ impl Geometry {
             input_channels,
             output_channels,
             filter_size,
-            batch_size: batch_axis.map_or(1, |axis| input.shape[axis]),
-            time_size: time_axis.map_or(1, |axis| input.shape[axis]),
+            batch_size: batch_axis.map_or(1, |axis| axes.shape()[axis]),
+            time_size: time_axis.map_or(1, |axis| axes.shape()[axis]),
             left,
             options,
         })

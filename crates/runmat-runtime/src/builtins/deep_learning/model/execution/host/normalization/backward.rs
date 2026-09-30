@@ -74,7 +74,7 @@ pub(in crate::builtins::deep_learning) fn backward(
         }
         (
             NormalizationStatsData::F64 {
-                scale,
+                scale: stats_scale,
                 mean_scaled,
                 inv_std_scaled,
                 inv_std_input,
@@ -82,7 +82,7 @@ pub(in crate::builtins::deep_learning) fn backward(
             _,
             _,
             _,
-        ) if scale.len() == geometry.groups
+        ) if stats_scale.len() == geometry.groups
             && mean_scaled.len() == geometry.groups
             && inv_std_scaled.len() == geometry.groups
             && inv_std_input.len() == geometry.groups =>
@@ -98,7 +98,7 @@ pub(in crate::builtins::deep_learning) fn backward(
                 x,
                 gamma,
                 dy,
-                scale,
+                stats_scale,
                 mean_scaled,
                 inv_std_scaled,
                 inv_std_input,

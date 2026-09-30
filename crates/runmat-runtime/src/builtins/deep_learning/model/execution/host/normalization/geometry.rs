@@ -120,6 +120,23 @@ impl Geometry {
         scale: &Tensor,
         offset: &Tensor,
     ) -> Result<(), NormalizationError> {
+        if input.shape.as_slice() != self.axes.shape() || input.len() != self.axes.element_count() {
+            return Err(NormalizationError::ShapeMismatch);
+        }
+        if scale.numeric_dtype() != input.numeric_dtype()
+            || offset.numeric_dtype() != input.numeric_dtype()
+        {
+            return Err(NormalizationError::UnsupportedPrecision);
+        }
+        self.validate_shapes(&scale.shape, &offset.shape, input.numeric_dtype())
+    }
+
+    pub fn validate_shapes(
+        &self,
+        scale_shape: &[usize],
+        offset_shape: &[usize],
+        dtype: NumericDType,
+    ) -> Result<(), NormalizationError> {
         // OperationDimension changes the reduction, not the learnable
         // parameters' channel-only geometry. Input kind selects the physical
         // orientation of the canonical Scale/Offset row or column.
@@ -133,18 +150,10 @@ impl Geometry {
         } else {
             [self.channels, 1]
         };
-        if input.shape.as_slice() != self.axes.shape()
-            || input.len() != self.axes.element_count()
-            || scale.shape.as_slice() != parameter_shape.as_slice()
-            || offset.shape.as_slice() != parameter_shape.as_slice()
-        {
+        if scale_shape != parameter_shape.as_slice() || offset_shape != parameter_shape.as_slice() {
             return Err(NormalizationError::ShapeMismatch);
         }
-        let dtype = input.numeric_dtype();
-        if !matches!(dtype, NumericDType::F32 | NumericDType::F64)
-            || scale.numeric_dtype() != dtype
-            || offset.numeric_dtype() != dtype
-        {
+        if !matches!(dtype, NumericDType::F32 | NumericDType::F64) {
             return Err(NormalizationError::UnsupportedPrecision);
         }
         if dtype == NumericDType::F32

@@ -34,7 +34,13 @@ impl ChannelGeometry {
         if input.shape.as_slice() != axes.shape() || input.len() != axes.element_count() {
             return Err(SoftmaxError::Axes);
         }
-        if !matches!(input.numeric_dtype(), NumericDType::F32 | NumericDType::F64) {
+        Self::from_axes(axes, input.numeric_dtype())
+    }
+
+    /// Share exact channel geometry between whole-network preflight and the
+    /// payload-bearing forward/adjoint kernels.
+    pub fn from_axes(axes: &AxisPlan, dtype: NumericDType) -> Result<Self, SoftmaxError> {
+        if !matches!(dtype, NumericDType::F32 | NumericDType::F64) {
             return Err(SoftmaxError::UnsupportedPrecision);
         }
         let channel = axes
@@ -80,6 +86,13 @@ impl ChannelGeometry {
     fn offset(&self, base: usize, channel: usize) -> usize {
         base + channel * self.channel_stride
     }
+}
+
+pub(in crate::builtins::deep_learning) fn admit(
+    axes: &AxisPlan,
+    dtype: NumericDType,
+) -> Result<(), SoftmaxError> {
+    ChannelGeometry::from_axes(axes, dtype).map(|_| ())
 }
 
 pub(in crate::builtins::deep_learning) fn forward(

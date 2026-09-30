@@ -1,5 +1,6 @@
 use super::super::{activation, conv, dense, normalization, pooling, recurrent, softmax};
-use super::types::{HostError, HostStep, HostTrace, HostValue, StateRole, StateUpdate, StepCache};
+use super::types::{HostError, HostTrace, HostValue, PinnedStep, StepCache};
+use crate::builtins::deep_learning::model::state::{StateRole, StateUpdate};
 
 pub(in crate::builtins::deep_learning) enum StepGradients {
     None,
@@ -32,8 +33,7 @@ pub(in crate::builtins::deep_learning) struct HostBackwardResult {
 }
 
 pub(in crate::builtins::deep_learning) fn backward(
-    steps: &[HostStep<'_>],
-    trace: HostTrace,
+    trace: &HostTrace,
     output_gradient: HostValue,
     state_gradients: &[StateUpdate],
 ) -> Result<HostBackwardResult, HostError> {
@@ -41,28 +41,26 @@ pub(in crate::builtins::deep_learning) fn backward(
         return Err(HostError::TraceMismatch);
     }
     for (index, state) in state_gradients.iter().enumerate() {
-        if !matches!(
-            steps.get(state.step_index),
-            Some(HostStep::Recurrent { .. })
-        ) || state_gradients[..index]
+        if !trace.records.iter().any(|record| {
+            record.step_index == state.layer_index
+                && matches!(&record.step, PinnedStep::Recurrent { .. })
+        }) || state_gradients[..index]
             .iter()
-            .any(|prior| prior.step_index == state.step_index && prior.role == state.role)
+            .any(|prior| prior.layer_index == state.layer_index && prior.role == state.role)
         {
             return Err(HostError::TraceMismatch);
         }
     }
     let mut gradient = output_gradient;
     let mut parameter_gradients = Vec::new();
-    for record in trace.records.into_iter().rev() {
+    for record in trace.records.iter().rev() {
         if !matches_axes(&gradient, &record.output_axes) {
             return Err(HostError::TraceMismatch);
         }
-        let step = steps
-            .get(record.step_index)
-            .ok_or(HostError::TraceMismatch)?;
-        let (next, parameters) = match (step, &record.input, &gradient, record.cache) {
+        let step = &record.step;
+        let (next, parameters) = match (step, &record.input, &gradient, &record.cache) {
             (
-                HostStep::FullyConnected { weights, bias },
+                PinnedStep::FullyConnected { weights, bias },
                 HostValue::Real(input),
                 HostValue::Real(dy),
                 StepCache::None,
@@ -76,7 +74,7 @@ pub(in crate::builtins::deep_learning) fn backward(
                     },
                 )
             }
-            (HostStep::Relu, HostValue::Real(input), HostValue::Real(dy), StepCache::None) => (
+            (PinnedStep::Relu, HostValue::Real(input), HostValue::Real(dy), StepCache::None) => (
                 HostValue::Real(activation::backward(
                     input,
                     dy,
@@ -85,7 +83,7 @@ pub(in crate::builtins::deep_learning) fn backward(
                 StepGradients::None,
             ),
             (
-                HostStep::Elu { alpha },
+                PinnedStep::Elu { alpha },
                 HostValue::Real(input),
                 HostValue::Real(dy),
                 StepCache::None,
@@ -97,14 +95,17 @@ pub(in crate::builtins::deep_learning) fn backward(
                 )?),
                 StepGradients::None,
             ),
-            (HostStep::Softmax, HostValue::Real(_), HostValue::Real(dy), StepCache::Softmax(y)) => {
-                (
-                    HostValue::Real(softmax::backward(&y, dy, &record.input_axes)?),
-                    StepGradients::None,
-                )
-            }
             (
-                HostStep::Convolution1d {
+                PinnedStep::Softmax,
+                HostValue::Real(_),
+                HostValue::Real(dy),
+                StepCache::Softmax(y),
+            ) => (
+                HostValue::Real(softmax::backward(&y, dy, &record.input_axes)?),
+                StepGradients::None,
+            ),
+            (
+                PinnedStep::Convolution1d {
                     weights,
                     bias,
                     options,
@@ -124,7 +125,7 @@ pub(in crate::builtins::deep_learning) fn backward(
                 )
             }
             (
-                HostStep::LayerNormalization {
+                PinnedStep::LayerNormalization {
                     scale,
                     offset,
                     options,
@@ -140,7 +141,7 @@ pub(in crate::builtins::deep_learning) fn backward(
                     dy,
                     &record.input_axes,
                     *options,
-                    &stats,
+                    stats,
                 )?;
                 (
                     HostValue::Real(result.input),
@@ -151,16 +152,16 @@ pub(in crate::builtins::deep_learning) fn backward(
                 )
             }
             (
-                HostStep::GlobalAveragePooling1d,
-                HostValue::Real(input),
+                PinnedStep::GlobalAveragePooling1d,
+                HostValue::Real(_input),
                 HostValue::Real(dy),
                 StepCache::None,
             ) => (
-                HostValue::Real(pooling::backward(input, dy, &record.input_axes)?),
+                HostValue::Real(pooling::backward(dy, &record.input_axes)?),
                 StepGradients::None,
             ),
             (
-                HostStep::GlobalAveragePooling1d,
+                PinnedStep::GlobalAveragePooling1d,
                 HostValue::Complex(input),
                 HostValue::Complex(dy),
                 StepCache::None,
@@ -169,7 +170,7 @@ pub(in crate::builtins::deep_learning) fn backward(
                 StepGradients::None,
             ),
             (
-                HostStep::Recurrent {
+                PinnedStep::Recurrent {
                     input_weights,
                     recurrent_weights,
                     bias,
@@ -186,22 +187,24 @@ pub(in crate::builtins::deep_learning) fn backward(
                     input_weights,
                     recurrent_weights,
                     bias,
-                    *initial_hidden,
-                    *initial_cell,
+                    initial_hidden.as_ref(),
+                    initial_cell.as_ref(),
                     &record.input_axes,
                     *options,
-                    &cache,
+                    cache,
                     dy,
                     state_gradients
                         .iter()
                         .find(|state| {
-                            state.step_index == record.step_index && state.role == StateRole::Hidden
+                            state.layer_index == record.step_index
+                                && state.role == StateRole::HiddenState
                         })
                         .map(|state| &state.value),
                     state_gradients
                         .iter()
                         .find(|state| {
-                            state.step_index == record.step_index && state.role == StateRole::Cell
+                            state.layer_index == record.step_index
+                                && state.role == StateRole::CellState
                         })
                         .map(|state| &state.value),
                 )?;

@@ -1,4 +1,4 @@
-use runmat_builtins::{DeepLearningAxisLabel, DeepLearningAxisLayout};
+use runmat_builtins::DeepLearningAxisLabel;
 use runmat_value::{NumericDType, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::{AxisGeometryError, AxisPlan};
@@ -82,6 +82,14 @@ pub(super) struct Geometry {
     spatial_sizes: Vec<usize>,
 }
 
+pub(in crate::builtins::deep_learning) struct RecurrentParameterShapes<'a> {
+    pub input_weights: &'a [usize],
+    pub recurrent_weights: &'a [usize],
+    pub bias: &'a [usize],
+    pub initial_hidden: Option<&'a [usize]>,
+    pub initial_cell: Option<&'a [usize]>,
+}
+
 fn strides(shape: &[usize]) -> Result<(Vec<usize>, usize), RecurrentError> {
     let mut next = 1usize;
     let mut strides = Vec::with_capacity(shape.len());
@@ -105,9 +113,9 @@ impl Geometry {
         axes: &AxisPlan,
         options: RecurrentOptions,
     ) -> Result<Self, RecurrentError> {
-        if axes.shape() != input.shape || options.hidden_size == 0 {
+        if axes.shape() != input.shape || input.len() != axes.element_count() {
             return Err(RecurrentError::Invalid(
-                "input axes must match shape and hidden size must be positive",
+                "input axes and payload must match shape",
             ));
         }
         let dtype = input.numeric_dtype();
@@ -121,6 +129,31 @@ impl Geometry {
                 .any(|tensor| tensor.numeric_dtype() != dtype)
         {
             return Err(RecurrentError::UnsupportedPrecision);
+        }
+        Self::from_shapes(
+            axes,
+            RecurrentParameterShapes {
+                input_weights: &input_weights.shape,
+                recurrent_weights: &recurrent_weights.shape,
+                bias: &bias.shape,
+                initial_hidden: initial_hidden.map(|tensor| tensor.shape.as_slice()),
+                initial_cell: initial_cell.map(|tensor| tensor.shape.as_slice()),
+            },
+            dtype,
+            options,
+        )
+    }
+
+    pub fn from_shapes(
+        axes: &AxisPlan,
+        parameters: RecurrentParameterShapes<'_>,
+        dtype: NumericDType,
+        options: RecurrentOptions,
+    ) -> Result<Self, RecurrentError> {
+        if options.hidden_size == 0 || !matches!(dtype, NumericDType::F32 | NumericDType::F64) {
+            return Err(RecurrentError::Invalid(
+                "positive hidden size and real single/double precision are required",
+            ));
         }
         let layout = axes.layout();
         let channel_axis = layout.index(DeepLearningAxisLabel::Channel);
@@ -138,7 +171,7 @@ impl Geometry {
             ));
         }
         for (axis, label) in layout.axes().iter().enumerate() {
-            if *label == DeepLearningAxisLabel::Unspecified && input.shape[axis] != 1 {
+            if *label == DeepLearningAxisLabel::Unspecified && axes.shape()[axis] != 1 {
                 return Err(RecurrentError::Invalid(
                     "non-singleton unspecified recurrent axes are unsupported",
                 ));
@@ -146,17 +179,17 @@ impl Geometry {
         }
         let spatial_sizes = spatial_axes
             .iter()
-            .map(|axis| input.shape[*axis])
+            .map(|axis| axes.shape()[*axis])
             .collect::<Vec<_>>();
         let input_channels = spatial_sizes
             .iter()
             .try_fold(
-                channel_axis.map_or(1, |axis| input.shape[axis]),
+                channel_axis.map_or(1, |axis| axes.shape()[axis]),
                 |n, size| n.checked_mul(*size),
             )
             .ok_or(RecurrentError::ShapeOverflow)?;
-        let batches = batch_axis.map_or(1, |axis| input.shape[axis]);
-        let steps = time_axis.map_or(1, |axis| input.shape[axis]);
+        let batches = batch_axis.map_or(1, |axis| axes.shape()[axis]);
+        let steps = time_axis.map_or(1, |axis| axes.shape()[axis]);
         if input_channels == 0 || batches == 0 || steps == 0 {
             return Err(RecurrentError::Invalid(
                 "recurrent channel, batch, and time dimensions must be nonempty",
@@ -168,13 +201,13 @@ impl Geometry {
             .checked_mul(4)
             .and_then(|n| n.checked_mul(directions))
             .ok_or(RecurrentError::ShapeOverflow)?;
-        if input_weights.shape != [rows, input_channels]
-            || recurrent_weights.shape != [rows, options.hidden_size]
-            || bias.shape != [rows, 1]
+        if parameters.input_weights != [rows, input_channels]
+            || parameters.recurrent_weights != [rows, options.hidden_size]
+            || parameters.bias != [rows, 1]
         {
             return Err(RecurrentError::Invalid("InputWeights, RecurrentWeights, or Bias shape does not match recurrent gate geometry"));
         }
-        if initial_hidden.is_some() != initial_cell.is_some() {
+        if parameters.initial_hidden.is_some() != parameters.initial_cell.is_some() {
             return Err(RecurrentError::Invalid(
                 "initial HiddenState and CellState must be supplied together",
             ));
@@ -182,8 +215,8 @@ impl Geometry {
         let state_channels = directions
             .checked_mul(options.hidden_size)
             .ok_or(RecurrentError::ShapeOverflow)?;
-        let state_batch = if let Some(hidden) = initial_hidden {
-            let cell = initial_cell.expect("paired state checked above");
+        let state_batch = if let Some(hidden) = parameters.initial_hidden {
+            let cell = parameters.initial_cell.expect("paired state checked above");
             let valid = |shape: &[usize]| match shape {
                 [channels] => (*channels == state_channels).then_some(1),
                 [channels, batch]
@@ -193,10 +226,10 @@ impl Geometry {
                 }
                 _ => None,
             };
-            let hidden_batch = valid(&hidden.shape).ok_or(RecurrentError::Invalid(
+            let hidden_batch = valid(hidden).ok_or(RecurrentError::Invalid(
                 "HiddenState must be channels-by-batch or broadcast channels-by-one",
             ))?;
-            let cell_batch = valid(&cell.shape).ok_or(RecurrentError::Invalid(
+            let cell_batch = valid(cell).ok_or(RecurrentError::Invalid(
                 "CellState must match HiddenState geometry",
             ))?;
             if hidden_batch != cell_batch {
@@ -212,22 +245,12 @@ impl Geometry {
             .hidden_size
             .checked_mul(directions)
             .ok_or(RecurrentError::ShapeOverflow)?;
-        let (output_shape, output_labels) = match (
-            batch_axis.is_some(),
-            time_axis.is_some(),
-            options.output_mode,
-        ) {
-            (true, true, OutputMode::Sequence) => (vec![output_channels, batches, steps], "CBT"),
-            (true, _, _) => (vec![output_channels, batches], "CB"),
-            (false, true, OutputMode::Sequence) => (vec![output_channels, steps], "CT"),
-            (false, _, _) => (vec![output_channels, 1], "CU"),
-        };
-        let output_layout = DeepLearningAxisLayout::parse(output_labels, output_shape.len())
-            .map_err(|_| RecurrentError::Invalid("invalid recurrent output axes"))?;
-        let output_axes = AxisPlan::new(output_layout, &output_shape)?;
-        let (input_strides, input_elements) = strides(&input.shape)?;
+        let output_axes =
+            axes.after_recurrent(output_channels, options.output_mode == OutputMode::Sequence)?;
+        let output_shape = output_axes.shape().to_vec();
+        let (input_strides, input_elements) = strides(axes.shape())?;
         let (output_strides, _) = strides(&output_shape)?;
-        if input_elements != input.len() {
+        if input_elements != axes.element_count() {
             return Err(RecurrentError::Invalid(
                 "input payload does not match its shape",
             ));
@@ -244,7 +267,7 @@ impl Geometry {
             .ok_or(RecurrentError::ShapeOverflow)?;
         Ok(Self {
             options,
-            input_shape: input.shape.clone(),
+            input_shape: axes.shape().to_vec(),
             output_shape,
             output_axes,
             input_channels,

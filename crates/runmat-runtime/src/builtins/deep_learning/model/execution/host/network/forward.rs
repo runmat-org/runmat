@@ -2,9 +2,10 @@ use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 
 use super::super::{activation, conv, dense, normalization, pooling, recurrent, softmax};
 use super::types::{
-    HostError, HostExecutionResult, HostStep, HostTrace, HostValue, StateRole, StateUpdate,
-    StepCache, StepRecord,
+    HostError, HostExecutionResult, HostStep, HostTrace, HostValue, PinnedStep, StepCache,
+    StepRecord,
 };
+use crate::builtins::deep_learning::model::state::{StateRole, StateUpdate};
 
 /// Execute a previously admitted network. Only CPU-owned tensors may reach
 /// this entrypoint; the public wrapper handles device provenance and routing.
@@ -14,6 +15,11 @@ pub(in crate::builtins::deep_learning) fn execute(
     input_axes: AxisPlan,
     capture: bool,
 ) -> Result<HostExecutionResult, HostError> {
+    if !matches_payload_axes(&input, &input_axes) {
+        return Err(HostError::Invalid(
+            "host input payload does not match its admitted axes",
+        ));
+    }
     let mut value = input;
     let mut axes = input_axes;
     let mut records = Vec::new();
@@ -29,6 +35,7 @@ pub(in crate::builtins::deep_learning) fn execute(
         if capture {
             records.push(StepRecord {
                 step_index,
+                step: PinnedStep::capture(step).expect("numerical step is not identity"),
                 input: value,
                 input_axes: axes,
                 output_axes: output_axes.clone(),
@@ -36,7 +43,7 @@ pub(in crate::builtins::deep_learning) fn execute(
             });
         }
         next_state.extend(state.into_iter().map(|(role, value)| StateUpdate {
-            step_index,
+            layer_index: step_index,
             role,
             value,
         }));
@@ -52,6 +59,17 @@ pub(in crate::builtins::deep_learning) fn execute(
         }),
         next_state,
     })
+}
+
+fn matches_payload_axes(value: &HostValue, axes: &AxisPlan) -> bool {
+    match value {
+        HostValue::Real(tensor) => {
+            tensor.shape.as_slice() == axes.shape() && tensor.len() == axes.element_count()
+        }
+        HostValue::Complex(tensor) => {
+            tensor.shape.as_slice() == axes.shape() && tensor.len() == axes.element_count()
+        }
+    }
 }
 
 type Applied = (
@@ -182,8 +200,8 @@ fn apply(
                 .map(StepCache::Recurrent)
                 .unwrap_or(StepCache::None);
             let state = vec![
-                (StateRole::Hidden, output.hidden_state),
-                (StateRole::Cell, output.cell_state),
+                (StateRole::HiddenState, output.hidden_state),
+                (StateRole::CellState, output.cell_state),
             ];
             Ok((HostValue::Real(output.tensor), output.axes, cache, state))
         }

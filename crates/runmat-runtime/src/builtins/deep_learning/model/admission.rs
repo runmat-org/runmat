@@ -38,30 +38,6 @@ pub(super) async fn prepare_input_for_host(value: Value) -> BuiltinResult<Value>
     }
 }
 
-pub(super) fn network_consumed_integer(network: &ObjectInstance) -> BuiltinResult<bool> {
-    let layers = network
-        .properties
-        .get("Layers")
-        .map(|value| layer_slice(value, "forward"))
-        .transpose()?
-        .unwrap_or(&[]);
-    for layer in layers {
-        let Value::Object(layer) = layer else {
-            continue;
-        };
-        if !layer.class_name.is(super::FULLY_CONNECTED_LAYER_CLASS) {
-            continue;
-        }
-        for name in ["Weights", "Bias"] {
-            let value = tensor_property_value(layer, name, "forward")?;
-            if crate::builtins::common::validation::value_has_native_integer_class(value) {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
-}
-
 fn forward_input_shape(value: &Value) -> BuiltinResult<&[usize]> {
     match forward_data(value) {
         Value::Tensor(tensor) => Ok(&tensor.shape),

@@ -102,7 +102,7 @@ fn values<T: Real>(input: &[T], operation: Activation) -> Vec<T> {
         .iter()
         .map(|&value| match operation {
             Activation::Relu => {
-                if value > T::zero() {
+                if value != value || value > T::zero() {
                     value
                 } else {
                     T::zero()
@@ -127,7 +127,9 @@ fn derivatives<T: Real>(input: &[T], dy: &[T], operation: Activation) -> Vec<T> 
             gradient
                 * match operation {
                     Activation::Relu => {
-                        if value > T::zero() {
+                        if value != value {
+                            value
+                        } else if value > T::zero() {
                             T::one()
                         } else {
                             T::zero()
@@ -161,5 +163,30 @@ mod tests {
         assert_eq!(y.as_f32_slice().unwrap()[1..], [0.0, 2.0]);
         assert!((dx.as_f32_slice().unwrap()[0] - 2.0 * (-1.0f32).exp()).abs() < 1e-6);
         assert_eq!(dx.as_f32_slice().unwrap()[1..], [2.0, 3.0]);
+    }
+
+    #[test]
+    fn relu_nan_stays_nan_in_forward_and_adjoint_at_both_precisions() {
+        let x32 = Tensor::from_f32(vec![f32::NAN, -2.0, 3.0], vec![3, 1]).unwrap();
+        let dy32 = Tensor::from_f32(vec![1.0; 3], vec![3, 1]).unwrap();
+        let y32 = forward(&x32, Activation::Relu).unwrap();
+        let dx32 = backward(&x32, &dy32, Activation::Relu).unwrap();
+        assert!(y32.as_f32_slice().unwrap()[0].is_nan());
+        assert!(dx32.as_f32_slice().unwrap()[0].is_nan());
+        assert_eq!(&y32.as_f32_slice().unwrap()[1..], &[0.0, 3.0]);
+        assert_eq!(&dx32.as_f32_slice().unwrap()[1..], &[0.0, 1.0]);
+
+        let x64 = Tensor::new(vec![f64::NAN, -2.0, 3.0], vec![3, 1]).unwrap();
+        let dy64 = Tensor::new(vec![1.0; 3], vec![3, 1]).unwrap();
+        assert!(forward(&x64, Activation::Relu)
+            .unwrap()
+            .as_f64_slice()
+            .unwrap()[0]
+            .is_nan());
+        assert!(backward(&x64, &dy64, Activation::Relu)
+            .unwrap()
+            .as_f64_slice()
+            .unwrap()[0]
+            .is_nan());
     }
 }

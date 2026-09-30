@@ -113,7 +113,7 @@ fn validate_unary_forward_result(
     }
 }
 
-fn validate_gpu_forward_layers(
+pub(super) fn validate_gpu_forward_layers(
     layers: &[Value],
     input: &GpuTensorHandle,
     function: &'static str,

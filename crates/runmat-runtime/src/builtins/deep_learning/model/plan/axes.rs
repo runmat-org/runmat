@@ -146,6 +146,25 @@ impl AxisPlan {
         Self::new(layout, &shape)
     }
 
+    /// Recurrent output replaces flattened source features with the hidden
+    /// channel width. Last-output mode removes T; an unbatched last result
+    /// retains the documented singleton unspecified axis.
+    pub(in crate::builtins::deep_learning) fn after_recurrent(
+        &self,
+        output_channels: usize,
+        sequence: bool,
+    ) -> Result<Self, AxisGeometryError> {
+        let batch = self.axis_size(DeepLearningAxisLabel::Batch);
+        let time = self.axis_size(DeepLearningAxisLabel::Time);
+        let (shape, labels) = match (batch, time, sequence) {
+            (Some(batch), Some(time), true) => (vec![output_channels, batch, time], "CBT"),
+            (Some(batch), _, _) => (vec![output_channels, batch], "CB"),
+            (None, Some(time), true) => (vec![output_channels, time], "CT"),
+            (None, _, _) => (vec![output_channels, 1], "CU"),
+        };
+        Self::new(DeepLearningAxisLayout::parse(labels, shape.len())?, &shape)
+    }
+
     pub(in crate::builtins::deep_learning) fn offset(
         &self,
         indices: &[usize],
