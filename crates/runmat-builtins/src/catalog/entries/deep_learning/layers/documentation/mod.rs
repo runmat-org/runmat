@@ -22,7 +22,7 @@ macro_rules! layer_documentation {
                     "The result is a host layer object. `Name` and `Description` are text. Recognized name-value options are stored under their canonical property names; unknown, duplicate, and cross-layer option names are rejected. A layer graph can retain recognized options that are not yet executable by `forward` or training.",
                 ] },
                 BuiltinDocumentationSection { heading: "Placement and validation", paragraphs: &[
-                    "The constructor validates required sizes and host option syntax before downloading option values. Valid resident option values are gathered to build the host metadata object. It does not execute a GPU kernel. Invalid host text options reject without downloading earlier resident values.",
+                    "The constructor validates required sizes and option syntax before downloading resident controls. Numeric and logical controls needed for validation may be gathered; data, learnables, recurrent state, and initializer captures retain their original storage and provider ownership. The result is a host metadata object, not a GPU kernel invocation. Invalid host text options reject without downloading earlier resident values. Execution validates parameter geometry and provider support separately.",
                     "Structural sizes are stored in double-valued layer properties. Typed integer sizes must survive that conversion exactly: the exact `uint64` value 9,007,199,254,740,993 is rejected, while an aligned exactly representable larger integer remains admissible if it fits the host size range. This boundary does not imply that a network with that many units can be allocated.",
                 ] },
             ],
@@ -42,7 +42,10 @@ macro_rules! layer_documentation {
             media: &[],
             evidence: BuiltinDocumentationEvidence {
                 implementation: &[SOURCE],
-                verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Layer construction and admission", location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs" }],
+                verification: &[
+                    BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Layer construction and admission", location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs" },
+                    BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Resident data and control boundaries", location: "crates/runmat-runtime/src/builtins/deep_learning/layers/residency_tests.rs" },
+                ],
                 notes: &["Constructor metadata is catalog-authoritative; execution support remains layer-specific. Native and browser behavior require integrated qualification."],
             },
             introduced: None,

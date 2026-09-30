@@ -6,6 +6,8 @@ fn construct(kind: DeepLearningLayerKind, options: Vec<Value>) -> Value {
     use DeepLearningLayerKind as K;
     block_on(async {
         match kind {
+            K::FeatureInput => feature_input_layer_builtin(Value::Num(2.0), options).await,
+            K::ClassificationOutput => classification_layer_builtin(options).await,
             K::FullyConnected => fully_connected_layer_builtin(Value::Num(2.0), options).await,
             K::Lstm => lstm_layer_builtin(Value::Num(2.0), options).await,
             K::Bilstm => bilstm_layer_builtin(Value::Num(2.0), options).await,
@@ -13,7 +15,7 @@ fn construct(kind: DeepLearningLayerKind, options: Vec<Value>) -> Value {
                 convolution_1d_layer_builtin(Value::Num(3.0), Value::Num(2.0), options).await
             }
             K::LayerNormalization => layer_normalization_layer_builtin(options).await,
-            _ => unreachable!("only learnable layer constructors in this fixture"),
+            _ => unreachable!("only data-bearing layer constructors in this fixture"),
         }
     })
     .unwrap()
@@ -33,7 +35,15 @@ fn resident_learnables_and_recurrent_state_are_not_materialized_by_construction(
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
         for (kind, options) in [
-            (K::FullyConnected, &[O::Weights, O::Bias][..]),
+            (
+                K::FeatureInput,
+                &[O::Mean, O::StandardDeviation, O::Min, O::Max][..],
+            ),
+            (K::ClassificationOutput, &[O::ClassWeights][..]),
+            (
+                K::FullyConnected,
+                &[O::Weights, O::Bias, O::InputLearnables, O::OutputLearnables][..],
+            ),
             (
                 K::Lstm,
                 &[
@@ -82,6 +92,80 @@ fn resident_learnables_and_recurrent_state_are_not_materialized_by_construction(
             }
         }
         source.allocation_lease().validate_live().unwrap();
+    });
+}
+
+#[test]
+fn initializer_closure_captures_keep_their_resident_lease_without_invocation() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let source = provider
+            .upload(&HostTensorView {
+                data: &[2.0, 5.0],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        let callback = Value::Closure(runmat_value::Closure {
+            function_name: "not_invoked_during_construction".into(),
+            bound_function: None,
+            captures: vec![Value::GpuTensor(source.clone())],
+        });
+        provider.reset_telemetry();
+        let Value::Object(layer) = construct(
+            DeepLearningLayerKind::FullyConnected,
+            vec![
+                Value::String(
+                    DeepLearningLayerOption::WeightsInitializer
+                        .canonical_name()
+                        .into(),
+                ),
+                callback.clone(),
+            ],
+        ) else {
+            panic!("layer expected")
+        };
+        let stored = layer
+            .properties
+            .get(DeepLearningLayerOption::WeightsInitializer.canonical_name())
+            .unwrap();
+        assert_eq!(stored, &callback);
+        source.allocation_lease().validate_live().unwrap();
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+    });
+}
+
+#[test]
+fn downloaded_invalid_control_rejects_before_publishing_a_layer() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let epsilon = provider
+            .upload(&HostTensorView {
+                data: &[0.002],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        let factor = provider
+            .upload(&HostTensorView {
+                data: &[-1.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let error = block_on(layer_normalization_layer_builtin(vec![
+            Value::String(DeepLearningLayerOption::Epsilon.canonical_name().into()),
+            Value::GpuTensor(epsilon.clone()),
+            Value::String(
+                DeepLearningLayerOption::ScaleLearnRateFactor
+                    .canonical_name()
+                    .into(),
+            ),
+            Value::GpuTensor(factor.clone()),
+        ]))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert!(provider.telemetry_snapshot().download_bytes > 0);
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+        epsilon.allocation_lease().validate_live().unwrap();
+        factor.allocation_lease().validate_live().unwrap();
     });
 }
 

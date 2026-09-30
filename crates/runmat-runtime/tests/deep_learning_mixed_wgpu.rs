@@ -2,7 +2,6 @@
 #![cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 
 use futures::executor::block_on;
-use runmat_accelerate::backend::wgpu::provider::WgpuProvider;
 use runmat_accelerate_api::{
     handle_precision, handle_provenance, handle_storage, AccelProvider, GpuHandleProvenance,
     GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
@@ -19,9 +18,7 @@ mod fixture;
 #[test]
 #[ignore = "requires an actual WGPU device; run explicitly for both native precisions"]
 fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracle() {
-    let provider = Box::leak(Box::new(
-        WgpuProvider::new(Default::default()).expect("actual WGPU device required"),
-    ));
+    let provider = fixture::device();
     let _selected = ThreadProviderGuard::set(Some(provider));
     for explicit_parameters in [false, true] {
         for lazy_source in [false, true] {

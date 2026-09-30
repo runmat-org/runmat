@@ -8,6 +8,25 @@ use runmat_accelerate_api::{
 use runmat_runtime::call_builtin;
 use runmat_value::{CellArray, Value};
 
+pub(super) fn device() -> &'static WgpuProvider {
+    let provider = Box::leak(Box::new(
+        WgpuProvider::new(Default::default()).expect("actual WGPU device required"),
+    ));
+    if let Ok(requested) = std::env::var("RUNMAT_WGPU_FORCE_PRECISION") {
+        let expected = match requested.trim().to_ascii_lowercase().as_str() {
+            "f32" | "float32" | "32" => ProviderPrecision::F32,
+            "f64" | "float64" | "64" => ProviderPrecision::F64,
+            other => panic!("unsupported hardware-test precision: {other}"),
+        };
+        assert_eq!(
+            provider.precision(),
+            expected,
+            "hardware qualification must not pass by substituting another precision"
+        );
+    }
+    provider
+}
+
 pub(super) fn upload(
     provider: &WgpuProvider,
     values: &[f64],

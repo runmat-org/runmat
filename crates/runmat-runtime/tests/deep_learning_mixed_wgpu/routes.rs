@@ -1,7 +1,6 @@
 //! Independent numerical witnesses for the other composed resident routes.
 
-use super::fixture::{assert_values, forward, read, upload};
-use runmat_accelerate::backend::wgpu::provider::WgpuProvider;
+use super::fixture::{assert_values, device, forward, read, upload};
 use runmat_accelerate_api::{AccelProvider, GpuHandleProvenance, ThreadProviderGuard};
 use runmat_runtime::call_builtin;
 use runmat_value::{Tensor, Value};
@@ -43,12 +42,6 @@ fn elu(value: f64) -> f64 {
     } else {
         1.5 * (value.exp() - 1.0)
     }
-}
-
-fn device() -> &'static WgpuProvider {
-    Box::leak(Box::new(
-        WgpuProvider::new(Default::default()).expect("actual WGPU device required"),
-    ))
 }
 
 #[test]
