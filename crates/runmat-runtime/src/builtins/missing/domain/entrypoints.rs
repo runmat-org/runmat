@@ -20,9 +20,11 @@ pub(super) async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let mut gathered = Vec::with_capacity(args.len());
     for argument in &args {
-        gathered.push(gather_if_needed_async(argument).await.map_err(|err| {
-            invalid_argument(format!("missing: failed to gather arguments: {err}"))
-        })?);
+        gathered.push(
+            gather_if_needed_async(argument)
+                .await
+                .map_err(|err| gather_error("missing", "arguments", err))?,
+        );
     }
     let shape = parse_size_args(&gathered)?;
     missing_string_array(shape)
@@ -47,7 +49,7 @@ pub(super) async fn ismissing_builtin(value: Value) -> BuiltinResult<Value> {
     }
     let value = gather_if_needed_async(&value)
         .await
-        .map_err(|err| invalid_argument(format!("ismissing: failed to gather input: {err}")))?;
+        .map_err(|err| gather_error("ismissing", "input", err))?;
     ismissing_value(&value)
 }
 
@@ -80,7 +82,7 @@ pub(super) fn ismissing_resident_integer(
 pub(super) async fn anymissing_builtin(value: Value) -> BuiltinResult<Value> {
     let value = gather_if_needed_async(&value)
         .await
-        .map_err(|err| invalid_argument(format!("anymissing: failed to gather input: {err}")))?;
+        .map_err(|err| gather_error("anymissing", "input", err))?;
     Ok(Value::Bool(any_missing(&value)?))
 }
 
@@ -108,15 +110,13 @@ pub(super) async fn standardize_missing_builtin(
             "standardizeMissing",
         )?;
     }
-    let indicator = gather_if_needed_async(indicator).await.map_err(|err| {
-        invalid_argument(format!(
-            "standardizeMissing: failed to gather indicators: {err}"
-        ))
-    })?;
+    let indicator = gather_if_needed_async(indicator)
+        .await
+        .map_err(|err| gather_error("standardizeMissing", "indicators", err))?;
     let indicators = indicator_set(&indicator)?;
-    let value = gather_if_needed_async(&value).await.map_err(|err| {
-        invalid_argument(format!("standardizeMissing: failed to gather input: {err}"))
-    })?;
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| gather_error("standardizeMissing", "input", err))?;
     standardize_missing_value(value, &indicators)
 }
 
@@ -149,7 +149,7 @@ pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> Builtin
             .ok_or_else(|| invalid_argument("rmmissing: no provider owns the resident input"))?;
         gpu_helpers::download_value_preserving_residency_async(owner, handle)
             .await
-            .map_err(|err| invalid_argument(format!("rmmissing: failed to gather input: {err}")))?
+            .map_err(|err| gather_error("rmmissing", "input", err))?
     } else {
         value
     };
@@ -204,7 +204,7 @@ pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> Built
     let options = FillOptions::parse(&rest)?;
     let value = gather_if_needed_async(&value)
         .await
-        .map_err(|err| invalid_argument(format!("fillmissing: failed to gather input: {err}")))?;
+        .map_err(|err| gather_error("fillmissing", "input", err))?;
     let (result, mask) = fill_missing_value(value, &options)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
@@ -397,7 +397,7 @@ pub(super) async fn movmad_builtin(
     }
     let value = gather_if_needed_async(&value)
         .await
-        .map_err(|err| invalid_argument(format!("movmad: failed to gather input: {err}")))?;
+        .map_err(|err| gather_error("movmad", "input", err))?;
     let tensor = numeric_tensor(value, "movmad")?;
     let options = MovingOptions::parse(&rest)?;
     let result = moving_mad(tensor, window, options)?;

@@ -22,6 +22,7 @@ fn first_unrepresentable_usize_double() -> f64 {
 }
 
 mod core;
+mod errors;
 mod filling;
 mod moving;
 mod nan;
