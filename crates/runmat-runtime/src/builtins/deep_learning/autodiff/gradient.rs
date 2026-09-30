@@ -37,6 +37,9 @@ pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
             "dlgradient: loss must be scalar",
         ));
     }
+    for target in rest.iter().take(requested) {
+        targets::validate(target)?;
+    }
     let gradients = backward(loss_node)?;
     let mut outputs = Vec::with_capacity(requested);
     for target in rest.iter().take(requested) {
@@ -50,6 +53,7 @@ pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
 }
 
 mod backward;
+mod targets;
 use backward::backward;
 
 #[cfg(test)]
