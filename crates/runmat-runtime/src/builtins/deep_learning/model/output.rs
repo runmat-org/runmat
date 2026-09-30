@@ -7,7 +7,8 @@ use super::execution::{
     host::network::{HostExecutionResult, HostValue},
     NetworkCaller, NetworkExecutionOutcome,
 };
-use super::{dlarray_format, object, state, DLARRAY_CLASS};
+use super::host::dlarray_format;
+use super::{object, state, DLARRAY_CLASS};
 use crate::builtins::deep_learning::{autodiff, deep_learning_error};
 use crate::BuiltinResult;
 
