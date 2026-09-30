@@ -9,6 +9,9 @@ use syn::{
     MetaNameValue, NestedMeta, Pat,
 };
 
+mod invocation_parameters;
+use invocation_parameters::{is_optional_runtime_context, is_optional_usize};
+
 static WASM_REGISTRY_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static WASM_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static WASM_REGISTRY_INIT: OnceLock<()> = OnceLock::new();
@@ -1277,67 +1280,6 @@ fn helper_ident_from_name(prefix: &str, name: &str) -> proc_macro2::Ident {
         }
     }
     format_ident!("{}{}", prefix, sanitized)
-}
-
-fn is_optional_runtime_context(ty: &syn::Type) -> bool {
-    let syn::Type::Path(outer) = ty else {
-        return false;
-    };
-    let Some(option) = outer.path.segments.last() else {
-        return false;
-    };
-    if option.ident != "Option" {
-        return false;
-    }
-    let syn::PathArguments::AngleBracketed(arguments) = &option.arguments else {
-        return false;
-    };
-    if arguments.args.len() != 1 {
-        return false;
-    }
-    matches!(
-        arguments.args.first(),
-        Some(syn::GenericArgument::Type(syn::Type::Path(inner)))
-            if inner.path.segments.last().is_some_and(|segment| segment.ident == "RuntimeContext")
-    )
-}
-
-fn is_optional_usize(ty: &syn::Type) -> bool {
-    let syn::Type::Path(outer) = ty else {
-        return false;
-    };
-    let Some(option) = outer.path.segments.last() else {
-        return false;
-    };
-    if option.ident != "Option" {
-        return false;
-    }
-    let syn::PathArguments::AngleBracketed(arguments) = &option.arguments else {
-        return false;
-    };
-    matches!(
-        arguments.args.first(),
-        Some(syn::GenericArgument::Type(syn::Type::Path(inner)))
-            if arguments.args.len() == 1 && inner.path.is_ident("usize")
-    )
-}
-
-#[cfg(test)]
-mod invocation_parameter_tests {
-    use super::{is_optional_runtime_context, is_optional_usize};
-
-    #[test]
-    fn invocation_metadata_requires_structural_types() {
-        let context =
-            syn::parse_str::<syn::Type>("Option<crate::context::RuntimeContext>").unwrap();
-        let outputs = syn::parse_str::<syn::Type>("Option<usize>").unwrap();
-        let wrong_context = syn::parse_str::<syn::Type>("Option<Value>").unwrap();
-        let wrong_outputs = syn::parse_str::<syn::Type>("Option<u32>").unwrap();
-        assert!(is_optional_runtime_context(&context));
-        assert!(is_optional_usize(&outputs));
-        assert!(!is_optional_runtime_context(&wrong_context));
-        assert!(!is_optional_usize(&wrong_outputs));
-    }
 }
 
 /// Smart type inference from Rust types to our enhanced Type enum
