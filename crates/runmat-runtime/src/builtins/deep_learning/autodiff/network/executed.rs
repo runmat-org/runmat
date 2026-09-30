@@ -26,7 +26,7 @@ pub(in crate::builtins::deep_learning::autodiff) struct NetworkTapeRecord {
     input: Option<ParentBinding>,
     parameters: HashMap<(usize, ParameterRole), ParentBinding>,
     states: HashMap<(usize, StateRole), ParentBinding>,
-    output_shape: Vec<usize>,
+    output_axes: model::plan::axes::AxisPlan,
     output_dtype: NumericDType,
     recorded_outputs: std::ops::Range<usize>,
     #[cfg(test)]
@@ -131,7 +131,7 @@ pub(in crate::builtins::deep_learning) fn record_execution(
         input,
         parameters,
         states,
-        output_shape: output.shape.clone(),
+        output_axes: execution.axes.clone(),
         output_dtype: output.numeric_dtype(),
         recorded_outputs: first_node..end,
         #[cfg(test)]

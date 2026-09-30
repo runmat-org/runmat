@@ -44,9 +44,23 @@ pub(in crate::builtins::deep_learning::autodiff) fn reverse(
         }
     }
     let prediction = match prediction {
-        Some(gradient) => gradient,
-        None => tensor::zeros_with_dtype(&execution.output_shape, execution.output_dtype)
-            .map_err(|error| deep_learning_error("dlgradient", error))?,
+        Some(gradient) => {
+            let HostValue::Real(gradient) = model::execution::present_host(
+                HostValue::Real(gradient),
+                &execution.output_axes,
+                execution.trace.output_axes(),
+                "dlgradient",
+            )?
+            else {
+                unreachable!("a real axis permutation preserves its value kind")
+            };
+            gradient
+        }
+        None => tensor::zeros_with_dtype(
+            execution.trace.output_axes().shape(),
+            execution.output_dtype,
+        )
+        .map_err(|error| deep_learning_error("dlgradient", error))?,
     };
     #[cfg(test)]
     execution

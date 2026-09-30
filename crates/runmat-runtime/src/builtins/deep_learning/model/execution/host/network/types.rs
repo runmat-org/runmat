@@ -56,6 +56,12 @@ pub(in crate::builtins::deep_learning) struct HostTrace {
     pub(super) output_axes: AxisPlan,
 }
 
+impl HostTrace {
+    pub(in crate::builtins::deep_learning) fn output_axes(&self) -> &AxisPlan {
+        &self.output_axes
+    }
+}
+
 pub(super) struct StepRecord {
     pub step_index: usize,
     pub step: PinnedStep,

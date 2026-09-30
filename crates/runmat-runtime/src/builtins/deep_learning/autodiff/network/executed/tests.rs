@@ -9,6 +9,7 @@ use futures::executor::block_on;
 use runmat_builtins::DeepLearningLayerKind as K;
 
 mod parents;
+mod presentation;
 
 fn layer(kind: K, fields: &[(&str, Value)]) -> Value {
     let mut layer = ObjectInstance::new(kind.class().owned());

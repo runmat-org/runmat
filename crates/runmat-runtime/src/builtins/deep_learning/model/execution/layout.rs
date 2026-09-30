@@ -46,7 +46,7 @@ pub(super) fn target_axes(
     })
 }
 
-pub(super) fn present_host(
+pub(in crate::builtins::deep_learning) fn present_host(
     value: HostValue,
     source: &AxisPlan,
     target: &AxisPlan,
