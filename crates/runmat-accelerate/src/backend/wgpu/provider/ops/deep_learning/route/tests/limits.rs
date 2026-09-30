@@ -53,11 +53,15 @@ fn chunked_dense_route_sums_every_native_buffer_without_execution() {
     let element = class.element_size() as u64;
     let product = 6 * element;
     let upload = (5 * channels as u64 + 3) * element;
-    // Eight 8192-wide K chunks, with a fresh product, accumulator and
-    // immutable 256-byte parameter buffer for each dispatch. The bias add
-    // owns a separate output and params buffer.
+    // Eight 8192-wide K chunks use two reusable product buffers, seven
+    // accumulation outputs, and immutable parameter buffers per dispatch.
+    // Broadcast parameters include all supported axes and exceed one page.
     let chunked_matmul = 2 * product + 8 * 256 + 7 * (product + 256);
-    let bias_add = product + 256;
+    let broadcast_uniform =
+        (std::mem::size_of::<crate::backend::wgpu::params::BinaryBroadcastParams>() as u64)
+            .div_ceil(256)
+            * 256;
+    let bias_add = product + broadcast_uniform;
     assert_eq!(resources.upload_bytes, upload);
     assert_eq!(
         resources.new_buffer_bytes_upper_bound,
