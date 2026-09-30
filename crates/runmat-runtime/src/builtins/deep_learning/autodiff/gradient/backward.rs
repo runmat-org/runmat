@@ -1,5 +1,5 @@
 use super::super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn matmul_grad_lhs(grad: &Tensor, lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
     let grad_values = floating_tensor_values(grad, "dlgradient")?;
@@ -46,6 +46,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
     let tape_guard = tape.borrow();
     let nodes = &tape_guard.nodes;
     let mut grads: HashMap<usize, Tensor> = HashMap::new();
+    let mut reversed_networks = HashSet::new();
     let loss_dtype = nodes
         .get(loss_node)
         .map(|node| node.value.numeric_dtype())
@@ -61,11 +62,16 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
         let Some(node) = nodes.get(id) else {
             continue;
         };
-        if let NodeKind::Network { execution, output } = &node.kind {
-            for (parent, gradient) in
-                super::super::network::reverse_execution(execution, *output, grad)?
-            {
-                accumulate_parent(&mut grads, Some(parent), gradient);
+        if let NodeKind::Network { execution, .. } = &node.kind {
+            // Outputs of one immutable network trace are contiguous and all
+            // precede their downstream operations. At the first reached
+            // output, every prediction/State seed has therefore accumulated.
+            if reversed_networks.insert(Rc::as_ptr(execution)) {
+                for (parent, gradient) in
+                    super::super::network::reverse_execution(execution, nodes, &grads)?
+                {
+                    accumulate_parent(&mut grads, Some(parent), gradient);
+                }
             }
             continue;
         }

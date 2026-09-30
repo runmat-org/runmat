@@ -28,6 +28,9 @@ pub(in crate::builtins::deep_learning::autodiff) struct NetworkTapeRecord {
     states: HashMap<(usize, StateRole), ParentBinding>,
     output_shape: Vec<usize>,
     output_dtype: NumericDType,
+    recorded_outputs: std::ops::Range<usize>,
+    #[cfg(test)]
+    reverse_calls: std::cell::Cell<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -104,6 +107,25 @@ pub(in crate::builtins::deep_learning) fn record_execution(
             "forward: active network tape requires an execution trace",
         )
     })?;
+    let first_node = active_tape()
+        .ok_or_else(|| deep_learning_error("forward", "forward: no active tape"))?
+        .borrow()
+        .nodes
+        .len();
+    let output_count = if capture_state {
+        execution.next_state.len()
+    } else {
+        0
+    };
+    let end = first_node
+        .checked_add(output_count)
+        .and_then(|end| end.checked_add(1))
+        .ok_or_else(|| {
+            deep_learning_error(
+                "forward",
+                "forward: tape output count exceeds addressable size",
+            )
+        })?;
     let record = Rc::new(NetworkTapeRecord {
         trace,
         input,
@@ -111,6 +133,9 @@ pub(in crate::builtins::deep_learning) fn record_execution(
         states,
         output_shape: output.shape.clone(),
         output_dtype: output.numeric_dtype(),
+        recorded_outputs: first_node..end,
+        #[cfg(test)]
+        reverse_calls: std::cell::Cell::new(0),
     });
     outputs.prediction = Some(push_node(
         output.clone(),

@@ -4,22 +4,54 @@ use model::execution::host::network::backward::StepGradients;
 use model::state::StateUpdate;
 
 pub(in crate::builtins::deep_learning::autodiff) fn reverse(
-    execution: &NetworkTapeRecord,
-    output: NetworkOutput,
-    gradient: Tensor,
+    execution: &Rc<NetworkTapeRecord>,
+    nodes: &[Node],
+    adjoints: &HashMap<usize, Tensor>,
 ) -> BuiltinResult<Vec<(usize, Tensor)>> {
-    let (prediction, states) = match output {
-        NetworkOutput::Prediction => (gradient, Vec::new()),
-        NetworkOutput::State { layer_index, role } => (
-            tensor::zeros_with_dtype(&execution.output_shape, execution.output_dtype)
-                .map_err(|error| deep_learning_error("dlgradient", error))?,
-            vec![StateUpdate {
+    let mut prediction = None;
+    let mut states = Vec::new();
+    for id in execution.recorded_outputs.clone() {
+        let Some(gradient) = adjoints.get(&id) else {
+            continue;
+        };
+        let Some(Node {
+            kind:
+                NodeKind::Network {
+                    execution: recorded,
+                    output,
+                },
+            ..
+        }) = nodes.get(id)
+        else {
+            return Err(deep_learning_error(
+                "dlgradient",
+                "dlgradient: network output is missing from its tape",
+            ));
+        };
+        if !Rc::ptr_eq(execution, recorded) {
+            return Err(deep_learning_error(
+                "dlgradient",
+                "dlgradient: network output belongs to a different trace",
+            ));
+        }
+        match *output {
+            NetworkOutput::Prediction => prediction = Some(gradient.clone()),
+            NetworkOutput::State { layer_index, role } => states.push(StateUpdate {
                 layer_index,
                 role,
-                value: gradient,
-            }],
-        ),
+                value: gradient.clone(),
+            }),
+        }
+    }
+    let prediction = match prediction {
+        Some(gradient) => gradient,
+        None => tensor::zeros_with_dtype(&execution.output_shape, execution.output_dtype)
+            .map_err(|error| deep_learning_error("dlgradient", error))?,
     };
+    #[cfg(test)]
+    execution
+        .reverse_calls
+        .set(execution.reverse_calls.get() + 1);
     let gradients =
         model::plan::host::reverse(&execution.trace, HostValue::Real(prediction), &states)?;
     let mut result = Vec::new();

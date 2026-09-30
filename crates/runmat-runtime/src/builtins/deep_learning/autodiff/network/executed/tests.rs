@@ -1,6 +1,6 @@
 use super::*;
 use crate::builtins::deep_learning::autodiff::{
-    array_methods::{dlarray_sum_builtin, dlarray_times_builtin},
+    array_methods::{dlarray_plus_builtin, dlarray_sum_builtin, dlarray_times_builtin},
     gradient::dlgradient_builtin,
     tape::{Tape, TapeActivation},
 };
@@ -281,6 +281,102 @@ fn returned_recurrent_state_is_an_output_of_the_shared_forward_trace() {
                 (gradient[index] - expected).abs() < 0.00001,
                 "{kind:?} State input {index}"
             );
+        }
+    }
+}
+
+fn prediction_and_states(net: &Value, x: Value) -> [Value; 3] {
+    let outputs = {
+        let _count = crate::output_count::push_output_count(Some(2));
+        block_on(forward_builtin(net.clone(), x, vec![])).unwrap()
+    };
+    let Value::OutputList(mut outputs) = outputs else {
+        panic!("[Y, State]")
+    };
+    let Value::Object(network) = net else {
+        panic!("network")
+    };
+    let mut hidden = None;
+    let mut cell = None;
+    model::state::map_result_values(network, outputs.remove(1), |key, value| {
+        match key.role {
+            StateRole::HiddenState => hidden = Some(value.clone()),
+            StateRole::CellState => cell = Some(value.clone()),
+        }
+        Ok(value)
+    })
+    .unwrap();
+    [outputs.remove(0), hidden.unwrap(), cell.unwrap()]
+}
+
+#[test]
+fn joint_prediction_hidden_and_cell_loss_runs_one_reverse_per_shared_trace() {
+    let data = vec![-0.7, 0.3, 0.5, -0.4, 1.2, 0.8];
+    for dtype in [NumericDType::F32, NumericDType::F64] {
+        for kind in [K::Lstm, K::Bilstm] {
+            let net = network(kind, dtype);
+            let analytic = {
+                let tape = Rc::new(RefCell::new(Tape::new()));
+                let _activation = TapeActivation::enter(tape.clone());
+                let x = annotate_dlarray_value(input(data.clone(), dtype)).unwrap();
+                let outputs = prediction_and_states(&net, x.clone());
+                let execution = {
+                    let graph = tape.borrow();
+                    let id = dlarray_node_id(&outputs[0]).unwrap();
+                    let NodeKind::Network { execution, .. } = &graph.nodes[id].kind else {
+                        panic!("network prediction")
+                    };
+                    execution.clone()
+                };
+                let mut losses = outputs.into_iter().map(|output| {
+                    dlarray_sum_builtin(
+                        dlarray_times_builtin(output.clone(), output).unwrap(),
+                        vec![Value::String("all".into())],
+                    )
+                    .unwrap()
+                });
+                let loss = dlarray_plus_builtin(
+                    dlarray_plus_builtin(losses.next().unwrap(), losses.next().unwrap()).unwrap(),
+                    losses.next().unwrap(),
+                )
+                .unwrap();
+                let first = block_on(dlgradient_builtin(loss.clone(), vec![x.clone()])).unwrap();
+                assert_eq!(execution.reverse_calls.get(), 1);
+                let second = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+                assert_eq!(execution.reverse_calls.get(), 2);
+                assert_eq!(tensor(&first), tensor(&second));
+                assert_eq!(tensor(&first).numeric_dtype(), dtype);
+                tensor(&first).materialize_f64()
+            };
+            let step = if dtype == NumericDType::F32 {
+                0.001
+            } else {
+                0.00001
+            };
+            let tolerance = if dtype == NumericDType::F32 {
+                0.003
+            } else {
+                0.00001
+            };
+            let objective = |values| {
+                prediction_and_states(&net, input(values, dtype))
+                    .iter()
+                    .flat_map(|output| tensor(output).materialize_f64())
+                    .map(|value| value * value)
+                    .sum::<f64>()
+            };
+            for index in 0..data.len() {
+                let mut upper = data.clone();
+                upper[index] += step;
+                let mut lower = data.clone();
+                lower[index] -= step;
+                let expected = (objective(upper) - objective(lower)) / (2.0 * step);
+                assert!(
+                    (analytic[index] - expected).abs() < tolerance,
+                    "{kind:?} {dtype:?} joint loss input {index}: {} vs {expected}",
+                    analytic[index]
+                );
+            }
         }
     }
 }
