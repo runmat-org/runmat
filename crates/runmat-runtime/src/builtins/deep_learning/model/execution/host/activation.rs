@@ -1,0 +1,165 @@
+//! Elementwise host activations, with the same admitted operation used by
+//! network forward execution and its reverse pass.
+
+use runmat_value::{NumericDType, NumericStorage, Tensor};
+
+use super::numeric::Real;
+
+#[derive(Clone, Copy)]
+pub(in crate::builtins::deep_learning) enum Activation {
+    Relu,
+    Elu { alpha: f64 },
+}
+
+#[derive(Debug)]
+pub(in crate::builtins::deep_learning) enum ActivationError {
+    InvalidAlpha,
+    UnsupportedPrecision,
+    GradientMismatch,
+    Storage(String),
+}
+
+impl std::fmt::Display for ActivationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for ActivationError {}
+
+impl Activation {
+    pub fn admit(self, dtype: NumericDType) -> Result<(), ActivationError> {
+        if !matches!(dtype, NumericDType::F32 | NumericDType::F64) {
+            return Err(ActivationError::UnsupportedPrecision);
+        }
+        if let Self::Elu { alpha } = self {
+            if !alpha.is_finite()
+                || alpha < 0.0
+                || (dtype == NumericDType::F32 && !(alpha as f32).is_finite())
+            {
+                return Err(ActivationError::InvalidAlpha);
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(in crate::builtins::deep_learning) fn forward(
+    input: &Tensor,
+    operation: Activation,
+) -> Result<Tensor, ActivationError> {
+    operation.admit(input.numeric_dtype())?;
+    let storage = match input.numeric_dtype() {
+        NumericDType::F32 => NumericStorage::F32(values(
+            input
+                .as_f32_slice()
+                .ok_or(ActivationError::UnsupportedPrecision)?,
+            operation,
+        )),
+        NumericDType::F64 => NumericStorage::F64(values(
+            input
+                .as_f64_slice()
+                .ok_or(ActivationError::UnsupportedPrecision)?,
+            operation,
+        )),
+        _ => return Err(ActivationError::UnsupportedPrecision),
+    };
+    Tensor::from_numeric_storage(storage, input.shape.clone()).map_err(ActivationError::Storage)
+}
+
+pub(in crate::builtins::deep_learning) fn backward(
+    input: &Tensor,
+    dy: &Tensor,
+    operation: Activation,
+) -> Result<Tensor, ActivationError> {
+    operation.admit(input.numeric_dtype())?;
+    if input.shape != dy.shape || input.numeric_dtype() != dy.numeric_dtype() {
+        return Err(ActivationError::GradientMismatch);
+    }
+    let storage = match input.numeric_dtype() {
+        NumericDType::F32 => NumericStorage::F32(derivatives(
+            input
+                .as_f32_slice()
+                .ok_or(ActivationError::UnsupportedPrecision)?,
+            dy.as_f32_slice()
+                .ok_or(ActivationError::UnsupportedPrecision)?,
+            operation,
+        )),
+        NumericDType::F64 => NumericStorage::F64(derivatives(
+            input
+                .as_f64_slice()
+                .ok_or(ActivationError::UnsupportedPrecision)?,
+            dy.as_f64_slice()
+                .ok_or(ActivationError::UnsupportedPrecision)?,
+            operation,
+        )),
+        _ => return Err(ActivationError::UnsupportedPrecision),
+    };
+    Tensor::from_numeric_storage(storage, input.shape.clone()).map_err(ActivationError::Storage)
+}
+
+fn values<T: Real>(input: &[T], operation: Activation) -> Vec<T> {
+    input
+        .iter()
+        .map(|&value| match operation {
+            Activation::Relu => {
+                if value > T::zero() {
+                    value
+                } else {
+                    T::zero()
+                }
+            }
+            Activation::Elu { alpha } => {
+                if value >= T::zero() {
+                    value
+                } else {
+                    T::from_f64(alpha) * (value.exp() - T::one())
+                }
+            }
+        })
+        .collect()
+}
+
+fn derivatives<T: Real>(input: &[T], dy: &[T], operation: Activation) -> Vec<T> {
+    input
+        .iter()
+        .zip(dy)
+        .map(|(&value, &gradient)| {
+            gradient
+                * match operation {
+                    Activation::Relu => {
+                        if value > T::zero() {
+                            T::one()
+                        } else {
+                            T::zero()
+                        }
+                    }
+                    Activation::Elu { alpha } => {
+                        if value >= T::zero() {
+                            T::one()
+                        } else {
+                            T::from_f64(alpha) * value.exp()
+                        }
+                    }
+                }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn elu_forward_and_adjoint_keep_single() {
+        let x = Tensor::from_f32(vec![-1.0, 0.0, 2.0], vec![3, 1]).unwrap();
+        let dy = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let op = Activation::Elu { alpha: 2.0 };
+        let y = forward(&x, op).unwrap();
+        let dx = backward(&x, &dy, op).unwrap();
+        assert_eq!(y.numeric_dtype(), NumericDType::F32);
+        assert!((y.as_f32_slice().unwrap()[0] - 2.0 * ((-1.0f32).exp() - 1.0)).abs() < 1e-6);
+        assert_eq!(y.as_f32_slice().unwrap()[1..], [0.0, 2.0]);
+        assert!((dx.as_f32_slice().unwrap()[0] - 2.0 * (-1.0f32).exp()).abs() < 1e-6);
+        assert_eq!(dx.as_f32_slice().unwrap()[1..], [2.0, 3.0]);
+    }
+}

@@ -17,6 +17,7 @@ pub(super) trait Real:
     fn abs(self) -> Self;
     fn is_finite(self) -> bool;
     fn sqrt(self) -> Self;
+    fn exp(self) -> Self;
 }
 
 impl Real for f32 {
@@ -38,6 +39,9 @@ impl Real for f32 {
     fn sqrt(self) -> Self {
         self.sqrt()
     }
+    fn exp(self) -> Self {
+        self.exp()
+    }
 }
 
 impl Real for f64 {
@@ -58,5 +62,8 @@ impl Real for f64 {
     }
     fn sqrt(self) -> Self {
         self.sqrt()
+    }
+    fn exp(self) -> Self {
+        self.exp()
     }
 }
