@@ -52,17 +52,7 @@ impl ExecutableUnit {
                 .map_err(|error| format!("{}: {}", error.path, error.message))?;
         let payloads = self.component_payloads()?;
         let revisions = self.component_revisions()?;
-        let components = payloads
-            .iter()
-            .map(|payload| {
-                runmat_execution::ExecutableComponentDescriptor::from_payload(
-                    payload.kind,
-                    payload.kind.schema_version(&revisions),
-                    &payload.bytes,
-                )
-                .map_err(|error| error.to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let components = component_descriptors(&payloads, &revisions)?;
         let source_stem = std::path::Path::new(&self.source().relative_path)
             .file_stem()
             .and_then(|stem| stem.to_str())
@@ -145,6 +135,23 @@ impl ExecutableUnit {
         };
         runmat_execution::ExecutableUnitEnvelope::new(manifest, payloads)
             .map_err(|error| error.to_string())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn native_product_digest(&self) -> Result<runmat_execution::Digest, String> {
+        let revisions = self.component_revisions()?;
+        let components = component_descriptors(&self.component_payloads()?, &revisions)?;
+        // VM layout, registry and bytecode also own the retained interpreter
+        // capture, resume locations and coverage instrumentation.
+        Ok(runmat_execution::Digest::sha256(canonical_json(&(
+            "runmat-native-compilation-v1",
+            revisions,
+            components,
+            self.binding_names(),
+            self.inferred_interop_manifest(),
+            &self.source().owner_identity,
+            &self.source().relative_path,
+        ))?))
     }
 
     fn inferred_interop_manifest(&self) -> runmat_types::InteropManifest {
@@ -243,9 +250,26 @@ impl ExecutableUnit {
     }
 }
 
-fn canonical_json(value: &impl Serialize) -> Result<Vec<u8>, String> {
+pub(super) fn canonical_json(value: &impl Serialize) -> Result<Vec<u8>, String> {
     let value = serde_json::to_value(value).map_err(|error| error.to_string())?;
     serde_json::to_vec(&value).map_err(|error| error.to_string())
+}
+
+fn component_descriptors(
+    payloads: &[runmat_execution::ExecutableComponentPayload],
+    revisions: &runmat_execution::ExecutableComponentRevisions,
+) -> Result<Vec<runmat_execution::ExecutableComponentDescriptor>, String> {
+    payloads
+        .iter()
+        .map(|payload| {
+            runmat_execution::ExecutableComponentDescriptor::from_payload(
+                payload.kind,
+                payload.kind.schema_version(revisions),
+                &payload.bytes,
+            )
+            .map_err(|error| error.to_string())
+        })
+        .collect()
 }
 
 trait ComponentSchema {

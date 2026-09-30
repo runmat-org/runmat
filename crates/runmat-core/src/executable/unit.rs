@@ -14,6 +14,8 @@ pub struct ExecutableUnit {
     bytecode: Rc<runmat_vm::Bytecode>,
     layout: Rc<runmat_vm::VmAssemblyLayout>,
     functions: Rc<runmat_vm::FunctionRegistry>,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_compilation_digest: Rc<std::cell::OnceCell<runmat_execution::Digest>>,
 }
 
 impl ExecutableUnit {
@@ -48,6 +50,8 @@ impl ExecutableUnit {
             bytecode: Rc::new(bytecode),
             layout: Rc::new(layout),
             functions,
+            #[cfg(not(target_arch = "wasm32"))]
+            native_compilation_digest: Rc::new(std::cell::OnceCell::new()),
         })
     }
 
@@ -75,6 +79,18 @@ impl ExecutableUnit {
     /// Canonical analyzed MIR retained for native lowering and artifact production.
     pub fn mir(&self) -> &runmat_mir::MirAssembly {
         &self.mir
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn native_compilation_digest(&self) -> Result<runmat_execution::Digest, String> {
+        if let Some(digest) = self.native_compilation_digest.get() {
+            return Ok(*digest);
+        }
+        // Fingerprint the exact lowering inputs once, only when a native
+        // product is requested. Clones share this immutable unit's digest.
+        let digest = self.native_product_digest()?;
+        let _ = self.native_compilation_digest.set(digest);
+        Ok(digest)
     }
 
     /// Deterministic whole-program retention facts for link planning and

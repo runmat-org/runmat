@@ -8,6 +8,9 @@ mod native_optional_profile;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_definition_identity.rs"]
 mod native_definition_identity;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_deep_learning.rs"]
+mod native_deep_learning;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};

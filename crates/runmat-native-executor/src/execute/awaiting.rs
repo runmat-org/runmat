@@ -28,7 +28,7 @@ pub(super) struct PendingAwait {
 enum AwaitWork {
     Poll(Value),
     Execute {
-        running: RunningFutureLease,
+        running: Box<RunningFutureLease>,
         call: Box<DeferredCall>,
     },
 }
@@ -60,7 +60,7 @@ pub(super) fn begin(
             })
         }
         AwaitAction::ExecuteFuture { handle, call } => {
-            let running = RunningFutureLease::new(state.runtime.clone(), handle);
+            let running = Box::new(RunningFutureLease::new(state.runtime.clone(), handle));
             let (continuation, generation) = state.next_suspension_identity()?;
             state.pending_await = Some(PendingAwait {
                 continuation,
@@ -107,7 +107,7 @@ pub(super) async fn complete(
                     AwaitAction::Pending(value) => work = AwaitWork::Poll(value),
                     AwaitAction::ExecuteFuture { handle, call } => {
                         work = AwaitWork::Execute {
-                            running: RunningFutureLease::new(runtime.clone(), handle),
+                            running: Box::new(RunningFutureLease::new(runtime.clone(), handle)),
                             call,
                         };
                     }

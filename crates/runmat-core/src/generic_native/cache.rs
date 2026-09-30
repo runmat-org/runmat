@@ -95,7 +95,7 @@ impl GenericNativeCache {
     ) -> Result<PublishedEntry, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit)?;
         let current = self.dependencies.snapshot_all();
-        let key = entry_key(unit, preferred_function);
+        let key = entry_key(unit, preferred_function)?;
         if let Some(entry) = self.entries.resolve(&key, &current) {
             return Ok(entry);
         }
@@ -130,9 +130,9 @@ impl GenericNativeCache {
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit)?;
         let current = self.dependencies.snapshot_all();
-        let key = entry_key(unit, preferred_function);
+        let key = entry_key(unit, preferred_function)?;
         self.publish_completed(&current)?;
-        let site = tier_site(unit, preferred_function, &key)?;
+        let site = tier_site(unit, preferred_function)?;
         let availability = self
             .entries
             .availability(&key, &current, self.pending.len());
@@ -270,8 +270,7 @@ impl GenericNativeCache {
         profile: Option<&RepresentationProfile>,
         elapsed_ns: u64,
     ) -> Result<(), runmat_runtime::RuntimeError> {
-        let key = entry_key(unit, preferred_function);
-        let site = tier_site(unit, preferred_function, &key)?;
+        let site = tier_site(unit, preferred_function)?;
         match profile {
             Some(profile) => self.tiering.observe_invocation(site, profile, elapsed_ns),
             None => self.tiering.observe_unprofiled_invocation(site, elapsed_ns),
@@ -288,15 +287,14 @@ impl GenericNativeCache {
         if backedges.is_empty() {
             return Ok(());
         }
-        let key = entry_key(unit, preferred_function);
-        let function_site = tier_site(unit, preferred_function, &key)?;
+        let function_site = tier_site(unit, preferred_function)?;
         for (header, count) in backedges {
             self.tiering
                 .observe_backedge(function_site.clone(), *count)
                 .and_then(|_| {
                     self.tiering.observe_backedge(
                         TierSiteId {
-                            entry: key.0.clone(),
+                            entry: function_site.entry.clone(),
                             function: header.function,
                             loop_header: Some(*header),
                         },
@@ -321,8 +319,8 @@ impl GenericNativeCache {
         let dependency_keys = self.observe_unit_dependencies(unit)?;
         let current = self.dependencies.snapshot_all();
         self.publish_completed(&current)?;
-        let key = entry_key(unit, preferred_function);
-        let function_site = tier_site(unit, preferred_function, &key)?;
+        let key = entry_key(unit, preferred_function)?;
+        let function_site = tier_site(unit, preferred_function)?;
         let Some(loop_site) = self.tiering.hottest_osr_site(&function_site) else {
             return Ok(None);
         };
@@ -679,7 +677,6 @@ impl GenericNativeCache {
 fn tier_site(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
-    key: &EntryKey,
 ) -> Result<TierSiteId, runmat_runtime::RuntimeError> {
     let function = preferred_function
         .and_then(|name| unit.native_function_id(name))
@@ -689,19 +686,35 @@ fn tier_site(
         .map(runmat_types::ProgramFunctionId)
         .map_err(|_| super::error::stage("NativeTierIdentity", "function identity exceeds u32"))?;
     Ok(TierSiteId {
-        entry: key.0.clone(),
+        entry: authored_entry_key(unit, preferred_function).0,
         function,
         loop_header: None,
     })
 }
 
-fn entry_key(unit: &ExecutableUnit, preferred_function: Option<&str>) -> EntryKey {
+fn authored_entry_key(unit: &ExecutableUnit, preferred_function: Option<&str>) -> EntryKey {
     EntryKey(format!(
         "{}|{}|{}",
         unit.revision().program_revision.canonical_identity(),
         unit.revision().source_digest,
         preferred_function.unwrap_or("<entrypoint>")
     ))
+}
+
+fn entry_key(
+    unit: &ExecutableUnit,
+    preferred_function: Option<&str>,
+) -> Result<EntryKey, runmat_runtime::RuntimeError> {
+    let digest = unit
+        .native_compilation_digest()
+        .map_err(|error| super::error::stage("NativeCompilationIdentity", error))?;
+    // Hotness belongs to authored code; published machine code additionally
+    // depends on its exact semantic ABI and analysis inputs.
+    Ok(EntryKey(format!(
+        "{}|{}",
+        authored_entry_key(unit, preferred_function).0,
+        digest
+    )))
 }
 
 fn function_revision(
