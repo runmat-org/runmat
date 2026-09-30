@@ -604,6 +604,111 @@ fn dlnetwork_materializes_metadata_and_learnables() {
 }
 
 #[test]
+fn dlnetwork_rejects_unknown_options_and_preserves_resident_learnables() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+        let mut fc = block_on(fully_connected_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+        let weights = provider
+            .upload(&HostTensorView {
+                data: &[2.0, 3.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let Value::Object(fc_object) = &mut fc else {
+            panic!("layer object expected")
+        };
+        fc_object
+            .properties
+            .insert("Weights".into(), Value::GpuTensor(weights));
+        let layers = Value::Cell(CellArray::new(vec![input, fc], 2, 1).unwrap());
+        provider.reset_telemetry();
+        let err = block_on(dlnetwork_builtin(vec![
+            layers.clone(),
+            Value::String("InputNames".into()),
+            Value::String("x".into()),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:deepLearning:InvalidInput")
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let net = block_on(dlnetwork_builtin(vec![layers])).unwrap();
+        let Value::Object(object) = net else {
+            panic!("network object expected")
+        };
+        let Value::Cell(layers) = object.properties.get("Layers").unwrap() else {
+            panic!("layers cell expected")
+        };
+        let Value::Object(fc) = &layers.data[1] else {
+            panic!("layer expected")
+        };
+        assert!(matches!(
+            fc.properties.get("Weights"),
+            Some(Value::GpuTensor(_))
+        ));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn forward_rejects_host_known_late_matrix_error_before_resident_input_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let mut net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+        let Value::Object(net_object) = &mut net else {
+            panic!("network expected")
+        };
+        let Value::Cell(layers) = net_object.properties.get_mut("Layers").unwrap() else {
+            panic!("layers expected")
+        };
+        let Value::Object(fc) = &mut layers.data[1] else {
+            panic!("fc expected")
+        };
+        fc.properties.insert(
+            "Weights".into(),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
+        );
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let err = block_on(forward_builtin(net, Value::GpuTensor(input), vec![])).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:deepLearning:InvalidInput")
+        );
+        assert!(err.message.contains("Weights must be outputSize-by-2"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn forward_integer_predictors_use_declared_runmat_extension_before_execution() {
+    let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+    let input = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).unwrap(),
+    );
+    {
+        let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+        let error = block_on(forward_builtin(net.clone(), input.clone(), vec![])).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:ForwardIntegerDataExtension")
+        );
+    }
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let Value::Tensor(result) = block_on(forward_builtin(net, input, vec![])).unwrap() else {
+        panic!("host numeric output expected")
+    };
+    assert_eq!(result.numeric_dtype(), NumericDType::F64);
+    assert_eq!(result.shape, vec![1, 1]);
+}
+
+#[test]
 fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let fc = block_on(fully_connected_layer_builtin(Value::Num(2.0), vec![])).unwrap();

@@ -1,0 +1,268 @@
+use crate::{
+    catalog::inference::{argument_error, finish_fixed},
+    BuiltinCatalogEntry,
+};
+use runmat_types::{
+    standard, CallInference, CallRequest, CellFact, DynamicReason, ObjectFact, ShapeFact,
+    StaticClassIdentity, StaticClassNamespace, StorageFact, StructFact, ValueFact, ValueKindFact,
+};
+use std::collections::BTreeMap;
+
+const LAYER_GRAPH: StaticClassIdentity = StaticClassIdentity::new("nnet.cnn.LayerGraph");
+const LAYER_NAMESPACE: StaticClassNamespace = StaticClassNamespace::new("nnet.cnn.layer");
+
+fn cell_layers_possible(cell: &CellFact) -> bool {
+    let possible = |fact: &ValueFact| {
+        matches!(
+            &fact.kind,
+            ValueKindFact::Unknown | ValueKindFact::Object(_)
+        )
+    };
+    possible(&cell.element) && cell.elements.iter().all(possible)
+}
+
+fn layers_count(value: &ValueFact) -> Result<Option<usize>, ()> {
+    match &value.kind {
+        ValueKindFact::Unknown => Ok(None),
+        ValueKindFact::Cell(cell) if cell_layers_possible(cell) => Ok(value.shape.element_count()),
+        ValueKindFact::Cell(_) => Err(()),
+        ValueKindFact::Object(object)
+            if [
+                standard::DL_NETWORK,
+                standard::SERIES_NETWORK,
+                standard::DAG_NETWORK,
+            ]
+            .iter()
+            .any(|class| {
+                object
+                    .runtime_class
+                    .as_ref()
+                    .is_some_and(|identity| identity.is(*class))
+            }) || object
+                .runtime_class
+                .as_ref()
+                .is_some_and(|identity| identity.is(LAYER_GRAPH)) =>
+        {
+            match object.properties.get("Layers") {
+                Some(layers) => layers_count(layers),
+                None if object.properties_complete => Err(()),
+                None => Ok(None),
+            }
+        }
+        ValueKindFact::Object(object)
+            if object
+                .runtime_class
+                .as_ref()
+                .is_none_or(|class| class.is_in_namespace(LAYER_NAMESPACE)) =>
+        {
+            Ok(Some(1))
+        }
+        _ => Err(()),
+    }
+}
+
+fn column(count: Option<usize>) -> ShapeFact {
+    ShapeFact::from(vec![count, Some(1)])
+}
+
+fn text(shape: ShapeFact) -> ValueFact {
+    ValueFact::proven(ValueKindFact::String, shape, StorageFact::Dense)
+}
+
+fn cell(shape: ShapeFact) -> ValueFact {
+    ValueFact::proven(
+        ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            elements: Vec::new(),
+            elements_complete: false,
+        }),
+        shape,
+        StorageFact::Dense,
+    )
+}
+
+fn stored_layers(source: Option<&ValueFact>, count: Option<usize>) -> ValueFact {
+    let source = source.and_then(|source| match &source.kind {
+        ValueKindFact::Cell(_) => Some(source.clone()),
+        ValueKindFact::Object(object)
+            if [
+                standard::DL_NETWORK,
+                standard::SERIES_NETWORK,
+                standard::DAG_NETWORK,
+                LAYER_GRAPH,
+            ]
+            .iter()
+            .any(|class| {
+                object
+                    .runtime_class
+                    .as_ref()
+                    .is_some_and(|identity| identity.is(*class))
+            }) =>
+        {
+            object.properties.get("Layers").cloned()
+        }
+        ValueKindFact::Object(_) => Some(ValueFact::proven(
+            ValueKindFact::Cell(CellFact {
+                element: Box::new(source.clone()),
+                elements: vec![source.clone()],
+                elements_complete: true,
+            }),
+            column(Some(1)),
+            StorageFact::Dense,
+        )),
+        _ => None,
+    });
+    match source {
+        Some(mut layers) if matches!(layers.kind, ValueKindFact::Cell(_)) => {
+            layers.shape = column(count);
+            layers
+        }
+        _ => cell(column(count)),
+    }
+}
+
+fn empty_struct() -> ValueFact {
+    ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        BTreeMap::new(),
+        true,
+    )))
+}
+
+pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    let mut diagnostics = Vec::new();
+    if request.arguments.is_empty() || request.arguments.len().is_multiple_of(2) {
+        diagnostics.push(argument_error(
+            "RM-DL-DLNETWORK-ARITY",
+            "dlnetwork requires a layer collection followed by complete name-value pairs",
+            request.arguments.len().saturating_sub(1),
+        ));
+    }
+    let count = request.arguments.first().and_then(|source| {
+        layers_count(source).unwrap_or_else(|_| {
+            diagnostics.push(argument_error(
+                "RM-DL-DLNETWORK-LAYERS",
+                "layers must be a supported layer object, graph, or cell collection",
+                0,
+            ));
+            None
+        })
+    });
+    if count == Some(0) {
+        diagnostics.push(argument_error(
+            "RM-DL-DLNETWORK-EMPTY",
+            "dlnetwork requires at least one supported layer",
+            0,
+        ));
+    }
+    for index in (1..request.arguments.len()).step_by(2) {
+        let name = &request.arguments[index];
+        if !matches!(
+            &name.kind,
+            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+        ) {
+            diagnostics.push(argument_error(
+                "RM-DL-DLNETWORK-OPTIONS",
+                "name-value keys must be text",
+                index,
+            ));
+        }
+        if request
+            .literals
+            .literal_string_at(index)
+            .is_some_and(|name| {
+                !matches!(
+                    name.to_ascii_lowercase().as_str(),
+                    "initialize" | "outputnames"
+                )
+            })
+        {
+            diagnostics.push(argument_error(
+                "RM-DL-DLNETWORK-OPTIONS",
+                "only Initialize and OutputNames are supported constructor options",
+                index,
+            ));
+        }
+        if let (Some(option), Some(value)) = (
+            request.literals.literal_string_at(index),
+            request.arguments.get(index + 1),
+        ) {
+            let admissible = match option.to_ascii_lowercase().as_str() {
+                "initialize" => {
+                    matches!(
+                        &value.kind,
+                        ValueKindFact::Logical | ValueKindFact::Numeric(_) | ValueKindFact::Unknown
+                    ) && value.shape.element_count().is_none_or(|count| count == 1)
+                }
+                "outputnames" => {
+                    matches!(
+                        &value.kind,
+                        ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+                    ) && value.shape.element_count().is_none_or(|count| count == 1)
+                }
+                _ => true,
+            };
+            if !admissible {
+                diagnostics.push(argument_error(
+                    "RM-DL-DLNETWORK-OPTION-VALUE",
+                    "Initialize must be a scalar logical-like control; OutputNames must be one text name",
+                    index + 1,
+                ));
+            }
+        }
+    }
+    let mut properties = BTreeMap::from([
+        (
+            "Layers".into(),
+            stored_layers(request.arguments.first(), count),
+        ),
+        ("LayerNames".into(), text(column(count))),
+        (
+            "InputNames".into(),
+            text(ShapeFact::from(vec![Some(1), Some(1)])),
+        ),
+        (
+            "OutputNames".into(),
+            text(ShapeFact::from(vec![Some(1), Some(1)])),
+        ),
+        ("Connections".into(), empty_struct()),
+        (
+            "Learnables".into(),
+            ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+                BTreeMap::from([
+                    ("Layer".into(), cell(column(None))),
+                    ("Parameter".into(), cell(column(None))),
+                    ("Value".into(), cell(column(None))),
+                ]),
+                true,
+            ))),
+        ),
+        ("State".into(), empty_struct()),
+        (
+            "Initialized".into(),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ),
+        ("SupportedExecution".into(), text(ShapeFact::Scalar)),
+    ]);
+    if request
+        .literals
+        .literal_string_at(1)
+        .is_some_and(|name| name.eq_ignore_ascii_case("Initialize"))
+    {
+        properties.insert(
+            "Initialize".into(),
+            ValueFact::scalar(ValueKindFact::Logical),
+        );
+    }
+    let result = ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(standard::DL_NETWORK.owned()),
+            properties,
+            properties_complete: false,
+            handle_semantics: Some(false),
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    );
+    finish_fixed(entry, request, result, diagnostics)
+}

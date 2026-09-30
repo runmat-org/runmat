@@ -222,6 +222,9 @@ pub mod standard {
     pub const DATETIME: StaticClassIdentity = StaticClassIdentity::new("datetime");
     pub const DURATION: StaticClassIdentity = StaticClassIdentity::new("duration");
     pub const DL_ARRAY: StaticClassIdentity = StaticClassIdentity::new("dlarray");
+    pub const DL_NETWORK: StaticClassIdentity = StaticClassIdentity::new("dlnetwork");
+    pub const SERIES_NETWORK: StaticClassIdentity = StaticClassIdentity::new("SeriesNetwork");
+    pub const DAG_NETWORK: StaticClassIdentity = StaticClassIdentity::new("DAGNetwork");
     pub const CALENDAR_DURATION: StaticClassIdentity = StaticClassIdentity::new("calendarDuration");
     pub const TRANSFER_FUNCTION: StaticClassIdentity = StaticClassIdentity::new("tf");
     pub const STATE_SPACE: StaticClassIdentity = StaticClassIdentity::new("ss");
