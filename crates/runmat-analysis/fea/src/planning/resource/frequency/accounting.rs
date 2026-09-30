@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn direct_workspace_bytes(
     full_dofs: u64,
     reduced_dofs: u64,
@@ -53,7 +56,7 @@ pub(super) fn direct_workspace_bytes(
         "affine reduction bytes",
     )?;
     let krylov_vectors = multiply(
-        add(restart, 9, "GMRES live vector count")?,
+        add(restart, 12, "GMRES and right-Jacobi live vector count")?,
         block_dimension,
         "GMRES live vector values",
     )?;

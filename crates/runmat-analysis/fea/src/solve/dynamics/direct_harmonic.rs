@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::{
     algebra::{spmv, PreparedModalSystem},
     assembly::AssemblySummary,
-    solve::krylov::{restarted_gmres, GmresPolicy},
+    solve::krylov::{restarted_gmres, right_diagonal::DiagonalRightPreconditioner, GmresPolicy},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -48,7 +48,7 @@ pub struct DirectHarmonicResponse {
     pub relative_residual: f64,
 }
 
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum DirectHarmonicError {
     #[error("direct harmonic inputs have inconsistent dimensions")]
     DimensionMismatch,
@@ -62,8 +62,17 @@ pub enum DirectHarmonicError {
     Breakdown,
     #[error("direct harmonic Krylov solve was cancelled")]
     Cancelled,
-    #[error("direct harmonic Krylov solve did not converge")]
-    NotConverged,
+    #[error("direct harmonic right preconditioning failed: {0}")]
+    Preconditioning(String),
+    #[error("direct harmonic Krylov solve did not converge: iterations={iterations}/{maximum_iterations}, restart={restart}, reduced_dofs={reduced_dof_count}, residual_norm={residual_norm}, relative_residual={relative_residual}")]
+    NotConverged {
+        iterations: u32,
+        maximum_iterations: usize,
+        restart: usize,
+        reduced_dof_count: usize,
+        residual_norm: f64,
+        relative_residual: f64,
+    },
 }
 
 /// Solve the full sparse complex structural system through a matrix-free real block operator.
@@ -105,11 +114,18 @@ pub fn solve_direct_harmonic(
     }
     let mut right_hand_side = reduced_real;
     right_hand_side.extend(reduced_imaginary);
+    // Right stiffness-Jacobi changes coordinates, not equilibrium or its residual norm.
+    // It does not assert that the frequency-dependent dynamic operator is positive definite.
+    let mut diagonal = prepared.operators().stiffness().diagonal_values();
+    diagonal.extend_from_within(..);
+    let preconditioner = DiagonalRightPreconditioner::new(&diagonal)
+        .map_err(|error| DirectHarmonicError::Preconditioning(error.to_string()))?;
+    drop(diagonal);
     let apply = |value: &[f64]| {
-        Ok::<_, std::convert::Infallible>(apply_dynamic_block(
+        Ok(apply_dynamic_block(
             &prepared,
             angular_frequency_rad_s,
-            value,
+            &preconditioner.apply(value)?,
         ))
     };
     let result = restarted_gmres(
@@ -121,10 +137,14 @@ pub fn solve_direct_harmonic(
             maximum_iterations: policy.maximum_iterations,
         },
         apply,
-        |left, right| Ok::<_, std::convert::Infallible>(dot(left, right)),
+        |left, right| Ok(dot(left, right)),
         crate::is_fea_cancelled,
     )
-    .expect("direct harmonic operator application is infallible")
+    .map_err(
+        |error: crate::solve::krylov::right_diagonal::DiagonalRightPreconditionerError| {
+            DirectHarmonicError::Preconditioning(error.to_string())
+        },
+    )?
     .ok_or(DirectHarmonicError::Breakdown)?;
     if result.cancelled {
         return Err(DirectHarmonicError::Cancelled);
@@ -132,27 +152,38 @@ pub fn solve_direct_harmonic(
     if result.breakdown {
         return Err(DirectHarmonicError::Breakdown);
     }
+    let load_norm = dot(&right_hand_side, &right_hand_side).sqrt();
+    let relative_residual = if load_norm > 0.0 {
+        result.residual_norm / load_norm
+    } else {
+        0.0
+    };
     if !result.converged {
-        return Err(DirectHarmonicError::NotConverged);
+        return Err(DirectHarmonicError::NotConverged {
+            iterations: result.iterations,
+            maximum_iterations: policy.maximum_iterations,
+            restart: policy.restart,
+            reduced_dof_count: reduced_size,
+            residual_norm: result.residual_norm,
+            relative_residual,
+        });
     }
+    let physical_solution = preconditioner
+        .apply(&result.solution)
+        .map_err(|error| DirectHarmonicError::Preconditioning(error.to_string()))?;
     let displacement_real = prepared
-        .expand(&result.solution[..reduced_size])
+        .expand(&physical_solution[..reduced_size])
         .map_err(|error| DirectHarmonicError::ConstraintReduction(error.to_string()))?;
     let displacement_imaginary = prepared
-        .expand(&result.solution[reduced_size..])
+        .expand(&physical_solution[reduced_size..])
         .map_err(|error| DirectHarmonicError::ConstraintReduction(error.to_string()))?;
-    let load_norm = dot(&right_hand_side, &right_hand_side).sqrt();
     Ok(DirectHarmonicResponse {
         angular_frequency_rad_s,
         displacement_real,
         displacement_imaginary,
         iterations: result.iterations,
         residual_norm: result.residual_norm,
-        relative_residual: if load_norm > 0.0 {
-            result.residual_norm / load_norm
-        } else {
-            0.0
-        },
+        relative_residual,
     })
 }
 
@@ -230,6 +261,9 @@ fn apply_dynamic_block(
 fn dot(left: &[f64], right: &[f64]) -> f64 {
     left.iter().zip(right).map(|(a, b)| a * b).sum()
 }
+
+#[cfg(test)]
+mod failure_tests;
 
 #[cfg(test)]
 mod tests {

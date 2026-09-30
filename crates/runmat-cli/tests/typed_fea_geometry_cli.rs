@@ -11,6 +11,9 @@ use tempfile::TempDir;
 #[path = "typed_fea_geometry_cli/acoustic.rs"]
 mod acoustic;
 
+#[path = "typed_fea_geometry_cli/harmonic.rs"]
+mod harmonic;
+
 fn runmat(project: &TempDir, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_runmat"))
         .current_dir(project.path())

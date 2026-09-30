@@ -754,6 +754,9 @@ fn generated_force_and_moment_match_explicit_static_beam_and_analytic_balance() 
 #[path = "signal_materialization_tests/solid_static.rs"]
 mod solid_static;
 
+#[path = "signal_materialization_tests/complex_frequency.rs"]
+mod complex_frequency;
+
 #[test]
 fn table_content_identity_includes_typed_jump_semantics() {
     let authored = signal(SignalShape::Scalar, SignalPrecision::Real64);

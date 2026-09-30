@@ -13,6 +13,8 @@ use runmat_analysis_core::{
 use runmat_types::{OperationParameterArity, OperationTypePattern};
 use std::collections::BTreeMap;
 
+mod sampled;
+
 pub(super) struct LowerSignal<'a> {
     pub declaration: &'a CheckedFeaDeclaration,
     pub bound: &'a BoundFeaProgram,
@@ -100,7 +102,7 @@ pub(super) fn lower(
     };
     validate_callable(declaration, facts, "signal", diagnostics);
     let arguments = arguments(declaration, facts, statements, "signal", diagnostics)?;
-    let (sampling, tolerance) = sampling(
+    let (sampling, tolerance) = sampled::sampling(
         declaration,
         domain,
         quantity_dimension,
@@ -141,7 +143,7 @@ pub(super) fn lower(
             interpolation,
             extrapolation,
         }),
-        precision: SignalPrecision::Real64,
+        precision: sampled::precision(declaration, statements, diagnostics)?,
         evidence: SignalApproximationEvidence {
             max_absolute_error: tolerance,
             max_relative_error: None,
@@ -408,96 +410,6 @@ fn generator_argument(
     }
 }
 
-fn sampling(
-    declaration: &CheckedFeaDeclaration,
-    domain: &str,
-    quantity_dimension: PhysicalDimension,
-    statements: &[CheckedFeaStatement],
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<(SignalSamplingPolicy, Option<f64>)> {
-    let samples = statements
-        .iter()
-        .filter_map(|statement| match &statement.kind {
-            CheckedFeaStatementKind::UniformSample { start, end, rate } => Some((start, end, rate)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    if samples.len() != 1 {
-        error(
-            declaration,
-            declaration.span,
-            "generated signal requires exactly one uniform sampling declaration",
-            diagnostics,
-        );
-        return None;
-    }
-    let (start, end, rate) = samples[0];
-    if domain != "time"
-        || start.value_type != FeaType::Quantity(PhysicalDimension::TIME)
-        || end.value_type != FeaType::Quantity(PhysicalDimension::TIME)
-        || rate.value_type != FeaType::Quantity(PhysicalDimension::FREQUENCY)
-    {
-        error(
-            declaration,
-            start.span,
-            "uniform generated sampling currently requires a time domain, time bounds, and frequency rate",
-            diagnostics,
-        );
-        return None;
-    }
-    let start = scalar(start)?;
-    let end = scalar(end)?;
-    let rate = scalar(rate)?;
-    let intervals = (end - start) * rate;
-    let rounded = intervals.round();
-    if !start.is_finite()
-        || !end.is_finite()
-        || !rate.is_finite()
-        || start >= end
-        || rate <= 0.0
-        || (intervals - rounded).abs() > 1e-9 * intervals.abs().max(1.0)
-        || rounded > (usize::MAX - 1) as f64
-    {
-        error(
-            declaration,
-            declaration.span,
-            "sampling bounds and rate must define at least two finite, exactly spaced samples",
-            diagnostics,
-        );
-        return None;
-    }
-    let tolerance = assignment(statements, "tolerance").and_then(|value| {
-        if value.value_type != FeaType::Quantity(quantity_dimension) {
-            error(
-                declaration,
-                value.span,
-                "signal tolerance must have the declared signal quantity",
-                diagnostics,
-            );
-            None
-        } else {
-            scalar(value)
-        }
-    });
-    if tolerance.is_some_and(|value| !value.is_finite() || value <= 0.0) {
-        error(
-            declaration,
-            declaration.span,
-            "signal tolerance must be finite and positive",
-            diagnostics,
-        );
-        return None;
-    }
-    Some((
-        SignalSamplingPolicy::Uniform {
-            start,
-            end,
-            sample_count: rounded as usize + 1,
-        },
-        tolerance,
-    ))
-}
-
 fn generator_domain(
     declaration: &CheckedFeaDeclaration,
     domain: &str,
@@ -532,8 +444,14 @@ fn validate_generator_members(
             CheckedFeaStatementKind::UniformSample { .. } => "sample",
             CheckedFeaStatementKind::Assignment { target, .. }
                 if target.len() == 1
-                    && ["interpolation", "extrapolation", "tolerance"]
-                        .contains(&target[0].as_str()) =>
+                    && [
+                        "interpolation",
+                        "extrapolation",
+                        "tolerance",
+                        "sample_points",
+                        "precision",
+                    ]
+                    .contains(&target[0].as_str()) =>
             {
                 target[0].as_str()
             }

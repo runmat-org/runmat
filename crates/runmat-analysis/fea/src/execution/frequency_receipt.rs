@@ -43,10 +43,17 @@ impl StructuralFrequencySolutionSpace {
         }
     }
 
-    fn expected_method(&self) -> SolverMethod {
+    pub(crate) fn expected_method(&self) -> SolverMethod {
         match self {
             Self::Direct => SolverMethod::StructuralDirectHarmonicGmres,
             Self::ModalReduced { .. } => SolverMethod::StructuralModalHarmonicDenseDirect,
+        }
+    }
+
+    pub(crate) fn expected_preconditioner(&self) -> SolverPreconditioner {
+        match self {
+            Self::Direct => SolverPreconditioner::Jacobi,
+            Self::ModalReduced { .. } => SolverPreconditioner::None,
         }
     }
 }
@@ -219,9 +226,18 @@ impl StructuralFrequencyEntrySolverEvidence {
                 "structural frequency solver evidence contains an invalid residual".into(),
             ));
         }
-        if self.preconditioner != SolverPreconditioner::None {
+        let expected_preconditioner = match self.solver_method {
+            SolverMethod::StructuralDirectHarmonicGmres => SolverPreconditioner::Jacobi,
+            SolverMethod::StructuralModalHarmonicDenseDirect => SolverPreconditioner::None,
+            _ => {
+                return Err(AnalysisExecutionError::Invalid(
+                    "unexpected structural harmonic method".into(),
+                ))
+            }
+        };
+        if self.preconditioner != expected_preconditioner {
             return Err(AnalysisExecutionError::Invalid(
-                "current structural harmonic solvers do not admit a preconditioner".into(),
+                "structural harmonic evidence does not name the applied preconditioner".into(),
             ));
         }
         match self.solver_backend {
@@ -483,254 +499,4 @@ impl StructuralFrequencyNumericalReceipt {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        execution::{
-            ComplexStructuralBalance, ConstraintPlanIdentity, DiscretizationIdentity,
-            StructuralComplexVector, StructuralDampingOperatorIdentity,
-            StructuralDofLayoutIdentity, StructuralExcitationSetIdentity,
-            StructuralFormulationIdentity, StructuralFrequencyProblemIdentity,
-            StructuralFrequencyScope, StructuralFrequencyScopeInput, StructuralKinematicsIdentity,
-            StructuralMassOperatorIdentity, StructuralPhasorConvention,
-            StructuralStiffnessOperatorIdentity,
-        },
-        frequency::FrequencyResponsePlan,
-        pipeline::modal_basis::ModalBasisIdentity,
-    };
-
-    fn operator_digest() -> Digest {
-        Digest::sha256(b"test-structural-operator")
-    }
-
-    fn basis_identity() -> ModalBasisIdentity {
-        serde_json::from_value(serde_json::to_value(Digest::sha256(b"test-modal-basis")).unwrap())
-            .unwrap()
-    }
-
-    fn scope() -> StructuralFrequencyScope {
-        let plan = FrequencyResponsePlan::new(20.0, &[10.0], &[]).unwrap();
-        StructuralFrequencyScope::new(StructuralFrequencyScopeInput {
-            problem: StructuralFrequencyProblemIdentity::from_physical_digest(Digest::sha256(
-                b"test-frequency-problem",
-            ))
-            .unwrap(),
-            plan,
-            discretization: DiscretizationIdentity::derive("test-discretization", &1_u8).unwrap(),
-            constraint_plan: ConstraintPlanIdentity::derive("test-constraints", &1_u8).unwrap(),
-            stiffness_operator: StructuralStiffnessOperatorIdentity::derive(
-                "test-stiffness",
-                &1_u8,
-            )
-            .unwrap(),
-            mass_operator: StructuralMassOperatorIdentity::derive("test-mass", &1_u8).unwrap(),
-            damping_operator: StructuralDampingOperatorIdentity::derive("test-damping", &1_u8)
-                .unwrap(),
-            operator_digest: operator_digest(),
-            excitations: StructuralExcitationSetIdentity::derive("test-excitations", &1_u8)
-                .unwrap(),
-            dof_layout: StructuralDofLayoutIdentity::derive("test-layout", &1_u8).unwrap(),
-            formulation: StructuralFormulationIdentity::derive("test-formulation", &1_u8).unwrap(),
-            kinematics: StructuralKinematicsIdentity::derive("test-kinematics", &1_u8).unwrap(),
-            physical_dof_count: 2,
-            phasor_convention: StructuralPhasorConvention::PeakAmplitude,
-        })
-        .unwrap()
-    }
-
-    fn vector(real: [f64; 2], imaginary: [f64; 2]) -> StructuralComplexVector {
-        StructuralComplexVector::new(real.to_vec(), imaginary.to_vec()).unwrap()
-    }
-
-    fn sample(
-        scope: &StructuralFrequencyScope,
-        ordinal: usize,
-    ) -> StructuralFrequencyPhysicalSample {
-        let entry = scope.plan().entries().unwrap()[ordinal];
-        let scale = entry.frequency_hz() / 10.0;
-        let applied = vector([scale, 0.0], [0.5 * scale, 0.0]);
-        let zero = vector([0.0, 0.0], [0.0, 0.0]);
-        let balance =
-            ComplexStructuralBalance::new(applied.clone(), zero.clone(), zero, applied).unwrap();
-        StructuralFrequencyPhysicalSample::new(
-            scope,
-            entry,
-            vector([0.1 * scale, 0.0], [-0.2 * scale, 0.0]),
-            vector([0.0, scale], [0.0, -scale]),
-            balance,
-        )
-        .unwrap()
-    }
-
-    fn direct_evidence(
-        sample: &StructuralFrequencyPhysicalSample,
-    ) -> StructuralFrequencyEntrySolverEvidence {
-        StructuralFrequencyEntrySolverEvidence::new(
-            sample,
-            StructuralFrequencySolverEvidenceInput {
-                solver_method: SolverMethod::StructuralDirectHarmonicGmres,
-                solver_backend: LinearAlgebraBackendKind::CpuReference,
-                preconditioner: SolverPreconditioner::None,
-                iterations: 4,
-                solver_residual_norm: 1.0e-12,
-                solver_relative_residual: 1.0e-13,
-                accelerator_evidence: Vec::new(),
-            },
-        )
-        .unwrap()
-    }
-
-    fn modal_solution_space() -> StructuralFrequencySolutionSpace {
-        StructuralFrequencySolutionSpace::ModalReduced {
-            basis_state: StateIdentity::derive("test-basis-state", &1_u8).unwrap(),
-            projection: ModalProjectionEvidence {
-                basis: basis_identity(),
-                operator_digest: operator_digest(),
-                full_dof_count: 2,
-                mode_count: 1,
-                maximum_mass_off_diagonal_ratio: 0.0,
-                maximum_stiffness_off_diagonal_ratio: 0.0,
-                maximum_damping_asymmetry_ratio: 0.0,
-            },
-        }
-    }
-
-    fn modal_evidence(
-        sample: &StructuralFrequencyPhysicalSample,
-    ) -> StructuralFrequencyEntrySolverEvidence {
-        StructuralFrequencyEntrySolverEvidence::new(
-            sample,
-            StructuralFrequencySolverEvidenceInput {
-                solver_method: SolverMethod::StructuralModalHarmonicDenseDirect,
-                solver_backend: LinearAlgebraBackendKind::CpuReference,
-                preconditioner: SolverPreconditioner::None,
-                iterations: 1,
-                solver_residual_norm: 1.0e-14,
-                solver_relative_residual: 1.0e-15,
-                accelerator_evidence: Vec::new(),
-            },
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn physical_result_and_receipt_round_trip_and_keep_method_separate() {
-        let scope = scope();
-        assert_eq!(
-            StructuralFrequencyScope::from_canonical_bytes(&scope.canonical_bytes().unwrap())
-                .unwrap(),
-            scope
-        );
-        let samples = vec![sample(&scope, 0), sample(&scope, 1)];
-        for physical_sample in &samples {
-            assert_eq!(
-                StructuralFrequencyPhysicalSample::from_canonical_bytes(
-                    &physical_sample.canonical_bytes().unwrap()
-                )
-                .unwrap(),
-                *physical_sample
-            );
-        }
-        let result = StructuralFrequencySolverResult::assemble(scope, samples).unwrap();
-        let manifest = super::super::StructuralFrequencySolverResultManifest::from_canonical_bytes(
-            &result.manifest().canonical_bytes().unwrap(),
-        )
-        .unwrap();
-        let reconstructed = StructuralFrequencySolverResult::from_manifest_and_samples(
-            manifest,
-            result.samples().to_vec(),
-        )
-        .unwrap();
-        assert_eq!(reconstructed, result);
-
-        let direct = StructuralFrequencyNumericalReceipt::new(
-            &result,
-            StructuralFrequencySolutionSpace::Direct,
-            result.samples().iter().map(direct_evidence).collect(),
-        )
-        .unwrap();
-        let decoded = StructuralFrequencyNumericalReceipt::from_canonical_bytes(
-            &direct.canonical_bytes().unwrap(),
-        )
-        .unwrap();
-        decoded.validate_for_result(&result).unwrap();
-
-        let modal_evidence = result.samples().iter().map(modal_evidence).collect();
-        let modal = StructuralFrequencyNumericalReceipt::new(
-            &result,
-            modal_solution_space(),
-            modal_evidence,
-        )
-        .unwrap();
-        assert_eq!(modal.source_result(), direct.source_result());
-        assert_ne!(modal.identity(), direct.identity());
-    }
-
-    #[test]
-    fn canonical_receipt_rejects_reidentified_invalid_modal_projection() {
-        let scope = scope();
-        let samples = vec![sample(&scope, 0), sample(&scope, 1)];
-        let result = StructuralFrequencySolverResult::assemble(scope, samples).unwrap();
-        let receipt = StructuralFrequencyNumericalReceipt::new(
-            &result,
-            modal_solution_space(),
-            result.samples().iter().map(modal_evidence).collect(),
-        )
-        .unwrap();
-
-        for mutation in 0..3 {
-            let mut tampered = receipt.clone();
-            let StructuralFrequencySolutionSpace::ModalReduced { projection, .. } =
-                &mut tampered.solution_space
-            else {
-                unreachable!();
-            };
-            match mutation {
-                0 => projection.mode_count = 0,
-                1 => projection.mode_count = projection.full_dof_count + 1,
-                _ => projection.operator_digest = Digest::sha256(b"another-operator"),
-            }
-            tampered.identity = tampered.derive_identity().unwrap();
-            let encoded = encode_contract(
-                FREQUENCY_RECEIPT_PREFIX,
-                "structural-frequency-numerical-receipt",
-                &tampered,
-                FREQUENCY_RECEIPT_LIMITS,
-            )
-            .unwrap();
-            assert!(StructuralFrequencyNumericalReceipt::from_canonical_bytes(&encoded).is_err());
-        }
-    }
-
-    #[test]
-    fn result_and_receipt_reject_missing_reordered_and_substituted_samples() {
-        let scope = scope();
-        let first = sample(&scope, 0);
-        let second = sample(&scope, 1);
-        assert!(
-            StructuralFrequencySolverResult::assemble(scope.clone(), vec![first.clone()]).is_err()
-        );
-        assert!(StructuralFrequencySolverResult::assemble(
-            scope.clone(),
-            vec![second.clone(), first.clone()]
-        )
-        .is_err());
-        let result = StructuralFrequencySolverResult::assemble(scope, vec![first, second]).unwrap();
-        let mut evidence = result
-            .samples()
-            .iter()
-            .map(direct_evidence)
-            .collect::<Vec<_>>();
-        evidence.swap(0, 1);
-        assert!(StructuralFrequencyNumericalReceipt::new(
-            &result,
-            StructuralFrequencySolutionSpace::Direct,
-            evidence,
-        )
-        .is_err());
-
-        let mut tampered = serde_json::to_value(&result.samples()[0]).unwrap();
-        tampered["reaction"]["real"][0] = serde_json::json!(99.0);
-        assert!(serde_json::from_value::<StructuralFrequencyPhysicalSample>(tampered).is_err());
-    }
-}
+mod tests;

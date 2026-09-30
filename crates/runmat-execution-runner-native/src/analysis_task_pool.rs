@@ -24,6 +24,8 @@ use crate::{
 };
 
 mod phase;
+#[cfg(test)]
+mod tests;
 pub(crate) use phase::execute_governed_analysis_phase;
 
 pub(crate) fn configure_local_analysis(
@@ -135,6 +137,11 @@ pub(crate) async fn execute_analysis_task_batch(
     tasks: Vec<PreparedAnalysisTask<'_>>,
     policy: AnalysisTaskBatchPolicy,
 ) -> NativeExecutionResult<Vec<ExecutedAnalysisTask>> {
+    // Optional observation/history waves can contain no admitted work. Do not submit an
+    // empty native graph or manufacture scheduler attempts for either placement.
+    if tasks.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut submissions = Vec::with_capacity(tasks.len());
     let mut admitted = Vec::with_capacity(tasks.len());
     for task in tasks {

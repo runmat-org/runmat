@@ -2,6 +2,8 @@
 
 use crate::{algebra::ScopedSpmvError, planning::resource::LocalExecutionPlan};
 
+pub(crate) mod right_diagonal;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GmresPolicy {
     pub relative_tolerance: f64,

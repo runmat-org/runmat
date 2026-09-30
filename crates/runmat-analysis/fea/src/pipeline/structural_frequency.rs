@@ -9,7 +9,7 @@ use crate::{
     assembly::{
         complex_structural::ComplexStructuralAssemblySummary, identity::structural_operator_digest,
     },
-    contracts::{validate_solver_formulation_compatibility, SolverMethod, SolverPreconditioner},
+    contracts::validate_solver_formulation_compatibility,
     execution::{
         structural_identity::{
             derive_structural_prepared_identities, structural_contract_digest,
@@ -492,16 +492,9 @@ fn execute_prepared_entry(
     let evidence = StructuralFrequencyEntrySolverEvidence::new(
         &sample,
         StructuralFrequencySolverEvidenceInput {
-            solver_method: match solution_space {
-                StructuralFrequencySolutionSpace::Direct => {
-                    SolverMethod::StructuralDirectHarmonicGmres
-                }
-                StructuralFrequencySolutionSpace::ModalReduced { .. } => {
-                    SolverMethod::StructuralModalHarmonicDenseDirect
-                }
-            },
+            solver_method: solution_space.expected_method(),
             solver_backend: LinearAlgebraBackendKind::CpuReference,
-            preconditioner: SolverPreconditioner::None,
+            preconditioner: solution_space.expected_preconditioner(),
             iterations,
             solver_residual_norm: residual_norm,
             solver_relative_residual: relative_residual,

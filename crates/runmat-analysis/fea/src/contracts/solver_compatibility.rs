@@ -218,13 +218,15 @@ const fn preconditioner_is_compatible(
         SolverMethod::MatrixFreeSaddlePointGmres
         | SolverMethod::DenseDirect
         | SolverMethod::StructuralModalTransientNewmarkDenseFactorization
-        | SolverMethod::StructuralDirectHarmonicGmres
         | SolverMethod::StructuralModalHarmonicDenseDirect
         | SolverMethod::StructuralModalResponseSpectrumCombination
         | SolverMethod::StructuralRandomResponseIntegration
         | SolverMethod::AcousticDomainGraphHelmholtzHarmonic
         | SolverMethod::AcousticCanonicalHelmholtzGmres => {
             matches!(preconditioner, SolverPreconditioner::None)
+        }
+        SolverMethod::StructuralDirectHarmonicGmres => {
+            matches!(preconditioner, SolverPreconditioner::Jacobi)
         }
         SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab => {
             matches!(preconditioner, SolverPreconditioner::BlockJacobi)
@@ -340,7 +342,7 @@ mod tests {
                 AnalysisProcedure::HarmonicResponse,
                 SolutionSpace::Direct,
                 SolverMethod::StructuralDirectHarmonicGmres,
-                SolverPreconditioner::None,
+                SolverPreconditioner::Jacobi,
             ),
             (
                 AnalysisProcedure::HarmonicResponse,

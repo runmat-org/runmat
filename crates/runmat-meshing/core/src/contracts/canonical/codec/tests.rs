@@ -180,7 +180,12 @@ fn decoder_rejects_noncanonical_maps_trailing_bytes_and_oversized_inputs() {
         MeshingStageIdentity::canonical_decode(&oversized)
             .unwrap_err()
             .reason,
-        "encoded contract exceeds its byte limit"
+        format!(
+            "contract `{}` contains {} bytes, exceeding its {}-byte limit",
+            MeshingStageIdentity::DOMAIN,
+            oversized.len(),
+            MeshingStageIdentity::LIMITS.maximum_encoded_bytes
+        )
     );
 }
 

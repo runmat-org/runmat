@@ -110,6 +110,7 @@ occt-native = [
 ]
 
 [dev-dependencies]
+runmat-geometry-ops = { workspace = true }
 tempfile = "3.12" 
 git2 = { version = "0.20", default-features = false }
 serde_json = { workspace = true }

@@ -177,7 +177,11 @@ pub fn encode_contract_with_control<T: Serialize>(
     if encoded.len() > limits.maximum_encoded_bytes {
         return Err(invalid(
             "canonical encoding",
-            "encoded contract exceeds its byte limit",
+            format!(
+                "contract `{domain}` encoded {} bytes, exceeding its {}-byte limit",
+                encoded.len(),
+                limits.maximum_encoded_bytes
+            ),
         ));
     }
     Ok(encoded)
@@ -204,7 +208,11 @@ pub fn decode_contract_with_control<T: DeserializeOwned>(
     if bytes.len() > limits.maximum_encoded_bytes {
         return Err(invalid(
             "canonical decoding",
-            "encoded contract exceeds its byte limit",
+            format!(
+                "contract `{domain}` contains {} bytes, exceeding its {}-byte limit",
+                bytes.len(),
+                limits.maximum_encoded_bytes
+            ),
         ));
     }
     let payload = bytes
@@ -397,6 +405,22 @@ mod tests {
             CanonicalLimits::new(bytes.len() - 1, 32, 128, 8),
         )
         .is_err());
+    }
+
+    #[test]
+    fn byte_bound_failure_names_domain_actual_size_and_unchanged_limit() {
+        let bytes = encode_contract(PREFIX, DOMAIN, &fixture(), LIMITS).unwrap();
+        let limit = bytes.len() - 1;
+        let limits = CanonicalLimits::new(limit, 32, 128, 8);
+        for error in [
+            encode_contract(PREFIX, DOMAIN, &fixture(), limits).unwrap_err(),
+            decode_contract::<Fixture>(PREFIX, DOMAIN, &bytes, limits).unwrap_err(),
+        ] {
+            let message = error.to_string();
+            assert!(message.contains(DOMAIN));
+            assert!(message.contains(&format!("{} bytes", bytes.len())));
+            assert!(message.contains(&format!("{limit}-byte limit")));
+        }
     }
 
     #[test]

@@ -175,8 +175,11 @@ impl StructuralFrequencyPhysicalSample {
     fn derive_identity(
         &self,
     ) -> AnalysisExecutionResult<StructuralFrequencyPhysicalSampleIdentity> {
-        StructuralFrequencyPhysicalSampleIdentity::derive(
-            "structural-frequency-physical-sample",
+        // Numerical vectors obey this sample's bound, not the small metadata identity
+        // envelope. Bind all physical content before deriving the typed identity.
+        let content = encode_contract(
+            FREQUENCY_SAMPLE_PREFIX,
+            "structural-frequency-physical-sample-content",
             &(
                 self.schema_version,
                 self.scope,
@@ -185,6 +188,11 @@ impl StructuralFrequencyPhysicalSample {
                 &self.reaction,
                 &self.balance,
             ),
+            FREQUENCY_SAMPLE_LIMITS,
+        )?;
+        StructuralFrequencyPhysicalSampleIdentity::derive(
+            "structural-frequency-physical-sample",
+            &runmat_execution::Digest::sha256(content),
         )
     }
 }

@@ -6225,6 +6225,7 @@ dependencies = [
  "runmat-gc",
  "runmat-geometry-core",
  "runmat-geometry-io",
+ "runmat-geometry-ops",
  "runmat-hir",
  "runmat-logging",
  "runmat-meshing-core",
