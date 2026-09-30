@@ -82,7 +82,7 @@ impl NativeOptimizer {
                 .value
                 .ok_or_else(|| fail(function, "parameter is uninitialized"))?;
             let shape = parameters::numeric_payload_shape(value, row.key.role.name(), function)?;
-            if shape != gradient.shape || gradient.len() == 0 {
+            if shape != gradient.shape || gradient.is_empty() {
                 return Err(fail(
                     function,
                     "parameter gradient geometry differs from Learnables",

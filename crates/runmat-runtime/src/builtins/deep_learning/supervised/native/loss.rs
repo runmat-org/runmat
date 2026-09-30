@@ -56,7 +56,7 @@ fn matching(
             "prediction and target must have matching single or double precision",
         ));
     }
-    if prediction.len() == 0 {
+    if prediction.is_empty() {
         return Err(fail(
             function,
             "training loss requires at least one output element",

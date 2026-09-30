@@ -5,7 +5,7 @@ use crate::builtins::common::gpu_helpers::propagate_output_provenance;
 use crate::builtins::deep_learning::model::plan::normalization::NormalizationStage;
 use runmat_accelerate_api::DeepLearningLayerNormCapability;
 
-fn parameter<'a>(layer: &'a ObjectInstance, role: ParameterRole) -> Option<&'a GpuTensorHandle> {
+fn parameter(layer: &ObjectInstance, role: ParameterRole) -> Option<&GpuTensorHandle> {
     resident_parameter_handle(layer, role)
 }
 
