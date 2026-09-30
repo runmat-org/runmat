@@ -1,4 +1,3 @@
-use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::{ResolveContext, Type};
@@ -27,43 +26,6 @@ pub fn mode_type(args: &[Type], context: &ResolveContext) -> Type {
         Some(Type::Bool) => Type::Bool,
         Some(Type::Int) => Type::Int,
         _ => reduced,
-    }
-}
-
-pub fn histcounts_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    let mut edges_len: Option<usize> = None;
-    for arg in args.iter().skip(1) {
-        if let Some(len) = size_vector_len(arg) {
-            if len > 1 {
-                edges_len = Some(len);
-                break;
-            }
-        }
-    }
-    match edges_len {
-        Some(len) if len > 1 => Type::Tensor {
-            shape: Some(vec![Some(1), Some(len - 1)]),
-        },
-        _ => row_vector_type(ctx),
-    }
-}
-
-pub fn histcounts2_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let mut edges_lens: Vec<usize> = Vec::new();
-    for arg in args.iter().skip(2) {
-        if let Some(len) = size_vector_len(arg) {
-            if len > 1 {
-                edges_lens.push(len);
-            }
-            if edges_lens.len() == 2 {
-                break;
-            }
-        }
-    }
-    let bins_x = edges_lens.get(0).and_then(|len| len.checked_sub(1));
-    let bins_y = edges_lens.get(1).and_then(|len| len.checked_sub(1));
-    Type::Tensor {
-        shape: Some(vec![bins_x, bins_y]),
     }
 }
 
