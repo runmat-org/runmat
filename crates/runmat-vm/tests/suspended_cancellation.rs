@@ -4,6 +4,9 @@ mod support;
 #[path = "suspended_cancellation/managed_arguments.rs"]
 mod managed_arguments;
 
+#[path = "suspended_cancellation/resident_validator.rs"]
+mod resident_validator;
+
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
 use runmat_runtime::builtin::RuntimeBuiltinBinding;
@@ -32,6 +35,10 @@ struct PendingBuiltin;
 
 #[test]
 fn execution_scope_preserves_normal_caught_language_errors() {
+    runmat_gc::gc_test_context(execution_scope_preserves_normal_caught_language_errors_inner);
+}
+
+fn execution_scope_preserves_normal_caught_language_errors_inner() {
     let bytecode = support::compile_source("try; error('expected'); catch; x = 42; end").unwrap();
     let source = CancellationSource::new();
     let runtime = RuntimeContext::with_cancellation(
@@ -84,6 +91,12 @@ impl Wake for Wakes {
 
 #[test]
 fn production_vm_cancellation_wakes_pending_dispatch_and_bypasses_catch() {
+    runmat_gc::gc_test_context(
+        production_vm_cancellation_wakes_pending_dispatch_and_bypasses_catch_inner,
+    );
+}
+
+fn production_vm_cancellation_wakes_pending_dispatch_and_bypasses_catch_inner() {
     runmat_vm::reset_thread_state_for_tests();
     let bytecode = support::compile_source("try; x = sin(1); catch; x = sin(2); end").unwrap();
     let source = CancellationSource::new();

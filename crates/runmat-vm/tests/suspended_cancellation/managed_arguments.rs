@@ -96,7 +96,7 @@ impl RuntimeBuiltinService for Builtins {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Terminal {
     Drop,
     Cancel,
@@ -115,7 +115,7 @@ fn actual_vm_managed_arguments_survive_suspension_and_release_at_terminal_bounda
             false,
         ),
         (
-            "function y = checked(v); arguments; v {cos}; end; y = v; end; x = checked(sin(0));",
+            "function y = checked(v); arguments; v {mustBeA('ManagedInput')}; end; y = cos(v); end; x = checked(sin(0));",
             false,
         ),
     ] {
@@ -200,7 +200,11 @@ fn run_case(source_text: &str, cell_output: bool, terminal: Terminal) {
     drop(vars);
     runmat_vm::reset_thread_state_for_tests();
     runmat_gc::gc_collect_major().unwrap();
-    assert_eq!(probe.retirements(), usize::from(output_root.is_none()));
+    assert_eq!(
+        probe.retirements(),
+        usize::from(output_root.is_none()),
+        "{source_text}: {terminal:?} must release unpublished storage"
+    );
     drop(output_root);
     runmat_gc::gc_collect_major().unwrap();
     assert!(runmat_gc::gc_with_value(&target, |_| ()).is_err());
