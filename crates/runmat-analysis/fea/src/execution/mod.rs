@@ -7,7 +7,10 @@ pub use crate::pipeline::thermal::PreparedThermalSolve;
 
 mod accuracy;
 mod acoustic;
-pub use acoustic::{AcousticHarmonicSolverResult, AcousticHarmonicWorkload};
+pub use acoustic::{
+    AcousticFrequencyResult, AcousticFrequencyWorkload, AcousticHarmonicSolverResult,
+    AcousticHarmonicWorkload,
+};
 mod accuracy_source;
 mod buckling_result;
 mod buckling_workload;

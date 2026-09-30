@@ -18,6 +18,7 @@ use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 mod publication;
+mod sweep;
 
 fn task(
     order: ElementOrder,

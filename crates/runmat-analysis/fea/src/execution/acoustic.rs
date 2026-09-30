@@ -23,6 +23,8 @@ pub(in crate::execution) use fields::{
 mod publication;
 mod result;
 pub use result::AcousticHarmonicSolverResult;
+mod sweep;
+pub use sweep::{AcousticFrequencyResult, AcousticFrequencyWorkload};
 #[cfg(test)]
 pub(in crate::execution) mod tests;
 const PREFIX: &[u8] = b"runmat-acoustic-harmonic-workload/v1\0";
