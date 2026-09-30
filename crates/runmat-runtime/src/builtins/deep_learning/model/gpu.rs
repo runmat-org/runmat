@@ -6,10 +6,12 @@ use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use runmat_builtins::DeepLearningAxisLabel;
 
 mod parameters;
+mod normalization;
 mod admission;
 mod pooling;
 
 pub(super) use admission::{admit_gpu_forward, GpuCapabilityReason, GpuForwardAdmission};
+pub(in crate::builtins::deep_learning) use normalization::forward as normalize_network_gpu;
 
 #[cfg(test)]
 mod tests;

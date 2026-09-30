@@ -32,8 +32,8 @@ mod covariance;
 pub use covariance::CovarianceWeightDomainError;
 mod deep_learning;
 pub use deep_learning::{
-    DeepLearningPool1DCapability, DeepLearningPool1DRequest, DeepLearningPool1DResultAxis,
-    DeepLearningPool1DRoute,
+    DeepLearningLayerNormCapability, DeepLearningLayerNormRequest, DeepLearningPool1DCapability,
+    DeepLearningPool1DRequest, DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
 pub use provider_execution::{
     ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,
@@ -3474,6 +3474,27 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _route: &DeepLearningPool1DRoute,
     ) -> anyhow::Result<DeepLearningPool1DCapability> {
         Ok(DeepLearningPool1DCapability::UnsupportedOperation)
+    }
+    /// Stable, channel-affine layer normalization on resident real data.
+    fn deep_learning_layer_norm<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _scale: &'a GpuTensorHandle,
+        _offset: &'a GpuTensorHandle,
+        _request: &'a DeepLearningLayerNormRequest,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("deep-learning layer normalization not supported by provider")
+    }
+    /// Pure admission for the entire normalization kernel and physical
+    /// parameter geometry. No uploads, allocations, or dispatches occur.
+    fn deep_learning_layer_norm_capability(
+        &self,
+        _input: &GpuTensorHandle,
+        _scale: Option<&GpuTensorHandle>,
+        _offset: Option<&GpuTensorHandle>,
+        _request: &DeepLearningLayerNormRequest,
+    ) -> anyhow::Result<DeepLearningLayerNormCapability> {
+        Ok(DeepLearningLayerNormCapability::UnsupportedOperation)
     }
     /// Reduce moments across multiple zero-based dimensions in one device pass.
     /// Returns mean (E[x]) and mean of squares (E[x^2]).

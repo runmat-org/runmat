@@ -475,6 +475,26 @@ impl AccelProvider for WgpuProvider {
         self.deep_learning_global_average_pool_1d_capability_exec(input, route)
     }
 
+    fn deep_learning_layer_norm<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        scale: &'a GpuTensorHandle,
+        offset: &'a GpuTensorHandle,
+        request: &'a DeepLearningLayerNormRequest,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.deep_learning_layer_norm_exec(input, scale, offset, request) })
+    }
+
+    fn deep_learning_layer_norm_capability(
+        &self,
+        input: &GpuTensorHandle,
+        scale: Option<&GpuTensorHandle>,
+        offset: Option<&GpuTensorHandle>,
+        request: &DeepLearningLayerNormRequest,
+    ) -> Result<DeepLearningLayerNormCapability> {
+        self.deep_learning_layer_norm_capability_exec(input, scale, offset, request)
+    }
+
     fn reduce_moments_nd<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

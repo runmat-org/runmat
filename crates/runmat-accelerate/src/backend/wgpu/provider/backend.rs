@@ -8,26 +8,26 @@ use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
     AccelContextHandle, AccelContextKind, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
     ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
-    CovarianceOptions, DeepLearningPool1DCapability, DeepLearningPool1DRequest,
-    DeepLearningPool1DResultAxis, DeepLearningPool1DRoute, FindDirection, FspecialRequest,
-    GpuTensorHandle, GpuTensorStorage, HostTensorOwned, HostTensorView, ImfilterOptions,
-    IsMemberOptions, IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest,
-    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
-    ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
-    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
-    ProviderCovarianceToCorrelationResult, ProviderCrossentropyMode, ProviderCrossentropyRequest,
-    ProviderCrossentropyResult, ProviderCummaxResult, ProviderCumminResult, ProviderEigResult,
-    ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult,
-    ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
-    ProviderMeshgridResult, ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult,
-    ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult,
-    ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions, ProviderQrPivot,
-    ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection, ProviderSpectralFrameMode,
-    ProviderSpectralRange, ProviderSpectralRequest, ProviderSpectralResult,
-    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, ReductionFlavor,
-    ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult,
-    SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions,
-    UniqueResult, WgpuBufferRef,
+    CovarianceOptions, DeepLearningLayerNormCapability, DeepLearningLayerNormRequest,
+    DeepLearningPool1DCapability, DeepLearningPool1DRequest, DeepLearningPool1DResultAxis,
+    DeepLearningPool1DRoute, FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage,
+    HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions, IsMemberResult,
+    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderAdamUpdateRequest,
+    ProviderAdamUpdateResult, ProviderBandwidth, ProviderBlackScholesPriceRequest,
+    ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
+    ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
+    ProviderCrossentropyMode, ProviderCrossentropyRequest, ProviderCrossentropyResult,
+    ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
+    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
+    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
+    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
+    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult,
+    ProviderQrResult, ProviderScanDirection, ProviderSpectralFrameMode, ProviderSpectralRange,
+    ProviderSpectralRequest, ProviderSpectralResult, ProviderStdNormalization,
+    ProviderSymmetryKind, ReduceDimResult, ReductionFlavor, ReductionTwoPassMode, SetdiffOptions,
+    SetdiffResult, SortComparison, SortOrder, SortResult, SortRowsColumnSpec,
+    SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
 };
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -74,6 +74,8 @@ mod core;
 mod deep_learning;
 #[path = "ops/deep_learning/pooling.rs"]
 mod deep_learning_pooling;
+#[path = "ops/deep_learning/normalization.rs"]
+mod deep_learning_normalization;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
 #[path = "ops/remainder.rs"]

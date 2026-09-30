@@ -350,6 +350,8 @@ pub struct WgpuPipelines {
     pub symmetry: PipelineBundle,
     pub reduce_nd_mean: PipelineBundle,
     pub deep_learning_stable_pool_1d: PipelineBundle,
+    pub deep_learning_layer_norm_statistics: PipelineBundle,
+    pub deep_learning_layer_norm_affine: PipelineBundle,
     pub reduce_nd_moments: PipelineBundle,
 }
 
@@ -1680,6 +1682,34 @@ impl WgpuPipelines {
             crate::backend::wgpu::shaders::deep_learning::stable_pool_1d(precision),
         );
 
+        let deep_learning_layer_norm_statistics = create_pipeline(
+            access,
+            "runmat-layer-norm-statistics-layout",
+            "runmat-layer-norm-statistics-shader",
+            "runmat-layer-norm-statistics-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_normalization::statistics(precision),
+        );
+        let deep_learning_layer_norm_affine = create_pipeline(
+            access,
+            "runmat-layer-norm-affine-layout",
+            "runmat-layer-norm-affine-shader",
+            "runmat-layer-norm-affine-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_entry(2),
+                storage_read_entry(3),
+                storage_read_write_entry(4),
+                uniform_entry(5),
+            ],
+            crate::backend::wgpu::shaders::deep_learning_normalization::affine(precision),
+        );
+
         let reduce_nd_moments = create_pipeline(
             access,
             "runmat-reduce-nd-moments-layout",
@@ -1781,6 +1811,8 @@ impl WgpuPipelines {
             symmetry,
             reduce_nd_mean,
             deep_learning_stable_pool_1d,
+            deep_learning_layer_norm_statistics,
+            deep_learning_layer_norm_affine,
             reduce_nd_moments,
         }
     }

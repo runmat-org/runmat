@@ -1,7 +1,8 @@
+use runmat_accelerate_api::DeepLearningLayerNormRequest;
 use runmat_builtins::{DeepLearningAxisLabel, DeepLearningNormalizationAxes};
 use runmat_value::{NumericDType, Tensor};
 
-use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
+use super::axes::AxisPlan;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::builtins::deep_learning) struct NormalizationOptions {
@@ -38,7 +39,7 @@ impl std::fmt::Display for NormalizationError {
 
 impl std::error::Error for NormalizationError {}
 
-pub(super) struct Geometry {
+pub(in crate::builtins::deep_learning) struct Geometry {
     pub axes: AxisPlan,
     pub channels: usize,
     pub channel_axis: usize,
@@ -47,6 +48,12 @@ pub(super) struct Geometry {
     pub groups: usize,
     pub group_size: usize,
     pub epsilon: f64,
+}
+
+/// A typed reference to the canonical layer row and its admitted geometry.
+pub(in crate::builtins::deep_learning) struct NormalizationStage {
+    pub layer_index: usize,
+    pub geometry: Geometry,
 }
 
 impl Geometry {
@@ -185,5 +192,96 @@ impl Geometry {
             }
         }
         (group, channel)
+    }
+
+    /// The provider receives the admitted physical geometry; it never
+    /// reinterprets public axis labels or operational option strings.
+    pub fn resident_request(&self) -> DeepLearningLayerNormRequest {
+        let reduce_mask = self
+            .reduce
+            .iter()
+            .enumerate()
+            .fold(0u8, |bits, (axis, &reduce)| {
+                bits | (u8::from(reduce) << axis)
+            });
+        let parameter_shape = if self
+            .axes
+            .layout()
+            .index(DeepLearningAxisLabel::Spatial)
+            .is_some()
+        {
+            vec![1, self.channels]
+        } else {
+            vec![self.channels, 1]
+        };
+        DeepLearningLayerNormRequest {
+            shape: self.axes.shape().to_vec(),
+            reduce_mask,
+            channel_axis: self.channel_axis,
+            scale_shape: parameter_shape.clone(),
+            offset_shape: parameter_shape,
+            epsilon: self.epsilon,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::DeepLearningAxisLayout;
+
+    #[test]
+    fn typed_reduction_geometry_is_shared_with_resident_request() {
+        let axes = AxisPlan::new(
+            DeepLearningAxisLayout::parse("SCBT", 4).unwrap(),
+            &[2, 3, 2, 2],
+        )
+        .unwrap();
+        for (operation, mask, groups, group_size) in [
+            (DeepLearningNormalizationAxes::ChannelOnly, 0b0010, 8, 3),
+            (DeepLearningNormalizationAxes::SpatialChannel, 0b0011, 4, 6),
+            (DeepLearningNormalizationAxes::BatchExcluded, 0b1011, 2, 12),
+        ] {
+            let geometry = Geometry::new(
+                &axes,
+                NormalizationOptions {
+                    epsilon: 1e-5,
+                    operation,
+                },
+            )
+            .unwrap();
+            assert_eq!((geometry.groups, geometry.group_size), (groups, group_size));
+            let request = geometry.resident_request();
+            assert_eq!(request.reduce_mask, mask);
+            assert_eq!(request.channel_axis, 1);
+            assert_eq!(request.scale_shape, [1, 3]);
+            assert_eq!(request.offset_shape, [1, 3]);
+            assert_eq!(request.shape, axes.shape());
+        }
+    }
+
+    #[test]
+    fn malformed_parameter_class_or_shape_fails_pure_admission() {
+        let axes = AxisPlan::new(DeepLearningAxisLayout::parse("CB", 2).unwrap(), &[3, 2]).unwrap();
+        let geometry = Geometry::new(
+            &axes,
+            NormalizationOptions {
+                epsilon: 1e-5,
+                operation: DeepLearningNormalizationAxes::ChannelOnly,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            geometry.validate_shapes(&[3, 1], &[3, 1], NumericDType::F32),
+            Ok(())
+        );
+        assert_eq!(
+            geometry.validate_shapes(&[3, 1], &[3, 1], NumericDType::I32),
+            Err(NormalizationError::UnsupportedPrecision)
+        );
+        assert_eq!(
+            geometry.validate_shapes(&[1, 3], &[3, 1], NumericDType::F64),
+            Err(NormalizationError::ShapeMismatch)
+        );
     }
 }

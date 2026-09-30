@@ -43,6 +43,37 @@ fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::Runtim
 }
 
 impl<'a> HostNetworkPlan<'a> {
+    /// A bounded first resident route. The same admitted geometry is used by
+    /// host execution; future composed device stages consume these steps.
+    pub(in crate::builtins::deep_learning) fn standalone_normalization(
+        &self,
+    ) -> Result<
+        Option<crate::builtins::deep_learning::model::plan::normalization::NormalizationStage>,
+        crate::builtins::deep_learning::model::plan::normalization::NormalizationError,
+    > {
+        use crate::builtins::deep_learning::model::plan::normalization::{
+            Geometry, NormalizationStage,
+        };
+        let [input, normalization, remainder @ ..] = self.steps.as_slice() else {
+            return Ok(None);
+        };
+        if !input.kind.is_input()
+            || normalization.kind != K::LayerNormalization
+            || !(remainder.is_empty() || remainder.len() == 1 && remainder[0].kind.is_output())
+        {
+            return Ok(None);
+        }
+        let Controls::Normalization(options) = normalization.controls else {
+            return Ok(None);
+        };
+        Geometry::new(&self.input_axes, options).map(|geometry| {
+            Some(NormalizationStage {
+                layer_index: normalization.index,
+                geometry,
+            })
+        })
+    }
+
     pub(in crate::builtins::deep_learning) fn admit(
         network: &'a ObjectInstance,
         input: &Value,

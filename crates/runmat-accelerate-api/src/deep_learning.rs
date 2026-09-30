@@ -36,3 +36,23 @@ pub enum DeepLearningPool1DCapability {
     UnsupportedOperation,
     ResourceLimit,
 }
+
+/// Physical, column-major layer-normalization geometry admitted by the
+/// runtime's shared host/device axis plan. Bits in `reduce_mask` identify
+/// axes reduced into each independently normalized group.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeepLearningLayerNormRequest {
+    pub shape: Vec<usize>,
+    pub reduce_mask: u8,
+    pub channel_axis: usize,
+    pub scale_shape: Vec<usize>,
+    pub offset_shape: Vec<usize>,
+    pub epsilon: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepLearningLayerNormCapability {
+    Ready,
+    UnsupportedOperation,
+    ResourceLimit,
+}

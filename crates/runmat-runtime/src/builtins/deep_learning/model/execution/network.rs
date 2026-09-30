@@ -13,7 +13,7 @@ use crate::builtins::deep_learning::model::{
     gpu::{self, evaluate_network_gpu},
     plan::host::HostNetworkPlan,
 };
-use crate::builtins::deep_learning::{autodiff, unsupported_error};
+use crate::builtins::deep_learning::{autodiff, deep_learning_error, unsupported_error};
 use crate::BuiltinResult;
 
 pub(in crate::builtins::deep_learning) async fn execute_network(
@@ -43,6 +43,36 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                 function,
                 format!("{function}: provider-resident network autodiff is not supported"),
             ));
+        }
+        if let Some(normalization) = plan
+            .standalone_normalization()
+            .map_err(|error| deep_learning_error(function, format!("{function}: {error}")))?
+        {
+            match gpu::normalize_network_gpu(
+                request.network,
+                handle,
+                &normalization,
+                &output_axes,
+                function,
+            )
+            .await?
+            {
+                Ok(output) => {
+                    return Ok(NetworkExecutionOutcome {
+                        data: crate::builtins::common::gpu_helpers::resident_gpu_value(output)?,
+                        output_axes,
+                        state_updates: Vec::new(),
+                        trace: None,
+                    })
+                }
+                Err(reason) if runmat_accelerate_api::handle_is_explicit(handle) => {
+                    return Err(unsupported_error(
+                        function,
+                        format!("{function}: {reason} for an explicit gpuArray input"),
+                    ));
+                }
+                Err(_) => {}
+            }
         }
         let Some(Value::Cell(layers)) = request.network.properties.get("Layers") else {
             unreachable!("whole-network admission validated Layers")

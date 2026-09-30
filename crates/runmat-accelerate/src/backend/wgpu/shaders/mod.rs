@@ -6,6 +6,7 @@ pub mod comms;
 pub mod conv;
 pub mod creation;
 pub mod deep_learning;
+pub mod deep_learning_normalization;
 pub mod diag;
 pub mod diff;
 pub mod elementwise;

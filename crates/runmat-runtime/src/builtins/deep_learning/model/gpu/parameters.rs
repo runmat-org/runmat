@@ -91,7 +91,7 @@ fn matching_resident_parameter<'a>(
     })
 }
 
-async fn prepare_host_parameter(
+pub(super) async fn prepare_host_parameter(
     layer: &ObjectInstance,
     role: ParameterRole,
     function: &'static str,
@@ -119,7 +119,7 @@ fn input_dtype(input: &GpuTensorHandle) -> NumericDType {
     }
 }
 
-fn upload_parameter(
+pub(super) fn upload_parameter(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     tensor: Tensor,
     input: &GpuTensorHandle,

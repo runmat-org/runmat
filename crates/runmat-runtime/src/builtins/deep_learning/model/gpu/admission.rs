@@ -135,6 +135,7 @@ pub(in crate::builtins::deep_learning::model) enum GpuCapabilityReason {
     InputStorage,
     InputRank,
     InputPrecision,
+    ParameterPrecision(ParameterRole),
     Layer(ClassIdentity),
     NoSupportedTransform,
     ProviderOperation,
@@ -160,6 +161,11 @@ impl fmt::Display for GpuCapabilityReason {
                 formatter,
                 "provider-resident forward requires single or double dlarray Data"
             ),
+            Self::ParameterPrecision(role) => write!(
+                formatter,
+                "provider-resident forward cannot use this {} precision",
+                role.name()
+            ),
             Self::Layer(identity) => write!(
                 formatter,
                 "provider-resident forward does not yet support layer type '{}'",
@@ -175,14 +181,14 @@ impl fmt::Display for GpuCapabilityReason {
             ),
             Self::ResourceLimit => write!(
                 formatter,
-                "provider cannot execute this resident pooling geometry within its device limits"
+                "provider cannot execute this resident geometry within its device limits"
             ),
         }
     }
 }
 
 #[derive(Clone, Copy)]
-enum GpuOperand {
+pub(super) enum GpuOperand {
     Input,
     Parameter(ParameterRole),
 }
@@ -367,7 +373,7 @@ fn classify_layers(
     Ok(None)
 }
 
-fn invalid_owner(function: &'static str, operand: GpuOperand) -> crate::RuntimeError {
+pub(super) fn invalid_owner(function: &'static str, operand: GpuOperand) -> crate::RuntimeError {
     crate::runtime_error::build_runtime_error(format!(
         "{function}: resident {operand} has no compatible live provider owner"
     ))

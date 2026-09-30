@@ -3,7 +3,9 @@ use runmat_value::{NumericStorage, Tensor};
 use crate::builtins::deep_learning::model::execution::host::numeric::Real;
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 
-use super::geometry::{Geometry, NormalizationError, NormalizationOptions};
+use crate::builtins::deep_learning::model::plan::normalization::{
+    Geometry, NormalizationError, NormalizationOptions,
+};
 
 pub(in crate::builtins::deep_learning) enum NormalizationStatsData {
     F32 {

@@ -1,11 +1,12 @@
 //! Layer normalization with native-precision statistics and adjoints.
 
-mod geometry;
 mod kernel;
 mod backward;
 
 pub(in crate::builtins::deep_learning) use backward::backward;
-pub(in crate::builtins::deep_learning) use geometry::{NormalizationError, NormalizationOptions};
+pub(in crate::builtins::deep_learning) use crate::builtins::deep_learning::model::plan::normalization::{
+    NormalizationError, NormalizationOptions,
+};
 pub(in crate::builtins::deep_learning) use kernel::{forward, NormalizationStats};
 
 pub(in crate::builtins::deep_learning) fn admit(
@@ -15,7 +16,8 @@ pub(in crate::builtins::deep_learning) fn admit(
     dtype: runmat_value::NumericDType,
     options: NormalizationOptions,
 ) -> Result<crate::builtins::deep_learning::model::plan::axes::AxisPlan, NormalizationError> {
-    let geometry = geometry::Geometry::new(axes, options)?;
+    let geometry =
+        crate::builtins::deep_learning::model::plan::normalization::Geometry::new(axes, options)?;
     geometry.validate_shapes(scale_shape, offset_shape, dtype)?;
     Ok(axes.clone())
 }
