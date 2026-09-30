@@ -1830,19 +1830,24 @@ fn assignin_preserves_resident_integer_provider_ownership() {
     let vars = execute_source(
         "base = uint64(9007199254740992); source_gpu = gpuArray([base + uint64(1) intmax('uint64')]); assignin('base','assigned_gpu',source_gpu); copied = evalin('base','gather(assigned_gpu)');",
     );
-    let resident_ids = vars
+    let resident_handles = vars
         .iter()
         .filter_map(|value| match value {
-            runmat_value::Value::GpuTensor(handle) => Some(handle.buffer_id),
+            runmat_value::Value::GpuTensor(handle) => Some(handle),
             _ => None,
         })
         .collect::<Vec<_>>();
+    let resident_ids = resident_handles
+        .iter()
+        .map(|handle| handle.allocation_identity())
+        .collect::<Vec<_>>();
     assert!(
-        resident_ids.iter().any(|id| resident_ids
+        resident_handles
             .iter()
-            .filter(|candidate| *candidate == id)
-            .count()
-            >= 2),
+            .enumerate()
+            .any(|(index, handle)| resident_handles[index + 1..]
+                .iter()
+                .any(|candidate| handle.shares_allocation_with(candidate))),
         "assignin should clone the same resident handle, got {resident_ids:?}"
     );
     assert!(vars.iter().any(|value| {

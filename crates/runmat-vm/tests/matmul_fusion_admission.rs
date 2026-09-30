@@ -26,6 +26,14 @@ fn tensor(data: &[f64], shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new(data.to_vec(), shape.to_vec()).unwrap())
 }
 
+fn retire_result(handle: runmat_accelerate_api::GpuTensorHandle) {
+    assert_eq!(
+        handle.release().expect("fused result retirement"),
+        runmat_accelerate_api::allocation::AllocationReleaseOutcome::Retired,
+        "the fused result must retain no hidden aliases"
+    );
+}
+
 fn direct(expression: &str) -> FusionExecutionOutcome<Value> {
     direct_with_left(expression, None)
 }
@@ -61,7 +69,7 @@ fn actual_provider_keeps_ordered_affine_and_scale_orientations() {
             let result = block_on(PROVIDER.download(&handle)).unwrap();
             assert_eq!(result.shape, [2, 2]);
             assert_eq!(result.data, expected, "{expression}");
-            PROVIDER.free(&handle).unwrap();
+            retire_result(handle);
         }
     });
 }
@@ -76,7 +84,7 @@ fn admitted_diagonal_remains_on_provider_and_publishes_column() {
         let result = block_on(PROVIDER.download(&handle)).unwrap();
         assert_eq!(result.shape, [2, 1]);
         assert_eq!(result.data, [2., 8.]);
-        PROVIDER.free(&handle).unwrap();
+        retire_result(handle);
     });
 }
 
@@ -95,7 +103,7 @@ fn power_proof_preserves_negative_integral_and_clamped_fractional_domains() {
             };
             let result = block_on(PROVIDER.download(&handle)).unwrap();
             assert_eq!(result.data, expected);
-            PROVIDER.free(&handle).unwrap();
+            retire_result(handle);
         }
     });
 }
@@ -113,7 +121,7 @@ fn actual_epilogue_keeps_nan_override_and_reverse_subtraction_zero_sign() {
         assert!(result.data[0].is_nan() && result.data[2].is_nan());
         assert_eq!(result.data[1], 1.);
         assert_eq!(result.data[3], 1.);
-        PROVIDER.free(&handle).unwrap();
+        retire_result(handle);
         let FusionExecutionOutcome::Executed(Value::GpuTensor(handle)) =
             direct_with_left("-0-(A*B)", Some(tensor(&[0.; 4], &[2, 2])))
         else {
@@ -124,7 +132,7 @@ fn actual_epilogue_keeps_nan_override_and_reverse_subtraction_zero_sign() {
             .data
             .iter()
             .all(|v| v.to_bits() == (-0.0f64).to_bits()));
-        PROVIDER.free(&handle).unwrap();
+        retire_result(handle);
     });
 }
 

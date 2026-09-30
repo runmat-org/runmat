@@ -106,6 +106,20 @@ fn output<'a>(bytecode: &runmat_vm::Bytecode, values: &'a [Value]) -> &'a Value 
     &values[index]
 }
 
+fn retire_output_after_frame(
+    values: Vec<Value>,
+    resident: Option<runmat_accelerate_api::GpuTensorHandle>,
+) {
+    drop(values);
+    if let Some(handle) = resident {
+        assert_eq!(
+            handle.release().expect("completed output retirement"),
+            runmat_accelerate_api::allocation::AllocationReleaseOutcome::Retired,
+            "completed frame must retain no hidden allocation aliases"
+        );
+    }
+}
+
 fn assert_output(value: &Value, expected: &[u8]) {
     let gathered = block_on(runmat_runtime::gather_if_needed_async(value)).unwrap();
     match gathered {
@@ -217,20 +231,21 @@ fn canonical_logical_forms_execute_through_vm_with_real_provider_feasibility() {
                 assert_eq!(matches!(result, Value::GpuTensor(_)), gpu, "{name}");
                 assert_output(result, expected);
                 assert_execution(&selection, gpu, if name == "logical" { 1 } else { 2 });
-                if let Value::GpuTensor(handle) = result {
-                    provider.free(handle).unwrap();
-                    runmat_accelerate_api::clear_handle_metadata(handle);
-                }
+                let resident = match result {
+                    Value::GpuTensor(handle) => Some(handle.clone()),
+                    _ => None,
+                };
+                retire_output_after_frame(values, resident);
             }
         }
         assert_invalid_calls_before_preparation();
-        assert_direct_call(provider);
-        assert_power_execution(provider);
-        admitted_logarithms::run(provider);
+        assert_direct_call();
+        assert_power_execution();
+        admitted_logarithms::run();
     });
 }
 
-fn assert_power_execution(provider: &dyn runmat_accelerate_api::AccelProvider) {
+fn assert_power_execution() {
     // Keep the provider/cache lifetime shared with the logical witnesses above.
     // feval prevents fusion from replacing the admitted runtime boundary.
     let cases = [
@@ -297,10 +312,11 @@ fn assert_power_execution(provider: &dyn runmat_accelerate_api::AccelProvider) {
                     assert_power_component(im, expected_im);
                 }
                 assert_execution(&selection, gpu, 2);
-                if let Value::GpuTensor(handle) = result {
-                    provider.free(handle).unwrap();
-                    runmat_accelerate_api::clear_handle_metadata(handle);
-                }
+                let resident = match result {
+                    Value::GpuTensor(handle) => Some(handle.clone()),
+                    _ => None,
+                };
+                retire_output_after_frame(values, resident);
             }
         }
     }
@@ -360,7 +376,7 @@ fn assert_invalid_calls_before_preparation() {
     }
 }
 
-fn assert_direct_call(provider: &dyn runmat_accelerate_api::AccelProvider) {
+fn assert_direct_call() {
     runmat_accelerate::placement::reset();
     let bytecode = support::compile_source("a = [0 2; -1 0]; result = logical(a);").unwrap();
     let (context, selection) = context("logical", ExecutionCandidateKind::ProviderOperation);
@@ -371,6 +387,6 @@ fn assert_direct_call(provider: &dyn runmat_accelerate_api::AccelProvider) {
     let Value::GpuTensor(handle) = result else {
         panic!("direct logical did not retain provider result");
     };
-    provider.free(handle).unwrap();
-    runmat_accelerate_api::clear_handle_metadata(handle);
+    let resident = handle.clone();
+    retire_output_after_frame(values, Some(resident));
 }

@@ -48,6 +48,10 @@ fn assert_buffers_equal(provider: &TestProvider, expected: &BufferStore) {
             record.data.exact_eq(&expected_record.data),
             "buffer {id} exact payload changed"
         );
+        assert!(
+            record.exact_snapshot_eq(expected_record),
+            "buffer {id} physical descriptor or owner phase changed"
+        );
     }
 }
 

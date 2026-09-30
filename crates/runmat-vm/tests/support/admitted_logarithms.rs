@@ -1,7 +1,7 @@
 //! Called within the existing long-lived admitted-provider fixture.
 use super::*;
 
-pub(super) fn run(provider: &dyn runmat_accelerate_api::AccelProvider) {
+pub(super) fn run() {
     for extensions in [false, true] {
         let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(extensions);
         for (name, input, expected) in [
@@ -37,10 +37,11 @@ pub(super) fn run(provider: &dyn runmat_accelerate_api::AccelProvider) {
                     assert!((actual - expected).abs() < 1e-12, "{name}");
                 }
                 assert_execution(&selection, gpu, 1);
-                if let Value::GpuTensor(handle) = value {
-                    provider.free(handle).unwrap();
-                    runmat_accelerate_api::clear_handle_metadata(handle);
-                }
+                let resident = match value {
+                    Value::GpuTensor(handle) => Some(handle.clone()),
+                    _ => None,
+                };
+                retire_output_after_frame(values, resident);
             }
             for source in [
                 format!("a = [1 4]; [x,y,z] = {name}(a);"),

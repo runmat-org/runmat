@@ -54,7 +54,7 @@ fn numeric_primitive_product_keeps_provider_route_under_named_override() {
             block_on(PROVIDER.download(&handle)).unwrap().data,
             [2., 6., 4., 8.]
         );
-        PROVIDER.free(&handle).unwrap();
+        retire_result(handle);
         // The same represented operands through a named call retain dispatch.
         let FusionOp::Builtin { origin, .. } = &mut plan.operations[0] else {
             unreachable!()

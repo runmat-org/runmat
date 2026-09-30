@@ -30,6 +30,8 @@ pub(super) enum BufferPayload {
 }
 
 impl BufferPayload {
+    // Fusion expressions are interpreted in f64 by this deterministic fixture;
+    // conversion here tests native output storage/class, not f32 shader arithmetic.
     pub fn from_values(data: Vec<f64>, element: NumericElementType) -> Self {
         match element {
             NumericElementType::F32 => {
@@ -113,6 +115,13 @@ impl BufferRecord {
                 .as_ref()
                 .and_then(WeakAllocationLease::acquire)
                 .is_some_and(|lease| lease.shares_allocation_with(handle.allocation_lease()))
+    }
+
+    pub fn exact_snapshot_eq(&self, other: &Self) -> bool {
+        self.shape == other.shape
+            && self.physical == other.physical
+            && self.phase == other.phase
+            && self.data.exact_eq(&other.data)
     }
 }
 
