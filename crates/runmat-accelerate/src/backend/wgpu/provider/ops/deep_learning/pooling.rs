@@ -56,13 +56,37 @@ impl WgpuProvider {
                 && entry.integer_type() == runmat_accelerate_api::handle_integer_type(input),
             "deep-learning pooling input descriptor does not match its provider-owned buffer"
         );
-        let shape = input.shape();
+        ensure!(
+            checked_shape_count(input.shape())? == entry.len,
+            "pooling input shape/storage mismatch"
+        );
+        self.deep_learning_global_average_pool_1d_planned_capability_exec(
+            input,
+            input.shape(),
+            route,
+        )
+    }
+
+    pub(crate) fn deep_learning_global_average_pool_1d_planned_capability_exec(
+        &self,
+        anchor: &GpuTensorHandle,
+        shape: &[usize],
+        route: &DeepLearningPool1DRoute,
+    ) -> Result<DeepLearningPool1DCapability> {
+        let entry = self.get_entry_raw(anchor)?;
+        ensure!(
+            anchor.physical().element_type() == entry.element_type
+                && anchor.physical().storage() == entry.storage
+                && checked_shape_count(anchor.shape())? == entry.len
+                && entry.logical == runmat_accelerate_api::handle_is_logical(anchor)
+                && entry.integer_type() == runmat_accelerate_api::handle_integer_type(anchor),
+            "deep-learning pooling anchor differs from provider-owned buffer"
+        );
         let axis = route.reduction.axis_zero_based;
         ensure!(axis < shape.len(), "pool axis exceeds input rank");
         let pool_size = shape[axis];
         ensure!(pool_size > 0, "cannot pool an empty axis");
         let total = checked_shape_count(shape)?;
-        ensure!(total == entry.len, "pooling input shape/storage mismatch");
         let output_count = total / pool_size;
         let mut keep_shape = shape.to_vec();
         keep_shape[axis] = 1;
@@ -247,6 +271,45 @@ fn checked_shape_count(shape: &[usize]) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires actual WGPU device; run explicitly for pure future-stage admission"]
+    fn planned_pooling_admits_future_shape_without_effects() {
+        use runmat_accelerate_api::{AccelProvider, HostTensorView};
+
+        let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+        let anchor = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        let route = DeepLearningPool1DRoute {
+            reduction: DeepLearningPool1DRequest { axis_zero_based: 1 },
+            result_axis: DeepLearningPool1DResultAxis::KeepSingleton,
+            source_shape: vec![3, 1],
+            target_shape: vec![3, 1],
+            target_to_source: vec![0, 1],
+        };
+        provider.reset_telemetry();
+        assert_eq!(
+            provider
+                .deep_learning_global_average_pool_1d_planned_capability_exec(
+                    &anchor,
+                    &[3, 4],
+                    &route,
+                )
+                .unwrap(),
+            DeepLearningPool1DCapability::Ready
+        );
+        assert!(provider
+            .deep_learning_global_average_pool_1d_capability_exec(&anchor, &route)
+            .is_err());
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.upload_bytes, 0);
+        assert_eq!(telemetry.download_bytes, 0);
+        anchor.release().unwrap();
+    }
 
     #[test]
     fn pool_dispatch_chunks_cover_each_output_once_without_overlap() {

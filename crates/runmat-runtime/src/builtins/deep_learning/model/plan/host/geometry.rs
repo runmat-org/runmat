@@ -26,6 +26,11 @@ pub(super) struct StepDescriptor {
     pub index: usize,
     pub kind: K,
     pub controls: Controls,
+    /// Geometry immediately before and after this admitted layer. Device
+    /// lowering consumes these facts instead of reconstructing axes from a
+    /// separate layer-specific shape solver.
+    pub input_axes: AxisPlan,
+    pub output_axes: AxisPlan,
 }
 
 pub(in crate::builtins::deep_learning) struct HostNetworkPlan<'a> {
@@ -76,7 +81,8 @@ impl<'a> HostNetworkPlan<'a> {
         let Controls::Normalization(options) = normalization.controls else {
             return Ok(None);
         };
-        Geometry::new(&self.input_axes, options).map(|geometry| {
+        debug_assert_eq!(normalization.input_axes, normalization.output_axes);
+        Geometry::new(&normalization.input_axes, options).map(|geometry| {
             Some(NormalizationStage {
                 layer_index: normalization.index,
                 geometry,
@@ -202,7 +208,7 @@ fn admit_layers(
             ));
         }
         let controls = controls::decode(layer, kind, function)?;
-        axes = layers::admit(
+        let output_axes = layers::admit(
             layer,
             index,
             controls,
@@ -216,7 +222,10 @@ fn admit_layers(
             index,
             kind,
             controls,
+            input_axes: axes,
+            output_axes: output_axes.clone(),
         });
+        axes = output_axes;
     }
     Ok((input_axes, axes, precision, input_payload_kind, steps))
 }

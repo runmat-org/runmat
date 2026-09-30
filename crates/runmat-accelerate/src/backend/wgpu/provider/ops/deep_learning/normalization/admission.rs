@@ -8,11 +8,21 @@ impl WgpuProvider {
         offset: Option<&GpuTensorHandle>,
         request: &DeepLearningLayerNormRequest,
     ) -> Result<DeepLearningLayerNormCapability> {
-        let (groups, group_size) = geometry(request)?;
         ensure!(
             input.shape() == request.shape,
             "normalization input shape differs from admitted geometry"
         );
+        self.deep_learning_layer_norm_planned_capability_exec(input, scale, offset, request)
+    }
+
+    pub(crate) fn deep_learning_layer_norm_planned_capability_exec(
+        &self,
+        anchor: &GpuTensorHandle,
+        scale: Option<&GpuTensorHandle>,
+        offset: Option<&GpuTensorHandle>,
+        request: &DeepLearningLayerNormRequest,
+    ) -> Result<DeepLearningLayerNormCapability> {
+        let (groups, group_size) = geometry(request)?;
         if let Some(scale) = scale {
             ensure!(
                 scale.shape() == request.scale_shape,
@@ -26,7 +36,7 @@ impl WgpuProvider {
             );
         }
         let total = shape_count(&request.shape)?;
-        for handle in std::iter::once(input).chain(scale).chain(offset) {
+        for handle in std::iter::once(anchor).chain(scale).chain(offset) {
             let entry = self.get_entry_raw(handle)?;
             ensure!(
                 entry.element_type == handle.physical().element_type()

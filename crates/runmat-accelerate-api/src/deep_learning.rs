@@ -56,3 +56,36 @@ pub enum DeepLearningLayerNormCapability {
     UnsupportedOperation,
     ResourceLimit,
 }
+
+/// A physical stage in a sequential, real-valued resident network. The
+/// runtime supplies geometry from its admitted network plan; providers do not
+/// reinterpret layer metadata or infer semantic axes here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepLearningFeedForwardStage {
+    Transpose2D {
+        rows: usize,
+        columns: usize,
+    },
+    Dense {
+        batch: usize,
+        input_channels: usize,
+        output_channels: usize,
+    },
+    Relu {
+        elements: usize,
+    },
+    Elu {
+        elements: usize,
+    },
+    SoftmaxRows {
+        rows: usize,
+        columns: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepLearningFeedForwardCapability {
+    Ready,
+    UnsupportedOperation,
+    ResourceLimit,
+}

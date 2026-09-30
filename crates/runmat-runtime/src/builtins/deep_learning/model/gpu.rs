@@ -97,12 +97,6 @@ pub(super) async fn evaluate_network_gpu(
     let mut current = if layout == GpuForwardLayout::ChannelsBatch {
         match provider.transpose(input) {
             Ok(output) => validate_layout_transpose(output, input, provider, function)?,
-            Err(error)
-                if runmat_accelerate_api::is_unsupported_provider_operation(&error)
-                    && !runmat_accelerate_api::handle_is_explicit(input) =>
-            {
-                return Ok(None)
-            }
             Err(error) => {
                 return Err(provider_failure(
                     function,

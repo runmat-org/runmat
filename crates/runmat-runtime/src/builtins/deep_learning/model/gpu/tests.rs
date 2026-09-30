@@ -29,6 +29,96 @@ fn dense_network() -> Value {
 }
 
 #[test]
+fn admitted_transpose_failure_is_operational_not_a_late_host_retry() {
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, AccelProvider, DeepLearningFeedForwardCapability,
+        DeepLearningFeedForwardStage, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
+        HostNumericTensorOwned,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FailingTranspose {
+        device: u32,
+        effects: AtomicUsize,
+    }
+    impl AccelProvider for FailingTranspose {
+        fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+            panic!("admitted resident route must not upload")
+        }
+
+        fn download<'a>(
+            &'a self,
+            _: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            panic!("operational transpose failure must not retry through a download")
+        }
+
+        fn device_info(&self) -> String {
+            "post-admission transpose failure probe".into()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.device
+        }
+        fn deep_learning_feed_forward_stage_capability(
+            &self,
+            _anchor: &GpuTensorHandle,
+            _stage: DeepLearningFeedForwardStage,
+        ) -> anyhow::Result<DeepLearningFeedForwardCapability> {
+            Ok(DeepLearningFeedForwardCapability::Ready)
+        }
+        fn transpose(&self, _input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+            self.effects.fetch_add(1, Ordering::SeqCst);
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "transpose capability changed after admission",
+            ))
+        }
+    }
+
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let owner = TestAllocationOwner::new();
+    let allocated = owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            shape: vec![2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let provider = Box::leak(Box::new(FailingTranspose {
+        device: owner.device_id(),
+        effects: AtomicUsize::new(0),
+    }));
+    let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let Value::Object(network) = dense_network() else {
+        panic!("network object expected")
+    };
+    let input_axes = AxisPlan::new(
+        runmat_builtins::DeepLearningAxisLayout::parse("CB", 2).unwrap(),
+        &[2, 3],
+    )
+    .unwrap();
+    let output_axes = AxisPlan::new(
+        runmat_builtins::DeepLearningAxisLayout::parse("CB", 2).unwrap(),
+        &[1, 3],
+    )
+    .unwrap();
+    let error = block_on(super::evaluate_network_gpu(
+        &network,
+        &allocated.handle,
+        super::GpuForwardLayout::ChannelsBatch,
+        super::NetworkOutputLayout::Preserve,
+        &input_axes,
+        &output_axes,
+        &output_axes,
+        "forward",
+    ))
+    .unwrap_err();
+    assert!(error.to_string().contains("input layout transpose"));
+    assert_eq!(provider.effects.load(Ordering::SeqCst), 1);
+    assert_eq!(allocated.probe.retirements(), 0);
+}
+
+#[test]
 fn explicit_nonsquare_cb_is_transposed_on_provider_and_restored_without_download() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];

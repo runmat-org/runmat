@@ -39,6 +39,42 @@ fn typed_geometry_rejects_malformed_reduction_and_parameter_shapes() {
 }
 
 #[test]
+#[ignore = "requires actual WGPU device; run explicitly for pure future-stage admission"]
+fn planned_normalization_admits_future_geometry_without_provider_effects() {
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
+
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU device required");
+    let anchor = provider
+        .upload(&HostTensorView {
+            data: &[1.0, 2.0],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let request = DeepLearningLayerNormRequest {
+        shape: vec![3, 4],
+        reduce_mask: 0b01,
+        channel_axis: 0,
+        scale_shape: vec![3, 1],
+        offset_shape: vec![3, 1],
+        epsilon: 1e-5,
+    };
+    provider.reset_telemetry();
+    assert_eq!(
+        provider
+            .deep_learning_layer_norm_planned_capability_exec(&anchor, None, None, &request)
+            .unwrap(),
+        DeepLearningLayerNormCapability::Ready
+    );
+    assert!(provider
+        .deep_learning_layer_norm_capability_exec(&anchor, None, None, &request)
+        .is_err());
+    let telemetry = provider.telemetry_snapshot();
+    assert_eq!(telemetry.upload_bytes, 0);
+    assert_eq!(telemetry.download_bytes, 0);
+    anchor.release().unwrap();
+}
+
+#[test]
 #[ignore = "requires actual WGPU device; run explicitly for native precision qualification"]
 fn resident_channel_normalization_matches_independent_cb_oracle() {
     use runmat_accelerate_api::{AccelProvider, HostTensorView};

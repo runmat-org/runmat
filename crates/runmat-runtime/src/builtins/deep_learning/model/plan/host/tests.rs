@@ -161,6 +161,37 @@ fn training_geometry_reads_supplied_network_canonical_state_batch() {
     );
 }
 
+#[test]
+fn admitted_steps_retain_their_own_input_and_output_axes() {
+    let Value::Object(network) = network() else {
+        panic!("network object expected")
+    };
+    let input = Value::Tensor(Tensor::new(vec![1.0; 6], vec![3, 2]).unwrap());
+    let plan = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
+    assert_eq!(plan.steps.len(), 2);
+    assert_eq!(plan.steps[0].input_axes.shape(), &[3, 2]);
+    assert_eq!(plan.steps[0].output_axes.shape(), &[3, 2]);
+    assert_eq!(plan.steps[1].input_axes, plan.steps[0].output_axes);
+    assert_eq!(plan.steps[1].output_axes.shape(), &[3, 1]);
+    assert_eq!(plan.steps[1].output_axes, plan.output_axes);
+
+    let formatted = object(
+        "dlarray",
+        vec![
+            (
+                "Data",
+                Value::Tensor(Tensor::new(vec![1.0; 6], vec![2, 3]).unwrap()),
+            ),
+            ("Format", Value::String("CB".into())),
+            ("Labels", Value::String("CB".into())),
+        ],
+    );
+    let plan = HostNetworkPlan::admit(&network, &formatted, "forward").unwrap();
+    assert_eq!(plan.steps[0].input_axes.shape(), &[2, 3]);
+    assert_eq!(plan.steps[1].input_axes, plan.steps[0].output_axes);
+    assert_eq!(plan.steps[1].output_axes.shape(), &[1, 3]);
+}
+
 fn pooling_network(input_layer: Value) -> Value {
     let pooling = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(

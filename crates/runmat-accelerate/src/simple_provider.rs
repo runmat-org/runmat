@@ -3908,6 +3908,62 @@ fn simple_trapezoid(
 }
 
 impl AccelProvider for InProcessProvider {
+    fn deep_learning_feed_forward_stage_capability(
+        &self,
+        anchor: &GpuTensorHandle,
+        stage: runmat_accelerate_api::DeepLearningFeedForwardStage,
+    ) -> Result<runmat_accelerate_api::DeepLearningFeedForwardCapability> {
+        use runmat_accelerate_api::{
+            DeepLearningFeedForwardCapability as C, DeepLearningFeedForwardStage as S,
+        };
+        let guard = numeric_registry()
+            .lock_for(self.device_id)
+            .map_err(|_| anyhow!("feed-forward allocation owner is poisoned"))?;
+        let payload = guard
+            .get(anchor)
+            .ok_or_else(|| anyhow!("feed-forward anchor is not a live buffer"))?;
+        if runmat_accelerate_api::handle_storage(anchor) != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(anchor)
+            || runmat_accelerate_api::handle_integer_type(anchor).is_some()
+        {
+            return Ok(C::UnsupportedOperation);
+        }
+        let native = matches!(
+            (payload, runmat_accelerate_api::handle_precision(anchor)),
+            (
+                InProcessNumericData::F32(_),
+                Some(runmat_accelerate_api::ProviderPrecision::F32)
+            ) | (
+                InProcessNumericData::F64(_),
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            )
+        );
+        if !native
+            || matches!(
+                stage,
+                S::Relu { .. } | S::Elu { .. } | S::SoftmaxRows { .. }
+            ) && matches!(payload, InProcessNumericData::F32(_))
+        {
+            return Ok(C::UnsupportedOperation);
+        }
+        let valid = match stage {
+            S::Transpose2D { rows, columns } | S::SoftmaxRows { rows, columns } => {
+                rows.checked_mul(columns).is_some()
+            }
+            S::Dense {
+                batch,
+                input_channels,
+                output_channels,
+            } => {
+                batch.checked_mul(input_channels).is_some()
+                    && batch.checked_mul(output_channels).is_some()
+                    && input_channels.checked_mul(output_channels).is_some()
+            }
+            S::Relu { .. } | S::Elu { .. } => true,
+        };
+        Ok(if valid { C::Ready } else { C::ResourceLimit })
+    }
+
     fn device_id(&self) -> u32 {
         self.device_id
     }

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "deep_learning/admission.rs"]
+mod admission;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct AdamUpdateParamsF64 {

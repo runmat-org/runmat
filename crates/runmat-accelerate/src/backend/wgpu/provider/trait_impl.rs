@@ -475,6 +475,19 @@ impl AccelProvider for WgpuProvider {
         self.deep_learning_global_average_pool_1d_capability_exec(input, route)
     }
 
+    fn deep_learning_global_average_pool_1d_planned_capability(
+        &self,
+        anchor: &GpuTensorHandle,
+        input_shape: &[usize],
+        route: &DeepLearningPool1DRoute,
+    ) -> Result<DeepLearningPool1DCapability> {
+        self.deep_learning_global_average_pool_1d_planned_capability_exec(
+            anchor,
+            input_shape,
+            route,
+        )
+    }
+
     fn deep_learning_layer_norm<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
@@ -493,6 +506,24 @@ impl AccelProvider for WgpuProvider {
         request: &DeepLearningLayerNormRequest,
     ) -> Result<DeepLearningLayerNormCapability> {
         self.deep_learning_layer_norm_capability_exec(input, scale, offset, request)
+    }
+
+    fn deep_learning_layer_norm_planned_capability(
+        &self,
+        anchor: &GpuTensorHandle,
+        scale: Option<&GpuTensorHandle>,
+        offset: Option<&GpuTensorHandle>,
+        request: &DeepLearningLayerNormRequest,
+    ) -> Result<DeepLearningLayerNormCapability> {
+        self.deep_learning_layer_norm_planned_capability_exec(anchor, scale, offset, request)
+    }
+
+    fn deep_learning_feed_forward_stage_capability(
+        &self,
+        anchor: &GpuTensorHandle,
+        stage: runmat_accelerate_api::DeepLearningFeedForwardStage,
+    ) -> Result<runmat_accelerate_api::DeepLearningFeedForwardCapability> {
+        self.deep_learning_feed_forward_stage_capability_exec(anchor, stage)
     }
 
     fn reduce_moments_nd<'a>(

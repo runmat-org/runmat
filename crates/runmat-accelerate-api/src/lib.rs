@@ -32,6 +32,7 @@ mod covariance;
 pub use covariance::CovarianceWeightDomainError;
 mod deep_learning;
 pub use deep_learning::{
+    DeepLearningFeedForwardCapability, DeepLearningFeedForwardStage,
     DeepLearningLayerNormCapability, DeepLearningLayerNormRequest, DeepLearningPool1DCapability,
     DeepLearningPool1DRequest, DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
@@ -3475,6 +3476,17 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> anyhow::Result<DeepLearningPool1DCapability> {
         Ok(DeepLearningPool1DCapability::UnsupportedOperation)
     }
+    /// Pure whole-route admission for a later pooling stage. `anchor`
+    /// establishes the live provider and physical numeric class; the future
+    /// input shape comes from the runtime's admitted per-layer axes.
+    fn deep_learning_global_average_pool_1d_planned_capability(
+        &self,
+        _anchor: &GpuTensorHandle,
+        _input_shape: &[usize],
+        _route: &DeepLearningPool1DRoute,
+    ) -> anyhow::Result<DeepLearningPool1DCapability> {
+        Ok(DeepLearningPool1DCapability::UnsupportedOperation)
+    }
     /// Stable, channel-affine layer normalization on resident real data.
     fn deep_learning_layer_norm<'a>(
         &'a self,
@@ -3495,6 +3507,29 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _request: &DeepLearningLayerNormRequest,
     ) -> anyhow::Result<DeepLearningLayerNormCapability> {
         Ok(DeepLearningLayerNormCapability::UnsupportedOperation)
+    }
+    /// Pure admission for a later normalization stage whose input does not
+    /// exist yet. `anchor` establishes the device owner and physical element
+    /// type; `request.shape` is the host-admitted future input geometry. A
+    /// provider must validate the whole request without dispatch or upload.
+    fn deep_learning_layer_norm_planned_capability(
+        &self,
+        _anchor: &GpuTensorHandle,
+        _scale: Option<&GpuTensorHandle>,
+        _offset: Option<&GpuTensorHandle>,
+        _request: &DeepLearningLayerNormRequest,
+    ) -> anyhow::Result<DeepLearningLayerNormCapability> {
+        Ok(DeepLearningLayerNormCapability::UnsupportedOperation)
+    }
+    /// Pure admission for a physical feed-forward stage in a planned
+    /// sequence. `anchor` proves device ownership and numeric class. The
+    /// proposed stage geometry can differ from the anchor's current shape.
+    fn deep_learning_feed_forward_stage_capability(
+        &self,
+        _anchor: &GpuTensorHandle,
+        _stage: DeepLearningFeedForwardStage,
+    ) -> anyhow::Result<DeepLearningFeedForwardCapability> {
+        Ok(DeepLearningFeedForwardCapability::UnsupportedOperation)
     }
     /// Reduce moments across multiple zero-based dimensions in one device pass.
     /// Returns mean (E[x]) and mean of squares (E[x^2]).

@@ -3,7 +3,9 @@
 
 use super::*;
 use crate::builtins::deep_learning::model::parameters::ParameterRole;
-use runmat_accelerate_api::DeepLearningPool1DCapability;
+use runmat_accelerate_api::{
+    DeepLearningFeedForwardCapability, DeepLearningFeedForwardStage, DeepLearningPool1DCapability,
+};
 use runmat_types::ClassIdentity;
 use std::fmt;
 
@@ -296,6 +298,20 @@ fn classify_layers(
         return Ok(Some(GpuCapabilityReason::InputPrecision));
     }
     let mut features = layout.channels(input.shape());
+    let batch = match layout {
+        GpuForwardLayout::BatchChannels => input.shape()[0],
+        GpuForwardLayout::ChannelsBatch => input.shape()[1],
+        GpuForwardLayout::GlobalPool { .. } => unreachable!("pool route is admitted separately"),
+    };
+    if layout == GpuForwardLayout::ChannelsBatch {
+        let stage = DeepLearningFeedForwardStage::Transpose2D {
+            rows: input.shape()[0],
+            columns: input.shape()[1],
+        };
+        if let Some(reason) = query_stage(provider, input, stage, function)? {
+            return Ok(Some(reason));
+        }
+    }
     let mut saw_input = false;
     let mut saw_transform = false;
     for layer in layers {
@@ -319,7 +335,16 @@ fn classify_layers(
                 saw_input = true;
             }
             Some(ForwardLayerKind::FullyConnected) if saw_input => {
-                features = fully_connected_output_width(layer, features, function)?;
+                let output_channels = fully_connected_output_width(layer, features, function)?;
+                let stage = DeepLearningFeedForwardStage::Dense {
+                    batch,
+                    input_channels: features,
+                    output_channels,
+                };
+                if let Some(reason) = query_stage(provider, input, stage, function)? {
+                    return Ok(Some(reason));
+                }
+                features = output_channels;
                 for role in [ParameterRole::Weights, ParameterRole::Bias] {
                     if let Some(handle) = resident_parameter_handle(layer, role) {
                         let owner =
@@ -346,12 +371,49 @@ fn classify_layers(
                 }
                 saw_transform = true;
             }
-            Some(ForwardLayerKind::Relu) if saw_input => saw_transform = true,
-            Some(ForwardLayerKind::Elu) if saw_input => {
-                let _ = elu_alpha(layer, function)?;
+            Some(ForwardLayerKind::Relu) if saw_input => {
+                let Some(elements) = batch.checked_mul(features) else {
+                    return Ok(Some(GpuCapabilityReason::ResourceLimit));
+                };
+                if let Some(reason) = query_stage(
+                    provider,
+                    input,
+                    DeepLearningFeedForwardStage::Relu { elements },
+                    function,
+                )? {
+                    return Ok(Some(reason));
+                }
                 saw_transform = true;
             }
-            Some(ForwardLayerKind::Softmax) if saw_input => saw_transform = true,
+            Some(ForwardLayerKind::Elu) if saw_input => {
+                let _ = elu_alpha(layer, function)?;
+                let Some(elements) = batch.checked_mul(features) else {
+                    return Ok(Some(GpuCapabilityReason::ResourceLimit));
+                };
+                if let Some(reason) = query_stage(
+                    provider,
+                    input,
+                    DeepLearningFeedForwardStage::Elu { elements },
+                    function,
+                )? {
+                    return Ok(Some(reason));
+                }
+                saw_transform = true;
+            }
+            Some(ForwardLayerKind::Softmax) if saw_input => {
+                if let Some(reason) = query_stage(
+                    provider,
+                    input,
+                    DeepLearningFeedForwardStage::SoftmaxRows {
+                        rows: batch,
+                        columns: features,
+                    },
+                    function,
+                )? {
+                    return Ok(Some(reason));
+                }
+                saw_transform = true;
+            }
             Some(kind) if kind.is_output() && saw_input && saw_transform => {}
             _ => {
                 // The host plan has already admitted the complete network.
@@ -370,7 +432,36 @@ fn classify_layers(
     if !saw_transform {
         return Ok(Some(GpuCapabilityReason::NoSupportedTransform));
     }
+    if layout == GpuForwardLayout::ChannelsBatch {
+        let stage = DeepLearningFeedForwardStage::Transpose2D {
+            rows: batch,
+            columns: features,
+        };
+        if let Some(reason) = query_stage(provider, input, stage, function)? {
+            return Ok(Some(reason));
+        }
+    }
     Ok(None)
+}
+
+fn query_stage(
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
+    stage: DeepLearningFeedForwardStage,
+    function: &'static str,
+) -> BuiltinResult<Option<GpuCapabilityReason>> {
+    let capability = provider
+        .deep_learning_feed_forward_stage_capability(input, stage)
+        .map_err(|error| provider_failure(function, "resident stage admission", error.into()))?;
+    Ok(match capability {
+        DeepLearningFeedForwardCapability::Ready => None,
+        DeepLearningFeedForwardCapability::UnsupportedOperation => {
+            Some(GpuCapabilityReason::ProviderOperation)
+        }
+        DeepLearningFeedForwardCapability::ResourceLimit => {
+            Some(GpuCapabilityReason::ResourceLimit)
+        }
+    })
 }
 
 pub(super) fn invalid_owner(function: &'static str, operand: GpuOperand) -> crate::RuntimeError {
@@ -380,4 +471,141 @@ pub(super) fn invalid_owner(function: &'static str, operand: GpuOperand) -> crat
     .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
     .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
+    use runmat_builtins::DeepLearningLayerKind as K;
+    use runmat_value::Tensor;
+    use std::sync::Mutex;
+
+    struct StageProbe {
+        observed: Mutex<Vec<DeepLearningFeedForwardStage>>,
+        fail_with_error: bool,
+    }
+
+    impl AccelProvider for StageProbe {
+        fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+            panic!("pure stage admission must not upload")
+        }
+
+        fn download<'a>(
+            &'a self,
+            _: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            panic!("pure stage admission must not download")
+        }
+
+        fn device_info(&self) -> String {
+            "stage admission probe".into()
+        }
+
+        fn deep_learning_feed_forward_stage_capability(
+            &self,
+            _anchor: &GpuTensorHandle,
+            stage: DeepLearningFeedForwardStage,
+        ) -> anyhow::Result<DeepLearningFeedForwardCapability> {
+            self.observed.lock().unwrap().push(stage);
+            if matches!(stage, DeepLearningFeedForwardStage::Dense { .. }) {
+                if self.fail_with_error {
+                    return Err(anyhow::anyhow!("invalid descriptor"));
+                }
+                return Ok(DeepLearningFeedForwardCapability::UnsupportedOperation);
+            }
+            Ok(DeepLearningFeedForwardCapability::Ready)
+        }
+    }
+
+    fn layers() -> Vec<Value> {
+        use crate::builtins::deep_learning::object_with_identity;
+        vec![
+            object_with_identity(
+                K::FeatureInput.class(),
+                vec![("InputSize", Value::Num(2.0))],
+            ),
+            object_with_identity(K::Relu.class(), Vec::<(&str, Value)>::new()),
+            object_with_identity(
+                K::FullyConnected.class(),
+                vec![
+                    ("OutputSize", Value::Num(1.0)),
+                    (
+                        "Weights",
+                        Value::Tensor(Tensor::new(vec![2.0, -1.0], vec![1, 2]).unwrap()),
+                    ),
+                    (
+                        "Bias",
+                        Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap()),
+                    ),
+                ],
+            ),
+            object_with_identity(K::Softmax.class(), Vec::<(&str, Value)>::new()),
+        ]
+    }
+
+    #[test]
+    fn later_unsupported_stage_is_found_before_any_execution() {
+        crate::builtins::common::test_support::with_test_provider(|owner| {
+            let input = owner
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    shape: &[2, 3],
+                })
+                .unwrap();
+            let probe = Box::leak(Box::new(StageProbe {
+                observed: Mutex::new(Vec::new()),
+                fail_with_error: false,
+            }));
+            let reason = classify_layers(
+                &layers(),
+                &input,
+                GpuForwardLayout::ChannelsBatch,
+                probe,
+                "forward",
+            )
+            .unwrap();
+            assert_eq!(reason, Some(GpuCapabilityReason::ProviderOperation));
+            assert_eq!(
+                *probe.observed.lock().unwrap(),
+                vec![
+                    DeepLearningFeedForwardStage::Transpose2D {
+                        rows: 2,
+                        columns: 3,
+                    },
+                    DeepLearningFeedForwardStage::Relu { elements: 6 },
+                    DeepLearningFeedForwardStage::Dense {
+                        batch: 3,
+                        input_channels: 2,
+                        output_channels: 1,
+                    },
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn invalid_later_stage_query_is_an_error_not_a_capability_fallback() {
+        crate::builtins::common::test_support::with_test_provider(|owner| {
+            let input = owner
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    shape: &[2, 3],
+                })
+                .unwrap();
+            let probe = Box::leak(Box::new(StageProbe {
+                observed: Mutex::new(Vec::new()),
+                fail_with_error: true,
+            }));
+            let error = classify_layers(
+                &layers(),
+                &input,
+                GpuForwardLayout::ChannelsBatch,
+                probe,
+                "forward",
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("resident stage admission"));
+        });
+    }
 }
