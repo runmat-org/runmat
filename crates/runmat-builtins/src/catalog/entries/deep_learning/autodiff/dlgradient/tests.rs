@@ -6,6 +6,9 @@ use runmat_types::{
 };
 use std::collections::BTreeMap;
 
+#[path = "tests/tree.rs"]
+mod tree;
+
 #[test]
 fn nested_cell_gradient_preserves_positions_and_native_leaf_facts() {
     let leaf = dlarray(ValueFact::proven(
