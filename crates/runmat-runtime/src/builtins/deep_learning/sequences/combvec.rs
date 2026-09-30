@@ -37,9 +37,8 @@ pub(in crate::builtins::deep_learning) async fn combvec_builtin(
     for (index, arg) in args.iter().enumerate() {
         let input = match arg {
             Value::GpuTensor(handle) => {
-                if handle.shape().len() > 2
-                    || handle.shape().first().copied() == Some(0)
-                    || handle.shape().get(1).copied() == Some(0)
+                if !matches!(handle.shape(), [columns] if *columns > 0)
+                    && !matches!(handle.shape(), [rows, columns] if *rows > 0 && *columns > 0)
                     || runmat_accelerate_api::handle_is_logical(handle)
                     || runmat_accelerate_api::handle_storage(handle)
                         != runmat_accelerate_api::GpuTensorStorage::Real
@@ -62,10 +61,11 @@ pub(in crate::builtins::deep_learning) async fn combvec_builtin(
                 let Value::GpuTensor(handle) = arg else {
                     unreachable!()
                 };
-                (
-                    handle.shape().first().copied().unwrap_or(1),
-                    handle.shape().get(1).copied().unwrap_or(1),
-                )
+                match handle.shape() {
+                    [columns] => (1, *columns),
+                    [rows, columns] => (*rows, *columns),
+                    _ => unreachable!("resident matrix shape was admitted above"),
+                }
             }
         };
         known_rows = known_rows.checked_add(rows).ok_or_else(|| {

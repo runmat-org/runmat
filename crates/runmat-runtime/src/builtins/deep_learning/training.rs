@@ -121,7 +121,7 @@ fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
-pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn dlfeval_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
     let Some((function, rest)) = args.split_first() else {
         return Err(super::errors::descriptor_error(
             "dlfeval",
@@ -144,5 +144,8 @@ pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
-    autodiff::with_tape_context(function.clone(), rest, requested_outputs).await
+    // Admission is complete. Move the call arguments into the tape future
+    // without an additional whole-tree clone at this boundary.
+    let function = args.remove(0);
+    autodiff::with_tape_context(function, args, requested_outputs).await
 }

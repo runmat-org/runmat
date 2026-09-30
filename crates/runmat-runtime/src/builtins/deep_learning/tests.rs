@@ -2041,6 +2041,65 @@ fn combvec_matches_neural_network_column_order() {
 }
 
 #[test]
+fn combvec_resident_rank_one_vector_has_host_row_geometry() {
+    let row = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+    let other = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap());
+    let host = block_on(combvec_builtin(vec![row, other.clone()])).unwrap();
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[2],
+            })
+            .unwrap();
+        let output = block_on(combvec_builtin(vec![
+            Value::GpuTensor(resident.clone()),
+            other,
+        ]))
+        .unwrap();
+        assert_eq!(output, host);
+        let Value::Tensor(matrix) = output else {
+            panic!("combvec must produce a host matrix")
+        };
+        assert_eq!(matrix.shape, vec![2, 4]);
+        assert_eq!(
+            matrix.materialize_f64(),
+            vec![1.0, 10.0, 2.0, 10.0, 1.0, 20.0, 2.0, 20.0]
+        );
+        assert!(resident.allocation_lease().validate_live().is_ok());
+    });
+}
+
+#[test]
+fn combvec_rank_one_capacity_rejects_before_resident_download() {
+    let first = vec![1.0; 1001];
+    let second = Value::Tensor(Tensor::new(vec![2.0; 1000], vec![1, 1000]).unwrap());
+    let host_error = block_on(combvec_builtin(vec![
+        Value::Tensor(Tensor::new(first.clone(), vec![1001]).unwrap()),
+        second.clone(),
+    ]))
+    .expect_err("1,001,000 Cartesian columns exceed capacity");
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &first,
+                shape: &[1001],
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let error = block_on(combvec_builtin(vec![
+            Value::GpuTensor(resident.clone()),
+            second,
+        ]))
+        .expect_err("resident rank-one input must have the same column count");
+        assert_eq!(error.identifier(), host_error.identifier());
+        assert!(error.to_string().contains("supported capacity"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(resident.allocation_lease().validate_live().is_ok());
+    });
+}
+
+#[test]
 fn combvec_reads_typed_integer_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(combvec_builtin(vec![
@@ -3634,6 +3693,42 @@ fn dlfeval_invalid_handle_preflights_before_resident_argument_access() {
 }
 
 #[test]
+fn dlfeval_owned_resident_argument_survives_callback_and_unpolled_drop() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &[3.0, 4.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let output = block_on(dlfeval_builtin(vec![
+            Value::FunctionHandle("deal".into()),
+            Value::GpuTensor(resident.clone()),
+        ]))
+        .unwrap();
+        let Value::GpuTensor(returned) = output else {
+            panic!("callback must retain the resident value")
+        };
+        assert_eq!(
+            returned.allocation_identity(),
+            resident.allocation_identity()
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let unpolled = dlfeval_builtin(vec![
+            Value::FunctionHandle("deal".into()),
+            Value::GpuTensor(resident.clone()),
+        ]);
+        drop(unpolled);
+        assert!(resident.allocation_lease().validate_live().is_ok());
+        assert!(returned.allocation_lease().validate_live().is_ok());
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
 fn dlupdate_maps_matching_struct_and_cell_trees() {
     let mut left = StructValue::new();
     left.insert(
@@ -3671,6 +3766,50 @@ fn dlupdate_maps_matching_struct_and_cell_trees() {
         panic!("expected cell bias");
     };
     assert_eq!(bias.data, vec![Value::Num(7.0)]);
+}
+
+#[test]
+fn dlupdate_borrowed_resident_tree_survives_callback_and_preflight_rejection() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&HostTensorView {
+                data: &[5.0, 6.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let tree =
+            || Value::Cell(CellArray::new(vec![Value::GpuTensor(resident.clone())], 1, 1).unwrap());
+        provider.reset_telemetry();
+        let output = block_on(dlupdate_builtin(vec![
+            Value::FunctionHandle("deal".into()),
+            tree(),
+        ]))
+        .unwrap();
+        let Value::Cell(output) = output else {
+            panic!("callback must reconstruct the cell tree")
+        };
+        let Value::GpuTensor(returned) = &output.data[0] else {
+            panic!("resident leaf must remain resident")
+        };
+        assert_eq!(
+            returned.allocation_identity(),
+            resident.allocation_identity()
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+
+        let mismatch =
+            Value::Cell(CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap());
+        let error = block_on(dlupdate_builtin(vec![
+            Value::FunctionHandle("deal".into()),
+            tree(),
+            mismatch,
+        ]))
+        .expect_err("preflight must reject unlike trees before callbacks");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(resident.allocation_lease().validate_live().is_ok());
+    });
 }
 
 #[test]

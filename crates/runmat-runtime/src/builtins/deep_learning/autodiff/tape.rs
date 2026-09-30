@@ -155,14 +155,14 @@ pub(in crate::builtins::deep_learning) fn tape_is_active() -> bool {
 
 pub(in crate::builtins::deep_learning) async fn with_tape_context(
     function: Value,
-    args: &[Value],
+    args: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
     let tape = Rc::new(RefCell::new(Tape::new()));
     TapeFuture {
         tape,
         future: Some(Box::pin(async move {
-            let prepared = prepare_tape_inputs(args.to_vec())?;
+            let prepared = prepare_tape_inputs(args)?;
             crate::call_feval_async_with_outputs(function, &prepared, requested_outputs).await
         })),
     }

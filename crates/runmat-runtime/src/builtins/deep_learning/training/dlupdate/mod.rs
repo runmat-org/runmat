@@ -43,10 +43,9 @@ pub(in crate::builtins::deep_learning) async fn dlupdate_builtin(
         ));
     }
 
-    let trees = rest.to_vec();
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
     preflight::matching_trees(rest)?;
-    let outputs = dlupdate_node(function, &trees, requested_outputs, 0).await?;
+    let outputs = dlupdate_node(function, rest, requested_outputs, 0).await?;
     if requested_outputs == 0 {
         Ok(Value::OutputList(Vec::new()))
     } else if requested_outputs == 1 {
