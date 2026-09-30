@@ -13,6 +13,12 @@ use crate::excitation::{
 use crate::physics::structural::frame::{scale_vector, transform_vector, unit_vector};
 use crate::topology::AnalysisProjection;
 
+mod surface_vector;
+use surface_vector::{apply_projected_force, apply_projected_traction};
+
+#[cfg(test)]
+mod tests;
+
 pub(super) fn apply_solver_mesh_structural_loads(
     excitations: &RealizedExcitations,
     mesh: &SolverMeshArtifact,
@@ -73,28 +79,10 @@ pub(super) fn apply_solver_mesh_structural_loads(
                     }
                     continue;
                 }
-                let scale = 1.0 / target_nodes.len() as f64;
-                let point = target_centroid(&node_coordinates_m, &target_nodes);
-                let force = resolve_vector(
-                    load,
-                    value.real,
-                    point,
-                    boundary_normal(&boundary_faces_matching(&projection, target)),
+                record_spatial_evidence(
+                    &mut evidence,
+                    apply_projected_force(&projection, layout, rhs, load, target, value.real)?,
                 )?;
-                let mut projection_evidence = SpatialProjectionAccumulator::new(
-                    load,
-                    &projection,
-                    SpatialIntegrationRule::UniformResultant,
-                    target_face_count,
-                    point,
-                );
-                projection_evidence.add_requested_force(point, force);
-                for node_index in target_nodes {
-                    let nodal_force = force.map(|component| component * scale);
-                    add_translational_rhs(layout, rhs, node_index, nodal_force);
-                    projection_evidence.add_projected_force(node_index, nodal_force);
-                }
-                record_spatial_evidence(&mut evidence, projection_evidence.finish())?;
             }
             RealizedExcitationKind::Moment(value) => {
                 if target_nodes.is_empty() {
@@ -355,57 +343,6 @@ fn apply_projected_pressure(
             .map_err(|error| {
                 SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
             })?;
-    }
-    Ok(evidence.finish())
-}
-
-fn apply_projected_traction(
-    projection: &AnalysisProjection,
-    layout: &StructuralDofLayout,
-    rhs: &mut [f64],
-    load: &RealizedExcitation,
-    target: &runmat_analysis_core::RegionTarget,
-    traction_components_pa: [f64; 3],
-) -> Result<SpatialProjectionEvidence, SolverMeshRegionMappingError> {
-    let faces = boundary_faces_matching(projection, target);
-    let reference_point_m = projected_boundary_centroid(&faces);
-    let mut evidence = SpatialProjectionAccumulator::new(
-        load,
-        projection,
-        SpatialIntegrationRule::BoundaryDunavantSeven,
-        faces.len(),
-        reference_point_m,
-    );
-    for face in faces {
-        let mut frame_error = None;
-        projection
-            .visit_boundary_quadrature(face, |point| {
-                let normal = unit_vector(point.area_vector_weight_m2).ok();
-                let Ok(traction_pa) = transform_vector(
-                    &load.policy.frame,
-                    traction_components_pa,
-                    point.position_m,
-                    normal,
-                ) else {
-                    frame_error = Some("coordinate frame is undefined on the selected boundary");
-                    return;
-                };
-                let integrated = scale_vector(traction_pa, point.area_weight_m2);
-                evidence.add_requested_force(point.position_m, integrated);
-                for (&node_index, &shape) in face.node_indices.iter().zip(point.shape_values()) {
-                    let nodal_force = scale_vector(integrated, shape);
-                    add_translational_rhs(layout, rhs, node_index, nodal_force);
-                    evidence.add_projected_force(node_index, nodal_force);
-                }
-            })
-            .map_err(|error| {
-                SolverMeshRegionMappingError::InvalidAnalysisProjection(error.to_string())
-            })?;
-        if let Some(error) = frame_error {
-            return Err(SolverMeshRegionMappingError::InvalidAnalysisProjection(
-                format!("excitation `{}` {error}", load.excitation_id.0),
-            ));
-        }
     }
     Ok(evidence.finish())
 }

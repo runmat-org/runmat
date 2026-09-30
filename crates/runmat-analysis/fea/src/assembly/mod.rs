@@ -3001,7 +3001,7 @@ mod tests {
         assert!(summary.operator.constrained_dofs()[0]);
         assert!(summary.operator.constrained_dofs()[1]);
         assert!(summary.operator.constrained_dofs()[2]);
-        assert_eq!(summary.operator.load()[10], -4.0);
+        assert!((summary.operator.load()[10] + 4.0).abs() <= 4.0 * f64::EPSILON);
         assert!(summary.structural_load_plan_identity.is_some());
         assert!(summary.operator.nullspace_evidence().is_some());
     }

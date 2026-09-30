@@ -54,6 +54,12 @@ load actuator_force {
 $\sum_i\mathbf f_i=\mathbf F$ within the recorded tolerance. The selected region and projection
 measure determine the distribution; use traction when a known local stress distribution matters.
 
+For canonical solid faces, the projection is surface-consistent:
+$\mathbf f_i=(\mathbf F/A)\int_{\Gamma}N_i\,dA$. The resultant direction is resolved once
+at the physical surface centroid; node density does not bias its distribution. On a planar
+Tri6 face, constant surface loading has zero corner weights and $A/3$ midside weights.
+Explicit point forces and generalized reference-point forces retain their own nodal/coupling rules.
+
 For a time-varying scalar amplitude, use a force signal plus direction:
 
 ```fea
