@@ -15,7 +15,7 @@ pub(crate) use adam::__runmat_wasm_register_builtin_adamupdate_builtin;
 #[cfg(test)]
 pub(super) use adam::adamupdate_builtin;
 #[cfg(target_arch = "wasm32")]
-pub(crate) use dlupdate::__runmat_wasm_register_builtin_dlupdate_builtin;
+pub(crate) use dlupdate::__runmat_wasm_register_builtin_dlupdate_builtin_registered;
 #[cfg(test)]
 pub(super) use dlupdate::dlupdate_builtin;
 
@@ -131,9 +131,28 @@ fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
 #[runtime_builtin(
     name = "dlfeval",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::deep_learning::training"
 )]
-pub(super) async fn dlfeval_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
+async fn dlfeval_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    dlfeval_in_runtime(runtime.as_ref(), requested_outputs, args).await
+}
+
+#[cfg(test)]
+pub(super) async fn dlfeval_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    dlfeval_in_runtime(None, crate::output_count::current_output_count(), args).await
+}
+
+async fn dlfeval_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    mut args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let Some(function) = args.first() else {
         return Err(super::errors::descriptor_error(
             "dlfeval",
@@ -155,9 +174,9 @@ pub(super) async fn dlfeval_builtin(mut args: Vec<Value>) -> BuiltinResult<Value
             &runmat_builtins::DLFEVAL_INVALID_FUNCTION,
         ));
     }
-    let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
+    let requested_outputs = requested_outputs.unwrap_or(1);
     // Admission is complete. Move the call arguments into the tape future
     // without an additional whole-tree clone at this boundary.
     let function = args.remove(0);
-    autodiff::with_tape_context(function, args, requested_outputs).await
+    autodiff::with_tape_context(runtime, function, args, requested_outputs).await
 }

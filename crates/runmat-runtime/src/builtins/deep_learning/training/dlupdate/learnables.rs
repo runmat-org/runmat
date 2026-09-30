@@ -2,6 +2,7 @@
 use super::*;
 
 pub(super) async fn dlupdate_learnables_struct(
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &Value,
     reference: &StructValue,
     values: &[Value],
@@ -28,7 +29,8 @@ pub(super) async fn dlupdate_learnables_struct(
             })
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    let updated_values = dlupdate_node(function, &value_columns, requested_outputs, depth).await?;
+    let updated_values =
+        dlupdate_node(runtime, function, &value_columns, requested_outputs, depth).await?;
     updated_values
         .into_iter()
         .map(|value_column| {
@@ -40,6 +42,7 @@ pub(super) async fn dlupdate_learnables_struct(
 }
 
 pub(super) async fn dlupdate_table(
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &Value,
     reference: &ObjectInstance,
     values: &[Value],
@@ -111,7 +114,8 @@ pub(super) async fn dlupdate_table(
             "dlupdate: learnables table Value variable must be a cell array",
         ));
     }
-    let updated_values = dlupdate_node(function, &value_columns, requested_outputs, depth).await?;
+    let updated_values =
+        dlupdate_node(runtime, function, &value_columns, requested_outputs, depth).await?;
 
     updated_values
         .into_iter()
@@ -125,6 +129,7 @@ pub(super) async fn dlupdate_table(
 }
 
 pub(super) async fn dlupdate_network(
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &Value,
     reference: &ObjectInstance,
     values: &[Value],
@@ -154,7 +159,7 @@ pub(super) async fn dlupdate_network(
         .iter()
         .map(|object| model::project_learnables(object, "dlupdate"))
         .collect::<BuiltinResult<Vec<_>>>()?;
-    let updated = dlupdate_node(function, &learnables, requested_outputs, depth).await?;
+    let updated = dlupdate_node(runtime, function, &learnables, requested_outputs, depth).await?;
     updated
         .into_iter()
         .map(|learnables| model::apply_learnables(reference.clone(), learnables, "dlupdate"))

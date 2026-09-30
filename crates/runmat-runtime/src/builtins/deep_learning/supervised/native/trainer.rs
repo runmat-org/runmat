@@ -96,6 +96,7 @@ fn batch_value(original: &Value, selected: Tensor) -> Value {
 }
 
 async fn initialized_network(
+    runtime: Option<&crate::context::RuntimeContext>,
     source: &Value,
     caller: TrainingCaller,
 ) -> BuiltinResult<ObjectInstance> {
@@ -106,13 +107,13 @@ async fn initialized_network(
             let Some(Value::Cell(layers)) = network.properties.get_mut("Layers") else {
                 return Err(fail(function, "network is missing Layers"));
             };
-            model::initialise_layers(&mut layers.data, function).await?;
+            model::initialise_layers_in_runtime(runtime, &mut layers.data, function).await?;
             model::state::initialize_missing(&mut network, function)?;
             return Ok(network);
         }
     }
     let mut layers = model::layers_from_network_value(source.clone(), function)?;
-    model::initialise_layers(&mut layers, function).await?;
+    model::initialise_layers_in_runtime(runtime, &mut layers, function).await?;
     let class = match caller {
         TrainingCaller::Trainnet => model::DLNETWORK_CLASS,
         TrainingCaller::TrainNetwork => {
@@ -165,6 +166,8 @@ fn attach_training_result(
 }
 
 pub(in crate::builtins::deep_learning::supervised) async fn train(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     caller: TrainingCaller,
     input: &Value,
     target: &Value,
@@ -198,7 +201,7 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
         loss_kind == LossKind::Classification,
         function,
     )?;
-    let mut network = initialized_network(source, caller).await?;
+    let mut network = initialized_network(runtime, source, caller).await?;
     let full_input = {
         let full_plan = HostNetworkPlan::admit(&network, input, function)?;
         let HostValue::Real(full_input) = full_plan.prepare_input(input).await? else {
@@ -291,10 +294,10 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
         iteration,
         function,
     )?;
-    let info = if crate::output_count::current_output_count() == Some(2) {
+    let info = if requested_outputs == Some(2) {
         Some(training_info(&config, &losses, iteration, function)?)
     } else {
         None
     };
-    output_network(Value::Object(network), info, function)
+    output_network(Value::Object(network), info, function, requested_outputs)
 }

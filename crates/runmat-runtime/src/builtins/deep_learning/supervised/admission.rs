@@ -4,8 +4,11 @@ use crate::BuiltinResult;
 
 use super::deep_learning_error;
 
-pub(super) fn admit_training_output_count(function: &'static str) -> BuiltinResult<()> {
-    if let Some(requested) = crate::output_count::current_output_count() {
+pub(super) fn admit_training_output_count(
+    function: &'static str,
+    requested_outputs: Option<usize>,
+) -> BuiltinResult<()> {
+    if let Some(requested) = requested_outputs {
         if requested > 2 {
             return Err(deep_learning_error(
                 function,

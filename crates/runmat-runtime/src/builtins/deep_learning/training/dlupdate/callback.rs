@@ -2,21 +2,34 @@
 use super::*;
 
 pub(super) async fn dlupdate_leaf(
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &Value,
     values: &[Value],
     requested_outputs: usize,
 ) -> BuiltinResult<Vec<Value>> {
-    let result = crate::call_feval_async_with_outputs(function.clone(), values, requested_outputs)
-        .await
-        .map_err(|err| {
-            crate::build_runtime_error(format!(
-                "dlupdate: function-handle evaluation failed: {err}"
-            ))
-            .with_builtin("dlupdate")
-            .with_identifier("RunMat:deepLearning:InvalidInput")
-            .with_source(err)
-            .build()
-        })?;
+    let call = match runtime {
+        Some(runtime) => {
+            crate::call_feval_async_with_outputs_in_context(
+                runtime,
+                function.clone(),
+                values,
+                requested_outputs,
+            )
+            .await
+        }
+        None => {
+            crate::call_feval_async_with_outputs(function.clone(), values, requested_outputs).await
+        }
+    };
+    let result = call.map_err(|err| {
+        crate::build_runtime_error(format!(
+            "dlupdate: function-handle evaluation failed: {err}"
+        ))
+        .with_builtin("dlupdate")
+        .with_identifier("RunMat:deepLearning:InvalidInput")
+        .with_source(err)
+        .build()
+    })?;
     normalize_dlupdate_outputs(result, requested_outputs)
 }
 

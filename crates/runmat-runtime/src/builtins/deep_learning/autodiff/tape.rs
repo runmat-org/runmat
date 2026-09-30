@@ -141,6 +141,7 @@ pub(in crate::builtins::deep_learning) fn tape_is_active() -> bool {
 }
 
 pub(in crate::builtins::deep_learning) async fn with_tape_context(
+    runtime: Option<&crate::context::RuntimeContext>,
     function: Value,
     args: Vec<Value>,
     requested_outputs: usize,
@@ -150,7 +151,21 @@ pub(in crate::builtins::deep_learning) async fn with_tape_context(
         tape,
         future: Some(Box::pin(async move {
             let prepared = prepare_tape_inputs(args)?;
-            crate::call_feval_async_with_outputs(function, &prepared, requested_outputs).await
+            match runtime {
+                Some(runtime) => {
+                    crate::call_feval_async_with_outputs_in_context(
+                        runtime,
+                        function,
+                        &prepared,
+                        requested_outputs,
+                    )
+                    .await
+                }
+                None => {
+                    crate::call_feval_async_with_outputs(function, &prepared, requested_outputs)
+                        .await
+                }
+            }
         })),
     }
     .await

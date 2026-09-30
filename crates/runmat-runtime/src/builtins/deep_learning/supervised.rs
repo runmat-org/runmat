@@ -20,10 +20,29 @@ use targets::*;
 #[runtime_builtin(
     name = "trainNetwork",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::deep_learning::supervised"
 )]
+async fn train_network_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    train_network_in_runtime(runtime.as_ref(), requested_outputs, args).await
+}
+
+#[cfg(test)]
 pub(super) async fn train_network_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    admit_training_output_count("trainNetwork")?;
+    train_network_in_runtime(None, crate::output_count::current_output_count(), args).await
+}
+
+async fn train_network_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    admit_training_output_count("trainNetwork", requested_outputs)?;
     if args.len() != 4 {
         return Err(deep_learning_error(
             "trainNetwork",
@@ -32,6 +51,8 @@ pub(super) async fn train_network_builtin(args: Vec<Value>) -> BuiltinResult<Val
     }
     let config = TrainingConfig::from_value(&args[3], "trainNetwork")?;
     native::trainer::train(
+        runtime,
+        requested_outputs,
         TrainingCaller::TrainNetwork,
         &args[0],
         &args[1],
@@ -45,10 +66,29 @@ pub(super) async fn train_network_builtin(args: Vec<Value>) -> BuiltinResult<Val
 #[runtime_builtin(
     name = "trainnet",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::deep_learning::supervised"
 )]
+async fn trainnet_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    trainnet_in_runtime(runtime.as_ref(), requested_outputs, args).await
+}
+
+#[cfg(test)]
 pub(super) async fn trainnet_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    admit_training_output_count("trainnet")?;
+    trainnet_in_runtime(None, crate::output_count::current_output_count(), args).await
+}
+
+async fn trainnet_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    admit_training_output_count("trainnet", requested_outputs)?;
     if args.len() != 5 {
         return Err(deep_learning_error(
             "trainnet",
@@ -58,6 +98,8 @@ pub(super) async fn trainnet_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let loss = parse_trainnet_loss(&args[3])?;
     let config = TrainingConfig::from_value(&args[4], "trainnet")?;
     native::trainer::train(
+        runtime,
+        requested_outputs,
         TrainingCaller::Trainnet,
         &args[0],
         &args[1],
@@ -72,8 +114,9 @@ fn output_network(
     network: Value,
     info: Option<Value>,
     function: &'static str,
+    requested_outputs: Option<usize>,
 ) -> BuiltinResult<Value> {
-    match crate::output_count::current_output_count() {
+    match requested_outputs {
         None => Ok(network),
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![network])),

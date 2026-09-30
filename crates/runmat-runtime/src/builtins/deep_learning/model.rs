@@ -41,7 +41,9 @@ pub(in crate::builtins) use construction::{
     is_deep_learning_network_object, layers_from_network_ref, layers_from_network_value,
     network_object,
 };
+#[cfg(test)]
 pub(in crate::builtins) use initialization::initialise_layers;
+pub(in crate::builtins) use initialization::initialise_layers_in_runtime;
 pub(in crate::builtins) use parameters::{
     apply as apply_learnables, project as project_learnables, validate_matching_networks,
 };
@@ -163,10 +165,29 @@ pub(crate) fn ensure_network_classes_registered() {
 #[runtime_builtin(
     name = "dlnetwork",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::deep_learning::model"
 )]
+async fn dlnetwork_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    dlnetwork_in_runtime(runtime.as_ref(), requested_outputs, args).await
+}
+
+#[cfg(test)]
 pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+    dlnetwork_in_runtime(None, crate::output_count::current_output_count(), args).await
+}
+
+async fn dlnetwork_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    if requested_outputs.is_some_and(|count| count > 1) {
         return Err(deep_learning_error(
             "dlnetwork",
             "dlnetwork: at most one output is supported",
@@ -189,7 +210,7 @@ pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
         "dlnetwork",
     )?;
     if options.initialize {
-        initialise_layers(&mut layers, "dlnetwork").await?;
+        initialise_layers_in_runtime(runtime, &mut layers, "dlnetwork").await?;
     }
     network_object(
         DLNETWORK_CLASS,

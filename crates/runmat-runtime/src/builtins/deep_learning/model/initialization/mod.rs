@@ -17,7 +17,16 @@ struct StagedParameter {
     existing_precision: Option<NumericDType>,
 }
 
+#[cfg(test)]
 pub(in crate::builtins) async fn initialise_layers(
+    layers: &mut [Value],
+    function: &'static str,
+) -> BuiltinResult<()> {
+    initialise_layers_in_runtime(None, layers, function).await
+}
+
+pub(in crate::builtins) async fn initialise_layers_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
     layers: &mut [Value],
     function: &'static str,
 ) -> BuiltinResult<()> {
@@ -45,18 +54,28 @@ pub(in crate::builtins) async fn initialise_layers(
                     vec![1, task.shape.len()],
                     function,
                 )?;
-                let result = crate::call_feval_async_with_outputs(callback, &[size], 1)
-                    .await
-                    .map_err(|source| {
-                        crate::build_runtime_error(format!(
-                            "{function}: initializer callback failed for {}",
-                            task.role.name()
-                        ))
-                        .with_builtin(function)
-                        .with_identifier("RunMat:deepLearning:InvalidInput")
-                        .with_source(source)
-                        .build()
-                    })?;
+                let result = match runtime {
+                    Some(runtime) => {
+                        crate::call_feval_async_with_outputs_in_context(
+                            runtime,
+                            callback,
+                            &[size],
+                            1,
+                        )
+                        .await
+                    }
+                    None => crate::call_feval_async_with_outputs(callback, &[size], 1).await,
+                }
+                .map_err(|source| {
+                    crate::build_runtime_error(format!(
+                        "{function}: initializer callback failed for {}",
+                        task.role.name()
+                    ))
+                    .with_builtin(function)
+                    .with_identifier("RunMat:deepLearning:InvalidInput")
+                    .with_source(source)
+                    .build()
+                })?;
                 match result {
                     Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
                     Value::OutputList(values) => {

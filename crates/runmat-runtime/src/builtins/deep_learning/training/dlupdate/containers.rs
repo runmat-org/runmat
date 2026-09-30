@@ -2,6 +2,7 @@
 use super::*;
 
 pub(super) async fn dlupdate_struct_array(
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &Value,
     reference: &StructArray,
     values: &[Value],
@@ -52,7 +53,8 @@ pub(super) async fn dlupdate_struct_array(
                         })
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            let updated = dlupdate_node(function, &fields, requested_outputs, depth).await?;
+            let updated =
+                dlupdate_node(runtime, function, &fields, requested_outputs, depth).await?;
             for (output, value) in outputs.iter_mut().zip(updated) {
                 output.push(value);
             }
@@ -72,6 +74,7 @@ pub(super) async fn dlupdate_struct_array(
 }
 
 pub(super) async fn dlupdate_struct(
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &Value,
     reference: &StructValue,
     values: &[Value],
@@ -113,7 +116,8 @@ pub(super) async fn dlupdate_struct(
                     .unwrap_or(Value::Num(f64::NAN))
             })
             .collect::<Vec<_>>();
-        let updated = dlupdate_node(function, &field_values, requested_outputs, depth).await?;
+        let updated =
+            dlupdate_node(runtime, function, &field_values, requested_outputs, depth).await?;
         for (out, value) in outputs.iter_mut().zip(updated.into_iter()) {
             out.insert(name.clone(), value);
         }
@@ -123,6 +127,7 @@ pub(super) async fn dlupdate_struct(
 }
 
 pub(super) async fn dlupdate_cell(
+    runtime: Option<&crate::context::RuntimeContext>,
     function: &Value,
     reference: &CellArray,
     values: &[Value],
@@ -152,7 +157,7 @@ pub(super) async fn dlupdate_cell(
             .iter()
             .map(|cell| cell.data[idx].clone())
             .collect::<Vec<_>>();
-        let updated = dlupdate_node(function, &elements, requested_outputs, depth).await?;
+        let updated = dlupdate_node(runtime, function, &elements, requested_outputs, depth).await?;
         for (out, value) in outputs.iter_mut().zip(updated.into_iter()) {
             out.push(value);
         }
