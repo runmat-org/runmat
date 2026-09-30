@@ -48,6 +48,7 @@ pub(crate) async fn predict_deep_learning_object(
         if value.class_name.is(DLARRAY_CLASS) && !formatted);
     let input = prepare_input(xnew, observations)?;
     let outcome = execute_network(NetworkExecutionRequest {
+        runtime: None,
         network: &network,
         input: &input,
         caller: NetworkCaller::Predict,

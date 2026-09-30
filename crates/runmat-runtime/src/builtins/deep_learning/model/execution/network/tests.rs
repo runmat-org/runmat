@@ -44,6 +44,7 @@ fn predict_column_input_returns_batch_major_native_single_scores() {
         ],
     );
     let result = block_on(execute_network(NetworkExecutionRequest {
+        runtime: None,
         network: network_object(&network),
         input: &input,
         caller: NetworkCaller::Predict,
@@ -83,6 +84,7 @@ fn caller_identity_selects_integer_compatibility_without_duplicate_numerics() {
     );
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(execute_network(NetworkExecutionRequest {
+        runtime: None,
         network: network_object(&network),
         input: &input,
         caller: NetworkCaller::Forward,
@@ -95,6 +97,7 @@ fn caller_identity_selects_integer_compatibility_without_duplicate_numerics() {
         Some("RunMat:compatibility:ForwardIntegerDataExtension")
     );
     let result = block_on(execute_network(NetworkExecutionRequest {
+        runtime: None,
         network: network_object(&network),
         input: &input,
         caller: NetworkCaller::Predict,

@@ -36,6 +36,13 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
             function,
         )?;
     }
+    if let Some(runtime) = request.runtime.filter(|runtime| runtime.is_cancelled()) {
+        return Err(crate::runtime_error::build_runtime_error(format!(
+            "{function}: execution was cancelled"
+        ))
+        .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+        .build());
+    }
     let active_tape = autodiff::tape_is_active();
     if let Some(handle) = resident_input_handle(request.input) {
         if active_tape {

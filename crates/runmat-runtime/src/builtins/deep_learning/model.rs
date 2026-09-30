@@ -221,14 +221,44 @@ async fn dlnetwork_in_runtime(
 #[runtime_builtin(
     name = "forward",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::deep_learning::model"
 )]
+async fn forward_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    network: Value,
+    input: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    forward_in_runtime(runtime.as_ref(), requested_outputs, network, input, rest).await
+}
+
+#[cfg(test)]
 pub(super) async fn forward_builtin(
     network: Value,
     input: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+    forward_in_runtime(
+        None,
+        crate::output_count::current_output_count(),
+        network,
+        input,
+        rest,
+    )
+    .await
+}
+
+async fn forward_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    network: Value,
+    input: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    if requested_outputs.is_some_and(|count| count > 2) {
         return Err(deep_learning_error(
             "forward",
             "forward: at most two outputs are supported",
@@ -241,8 +271,9 @@ pub(super) async fn forward_builtin(
         ));
     }
     let network_object = require_network_object(&network, "forward")?;
-    let requested_state = crate::output_count::current_output_count() == Some(2);
+    let requested_state = requested_outputs == Some(2);
     let outcome = execution::execute_network(execution::NetworkExecutionRequest {
+        runtime,
         network: network_object,
         input: &input,
         caller: execution::NetworkCaller::Forward,

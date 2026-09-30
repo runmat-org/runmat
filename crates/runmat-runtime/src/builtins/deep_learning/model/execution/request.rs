@@ -40,6 +40,7 @@ impl NetworkOutputLayout {
 }
 
 pub(in crate::builtins::deep_learning) struct NetworkExecutionRequest<'a> {
+    pub runtime: Option<&'a crate::context::RuntimeContext>,
     pub network: &'a ObjectInstance,
     pub input: &'a Value,
     pub caller: NetworkCaller,

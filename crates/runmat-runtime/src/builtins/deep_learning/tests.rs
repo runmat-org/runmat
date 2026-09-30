@@ -1136,6 +1136,49 @@ fn forward_and_predict_execute_supported_feedforward_networks() {
 }
 
 #[test]
+fn canonical_forward_uses_invocation_outputs_and_cancellation() {
+    use std::rc::Rc;
+
+    use runmat_execution::{cancellation::CancellationSource, CancellationReason};
+
+    let network = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let input = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap());
+    let args = [network, input];
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name("forward");
+    assert_eq!(bindings.len(), 1);
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let _ambient_outputs = crate::output_count::push_output_count(Some(3));
+    let output = block_on((bindings[0].implementation)(
+        crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(2)),
+    ))
+    .unwrap();
+    assert!(matches!(output, Value::OutputList(values) if values.len() == 2));
+    let output = block_on((bindings[0].implementation)(
+        crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
+    ))
+    .unwrap();
+    assert!(!matches!(output, Value::OutputList(_)));
+
+    runtime.set_error_namespace("Invocation");
+    let source = CancellationSource::new();
+    source.cancel(CancellationReason::User);
+    let cancelled = runtime.with_cancellation_token(source.token());
+    let error = block_on((bindings[0].implementation)(
+        crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(cancelled), Some(1)),
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("Invocation:Cancelled"));
+
+    let error = block_on((bindings[0].implementation)(
+        crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime), Some(3)),
+    ))
+    .unwrap_err();
+    assert!(error.message().contains("at most two outputs"));
+}
+
+#[test]
 fn forward_preserves_native_single_through_fully_connected_and_softmax() {
     let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let fully_connected = block_on(fully_connected_layer_builtin(
