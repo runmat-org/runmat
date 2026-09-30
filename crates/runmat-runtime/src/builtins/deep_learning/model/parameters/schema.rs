@@ -23,7 +23,7 @@ impl ParameterRole {
         }
     }
 
-    pub(super) fn parse(name: &str) -> Option<Self> {
+    pub(in crate::builtins::deep_learning) fn parse(name: &str) -> Option<Self> {
         match name {
             "Weights" => Some(Self::Weights),
             "InputWeights" => Some(Self::InputWeights),

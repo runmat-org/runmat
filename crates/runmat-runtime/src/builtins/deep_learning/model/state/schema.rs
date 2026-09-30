@@ -17,7 +17,7 @@ impl StateRole {
         }
     }
 
-    pub(super) fn parse(name: &str) -> Option<Self> {
+    pub(in crate::builtins::deep_learning) fn parse(name: &str) -> Option<Self> {
         match name {
             "HiddenState" => Some(Self::HiddenState),
             "CellState" => Some(Self::CellState),

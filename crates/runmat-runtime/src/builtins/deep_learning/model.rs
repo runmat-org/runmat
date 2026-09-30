@@ -30,6 +30,8 @@ pub(in crate::builtins::deep_learning) mod state;
 mod table_rows;
 mod topology;
 
+pub(in crate::builtins::deep_learning) use table_rows::gradient_values;
+
 use admission::require_network_object;
 use construction::{layer_slice, parse_network_options};
 use host::{elu_alpha, transpose_2d};

@@ -52,6 +52,9 @@ pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
 mod backward;
 use backward::backward;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) fn gradient_tree_for_target(
     target: &Value,
     gradients: &HashMap<usize, Tensor>,
@@ -90,16 +93,12 @@ pub(super) fn gradient_tree_for_target(
             let Value::Object(table) = model::project_learnables(object, "dlgradient")? else {
                 unreachable!("network learnables projection is a table")
             };
-            let mut variables = crate::builtins::table::table_variables(&table)
-                .map_err(|error| deep_learning_error("dlgradient", error.to_string()))?;
-            let values = variables.fields.remove("Value").ok_or_else(|| {
-                deep_learning_error("dlgradient", "dlgradient: Learnables table is missing Value")
-            })?;
-            variables.insert("Value", gradient_tree_for_target(&values, gradients)?);
-            crate::builtins::table::table_replace_variables_like(&table, variables)
-                .map_err(|error| deep_learning_error("dlgradient", error.to_string()))
+            gradient_network_table(&table, gradients)
         }
         Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
+            if model::gradient_values(object, "dlgradient")?.is_some() {
+                return gradient_network_table(object, gradients);
+            }
             let variables = crate::builtins::table::table_variables(object)
                 .map_err(|err| deep_learning_error("dlgradient", err.to_string()))?;
             let mut updated = StructValue::new();
@@ -143,6 +142,29 @@ pub(super) fn gradient_tree_for_target(
             format!("dlgradient: target must be a traced dlarray, learnables tree, or dlnetwork, got {other:?}"),
         )),
     }
+}
+
+fn gradient_network_table(
+    table: &ObjectInstance,
+    gradients: &HashMap<usize, Tensor>,
+) -> BuiltinResult<Value> {
+    let values = model::gradient_values(table, "dlgradient")?.expect("network table schema");
+    let gradients = values
+        .data
+        .iter()
+        .map(|value| gradient_tree_for_target(value, gradients))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    let mut variables = crate::builtins::table::table_variables(table)
+        .map_err(|error| deep_learning_error("dlgradient", error.to_string()))?;
+    variables.insert(
+        "Value",
+        Value::Cell(
+            CellArray::new_with_shape(gradients, values.shape.clone())
+                .map_err(|error| deep_learning_error("dlgradient", error))?,
+        ),
+    );
+    crate::builtins::table::table_replace_variables_like(table, variables)
+        .map_err(|error| deep_learning_error("dlgradient", error.to_string()))
 }
 
 fn validate_host_tape_dlarray_data(value: &Value) -> BuiltinResult<()> {
