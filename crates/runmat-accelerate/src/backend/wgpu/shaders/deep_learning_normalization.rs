@@ -68,6 +68,17 @@ fn group_and_channel(index: u32) -> vec2<u32> {
 fn epsilon() -> $SCALAR$ { $EPSILON$ }
 fn quiet_nan() -> $SCALAR$ { $NAN$ }
 fn is_special(value: $SCALAR$) -> bool { $SPECIAL$ }
+
+// The divisor is finite, positive and at least sqrt(epsilon). Splitting
+// its binary exponent keeps both scale factors normal. Explicit fused
+// operations prevent a reciprocal of a large divisor from becoming a
+// subnormal intermediate even when the quotient itself is normal.
+fn scaled_ratio(value: $SCALAR$, divisor: $SCALAR$) -> $SCALAR$ {
+  $RATIO_SCALE$
+  let numerator = fma(fma(value, first, $SCALAR$(0.0)), second, $SCALAR$(0.0));
+  let denominator = fma(fma(divisor, first, $SCALAR$(0.0)), second, $SCALAR$(0.0));
+  return numerator / denominator;
+}
 "#;
 
 const STATISTICS: &str = r#"
@@ -97,15 +108,15 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let count = $SCALAR$(params.group_size);
   var mean = $SCALAR$(0.0);
   for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
-    mean = mean + input.data[physical_index(group, sample)] / maximum;
+    mean = mean + scaled_ratio(input.data[physical_index(group, sample)], maximum);
   }
   mean = mean / count;
   var variance = $SCALAR$(0.0);
   for (var sample = 0u; sample < params.group_size; sample = sample + 1u) {
-    let delta = input.data[physical_index(group, sample)] / maximum - mean;
+    let delta = scaled_ratio(input.data[physical_index(group, sample)], maximum) - mean;
     variance = variance + delta * delta;
   }
-  let epsilon_ratio = sqrt_epsilon / maximum;
+  let epsilon_ratio = scaled_ratio(sqrt_epsilon, maximum);
   let denominator = sqrt(variance / count + epsilon_ratio * epsilon_ratio);
   var inv_std_scaled = $SCALAR$(0.0);
   if (denominator != $SCALAR$(0.0)) {
@@ -132,24 +143,36 @@ fn main(@builtin(global_invocation_id) invocation: vec3<u32>) {
   let index = params.chunk_offset + local;
   let position = group_and_channel(index);
   let base = 3u * position.x;
-  let normalized = (input.data[index] / statistics.data[base] - statistics.data[base + 1u]) * statistics.data[base + 2u];
+  if (is_special(statistics.data[base]) || is_special(statistics.data[base + 1u])) {
+    output.data[index] = quiet_nan();
+    return;
+  }
+  let normalized = (scaled_ratio(input.data[index], statistics.data[base]) - statistics.data[base + 1u]) * statistics.data[base + 2u];
   output.data[index] = normalized * scale.data[position.y] + offset.data[position.y];
 }
 "#;
 
 fn common(precision: super::super::types::NumericPrecision, binding: u32) -> String {
-    let (scalar, epsilon, nan, special) = match precision {
+    let (scalar, epsilon, nan, special, ratio_scale) = match precision {
         super::super::types::NumericPrecision::F32 => (
             "f32",
             "return bitcast<f32>(params.epsilon_low);",
             "return bitcast<f32>(0x7fc00000u);",
             "return (bitcast<u32>(value) & 0x7f800000u) == 0x7f800000u;",
+            r#"let exponent = i32((bitcast<u32>(divisor) >> 23u) & 0xffu) - 127;
+  let half = exponent / 2;
+  let first = bitcast<f32>(u32(127 - half) << 23u);
+  let second = bitcast<f32>(u32(127 - (exponent - half)) << 23u);"#,
         ),
         super::super::types::NumericPrecision::F64 => (
             "f64",
             "return bitcast<f64>(vec2<u32>(params.epsilon_low, params.epsilon_high));",
             "return bitcast<f64>(vec2<u32>(0u, 0x7ff80000u));",
             "return (bitcast<vec2<u32>>(value).y & 0x7ff00000u) == 0x7ff00000u;",
+            r#"let exponent = i32((bitcast<vec2<u32>>(divisor).y >> 20u) & 0x7ffu) - 1023;
+  let half = exponent / 2;
+  let first = bitcast<f64>(vec2<u32>(0u, u32(1023 - half) << 20u));
+  let second = bitcast<f64>(vec2<u32>(0u, u32(1023 - (exponent - half)) << 20u));"#,
         ),
     };
     COMMON
@@ -158,6 +181,7 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
         .replace("$EPSILON$", epsilon)
         .replace("$NAN$", nan)
         .replace("$SPECIAL$", special)
+        .replace("$RATIO_SCALE$", ratio_scale)
 }
 
 pub fn statistics(precision: super::super::types::NumericPrecision) -> String {
