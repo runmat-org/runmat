@@ -21,7 +21,11 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
 ) -> BuiltinResult<NetworkExecutionOutcome> {
     let function = request.caller.function();
     let plan = HostNetworkPlan::admit(request.network, request.input, function)?;
-    let output_axes = layout::target_axes(plan.output_axes(), request.output_layout, function)?;
+    let output_layout = request.output_layout.resolve(
+        plan.input_axes().shape().len(),
+        plan.output_axes().shape().len(),
+    );
+    let output_axes = layout::target_axes(plan.output_axes(), output_layout, function)?;
     if request.caller == NetworkCaller::Forward
         && (crate::builtins::common::validation::value_has_native_integer_class(forward_data(
             request.input,
@@ -45,14 +49,9 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
         };
         let route = gpu::admit_gpu_forward(&layers.data, handle, plan.input_axes(), function)?;
         if let gpu::GpuForwardAdmission::Ready(layout) = &route {
-            if let Some(output) = evaluate_network_gpu(
-                request.network,
-                handle,
-                *layout,
-                request.output_layout,
-                function,
-            )
-            .await?
+            if let Some(output) =
+                evaluate_network_gpu(request.network, handle, *layout, output_layout, function)
+                    .await?
             {
                 if output.shape() != output_axes.shape() {
                     return Err(crate::builtins::common::gpu_helpers::reject_gpu_output(

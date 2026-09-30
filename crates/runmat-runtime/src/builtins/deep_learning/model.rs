@@ -2,10 +2,10 @@
 
 use super::layer_identity::ForwardLayerKind;
 use super::{
-    autodiff, deep_learning_error, layer_names, logical_scalar, numeric_vector, object,
-    object_with_identity, parse_name_values, positive_usize, scalar_text, string_array,
-    tensor_value, unsupported_error, DLARRAY_CLASS, ELU_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS,
-    LAYER_GRAPH_CLASS, RELU_LAYER_CLASS, SOFTMAX_LAYER_CLASS,
+    deep_learning_error, layer_names, logical_scalar, numeric_vector, object, object_with_identity,
+    parse_name_values, positive_usize, scalar_text, string_array, tensor_value, unsupported_error,
+    DLARRAY_CLASS, ELU_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS, LAYER_GRAPH_CLASS,
+    RELU_LAYER_CLASS, SOFTMAX_LAYER_CLASS,
 };
 use crate::{builtins::common::tensor, BuiltinResult};
 use runmat_accelerate_api::{
@@ -20,6 +20,7 @@ pub(in crate::builtins::deep_learning) mod execution;
 mod gpu;
 mod host;
 mod initialization;
+mod output;
 pub(in crate::builtins::deep_learning) mod parameters;
 pub(in crate::builtins::deep_learning) mod plan;
 pub(in crate::builtins::deep_learning) mod precision;
@@ -31,7 +32,7 @@ mod topology;
 
 use admission::require_network_object;
 use construction::{layer_slice, parse_network_options};
-use host::{dlarray_format, elu_alpha, transpose_2d};
+use host::{elu_alpha, transpose_2d};
 use properties::normalize_numeric_tensor;
 
 pub(in crate::builtins) use predict::predict_deep_learning_object;
@@ -222,86 +223,23 @@ pub(super) async fn forward_builtin(
     }
     let network_object = require_network_object(&network, "forward")?;
     let requested_state = crate::output_count::current_output_count() == Some(2);
-    let wrap_dlarray =
-        matches!(&input, Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS));
-    let original_format = dlarray_format(&input);
-    let execution::NetworkExecutionOutcome {
-        data,
-        output_axes,
-        state_updates,
-        trace,
-    } = execution::execute_network(execution::NetworkExecutionRequest {
+    let outcome = execution::execute_network(execution::NetworkExecutionRequest {
         network: network_object,
         input: &input,
         caller: execution::NetworkCaller::Forward,
         output_layout: execution::NetworkOutputLayout::Preserve,
     })
     .await?;
-    let (data, state_updates, nodes) = if trace.is_some() {
-        let value = match data {
-            Value::Tensor(tensor) => execution::host::network::HostValue::Real(tensor),
-            Value::ComplexTensor(tensor) => execution::host::network::HostValue::Complex(tensor),
-            _ => {
-                return Err(deep_learning_error(
-                    "forward",
-                    "forward: host trace requires a host numerical output",
-                ))
-            }
-        };
-        let mut result = execution::host::network::HostExecutionResult {
-            value,
-            axes: output_axes.clone(),
-            trace,
-            next_state: state_updates,
-        };
-        let nodes = autodiff::record_network_execution(
-            network_object,
-            &input,
-            &mut result,
-            requested_state,
-        )?;
-        let data = match result.value {
-            execution::host::network::HostValue::Real(tensor) => Value::Tensor(tensor),
-            execution::host::network::HostValue::Complex(tensor) => Value::ComplexTensor(tensor),
-        };
-        (data, result.next_state, Some(nodes))
+    let mut outputs = output::present(
+        network_object,
+        &input,
+        outcome,
+        output::OutputPresentation::Forward,
+        requested_state,
+    )?;
+    if requested_state {
+        Ok(Value::OutputList(outputs))
     } else {
-        (data, state_updates, None)
-    };
-    let format = if original_format.is_empty() {
-        original_format
-    } else {
-        output_axes.layout().labels()
-    };
-    let prediction = if wrap_dlarray {
-        object(
-            "dlarray",
-            vec![
-                ("Data", data),
-                ("Format", Value::String(format.clone())),
-                ("Labels", Value::String(format)),
-            ],
-        )
-    } else {
-        data
-    };
-    let state = if requested_state {
-        Some(state::publish_updates(
-            network_object,
-            state_updates,
-            "forward",
-        )?)
-    } else {
-        None
-    };
-    let (prediction, state) = match nodes {
-        Some(nodes) => {
-            autodiff::annotate_network_outputs(network_object, prediction, state, nodes)?
-        }
-        None => (prediction, state),
-    };
-    match state {
-        Some(state) => Ok(Value::OutputList(vec![prediction, state])),
-        None => Ok(prediction),
+        Ok(outputs.remove(0))
     }
 }

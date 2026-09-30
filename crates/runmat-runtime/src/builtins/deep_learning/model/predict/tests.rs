@@ -57,6 +57,7 @@ fn invalid_observations_option_is_rejected_before_resident_access() {
 #[test]
 fn excess_predict_outputs_fail_before_resident_access() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
+        let network = network();
         let handle = provider
             .upload(&HostTensorView {
                 data: &[1.0, 2.0],
@@ -66,9 +67,9 @@ fn excess_predict_outputs_fail_before_resident_access() {
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
         provider.reset_telemetry();
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(3));
         let error = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
-            network(),
+            network,
             Value::GpuTensor(handle),
             vec![],
         ))
@@ -78,6 +79,55 @@ fn excess_predict_outputs_fail_before_resident_access() {
         assert_eq!(telemetry.upload_bytes, 0);
         assert_eq!(telemetry.download_bytes, 0);
     });
+}
+
+#[test]
+fn direct_network_predict_rejects_excess_outputs_before_provider_access() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let Value::Object(network) = network() else {
+            panic!("network object expected")
+        };
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0],
+                shape: &[1, 2],
+            })
+            .unwrap()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        provider.reset_telemetry();
+        let _outputs = crate::output_count::push_output_count(Some(3));
+        let error = block_on(predict_deep_learning_object(
+            network,
+            Value::GpuTensor(handle),
+            vec![],
+        ))
+        .unwrap_err();
+        assert!(error.message().contains("too many output arguments"));
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.upload_bytes, 0);
+        assert_eq!(telemetry.download_bytes, 0);
+    });
+}
+
+#[test]
+fn two_output_network_predict_returns_state() {
+    let network = network();
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let value = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        network,
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        vec![],
+    ))
+    .unwrap();
+    let Value::OutputList(outputs) = value else {
+        panic!("prediction and State outputs expected")
+    };
+    assert_eq!(outputs.len(), 2);
+    assert!(matches!(&outputs[0], Value::Tensor(_)));
+    assert!(
+        matches!(&outputs[1], Value::Object(object) if crate::builtins::table::is_tabular_object(object))
+    );
 }
 
 #[test]
@@ -181,9 +231,98 @@ fn formatted_predictor_keeps_its_typed_axis_order() {
         vec![],
     ))
     .unwrap();
-    let Value::Tensor(output) = output else {
-        panic!("raw score tensor expected")
+    let Value::Object(output) = output else {
+        panic!("formatted dlarray score expected")
     };
-    assert_eq!(output.shape, vec![3, 1]);
-    assert_eq!(output.materialize_f64(), vec![0.5, 2.5, 4.5]);
+    assert!(output.class_name.is(DLARRAY_CLASS));
+    assert_eq!(
+        output.properties.get("Format"),
+        Some(&Value::String("CB".into()))
+    );
+    assert_eq!(
+        output.properties.get("Labels"),
+        Some(&Value::String("CB".into()))
+    );
+    let Some(Value::Tensor(data)) = output.properties.get("Data") else {
+        panic!("host score data expected")
+    };
+    assert_eq!(data.shape, vec![1, 3]);
+    assert_eq!(data.materialize_f64(), vec![0.5, 2.5, 4.5]);
+}
+
+#[test]
+fn unformatted_dlarray_keeps_wrapper_and_same_rank_input_order() {
+    let input = object(
+        "dlarray",
+        vec![
+            (
+                "Data",
+                Value::Tensor(Tensor::new(vec![1., 3., 5., 2., 4., 6.], vec![3, 2]).unwrap()),
+            ),
+            ("Format", Value::String(String::new())),
+            ("Labels", Value::String(String::new())),
+        ],
+    );
+    let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        network(),
+        input,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Object(output) = output else {
+        panic!("unformatted dlarray score expected")
+    };
+    assert!(output.class_name.is(DLARRAY_CLASS));
+    assert_eq!(
+        output.properties.get("Format"),
+        Some(&Value::String(String::new()))
+    );
+    let Some(Value::Tensor(data)) = output.properties.get("Data") else {
+        panic!("unformatted host score expected")
+    };
+    assert_eq!(data.shape, vec![3, 1]);
+    assert_eq!(data.materialize_f64(), vec![0.5, 2.5, 4.5]);
+}
+
+#[test]
+fn source_dlarray_metadata_is_preserved_and_disagreement_is_rejected() {
+    let input = object(
+        "dlarray",
+        vec![
+            (
+                "Data",
+                Value::Tensor(Tensor::new(vec![1., 2.], vec![2, 1]).unwrap()),
+            ),
+            ("Format", Value::String("CB".into())),
+            ("Labels", Value::String("CB".into())),
+            ("TraceMarker", Value::String("retained".into())),
+        ],
+    );
+    let prepared = prepare_input(input.clone(), ObservationsIn::Rows).unwrap();
+    assert_eq!(prepared, input);
+    let prepared = prepare_input(input, ObservationsIn::Columns).unwrap();
+    let Value::Object(prepared) = prepared else {
+        panic!("dlarray expected")
+    };
+    assert_eq!(
+        prepared.properties.get("TraceMarker"),
+        Some(&Value::String("retained".into()))
+    );
+
+    let mut disagreement = prepared.clone();
+    disagreement
+        .properties
+        .insert("Labels".into(), Value::String("BC".into()));
+    let error = prepare_input(Value::Object(disagreement), ObservationsIn::Rows).unwrap_err();
+    assert!(error.message().contains("Format and Labels disagree"));
+
+    let mut conflicting = prepared;
+    conflicting
+        .properties
+        .insert("Format".into(), Value::String("BC".into()));
+    conflicting
+        .properties
+        .insert("Labels".into(), Value::String("BC".into()));
+    let error = prepare_input(Value::Object(conflicting), ObservationsIn::Columns).unwrap_err();
+    assert!(error.message().contains("conflicts"));
 }

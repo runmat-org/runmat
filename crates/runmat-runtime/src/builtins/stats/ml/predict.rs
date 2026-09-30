@@ -112,9 +112,6 @@ pub(crate) async fn predict_builtin(
         Value::Object(object)
             if crate::builtins::deep_learning::model::is_deep_learning_network_object(&object) =>
         {
-            if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
-                return Err(predict_invalid("predict: too many output arguments"));
-            }
             crate::builtins::deep_learning::model::predict_deep_learning_object(object, xnew, rest)
                 .await?
         }

@@ -1,15 +1,18 @@
-//! Prediction-specific input presentation and output adaptation.
+//! Prediction-specific input presentation and public option admission.
 //!
 //! Numerical execution, parameter admission, placement, and state handling
-//! belong to the shared network executor. This module only interprets the
-//! public `predict` observations option and returns its raw score array.
+//! belong to the shared network executor. Output wrappers, State publication,
+//! and tape recording belong to the common network output presenter.
 
+use runmat_builtins::{DeepLearningAxisLabel, DeepLearningAxisLayout};
 use runmat_value::{ObjectInstance, Value};
 
 use super::execution::{
     execute_network, NetworkCaller, NetworkExecutionRequest, NetworkOutputLayout,
 };
-use super::{deep_learning_error, object, scalar_text, BuiltinResult, DLARRAY_CLASS};
+use super::{
+    deep_learning_error, object, output, scalar_text, BuiltinResult, DLARRAY_CLASS, DLNETWORK_CLASS,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ObservationsIn {
@@ -17,29 +20,76 @@ enum ObservationsIn {
     Columns,
 }
 
-impl ObservationsIn {
-    fn format(self) -> &'static str {
-        match self {
-            // The input layer owns the unformatted convention: feature
-            // matrices use BC, while sequence/spatial inputs have distinct
-            // typed defaults. An explicit column-observation request is CB.
-            Self::Rows => "",
-            Self::Columns => "CB",
-        }
-    }
-}
-
 pub(crate) async fn predict_deep_learning_object(
     network: ObjectInstance,
     xnew: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
+    let requested_state = crate::output_count::current_output_count() == Some(2)
+        && network.class_name.is(DLNETWORK_CLASS);
+    if crate::output_count::current_output_count().is_some_and(|count| {
+        count
+            > if network.class_name.is(DLNETWORK_CLASS) {
+                2
+            } else {
+                1
+            }
+    }) {
+        return Err(deep_learning_error(
+            "predict",
+            "predict: too many output arguments",
+        ));
+    }
     let observations = parse_observations_in(&rest)?;
-    let (data, input_format) = match xnew {
+    let formatted = matches!(&xnew, Value::Object(value)
+        if value.class_name.is(DLARRAY_CLASS)
+            && matches!(value.properties.get("Format"), Some(Value::String(format)) if !format.is_empty()));
+    let unformatted_dlarray = matches!(&xnew, Value::Object(value)
+        if value.class_name.is(DLARRAY_CLASS) && !formatted);
+    let input = prepare_input(xnew, observations)?;
+    let outcome = execute_network(NetworkExecutionRequest {
+        network: &network,
+        input: &input,
+        caller: NetworkCaller::Predict,
+        output_layout: if formatted {
+            NetworkOutputLayout::Preserve
+        } else if unformatted_dlarray {
+            NetworkOutputLayout::MatchInputRank
+        } else {
+            NetworkOutputLayout::ObservationMajor
+        },
+    })
+    .await?;
+    output::present(
+        &network,
+        &input,
+        outcome,
+        if formatted {
+            output::OutputPresentation::PredictFormatted
+        } else if unformatted_dlarray {
+            output::OutputPresentation::PredictUnformattedArray
+        } else {
+            output::OutputPresentation::PredictRaw
+        },
+        requested_state,
+    )
+}
+
+fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Value> {
+    let column_layout = DeepLearningAxisLayout::from_axes(&[
+        DeepLearningAxisLabel::Channel,
+        DeepLearningAxisLabel::Batch,
+    ])
+    .map_err(|error| deep_learning_error("predict", format!("predict: {error}")))?;
+    let column_format = column_layout.labels();
+    match input {
         Value::Object(mut value) if value.class_name.is(DLARRAY_CLASS) => {
+            let data = value.properties.get("Data").ok_or_else(|| {
+                deep_learning_error("predict", "predict: dlarray is missing Data")
+            })?;
             let format = match value.properties.get("Format") {
-                Some(Value::String(text)) => text.clone(),
-                None => String::new(),
+                Some(Value::String(text)) => text.as_str(),
+                None => "",
                 Some(_) => {
                     return Err(deep_learning_error(
                         "predict",
@@ -47,34 +97,70 @@ pub(crate) async fn predict_deep_learning_object(
                     ))
                 }
             };
-            let data = value.properties.remove("Data").ok_or_else(|| {
-                deep_learning_error("predict", "predict: dlarray is missing Data")
-            })?;
-            (data, Some(format))
+            let labels = match value.properties.get("Labels") {
+                Some(Value::String(text)) => text.as_str(),
+                None => format,
+                Some(_) => {
+                    return Err(deep_learning_error(
+                        "predict",
+                        "predict: dlarray Labels must be text",
+                    ))
+                }
+            };
+            if labels != format {
+                return Err(deep_learning_error(
+                    "predict",
+                    "predict: dlarray Format and Labels disagree",
+                ));
+            }
+            let shape = match data {
+                Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+                Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+                Value::GpuTensor(handle) => Some(handle.shape()),
+                _ => None,
+            };
+            if !format.is_empty() {
+                if let Some(shape) = shape {
+                    let layout =
+                        DeepLearningAxisLayout::parse(format, shape.len()).map_err(|error| {
+                            deep_learning_error(
+                                "predict",
+                                format!("predict: invalid dlarray axes: {error}"),
+                            )
+                        })?;
+                    if observations == ObservationsIn::Columns && layout != column_layout {
+                        return Err(deep_learning_error(
+                            "predict",
+                            "predict: ObservationsIn='columns' conflicts with formatted dlarray axes",
+                        ));
+                    }
+                }
+            } else if observations == ObservationsIn::Columns {
+                value
+                    .properties
+                    .insert("Format".into(), Value::String(column_format.clone()));
+                value
+                    .properties
+                    .insert("Labels".into(), Value::String(column_format));
+            }
+            Ok(Value::Object(value))
         }
-        other => (other, None),
-    };
-    let format = if observations == ObservationsIn::Rows {
-        input_format.unwrap_or_default()
-    } else {
-        observations.format().into()
-    };
-    let input = object(
-        "dlarray",
-        vec![
-            ("Data", data),
-            ("Format", Value::String(format.clone())),
-            ("Labels", Value::String(format)),
-        ],
-    );
-    let outcome = execute_network(NetworkExecutionRequest {
-        network: &network,
-        input: &input,
-        caller: NetworkCaller::Predict,
-        output_layout: NetworkOutputLayout::ObservationMajor,
-    })
-    .await?;
-    Ok(vec![outcome.data])
+        data => {
+            let format = if observations == ObservationsIn::Columns {
+                column_format
+            } else {
+                String::new()
+            };
+            Ok(object(
+                "dlarray",
+                vec![
+                    ("Data", data),
+                    ("Format", Value::String(format.clone())),
+                    ("Labels", Value::String(format)),
+                ],
+            ))
+        }
+    }
 }
 
 fn parse_observations_in(values: &[Value]) -> BuiltinResult<ObservationsIn> {

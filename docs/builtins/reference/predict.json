@@ -15,9 +15,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": ["f64"],
+    "precisions": ["f32", "f64"],
     "broadcasting": "none",
-    "notes": "GPU predictor inputs are gathered to host for model prediction."
+    "notes": "Supported deep-learning network routes execute on resident GPU inputs without gathering; unsupported explicit gpuArray routes return an error. Implemented statistical predictors gather to host."
   },
   "fusion": {
     "elementwise": false,
@@ -37,8 +37,10 @@
     "For table input, predictor variables are selected by the model's `PredictorNames` property.",
     "For `LinearModel`, `[ypred,yci] = predict(...)` returns pointwise confidence intervals for curve predictions by default.",
     "For `ClassificationTree`, `[label,score,node,cnum] = predict(...)` returns predicted class labels, posterior probabilities, one-based leaf node ids, and one-based class-number predictions.",
-    "For `dlnetwork`, `SeriesNetwork`, and `DAGNetwork` compatibility objects, `predict(net,Xnew)` returns the score/activation matrix for the supported sequential feed-forward layer subset also used by `forward`.",
-    "Deep Learning prediction accepts `ObservationsIn` with `rows` or `columns`; column-observation input is transposed before execution.",
+    "Deep-learning network prediction uses the same admitted sequential layer execution as `forward`. A formatted dlarray input returns a formatted dlarray in the network output axis order; an unformatted dlarray input returns an unformatted dlarray. Raw numeric input returns a numeric score array.",
+    "For an unformatted dlarray, an output with the same rank retains the input axis order; when the rank changes, batch precedes the remaining output axes. Raw numeric predictions retain RunMat's observation-major presentation.",
+    "Deep-learning prediction accepts `ObservationsIn` with `rows` or `columns`. A formatted dlarray with incompatible labels is rejected rather than relabeled; the original dlarray and its differentiation provenance are preserved.",
+    "A dlnetwork can return updated State as the second output. The current SeriesNetwork and DAGNetwork compatibility routes return one output.",
     "Linear-model name-value options `Alpha`, `Prediction`, and `Simultaneous` are accepted. `Prediction` can be `curve` or `observation`; `Simultaneous` must be false because simultaneous intervals are not supported yet.",
     "Classification-tree prediction currently accepts matrix or table predictor data and raises explicit errors for unsupported pruning/subtree options."
   ],
