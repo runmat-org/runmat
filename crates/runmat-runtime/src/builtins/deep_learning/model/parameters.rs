@@ -7,6 +7,7 @@ use super::*;
 mod projection;
 mod precision;
 mod schema;
+mod tape_values;
 mod update;
 mod validation;
 mod view;
@@ -15,6 +16,7 @@ pub(in crate::builtins::deep_learning) use precision::floating_precision;
 pub(in crate::builtins::deep_learning) use schema::{
     ParameterKey, ParameterRole, ParameterShape, ParameterView,
 };
+pub(in crate::builtins::deep_learning) use tape_values::install_annotated;
 pub(super) use validation::numeric_payload_shape;
 use validation::{empty_parameter, parameter_data, validate_parameter};
 pub(in crate::builtins::deep_learning) use view::{view, view_layers};

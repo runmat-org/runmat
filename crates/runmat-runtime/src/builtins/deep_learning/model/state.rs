@@ -7,9 +7,11 @@ use super::*;
 mod schema;
 mod table;
 mod publication;
+mod tape_values;
 
 pub(in crate::builtins::deep_learning) use publication::{publish_updates, StateUpdate};
 pub(in crate::builtins::deep_learning) use schema::{StateKey, StateRole};
+pub(in crate::builtins::deep_learning) use tape_values::{install_annotated, stage_annotated};
 
 pub(super) const STORAGE_PROPERTY: &str = "_State";
 

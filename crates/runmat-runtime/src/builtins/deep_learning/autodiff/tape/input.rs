@@ -1,6 +1,9 @@
 use super::super::*;
 use super::dlarray_object_node_id;
 
+mod network;
+use network::annotate_network_object;
+
 pub(super) fn prepare_tape_inputs(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     values.into_iter().map(annotate_tree).collect()
 }
@@ -74,6 +77,16 @@ fn annotate_dlarray_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
         .get("Data")
         .ok_or_else(|| deep_learning_error("dlarray", "dlarray: traced object is missing Data"))?;
     let tensor = host_tensor_from_value(data, "dlarray", "Data")?;
+    annotate_dlarray_object_with_tensor(object, tensor)
+}
+
+fn annotate_dlarray_object_with_tensor(
+    object: &mut ObjectInstance,
+    tensor: Tensor,
+) -> BuiltinResult<()> {
+    if dlarray_object_node_id(object).is_some() {
+        return Ok(());
+    }
     let node = push_node(tensor, NodeKind::Leaf)?;
     let tape_id = active_tape()
         .expect("node insertion requires active tape")
@@ -89,48 +102,5 @@ fn annotate_dlarray_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
         AD_TAPE_PROPERTY.to_string(),
         Value::Int(IntValue::U64(tape_id)),
     );
-    Ok(())
-}
-
-fn annotate_network_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
-    let Some(Value::Cell(layers)) = object.properties.get_mut("Layers") else {
-        return Ok(());
-    };
-    for layer in &mut layers.data {
-        let Value::Object(layer_object) = layer else {
-            continue;
-        };
-        if !layer_object
-            .class_name
-            .is(runmat_builtins::FULLY_CONNECTED_LAYER_CLASS)
-        {
-            continue;
-        }
-        for parameter in ["Weights", "Bias"] {
-            if let Some(value) = layer_object.properties.remove(parameter) {
-                let wrapped = match value {
-                    Value::Object(object) if object.class_name == DLARRAY_CLASS => {
-                        annotate_dlarray_value(Value::Object(object))?
-                    }
-                    Value::Tensor(_) | Value::Num(_) | Value::Int(_) => {
-                        let mut wrapper = ObjectInstance::new(DLARRAY_CLASS.to_string());
-                        wrapper.properties.insert("Data".to_string(), value);
-                        wrapper
-                            .properties
-                            .insert("Format".to_string(), Value::String(String::new()));
-                        wrapper
-                            .properties
-                            .insert("Labels".to_string(), Value::String(String::new()));
-                        annotate_dlarray_object(&mut wrapper)?;
-                        Value::Object(wrapper)
-                    }
-                    other => other,
-                };
-                layer_object
-                    .properties
-                    .insert(parameter.to_string(), wrapped);
-            }
-        }
-    }
     Ok(())
 }

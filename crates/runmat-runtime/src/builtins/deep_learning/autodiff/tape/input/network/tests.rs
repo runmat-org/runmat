@@ -1,0 +1,313 @@
+use super::*;
+use crate::builtins::deep_learning::model::{parameters, state};
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
+use crate::builtins::deep_learning::autodiff::tape::{Tape, TapeActivation};
+use runmat_builtins::DeepLearningLayerKind;
+use runmat_value::NumericDType;
+
+fn tensor(shape: &[usize], single: bool) -> Value {
+    let count = shape.iter().product();
+    if single {
+        Value::Tensor(Tensor::from_f32(vec![1.0; count], shape.to_vec()).unwrap())
+    } else {
+        Value::Tensor(Tensor::new(vec![1.0; count], shape.to_vec()).unwrap())
+    }
+}
+
+fn layer(kind: DeepLearningLayerKind, name: &str, fields: &[(&str, Value)]) -> Value {
+    let mut object = ObjectInstance::new(kind.class().owned());
+    object
+        .properties
+        .insert("Name".into(), Value::String(name.into()));
+    for (key, value) in fields {
+        object.properties.insert((*key).into(), value.clone());
+    }
+    Value::Object(object)
+}
+
+fn network(layers: Vec<Value>) -> ObjectInstance {
+    let Value::Object(object) =
+        model::network_object(model::DLNETWORK_CLASS, layers, BTreeMap::new(), "dlfeval").unwrap()
+    else {
+        panic!("network object expected")
+    };
+    object
+}
+
+fn data(value: &Value) -> &Tensor {
+    let Value::Object(wrapper) = value else {
+        panic!("dlarray wrapper expected")
+    };
+    let Some(Value::Tensor(tensor)) = wrapper.properties.get("Data") else {
+        panic!("tensor data expected")
+    };
+    tensor
+}
+
+#[test]
+fn canonical_learnables_and_recurrent_state_are_annotated_without_changing_metadata() {
+    let cases = [
+        network(vec![
+            layer(
+                DeepLearningLayerKind::FeatureInput,
+                "input",
+                &[("InputSize", Value::Num(2.0))],
+            ),
+            layer(
+                DeepLearningLayerKind::FullyConnected,
+                "dense",
+                &[
+                    ("OutputSize", Value::Num(3.0)),
+                    ("Weights", tensor(&[3, 2], true)),
+                    ("Bias", tensor(&[3, 1], true)),
+                ],
+            ),
+        ]),
+        network(vec![
+            layer(
+                DeepLearningLayerKind::SequenceInput,
+                "input",
+                &[("InputSize", Value::Num(2.0))],
+            ),
+            layer(
+                DeepLearningLayerKind::Convolution1D,
+                "conv",
+                &[
+                    ("FilterSize", Value::Num(3.0)),
+                    ("NumFilters", Value::Num(4.0)),
+                    ("Weights", tensor(&[3, 2, 4], true)),
+                    ("Bias", tensor(&[1, 4], true)),
+                ],
+            ),
+        ]),
+        network(vec![
+            layer(
+                DeepLearningLayerKind::SequenceInput,
+                "input",
+                &[("InputSize", Value::Num(2.0))],
+            ),
+            layer(
+                DeepLearningLayerKind::Lstm,
+                "lstm",
+                &[
+                    ("NumHiddenUnits", Value::Num(3.0)),
+                    ("InputWeights", tensor(&[12, 2], true)),
+                    ("RecurrentWeights", tensor(&[12, 3], true)),
+                    ("Bias", tensor(&[12, 1], true)),
+                    ("HiddenState", tensor(&[3, 1], true)),
+                    ("CellState", tensor(&[3, 1], true)),
+                ],
+            ),
+        ]),
+        network(vec![
+            layer(
+                DeepLearningLayerKind::SequenceInput,
+                "input",
+                &[("InputSize", Value::Num(2.0))],
+            ),
+            layer(
+                DeepLearningLayerKind::Bilstm,
+                "bilstm",
+                &[
+                    ("NumHiddenUnits", Value::Num(3.0)),
+                    ("InputWeights", tensor(&[24, 2], true)),
+                    ("RecurrentWeights", tensor(&[24, 3], true)),
+                    ("Bias", tensor(&[24, 1], true)),
+                    ("HiddenState", tensor(&[6, 1], true)),
+                    ("CellState", tensor(&[6, 1], true)),
+                ],
+            ),
+        ]),
+        network(vec![
+            layer(
+                DeepLearningLayerKind::SequenceInput,
+                "input",
+                &[("InputSize", Value::Num(2.0))],
+            ),
+            layer(
+                DeepLearningLayerKind::LayerNormalization,
+                "norm",
+                &[
+                    ("Scale", tensor(&[2, 1], true)),
+                    ("Offset", tensor(&[2, 1], true)),
+                ],
+            ),
+        ]),
+    ];
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    let _activation = TapeActivation::enter(tape.clone());
+    let mut expected_leaves = 0;
+    for mut network in cases {
+        let initialized = network.properties.get("Initialized").cloned();
+        let before_parameters = parameters::view(&network, "dlfeval").unwrap();
+        let before_state = state::view(&network, "dlfeval").unwrap();
+        let originals = before_parameters
+            .iter()
+            .filter_map(|row| row.value.map(|value| (row.key.clone(), value.clone())))
+            .collect::<Vec<_>>();
+        let state_originals = before_state
+            .iter()
+            .map(|row| (row.key.clone(), row.value.clone()))
+            .collect::<Vec<_>>();
+        expected_leaves += originals.len() + state_originals.len();
+        annotate_network_object(&mut network).unwrap();
+        assert_eq!(network.properties.get("Initialized"), initialized.as_ref());
+        for (row, (key, original)) in parameters::view(&network, "dlfeval")
+            .unwrap()
+            .into_iter()
+            .filter(|row| row.value.is_some())
+            .zip(originals)
+        {
+            assert_eq!(row.key, key);
+            let annotated = row.value.unwrap();
+            let Value::Tensor(before) = original else {
+                panic!("original tensor")
+            };
+            let after = data(annotated);
+            assert_eq!(after.numeric_dtype(), NumericDType::F32);
+            assert_eq!(after.shape, before.shape);
+            assert!(after
+                .host_buffer()
+                .shares_allocation_with(before.host_buffer()));
+        }
+        for (row, (key, original)) in state::view(&network, "dlfeval")
+            .unwrap()
+            .into_iter()
+            .zip(state_originals)
+        {
+            assert_eq!(row.key, key);
+            let before = data(&original);
+            let after = data(row.value);
+            assert_eq!(after.numeric_dtype(), NumericDType::F32);
+            assert_eq!(after.shape, before.shape);
+            assert!(after
+                .host_buffer()
+                .shares_allocation_with(before.host_buffer()));
+        }
+        let before_repeat = tape.borrow().nodes.len();
+        annotate_network_object(&mut network).unwrap();
+        assert_eq!(tape.borrow().nodes.len(), before_repeat);
+    }
+    assert_eq!(tape.borrow().nodes.len(), expected_leaves);
+}
+
+#[test]
+fn invalid_last_parameter_is_rejected_before_creating_any_leaf() {
+    let mut network = network(vec![
+        layer(
+            DeepLearningLayerKind::SequenceInput,
+            "input",
+            &[("InputSize", Value::Num(2.0))],
+        ),
+        layer(
+            DeepLearningLayerKind::LayerNormalization,
+            "norm",
+            &[
+                ("Scale", tensor(&[2, 1], true)),
+                ("Offset", tensor(&[2, 1], true)),
+            ],
+        ),
+    ]);
+    let original_initialized = network.properties.get("Initialized").cloned();
+    let Some(Value::Cell(layers)) = network.properties.get_mut("Layers") else {
+        panic!("Layers")
+    };
+    let Value::Object(last) = &mut layers.data[1] else {
+        panic!("normalization layer")
+    };
+    last.properties
+        .insert("Offset".into(), Value::String("invalid".into()));
+
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    let _activation = TapeActivation::enter(tape.clone());
+    assert!(annotate_network_object(&mut network).is_err());
+    assert!(tape.borrow().nodes.is_empty());
+    assert_eq!(
+        network.properties.get("Initialized"),
+        original_initialized.as_ref()
+    );
+    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+        panic!("Layers")
+    };
+    let Value::Object(last) = &layers.data[1] else {
+        panic!("normalization layer")
+    };
+    assert_eq!(
+        last.properties.get("Offset"),
+        Some(&Value::String("invalid".into()))
+    );
+}
+
+#[test]
+fn uninitialized_network_preserves_its_lifecycle_and_fresh_tapes_get_fresh_leaves() {
+    let mut network = network(vec![
+        layer(
+            DeepLearningLayerKind::FeatureInput,
+            "input",
+            &[("InputSize", Value::Num(2.0))],
+        ),
+        layer(
+            DeepLearningLayerKind::FullyConnected,
+            "dense",
+            &[
+                ("OutputSize", Value::Num(3.0)),
+                ("Bias", tensor(&[3, 1], true)),
+            ],
+        ),
+    ]);
+    assert_eq!(
+        network.properties.get("Initialized"),
+        Some(&Value::Bool(false))
+    );
+    for _ in 0..2 {
+        let tape = Rc::new(RefCell::new(Tape::new()));
+        let _activation = TapeActivation::enter(tape.clone());
+        annotate_network_object(&mut network).unwrap();
+        assert_eq!(tape.borrow().nodes.len(), 1);
+        assert_eq!(
+            network.properties.get("Initialized"),
+            Some(&Value::Bool(false))
+        );
+        let parameters = parameters::view(&network, "dlfeval").unwrap();
+        assert!(parameters[0].value.is_none());
+        assert!(parameters[1].value.is_some());
+    }
+}
+
+#[test]
+fn resident_parameter_is_rejected_without_gather_or_partial_tape() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                shape: &[3, 2],
+            })
+            .unwrap();
+        let mut network = network(vec![
+            layer(
+                DeepLearningLayerKind::FeatureInput,
+                "input",
+                &[("InputSize", Value::Num(2.0))],
+            ),
+            layer(
+                DeepLearningLayerKind::FullyConnected,
+                "dense",
+                &[
+                    ("OutputSize", Value::Num(3.0)),
+                    ("Weights", Value::GpuTensor(resident)),
+                    ("Bias", tensor(&[3, 1], false)),
+                ],
+            ),
+        ]);
+        let tape = Rc::new(RefCell::new(Tape::new()));
+        let _activation = TapeActivation::enter(tape.clone());
+        provider.reset_telemetry();
+        let error = annotate_network_object(&mut network).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(tape.borrow().nodes.is_empty());
+    });
+}
