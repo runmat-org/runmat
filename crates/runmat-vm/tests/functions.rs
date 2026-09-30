@@ -5528,14 +5528,24 @@ fn feval_expand_cell_indices_support_2d_end_offsets() {
 fn feval_expand_cell_indices_2d_end_plus_offset_errors() {
     let program = "C = {1, 2; 3, 4}; r = feval(@max, C{end+1,1}, 0);";
     let err = execute_source_result(program).err().unwrap();
-    assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+    assert_eq!(err.identifier(), Some("RunMat:CellSubscriptOutOfBounds"));
 }
 
 #[test]
-fn feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier() {
+fn feval_expand_cell_indices_non_offset_end_expr_executes() {
     let program = "C = {10, 20, 30, 40}; r = feval(@max, C{end/2}, 0);";
-    let err = compile_source(program).expect_err("compile should fail");
-    assert_eq!(err.identifier(), Some("RunMat:MirCellExpandPlanInvalid"));
+    let bytecode = compile_source(program).expect("compile contextual cell end expression");
+    assert!(bytecode.instructions.iter().any(|instruction| matches!(
+        instruction,
+        runmat_vm::Instr::LoadContextualIndexEnd { component: 0 }
+    )));
+    let values = interpret(&bytecode).expect("execute contextual cell end expression");
+    assert!(has_num(&values, 20.0));
+
+    // Contextual expression support does not relax integer selector admission.
+    let fractional = "C = {10, 20, 30}; r = feval(@max, C{end/2}, 0);";
+    let error = execute_source_result(fractional).expect_err("fractional selector must fail");
+    assert_eq!(error.identifier(), Some("RunMat:CellIndexType"));
 }
 
 #[test]
