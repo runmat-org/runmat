@@ -1105,16 +1105,19 @@ impl Compiler {
             MirStmtKind::Expr(value) => {
                 self.pending_place_mutation = None;
                 self.compile_mir_rvalue(value)?;
-                if !matches!(
-                    value,
+                let produces_no_value = match value {
+                    MirRvalue::Call(call) => call.requested_outputs.known_count() == Some(0),
                     MirRvalue::Member {
                         sequence_use: runmat_types::SequenceUse::Discard,
                         ..
-                    } | MirRvalue::DynamicMember {
+                    }
+                    | MirRvalue::DynamicMember {
                         sequence_use: runmat_types::SequenceUse::Discard,
                         ..
-                    }
-                ) {
+                    } => true,
+                    _ => false,
+                };
+                if !produces_no_value {
                     self.emit(Instr::Pop);
                 }
                 Ok(())

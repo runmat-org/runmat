@@ -17,6 +17,10 @@ use std::collections::{HashMap, HashSet};
 #[path = "compile/fusion_admission_tests.rs"]
 mod fusion_admission_tests;
 
+#[cfg(test)]
+#[path = "compile/statement_outputs_tests.rs"]
+mod statement_outputs_tests;
+
 pub fn compile(
     hir: &HirAssembly,
     mir: &MirAssembly,
