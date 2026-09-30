@@ -8,6 +8,8 @@ use crate::builtins::deep_learning::{model::forward_builtin, object};
 use futures::executor::block_on;
 use runmat_builtins::DeepLearningLayerKind as K;
 
+mod parents;
+
 fn layer(kind: K, fields: &[(&str, Value)]) -> Value {
     let mut layer = ObjectInstance::new(kind.class().owned());
     layer
