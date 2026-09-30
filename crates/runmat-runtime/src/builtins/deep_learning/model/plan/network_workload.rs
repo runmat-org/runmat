@@ -5,7 +5,7 @@
 //! shared placement service after this semantic projection.
 
 use runmat_accelerate_api::{
-    AllocationIdentity, GpuHandleProvenance, GpuTensorLayout, ProviderPrecision,
+    allocation::AllocationIdentity, GpuHandleProvenance, GpuTensorLayout, ProviderPrecision,
 };
 use runmat_value::{NumericDType, Value};
 
@@ -78,7 +78,15 @@ impl PayloadFacts {
                 handle
                     .allocation_lease()
                     .validate_live()
-                    .map_err(|error| deep_learning_error(function, error))?;
+                    .map_err(|source| {
+                        crate::build_runtime_error(format!(
+                            "{function}: network payload has a retired resident allocation"
+                        ))
+                        .with_builtin(function)
+                        .with_identifier("RunMat:deepLearning:InvalidInput")
+                        .with_source(source)
+                        .build()
+                    })?;
                 let dtype = match runmat_accelerate_api::handle_precision(handle) {
                     Some(ProviderPrecision::F32) => NumericDType::F32,
                     Some(ProviderPrecision::F64) => NumericDType::F64,

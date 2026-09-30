@@ -118,6 +118,7 @@ pub(super) fn from_plan<'a, 'h: 'a>(
                         "selected dense route is not a matrix",
                     ));
                 };
+                let (batch, input_channels) = (*batch, *input_channels);
                 let network_step = host
                     .steps()
                     .iter()
@@ -155,7 +156,7 @@ pub(super) fn from_plan<'a, 'h: 'a>(
                     *layer_index,
                     ParameterRole::Weights,
                     element_type,
-                    Some(vec![*input_channels, output_channels]),
+                    Some(vec![input_channels, output_channels]),
                     weight_views,
                     &mut parameters,
                 ) else {
@@ -174,14 +175,14 @@ pub(super) fn from_plan<'a, 'h: 'a>(
                 };
                 steps.push(step(
                     Operation::FeedForward(PhysicalStage::Dense {
-                        batch: *batch,
-                        input_channels: *input_channels,
+                        batch,
+                        input_channels,
                         output_channels,
                     }),
                     Bindings::Dense { weights, bias },
                 ));
                 view = view
-                    .with_shape(vec![*batch, output_channels])
+                    .with_shape(vec![batch, output_channels])
                     .with_layout(GpuTensorLayout::Contiguous);
             }
             Stage::Relu | Stage::Elu { .. } => {
