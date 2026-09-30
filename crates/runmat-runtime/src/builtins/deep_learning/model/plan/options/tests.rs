@@ -30,7 +30,7 @@ fn defaults_and_metadata_do_not_require_an_execution_consumer() {
             vec![
                 ("FilterSize", Value::Num(3.0)),
                 ("NumFilters", Value::Num(4.0)),
-                ("Padding", Value::String("same".into())),
+                ("Padding", Value::Num(0.0)),
                 ("Stride", Value::Num(1.0)),
             ],
         ),
@@ -53,6 +53,20 @@ fn defaults_and_metadata_do_not_require_an_execution_consumer() {
         .iter()
         .all(|requirement| requirement.status != OptionRequirementStatus::NeedsConsumer));
     plan.require_consumed("forward", |_| false).unwrap();
+}
+
+#[test]
+fn convolution_same_padding_is_not_misclassified_as_the_default() {
+    let layers = [layer(
+        CONVOLUTION_1D_LAYER_CLASS,
+        vec![("Padding", Value::String("same".into()))],
+    )];
+    let plan = LayerOperationalPlan::inspect(&layers, "forward").unwrap();
+    assert!(plan.require_consumed("forward", |_| false).is_err());
+    plan.require_consumed("forward", |requirement| {
+        requirement.option == DeepLearningLayerOption::Padding
+    })
+    .unwrap();
 }
 
 #[test]
@@ -133,7 +147,7 @@ fn explicit_nondefault_normalization_control_remains_a_requirement() {
 }
 
 #[test]
-fn callable_normalization_is_retained_but_never_invoked_during_inspection() {
+fn callable_normalization_requires_a_consumer_without_invocation_during_inspection() {
     let layers = [layer(
         FEATURE_INPUT_LAYER_CLASS,
         vec![
@@ -150,8 +164,6 @@ fn callable_normalization_is_retained_but_never_invoked_during_inspection() {
         .iter()
         .find(|requirement| requirement.option == DeepLearningLayerOption::Normalization)
         .unwrap();
-    assert!(requirement.has_callback);
     assert_eq!(requirement.status, OptionRequirementStatus::NeedsConsumer);
-    assert!(matches!(requirement.value, Value::FunctionHandle(_)));
     assert!(plan.require_consumed("forward", |_| false).is_err());
 }

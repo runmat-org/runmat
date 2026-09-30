@@ -10,8 +10,8 @@ use super::geometry::HostNetworkPlan;
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 use crate::builtins::deep_learning::model::{
     execution::host::network::{self, HostExecutionResult, HostStep, HostValue},
-    parameters::{ParameterRole, ParameterView},
-    state::{StateRole, StateView},
+    parameters::ParameterRole,
+    state::StateRole,
 };
 use crate::builtins::deep_learning::{deep_learning_error, DLARRAY_CLASS};
 use crate::BuiltinResult;
@@ -110,14 +110,6 @@ impl<'a> HostNetworkPlan<'a> {
 }
 
 impl PreparedHostNetwork<'_> {
-    pub(in crate::builtins::deep_learning) fn parameter_rows(&self) -> &[ParameterView<'_>] {
-        &self.plan.parameters
-    }
-
-    pub(in crate::builtins::deep_learning) fn state_rows(&self) -> &[StateView<'_>] {
-        &self.plan.state
-    }
-
     pub(in crate::builtins::deep_learning) fn output_axes(&self) -> &AxisPlan {
         &self.plan.output_axes
     }

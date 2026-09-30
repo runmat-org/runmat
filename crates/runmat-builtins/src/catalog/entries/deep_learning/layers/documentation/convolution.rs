@@ -9,5 +9,5 @@ layer_documentation!(
     "layer = convolution1dLayer(3, 16, 'Padding', 'causal', 'Name', 'conv'); fprintf('%g\\n', layer.NumFilters);",
     "16",
     "assert(layer.FilterSize == 3); assert(layer.NumFilters == 16); assert(strcmp(layer.Padding, 'causal'));",
-    "`FilterSize` and `NumFilters` are required positive integers. `Stride` defaults to one, `Padding` to `same`, and both can be overridden by name-value properties."
+    "`FilterSize` and `NumFilters` are required positive integers. `Stride` defaults to one and `Padding` to zero on both sides; both can be overridden by name-value properties."
 );

@@ -85,7 +85,7 @@ pub(super) fn decode(
             let stride = positive(layer, kind, O::Stride, 1, function)?;
             let dilation = positive(layer, kind, O::DilationFactor, 1, function)?;
             let padding = match value(layer, kind, O::Padding) {
-                None => conv::Padding::Same,
+                None => conv::Padding::Valid,
                 Some(value)
                     if scalar_text(value, function)
                         .is_ok_and(|name| name.eq_ignore_ascii_case("same")) =>
@@ -101,6 +101,7 @@ pub(super) fn decode(
                 Some(value) => {
                     let values = padding_extents(value, function)?;
                     match values.as_slice() {
+                        [0] | [0, 0] => conv::Padding::Valid,
                         [extent] => conv::Padding::Explicit {
                             left: *extent,
                             right: *extent,
@@ -262,4 +263,39 @@ fn padding_extents(value: &Value, function: &'static str) -> BuiltinResult<Vec<u
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::CONVOLUTION_1D_LAYER_CLASS;
+
+    fn convolution(padding: Option<Value>) -> ObjectInstance {
+        let mut layer = ObjectInstance::new(CONVOLUTION_1D_LAYER_CLASS.owned());
+        if let Some(padding) = padding {
+            layer.properties.insert("Padding".into(), padding);
+        }
+        layer
+    }
+
+    fn admitted_padding(layer: &ObjectInstance) -> conv::Padding {
+        let Controls::Convolution(options) = decode(layer, K::Convolution1D, "forward").unwrap()
+        else {
+            panic!("convolution controls expected")
+        };
+        options.padding
+    }
+
+    #[test]
+    fn absent_and_explicit_zero_padding_use_valid_geometry() {
+        assert_eq!(admitted_padding(&convolution(None)), conv::Padding::Valid);
+        assert_eq!(
+            admitted_padding(&convolution(Some(Value::Num(0.0)))),
+            conv::Padding::Valid
+        );
+        assert_eq!(
+            admitted_padding(&convolution(Some(Value::String("same".into())))),
+            conv::Padding::Same
+        );
+    }
 }

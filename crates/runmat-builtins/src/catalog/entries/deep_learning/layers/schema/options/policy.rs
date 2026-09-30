@@ -44,9 +44,8 @@ impl DeepLearningLayerOption {
             (DeepLearningLayerKind::Convolution1D, O::Stride | O::DilationFactor) => {
                 Some(D::Number(1.0))
             }
-            // Preserve the existing RunMat default until the separately
-            // reviewed MATLAB-compatibility decision changes it deliberately.
-            (DeepLearningLayerKind::Convolution1D, O::Padding) => Some(D::Text("same")),
+            // The convolution1dLayer default is zero padding on both sides.
+            (DeepLearningLayerKind::Convolution1D, O::Padding) => Some(D::Number(0.0)),
             (DeepLearningLayerKind::Convolution1D, O::PaddingValue) => Some(D::Number(0.0)),
             (DeepLearningLayerKind::Convolution1D, O::NumChannels) => Some(D::Text("auto")),
             (DeepLearningLayerKind::Lstm | DeepLearningLayerKind::Bilstm, O::OutputMode) => {

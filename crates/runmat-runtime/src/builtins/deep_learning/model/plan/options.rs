@@ -13,9 +13,7 @@ use runmat_builtins::{
 };
 use runmat_value::Value;
 
-use super::super::super::{
-    deep_learning_error, layer_helpers::options::is_callable, logical_scalar, scalar_text,
-};
+use super::super::super::{deep_learning_error, logical_scalar, scalar_text};
 use crate::BuiltinResult;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,23 +23,21 @@ pub(in crate::builtins::deep_learning) enum OptionRequirementStatus {
     NeedsConsumer,
 }
 
-/// The source value remains borrowed so a later typed plan can preserve
-/// callback identity, device ownership, precision, and parameter storage.
-pub(in crate::builtins::deep_learning) struct LayerOptionRequirement<'a> {
+/// Only the admission decision is retained. Execution decodes consumed
+/// values from the canonical layer object after this pre-effect check.
+pub(in crate::builtins::deep_learning) struct LayerOptionRequirement {
     pub layer_index: usize,
     pub kind: DeepLearningLayerKind,
     pub option: DeepLearningLayerOption,
-    pub value: &'a Value,
     pub status: OptionRequirementStatus,
-    pub has_callback: bool,
 }
 
-pub(in crate::builtins::deep_learning) struct LayerOperationalPlan<'a> {
-    requirements: Vec<LayerOptionRequirement<'a>>,
+pub(in crate::builtins::deep_learning) struct LayerOperationalPlan {
+    requirements: Vec<LayerOptionRequirement>,
 }
 
-impl<'a> LayerOperationalPlan<'a> {
-    pub fn inspect(layers: &'a [Value], function: &'static str) -> BuiltinResult<Self> {
+impl LayerOperationalPlan {
+    pub fn inspect(layers: &[Value], function: &'static str) -> BuiltinResult<Self> {
         let mut requirements = Vec::new();
         for (layer_index, value) in layers.iter().enumerate() {
             let Value::Object(layer) = value else {
@@ -98,16 +94,15 @@ impl<'a> LayerOperationalPlan<'a> {
                     layer_index,
                     kind,
                     option,
-                    value,
                     status,
-                    has_callback: is_callable(value),
                 });
             }
         }
         Ok(Self { requirements })
     }
 
-    pub fn requirements(&self) -> &[LayerOptionRequirement<'a>] {
+    #[cfg(test)]
+    pub fn requirements(&self) -> &[LayerOptionRequirement] {
         &self.requirements
     }
 
@@ -117,7 +112,7 @@ impl<'a> LayerOperationalPlan<'a> {
     pub fn require_consumed(
         &self,
         function: &'static str,
-        mut consumed: impl FnMut(&LayerOptionRequirement<'a>) -> bool,
+        mut consumed: impl FnMut(&LayerOptionRequirement) -> bool,
     ) -> BuiltinResult<()> {
         for requirement in &self.requirements {
             if requirement.status == OptionRequirementStatus::NeedsConsumer

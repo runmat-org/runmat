@@ -3,7 +3,8 @@ use runmat_value::{NumericDType, Tensor};
 
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 
-use super::{backward, execute, HostStep, HostValue, StepGradients};
+use super::backward::StepGradients;
+use super::{backward, execute, HostStep, HostValue};
 
 fn axes(labels: &str, shape: &[usize]) -> AxisPlan {
     AxisPlan::new(
