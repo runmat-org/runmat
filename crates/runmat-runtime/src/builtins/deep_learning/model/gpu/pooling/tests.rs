@@ -222,6 +222,10 @@ fn public_forward_and_predict_keep_pooling_resident_with_correct_axes() {
     );
     assert_eq!(forward_data.device_id(), input.device_id());
     assert_eq!(
+        runmat_accelerate_api::handle_precision(forward_data),
+        runmat_accelerate_api::handle_precision(&input)
+    );
+    assert_eq!(
         handle_provenance(forward_data),
         Some(GpuHandleProvenance::Explicit)
     );
@@ -243,6 +247,10 @@ fn public_forward_and_predict_keep_pooling_resident_with_correct_axes() {
     assert_eq!(predicted_data.shape(), &[3, 2]);
     assert_eq!(predicted_data.device_id(), input.device_id());
     assert_eq!(
+        runmat_accelerate_api::handle_precision(predicted_data),
+        runmat_accelerate_api::handle_precision(&input)
+    );
+    assert_eq!(
         handle_provenance(predicted_data),
         Some(GpuHandleProvenance::Explicit)
     );
@@ -251,6 +259,8 @@ fn public_forward_and_predict_keep_pooling_resident_with_correct_axes() {
 
     let forward_values = block_on(provider.download(forward_data)).unwrap();
     let predicted_values = block_on(provider.download(predicted_data)).unwrap();
+    assert_eq!(forward_values.data.len(), 6);
+    assert_eq!(predicted_values.data.len(), 6);
     let tolerance = if provider.precision() == ProviderPrecision::F32 {
         2e-5
     } else {
