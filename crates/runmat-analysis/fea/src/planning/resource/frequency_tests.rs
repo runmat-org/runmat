@@ -425,8 +425,10 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
     let request = FieldRecoveryRequest::new(
         entry_request.step(),
         FieldRecoverySource::StructuralFrequencyEntry(entry.identity()),
-        topology.identity,
-        crate::execution::FieldRecoveryPlan::resolve(
+        crate::execution::FieldTopologyIdentity::Structural {
+            topology: topology.identity,
+        },
+        crate::execution::FieldRecoveryPlan::resolve_structural(
             workload.procedure_step().unwrap(),
             topology,
             constraints.groups.len(),
@@ -522,7 +524,9 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
     let substituted = FieldRecoveryRequest::new(
         entry_request.step(),
         FieldRecoverySource::StructuralFrequencyEntry(other_entry.identity()),
-        topology.identity,
+        crate::execution::FieldTopologyIdentity::Structural {
+            topology: topology.identity,
+        },
         request.plan.clone(),
     )
     .unwrap();

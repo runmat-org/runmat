@@ -10,7 +10,7 @@ fn fixture() -> (RecoveredFieldArtifactEntry, Vec<RecoveredFieldPartition>) {
         "temperature",
         ObservationQuantity::Temperature,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )

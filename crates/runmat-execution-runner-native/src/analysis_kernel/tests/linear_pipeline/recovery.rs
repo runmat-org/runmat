@@ -8,8 +8,10 @@ pub(super) fn execute(solved: &SolvedPipeline) -> RecoveredPipeline {
     let request = FieldRecoveryRequest::new(
         step,
         FieldRecoverySource::SolverResult(solved.source_result),
-        solved.constraint_plan.topology,
-        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
+        runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
+            topology: solved.constraint_plan.topology,
+        },
+        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve_structural(
             solved.solve.procedure_step().unwrap(),
             topology,
             solved.constraint_plan.groups.len(),

@@ -40,7 +40,7 @@ fn portable_partition_event_requires_the_exact_completed_result() {
         "temperature.event",
         ObservationQuantity::Temperature,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -113,7 +113,7 @@ fn portable_partition_event_requires_the_exact_completed_result() {
     let recovery = FieldRecoveryRequest::new(
         producer,
         FieldRecoverySource::SolverResult(source_result),
-        topology,
+        crate::execution::FieldTopologyIdentity::Structural { topology },
         crate::execution::FieldRecoveryPlan::default(),
     )
     .unwrap();
@@ -122,9 +122,9 @@ fn portable_partition_event_requires_the_exact_completed_result() {
         FieldRecoverySource::SolverResult(source_result),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: projection.elements.len() * 4,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

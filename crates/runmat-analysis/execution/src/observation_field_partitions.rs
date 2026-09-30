@@ -143,7 +143,7 @@ mod tests {
             "large.temperature",
             ObservationQuantity::Temperature,
             FieldLocation::Node,
-            RecoveredFieldEntityDomain::StructuralNodes,
+            RecoveredFieldEntityDomain::Nodes,
             ObservationValueShape::Scalar,
             RecoveredFieldNumericRepresentation::Real,
         )

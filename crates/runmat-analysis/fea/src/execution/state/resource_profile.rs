@@ -3,6 +3,7 @@
 //! These projections never construct a semantic state or clone its numerical arrays. They
 //! bound canonical output construction, not the complete worker working set. Callers must
 //! separately account source decoding, retained transport, typed state storage and validation.
+use runmat_analysis_core::AnalysisField;
 use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};

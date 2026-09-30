@@ -3,8 +3,8 @@ use super::*;
 use crate::{
     execution::{
         CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
-        FieldRecoveryPlan, FieldRecoveryRequest, FieldRecoverySource, SequenceIdentity,
-        SolverResultIdentity, StepIdentity, StructuralFrequencyEntryRequest,
+        FieldRecoveryPlan, FieldRecoveryRequest, FieldRecoverySource, FieldTopologyIdentity,
+        SequenceIdentity, SolverResultIdentity, StepIdentity, StructuralFrequencyEntryRequest,
         StructuralFrequencyEntryResult, StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
         StructuralFrequencyWorkloadInput,
     },
@@ -133,9 +133,15 @@ fn damped_modal_cold_state_entry_and_recovered_field_preserve_analytic_phase() {
         let recovery = FieldRecoveryRequest::new(
             prepared.step,
             FieldRecoverySource::StructuralFrequencyEntry(imported.identity()),
-            topology.identity,
-            FieldRecoveryPlan::resolve(cold_workload.procedure_step().unwrap(), topology, 0)
-                .unwrap(),
+            FieldTopologyIdentity::Structural {
+                topology: topology.identity,
+            },
+            FieldRecoveryPlan::resolve_structural(
+                cold_workload.procedure_step().unwrap(),
+                topology,
+                0,
+            )
+            .unwrap(),
         )
         .unwrap();
         let fields =

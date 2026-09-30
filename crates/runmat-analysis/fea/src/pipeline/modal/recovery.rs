@@ -278,7 +278,7 @@ pub(super) fn recover_modal_core(
                 quantity: runmat_analysis_core::ObservationQuantity::Displacement,
                 source_field_id: MODAL_DISPLACEMENT_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::Nodes,
                 value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -288,7 +288,7 @@ pub(super) fn recover_modal_core(
                 quantity: runmat_analysis_core::ObservationQuantity::Rotation,
                 source_field_id: MODAL_ROTATION_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::Nodes,
                 value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -300,7 +300,7 @@ pub(super) fn recover_modal_core(
                 quantity: runmat_analysis_core::ObservationQuantity::Strain,
                 source_field_id: MODAL_STRAIN_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::VolumeElements,
                 value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -312,7 +312,7 @@ pub(super) fn recover_modal_core(
                 quantity: runmat_analysis_core::ObservationQuantity::Stress,
                 source_field_id: MODAL_STRESS_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::VolumeElements,
                 value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -324,7 +324,7 @@ pub(super) fn recover_modal_core(
                 quantity: runmat_analysis_core::ObservationQuantity::StrainEnergy,
                 source_field_id: MODAL_STRAIN_ENERGY_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::VolumeElements,
                 value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,

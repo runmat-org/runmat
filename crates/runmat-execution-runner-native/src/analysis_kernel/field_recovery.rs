@@ -43,7 +43,11 @@ pub(super) fn execute_field_recovery(
         .transpose()?;
     let topology = StructuralRecoveredFieldTopology::derive(&workload.model, mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if topology.identity != request.topology {
+    if request.topology
+        != (runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
+            topology: topology.identity,
+        })
+    {
         return Err(AnalysisBridgeError::Identity(
             "field recovery topology differs from its admitted identity",
         ));
@@ -76,11 +80,12 @@ pub(super) fn execute_field_recovery(
                 "field recovery constraint result differs from the canonical executed plan",
             )
         })?;
-    let expected_recovery_plan = runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
-        workload.procedure_step()?,
-        topology,
-        constraint_plan.groups.len(),
-    )?;
+    let expected_recovery_plan =
+        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve_structural(
+            workload.procedure_step()?,
+            topology,
+            constraint_plan.groups.len(),
+        )?;
     if request.plan != expected_recovery_plan {
         return Err(AnalysisBridgeError::Identity(
             "field recovery plan differs from the admitted workload and topology",

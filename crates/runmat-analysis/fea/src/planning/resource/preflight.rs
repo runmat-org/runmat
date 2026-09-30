@@ -158,7 +158,7 @@ pub(crate) fn build_static_resource_plan(
     let recovery_topology = StructuralRecoveredFieldTopology::derive(model, mesh)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let field_recovery = FieldRecoveryResourceFacts::from_plan(
-        &FieldRecoveryPlan::resolve(step, recovery_topology, constraints.groups.len())
+        &FieldRecoveryPlan::resolve_structural(step, recovery_topology, constraints.groups.len())
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
     )?;
     let dofs = facts.sparse.rows.0;

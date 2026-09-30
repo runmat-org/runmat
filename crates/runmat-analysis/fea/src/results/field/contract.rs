@@ -9,6 +9,7 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::entity::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain};
 use crate::execution::{FieldRecoveryRequestIdentity, FieldRecoverySource};
 
 use super::partition_set::{
@@ -66,18 +67,6 @@ pub enum RecoveredFieldNumericRepresentation {
     ComplexInterleaved,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecoveredFieldEntityDomain {
-    StructuralNodes,
-    SolidElements,
-    SolidIntegrationPoints,
-    BeamElements,
-    ShellElements,
-    Connectors,
-    ConstraintGroups,
-}
-
 /// Physical and numerical provenance of the values in one published field.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -87,47 +76,6 @@ pub enum RecoveredFieldDerivation {
         source_location: FieldLocation,
         recovery: RecoveryPolicy,
     },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecoveredFieldEntityCounts {
-    pub structural_nodes: usize,
-    pub solid_elements: usize,
-    pub solid_integration_points: usize,
-    pub beam_elements: usize,
-    pub shell_elements: usize,
-    pub connectors: usize,
-    pub constraint_groups: usize,
-}
-
-impl RecoveredFieldEntityCounts {
-    pub const fn entity_count(self, domain: RecoveredFieldEntityDomain) -> usize {
-        match domain {
-            RecoveredFieldEntityDomain::StructuralNodes => self.structural_nodes,
-            RecoveredFieldEntityDomain::SolidElements => self.solid_elements,
-            RecoveredFieldEntityDomain::SolidIntegrationPoints => self.solid_integration_points,
-            RecoveredFieldEntityDomain::BeamElements => self.beam_elements,
-            RecoveredFieldEntityDomain::ShellElements => self.shell_elements,
-            RecoveredFieldEntityDomain::Connectors => self.connectors,
-            RecoveredFieldEntityDomain::ConstraintGroups => self.constraint_groups,
-        }
-    }
-
-    pub(super) fn validate(self) -> Result<(), RecoveredFieldError> {
-        if self.structural_nodes == 0
-            || self
-                .solid_elements
-                .checked_add(self.beam_elements)
-                .and_then(|count| count.checked_add(self.shell_elements))
-                .is_none_or(|count| count == 0)
-        {
-            return Err(RecoveredFieldError::InvalidArtifact(
-                "field topology requires structural nodes and at least one element".into(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -358,28 +306,31 @@ impl RecoveredFieldDefinition {
         }
         if !matches!(
             (self.location, self.entity_domain),
-            (
-                FieldLocation::Node,
-                RecoveredFieldEntityDomain::StructuralNodes
-            ) | (
-                FieldLocation::Element,
-                RecoveredFieldEntityDomain::SolidElements
-            ) | (
-                FieldLocation::IntegrationPoint,
-                RecoveredFieldEntityDomain::SolidIntegrationPoints
-            ) | (
-                FieldLocation::Element,
-                RecoveredFieldEntityDomain::BeamElements
-            ) | (
-                FieldLocation::Element,
-                RecoveredFieldEntityDomain::ShellElements
-            ) | (
-                FieldLocation::Connector,
-                RecoveredFieldEntityDomain::Connectors
-            ) | (
-                FieldLocation::Constraint,
-                RecoveredFieldEntityDomain::ConstraintGroups
-            )
+            (FieldLocation::Node, RecoveredFieldEntityDomain::Nodes)
+                | (
+                    FieldLocation::Element,
+                    RecoveredFieldEntityDomain::VolumeElements
+                )
+                | (
+                    FieldLocation::IntegrationPoint,
+                    RecoveredFieldEntityDomain::VolumeIntegrationPoints
+                )
+                | (
+                    FieldLocation::Element,
+                    RecoveredFieldEntityDomain::BeamElements
+                )
+                | (
+                    FieldLocation::Element,
+                    RecoveredFieldEntityDomain::ShellElements
+                )
+                | (
+                    FieldLocation::Connector,
+                    RecoveredFieldEntityDomain::Connectors
+                )
+                | (
+                    FieldLocation::Constraint,
+                    RecoveredFieldEntityDomain::ConstraintGroups
+                )
         ) {
             return Err(RecoveredFieldError::CatalogUnsupportedLocation);
         }

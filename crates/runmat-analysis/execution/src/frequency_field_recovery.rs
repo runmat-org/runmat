@@ -149,7 +149,7 @@ pub fn prepare_structural_frequency_field_recovery(
     let constraints =
         CanonicalStructuralConstraintPlan::compile_for_model(workload.model(), Some(&mesh))
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let recovery_plan = runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
+    let recovery_plan = runmat_analysis_fea::execution::FieldRecoveryPlan::resolve_structural(
         workload.procedure_step()?,
         topology,
         constraints.groups.len(),
@@ -157,7 +157,9 @@ pub fn prepare_structural_frequency_field_recovery(
     let request = FieldRecoveryRequest::new(
         prepared.step,
         FieldRecoverySource::StructuralFrequencyEntry(result.identity()),
-        topology.identity,
+        runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
+            topology: topology.identity,
+        },
         recovery_plan,
     )?;
     let request_objects = prepare_analysis_objects(

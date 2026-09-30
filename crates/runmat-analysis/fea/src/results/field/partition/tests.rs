@@ -26,7 +26,7 @@ fn rejects_rehashed_partitions_with_incorrect_value_counts() {
                 "partition.values",
                 quantity,
                 FieldLocation::Element,
-                RecoveredFieldEntityDomain::SolidElements,
+                RecoveredFieldEntityDomain::VolumeElements,
                 shape.clone(),
                 representation,
             )

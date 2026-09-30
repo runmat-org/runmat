@@ -34,7 +34,7 @@ fn structural_selection_preserves_catalog_order_and_all_required_samples() {
     let request = FieldRecoveryRequest::new(
         producer,
         FieldRecoverySource::SolverResult(result),
-        topology,
+        crate::execution::FieldTopologyIdentity::Structural { topology },
         FieldRecoveryPlan::default(),
     )
     .unwrap();
@@ -43,9 +43,9 @@ fn structural_selection_preserves_catalog_order_and_all_required_samples() {
         request.source,
         topology.discretization_digest(),
         RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: projection.elements.len() * 4,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

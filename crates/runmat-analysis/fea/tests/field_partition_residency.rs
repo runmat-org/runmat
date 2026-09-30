@@ -16,7 +16,7 @@ fn measure(blocks: usize) -> (u64, u64) {
         "temperature.residency",
         ObservationQuantity::Temperature,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )

@@ -24,7 +24,7 @@ fn definitions() -> [RecoveredFieldDefinition; 3] {
             id,
             quantity,
             FieldLocation::Element,
-            RecoveredFieldEntityDomain::SolidElements,
+            RecoveredFieldEntityDomain::VolumeElements,
             shape,
             RecoveredFieldNumericRepresentation::Real,
         )

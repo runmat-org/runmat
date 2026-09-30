@@ -59,8 +59,8 @@ pub struct ComplexStructuralFieldLayout {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ComplexStructuralFieldCardinality {
-    pub structural_nodes: usize,
-    pub solid_elements: usize,
+    pub nodes: usize,
+    pub volume_elements: usize,
     pub beam_elements: usize,
     pub shell_elements: usize,
     pub connectors: usize,
@@ -72,9 +72,9 @@ pub fn complex_structural_field_layout(
     cardinality: ComplexStructuralFieldCardinality,
 ) -> Result<ComplexStructuralFieldLayout, ComplexStructuralFieldRecoveryError> {
     let entity_counts = RecoveredFieldEntityCounts {
-        structural_nodes: cardinality.structural_nodes,
-        solid_elements: cardinality.solid_elements,
-        solid_integration_points: cardinality.solid_elements.saturating_mul(4),
+        nodes: cardinality.nodes,
+        volume_elements: cardinality.volume_elements,
+        volume_integration_points: cardinality.volume_elements.saturating_mul(4),
         beam_elements: cardinality.beam_elements,
         shell_elements: cardinality.shell_elements,
         connectors: cardinality.connectors,
@@ -170,8 +170,8 @@ pub fn recover_complex_structural_result_fields(
     state: ComplexStructuralFieldState<'_>,
 ) -> Result<Vec<RecoveredField>, ComplexStructuralFieldRecoveryError> {
     let layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
-        structural_nodes: summary.structural_dof_layout.node_count(),
-        solid_elements: summary.structural_solid_recovery.len(),
+        nodes: summary.structural_dof_layout.node_count(),
+        volume_elements: summary.structural_solid_recovery.len(),
         beam_elements: summary.structural_beam_recovery.len(),
         shell_elements: summary.structural_shell_recovery.len(),
         connectors: 0,

@@ -97,7 +97,10 @@ impl ObservationFieldCatalog {
             crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(model, mesh)
                 .map_err(invalid)?;
         if producer != recovery_request.producer
-            || recovery_request.topology != constraints.topology
+            || recovery_request.topology
+                != (crate::execution::FieldTopologyIdentity::Structural {
+                    topology: constraints.topology,
+                })
             || manifest.topology_digest != constraints.topology.discretization_digest()
         {
             return Err(invalid(

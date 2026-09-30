@@ -190,7 +190,11 @@ fn admit_structural(
         .transpose()?;
     let topology = StructuralRecoveredFieldTopology::derive(workload.model(), mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if topology.identity != source_request.topology {
+    if source_request.topology
+        != (runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
+            topology: topology.identity,
+        })
+    {
         return Err(AnalysisBridgeError::Identity(
             "observation topology differs from its field-recovery request",
         ));

@@ -86,7 +86,7 @@ pub(super) fn resolve_field_target(
                 ) => {
                     let parents = matching_elements(
                         region,
-                        RecoveredFieldEntityDomain::SolidElements,
+                        RecoveredFieldEntityDomain::VolumeElements,
                         topology,
                     )?;
                     enforce_cardinality(region.cardinality, parents.clone().count(), spec)?;
@@ -101,7 +101,7 @@ pub(super) fn resolve_field_target(
                     let projection = solid_projection(topology, spec)?;
                     let elements = matching_elements(
                         region,
-                        RecoveredFieldEntityDomain::SolidElements,
+                        RecoveredFieldEntityDomain::VolumeElements,
                         topology,
                     )?;
                     enforce_cardinality(region.cardinality, elements.clone().count(), spec)?;

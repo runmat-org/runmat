@@ -1,7 +1,7 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
-use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
+use super::FieldTopologyIdentity;
 
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryPlan,
@@ -37,7 +37,7 @@ pub struct FieldRecoveryRequest {
     identity: FieldRecoveryRequestIdentity,
     pub producer: StepIdentity,
     pub source: FieldRecoverySource,
-    pub topology: CanonicalStructuralTopologyIdentity,
+    pub topology: FieldTopologyIdentity,
     pub plan: FieldRecoveryPlan,
 }
 
@@ -48,7 +48,7 @@ struct FieldRecoveryRequestWire {
     identity: FieldRecoveryRequestIdentity,
     producer: StepIdentity,
     source: FieldRecoverySource,
-    topology: CanonicalStructuralTopologyIdentity,
+    topology: FieldTopologyIdentity,
     plan: FieldRecoveryPlan,
 }
 
@@ -73,7 +73,7 @@ impl FieldRecoveryRequest {
     pub fn new(
         producer: StepIdentity,
         source: FieldRecoverySource,
-        topology: CanonicalStructuralTopologyIdentity,
+        topology: FieldTopologyIdentity,
         plan: FieldRecoveryPlan,
     ) -> AnalysisExecutionResult<Self> {
         let request = Self {
@@ -163,14 +163,14 @@ mod tests {
         let solver_request = FieldRecoveryRequest::new(
             step,
             FieldRecoverySource::SolverResult(solver),
-            topology,
+            crate::execution::FieldTopologyIdentity::Structural { topology },
             FieldRecoveryPlan::default(),
         )
         .unwrap();
         let frequency_request = FieldRecoveryRequest::new(
             step,
             FieldRecoverySource::StructuralFrequencyEntry(entry),
-            topology,
+            crate::execution::FieldTopologyIdentity::Structural { topology },
             FieldRecoveryPlan::default(),
         )
         .unwrap();
@@ -202,7 +202,7 @@ mod tests {
             output_location: FieldLocation::Node,
             recovery: RecoveryPolicy::VolumeWeightedAverage,
             value_shape: ObservationValueShape::Scalar,
-            entity_domain: RecoveredFieldEntityDomain::StructuralNodes,
+            entity_domain: RecoveredFieldEntityDomain::Nodes,
             cost: FieldRecoveryCost {
                 source_entity_count: 2,
                 output_entity_count: 7,
@@ -213,7 +213,7 @@ mod tests {
         let planned = FieldRecoveryRequest::new(
             step,
             FieldRecoverySource::SolverResult(solver),
-            topology,
+            crate::execution::FieldTopologyIdentity::Structural { topology },
             FieldRecoveryPlan {
                 requirements: vec![requirement],
             },
@@ -222,7 +222,7 @@ mod tests {
         let unplanned = FieldRecoveryRequest::new(
             step,
             FieldRecoverySource::SolverResult(solver),
-            topology,
+            crate::execution::FieldTopologyIdentity::Structural { topology },
             FieldRecoveryPlan::default(),
         )
         .unwrap();

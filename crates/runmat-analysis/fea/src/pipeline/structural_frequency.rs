@@ -567,7 +567,7 @@ fn recover_structural_frequency_entry_fields_with_state(
         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
     if request.producer != prepared.step
         || request.source != FieldRecoverySource::StructuralFrequencyEntry(result.identity())
-        || request.topology != topology.identity
+        || request.topology.require_structural()? != topology.identity
         || result.request().scope() != &prepared.scope
     {
         return Err(AnalysisExecutionError::Identity(
@@ -579,7 +579,7 @@ fn recover_structural_frequency_entry_fields_with_state(
         Some(solver_mesh),
     )
     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-    let expected_recovery_plan = crate::execution::FieldRecoveryPlan::resolve(
+    let expected_recovery_plan = crate::execution::FieldRecoveryPlan::resolve_structural(
         workload.procedure_step()?,
         topology,
         constraint_plan.groups.len(),
@@ -657,8 +657,8 @@ fn recover_structural_frequency_entry_fields_with_state(
         fields.push(field);
     }
     let layout = complex_structural_field_layout(ComplexStructuralFieldCardinality {
-        structural_nodes: assembly.real.structural_dof_layout.node_count(),
-        solid_elements: assembly.real.structural_solid_recovery.len(),
+        nodes: assembly.real.structural_dof_layout.node_count(),
+        volume_elements: assembly.real.structural_solid_recovery.len(),
         beam_elements: assembly.real.structural_beam_recovery.len(),
         shell_elements: assembly.real.structural_shell_recovery.len(),
         connectors: connector_count,

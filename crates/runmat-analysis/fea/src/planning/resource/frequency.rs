@@ -55,8 +55,8 @@ fn structural_frequency_recovery_layout(
 ) -> Result<crate::post::ComplexStructuralFieldLayout, ResourcePlanningError> {
     let facts = derive_structural_resource_facts(workload.model(), Some(mesh), constraints)?;
     complex_structural_field_layout(ComplexStructuralFieldCardinality {
-        structural_nodes: facts.recovery_node_count,
-        solid_elements: facts.recovery_solid_element_count,
+        nodes: facts.recovery_node_count,
+        volume_elements: facts.recovery_solid_element_count,
         beam_elements: facts.recovery_beam_element_count,
         shell_elements: facts.recovery_shell_element_count,
         connectors: workload.model().connectors.len(),

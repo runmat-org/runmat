@@ -74,7 +74,7 @@ fn high_rate_history_checkpoints_write_only_new_chunks_and_resume_exactly() {
         "displacement.high_rate",
         runmat_analysis_core::ObservationQuantity::Displacement,
         runmat_analysis_core::FieldLocation::Node,
-        runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+        runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::Nodes,
         runmat_analysis_core::ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )

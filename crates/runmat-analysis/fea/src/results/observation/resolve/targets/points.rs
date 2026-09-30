@@ -8,7 +8,7 @@ pub(super) fn resolve_interpolated_points(
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     if spec.source_location != FieldLocation::Node
         || spec.output_location != FieldLocation::Point
-        || field_domain != RecoveredFieldEntityDomain::StructuralNodes
+        || field_domain != RecoveredFieldEntityDomain::Nodes
     {
         return Err(target_error(
             spec,

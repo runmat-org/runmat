@@ -29,8 +29,8 @@ fn solved_temperature_binding(
     let request = FieldRecoveryRequest::new(
         producer.producer,
         FieldRecoverySource::SolverResult(source),
-        crate::constraints::CanonicalStructuralTopologyIdentity::Explicit {
-            structural_topology_digest: producer.topology_digest,
+        crate::execution::FieldTopologyIdentity::VolumeMesh {
+            mesh_digest: mesh.canonical_digest,
         },
         FieldRecoveryPlan::default(),
     )
@@ -46,9 +46,9 @@ fn solved_temperature_binding(
         FieldRecoverySource::SolverResult(source),
         producer.topology_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: mesh.topology.nodes.len(),
-            solid_elements: mesh.topology.volume_elements.len(),
-            solid_integration_points: 0,
+            nodes: mesh.topology.nodes.len(),
+            volume_elements: mesh.topology.volume_elements.len(),
+            volume_integration_points: 0,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

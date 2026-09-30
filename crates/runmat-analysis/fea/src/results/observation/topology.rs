@@ -33,8 +33,8 @@ pub(crate) struct StructuralObservationTopology {
     pub identity: CanonicalStructuralTopologyIdentity,
     topology_digest: Digest,
     pub nodes: Vec<StructuralObservationNode>,
-    pub solid_elements: Vec<StructuralObservationElement>,
-    pub solid_integration_points: Vec<StructuralObservationElement>,
+    pub volume_elements: Vec<StructuralObservationElement>,
+    pub volume_integration_points: Vec<StructuralObservationElement>,
     pub beam_elements: Vec<StructuralObservationElement>,
     pub shell_elements: Vec<StructuralObservationElement>,
     pub solid_projection: Option<AnalysisProjection>,
@@ -49,7 +49,7 @@ impl StructuralObservationTopology {
             .enumerate()
             .map(|(index, node)| (node.node_id, vec![index]))
             .collect();
-        let solid_integration_points = integration_point_elements(projection);
+        let volume_integration_points = integration_point_elements(projection);
         Self {
             identity: CanonicalStructuralTopologyIdentity::Solid {
                 mesh_digest: projection.mesh_digest,
@@ -63,7 +63,7 @@ impl StructuralObservationTopology {
                     coordinates_m: node.coordinates_m,
                 })
                 .collect(),
-            solid_elements: projection
+            volume_elements: projection
                 .elements
                 .iter()
                 .map(|element| StructuralObservationElement {
@@ -72,7 +72,7 @@ impl StructuralObservationTopology {
                     centroid_m: element.centroid_m,
                 })
                 .collect(),
-            solid_integration_points,
+            volume_integration_points,
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             solid_projection: Some(projection.clone()),
@@ -82,9 +82,9 @@ impl StructuralObservationTopology {
 
     pub(crate) fn entity_counts(&self) -> RecoveredFieldEntityCounts {
         RecoveredFieldEntityCounts {
-            structural_nodes: self.nodes.len(),
-            solid_elements: self.solid_elements.len(),
-            solid_integration_points: self.solid_integration_points.len(),
+            nodes: self.nodes.len(),
+            volume_elements: self.volume_elements.len(),
+            volume_integration_points: self.volume_integration_points.len(),
             beam_elements: self.beam_elements.len(),
             shell_elements: self.shell_elements.len(),
             connectors: 0,
@@ -163,7 +163,7 @@ impl StructuralObservationTopology {
                     coordinates_m: node.coordinates_m,
                 })
                 .collect(),
-            solid_elements: projection
+            volume_elements: projection
                 .as_ref()
                 .map(|projection| {
                     projection
@@ -177,7 +177,7 @@ impl StructuralObservationTopology {
                         .collect()
                 })
                 .unwrap_or_default(),
-            solid_integration_points: projection
+            volume_integration_points: projection
                 .as_ref()
                 .map(integration_point_elements)
                 .unwrap_or_default(),
@@ -246,9 +246,9 @@ impl StructuralObservationTopology {
         domain: RecoveredFieldEntityDomain,
     ) -> Result<&[StructuralObservationElement], ObservationError> {
         match domain {
-            RecoveredFieldEntityDomain::SolidElements => Ok(&self.solid_elements),
-            RecoveredFieldEntityDomain::SolidIntegrationPoints => {
-                Ok(&self.solid_integration_points)
+            RecoveredFieldEntityDomain::VolumeElements => Ok(&self.volume_elements),
+            RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
+                Ok(&self.volume_integration_points)
             }
             RecoveredFieldEntityDomain::BeamElements => Ok(&self.beam_elements),
             RecoveredFieldEntityDomain::ShellElements => Ok(&self.shell_elements),
@@ -258,7 +258,7 @@ impl StructuralObservationTopology {
             RecoveredFieldEntityDomain::ConstraintGroups => Err(ObservationError::Unsupported(
                 "constraint groups are resolved by the canonical constraint plan",
             )),
-            RecoveredFieldEntityDomain::StructuralNodes => Err(ObservationError::Invalid(
+            RecoveredFieldEntityDomain::Nodes => Err(ObservationError::Invalid(
                 "nodal field domain cannot resolve element topology".into(),
             )),
         }

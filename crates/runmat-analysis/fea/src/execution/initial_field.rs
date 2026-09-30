@@ -122,7 +122,7 @@ impl InitialFieldBinding {
         }
         if topology_digest != self.artifact.topology_digest
             || node_count == 0
-            || node_count != self.artifact.entity_counts.structural_nodes
+            || node_count != self.artifact.entity_counts.nodes
         {
             return Err(invalid("consumer topology or complete node count differs"));
         }
@@ -130,7 +130,7 @@ impl InitialFieldBinding {
         let definition = field.definition();
         if definition.quantity() != quantity
             || definition.location() != FieldLocation::Node
-            || definition.entity_domain() != RecoveredFieldEntityDomain::StructuralNodes
+            || definition.entity_domain() != RecoveredFieldEntityDomain::Nodes
             || !definition.value_shape().is_storage_equivalent_to(&shape)
             || definition.numeric_representation() != RecoveredFieldNumericRepresentation::Real
         {

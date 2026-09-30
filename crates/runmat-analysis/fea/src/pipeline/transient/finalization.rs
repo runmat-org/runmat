@@ -316,7 +316,7 @@ pub(super) fn finish_transient_run(
                 quantity: runmat_analysis_core::ObservationQuantity::Displacement,
                 source_field_id: TRANSIENT_DISPLACEMENT_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::Nodes,
                 value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -326,7 +326,7 @@ pub(super) fn finish_transient_run(
                 quantity: runmat_analysis_core::ObservationQuantity::Velocity,
                 source_field_id: TRANSIENT_VELOCITY_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::Nodes,
                 value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -336,7 +336,7 @@ pub(super) fn finish_transient_run(
                 quantity: runmat_analysis_core::ObservationQuantity::Acceleration,
                 source_field_id: TRANSIENT_ACCELERATION_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::Nodes,
                 value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -348,7 +348,7 @@ pub(super) fn finish_transient_run(
                 quantity: runmat_analysis_core::ObservationQuantity::Rotation,
                 source_field_id: TRANSIENT_ROTATION_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Node,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::Nodes,
                 value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -360,7 +360,7 @@ pub(super) fn finish_transient_run(
                 quantity: runmat_analysis_core::ObservationQuantity::Strain,
                 source_field_id: TRANSIENT_STRAIN_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::VolumeElements,
                 value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -372,7 +372,7 @@ pub(super) fn finish_transient_run(
                 quantity: runmat_analysis_core::ObservationQuantity::Stress,
                 source_field_id: TRANSIENT_STRESS_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::VolumeElements,
                 value_shape: runmat_analysis_core::ObservationValueShape::SymmetricTensor3,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -384,7 +384,7 @@ pub(super) fn finish_transient_run(
                 quantity: runmat_analysis_core::ObservationQuantity::StrainEnergy,
                 source_field_id: TRANSIENT_STRAIN_ENERGY_DENSITY_HISTORY_SOURCE,
                 location: runmat_analysis_core::FieldLocation::Element,
-                entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
+                entity_domain: crate::results::field::RecoveredFieldEntityDomain::VolumeElements,
                 value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
                 numeric_representation:
                     crate::results::field::RecoveredFieldNumericRepresentation::Real,

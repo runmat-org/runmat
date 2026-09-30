@@ -16,10 +16,12 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
+mod fields;
+pub(in crate::execution) use fields::native_acoustic_field_plan;
 mod result;
 pub use result::AcousticHarmonicSolverResult;
 #[cfg(test)]
-mod tests;
+pub(in crate::execution) mod tests;
 const PREFIX: &[u8] = b"runmat-acoustic-harmonic-workload/v1\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 

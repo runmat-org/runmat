@@ -29,9 +29,9 @@ impl RecoveredFieldCatalog {
         if artifact.topology_digest != projection.projection_digest
             || artifact.entity_counts
                 != (RecoveredFieldEntityCounts {
-                    structural_nodes: projection.nodes.len(),
-                    solid_elements: projection.elements.len(),
-                    solid_integration_points: projection.elements.len() * 4,
+                    nodes: projection.nodes.len(),
+                    volume_elements: projection.elements.len(),
+                    volume_integration_points: projection.elements.len() * 4,
                     beam_elements: 0,
                     shell_elements: 0,
                     connectors: 0,
@@ -50,9 +50,9 @@ impl RecoveredFieldCatalog {
         Self::new_for_topology(
             projection.projection_digest,
             RecoveredFieldEntityCounts {
-                structural_nodes: projection.nodes.len(),
-                solid_elements: projection.elements.len(),
-                solid_integration_points: projection.elements.len() * 4,
+                nodes: projection.nodes.len(),
+                volume_elements: projection.elements.len(),
+                volume_integration_points: projection.elements.len() * 4,
                 beam_elements: 0,
                 shell_elements: 0,
                 connectors: 0,

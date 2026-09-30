@@ -160,7 +160,7 @@ pub fn prepare_structural_field_recovery(
                 "field recovery connector result differs from the authored connector contract",
             )
         })?;
-    let recovery_plan = runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
+    let recovery_plan = runmat_analysis_fea::execution::FieldRecoveryPlan::resolve_structural(
         workload.procedure_step()?,
         topology,
         constraint_plan.groups.len(),
@@ -168,7 +168,9 @@ pub fn prepare_structural_field_recovery(
     let request = FieldRecoveryRequest::new(
         preparation.source_host.workload.step,
         FieldRecoverySource::SolverResult(source_result),
-        topology.identity,
+        runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
+            topology: topology.identity,
+        },
         recovery_plan,
     )?;
     let request_bytes = request.canonical_bytes()?;

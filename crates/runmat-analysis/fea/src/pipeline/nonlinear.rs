@@ -415,8 +415,7 @@ pub fn run_nonlinear_with_options(
                     quantity: runmat_analysis_core::ObservationQuantity::Displacement,
                     source_field_id: NONLINEAR_DISPLACEMENT_HISTORY_SOURCE,
                     location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                    entity_domain: crate::results::field::RecoveredFieldEntityDomain::Nodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
                     numeric_representation:
                         crate::results::field::RecoveredFieldNumericRepresentation::Real,
@@ -426,8 +425,7 @@ pub fn run_nonlinear_with_options(
                     quantity: runmat_analysis_core::ObservationQuantity::Rotation,
                     source_field_id: NONLINEAR_ROTATION_HISTORY_SOURCE,
                     location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+                    entity_domain: crate::results::field::RecoveredFieldEntityDomain::Nodes,
                     value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
                     numeric_representation:
                         crate::results::field::RecoveredFieldNumericRepresentation::Real,

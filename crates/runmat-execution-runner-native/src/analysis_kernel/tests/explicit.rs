@@ -153,8 +153,10 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
     let recovery_request = FieldRecoveryRequest::new(
         prepared.host.workload.step,
         FieldRecoverySource::SolverResult(source_result),
-        result.constraint_result.topology,
-        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve(
+        runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
+            topology: result.constraint_result.topology,
+        },
+        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve_structural(
             solve.procedure_step().unwrap(),
             StructuralRecoveredFieldTopology::derive(&solve.model, None).unwrap(),
             result.constraint_result.groups.len(),
@@ -196,7 +198,7 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
         recovered.topology_digest,
         result.constraint_result.topology.discretization_digest()
     );
-    assert_eq!(recovered.entity_counts.solid_elements, 0);
+    assert_eq!(recovered.entity_counts.volume_elements, 0);
     assert!(recovered.entity_counts.beam_elements > 0);
 
     let mut substituted_workload = solve.clone();

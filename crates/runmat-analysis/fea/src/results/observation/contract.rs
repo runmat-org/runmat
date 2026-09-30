@@ -105,7 +105,7 @@ pub(super) const fn observation_element_entity(
     identity: StableDigest,
 ) -> ObservationEntity {
     match domain {
-        RecoveredFieldEntityDomain::SolidIntegrationPoints => {
+        RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
             ObservationEntity::IntegrationPoint(identity)
         }
         _ => ObservationEntity::Element(identity),
@@ -965,7 +965,7 @@ fn validate_resolved_observation(
             identities,
         } => {
             if materialized_field_location(&observation.spec) != FieldLocation::Node
-                || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
+                || observation.source_entity_domain != RecoveredFieldEntityDomain::Nodes
                 || (has_spatial_reduction && !spatial_extrema && !has_discrete_reaction_reduction)
                 || indices.len() != identities.len()
                 || indices.is_empty()
@@ -987,9 +987,9 @@ fn validate_resolved_observation(
                 FieldLocation::Element | FieldLocation::IntegrationPoint
             ) || (materialized_field_location(&observation.spec)
                 == FieldLocation::IntegrationPoint)
-                != (*domain == RecoveredFieldEntityDomain::SolidIntegrationPoints)
+                != (*domain == RecoveredFieldEntityDomain::VolumeIntegrationPoints)
                 || observation.source_entity_domain != *domain
-                || *domain == RecoveredFieldEntityDomain::StructuralNodes
+                || *domain == RecoveredFieldEntityDomain::Nodes
                 || (has_spatial_reduction && !spatial_extrema)
                 || indices.len() != identities.len()
                 || indices.is_empty()
@@ -1020,7 +1020,7 @@ fn validate_resolved_observation(
             });
             if materialized_field_location(&observation.spec) != FieldLocation::Node
                 || observation.spec.output_location != FieldLocation::Point
-                || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
+                || observation.source_entity_domain != RecoveredFieldEntityDomain::Nodes
                 || observation.spec.recovery
                     != runmat_analysis_core::RecoveryPolicy::ShapeFunctionInterpolation
                 || (has_spatial_reduction && !spatial_extrema)
@@ -1084,8 +1084,7 @@ fn validate_resolved_observation(
             if observation.spec.reduction.is_none()
                 || !matches!(
                     observation.source_entity_domain,
-                    RecoveredFieldEntityDomain::StructuralNodes
-                        | RecoveredFieldEntityDomain::SolidElements
+                    RecoveredFieldEntityDomain::Nodes | RecoveredFieldEntityDomain::VolumeElements
                 )
                 || element_indices.is_empty()
                 || !strictly_increasing(element_indices)
@@ -1102,7 +1101,7 @@ fn validate_resolved_observation(
             face_identities,
         } => {
             if materialized_field_location(&observation.spec) != FieldLocation::Node
-                || observation.source_entity_domain != RecoveredFieldEntityDomain::StructuralNodes
+                || observation.source_entity_domain != RecoveredFieldEntityDomain::Nodes
                 || observation.spec.reduction.is_none()
                 || face_indices.is_empty()
                 || !strictly_increasing(face_indices)

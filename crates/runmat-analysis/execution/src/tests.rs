@@ -854,7 +854,7 @@ fn observation_history_import_reads_only_the_requested_retained_sample() {
         "displacement.history",
         runmat_analysis_core::ObservationQuantity::Displacement,
         runmat_analysis_core::FieldLocation::Node,
-        runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::StructuralNodes,
+        runmat_analysis_fea::results::field::RecoveredFieldEntityDomain::Nodes,
         runmat_analysis_core::ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -1884,9 +1884,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         field_prepared.request.source,
         field_prepared.request.topology.discretization_digest(),
         runmat_analysis_fea::results::field::RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: projection.elements.len() * 4,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

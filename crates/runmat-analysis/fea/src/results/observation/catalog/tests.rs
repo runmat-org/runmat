@@ -102,15 +102,19 @@ fn structural_catalog_binds_recovery_request_and_selected_field_inventory() {
     let topology = CanonicalStructuralTopologyIdentity::Explicit {
         structural_topology_digest: Digest::sha256("topology"),
     };
-    let request =
-        FieldRecoveryRequest::new(producer, source, topology, FieldRecoveryPlan::default())
-            .unwrap();
+    let request = FieldRecoveryRequest::new(
+        producer,
+        source,
+        crate::execution::FieldTopologyIdentity::Structural { topology },
+        FieldRecoveryPlan::default(),
+    )
+    .unwrap();
     let field = RecoveredField::new(
         RecoveredFieldDefinition::new(
             "displacement",
             ObservationQuantity::Displacement,
             FieldLocation::Node,
-            RecoveredFieldEntityDomain::StructuralNodes,
+            RecoveredFieldEntityDomain::Nodes,
             ObservationValueShape::Vector3,
             RecoveredFieldNumericRepresentation::Real,
         )
@@ -124,9 +128,9 @@ fn structural_catalog_binds_recovery_request_and_selected_field_inventory() {
         source,
         topology.discretization_digest(),
         RecoveredFieldEntityCounts {
-            structural_nodes: 1,
-            solid_elements: 0,
-            solid_integration_points: 0,
+            nodes: 1,
+            volume_elements: 0,
+            volume_integration_points: 0,
             beam_elements: 1,
             shell_elements: 0,
             connectors: 0,
@@ -148,7 +152,7 @@ fn structural_catalog_binds_recovery_request_and_selected_field_inventory() {
     let foreign_request = FieldRecoveryRequest::new(
         other_producer,
         source,
-        topology,
+        crate::execution::FieldTopologyIdentity::Structural { topology },
         FieldRecoveryPlan::default(),
     )
     .unwrap();

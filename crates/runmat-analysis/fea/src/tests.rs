@@ -2603,8 +2603,10 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
             let recovery_request = FieldRecoveryRequest::new(
                 prepared.step,
                 FieldRecoverySource::StructuralFrequencyEntry(entry.identity()),
-                topology.identity,
-                crate::execution::FieldRecoveryPlan::resolve(
+                crate::execution::FieldTopologyIdentity::Structural {
+                    topology: topology.identity,
+                },
+                crate::execution::FieldRecoveryPlan::resolve_structural(
                     workload.procedure_step().unwrap(),
                     topology,
                     0,

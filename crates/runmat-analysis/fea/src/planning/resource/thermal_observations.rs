@@ -82,9 +82,9 @@ impl ThermalObservationResourceFacts {
         // Evaluation clones the complete source inventory, even for one requested quantity.
         // Derive widths from the same definitions used by the evaluator (including storage rate).
         let counts = crate::results::field::RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: 0,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: 0,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

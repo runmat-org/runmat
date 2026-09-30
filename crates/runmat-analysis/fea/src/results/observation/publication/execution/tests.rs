@@ -25,9 +25,9 @@ fn fixture() -> ObservationPublicationCatalog {
     let recovery = FieldRecoveryRequest::new(
         producer,
         FieldRecoverySource::SolverResult(solver),
-        crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Explicit {
+        crate::execution::FieldTopologyIdentity::Structural { topology: crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Explicit {
             structural_topology_digest: plan.topology_digest,
-        },
+        } },
         FieldRecoveryPlan::default(),
     )
     .unwrap();
@@ -36,9 +36,9 @@ fn fixture() -> ObservationPublicationCatalog {
         recovery.source,
         plan.topology_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: 0,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: 0,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

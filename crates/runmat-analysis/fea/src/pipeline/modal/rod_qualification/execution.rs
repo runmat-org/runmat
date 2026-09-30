@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     execution::{
-        FieldRecoveryPlan, FieldRecoveryRequest, FieldRecoverySource,
+        FieldRecoveryPlan, FieldRecoveryRequest, FieldRecoverySource, FieldTopologyIdentity,
         StructuralFrequencyEntryRequest, StructuralFrequencyEntryResult,
         StructuralFrequencySolverPlan, StructuralFrequencyWorkload,
         StructuralFrequencyWorkloadInput,
@@ -113,8 +113,11 @@ pub(super) fn cold_execution_on_mesh(
     let recovery = FieldRecoveryRequest::new(
         prepared.step,
         FieldRecoverySource::StructuralFrequencyEntry(imported.identity()),
-        topology.identity,
-        FieldRecoveryPlan::resolve(cold_workload.procedure_step().unwrap(), topology, 0).unwrap(),
+        FieldTopologyIdentity::Structural {
+            topology: topology.identity,
+        },
+        FieldRecoveryPlan::resolve_structural(cold_workload.procedure_step().unwrap(), topology, 0)
+            .unwrap(),
     )
     .unwrap();
     let fields =

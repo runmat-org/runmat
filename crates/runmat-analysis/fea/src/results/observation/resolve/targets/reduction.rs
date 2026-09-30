@@ -49,7 +49,7 @@ pub(super) fn resolve_reduction_target(
     }
     if !matches!(
         field_domain,
-        RecoveredFieldEntityDomain::StructuralNodes | RecoveredFieldEntityDomain::SolidElements
+        RecoveredFieldEntityDomain::Nodes | RecoveredFieldEntityDomain::VolumeElements
     ) {
         return Err(ObservationError::Unsupported(
             "beam and shell reductions require formulation-owned integration rules",
@@ -60,7 +60,7 @@ pub(super) fn resolve_reduction_target(
         ObservationQuantity::ReactionForce | ObservationQuantity::ReactionMoment
     ) {
         if spec.source_location != FieldLocation::Node
-            || field_domain != RecoveredFieldEntityDomain::StructuralNodes
+            || field_domain != RecoveredFieldEntityDomain::Nodes
         {
             return Err(ObservationError::Invalid(
                 "reaction resultants require a nodal structural reaction field".into(),
@@ -93,7 +93,7 @@ pub(super) fn resolve_reduction_target(
                 (EntityDimension::Volume, ExpectedTopology::MeshElement) => {
                     let indices = matching_elements(
                         region,
-                        RecoveredFieldEntityDomain::SolidElements,
+                        RecoveredFieldEntityDomain::VolumeElements,
                         topology,
                     )?;
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;

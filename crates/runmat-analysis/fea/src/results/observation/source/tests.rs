@@ -47,7 +47,7 @@ fn structural_selection_binds_producer_through_recovery_request() {
     let request = FieldRecoveryRequest::new(
         producer,
         FieldRecoverySource::SolverResult(result),
-        topology,
+        crate::execution::FieldTopologyIdentity::Structural { topology },
         FieldRecoveryPlan::default(),
     )
     .unwrap();
@@ -56,7 +56,7 @@ fn structural_selection_binds_producer_through_recovery_request() {
             "displacement",
             ObservationQuantity::Displacement,
             FieldLocation::Node,
-            RecoveredFieldEntityDomain::StructuralNodes,
+            RecoveredFieldEntityDomain::Nodes,
             ObservationValueShape::Vector3,
             RecoveredFieldNumericRepresentation::Real,
         )
@@ -70,9 +70,9 @@ fn structural_selection_binds_producer_through_recovery_request() {
         request.source,
         topology.discretization_digest(),
         RecoveredFieldEntityCounts {
-            structural_nodes: 1,
-            solid_elements: 0,
-            solid_integration_points: 0,
+            nodes: 1,
+            volume_elements: 0,
+            volume_integration_points: 0,
             beam_elements: 1,
             shell_elements: 0,
             connectors: 0,
@@ -87,10 +87,42 @@ fn structural_selection_binds_producer_through_recovery_request() {
         ObservationFieldSelection::structural(&request, &manifest, vec![field.identity()]).unwrap();
     selection.validate_structural(&request, &manifest).unwrap();
     assert_eq!(selection.producer(), producer);
+    let volume_request = FieldRecoveryRequest::new(
+        producer,
+        request.source,
+        crate::execution::FieldTopologyIdentity::VolumeMesh {
+            mesh_digest: StableDigest::from_bytes(*topology.discretization_digest().bytes()),
+        },
+        FieldRecoveryPlan::default(),
+    )
+    .unwrap();
+    // Matching digest and authentic catalog do not grant structural family authority.
+    let volume_manifest = RecoveredFieldArtifact::new(
+        volume_request.identity(),
+        volume_request.source,
+        manifest.topology_digest,
+        manifest.entity_counts,
+        vec![field.clone()],
+    )
+    .unwrap()
+    .manifest()
+    .unwrap();
+    assert_eq!(
+        volume_request.topology.discretization_digest(),
+        topology.discretization_digest()
+    );
+    assert!(ObservationFieldSelection::structural(
+        &volume_request,
+        &volume_manifest,
+        vec![field.identity()],
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("structural topology authority"));
     let foreign_request = FieldRecoveryRequest::new(
         other_producer,
         request.source,
-        topology,
+        crate::execution::FieldTopologyIdentity::Structural { topology },
         FieldRecoveryPlan::default(),
     )
     .unwrap();

@@ -1,5 +1,7 @@
 //! Placement-neutral compilation of realized studies onto exact solver topology.
 
+mod acoustic_planning;
+mod acoustic_product;
 mod compilation;
 mod identity;
 mod planning;
@@ -7,6 +9,14 @@ mod product;
 mod thermal_planning;
 mod thermal_product;
 
+pub use acoustic_planning::{
+    plan_acoustic_study, AcousticStudyPlan, AcousticStudyPlanningError,
+    AcousticStudyPlanningPolicy, PlannedAcousticFrequency,
+};
+pub use acoustic_product::{
+    build_acoustic_study_product, AcousticStudyProduct, AcousticStudyProductError,
+    AcousticStudyProductInput,
+};
 pub use compilation::{
     compile_analysis_study, AnalysisStudyCompilationError, AnalysisStudyCompilationInput,
     CompiledAnalysisStudy,

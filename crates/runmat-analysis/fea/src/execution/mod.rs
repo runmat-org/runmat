@@ -14,6 +14,7 @@ mod buckling_workload;
 mod error;
 mod field;
 mod field_plan;
+mod field_topology;
 mod frequency_assembly;
 mod frequency_balance;
 mod frequency_entry;
@@ -84,6 +85,7 @@ pub use buckling_workload::{
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use field::{FieldRecoveryRequest, FieldRecoverySource};
 pub use field_plan::{FieldRecoveryCost, FieldRecoveryPlan, FieldRecoveryRequirement};
+pub use field_topology::FieldTopologyIdentity;
 pub use frequency_assembly::{
     StructuralFrequencyAssemblyEntry, StructuralFrequencyAssemblyOutput,
     StructuralFrequencyResultAssemblyRequest,
@@ -211,11 +213,11 @@ pub use solve::{
     StructuralLinearStateInput, StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 pub use state::{
-    BoundThermalStateTransfer, CanonicalSemanticState, CanonicalSemanticStateInput,
-    CanonicalSemanticStatePayload, CanonicalStateTransition, CanonicalStateTransitionInput,
-    SemanticStatePublicationProfileSource, SemanticStatePublicationRequest,
-    SemanticStatePublicationSource, StatePublicationProfileEntry, StatePublicationProfiles,
-    STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
+    AcousticPhasorConvention, BoundThermalStateTransfer, CanonicalAcousticStatePayload,
+    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+    CanonicalStateTransition, CanonicalStateTransitionInput, SemanticStatePublicationProfileSource,
+    SemanticStatePublicationRequest, SemanticStatePublicationSource, StatePublicationProfileEntry,
+    StatePublicationProfiles, STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
 };
 mod structural_state_profiles;
 pub use structural_state_profiles::{

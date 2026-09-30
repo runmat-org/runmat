@@ -118,7 +118,7 @@ pub(super) fn matching_elements<'a>(
     topology: &'a StructuralObservationTopology,
 ) -> Result<impl Iterator<Item = usize> + Clone + 'a, ObservationError> {
     let elements = topology.elements(domain)?;
-    let projection = if domain == RecoveredFieldEntityDomain::SolidElements {
+    let projection = if domain == RecoveredFieldEntityDomain::VolumeElements {
         topology.solid_projection.as_ref()
     } else {
         None

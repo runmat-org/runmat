@@ -9,7 +9,7 @@ fn definition(
         "identity.profile",
         quantity,
         FieldLocation::Element,
-        RecoveredFieldEntityDomain::SolidElements,
+        RecoveredFieldEntityDomain::VolumeElements,
         shape,
         representation,
     )

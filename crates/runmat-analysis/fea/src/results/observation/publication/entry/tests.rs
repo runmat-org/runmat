@@ -72,7 +72,7 @@ fn fixture_with_policy(
         "temperature",
         ObservationQuantity::Temperature,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -139,8 +139,10 @@ fn fixture_with_policy(
     let recovery = FieldRecoveryRequest::new(
         producer,
         numerical_source,
-        CanonicalStructuralTopologyIdentity::Explicit {
-            structural_topology_digest: plan.topology_digest,
+        crate::execution::FieldTopologyIdentity::Structural {
+            topology: CanonicalStructuralTopologyIdentity::Explicit {
+                structural_topology_digest: plan.topology_digest,
+            },
         },
         FieldRecoveryPlan::default(),
     )
@@ -151,9 +153,9 @@ fn fixture_with_policy(
         numerical_source,
         plan.topology_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: 0,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: 0,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

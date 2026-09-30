@@ -33,7 +33,7 @@ fn integration_point_stress_definition() -> RecoveredFieldDefinition {
         crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
         ObservationQuantity::Stress,
         FieldLocation::IntegrationPoint,
-        RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        RecoveredFieldEntityDomain::VolumeIntegrationPoints,
         ObservationValueShape::SymmetricTensor3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -45,7 +45,7 @@ fn definition() -> RecoveredFieldDefinition {
         "temperature.partitioned",
         ObservationQuantity::Temperature,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -313,7 +313,7 @@ fn materialized_volume_weighted_recovery_is_partition_equivalent() {
         "structural.nodal_von_mises",
         ObservationQuantity::VonMisesStress,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
         RecoveredFieldDerivation::LocationTransfer {
@@ -762,7 +762,7 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
         "contact.pressure",
         ObservationQuantity::ContactPressure,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -871,7 +871,7 @@ fn complex_volume_resultant_and_moment_preserve_the_complete_phasor() {
         "magnetic_flux_density.phasor",
         ObservationQuantity::MagneticFluxDensity,
         FieldLocation::Element,
-        RecoveredFieldEntityDomain::SolidElements,
+        RecoveredFieldEntityDomain::VolumeElements,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::ComplexInterleaved,
     )
@@ -1019,7 +1019,7 @@ fn boundary_stress_resultant_uses_cauchy_traction_and_rejects_ambiguous_pressure
         "stress.traction",
         ObservationQuantity::Stress,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::SymmetricTensor3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -1077,7 +1077,7 @@ fn boundary_stress_resultant_uses_cauchy_traction_and_rejects_ambiguous_pressure
         "pressure.ambiguous",
         ObservationQuantity::ContactPressure,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -1118,7 +1118,7 @@ fn complex_boundary_pressure_resultant_is_partition_equivalent() {
         "pressure.phasor",
         ObservationQuantity::AcousticPressure,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::ComplexInterleaved,
     )
@@ -1206,7 +1206,7 @@ fn vector_l2_norm_is_scalar_and_partition_equivalent() {
         "displacement.norm",
         ObservationQuantity::Displacement,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -1279,7 +1279,7 @@ fn nodal_reaction_resultant_and_moment_are_discrete_partition_equivalent_sums() 
         "reaction.force",
         ObservationQuantity::ReactionForce,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )

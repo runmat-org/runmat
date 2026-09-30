@@ -28,7 +28,7 @@ impl OwnedHistorySeries {
             quantity: self.quantity,
             source_field_id: self.source_field_id,
             location: runmat_analysis_core::FieldLocation::Element,
-            entity_domain: RecoveredFieldEntityDomain::SolidElements,
+            entity_domain: RecoveredFieldEntityDomain::VolumeElements,
             value_shape: self.value_shape.clone(),
             numeric_representation: RecoveredFieldNumericRepresentation::ComplexInterleaved,
             snapshots: &self.snapshots,

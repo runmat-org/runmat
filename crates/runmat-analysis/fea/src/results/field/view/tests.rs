@@ -18,7 +18,7 @@ fn definition(shape: ObservationValueShape) -> RecoveredFieldDefinition {
         "borrowed.multipart",
         quantity,
         FieldLocation::Element,
-        RecoveredFieldEntityDomain::SolidElements,
+        RecoveredFieldEntityDomain::VolumeElements,
         shape,
         RecoveredFieldNumericRepresentation::Real,
     )

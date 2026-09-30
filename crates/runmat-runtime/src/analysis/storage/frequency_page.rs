@@ -237,7 +237,7 @@ mod tests {
             "structural.displacement",
             ObservationQuantity::Displacement,
             FieldLocation::Node,
-            RecoveredFieldEntityDomain::StructuralNodes,
+            RecoveredFieldEntityDomain::Nodes,
             ObservationValueShape::Vector3,
             RecoveredFieldNumericRepresentation::ComplexInterleaved,
         )
@@ -383,7 +383,7 @@ mod tests {
                 "beam.displacement",
                 ObservationQuantity::Displacement,
                 FieldLocation::Node,
-                RecoveredFieldEntityDomain::StructuralNodes,
+                RecoveredFieldEntityDomain::Nodes,
                 ObservationValueShape::Vector3,
                 RecoveredFieldNumericRepresentation::ComplexInterleaved,
             )

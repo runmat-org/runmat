@@ -40,7 +40,7 @@ pub(super) fn scalar_definition() -> RecoveredFieldDefinition {
         "temperature.recovered",
         ObservationQuantity::Temperature,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -140,7 +140,7 @@ fn complex_pressure_definition() -> RecoveredFieldDefinition {
         "acoustic.pressure.recovered",
         ObservationQuantity::AcousticPressure,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::ComplexInterleaved,
     )
@@ -345,9 +345,9 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
     let catalog = RecoveredFieldCatalog::new_for_topology(
         plan.topology_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: mesh.topology.nodes.len(),
-            solid_elements: mesh.topology.volume_elements.len(),
-            solid_integration_points: mesh.topology.volume_elements.len() * 4,
+            nodes: mesh.topology.nodes.len(),
+            volume_elements: mesh.topology.volume_elements.len(),
+            volume_integration_points: mesh.topology.volume_elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -467,9 +467,9 @@ fn connector_observation_binds_exact_identity_and_partition_source() {
     let catalog = RecoveredFieldCatalog::new_for_topology(
         plan.topology_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: mesh.topology.nodes.len(),
-            solid_elements: mesh.topology.volume_elements.len(),
-            solid_integration_points: mesh.topology.volume_elements.len() * 4,
+            nodes: mesh.topology.nodes.len(),
+            volume_elements: mesh.topology.volume_elements.len(),
+            volume_integration_points: mesh.topology.volume_elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 1,
@@ -662,7 +662,7 @@ fn materialized_volume_weighted_field_binds_by_recovery_provenance() {
         "structural.nodal_von_mises",
         ObservationQuantity::VonMisesStress,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
         RecoveredFieldDerivation::LocationTransfer {
@@ -751,7 +751,7 @@ fn integration_point_field_retains_canonical_point_entities() {
         crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
         ObservationQuantity::Stress,
         FieldLocation::IntegrationPoint,
-        RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        RecoveredFieldEntityDomain::VolumeIntegrationPoints,
         ObservationValueShape::SymmetricTensor3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -791,7 +791,7 @@ fn integration_point_region_cardinality_applies_to_parent_elements() {
         crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
         ObservationQuantity::Stress,
         FieldLocation::IntegrationPoint,
-        RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        RecoveredFieldEntityDomain::VolumeIntegrationPoints,
         ObservationValueShape::SymmetricTensor3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -829,7 +829,7 @@ fn integration_point_region_cardinality_applies_to_parent_elements() {
     else {
         panic!("integration-point field did not resolve to discrete entities");
     };
-    assert_eq!(*domain, RecoveredFieldEntityDomain::SolidIntegrationPoints);
+    assert_eq!(*domain, RecoveredFieldEntityDomain::VolumeIntegrationPoints);
     assert_eq!(indices, &[0, 1, 2, 3]);
     assert_eq!(identities.len(), 4);
 }
@@ -841,7 +841,7 @@ fn von_mises_projection_keeps_stress_as_its_source_quantity() {
         "stress.recovered",
         ObservationQuantity::Stress,
         FieldLocation::Element,
-        RecoveredFieldEntityDomain::SolidElements,
+        RecoveredFieldEntityDomain::VolumeElements,
         ObservationValueShape::SymmetricTensor3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -886,7 +886,7 @@ fn principal_projections_execute_through_the_canonical_observation_plan() {
         "stress.recovered",
         ObservationQuantity::Stress,
         FieldLocation::Element,
-        RecoveredFieldEntityDomain::SolidElements,
+        RecoveredFieldEntityDomain::VolumeElements,
         ObservationValueShape::SymmetricTensor3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -1549,7 +1549,7 @@ fn typed_event_histories_preserve_source_attribution_and_ordering() {
         "structural.displacement.event",
         ObservationQuantity::Displacement,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -1756,7 +1756,7 @@ fn event_histories_may_finish_empty_but_cannot_request_series_statistics() {
         "structural.displacement.optional_event",
         ObservationQuantity::Displacement,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -2013,7 +2013,7 @@ fn observation_assembly_requires_the_exact_subset_scheduled_at_one_frequency() {
     let recovery = FieldRecoveryRequest::new(
         producer,
         FieldRecoverySource::SolverResult(source_result),
-        topology,
+        crate::execution::FieldTopologyIdentity::Structural { topology },
         crate::execution::FieldRecoveryPlan::default(),
     )
     .unwrap();
@@ -2024,9 +2024,9 @@ fn observation_assembly_requires_the_exact_subset_scheduled_at_one_frequency() {
         FieldRecoverySource::SolverResult(source_result),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: projection.elements.len() * 4,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -2089,7 +2089,7 @@ fn complex_observation_precision_and_real_source_mismatch_fail_closed() {
         "acoustic.pressure.real-only",
         ObservationQuantity::AcousticPressure,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -2116,7 +2116,7 @@ fn complex_vector_component_projection_uses_logical_components() {
         "acoustic.velocity.recovered",
         ObservationQuantity::AcousticParticleVelocity,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::ComplexInterleaved,
     )
@@ -2183,7 +2183,7 @@ fn study_parameter_history_keeps_parameter_identity_and_exact_values() {
         "structural.displacement.parameter-study",
         ObservationQuantity::Displacement,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -2353,7 +2353,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         "structural.displacement",
         ObservationQuantity::Displacement,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -2403,9 +2403,9 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
     let fields = RecoveredFieldCatalog::new_for_topology(
         plan.topology_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: node_count,
-            solid_elements: 0,
-            solid_integration_points: 0,
+            nodes: node_count,
+            volume_elements: 0,
+            volume_integration_points: 0,
             beam_elements: beam_count,
             shell_elements: shell_count,
             connectors: 0,
@@ -2431,7 +2431,9 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
     let recovery_request = FieldRecoveryRequest::new(
         producer,
         numerical_source,
-        constraint_plan.topology,
+        crate::execution::FieldTopologyIdentity::Structural {
+            topology: constraint_plan.topology,
+        },
         crate::execution::FieldRecoveryPlan::default(),
     )
     .unwrap();
@@ -2440,9 +2442,9 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         numerical_source,
         plan.topology_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: node_count,
-            solid_elements: 0,
-            solid_integration_points: 0,
+            nodes: node_count,
+            volume_elements: 0,
+            volume_integration_points: 0,
             beam_elements: beam_count,
             shell_elements: shell_count,
             connectors: 0,
@@ -2594,7 +2596,7 @@ fn output_and_accuracy_changes_do_not_invalidate_solver_layers() {
         "displacement.recovered",
         ObservationQuantity::Displacement,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )

@@ -10,7 +10,7 @@ use runmat_analysis_core::{
     TemporalImplementation,
 };
 
-fn workload() -> AcousticHarmonicWorkload {
+pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     replace_fixture_excitations(&mut model, Vec::new());
     model.constraints.clear();

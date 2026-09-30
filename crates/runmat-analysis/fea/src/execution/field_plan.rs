@@ -41,7 +41,7 @@ pub struct FieldRecoveryPlan {
 }
 
 impl FieldRecoveryPlan {
-    pub fn resolve(
+    pub fn resolve_structural(
         step: &ProcedureStep,
         topology: StructuralRecoveredFieldTopology,
         constraint_group_count: usize,
@@ -128,8 +128,7 @@ impl FieldRecoveryPlan {
                 || (requirement.recovery == RecoveryPolicy::VolumeWeightedAverage
                     && (requirement.source_location != FieldLocation::Element
                         || requirement.output_location != FieldLocation::Node
-                        || requirement.entity_domain
-                            != RecoveredFieldEntityDomain::StructuralNodes
+                        || requirement.entity_domain != RecoveredFieldEntityDomain::Nodes
                         || requirement.cost.topology_incidence_count == 0))
                 || (requirement.recovery == RecoveryPolicy::Native
                     && (requirement.source_location != requirement.output_location
@@ -217,10 +216,10 @@ fn structural_entity_domain(
 ) -> AnalysisExecutionResult<RecoveredFieldEntityDomain> {
     use ObservationQuantity as Quantity;
     let domain = match location {
-        FieldLocation::Node => RecoveredFieldEntityDomain::StructuralNodes,
+        FieldLocation::Node => RecoveredFieldEntityDomain::Nodes,
         FieldLocation::Connector => RecoveredFieldEntityDomain::Connectors,
         FieldLocation::Constraint => RecoveredFieldEntityDomain::ConstraintGroups,
-        FieldLocation::IntegrationPoint => RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        FieldLocation::IntegrationPoint => RecoveredFieldEntityDomain::VolumeIntegrationPoints,
         FieldLocation::Element => match quantity {
             Quantity::BeamAxialForce
             | Quantity::BeamShearForce
@@ -232,7 +231,7 @@ fn structural_entity_domain(
             | Quantity::ShellBendingMoment
             | Quantity::ShellTransverseShear
             | Quantity::ShellVonMises => RecoveredFieldEntityDomain::ShellElements,
-            _ => RecoveredFieldEntityDomain::SolidElements,
+            _ => RecoveredFieldEntityDomain::VolumeElements,
         },
         _ => {
             return Err(AnalysisExecutionError::Invalid(format!(

@@ -22,8 +22,10 @@ fn artifact(
     let request = crate::execution::FieldRecoveryRequest::new(
         step,
         crate::execution::FieldRecoverySource::SolverResult(source),
-        crate::constraints::CanonicalStructuralTopologyIdentity::Explicit {
-            structural_topology_digest: Digest::sha256("topology"),
+        crate::execution::FieldTopologyIdentity::Structural {
+            topology: crate::constraints::CanonicalStructuralTopologyIdentity::Explicit {
+                structural_topology_digest: Digest::sha256("topology"),
+            },
         },
         crate::execution::FieldRecoveryPlan::default(),
     )
@@ -33,7 +35,7 @@ fn artifact(
             "initial",
             quantity,
             FieldLocation::Node,
-            RecoveredFieldEntityDomain::StructuralNodes,
+            RecoveredFieldEntityDomain::Nodes,
             shape.clone(),
             RecoveredFieldNumericRepresentation::Real,
         )
@@ -63,9 +65,9 @@ fn source_artifact(
         crate::execution::FieldRecoverySource::SolverResult(source),
         Digest::sha256("topology"),
         RecoveredFieldEntityCounts {
-            structural_nodes: 4,
-            solid_elements: 1,
-            solid_integration_points: 4,
+            nodes: 4,
+            volume_elements: 1,
+            volume_integration_points: 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,

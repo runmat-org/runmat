@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisField, AnalysisModel, ProcedureStepId, ReferenceStatePolicy, StateCompleteness,
-    StateId, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,
-    StateTransitionMethod, StateUse, TopologyTransitionPolicy,
+    AnalysisModel, ProcedureStepId, ReferenceStatePolicy, StateCompleteness, StateId, StateKind,
+    StateOutput, StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
+    TopologyTransitionPolicy,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -19,9 +19,13 @@ const STATE_LIMITS: CanonicalLimits =
 pub(super) mod field_validation;
 mod resource_profile;
 pub use resource_profile::SemanticStatePublicationProfileSource;
+mod acoustic;
+mod payload;
 mod thermal;
 mod thermal_transfer;
+pub use acoustic::{AcousticPhasorConvention, CanonicalAcousticStatePayload};
 use field_validation::{select_structural_state_fields, validate_portable_fields};
+pub use payload::CanonicalSemanticStatePayload;
 pub use thermal::CanonicalThermalStatePayload;
 pub use thermal_transfer::BoundThermalStateTransfer;
 
@@ -46,33 +50,6 @@ pub struct CanonicalSemanticState {
     pub topology_digest: Digest,
     pub source_result: SolverResultIdentity,
     pub payload: CanonicalSemanticStatePayload,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
-pub enum CanonicalSemanticStatePayload {
-    Fields {
-        fields: Vec<AnalysisField>,
-    },
-    Thermal {
-        state: Box<CanonicalThermalStatePayload>,
-    },
-    StructuralFrequency {
-        publication: Box<super::StructuralFrequencyPublicationManifest>,
-    },
-    ModalBasis {
-        basis: Box<crate::pipeline::modal_basis::ModalBasisArtifact>,
-    },
-    StructuralLinearization {
-        linearization:
-            Box<crate::pipeline::structural_linearization::StructuralLinearizationArtifact>,
-    },
-    StructuralResponseEnvelope {
-        envelope: Box<super::StructuralResponseEnvelope>,
-    },
-    StructuralRandomStatistics {
-        statistics: Box<super::StructuralRandomStatistics>,
-    },
 }
 
 pub struct CanonicalSemanticStateInput {
@@ -130,6 +107,7 @@ impl CanonicalSemanticState {
                 if matches!(
                     self.kind,
                     StateKind::Thermal
+                        | StateKind::AcousticComplex
                         | StateKind::ModalBasis
                         | StateKind::StructuralComplex
                         | StateKind::StructuralResponseEnvelope
@@ -150,6 +128,17 @@ impl CanonicalSemanticState {
                     ));
                 }
                 state.validate()?;
+            }
+            CanonicalSemanticStatePayload::Acoustic { state } => {
+                if self.kind != StateKind::AcousticComplex
+                    || self.completeness != StateCompleteness::Complete
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "acoustic semantic-state payload requires acoustic-complex state kind"
+                            .into(),
+                    ));
+                }
+                state.validate_for(self.topology_digest, self.source_result, self.producer)?;
             }
             CanonicalSemanticStatePayload::StructuralFrequency { publication } => {
                 if self.kind != StateKind::StructuralComplex {
@@ -271,82 +260,6 @@ impl CanonicalSemanticState {
             self.source_result,
             self.content_digest,
         )
-    }
-}
-
-impl CanonicalSemanticStatePayload {
-    pub fn fields(&self) -> Option<&[AnalysisField]> {
-        match self {
-            Self::Fields { fields } => Some(fields),
-            Self::Thermal { state } => Some(std::slice::from_ref(&state.temperature)),
-            Self::StructuralFrequency { .. }
-            | Self::ModalBasis { .. }
-            | Self::StructuralLinearization { .. }
-            | Self::StructuralResponseEnvelope { .. }
-            | Self::StructuralRandomStatistics { .. } => None,
-        }
-    }
-
-    pub fn structural_frequency(&self) -> Option<&super::StructuralFrequencyPublicationManifest> {
-        match self {
-            Self::StructuralFrequency { publication } => Some(publication.as_ref()),
-            Self::Fields { .. }
-            | Self::Thermal { .. }
-            | Self::ModalBasis { .. }
-            | Self::StructuralLinearization { .. }
-            | Self::StructuralResponseEnvelope { .. }
-            | Self::StructuralRandomStatistics { .. } => None,
-        }
-    }
-
-    pub fn modal_basis(&self) -> Option<&crate::pipeline::modal_basis::ModalBasisArtifact> {
-        match self {
-            Self::Fields { .. }
-            | Self::Thermal { .. }
-            | Self::StructuralFrequency { .. }
-            | Self::StructuralLinearization { .. }
-            | Self::StructuralResponseEnvelope { .. }
-            | Self::StructuralRandomStatistics { .. } => None,
-            Self::ModalBasis { basis } => Some(basis.as_ref()),
-        }
-    }
-
-    pub fn structural_linearization(
-        &self,
-    ) -> Option<&crate::pipeline::structural_linearization::StructuralLinearizationArtifact> {
-        match self {
-            Self::StructuralLinearization { linearization } => Some(linearization.as_ref()),
-            Self::Fields { .. }
-            | Self::Thermal { .. }
-            | Self::StructuralFrequency { .. }
-            | Self::ModalBasis { .. }
-            | Self::StructuralResponseEnvelope { .. }
-            | Self::StructuralRandomStatistics { .. } => None,
-        }
-    }
-
-    pub fn structural_response_envelope(&self) -> Option<&super::StructuralResponseEnvelope> {
-        match self {
-            Self::StructuralResponseEnvelope { envelope } => Some(envelope.as_ref()),
-            Self::Fields { .. }
-            | Self::Thermal { .. }
-            | Self::StructuralFrequency { .. }
-            | Self::ModalBasis { .. }
-            | Self::StructuralLinearization { .. }
-            | Self::StructuralRandomStatistics { .. } => None,
-        }
-    }
-
-    pub fn structural_random_statistics(&self) -> Option<&super::StructuralRandomStatistics> {
-        match self {
-            Self::StructuralRandomStatistics { statistics } => Some(statistics.as_ref()),
-            Self::Fields { .. }
-            | Self::Thermal { .. }
-            | Self::StructuralFrequency { .. }
-            | Self::ModalBasis { .. }
-            | Self::StructuralLinearization { .. }
-            | Self::StructuralResponseEnvelope { .. } => None,
-        }
     }
 }
 

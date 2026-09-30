@@ -75,8 +75,8 @@ fn native_thermal_worker_consumes_source_bound_cold_initial_field() {
         let request = FieldRecoveryRequest::new(
             producer.producer,
             FieldRecoverySource::SolverResult(source),
-            runmat_analysis_fea::constraints::CanonicalStructuralTopologyIdentity::Explicit {
-                structural_topology_digest: producer.topology_digest,
+            runmat_analysis_fea::execution::FieldTopologyIdentity::VolumeMesh {
+                mesh_digest: mesh.canonical_digest,
             },
             FieldRecoveryPlan::default(),
         )
@@ -92,9 +92,9 @@ fn native_thermal_worker_consumes_source_bound_cold_initial_field() {
             FieldRecoverySource::SolverResult(source),
             producer.topology_digest,
             RecoveredFieldEntityCounts {
-                structural_nodes: producer.ordered_node_ids.len(),
-                solid_elements: producer.ordered_element_ids.len(),
-                solid_integration_points: 0,
+                nodes: producer.ordered_node_ids.len(),
+                volume_elements: producer.ordered_element_ids.len(),
+                volume_integration_points: 0,
                 beam_elements: 0,
                 shell_elements: 0,
                 connectors: 0,

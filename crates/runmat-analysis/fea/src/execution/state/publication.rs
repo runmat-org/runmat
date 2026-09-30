@@ -3,6 +3,7 @@ use crate::execution::{
     StructuralModalResponseSpectrumSolverResult, StructuralRandomResponseSolverResult,
     StructuralRandomStatistics, StructuralResponseEnvelope,
 };
+use runmat_analysis_core::AnalysisField;
 
 impl CanonicalSemanticState {
     pub fn from_publication(

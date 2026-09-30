@@ -32,7 +32,10 @@ impl StructuralFrequencyEntryResourceProjection {
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         if request.producer != result.request().step()
             || request.source != FieldRecoverySource::StructuralFrequencyEntry(result.identity())
-            || request.topology != self.structural_topology
+            || request.topology
+                != (crate::execution::FieldTopologyIdentity::Structural {
+                    topology: self.structural_topology,
+                })
         {
             return Err(ResourcePlanningError::Invalid(
                 "frequency recovery request differs from its workload, entry, or topology".into(),

@@ -146,7 +146,7 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
         "displacement.native_checkpoint",
         runmat_analysis_core::ObservationQuantity::Displacement,
         runmat_analysis_core::FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         runmat_analysis_core::ObservationValueShape::Vector3,
         RecoveredFieldNumericRepresentation::Real,
     )

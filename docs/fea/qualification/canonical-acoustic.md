@@ -150,6 +150,61 @@ identity. This numerical entry returns result fields, not semantic lifecycle sta
 publications. It does not establish process restart, native authoring integration or
 graph-caller migration.
 
+### Authored product and native field/state publication
+
+The new core product path compiles a `RealizedStudy` against exact admitted geometry,
+resolved persistent regions, materials and a sealed canonical mesh, then derives its
+frequency entry through the shared `FrequencyResponsePlan`. The initial envelope is
+one fresh direct harmonic step, one frequency and one complete `AcousticComplex`
+declaration. Observations, authored output bindings, inbound state, graph sequencing
+and multi-frequency state ambiguity reject explicitly. The model's required typed
+state declaration is preserved, not dropped to make numerical execution admissible.
+This core product API is not runtime/native authored-family dispatch.
+
+Authenticated acoustic results can publish native pressure and particle velocity into
+the existing recovered-field artifact and canonical partition contracts. Pressure is a
+complex nodal scalar; velocity is a complex quadrature-volume average per element,
+not a nodal or integration-point value. Shared entity domains are `Nodes`,
+`VolumeElements` and `VolumeIntegrationPoints`; specialized structural domains remain.
+`FieldTopologyIdentity::VolumeMesh` carries canonical mesh storage authority. Structural
+recovery keeps its explicit family authority, including explicit/mixed topology; a
+same-digest wrong variant may not substitute for either admission. Old domain/count
+spellings have no compatibility decoder.
+
+The typed acoustic state retains the `exp(+i omega t)` convention, positive frequency,
+ordered node/element IDs, exact producer/source, recovery request and shared native
+artifact. Publication copies already recovered values; it does not perform another
+solve. Cold validation checks finite host storage, complete typed definitions, exact
+native recovery plan, frequency samples and source/topology binding. The authored
+tetrahedron fixture exercises compilation through cold state encoding for Tet4/Tet10;
+its prescribed-pressure/residual/power checks are integration evidence, not an
+independent arbitrary-tetrahedron continuum reference.
+
+The separate matched-duct field tests compare published pressure with
+`exp(-i*k*x)` and volume-average velocity with an independent simplex-moment
+exponential integral divided by `rho*c=6`. For the straight tetrahedron with corner
+coordinates `x_j`, the exact polynomial average is
+`mean(x^n)=6*h_n(x_0,x_1,x_2,x_3)/((n+1)(n+2)(n+3))`, where `h_n` is the complete
+homogeneous symmetric polynomial. Expanding the exponential against these moments
+avoids using FE recovery quadrature as its own reference. Partition reconstruction,
+foreign result/mesh/plan, same-digest wrong topology, node-order and shape rejection
+are separate publication checks. These bounded coarse field checks do not replace
+the refinement/phase/power qualification above.
+
+The final acoustic-filter suite passes 30/30, including the independent references and
+authored/cold-state checks above. Shared field/observation regressions pass 123/123,
+the execution bridge passes 91/91, and the native runner compiles. Strict core/bridge
+all-target lint passes; the last subsequent edit only corrects a negative test to use
+explicit state admission rather than raw serde decoding. Architecture checking still
+reports five unrelated runtime module-size violations. This is not unrestricted suite
+or production evidence. Numerical receipts,
+output-policy-neutral entry intent, worker field/state outputs, shared observation
+catalog admission, independent frequency fan-out/fan-in and durable accepted-entry
+sweep restart remain required. Storage topology is distinct from interpolation
+projection; acoustic fields are not forced through the legacy projection-specific
+catalog constructor or assigned fictitious integration-point counts. No production,
+process-restart, measured-memory or distributed-algebra gate is promoted.
+
 ### Canonical native task and resource admission
 
 `prepare_acoustic_harmonic_task` prepares an explicit CPU task with exactly a canonical

@@ -26,7 +26,7 @@ impl StructuralRecoveredFieldTopology {
         }
         let structural = model.structural.as_ref();
         let has_explicit = structural.is_some_and(|structural| !structural.elements.is_empty());
-        let (identity, structural_nodes) = match (mesh, structural.filter(|_| has_explicit)) {
+        let (identity, nodes) = match (mesh, structural.filter(|_| has_explicit)) {
             (Some(mesh), Some(structural)) if !mesh.topology.volume_elements.is_empty() => {
                 let topology = CanonicalStructuralNodeSpace::derive(mesh, structural)
                     .map_err(|error| RecoveredFieldError::InvalidArtifact(error.to_string()))?;
@@ -61,11 +61,11 @@ impl StructuralRecoveredFieldTopology {
             })
             .unwrap_or_default();
         let entity_counts = RecoveredFieldEntityCounts {
-            structural_nodes,
-            solid_elements: mesh
+            nodes,
+            volume_elements: mesh
                 .map(|mesh| mesh.topology.volume_elements.len())
                 .unwrap_or(0),
-            solid_integration_points: mesh
+            volume_integration_points: mesh
                 .map(|mesh| mesh.topology.volume_elements.len().saturating_mul(4))
                 .unwrap_or(0),
             beam_elements,

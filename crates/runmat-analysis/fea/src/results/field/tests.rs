@@ -17,7 +17,7 @@ fn temperature_definition(label: &str) -> RecoveredFieldDefinition {
         label,
         ObservationQuantity::Temperature,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -100,7 +100,7 @@ fn partition_shape_profile_covers_vector_and_tensor_widths() {
             "profile.components",
             quantity,
             FieldLocation::Element,
-            RecoveredFieldEntityDomain::SolidElements,
+            RecoveredFieldEntityDomain::VolumeElements,
             shape,
             RecoveredFieldNumericRepresentation::Real,
         )
@@ -167,8 +167,10 @@ fn recovery_request() -> crate::execution::FieldRecoveryRequestIdentity {
     crate::execution::FieldRecoveryRequest::new(
         step,
         crate::execution::FieldRecoverySource::SolverResult(source_result()),
-        crate::constraints::CanonicalStructuralTopologyIdentity::Explicit {
-            structural_topology_digest: Digest::sha256("topology"),
+        crate::execution::FieldTopologyIdentity::Structural {
+            topology: crate::constraints::CanonicalStructuralTopologyIdentity::Explicit {
+                structural_topology_digest: Digest::sha256("topology"),
+            },
         },
         crate::execution::FieldRecoveryPlan::default(),
     )
@@ -190,7 +192,7 @@ fn transferred_field_identity_retains_source_provenance() {
         "stress.native",
         ObservationQuantity::VonMisesStress,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
     )
@@ -199,7 +201,7 @@ fn transferred_field_identity_retains_source_provenance() {
         "stress.recovered",
         ObservationQuantity::VonMisesStress,
         FieldLocation::Node,
-        RecoveredFieldEntityDomain::StructuralNodes,
+        RecoveredFieldEntityDomain::Nodes,
         ObservationValueShape::Scalar,
         RecoveredFieldNumericRepresentation::Real,
         RecoveredFieldDerivation::LocationTransfer {
@@ -263,7 +265,7 @@ fn constructors_and_deserialization_reject_shape_identity_and_sample_substitutio
             "temperature.invalid",
             ObservationQuantity::Temperature,
             FieldLocation::Node,
-            RecoveredFieldEntityDomain::StructuralNodes,
+            RecoveredFieldEntityDomain::Nodes,
             ObservationValueShape::Vector3,
             RecoveredFieldNumericRepresentation::Real,
         )
@@ -300,9 +302,9 @@ fn recovered_field_artifact_binds_source_topology_and_content() {
         crate::execution::FieldRecoverySource::SolverResult(source_result()),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: projection.elements.len() * 4,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -341,9 +343,9 @@ fn field_manifest_resolves_semantics_without_values_and_reconstructs_exact_conte
         crate::execution::FieldRecoverySource::SolverResult(source_result()),
         projection.projection_digest,
         RecoveredFieldEntityCounts {
-            structural_nodes: projection.nodes.len(),
-            solid_elements: projection.elements.len(),
-            solid_integration_points: projection.elements.len() * 4,
+            nodes: projection.nodes.len(),
+            volume_elements: projection.elements.len(),
+            volume_integration_points: projection.elements.len() * 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -432,9 +434,9 @@ fn field_storage_partitions_are_canonical_complete_and_reconstruct_exactly() {
         crate::execution::FieldRecoverySource::SolverResult(source_result()),
         Digest::sha256("large-topology"),
         RecoveredFieldEntityCounts {
-            structural_nodes: entity_count,
-            solid_elements: 1,
-            solid_integration_points: 4,
+            nodes: entity_count,
+            volume_elements: 1,
+            volume_integration_points: 4,
             beam_elements: 0,
             shell_elements: 0,
             connectors: 0,
@@ -457,7 +459,7 @@ fn integration_point_tensor_storage_pages_and_reconstructs_exactly() {
         crate::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
         ObservationQuantity::Stress,
         FieldLocation::IntegrationPoint,
-        RecoveredFieldEntityDomain::SolidIntegrationPoints,
+        RecoveredFieldEntityDomain::VolumeIntegrationPoints,
         ObservationValueShape::SymmetricTensor3,
         RecoveredFieldNumericRepresentation::Real,
     )

@@ -1,0 +1,169 @@
+use runmat_analysis_core::{
+    AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
+    AnalysisProcedure, AnalysisSequence, BoundaryOperator, IndependentDomain,
+    MaterialAcousticModel, ObservationId, ObservationRequest, PhysicsFamily, PrescribedValue,
+    Pressure, ProcedureStep, PropertyRegionTarget, RegionTarget, RestartPolicy, RetentionPolicy,
+    SamplingPolicy, SpecificAcousticImpedance,
+};
+use runmat_meshing_core::StableDigest;
+
+use crate::{
+    fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
+    properties::compile_property_map,
+    topology::test_meshes::slab_mesh,
+};
+
+use super::*;
+
+fn compiled_duct() -> CompiledAnalysisStudy {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    replace_fixture_excitations(&mut model, Vec::new());
+    model.constraints.clear();
+    model.boundaries.clear();
+    model.materials[0].acoustic = Some(MaterialAcousticModel {
+        speed_of_sound_m_per_s: 2.0,
+        damping_ratio: 0.0,
+    });
+    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    let mut step = ProcedureStep::acoustic_harmonic("acoustic");
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
+    step.accuracy.criteria[0].tolerance = AccuracyTolerance::Relative(2.0e-9);
+    model.sequence = AnalysisSequence::from_steps("duct", vec![step]);
+    model
+        .constraints
+        .push(AnalysisConstraint::Acoustic(AcousticConstraint {
+            constraint_id: "pressure".into(),
+            kind: AcousticConstraintKind::PrescribedPressure {
+                target: RegionTarget::boundary("slab_left"),
+                value: PrescribedValue::Constant(Pressure::new(1.0)),
+            },
+        }));
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "matched".into(),
+        target: RegionTarget::boundary("slab_right"),
+        operator: BoundaryOperator::AcousticImpedance {
+            impedance: SpecificAcousticImpedance::new(6.0),
+        },
+    });
+    let properties = compile_property_map(&model, None).unwrap();
+    CompiledAnalysisStudy {
+        module_path: "tests/acoustic-duct.fea".into(),
+        study_id: "duct".into(),
+        formulation_requirement: FormulationRequirement::Experimental,
+        study_inputs: Vec::new(),
+        outputs: Vec::new(),
+        model,
+        properties,
+        solver_mesh_digest: StableDigest::ZERO,
+    }
+}
+
+#[test]
+fn plans_single_canonical_frequency_in_shared_order() {
+    let study = compiled_duct();
+    let plan = plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()).unwrap();
+    assert_eq!(plan.frequency_plan().frequencies_hz(), &[0.2]);
+    assert_eq!(plan.frequency_plan().reference_frequency_hz(), 0.2);
+    assert_eq!(plan.frequencies().len(), 1);
+    for (ordinal, planned) in plan.frequencies().iter().enumerate() {
+        assert_eq!(planned.entry().ordinal() as usize, ordinal);
+        assert_eq!(
+            planned.entry().frequency_hz(),
+            planned.workload().frequency.hertz
+        );
+        assert_eq!(planned.workload().model, study.model);
+        assert_eq!(planned.workload().solver.relative_tolerance, 2.0e-9);
+        plan.frequency_plan()
+            .validate_entry(planned.entry())
+            .unwrap();
+        planned.workload().execute(&slab_mesh(2)).unwrap();
+    }
+}
+
+#[test]
+fn rejects_lifecycle_family_and_procedure_substitution() {
+    let mut study = compiled_duct();
+    study.model.sequence.steps[0].restart = RestartPolicy::ResumeCheckpoint {
+        checkpoint_id: "checkpoint".into(),
+        required_state_digest: "state".into(),
+    };
+    assert!(matches!(
+        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()),
+        Err(AcousticStudyPlanningError::UnsupportedSequence)
+    ));
+
+    study = compiled_duct();
+    study.model.sequence.steps[0].family = PhysicsFamily::Thermal;
+    assert!(matches!(
+        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()),
+        Err(AcousticStudyPlanningError::UnsupportedProcedure)
+            | Err(AcousticStudyPlanningError::Compilation(_))
+            | Err(AcousticStudyPlanningError::Workload(_))
+    ));
+
+    study = compiled_duct();
+    study.model.sequence.steps[0].procedure = AnalysisProcedure::Static;
+    assert!(matches!(
+        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()),
+        Err(AcousticStudyPlanningError::UnsupportedProcedure)
+            | Err(AcousticStudyPlanningError::Compilation(_))
+            | Err(AcousticStudyPlanningError::Workload(_))
+    ));
+}
+
+#[test]
+fn rejects_unimplemented_publication_and_missing_state() {
+    let mut study = compiled_duct();
+    study.model.sequence.steps[0].state_outputs.clear();
+    assert!(matches!(
+        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()),
+        Err(AcousticStudyPlanningError::UnsupportedStatePublication)
+    ));
+
+    study = compiled_duct();
+    study.model.sequence.steps[0] = ProcedureStep::acoustic_harmonic("acoustic");
+    study.model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
+    study.model.sequence.steps[0]
+        .observations
+        .push(ObservationRequest::Diagnostic(
+            runmat_analysis_core::DiagnosticObservation {
+                observation_id: ObservationId("balance".into()),
+                diagnostic: runmat_analysis_core::DiagnosticKind::Balance,
+                sampling: SamplingPolicy::Final,
+                retention: RetentionPolicy::Canonical,
+            },
+        ));
+    assert!(matches!(
+        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()),
+        Err(AcousticStudyPlanningError::UnsupportedPublication)
+    ));
+}
+
+#[test]
+fn rejects_multi_frequency_state_without_a_sweep_selector() {
+    let mut study = compiled_duct();
+    study.model.sequence.steps[0].independent_domain =
+        IndependentDomain::FrequencyHertz(vec![0.2, 0.4]);
+    assert!(matches!(
+        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::experimental()),
+        Err(AcousticStudyPlanningError::AmbiguousFrequencySweepState)
+    ));
+}
+
+#[test]
+fn rejects_invalid_policy_and_formulation_mismatch() {
+    let study = compiled_duct();
+    let mut policy = AcousticStudyPlanningPolicy::experimental();
+    policy.krylov_restart = 0;
+    assert!(matches!(
+        plan_acoustic_study(&study, policy),
+        Err(AcousticStudyPlanningError::InvalidNumericalPolicy)
+    ));
+    let mut policy = AcousticStudyPlanningPolicy::experimental();
+    policy.formulation_requirement = FormulationRequirement::Production;
+    assert!(matches!(
+        plan_acoustic_study(&study, policy),
+        Err(AcousticStudyPlanningError::FormulationRequirementMismatch)
+    ));
+}

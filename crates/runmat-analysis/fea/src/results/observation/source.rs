@@ -158,7 +158,7 @@ impl ObservationFieldSelection {
                 recovery_request: request.identity(),
                 artifact: manifest.identity,
                 numerical_source: request.source,
-                topology: request.topology,
+                topology: request.topology.require_structural()?,
             },
             fields,
         )
