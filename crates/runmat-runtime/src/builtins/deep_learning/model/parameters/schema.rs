@@ -2,7 +2,7 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(super) enum ParameterRole {
+pub(in crate::builtins::deep_learning) enum ParameterRole {
     Weights,
     InputWeights,
     RecurrentWeights,
@@ -12,7 +12,7 @@ pub(super) enum ParameterRole {
 }
 
 impl ParameterRole {
-    pub(super) fn name(self) -> &'static str {
+    pub(in crate::builtins::deep_learning) fn name(self) -> &'static str {
         match self {
             Self::Weights => "Weights",
             Self::InputWeights => "InputWeights",
@@ -37,14 +37,14 @@ impl ParameterRole {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(super) struct ParameterKey {
-    pub(super) layer_index: usize,
-    pub(super) layer_name: String,
-    pub(super) role: ParameterRole,
+pub(in crate::builtins::deep_learning) struct ParameterKey {
+    pub(in crate::builtins::deep_learning) layer_index: usize,
+    pub(in crate::builtins::deep_learning) layer_name: String,
+    pub(in crate::builtins::deep_learning) role: ParameterRole,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) enum ParameterShape {
+pub(in crate::builtins::deep_learning) enum ParameterShape {
     /// Matrix whose input width can remain unknown until an input is admitted.
     Matrix { rows: usize, columns: Option<usize> },
     /// An exact multidimensional geometry. An unknown channel dimension remains
@@ -54,8 +54,8 @@ pub(super) enum ParameterShape {
     Elements(usize),
 }
 
-pub(super) struct ParameterView<'a> {
-    pub(super) key: ParameterKey,
-    pub(super) value: Option<&'a Value>,
-    pub(super) expected_shape: ParameterShape,
+pub(in crate::builtins::deep_learning) struct ParameterView<'a> {
+    pub(in crate::builtins::deep_learning) key: ParameterKey,
+    pub(in crate::builtins::deep_learning) value: Option<&'a Value>,
+    pub(in crate::builtins::deep_learning) expected_shape: ParameterShape,
 }

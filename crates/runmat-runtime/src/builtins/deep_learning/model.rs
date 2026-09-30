@@ -20,9 +20,9 @@ mod admission;
 mod construction;
 mod gpu;
 mod host;
-mod parameters;
+pub(in crate::builtins::deep_learning) mod parameters;
 mod properties;
-mod state;
+pub(in crate::builtins::deep_learning) mod state;
 mod table_rows;
 mod topology;
 

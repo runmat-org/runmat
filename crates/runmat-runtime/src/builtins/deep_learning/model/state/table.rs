@@ -2,7 +2,11 @@
 use super::*;
 use std::collections::HashMap;
 
-fn table(keys: &[StateKey], values: Vec<Value>, function: &'static str) -> BuiltinResult<Value> {
+pub(super) fn table(
+    keys: &[StateKey],
+    values: Vec<Value>,
+    function: &'static str,
+) -> BuiltinResult<Value> {
     let count = keys.len();
     let layer = string_array(
         keys.iter().map(|key| key.layer_name.clone()).collect(),

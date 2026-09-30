@@ -4,13 +4,13 @@ use runmat_builtins::DeepLearningLayerKind;
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(super) enum StateRole {
+pub(in crate::builtins::deep_learning) enum StateRole {
     HiddenState,
     CellState,
 }
 
 impl StateRole {
-    pub(super) fn name(self) -> &'static str {
+    pub(in crate::builtins::deep_learning) fn name(self) -> &'static str {
         match self {
             Self::HiddenState => "HiddenState",
             Self::CellState => "CellState",
@@ -27,11 +27,11 @@ impl StateRole {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(super) struct StateKey {
-    pub(super) layer_index: usize,
-    pub(super) layer_name: String,
-    pub(super) role: StateRole,
-    pub(super) channels: usize,
+pub(in crate::builtins::deep_learning) struct StateKey {
+    pub(in crate::builtins::deep_learning) layer_index: usize,
+    pub(in crate::builtins::deep_learning) layer_name: String,
+    pub(in crate::builtins::deep_learning) role: StateRole,
+    pub(in crate::builtins::deep_learning) channels: usize,
 }
 
 pub(super) fn keys(layers: &[Value], function: &'static str) -> BuiltinResult<Vec<StateKey>> {

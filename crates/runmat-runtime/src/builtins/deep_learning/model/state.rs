@@ -7,11 +7,51 @@ use super::*;
 mod schema;
 mod table;
 
-use schema::{StateKey, StateRole};
+pub(in crate::builtins::deep_learning) use schema::{StateKey, StateRole};
 
 pub(super) const STORAGE_PROPERTY: &str = "_State";
 
 pub(super) use table::initial;
+
+/// A typed, borrowed row from the single canonical serialized State table.
+pub(in crate::builtins::deep_learning) struct StateView<'a> {
+    pub key: StateKey,
+    pub value: &'a Value,
+}
+
+pub(in crate::builtins::deep_learning) fn view<'a>(
+    network: &'a ObjectInstance,
+    function: &'static str,
+) -> BuiltinResult<Vec<StateView<'a>>> {
+    if !is_deep_learning_network_object(network) {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: expected network object"),
+        ));
+    }
+    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: network is missing Layers"),
+        ));
+    };
+    let stored = network.properties.get(STORAGE_PROPERTY).ok_or_else(|| {
+        deep_learning_error(
+            function,
+            format!("{function}: network is missing canonical State"),
+        )
+    })?;
+    table::validate_canonical(&layers.data, stored, function)?;
+    let Value::Object(table) = stored else {
+        unreachable!("validated State table")
+    };
+    let values = super::table_rows::values(table, "State", function)?;
+    Ok(schema::keys(&layers.data, function)?
+        .into_iter()
+        .zip(&values.data)
+        .map(|(key, value)| StateView { key, value })
+        .collect())
+}
 
 pub(super) fn all_filled(network: &ObjectInstance, function: &'static str) -> BuiltinResult<bool> {
     let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
@@ -33,30 +73,13 @@ pub(in crate::builtins) fn project(
     network: &ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<Value> {
-    if !is_deep_learning_network_object(network) {
-        return Err(deep_learning_error(
-            function,
-            format!("{function}: expected network object"),
-        ));
-    }
-    let Value::Cell(layers) = network.properties.get("Layers").ok_or_else(|| {
-        deep_learning_error(function, format!("{function}: network is missing Layers"))
-    })?
-    else {
-        return Err(deep_learning_error(
-            function,
-            format!("{function}: Layers must be a cell array"),
-        ));
-    };
-    let state = network.properties.get(STORAGE_PROPERTY).ok_or_else(|| {
-        deep_learning_error(
-            function,
-            format!("{function}: network is missing canonical State"),
-        )
-    })?;
-    // Re-admit restored values before publishing them as a public property.
-    table::validate_canonical(&layers.data, state, function)?;
-    Ok(state.clone())
+    // Admission is shared with execution's borrowed view; publishing a table
+    // must not become a separate interpretation of state identities or storage.
+    let (keys, values): (Vec<_>, Vec<_>) = view(network, function)?
+        .into_iter()
+        .map(|row| (row.key, super::parameters::public_value(Some(row.value))))
+        .unzip();
+    table::table(&keys, values, function)
 }
 
 pub(in crate::builtins) fn apply(
@@ -115,6 +138,16 @@ mod tests {
     #[test]
     fn network_state_table_is_canonical_and_validated() {
         let network = recurrent_network();
+        let rows = view(&network, "forward").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].key.role, StateRole::HiddenState);
+        assert_eq!(rows[1].key.role, StateRole::CellState);
+        let Value::Object(stored) = network.properties.get(STORAGE_PROPERTY).unwrap() else {
+            panic!("stored State table expected");
+        };
+        let stored_values = super::super::table_rows::values(stored, "State", "forward").unwrap();
+        assert!(std::ptr::eq(rows[0].value, &stored_values.data[0]));
+        assert!(std::ptr::eq(rows[1].value, &stored_values.data[1]));
         super::super::super::class_registration::ensure_network_class_registered(DLNETWORK_CLASS);
         let public = crate::class_registry::lookup_property(
             &network.class_name,

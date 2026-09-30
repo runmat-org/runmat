@@ -10,10 +10,12 @@ mod update;
 mod validation;
 mod view;
 
-use schema::{ParameterKey, ParameterRole, ParameterShape, ParameterView};
+pub(in crate::builtins::deep_learning) use schema::{
+    ParameterKey, ParameterRole, ParameterShape, ParameterView,
+};
 pub(super) use validation::numeric_payload_shape;
 use validation::{empty_parameter, parameter_data, validate_parameter};
-use view::view;
+pub(in crate::builtins::deep_learning) use view::view;
 
 pub(in crate::builtins) use projection::project;
 pub(super) use projection::public_value;

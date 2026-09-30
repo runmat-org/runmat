@@ -121,7 +121,7 @@ fn layers<'a>(network: &'a ObjectInstance, function: &'static str) -> BuiltinRes
 
 /// Borrow the parameters consumed by supported sequential execution without
 /// materializing host payloads or downloading GPU buffers.
-pub(super) fn view<'a>(
+pub(in crate::builtins::deep_learning) fn view<'a>(
     network: &'a ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<Vec<ParameterView<'a>>> {
