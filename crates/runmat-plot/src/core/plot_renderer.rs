@@ -153,6 +153,7 @@ pub struct PlotRenderer {
     last_geometry_scene: Option<GeometryScene>,
     geometry_overlay: Option<GeometrySceneOverlay>,
     geometry_presentation: GeometryScenePresentation,
+    presence: crate::collaboration::PresenceFrame,
     geometry_xray_enabled: bool,
     geometry_node_owner_ids: HashMap<u64, Vec<String>>,
     geometry_hidden_owner_node_ids: BTreeSet<String>,
@@ -369,6 +370,7 @@ impl PlotRenderer {
             last_geometry_scene: None,
             geometry_overlay: None,
             geometry_presentation: GeometryScenePresentation::default(),
+            presence: crate::collaboration::PresenceFrame::default(),
             geometry_xray_enabled: false,
             geometry_node_owner_ids: HashMap::new(),
             geometry_hidden_owner_node_ids: BTreeSet::new(),
@@ -508,6 +510,7 @@ impl PlotRenderer {
     /// Set the figure to render
     pub fn set_figure(&mut self, figure: Figure) {
         self.last_geometry_scene_key = None;
+        self.last_geometry_scene = None;
         self.geometry_overlay = None;
         self.geometry_xray_enabled = false;
         self.geometry_node_owner_ids.clear();
@@ -3367,6 +3370,14 @@ impl PlotRenderer {
     // Removed simple data_bounds getter in favor of overlay-aware bounds below
 
     /// Get the primary (axes 0) camera.
+    pub fn set_presence(&mut self, frame: crate::collaboration::PresenceFrame) -> Result<(), String> {
+        if !frame.validate() { return Err("invalid presence frame".into()); }
+        self.presence = frame;
+        Ok(())
+    }
+
+    pub fn presence(&self) -> &crate::collaboration::PresenceFrame { &self.presence }
+
     pub fn camera(&self) -> &Camera {
         self.axes_cameras
             .first()

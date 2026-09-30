@@ -189,7 +189,7 @@ pub async fn electromagnetic_domain_builtin(frequency: Value) -> BuiltinResult<V
     domain_object(
         "fea.ElectromagneticDomain.atFrequency",
         FEA_ELECTROMAGNETIC_DOMAIN_CLASS,
-        &ElectromagneticDomain {
+        &ElectromagneticDomain::Harmonic {
             reference_frequency: Frequency::new(quantity_scalar(
                 "fea.ElectromagneticDomain.atFrequency",
                 &frequency,

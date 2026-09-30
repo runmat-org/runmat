@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn static_electrical_domain_does_not_invent_frequency_and_conduction_requires_positive_sigma() {
+    let mut model = valid_model();
+    model.materials[0].electrical = Some(MaterialElectricalModel {
+        reference_temperature_k: 293.15,
+        conductivity_s_per_m: 0.0,
+        resistive_heating_coefficient: 0.0,
+        relative_permittivity: 2.0,
+        relative_permeability: 1.0,
+        conductivity_frequency_response: Vec::new(),
+    });
+    model.electromagnetic = Some(ElectromagneticDomain::Static {
+        equation: StaticElectricalEquation::Electrostatics,
+    });
+    crate::validate_domains::validate_domains(&model).unwrap();
+    model.electromagnetic = Some(ElectromagneticDomain::Static {
+        equation: StaticElectricalEquation::SteadyConduction,
+    });
+    assert!(matches!(
+        crate::validate_domains::validate_domains(&model),
+        Err(AnalysisValidationError::InvalidMaterial { .. })
+    ));
+    model.materials[0]
+        .electrical
+        .as_mut()
+        .unwrap()
+        .conductivity_s_per_m = 1.0;
+    crate::validate_domains::validate_domains(&model).unwrap();
+    for frequency in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
+            reference_frequency: Frequency::new(frequency),
+        });
+        assert!(matches!(
+            crate::validate_domains::validate_domains(&model),
+            Err(AnalysisValidationError::InvalidDomain {
+                domain: "electromagnetic",
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
 fn missing_material_and_condition_validation_failures() {
     let mut model = valid_model();
     model.materials.clear();

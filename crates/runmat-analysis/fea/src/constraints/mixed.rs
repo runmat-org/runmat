@@ -20,7 +20,7 @@ use super::{
     mixed_surface,
     pairing::{pair_mixed_targets, pairing_rows},
     row,
-    target::resolve_solid_target,
+    target::resolve_nodal_target,
 };
 
 pub(super) fn requires_mixed_compilation(
@@ -287,7 +287,7 @@ pub(super) fn resolve_target(
     let nodes = ownership.canonical_nodes().to_vec();
     let resolved = match ownership {
         MixedStructuralTargetOwnership::Solid { .. }
-        | MixedStructuralTargetOwnership::Shared { .. } => resolve_solid_target(
+        | MixedStructuralTargetOwnership::Shared { .. } => resolve_nodal_target(
             mesh.expect("solid target ownership requires a solver mesh"),
             target,
             &constraint.constraint_id,

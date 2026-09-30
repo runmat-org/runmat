@@ -1,3 +1,6 @@
+import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
+import type { InputManifest } from "./generated/collaboration-contracts.js";
+export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
 import type {
   RunMatFilesystemProvider
 } from "./fs/provider-types.js";
@@ -50,6 +53,8 @@ import {
   FEA_RUN_DATASET_SCHEMA_VERSION,
 } from "./fea-contracts.js";
 import { createDefaultFsProvider } from "./fs/default.js";
+import type { PlotPresenceFrame, PlotPointerPosition } from "./plot-presence.js";
+export type { PlotPresenceFrame, PlotPointerPosition } from "./plot-presence.js";
 import { createIndexedDbPackageCache } from "./package-cache/indexeddb.js";
 import { fetchGitTreeInventoryWire } from "./package-cache/git-gateway.js";
 import { BrowserProjectResolver } from "./package-cache/browser-resolver.js";
@@ -684,6 +689,7 @@ export interface ExecuteRequestPathSource {
 export type ExecuteRequestSource = ExecuteRequestTextSource | ExecuteRequestPathSource;
 
 export interface ExecuteRequest {
+  inputManifest?: InputManifest;
   source: ExecuteRequestSource;
   compatibility?: LanguageCompatMode;
   hostPolicy?: {
@@ -694,6 +700,8 @@ export interface ExecuteRequest {
 }
 
 export interface ExecuteResult {
+  /** Canonical lock for the dependency graph actually used for this captured run. */
+  dependencyLock?: string | null;
   flow: RuntimeFlow;
   displayEvents: DisplayEvent[];
   valueText?: string;
@@ -1035,7 +1043,7 @@ export interface RunMatSessionHandle {
     geometrySceneHandle?: number | null,
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
-  checkFeaSource(path: string): Promise<FeaSourceCheckResult>;
+  checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult>;
   feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult>;
   materializeDataFileVariable(
     path: string,
@@ -1066,6 +1074,7 @@ export interface RunMatSessionHandle {
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
   setFsProvider?(provider: RunMatFilesystemProvider): Promise<void>;
   packageCacheSnapshot(): Promise<PackageCacheSnapshot | null>;
+  prepareCapturedProject: CapturedProjectResolver;
   installProjectHandoff(handoff: unknown): Promise<unknown>;
   clearProjectHandoff(): Promise<void>;
   projectRevision(): Promise<unknown | null>;
@@ -1127,7 +1136,7 @@ interface RunMatNativeSession {
     geometrySceneHandle?: number | null,
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
-  checkFeaSource?: (path: string) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
+  checkFeaSource?: (path: string, inputManifest?: InputManifest) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
   feaField?: (
     runId: string,
     fieldId: string,
@@ -1162,6 +1171,7 @@ interface RunMatNativeSession {
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
   setFsProvider?: (provider: RunMatFilesystemProvider) => void;
   packageCacheSnapshot?: () => Promise<PackageCacheSnapshot | null>;
+  prepareCapturedProject?: CapturedProjectResolver;
   installProjectHandoff?: (handoff: unknown) => unknown;
   clearProjectHandoff?: () => void;
   projectRevision?: () => unknown | null;
@@ -1408,6 +1418,8 @@ interface RunMatNativeModule {
   bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
   presentSurface?: (surfaceId: number) => void;
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
+  setSurfacePresence?: (surfaceId: number, frame: PlotPresenceFrame) => void;
+  captureSurfacePointer?: (surfaceId: number, x: number, y: number) => unknown;
   presentGeometrySceneOnSurface?: (surfaceId: number, handle: number) => void;
   setGeometryScenePresentation?: (surfaceId: number, presentation: GeometryScenePresentationState) => void;
   pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number, mode: string) => GeometryScenePickResult | null;
@@ -1416,7 +1428,7 @@ interface RunMatNativeModule {
   fitPlotSurfaceExtents?: (surfaceId: number) => void;
   resetPlotSurfaceCamera?: (surfaceId: number) => void;
   getPlotSurfaceCameraState?: (surfaceId: number) => unknown;
-  setPlotSurfaceCameraState?: (surfaceId: number, state: unknown) => void;
+  setPlotSurfaceCameraState?: (surfaceId: number, state: PlotSurfaceCameraState, expectedTarget?: NonNullable<PlotPresenceFrame["target"]>) => void;
   setPlotThemeConfig?: (theme: unknown) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
@@ -1775,6 +1787,18 @@ export async function presentSurface(surfaceId: number): Promise<void> {
   native.presentSurface(surfaceId);
 }
 
+export async function setSurfacePresence(surfaceId: number, frame: PlotPresenceFrame): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setSurfacePresence");
+  native.setSurfacePresence(surfaceId, frame);
+}
+
+export async function captureSurfacePointer(surfaceId: number, x: number, y: number): Promise<PlotPointerPosition | null> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "captureSurfacePointer");
+  return (normalizeWasmStructuredValue(native.captureSurfacePointer(surfaceId, x, y)) ?? null) as PlotPointerPosition | null;
+}
+
 export async function presentFigureOnSurface(surfaceId: number, handle: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "presentFigureOnSurface");
@@ -1848,11 +1872,12 @@ export async function getPlotSurfaceCameraState(surfaceId: number): Promise<Plot
 
 export async function setPlotSurfaceCameraState(
   surfaceId: number,
-  state: PlotSurfaceCameraState
+  state: PlotSurfaceCameraState,
+  expectedTarget?: NonNullable<PlotPresenceFrame["target"]>
 ): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "setPlotSurfaceCameraState");
-  native.setPlotSurfaceCameraState(surfaceId, state);
+  native.setPlotSurfaceCameraState(surfaceId, state, expectedTarget);
 }
 
 export async function setPlotThemeConfig(theme: unknown): Promise<void> {
@@ -2256,12 +2281,12 @@ class WebRunMatSession implements RunMatSessionHandle {
     return this.native.feaCapabilities();
   }
 
-  async checkFeaSource(path: string): Promise<FeaSourceCheckResult> {
+  async checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult> {
     this.ensureActive();
     if (typeof this.native.checkFeaSource !== "function") {
       throw new Error("The loaded runmat-wasm module does not expose checkFeaSource yet.");
     }
-    return this.native.checkFeaSource(path);
+    return inputManifest ? this.native.checkFeaSource(path, inputManifest) : this.native.checkFeaSource(path);
   }
 
   async feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult> {
@@ -2485,6 +2510,13 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
     return (await this.native.packageCacheSnapshot()) ?? null;
   }
+
+  prepareCapturedProject: CapturedProjectResolver = async (request, provider, filesystem) => {
+    if (!this.native.prepareCapturedProject) {
+      throw new Error("The loaded runtime does not support captured package resolution");
+    }
+    return this.native.prepareCapturedProject(request, provider, filesystem);
+  };
 
   async installProjectHandoff(handoff: unknown): Promise<unknown> {
     this.ensureActive();

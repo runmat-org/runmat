@@ -24,7 +24,7 @@ use super::normal::boundary_node_normals;
 use super::pairing::{pair_targets, pairing_rows};
 use super::plan::reference_point_identity;
 use super::row;
-use super::target::{node_coordinates, resolve_solid_target};
+use super::target::{node_coordinates, resolve_nodal_target};
 
 type CompiledConstraint = (
     Vec<ResolvedConstraintTarget>,
@@ -112,7 +112,7 @@ pub(super) fn compile_constraint(
                         constraint.constraint_id
                     )));
                 }
-                let resolved = resolve_solid_target(mesh, &term.target, &constraint.constraint_id)?;
+                let resolved = resolve_nodal_target(mesh, &term.target, &constraint.constraint_id)?;
                 terms.extend(
                     resolved
                         .matched_node_identities
@@ -144,7 +144,7 @@ pub(super) fn compile_constraint(
         }
         StructuralConstraintKind::NormalDisplacement { target, value } => {
             require_normal_capable(constraint)?;
-            let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
+            let resolved = resolve_nodal_target(mesh, target, &constraint.constraint_id)?;
             let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
             let right_hand_side =
                 study_constant_displacement(value, model, &constraint.constraint_id)?;
@@ -191,7 +191,7 @@ fn compile_fixed(
     constraint: &StructuralConstraint,
     target: &runmat_analysis_core::RegionTarget,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
-    let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
+    let resolved = resolve_nodal_target(mesh, target, &constraint.constraint_id)?;
     let rows = resolved
         .matched_node_identities
         .iter()
@@ -225,7 +225,7 @@ fn compile_prescribed(
             ))
         })
         .collect::<Result<Vec<_>, ConstraintPlanError>>()?;
-    let resolved = resolve_solid_target(mesh, &values.target, &constraint.constraint_id)?;
+    let resolved = resolve_nodal_target(mesh, &values.target, &constraint.constraint_id)?;
     let normals = if constraint.frame == CoordinateFrame::BoundaryNormalTangent {
         Some(boundary_node_normals(
             mesh,
@@ -261,7 +261,7 @@ fn compile_prescribed_motion(
     motion: &PrescribedStructuralMotion,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_global(constraint)?;
-    let resolved = resolve_solid_target(mesh, &motion.target, &constraint.constraint_id)?;
+    let resolved = resolve_nodal_target(mesh, &motion.target, &constraint.constraint_id)?;
     let mut rows = Vec::with_capacity(
         resolved
             .matched_node_identities
@@ -289,7 +289,7 @@ fn compile_boundary_directions(
     tangential: bool,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_normal_capable(constraint)?;
-    let resolved = resolve_solid_target(mesh, target, &constraint.constraint_id)?;
+    let resolved = resolve_nodal_target(mesh, target, &constraint.constraint_id)?;
     let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
     let mut rows = Vec::new();
     for node_identity in &resolved.matched_node_identities {
@@ -326,8 +326,8 @@ fn compile_pair(
     transform_displacement: bool,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_global(constraint)?;
-    let primary = resolve_solid_target(mesh, &pair.primary, &constraint.constraint_id)?;
-    let secondary = resolve_solid_target(mesh, &pair.secondary, &constraint.constraint_id)?;
+    let primary = resolve_nodal_target(mesh, &pair.primary, &constraint.constraint_id)?;
+    let secondary = resolve_nodal_target(mesh, &pair.secondary, &constraint.constraint_id)?;
     let pairings = pair_targets(
         mesh,
         &primary,
@@ -352,7 +352,7 @@ fn compile_coupling(
     kind: ConstraintCouplingKind,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_global(constraint)?;
-    let target = resolve_solid_target(mesh, &coupling.target, &constraint.constraint_id)?;
+    let target = resolve_nodal_target(mesh, &coupling.target, &constraint.constraint_id)?;
     let identity = reference_point_identity(
         &coupling.reference_point.reference_point_id,
         coupling.reference_point.position.meters,

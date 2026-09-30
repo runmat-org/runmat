@@ -26,9 +26,15 @@ pub(super) fn prove(
     {
         return Err(NullspaceEvidenceError::DimensionMismatch);
     }
+    if !matches!(
+        operator.role(),
+        OperatorRole::Conductivity | OperatorRole::Stiffness
+    ) {
+        return Err(NullspaceEvidenceError::IncompatibleOperator);
+    }
     validate_operator(
         operator,
-        OperatorRole::Conductivity,
+        operator.role(),
         MatrixDefiniteness::PositiveSemidefinite,
     )?;
     let component_nodes = connected_components(&projection.node_neighbors)?;

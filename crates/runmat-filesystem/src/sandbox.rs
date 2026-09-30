@@ -18,6 +18,8 @@ use std::fs;
 use std::io;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Component, Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 /// Filesystem provider that sandboxes all operations under a fixed root directory.
@@ -26,6 +28,26 @@ use std::path::{Component, Path, PathBuf};
 /// Attempts to traverse outside the root using `..` simply clamp to the root, preventing escape.
 pub struct SandboxFsProvider {
     root: PathBuf,
+    captured_io: Option<Arc<dyn CapturedIo>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait(?Send)]
+pub trait CapturedIo: Send + Sync + 'static {
+    async fn read_version(
+        &self,
+        path: &Path,
+        version: &str,
+        size: u64,
+        snapshot: &str,
+    ) -> io::Result<Vec<u8>>;
+    async fn publish_output(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String>;
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()>;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -36,7 +58,17 @@ impl SandboxFsProvider {
             fs::create_dir_all(&root)?;
         }
         let canonical = fs::canonicalize(root)?;
-        Ok(Self { root: canonical })
+        Ok(Self {
+            root: canonical,
+            captured_io: None,
+        })
+    }
+
+    /// Keep ordinary project reads in the sandbox while captured runs use the
+    /// authoritative provider for immutable versions and conditional outputs.
+    pub fn with_captured_io(mut self, provider: Arc<dyn CapturedIo>) -> Self {
+        self.captured_io = Some(provider);
+        self
     }
 
     /// Return the sandbox root on the host filesystem.
@@ -115,6 +147,47 @@ impl FsProvider for SandboxFsProvider {
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let target = self.resolve(path);
         fs::read(target)
+    }
+
+    async fn read_version(
+        &self,
+        path: &Path,
+        version: &str,
+        size: u64,
+        snapshot: &str,
+    ) -> io::Result<Vec<u8>> {
+        let provider = self.captured_io.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "immutable version reads are unsupported by this provider",
+            )
+        })?;
+        provider.read_version(path, version, size, snapshot).await
+    }
+
+    async fn publish_output(
+        &self,
+        path: &Path,
+        data: &[u8],
+        expected: Option<&str>,
+    ) -> io::Result<String> {
+        let provider = self.captured_io.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "conditional output publication is unsupported",
+            )
+        })?;
+        provider.publish_output(path, data, expected).await
+    }
+
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
+        let provider = self.captured_io.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "conditional output removal is unsupported",
+            )
+        })?;
+        provider.remove_output(path, expected).await
     }
 
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
@@ -322,14 +395,81 @@ fn sanitize_segment(input: &str) -> String {
 
 #[cfg(all(not(target_arch = "wasm32"), test))]
 mod tests {
-    use super::SandboxFsProvider;
+    use super::{CapturedIo, SandboxFsProvider};
     use crate::FsProvider;
     use futures::executor;
     use std::path::Path;
+    use std::{io, sync::Arc};
     use tempfile::tempdir;
 
     fn virtual_path(path: &Path) -> String {
         path.to_string_lossy().replace('\\', "/")
+    }
+
+    struct CapturedFixture;
+
+    #[async_trait::async_trait(?Send)]
+    impl CapturedIo for CapturedFixture {
+        async fn read_version(
+            &self,
+            _path: &Path,
+            version: &str,
+            size: u64,
+            snapshot: &str,
+        ) -> io::Result<Vec<u8>> {
+            if version != "v1" || snapshot != "snapshot" || size != 3 {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "version unavailable",
+                ));
+            }
+            Ok(b"old".to_vec())
+        }
+        async fn publish_output(
+            &self,
+            _path: &Path,
+            _data: &[u8],
+            _expected: Option<&str>,
+        ) -> io::Result<String> {
+            Ok("published".to_owned())
+        }
+        async fn remove_output(&self, _path: &Path, _expected: &str) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn cached_live_file_cannot_substitute_for_a_captured_version() {
+        let temp = tempdir().expect("tempdir");
+        let provider = SandboxFsProvider::new(temp.path().to_path_buf())
+            .expect("sandbox")
+            .with_captured_io(Arc::new(CapturedFixture));
+        executor::block_on(provider.write(Path::new("/basic.m"), b"new")).expect("cache write");
+        assert_eq!(
+            executor::block_on(provider.read(Path::new("/basic.m"))).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            executor::block_on(provider.read_version(Path::new("/basic.m"), "v1", 3, "snapshot"))
+                .unwrap(),
+            b"old"
+        );
+        assert_eq!(
+            executor::block_on(provider.read_version(
+                Path::new("/basic.m"),
+                "missing",
+                3,
+                "snapshot"
+            ))
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            executor::block_on(provider.publish_output(Path::new("/output"), b"data", None))
+                .unwrap(),
+            "published"
+        );
     }
 
     #[test]

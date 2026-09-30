@@ -1,0 +1,260 @@
+use super::{assembly::ElectricalAssembly, recovery, ElectricalStaticError};
+use crate::algebra::{
+    spmv, AssembledRealSystem, CanonicalRealOperators, MatrixProperties,
+    NullspaceEliminationEvidence, OperatorRole, RealSparseMatrix,
+};
+use runmat_analysis_core::StaticElectricalEquation;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ElectricalConstitutiveResponse {
+    Electrostatics {
+        displacement_c_per_m2: Vec<[f64; 3]>,
+        energy_density_j_per_m3: Vec<f64>,
+        total_energy_j: f64,
+    },
+    SteadyConduction {
+        current_density_a_per_m2: Vec<[f64; 3]>,
+        joule_density_w_per_m3: Vec<f64>,
+        total_joule_power_w: f64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElectricalTerminalResponse {
+    pub constraint_id: String,
+    pub ordered_node_ids: Vec<u64>,
+    /// Outward dielectric flux (C) or conduction current (A), from the original weak
+    /// operator, not a field-average extrapolation. Electrode charge has opposite sign.
+    pub outward_flux: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalElectricalResponse {
+    pub equation: StaticElectricalEquation,
+    pub mesh_digest: runmat_meshing_core::StableDigest,
+    pub ordered_node_ids: Vec<u64>,
+    pub ordered_element_ids: Vec<u64>,
+    pub potential_v: Vec<f64>,
+    /// Volume averages. Quadratic products below are integrated BEFORE averaging.
+    pub element_electric_field_v_per_m: Vec<[f64; 3]>,
+    pub constitutive: ElectricalConstitutiveResponse,
+    pub terminals: Vec<ElectricalTerminalResponse>,
+    pub nodal_outward_flux: Vec<f64>,
+    pub relative_flux_imbalance: f64,
+    pub relative_energy_identity_error: f64,
+    pub linear_residual: f64,
+    pub iterations: u32,
+}
+
+pub(super) fn solve(
+    assembly: ElectricalAssembly,
+    equation: StaticElectricalEquation,
+    residual_target: f64,
+) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
+    let count = assembly.projection.nodes.len();
+    let constrained = assembly
+        .prescribed
+        .iter()
+        .map(Option::is_some)
+        .collect::<Vec<_>>();
+    // Dimensionless solve scaling prevents identity Dirichlet rows in volts from
+    // overwhelming the free electrostatic residual (epsilon is ~1e-11 SI).
+    // The original physical operator is retained for flux and energy accounting.
+    let scale = assembly
+        .coefficients
+        .iter()
+        .copied()
+        .reduce(f64::max)
+        .ok_or_else(|| ElectricalStaticError::Material("empty electrical domain".into()))?;
+    let normalized = RealSparseMatrix::scaled_sum(
+        &[(scale.recip(), &assembly.stiffness)],
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    let proof = NullspaceEliminationEvidence::prove_scalar_diffusion(
+        &assembly.projection,
+        &normalized,
+        &constrained,
+        &vec![0.0; count],
+    )
+    .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    // Solve component-wise increments so arbitrary potential gauge offsets do not
+    // create roundoff fields, spurious terminal flux or a false relative energy error.
+    let components = crate::algebra::connected_components(&assembly.projection.node_neighbors)
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    let mut reference = vec![0.0; count];
+    for nodes in components {
+        let value = nodes
+            .iter()
+            .find_map(|&node| assembly.prescribed[node])
+            .ok_or_else(|| ElectricalStaticError::Boundary("unanchored component".into()))?;
+        for node in nodes {
+            reference[node] = value;
+        }
+    }
+    let zero = |role| {
+        RealSparseMatrix::diagonal(
+            vec![0.0; count],
+            role,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))
+    };
+    let operators = CanonicalRealOperators::try_new(
+        normalized,
+        zero(OperatorRole::Mass)?,
+        zero(OperatorRole::Damping)?,
+    )
+    .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    let rhs = assembly
+        .prescribed
+        .iter()
+        .zip(&reference)
+        .map(|(value, reference)| value.map_or(0.0, |value| value - reference))
+        .collect();
+    let system = AssembledRealSystem::try_new_with_nullspace_evidence(
+        operators,
+        constrained,
+        rhs,
+        Some(proof),
+    )
+    .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    let backend = crate::solve::backend::cpu_reference::CpuReferenceBackend;
+    let solution = crate::solve::linear::solve_operator_system_scoped(
+        &system,
+        crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        &backend,
+        None,
+        crate::solve::linear::ScopedLinearSolveSettings {
+            plan: crate::planning::resource::LocalExecutionPlan::serial(),
+            admission: None,
+            relative_tolerance: residual_target,
+        },
+    )
+    .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    if !solution.converged || solution.solution.iter().any(|value| !value.is_finite()) {
+        return Err(ElectricalStaticError::NotConverged {
+            iterations: solution.iterations,
+            residual: solution.residual_norm,
+            diagnostics: solution.diagnostics,
+        });
+    }
+    let increment = solution.solution;
+    let potential = increment
+        .iter()
+        .zip(&reference)
+        .map(|(value, reference)| value + reference)
+        .collect();
+    let reactions = spmv(&assembly.stiffness, &increment)
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    let recovery = recovery::recover(&assembly, &increment)?;
+    let integrals = recovery
+        .squared_field_integral
+        .iter()
+        .zip(&assembly.coefficients)
+        .map(|(square, coefficient)| square * coefficient)
+        .collect::<Vec<_>>();
+    let total = integrals.iter().sum::<f64>();
+    let weak_total = increment
+        .iter()
+        .zip(&reactions)
+        .map(|(value, reaction)| value * reaction)
+        .sum::<f64>();
+    let relative_energy_identity_error =
+        (total - weak_total).abs() / total.abs().max(weak_total.abs()).max(f64::MIN_POSITIVE);
+    let constitutive = match equation {
+        StaticElectricalEquation::Electrostatics => {
+            ElectricalConstitutiveResponse::Electrostatics {
+                displacement_c_per_m2: recovery.flux,
+                energy_density_j_per_m3: integrals
+                    .iter()
+                    .zip(&recovery.volumes)
+                    .map(|(value, volume)| 0.5 * value / volume)
+                    .collect(),
+                total_energy_j: 0.5 * total,
+            }
+        }
+        StaticElectricalEquation::SteadyConduction => {
+            ElectricalConstitutiveResponse::SteadyConduction {
+                current_density_a_per_m2: recovery.flux,
+                joule_density_w_per_m3: integrals
+                    .iter()
+                    .zip(&recovery.volumes)
+                    .map(|(value, volume)| value / volume)
+                    .collect(),
+                total_joule_power_w: total,
+            }
+        }
+    };
+    let nodal_outward_flux = reactions.iter().map(|value| -value).collect::<Vec<_>>();
+    let terminals = assembly
+        .terminal_nodes
+        .iter()
+        .map(|(id, nodes)| ElectricalTerminalResponse {
+            constraint_id: id.clone(),
+            ordered_node_ids: nodes
+                .iter()
+                .map(|&node| assembly.projection.nodes[node].node_id)
+                .collect(),
+            outward_flux: nodes.iter().map(|&node| nodal_outward_flux[node]).sum(),
+        })
+        .collect::<Vec<_>>();
+    let flux_scale = terminals
+        .iter()
+        .map(|terminal| terminal.outward_flux.abs())
+        .sum::<f64>();
+    let relative_flux_imbalance = terminals
+        .iter()
+        .map(|terminal| terminal.outward_flux)
+        .sum::<f64>()
+        .abs()
+        / flux_scale.max(f64::MIN_POSITIVE);
+    if !total.is_finite()
+        || !relative_energy_identity_error.is_finite()
+        || !relative_flux_imbalance.is_finite()
+        || reactions.iter().any(|value| !value.is_finite())
+        || integrals.iter().any(|value| !value.is_finite())
+    {
+        return Err(ElectricalStaticError::Operator(
+            "nonfinite conservation accounting".into(),
+        ));
+    }
+    if relative_energy_identity_error > residual_target.max(1e-10) * 10.0
+        || relative_flux_imbalance > residual_target.max(1e-10) * 10.0
+    {
+        return Err(ElectricalStaticError::Operator(
+            "electrical conservation target not satisfied".into(),
+        ));
+    }
+    Ok(CanonicalElectricalResponse {
+        equation,
+        mesh_digest: assembly.projection.mesh_digest,
+        ordered_node_ids: assembly
+            .projection
+            .nodes
+            .iter()
+            .map(|node| node.node_id)
+            .collect(),
+        ordered_element_ids: assembly
+            .projection
+            .elements
+            .iter()
+            .map(|element| element.element_id)
+            .collect(),
+        potential_v: potential,
+        element_electric_field_v_per_m: recovery.electric_field,
+        constitutive,
+        terminals,
+        nodal_outward_flux,
+        relative_flux_imbalance,
+        relative_energy_identity_error,
+        linear_residual: solution.residual_norm,
+        iterations: solution.iterations,
+    })
+}

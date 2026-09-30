@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn static_electrical_template_is_direct_and_publishes_static_state() {
+    let step = ProcedureStep::electromagnetic_static("electric");
+    assert_eq!(step.family, PhysicsFamily::Electromagnetic);
+    assert_eq!(step.procedure, AnalysisProcedure::Static);
+    assert_eq!(step.solution_space, SolutionSpace::Direct);
+    assert_eq!(step.independent_domain, IndependentDomain::Static);
+    assert_eq!(step.state_outputs.len(), 1);
+    assert_eq!(step.state_outputs[0].kind, StateKind::ElectromagneticStatic);
+    assert_ne!(
+        step.state_outputs,
+        ProcedureStep::electromagnetic_harmonic("electric").state_outputs
+    );
+    let sequence = AnalysisSequence::from_steps("electrical", vec![step.clone()]);
+    crate::validate_sequence::validate_sequence_contract(&sequence).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<ProcedureStep>(&serde_json::to_vec(&step).unwrap()).unwrap(),
+        step
+    );
+}
+
+#[test]
 fn excitation_selection_changes_solver_identity_and_roundtrips_distinctly() {
     let original = ProcedureStep::structural_static("response");
     let mut encoded_contracts = std::collections::BTreeSet::new();

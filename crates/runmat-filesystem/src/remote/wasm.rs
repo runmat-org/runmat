@@ -74,6 +74,7 @@ struct FsWriteChunkRequest<'a> {
     create_new: bool,
     data: &'a [u8],
     hash: Option<&'a str>,
+    expected_version_id: Option<&'a str>,
 }
 
 struct UploadSessionCompleteParams<'a> {
@@ -474,7 +475,7 @@ impl RemoteFsProvider {
         serde_json::from_str(&text).map_err(map_serde_err)
     }
 
-    fn upload_session_complete(&self, params: UploadSessionCompleteParams<'_>) -> io::Result<()> {
+    fn upload_session_complete(&self, params: UploadSessionCompleteParams<'_>) -> io::Result<Option<String>> {
         let body = UploadSessionCompleteRequest {
             path: params.path.to_string(),
             session_id: params.session_id.to_string(),
@@ -484,16 +485,20 @@ impl RemoteFsProvider {
             chunk_count: params.chunk_count,
             create_new: params.create_new,
             hash: params.hash.map(ToString::to_string),
+            expected_version_id: params.expected_version_id.map(ToString::to_string),
         };
         let payload = serde_json::to_vec(&body).map_err(map_serde_err)?;
-        let _ = self.send_text(
+        let response = self.send_text(
             "POST",
             "/fs/upload-session/complete",
             &[],
             Some(&payload),
             Some("application/json"),
         )?;
-        Ok(())
+        #[derive(Deserialize)]
+        struct Commit { version_id: Option<String> }
+        let commit: Commit = serde_json::from_str(&response).map_err(map_serde_err)?;
+        Ok(commit.version_id)
     }
 
     fn upload_chunk_target(
@@ -661,15 +666,19 @@ impl RemoteFsProvider {
         hash: Option<&str>,
         allow_legacy_fallback: bool,
     ) -> io::Result<()> {
+        self.upload_versioned_file(path, data, create_new, hash, allow_legacy_fallback, None).map(|_| ())
+    }
+
+    fn upload_versioned_file(&self, path: &str, data: &[u8], create_new: bool, hash: Option<&str>, allow_legacy_fallback: bool, expected_version_id: Option<&str>) -> io::Result<Option<String>> {
         if data.is_empty() && allow_legacy_fallback {
-            return self.upload_unsharded_file_legacy(path, data, create_new, hash);
+            return self.upload_unsharded_file_legacy(path, data, create_new, hash).map(|_| None);
         }
         let content_sha256 = sha256_hex(data);
         let session =
             match self.upload_session_start(path, data.len() as u64, &content_sha256, create_new) {
                 Ok(session) => session,
                 Err(err) if err.kind() == ErrorKind::NotFound && allow_legacy_fallback => {
-                    return self.upload_unsharded_file_legacy(path, data, create_new, hash);
+                    return self.upload_unsharded_file_legacy(path, data, create_new, hash).map(|_| None);
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => {
                     return Err(io::Error::new(
@@ -724,8 +733,8 @@ impl RemoteFsProvider {
             chunk_count: chunks.len(),
             create_new,
             hash,
-        })?;
-        Ok(())
+            expected_version_id,
+        })
     }
 
     fn upload_sharded_file(&self, path: &str, data: &[u8], create_new: bool) -> io::Result<()> {
@@ -983,6 +992,32 @@ impl FsProvider for RemoteFsProvider {
                 readonly,
             },
         )
+    }
+
+    async fn publish_output(&self, path: &Path, data: &[u8], expected: Option<&str>) -> io::Result<String> {
+        self.upload_versioned_file(&self.normalize(path), data, expected.is_none(), None, false, expected)?
+            .filter(|version| !version.is_empty())
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "conditional publication returned no version"))
+    }
+
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
+        self.send_text("DELETE", "/fs/file", &[("path", self.normalize(path)), ("expectedVersionId", expected.to_owned())], None, None).map(|_| ())
+    }
+
+    async fn read_version(&self, path: &Path, version: &str, size: u64, snapshot: &str) -> io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        loop {
+            let remaining = size.saturating_sub(bytes.len() as u64);
+            let length = remaining.min(self.chunk_bytes as u64) as usize;
+            let mut query = vec![("path", self.normalize(path)), ("versionId", version.to_owned()), ("offset", bytes.len().to_string()), ("length", length.max(1).to_string())];
+            if !snapshot.is_empty() { query.push(("snapshotId", snapshot.to_owned())); }
+            let chunk = self.send_bytes("GET", "/fs/read", &query, None, None)?;
+            if chunk.len() > length || (chunk.is_empty() && remaining > 0) {
+                return Err(io::Error::new(ErrorKind::InvalidData, "immutable version length mismatch"));
+            }
+            bytes.extend_from_slice(&chunk);
+            if bytes.len() as u64 == size { return Ok(bytes); }
+        }
     }
 
     async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicCreateResult> {
@@ -1340,6 +1375,8 @@ struct UploadSessionCompleteRequest {
     chunk_count: usize,
     #[serde(default, skip_serializing_if = "is_false")]
     create_new: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_version_id: Option<String>,
     hash: Option<String>,
 }
 

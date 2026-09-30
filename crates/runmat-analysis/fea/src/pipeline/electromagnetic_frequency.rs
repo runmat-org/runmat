@@ -29,12 +29,19 @@ pub fn run_electromagnetic_frequency_response(
     let step = super::electromagnetic::matching_step(model, options.procedure)?;
     let observation_frequencies_hz = required_frequency_history_samples(step)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-    let reference_frequency_hz = model
+    let domain = model
         .electromagnetic
         .as_ref()
-        .ok_or_else(|| FeaRunError::InvalidModel("electromagnetic domain is absent".into()))?
-        .reference_frequency
-        .hertz;
+        .ok_or_else(|| FeaRunError::InvalidModel("electromagnetic domain is absent".into()))?;
+    let runmat_analysis_core::ElectromagneticDomain::Harmonic {
+        reference_frequency,
+    } = domain
+    else {
+        return Err(FeaRunError::InvalidModel(
+            "harmonic frequency response does not admit static electrical intent".into(),
+        ));
+    };
+    let reference_frequency_hz = reference_frequency.hertz;
     let plan = FrequencyResponsePlan::new(
         reference_frequency_hz,
         requested_frequencies_hz,
@@ -51,12 +58,10 @@ pub fn run_electromagnetic_frequency_response(
             return Err(FeaRunError::MissingElectromagneticSource { frequency_hz });
         }
         let mut sample_model = model.clone();
-        sample_model
-            .electromagnetic
-            .as_mut()
-            .expect("frequency plan validated the electromagnetic domain")
-            .reference_frequency
-            .hertz = frequency_hz;
+        sample_model.electromagnetic =
+            Some(runmat_analysis_core::ElectromagneticDomain::Harmonic {
+                reference_frequency: runmat_analysis_core::Frequency::new(frequency_hz),
+            });
         runs.push(super::electromagnetic::run_electromagnetic_with_options(
             &sample_model,
             backend,

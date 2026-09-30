@@ -38,6 +38,7 @@ pub use resolve::{
     ResolutionRequirement, SourceSelectionPolicy, UpdatePlan, UpdatePolicy,
 };
 pub use source::{
+    resolve_captured_project_async, CapturedResolvedProject, CapturedProjectError,
     build_frozen_project, build_frozen_project_async, discover_frozen_project_from,
     discover_frozen_project_from_async, discover_known_project_symbols_from_source_name,
     discover_known_project_symbols_from_source_name_async,

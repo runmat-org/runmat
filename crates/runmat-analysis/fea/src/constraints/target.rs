@@ -9,7 +9,7 @@ use super::plan::canonical_digest;
 #[cfg(test)]
 mod tests;
 
-pub(super) fn resolve_solid_target(
+pub(crate) fn resolve_nodal_target(
     mesh: &SolverMeshArtifact,
     target: &RegionTarget,
     constraint_id: &str,

@@ -19,6 +19,7 @@ pub use concurrency::NativeCacheLease;
 pub use config::NativeCacheConfig;
 pub use error::NativeCacheError;
 pub use project::{
+    resolve_native_captured_project, NativeCapturedProject,
     resolve_native_project, NativeProjectError, NativeProjectResolveRequest, NativeResolvedProject,
 };
 pub use provider::{NativeGitPackageProvider, NativePackageSourceProvider};

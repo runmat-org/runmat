@@ -5,6 +5,46 @@ direct harmonic response, modal extraction/truncation, and cold typed execution 
 an independent continuum reference. It supplements the [isolated operator
 matrix](solid-harmonic.md); it does not promote the formulation to production.
 
+## Damped modal extension — qualification in progress
+
+For the same constrained straight rod, `phi_1=sin(pi x/2)` has independent modal
+mass `1/2`, stiffness `E pi²/8` and end-force amplitude `T`. With Rayleigh
+coefficients `alpha=0.8 s^-1`, `beta=0.002 s` and `exp(+i omega t)`, its exact
+retained-one-mode field is
+
+```
+u_1(x) = 2 T sin(lambda x) /
+         [E lambda² - omega² + i omega (alpha + beta E lambda²)]
+lambda = pi/2
+```
+
+This is a reference for first-mode spatial error, not the full forced PDE response.
+The extension separates first-mode mesh/phase/power convergence from truncation:
+on fixed 4-cell Tet4 / 2-cell Tet10 meshes (100 free axial DOFs), 1/8/100 retained
+modes must approach the direct discretized response; the full basis also has
+independent coarse PDE field and power bounds. Cold tests decode the modal state,
+workload, request and canonical mesh, rederive preparation and recover complex
+displacement against the analytic first-mode field. Missing state and a valid
+resealed state naming another topology reject. These are portable-object checks,
+not process restart or arbitrary modal-spectrum qualification.
+
+With the original shared ordering, the Tet10 first-mode 1/2/4-cell tests pass
+their prescribed refinement factors and finest 0.5% field/power bounds. Finest
+complex-field errors are 0.02162%, 0.04138% and 0.02442% at
+`k={0.5,pi/2,2}`. Both-order truncation and cold canonical-entry/recovered-phase
+checks also pass; these results do not qualify the missing Tet4 refinement.
+
+The first-mode refinement test remains **unqualified**: its required 16-cell
+Tet4 stiffness coercivity proof exceeds the shared symbolic update-work limit
+before eigensolving. The mesh and its accuracy bound are not reduced, and proof
+limits are not bypassed. A bounded graph-separator ordering experiment also
+failed the actual modal and electrical cases and was discarded. Passing coarse
+truncation/cold checks do not close this missing convergence gate.
+
+```sh
+cargo test --locked -p runmat-analysis-fea --lib pipeline::modal::rod_qualification::damped_modal -- --nocapture
+```
+
 ## Independent problem and reference
 
 The domain is the unit cube, treated as a unit-length/unit-area axial rod, with

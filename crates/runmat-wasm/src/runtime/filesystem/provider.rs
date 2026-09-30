@@ -52,6 +52,21 @@ impl FsProvider for JsFsProvider {
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         self.funcs.read_file_async(path).await
     }
+    async fn read_version(&self, path: &Path, version: &str, size: u64, snapshot: &str) -> io::Result<Vec<u8>> {
+        self.funcs.read_version_async(path, version, size, snapshot).await
+    }
+
+    async fn publish_output(&self, path: &Path, data: &[u8], expected: Option<&str>) -> io::Result<String> {
+        self.funcs.publish_output_async(path, data, expected).await
+    }
+
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
+        self.funcs.remove_output_async(path, expected).await
+    }
+
+    async fn atomic_create_new(&self, path: &Path, data: &[u8]) -> io::Result<runmat_filesystem::AtomicCreateResult> {
+        self.funcs.atomic_create_new_async(path, data).await
+    }
 
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         self.funcs.write_file_async(path, data).await

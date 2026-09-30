@@ -31,7 +31,7 @@ const rustCoreFormulationPath = path.resolve(
 );
 const rustCoreOutputPath = path.resolve(
   repoRoot,
-  "crates/runmat-analysis/core/src/study/output.rs"
+  "crates/runmat-analysis/core/src/study/output/quantity.rs"
 );
 const rustSignalPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/signal.rs");
 const rustExcitationPath = path.resolve(repoRoot, "crates/runmat-analysis/core/src/problem/excitation.rs");
@@ -253,7 +253,7 @@ function readEnumValues(source, name) {
   const values = [];
   for (const rawLine of body.split("\n")) {
     const line = rawLine.trim();
-    if (!line || line.startsWith("#[")) {
+    if (!line || line.startsWith("#[") || line.startsWith("//")) {
       continue;
     }
     const variantMatch = line.match(/^([A-Za-z0-9_]+),$/);
@@ -596,7 +596,7 @@ export interface FeaSequenceBranch { branch_id: string; producer_step: string; s
     "export interface FeaInitialConditionBody<Q> { initial_condition_id: string; target: { region: FeaRegionTarget } | \"whole_model\"; frame: FeaCoordinateFrame; value: FeaInitialValue<Q>; applies_before_step_id: string; }",
     "export type FeaInitialConditionInput = { displacement: FeaInitialConditionBody<{ meters: number }> } | { velocity: FeaInitialConditionBody<{ meters_per_second: number }> } | { angular_velocity: FeaInitialConditionBody<{ radians_per_second: number }> } | { temperature: FeaInitialConditionBody<{ kelvin: number }> } | { electric_potential: FeaInitialConditionBody<{ volts: number }> } | { magnetic_vector_potential: FeaInitialConditionBody<{ webers_per_meter: number }> } | { acoustic_pressure: FeaInitialConditionBody<{ pascals: number }> } | { fluid_pressure: FeaInitialConditionBody<{ pascals: number }> } | { fluid_velocity: FeaInitialConditionBody<{ meters_per_second: number }> };",
     "export interface FeaResponseSpectrumInput { spectrum_id: string; abscissa: { frequency_hertz: number[] } | { period_seconds: number[] }; ordinates: number[]; damping: { ratio: number } | { quality_factor: number }; response: \"relative_displacement\" | \"relative_velocity\" | \"relative_acceleration\" | \"absolute_acceleration\" | \"pseudo_velocity\" | \"pseudo_acceleration\"; envelope: \"positive\" | \"negative\" | \"maximax\"; interpolation: \"linear_frequency\" | \"linear_period\" | \"log_log\"; extrapolation: \"reject\" | \"hold_endpoint\"; direction: { frame: FeaCoordinateFrame; vector: [number, number, number] }; modal_combination: \"srss\" | \"complete_quadratic_combination\" | \"ten_percent\" | \"absolute_sum\"; directional_combination: \"srss\" | \"absolute_sum\" | { percentage_rule: { primary: number; secondary: number } }; truncation: { minimum_cumulative_mass_ratio: number; include_residual_mode: boolean; include_rigid_response: boolean; include_missing_mass: boolean }; construction: \"authored_design\" | { derived_from_acceleration_history: { source_signal_id: string; method: \"exact_piecewise_linear\" | \"recursive_filter\" } }; evidence: { sampling_adequacy_ratio: number; max_interpolation_error: number | null }; provenance_digest: string; }",
-    "export interface FeaDomainsInput { thermo_mechanical?: { reference_temperature: { kelvin: number } }; electro_thermal?: { reference_temperature: { kelvin: number } }; electromagnetic?: { reference_frequency: { hertz: number } }; cfd?: { density: { kilograms_per_cubic_meter: number }; dynamic_viscosity: { pascal_seconds: number }; turbulence_intensity: { ratio: number } }; }",
+    "export interface FeaDomainsInput { thermo_mechanical?: { reference_temperature: { kelvin: number } }; electro_thermal?: { reference_temperature: { kelvin: number } }; electromagnetic?: { static: { equation: \"electrostatics\" | \"steady_conduction\" } } | { harmonic: { reference_frequency: { hertz: number } } }; cfd?: { density: { kilograms_per_cubic_meter: number }; dynamic_viscosity: { pascal_seconds: number }; turbulence_intensity: { ratio: number } }; }",
     "export interface FeaCanonicalSequence { sequence_id: string; steps: FeaProcedureStep[]; dependencies: FeaSequenceDependency[]; transitions: FeaStateTransition[]; branches: FeaSequenceBranch[]; }",
     "export type FeaExecutionInput = { step: string; backend?: FeaComputeBackend; requirement?: FeaFormulationRequirement } & ({ solver: \"structural_linear\"; options: FeaStructuralLinearOptions } | { solver: \"structural_modes\"; options: FeaStructuralModesOptions } | { solver: \"acoustic_helmholtz\"; options: FeaAcousticHelmholtzOptions } | { solver: \"thermal_diffusion\"; options: FeaThermalDiffusionOptions } | { solver: \"structural_transient\"; options: FeaStructuralTransientOptions } | { solver: \"incompressible_flow\"; options: FeaIncompressibleFlowOptions } | { solver: \"conjugate_heat_transfer\"; options: FeaConjugateHeatTransferOptions } | { solver: \"fluid_structure_interaction\"; options: FeaFluidStructureInteractionOptions } | { solver: \"structural_nonlinear\"; options: FeaStructuralNonlinearOptions } | { solver: \"electromagnetic_potential\"; options: FeaElectromagneticPotentialOptions } | { solver?: never; options?: never });",
   ].join("\n\n");

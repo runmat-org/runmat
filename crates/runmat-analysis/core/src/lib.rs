@@ -132,7 +132,8 @@ pub use problem::constraint::{
 };
 pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{
-    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermalDomain, ThermoMechanicalDomain,
+    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, StaticElectricalEquation,
+    ThermalDomain, ThermoMechanicalDomain,
 };
 pub use problem::excitation::{
     AnalysisExcitation, Direction, ExcitationAction, ExcitationCase, ExcitationCaseActivation,

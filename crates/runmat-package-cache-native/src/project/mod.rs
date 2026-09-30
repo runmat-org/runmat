@@ -1,3 +1,5 @@
+mod captured;
+pub use captured::{resolve_native_captured_project, NativeCapturedProject};
 mod service;
 
 pub use service::{

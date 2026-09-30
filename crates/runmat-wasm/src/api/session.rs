@@ -609,6 +609,7 @@ struct ExecuteHostPolicyPayload {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecuteRequestPayload {
+    input_manifest: Option<runmat_filesystem::pinned::InputManifest>,
     source: ExecuteRequestSourcePayload,
     compatibility: Option<String>,
     host_policy: Option<ExecuteHostPolicyPayload>,
@@ -730,9 +731,9 @@ impl RunMatWasm {
                 count => runmat_hir::RequestedOutputCount::Exactly(count as usize),
             };
         }
-        let exec_response = session.execute_request(request).await;
+        let exec_response = session.execute_request_with_inputs(request, request_payload.input_manifest).await;
         *self.session.borrow_mut() = session;
-        let payload = match exec_response.result {
+        let mut payload = match exec_response.result {
             Ok(outcome) => {
                 if !retain_figures
                     && !outcome.diagnostics.iter().any(|diagnostic| {
@@ -750,6 +751,7 @@ impl RunMatWasm {
                 ExecutionPayload::from_outcome(outcome, &exec_response.source_context)
             }
             Err(err) => ExecutionPayload {
+                dependency_lock: None,
                 flow: serde_json::json!({ "kind": "no-value" }),
                 value_text: None,
                 value_json: None,
@@ -776,6 +778,7 @@ impl RunMatWasm {
                 fusion_plan: None,
             },
         };
+        payload.dependency_lock = exec_response.dependency_lock;
         info!(
             target = "runmat.runtime",
             workspace_entries = payload.workspace.values.len(),
@@ -903,8 +906,17 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = checkFeaSource)]
-    pub async fn check_fea_source_js(&self, path: String) -> Result<JsValue, JsValue> {
+    pub async fn check_fea_source_js(&self, path: String, inputs: JsValue) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
+        let inputs: Option<runmat_filesystem::pinned::InputManifest> = if inputs.is_null() || inputs.is_undefined() {
+            None
+        } else {
+            Some(serde_wasm_bindgen::from_value(inputs).map_err(|err| js_error(&format!("Invalid run inputs: {err}")))?)
+        };
+        let _filesystem = inputs.map(|manifest| {
+            runmat_filesystem::pinned::PinnedFsProvider::new(runmat_filesystem::current_provider(), manifest)
+                .map(|provider| runmat_filesystem::replace_provider(std::sync::Arc::new(provider)))
+        }).transpose().map_err(|err| js_error(&format!("Invalid run inputs: {err}")))?;
         let payload = check_fea_path(path, &self.session)
             .await
             .map_err(|err| js_error(&err))?;
@@ -997,6 +1009,7 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = clearProjectHandoff)]
     pub fn clear_project_handoff_js(&self) -> Result<(), JsValue> {
         self.ensure_not_disposed()?;
+        self.session.borrow_mut().clear_captured_project();
         self.session.borrow_mut().clear_project_handoff();
         Ok(())
     }

@@ -1,3 +1,5 @@
+mod captured;
+pub use captured::{resolve_captured_project_async, CapturedResolvedProject, CapturedProjectError};
 mod acquisition;
 mod catalog;
 mod encrypted_artifact;

@@ -2512,7 +2512,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             }
         }
 
-        model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain {
+        model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain::Harmonic {
             reference_frequency: runmat_analysis_core::Frequency::new(
                 profile.reference_frequency_hz,
             ),

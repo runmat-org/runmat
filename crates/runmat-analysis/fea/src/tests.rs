@@ -634,7 +634,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
 
     let mut electromagnetic_model = model.clone();
     replace_fixture_with_electric_current(&mut electromagnetic_model, "coil_current", "tip", 120.0);
-    electromagnetic_model.electromagnetic = Some(ElectromagneticDomain {
+    electromagnetic_model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     electromagnetic_model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
@@ -2831,7 +2831,7 @@ fn electromagnetic_pipeline_rejects_moment_loads_before_domain_validation() {
 fn electromagnetic_pipeline_rejects_a_model_without_the_requested_step() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     model.sequence.steps = vec![ProcedureStep::structural_static("structural")];
@@ -2852,10 +2852,45 @@ fn electromagnetic_pipeline_rejects_a_model_without_the_requested_step() {
 }
 
 #[test]
+fn legacy_harmonic_entry_points_reject_static_electrical_intent() {
+    for equation in [
+        runmat_analysis_core::StaticElectricalEquation::Electrostatics,
+        runmat_analysis_core::StaticElectricalEquation::SteadyConduction,
+    ] {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
+        model.electromagnetic = Some(ElectromagneticDomain::Static { equation });
+        model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
+        for material in &mut model.materials {
+            material.electrical = Some(test_electrical_material());
+        }
+        let error = crate::run_electromagnetic_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            experimental_electromagnetic_options(),
+        )
+        .expect_err("static intent must not enter the legacy harmonic solver");
+        assert!(error
+            .to_string()
+            .contains("does not admit static electrical intent"));
+        let error = crate::run_electromagnetic_frequency_response(
+            &model,
+            ComputeBackend::Cpu,
+            experimental_electromagnetic_options(),
+            &[60.0],
+        )
+        .expect_err("static intent must not be converted to a harmonic frequency sweep");
+        assert!(error
+            .to_string()
+            .contains("does not admit static electrical intent"));
+    }
+}
+
+#[test]
 fn electromagnetic_pipeline_consumes_electric_current_without_structural_admission() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     replace_fixture_with_electric_current(&mut model, "coil_current", "beam_span", 4.0);
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];
@@ -2889,7 +2924,7 @@ fn electromagnetic_pipeline_consumes_electric_current_without_structural_admissi
 fn electromagnetic_frequency_response_publishes_exact_complex_resultant_history() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     replace_fixture_with_electric_current(&mut model, "coil_current", "tip", 120.0);
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     let mut step = ProcedureStep::electromagnetic_harmonic("em");
@@ -5642,7 +5677,7 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
 fn electromagnetic_coefficients_are_independent_of_assignment_confidence() {
     let mut audited_model = fixture_model(FixtureId::MultiMaterialAssembly);
     replace_fixture_with_electric_current(&mut audited_model, "coil_current", "tip", 120.0);
-    audited_model.electromagnetic = Some(ElectromagneticDomain {
+    audited_model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     audited_model.sequence.steps = vec![ProcedureStep::electromagnetic_harmonic("em")];

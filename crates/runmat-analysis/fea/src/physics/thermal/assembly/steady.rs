@@ -91,7 +91,7 @@ impl ThermalOperatorAssembly {
         .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
         let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
-        let evidence = match NullspaceEliminationEvidence::prove_thermal(
+        let evidence = match NullspaceEliminationEvidence::prove_scalar_diffusion(
             &self.projection,
             operators.stiffness(),
             &constrained,

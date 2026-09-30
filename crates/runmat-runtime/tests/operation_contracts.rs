@@ -1928,7 +1928,7 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     model.constraints = vec![magnetic_ground("bc_em_snapshot_ground", region_id)];
     model.boundaries.clear();
     replace_with_electric_current(&mut model, "load_em_snapshot_coil", "node:2", 120.0);
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: runmat_analysis_core::Frequency::new(60.0),
     });
     model.materials[0].electrical = Some(test_electrical_material());
@@ -2094,7 +2094,7 @@ fn electromagnetic_contract_snapshot_matches_expected_shape() {
     model.constraints = vec![magnetic_ground("bc_em_snapshot_ground", region_id)];
     model.boundaries.clear();
     replace_with_electric_current(&mut model, "load_em_snapshot_coil", "node:2", 120.0);
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: runmat_analysis_core::Frequency::new(60.0),
     });
 

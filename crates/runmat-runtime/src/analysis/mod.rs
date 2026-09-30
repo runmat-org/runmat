@@ -5999,24 +5999,21 @@ pub fn analysis_run_electromagnetic_with_options_op(
             BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     };
-    if !em_domain.reference_frequency.hertz.is_finite()
-        || em_domain.reference_frequency.hertz <= 0.0
+    if !matches!(em_domain, runmat_analysis_core::ElectromagneticDomain::Harmonic { reference_frequency }
+        if reference_frequency.is_finite() && reference_frequency.hertz > 0.0)
     {
         return Err(operation_error(
             AnalysisOperation::Electromagnetic.name(),
             AnalysisOperation::Electromagnetic.version(),
             &context,
             OperationErrorSpec {
-                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_OPTIONS",
-                error_type: OperationErrorType::Input,
+                error_code: "RM.FEA.RUN_ELECTROMAGNETIC.INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            "fea.run_electromagnetic requires finite positive reference_frequency_hz",
-            BTreeMap::from([(
-                "reference_frequency_hz".to_string(),
-                em_domain.reference_frequency.hertz.to_string(),
-            )]),
+            "legacy harmonic electromagnetic operation requires explicit harmonic intent and a finite positive frequency; static electrical intent is not admitted",
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
         ));
     }
     if !options.residual_target.is_finite() || options.residual_target <= 0.0 {

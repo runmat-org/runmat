@@ -50,6 +50,8 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             native_tiering_enabled,
             project_handoff: None,
+            pinned_inputs: None,
+            captured_project: None,
             source_pool: SourcePool::default(),
             interrupt_flag: Arc::clone(&interrupt_flag),
             runtime_context: runmat_runtime::context::RuntimeContext::with_cancellation(

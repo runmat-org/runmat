@@ -32,7 +32,9 @@ use crate::{
     solve::backend::kind::LinearAlgebraBackendKind,
 };
 
+mod domain;
 mod solver_mesh_topology;
+pub(super) use domain::harmonic_frequency;
 
 pub fn has_nonzero_source_at_frequency(
     model: &AnalysisModel,
@@ -185,21 +187,12 @@ pub fn run_electromagnetic_with_options(
     );
     check_cancelled("fea.run_electromagnetic")?;
 
-    let Some(domain) = model.electromagnetic.as_ref() else {
-        return Err(FeaRunError::InvalidModel(
-            "electromagnetic solve requires model.electromagnetic".to_string(),
-        ));
-    };
-    if !domain.reference_frequency.is_finite() || domain.reference_frequency.hertz <= 0.0 {
-        return Err(FeaRunError::InvalidModel(
-            "electromagnetic solve requires a finite positive reference frequency".to_string(),
-        ));
-    }
+    let reference_frequency = harmonic_frequency(model)?;
     let electromagnetic_step = matching_step(model, options.procedure)?;
     let excitations = realize_step_excitations(
         model,
         electromagnetic_step,
-        ExcitationSamplePoint::frequency(domain.reference_frequency.hertz),
+        ExcitationSamplePoint::frequency(reference_frequency.hertz),
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
 
@@ -227,7 +220,7 @@ pub fn run_electromagnetic_with_options(
         .map(|mesh| mesh.topology.nodes.len())
         .unwrap_or_else(|| summary.dof_count.max(8));
     let coefficient_profile =
-        electromagnetic_coefficient_profile(model, domain.reference_frequency.hertz)?;
+        electromagnetic_coefficient_profile(model, reference_frequency.hertz)?;
     let material_stats = coefficient_profile.stats;
     let total_bc_count = (model.constraints.len() + model.boundaries.len()).max(1);
     let mut magnetic_insulation_count = 0usize;
@@ -483,7 +476,7 @@ pub fn run_electromagnetic_with_options(
     let mu0 = 4.0e-7 * std::f64::consts::PI;
     let epsilon0 = 8.854_187_812_8e-12_f64;
     let reluctivity = 1.0 / (mu0 * material_stats.relative_permeability_mean.max(1.0e-9));
-    let omega = 2.0 * std::f64::consts::PI * domain.reference_frequency.hertz;
+    let omega = 2.0 * std::f64::consts::PI * reference_frequency.hertz;
     let effective_permittivity = epsilon0 * material_stats.relative_permittivity_mean.max(1.0e-9);
 
     let mut node_sigma = vec![material_stats.conductivity_mean.max(1.0e-9); node_count];
@@ -816,7 +809,7 @@ pub fn run_electromagnetic_with_options(
         ),
     }];
     diagnostics.push(electromagnetic_formulation_diagnostic(
-        domain.reference_frequency.hertz,
+        reference_frequency.hertz,
         omega,
         &material_stats,
         effective_permittivity,
@@ -1171,7 +1164,7 @@ pub fn run_electromagnetic_with_options(
         },
         message: format!(
             "reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} conductivity_frequency_scale_mean={} conductivity_frequency_scale_spread_ratio={} conductivity_frequency_response_coverage_ratio={} relative_permittivity_frequency_scale_mean={} relative_permittivity_frequency_scale_spread_ratio={} relative_permittivity_frequency_response_coverage_ratio={} relative_permeability_frequency_scale_mean={} relative_permeability_frequency_scale_spread_ratio={} relative_permeability_frequency_response_coverage_ratio={} dispersive_loss_scale_mean={} dispersive_loss_scale_spread_ratio={} dispersive_phase_attenuation_mean={} dispersive_phase_attenuation_spread_ratio={} dispersive_conductivity_coupling_ratio={} dispersive_phase_conductivity_attenuation_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} assigned_coefficient_coverage_ratio={} region_coefficient_contrast_index={} condition_number_estimate={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_ratio={} flux_divergence_ratio={} flux_phasor_coherence_ratio={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} field_energy_integral={}",
-            domain.reference_frequency.hertz,
+            reference_frequency.hertz,
             applied_current_a,
             material_stats.conductivity_mean,
             material_stats.relative_permittivity_mean,
@@ -1511,7 +1504,7 @@ pub fn run_electromagnetic_with_options(
 
     Ok(FeaElectromagneticRunResult {
         run,
-        reference_frequency_hz: domain.reference_frequency.hertz,
+        reference_frequency_hz: reference_frequency.hertz,
         applied_current_a,
         vector_potential_real_field,
         vector_potential_imag_field,

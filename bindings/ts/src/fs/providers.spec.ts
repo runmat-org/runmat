@@ -15,6 +15,19 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 describe("in-memory filesystem provider", () => {
+  it("publishes complete objects once and returns independent winner bytes", async () => {
+    const provider = createInMemoryFsProvider();
+    const original = encoder.encode("first");
+    expect(await provider.atomicCreateNew!("/object", original)).toEqual({ kind: "published", result: { durability: "atomic_visibility" } });
+    original.fill(0);
+    const loser = await provider.atomicCreateNew!("/object", encoder.encode("second"));
+    expect(loser).toEqual({ kind: "existing", result: Array.from(encoder.encode("first")) });
+    if (loser.kind === "existing") loser.result.fill(0);
+    expect(toText(provider.readFile("/object"))).toBe("first");
+    provider.createDir!("/directory");
+    expect(() => provider.atomicCreateNew!("/directory", original)).toThrow();
+  });
+
   it("supports basic file workflow", () => {
     const provider = createInMemoryFsProvider({
       initialFiles: {

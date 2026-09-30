@@ -651,7 +651,7 @@ fn preserves_reference_point_force_and_moment_action_identity() {
 #[test]
 fn preserves_complex_frequency_domain_current_density() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain {
+    model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain::Harmonic {
         reference_frequency: runmat_analysis_core::Frequency::new(60.0),
     });
     let signal_id = runmat_analysis_core::SignalId("coil.current_density".into());

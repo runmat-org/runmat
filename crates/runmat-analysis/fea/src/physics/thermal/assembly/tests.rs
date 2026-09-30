@@ -313,7 +313,7 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
         .map(Option::is_some)
         .collect::<Vec<_>>();
     assert_eq!(
-        NullspaceEliminationEvidence::prove_thermal(
+        NullspaceEliminationEvidence::prove_scalar_diffusion(
             &disconnected_projection,
             &assembly.conductivity,
             &constrained,
@@ -369,7 +369,7 @@ fn thermal_nullspace_proof_rejects_metadata_only_semidefinite_claims() {
     .unwrap();
 
     assert_eq!(
-        NullspaceEliminationEvidence::prove_thermal(
+        NullspaceEliminationEvidence::prove_scalar_diffusion(
             &assembly.projection,
             &false_semidefinite,
             &constrained,

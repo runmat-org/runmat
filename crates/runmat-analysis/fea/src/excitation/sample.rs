@@ -1,7 +1,8 @@
 use runmat_analysis_core::{
-    AnalysisModel, Direction, HeatFlux, PhysicalSignal, PrescribedValue, Pressure, ProcedureStep,
-    Signal, SignalExtrapolation, SignalInterpolation, SignalKnot, SignalKnotValue, SignalOrdinate,
-    SignalRepresentation, SignalSampleApproach, SignalValue, TabulatedSignalDomain, Temperature,
+    AnalysisModel, Direction, ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue,
+    Pressure, ProcedureStep, Signal, SignalExtrapolation, SignalInterpolation, SignalKnot,
+    SignalKnotValue, SignalOrdinate, SignalRepresentation, SignalSampleApproach, SignalValue,
+    TabulatedSignalDomain, Temperature,
 };
 
 use super::{
@@ -230,6 +231,23 @@ pub(crate) fn sample_signal<Q>(
             ),
         ),
     }
+}
+
+pub(crate) fn sample_prescribed_potential(
+    value: &PrescribedValue<ElectricPotential>,
+    signals: &[PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ComplexScalar, RealizationError> {
+    sample_prescribed_scalar(
+        value,
+        signals,
+        sample,
+        |signal| match signal {
+            PhysicalSignal::ElectricPotential(signal) => Some(signal),
+            _ => None,
+        },
+        |value| value.volts,
+    )
 }
 
 pub(crate) fn sample_prescribed_temperature(

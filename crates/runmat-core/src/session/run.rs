@@ -385,6 +385,7 @@ impl RunMatSession {
             Ok(resolved) => resolved,
             Err(err) => {
                 return crate::abi::ExecutionResponse {
+                    dependency_lock: None,
                     source_context: unresolved_source_context(&source_input),
                     result: Err(err),
                 };
@@ -422,6 +423,7 @@ impl RunMatSession {
         self.pending_companion_source_discovery = None;
 
         crate::abi::ExecutionResponse {
+            dependency_lock: None,
             source_context: crate::abi::ExecutionSourceContext {
                 name: source_name,
                 text: Some(source_text),
@@ -1629,7 +1631,7 @@ fn source_text_hash(source_text: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-fn unresolved_source_context(
+pub(super) fn unresolved_source_context(
     source: &crate::abi::SourceInput,
 ) -> crate::abi::ExecutionSourceContext {
     let name = match source {

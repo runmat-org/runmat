@@ -185,6 +185,30 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
     return root;
   }
 
+  async publishOutput(path: string, data: Uint8Array, expectedVersionId: string | null): Promise<string> {
+    this.assertMutable(path);
+    if (!this.workspace.publishOutput) throw new Error("Conditional workspace publication is unavailable");
+    return this.workspace.publishOutput(path, data, expectedVersionId);
+  }
+
+  async removeOutput(path: string, expectedVersionId: string): Promise<void> {
+    this.assertMutable(path);
+    if (!this.workspace.removeOutput) throw new Error("Conditional workspace deletion is unavailable");
+    return this.workspace.removeOutput(path, expectedVersionId);
+  }
+
+  async atomicCreateNew(path: string, data: Uint8Array) {
+    this.assertMutable(path);
+    if (!this.workspace.atomicCreateNew) throw new Error("Atomic workspace publication is unavailable");
+    return this.workspace.atomicCreateNew(path, data);
+  }
+
+  async readVersion(path: string, versionId: string, size: number, snapshotId: string): Promise<Uint8Array | ArrayBuffer> {
+    this.assertMutable(path);
+    if (!this.workspace.readVersion) throw new Error("Immutable workspace reads are unavailable");
+    return this.workspace.readVersion(path, versionId, size, snapshotId);
+  }
+
   async readFile(path: string): Promise<Uint8Array | ArrayBuffer> {
     const resolved = this.resolve(path);
     return resolved

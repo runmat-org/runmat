@@ -7089,6 +7089,7 @@ dependencies = [
  "keyring",
  "p256",
  "rand_core 0.6.4",
+ "runmat-filesystem",
  "runmat-package",
  "runmat-package-cache",
  "runmat-server-client",

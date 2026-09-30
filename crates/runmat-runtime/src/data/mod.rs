@@ -1,3 +1,4 @@
+pub(crate) mod objects;
 use runmat_value::{ComplexStorage, ComplexTensor, IntegerComplexStorage};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -879,25 +880,9 @@ pub async fn write_array_payload_async(
             array_dir.display()
         ))
     })?;
-    let payload_path = array_dir.join("data.f64.json");
     let bytes = serde_json::to_vec(payload)
         .map_err(|err| data_error(format!("failed to encode array payload json: {err}")))?;
-    fs::write_async(&payload_path, &bytes)
-        .await
-        .map_err(|err| {
-            data_error(format!(
-                "failed to write payload '{}': {err}",
-                payload_path.display()
-            ))
-        })?;
-
-    let chunk_dir = array_dir.join("chunks");
-    fs::create_dir_all_async(&chunk_dir).await.map_err(|err| {
-        data_error(format!(
-            "failed to create chunk dir '{}': {err}",
-            chunk_dir.display()
-        ))
-    })?;
+    let payload_path = objects::write_object(root, &bytes).await?;
 
     let mut index = DataChunkIndex {
         schema_version: 1,
@@ -929,19 +914,11 @@ pub async fn write_array_payload_async(
                 .transpose()?,
         };
         let key = chunk_key(&coords);
-        let object_id = format!("obj_{}", key.replace('.', "_"));
         let chunk_bytes = serde_json::to_vec(&chunk_payload)
             .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
-        let data_path = chunk_dir.join(format!("{object_id}.json"));
-        fs::write_async(&data_path, &chunk_bytes)
-            .await
-            .map_err(|err| {
-                data_error(format!(
-                    "failed to write chunk '{}': {err}",
-                    data_path.display()
-                ))
-            })?;
         let hash = sha256_hex(&chunk_bytes);
+        let object_id = hash.clone();
+        let data_path = objects::write_object(root, &chunk_bytes).await?;
         let rel_chunk_path = data_path
             .strip_prefix(root)
             .map_err(|err| data_error(format!("failed to compute chunk relative path: {err}")))?
@@ -983,17 +960,9 @@ pub async fn write_array_payload_async(
         "data chunk write planned"
     );
 
-    let chunk_index_path = chunk_dir.join("index.json");
     let chunk_index_bytes = serde_json::to_vec(&index)
         .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
-    fs::write_async(&chunk_index_path, &chunk_index_bytes)
-        .await
-        .map_err(|err| {
-            data_error(format!(
-                "failed to write chunk index '{}': {err}",
-                chunk_index_path.display()
-            ))
-        })?;
+    let chunk_index_path = objects::write_chunk_index(root, array, &chunk_index_bytes).await?;
     Ok((payload_path, chunk_index_path))
 }
 

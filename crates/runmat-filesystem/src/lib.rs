@@ -26,11 +26,12 @@ pub use native::NativeFsProvider;
 #[cfg(not(target_arch = "wasm32"))]
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
 #[cfg(not(target_arch = "wasm32"))]
-pub use sandbox::SandboxFsProvider;
+pub use sandbox::{CapturedIo, SandboxFsProvider};
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
 
 pub mod data_contract;
+pub mod pinned;
 
 use data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
@@ -265,14 +266,16 @@ pub struct ReadManyEntry {
 /// report `Durable` only when they also guarantee that the published directory entry and content
 /// survive a host crash. Remote and in-memory providers generally establish atomic visibility but
 /// leave durable retention to their backing service.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PublicationDurability {
     AtomicVisibility,
     Durable,
 }
 
 /// Result of publishing one complete byte sequence at a previously absent path.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "result", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AtomicCreateResult {
     Published { durability: PublicationDurability },
     Existing(Vec<u8>),
@@ -393,7 +396,20 @@ pub trait FsProvider: Send + Sync + 'static {
         self.open(path, flags)
     }
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
+    /// Read an immutable version through the provider's normal authorization.
+    /// Never fall back to a live head when the version is unavailable.
+    async fn read_version(&self, _path: &Path, _version: &str, _size: u64, _snapshot: &str) -> io::Result<Vec<u8>> {
+        Err(io::Error::new(ErrorKind::Unsupported, "immutable version reads are unsupported by this provider"))
+    }
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
+    /// Atomically create (None) or replace the exact previously published version.
+    /// Implementations must never emulate this with a read followed by a write.
+    async fn publish_output(&self, _path: &Path, _data: &[u8], _expected: Option<&str>) -> io::Result<String> {
+        Err(io::Error::new(ErrorKind::Unsupported, "conditional output publication is unsupported"))
+    }
+    async fn remove_output(&self, _path: &Path, _expected: &str) -> io::Result<()> {
+        Err(io::Error::new(ErrorKind::Unsupported, "conditional output removal is unsupported"))
+    }
     async fn remove_file(&self, path: &Path) -> io::Result<()>;
     async fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;
     async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata>;

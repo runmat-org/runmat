@@ -55,6 +55,7 @@ mod executable;
 mod fea_source;
 pub use fea_source::CheckedFeaSessionSource;
 mod init;
+mod pinned;
 #[cfg(not(target_arch = "wasm32"))]
 mod program;
 mod project;
@@ -89,6 +90,8 @@ pub struct RunMatSession {
     native_tiering_enabled: bool,
     /// Optional host-frozen project snapshot used by every compilation in this session.
     project_handoff: Option<runmat_package::FrozenProjectHandoff>,
+    captured_project: Option<pinned::CapturedProject>,
+    pinned_inputs: Option<(runmat_filesystem::pinned::InputManifest, std::sync::Arc<runmat_filesystem::pinned::PinnedFsProvider>)>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
     /// Cooperative cancellation flag shared with the runtime.

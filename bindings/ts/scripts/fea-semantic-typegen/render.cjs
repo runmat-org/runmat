@@ -116,8 +116,12 @@ function variantPayload(variant, declaration, registry) {
 
 function renderType(raw, registry, generics) {
   let source = stripVisibility(raw.trim()).replace(/^&(?:'\w+\s+)?/, "").trim();
-  const array = source.match(/^\[([\s\S]+);\s*\d+\]$/);
-  if (array) return `${renderType(array[1], registry, generics)}[]`;
+  const array = source.match(/^\[([\s\S]+);\s*(\d+)\]$/);
+  if (array) {
+    const length = Number(array[2]);
+    if (!Number.isSafeInteger(length) || length > 1024) throw new Error(`Unsupported fixed array length ${array[2]}`);
+    return `[${Array.from({ length }, () => renderType(array[1], registry, generics)).join(", ")}]`;
+  }
   const tuple = source.startsWith("(") && source.endsWith(")") ? splitTopLevel(source.slice(1, -1)) : null;
   if (tuple) return `[${tuple.map((value) => renderType(value, registry, generics)).join(", ")}]`;
   for (const wrapper of ["Vec", "BTreeSet", "HashSet", "Box"]) {

@@ -18,10 +18,10 @@ mod canonical_frame;
 mod components;
 mod mixed_structural;
 mod rigid_body;
+mod scalar;
 mod solid;
 mod solid_components;
 mod structural_frame;
-mod thermal;
 
 pub(crate) use components::connected_components;
 
@@ -140,13 +140,16 @@ pub(crate) struct ConnectorAnchoredSolidInput<'a> {
 }
 
 impl NullspaceEliminationEvidence {
-    pub fn prove_thermal(
+    /// Prove elimination of one scalar constant mode per connected component.
+    /// Used by thermal and electrical gradient forms; coefficients/provenance remain
+    /// owned by their physics rather than by this shared mathematical proof.
+    pub fn prove_scalar_diffusion(
         projection: &AnalysisProjection,
         operator: &RealSparseMatrix,
         prescribed: &[bool],
         positive_robin_weight: &[f64],
     ) -> Result<Self, NullspaceEvidenceError> {
-        thermal::prove(projection, operator, prescribed, positive_robin_weight)
+        scalar::prove(projection, operator, prescribed, positive_robin_weight)
     }
 
     pub fn prove_solid(

@@ -1,3 +1,4 @@
+import type { AtomicCreateResult } from "../generated/collaboration-contracts";
 export type RunMatFsFileType = "file" | "dir" | "directory" | "symlink" | "other" | "unknown";
 
 export interface RunMatFilesystemMetadata {
@@ -33,6 +34,11 @@ export interface RunMatOpenFileDialogSelection {
 }
 
 export interface RunMatFilesystemProvider {
+  publishOutput?(path: string, data: Uint8Array, expectedVersionId: string | null): RunMatMaybePromise<string>;
+  removeOutput?(path: string, expectedVersionId: string): RunMatMaybePromise<void>;
+  atomicCreateNew?(path: string, data: Uint8Array): RunMatMaybePromise<AtomicCreateResult>;
+  /** Immutable version read; unavailable versions must never fall back to live bytes. */
+  readVersion?(path: string, versionId: string, size: number, snapshotId: string): RunMatMaybePromise<Uint8Array | ArrayBuffer>;
   readFile(path: string): RunMatMaybePromise<Uint8Array | ArrayBuffer>;
   readMany?(paths: string[]): RunMatMaybePromise<Array<Uint8Array | ArrayBuffer | null>>;
   writeFile(path: string, data: Uint8Array | ArrayBuffer | ArrayBufferView): RunMatMaybePromise<void>;

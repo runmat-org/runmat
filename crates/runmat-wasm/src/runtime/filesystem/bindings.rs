@@ -19,6 +19,10 @@ use super::convert::{
 pub(super) struct JsFsFuncs {
     bindings: JsValue,
     read_file: Option<Function>,
+    read_version: Option<Function>,
+    atomic_create_new: Option<Function>,
+    publish_output: Option<Function>,
+    remove_output: Option<Function>,
     read_many: Option<Function>,
     write_file: Option<Function>,
     remove_file: Option<Function>,
@@ -44,6 +48,10 @@ impl JsFsFuncs {
         Ok(Self {
             bindings: bindings.clone(),
             read_file: get_fn(bindings, "readFile")?,
+            read_version: get_fn(bindings, "readVersion")?,
+            atomic_create_new: get_fn(bindings, "atomicCreateNew")?,
+            publish_output: get_fn(bindings, "publishOutput")?,
+            remove_output: get_fn(bindings, "removeOutput")?,
             read_many: get_fn(bindings, "readMany")?,
             write_file: get_fn(bindings, "writeFile")?,
             remove_file: get_fn(bindings, "removeFile")?,
@@ -80,6 +88,41 @@ impl JsFsFuncs {
             .map_err(|err| map_js_error("readFile", err))?;
         let resolved = resolve_maybe_promise(value, "readFile").await?;
         js_value_to_bytes(resolved, "readFile")
+    }
+
+    pub(super) async fn publish_output_async(&self, path: &Path, data: &[u8], expected: Option<&str>) -> io::Result<String> {
+        let func = self.require_fn(&self.publish_output, "publishOutput")?;
+        let bytes = js_sys::Uint8Array::from(data);
+        let expected = expected.map(JsValue::from).unwrap_or(JsValue::NULL);
+        let value = func.call3(&self.bindings, &JsValue::from(path_to_string(path)), &bytes, &expected)
+            .map_err(|error| map_js_error("publishOutput", error))?;
+        resolve_maybe_promise(value, "publishOutput").await?.as_string()
+            .filter(|version| !version.is_empty() && version.len() <= 160)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid output version response"))
+    }
+
+    pub(super) async fn remove_output_async(&self, path: &Path, expected: &str) -> io::Result<()> {
+        let func = self.require_fn(&self.remove_output, "removeOutput")?;
+        let value = func.call2(&self.bindings, &JsValue::from(path_to_string(path)), &JsValue::from(expected))
+            .map_err(|error| map_js_error("removeOutput", error))?;
+        resolve_maybe_promise(value, "removeOutput").await?;
+        Ok(())
+    }
+
+    pub(super) async fn atomic_create_new_async(&self, path: &Path, data: &[u8]) -> io::Result<runmat_filesystem::AtomicCreateResult> {
+        let func = self.require_fn(&self.atomic_create_new, "atomicCreateNew")?;
+        let bytes = js_sys::Uint8Array::from(data);
+        let value = func.call2(&self.bindings, &JsValue::from(path_to_string(path)), &bytes)
+            .map_err(|error| map_js_error("atomicCreateNew", error))?;
+        let value = resolve_maybe_promise(value, "atomicCreateNew").await?;
+        serde_wasm_bindgen::from_value(value).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+    }
+
+    pub(super) async fn read_version_async(&self, path: &Path, version: &str, size: u64, snapshot: &str) -> io::Result<Vec<u8>> {
+        let func = self.require_fn(&self.read_version, "readVersion")?;
+        let value = func.apply(&self.bindings, &js_sys::Array::of4(&JsValue::from(path_to_string(path)), &JsValue::from(version), &JsValue::from_f64(size as f64), &JsValue::from(snapshot)))
+            .map_err(|error| map_js_error("readVersion", error))?;
+        js_value_to_bytes(resolve_maybe_promise(value, "readVersion").await?, "readVersion")
     }
 
     pub(super) fn write_file(&self, path: &Path, data: &[u8]) -> io::Result<()> {

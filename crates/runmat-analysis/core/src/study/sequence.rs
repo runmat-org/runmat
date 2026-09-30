@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::ResponseSpectrumId;
 
 mod activation;
+mod electrical;
 pub use activation::{
     ActivationLifecycle, ExcitationCaseSelection, StepObjectActivation, StepObjectRef,
 };
@@ -592,20 +593,6 @@ impl ProcedureStep {
                 state("stress_strain", StateKind::StructuralStressStrain),
                 state("material_history", StateKind::MaterialHistory),
             ],
-        )
-    }
-
-    pub fn electromagnetic_harmonic(step_id: impl Into<String>) -> Self {
-        Self::experimental(
-            step_id,
-            PhysicsFamily::Electromagnetic,
-            AnalysisProcedure::HarmonicResponse,
-            SolutionSpace::Direct,
-            IndependentDomain::FrequencyHertz(vec![60.0]),
-            vec![state(
-                "electromagnetic_complex",
-                StateKind::ElectromagneticComplex,
-            )],
         )
     }
 

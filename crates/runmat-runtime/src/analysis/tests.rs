@@ -786,7 +786,7 @@ fn test_model_for_geometry(
             for material in &mut model.materials {
                 material.electrical = Some(test_electrical_material());
             }
-            model.electromagnetic = Some(ElectromagneticDomain {
+            model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
                 reference_frequency: Frequency::new(60.0),
             });
             model.sequence = AnalysisSequence::from_steps(
@@ -5967,7 +5967,7 @@ fn configure_valid_em_authoring(model: &mut AnalysisModel) {
             material.electrical = Some(test_electrical_material());
         }
     }
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     model.constraints = vec![magnetic_ground("em_ground", "em_region")];
@@ -6162,7 +6162,7 @@ fn analysis_run_electromagnetic_harmonic_contract_emits_typed_payload() {
             },
         ],
     });
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     configure_valid_em_authoring(&mut model);
@@ -6431,7 +6431,7 @@ fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
             },
         ],
     });
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     configure_valid_em_authoring(&mut model);
@@ -6483,7 +6483,7 @@ fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::electromagnetic_harmonic("electromagnetic_test");
-    model.electromagnetic = Some(ElectromagneticDomain {
+    model.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
     let err = analysis_run_electromagnetic_with_options_op(

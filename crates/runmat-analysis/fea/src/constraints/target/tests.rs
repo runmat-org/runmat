@@ -18,7 +18,7 @@ fn shared_cad_face_provenance_is_deduplicated_without_changing_selection() {
         }
         let mut target = RegionTarget::boundary("shared-face");
         target.cardinality = TargetCardinality::One;
-        let expected = resolve_solid_target(&mesh, &target, "fixed").unwrap();
+        let expected = resolve_nodal_target(&mesh, &target, "fixed").unwrap();
         assert_eq!(expected.matched_entities, vec![entity]);
         assert_eq!(
             expected.matched_node_identities.len(),
@@ -31,7 +31,7 @@ fn shared_cad_face_provenance_is_deduplicated_without_changing_selection() {
             mesh.topology.boundary_faces.extend(faces.iter().cloned());
         }
         assert_eq!(
-            resolve_solid_target(&mesh, &target, "fixed").unwrap(),
+            resolve_nodal_target(&mesh, &target, "fixed").unwrap(),
             expected
         );
     }

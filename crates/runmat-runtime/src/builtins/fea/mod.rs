@@ -3373,7 +3373,12 @@ mod tests {
             let domain = block_on(domains::electromagnetic_domain_builtin(frequency))
                 .expect("typed electromagnetic domain");
             let domain: runmat_analysis_core::ElectromagneticDomain = object_payload(&domain);
-            assert_eq!(domain.reference_frequency.hertz, expected);
+            assert_eq!(
+                domain,
+                runmat_analysis_core::ElectromagneticDomain::Harmonic {
+                    reference_frequency: runmat_analysis_core::Frequency::new(expected),
+                }
+            );
 
             let material = block_on(fea_material_builtin(vec![
                 Value::String("material".into()),

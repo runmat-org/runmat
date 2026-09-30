@@ -28,11 +28,42 @@ pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisVali
         }
     }
     if let Some(domain) = &model.electromagnetic {
-        if !domain.reference_frequency.is_finite() || domain.reference_frequency.hertz <= 0.0 {
-            return Err(domain_error(
-                "electromagnetic",
-                "reference frequency must be finite and positive",
-            ));
+        match domain {
+            crate::ElectromagneticDomain::Harmonic {
+                reference_frequency,
+            } => {
+                if !reference_frequency.is_finite() || reference_frequency.hertz <= 0.0 {
+                    return Err(domain_error(
+                        "electromagnetic",
+                        "harmonic reference frequency must be finite and positive",
+                    ));
+                }
+            }
+            crate::ElectromagneticDomain::Static {
+                equation: crate::StaticElectricalEquation::SteadyConduction,
+            } => {
+                for material in &model.materials {
+                    let Some(electrical) = &material.electrical else {
+                        return Err(AnalysisValidationError::InvalidMaterial {
+                            material_id: material.material_id.clone(),
+                            detail: "steady conduction requires electrical material properties"
+                                .into(),
+                        });
+                    };
+                    if !electrical.conductivity_s_per_m.is_finite()
+                        || electrical.conductivity_s_per_m <= 0.0
+                    {
+                        return Err(AnalysisValidationError::InvalidMaterial {
+                            material_id: material.material_id.clone(),
+                            detail: "steady conduction conductivity must be finite and positive"
+                                .into(),
+                        });
+                    }
+                }
+            }
+            crate::ElectromagneticDomain::Static {
+                equation: crate::StaticElectricalEquation::Electrostatics,
+            } => {}
         }
     }
     if let Some(domain) = &model.cfd {

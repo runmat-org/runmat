@@ -1,3 +1,4 @@
+import type { InputManifest } from "../generated/collaboration-contracts.js";
 import type { RunMatFilesystemProvider } from "../fs/provider-types.js";
 import type {
   GitAcquisitionIntent,
@@ -45,6 +46,7 @@ export interface BrowserProjectResolveOptions {
 export interface BrowserProjectResolveRequest {
   manifestPath: string;
   existingLock?: unknown;
+  inputManifest?: InputManifest;
   options: BrowserProjectResolveOptions;
 }
 
@@ -58,7 +60,7 @@ export interface BrowserResolvedProject {
   source_inventories: unknown[];
 }
 
-interface BrowserResolveWireResult extends BrowserResolvedProject {
+export interface BrowserResolveWireResult extends BrowserResolvedProject {
   cache_lease?: PackageCacheLease | null;
 }
 
@@ -87,6 +89,12 @@ export interface BrowserProjectResolverNative {
     lease: PackageCacheLease
   ): Promise<void>;
 }
+
+export type CapturedProjectResolver = (
+  request: { manifestPath: string; inputManifest: InputManifest; options: BrowserProjectResolveOptions },
+  provider: Parameters<BrowserProjectResolverNative["resolveProject"]>[1],
+  filesystem: RunMatFilesystemProvider
+) => Promise<BrowserResolveWireResult>;
 
 export interface BrowserProjectResolverConfig {
   native: BrowserProjectResolverNative;
@@ -121,7 +129,7 @@ export class BrowserProjectResolver {
       subscribePrivateArtifactInvalidation(() => this.filesystem.clear());
   }
 
-  async resolve(request: BrowserProjectResolveRequest): Promise<BrowserResolvedProject> {
+  async resolve(request: BrowserProjectResolveRequest, captured?: CapturedProjectResolver): Promise<BrowserResolvedProject> {
     if (this.disposed) {
       throw new Error("Browser project resolver has been disposed");
     }
@@ -130,8 +138,16 @@ export class BrowserProjectResolver {
     }
     this.resolving = true;
     try {
+      const inputs = request.inputManifest;
+      const resolve = inputs
+        ? (() => {
+            if (!captured) throw new Error("Captured project resolution is unavailable");
+            return (request: BrowserProjectResolveRequest, provider: Parameters<BrowserProjectResolverNative["resolveProject"]>[1], filesystem: RunMatFilesystemProvider) =>
+              captured({ manifestPath: request.manifestPath, inputManifest: inputs, options: request.options }, provider, filesystem);
+          })()
+        : this.config.native.resolveProject.bind(this.config.native);
       const { cache_lease: cacheLease, ...resolved } =
-        await this.config.native.resolveProject(
+        await resolve(
           request,
           {
             packageCache: this.config.packageCache,

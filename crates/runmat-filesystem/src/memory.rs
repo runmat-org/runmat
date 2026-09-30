@@ -20,7 +20,7 @@ pub struct MemoryFsProvider {
 #[derive(Clone, Debug)]
 enum MemoryEntry {
     Directory,
-    File { bytes: Vec<u8>, readonly: bool },
+    File { bytes: Vec<u8>, readonly: bool, revision: String },
 }
 
 #[derive(Debug)]
@@ -94,6 +94,7 @@ impl MemoryFsProvider {
             MemoryEntry::File {
                 bytes: data.to_vec(),
                 readonly: false,
+                revision: uuid::Uuid::new_v4().to_string(),
             },
         );
         Ok(())
@@ -313,6 +314,40 @@ impl FsProvider for MemoryFsProvider {
         self.write_project_path(path, data)
     }
 
+    async fn publish_output(&self, path: &Path, data: &[u8], expected: Option<&str>) -> io::Result<String> {
+        let path = normalize_path(path)?;
+        let mut tree = self.inner.lock().expect("memory filesystem lock poisoned");
+        match (tree.entries.get(&path), expected) {
+            (None, None) => (),
+            (Some(MemoryEntry::File { revision, readonly: false, .. }), Some(expected)) if revision == expected => (),
+            _ => return Err(io::Error::new(ErrorKind::PermissionDenied, "output version changed")),
+        }
+        ensure_parent_dirs(&mut tree, &path)?;
+        let revision = uuid::Uuid::new_v4().to_string();
+        tree.entries.insert(path, MemoryEntry::File { bytes: data.to_vec(), readonly: false, revision: revision.clone() });
+        Ok(revision)
+    }
+
+    async fn remove_output(&self, path: &Path, expected: &str) -> io::Result<()> {
+        let path = normalize_path(path)?;
+        let mut tree = self.inner.lock().expect("memory filesystem lock poisoned");
+        match tree.entries.get(&path) {
+            Some(MemoryEntry::File { revision, readonly: false, .. }) if revision == expected => (),
+            _ => return Err(io::Error::new(ErrorKind::PermissionDenied, "output version changed")),
+        }
+        tree.entries.remove(&path);
+        Ok(())
+    }
+
+    async fn read_version(&self, path: &Path, version: &str, size: u64, _snapshot: &str) -> io::Result<Vec<u8>> {
+        let path = normalize_path(path)?;
+        let tree = self.inner.lock().expect("memory filesystem lock poisoned");
+        match tree.entries.get(&path) {
+            Some(MemoryEntry::File { revision, bytes, .. }) if revision == version && bytes.len() as u64 == size => Ok(bytes.clone()),
+            _ => Err(io::Error::new(ErrorKind::NotFound, "memory file version is unavailable")),
+        }
+    }
+
     async fn remove_file(&self, path: &Path) -> io::Result<()> {
         let path = normalize_path(path)?;
         let mut guard = self.inner.lock().expect("memory filesystem lock poisoned");
@@ -417,6 +452,7 @@ impl FsProvider for MemoryFsProvider {
             MemoryEntry::File {
                 bytes: bytes.to_vec(),
                 readonly: false,
+                revision: uuid::Uuid::new_v4().to_string(),
             },
         );
         Ok(AtomicCreateResult::Published {
@@ -592,7 +628,7 @@ fn entry_type(entry: &MemoryEntry) -> FsFileType {
 fn metadata_for(path: &Path, entry: Option<&MemoryEntry>) -> io::Result<FsMetadata> {
     match entry {
         Some(MemoryEntry::Directory) => Ok(FsMetadata::new(FsFileType::Directory, 0, None, false)),
-        Some(MemoryEntry::File { bytes, readonly }) => Ok(FsMetadata::new(
+        Some(MemoryEntry::File { bytes, readonly, .. }) => Ok(FsMetadata::new(
             FsFileType::File,
             bytes.len() as u64,
             None,

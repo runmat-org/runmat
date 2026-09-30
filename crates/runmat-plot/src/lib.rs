@@ -6,6 +6,7 @@
 // ===== CORE ARCHITECTURE =====
 
 // Core rendering engine (always available)
+pub mod collaboration;
 pub mod context;
 pub mod core;
 pub mod data;

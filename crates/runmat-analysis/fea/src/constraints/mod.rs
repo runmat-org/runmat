@@ -25,6 +25,7 @@ mod result_state;
 mod row;
 mod target;
 mod vector;
+pub(crate) use target::resolve_nodal_target;
 
 pub use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 pub use contract::{

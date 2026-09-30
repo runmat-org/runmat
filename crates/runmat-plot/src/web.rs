@@ -589,6 +589,19 @@ impl WebRenderer {
         self.render_current_scene()
     }
 
+    pub fn set_presence(&mut self, frame: crate::collaboration::PresenceFrame) -> Result<(), WebRendererError> {
+        self.plot_renderer.set_presence(frame).map_err(WebRendererError::Render)
+    }
+
+    pub fn capture_presence_pointer(&self, logical_pixel: [f32; 2]) -> Option<crate::collaboration::PointerPosition> {
+        #[cfg(feature = "egui-overlay")]
+        if let Some(overlay) = &self.overlay {
+            return overlay.plot_overlay.presence_projections(&self.plot_renderer).iter().rev().find_map(|projection| projection.capture(logical_pixel));
+        }
+        let _ = logical_pixel;
+        None
+    }
+
     pub fn set_geometry_scene_presentation(
         &mut self,
         presentation: GeometryScenePresentation,

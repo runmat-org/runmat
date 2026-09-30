@@ -278,6 +278,9 @@ describe("initRunMat wiring", () => {
 
     await expect(session.checkFeaSource("models/bracket.fea")).resolves.toEqual(checkResult);
     expect(checkFeaSource).toHaveBeenCalledWith("models/bracket.fea");
+    const inputManifest = { snapshotId: "captured", entries: [] };
+    await expect(session.checkFeaSource("models/bracket.fea", inputManifest)).resolves.toEqual(checkResult);
+    expect(checkFeaSource).toHaveBeenLastCalledWith("models/bracket.fea", inputManifest);
   });
 
   it("forwards dynamic language policy and error namespace updates", async () => {

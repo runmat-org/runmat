@@ -276,6 +276,7 @@ pub use web::{
     get_surface_camera_state, install_surface, invalidate_surface_revisions,
     pick_geometry_scene_region, present_surface, render_current_scene, reset_surface_camera,
     resize_surface, set_geometry_scene_presentation, set_plot_theme_config,
+    set_surface_presence, capture_surface_pointer,
     set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
     PlotSurfaceCameraState,
 };

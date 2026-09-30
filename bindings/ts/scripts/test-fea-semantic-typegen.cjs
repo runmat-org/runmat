@@ -18,6 +18,7 @@ pub struct Root {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omitted_when_none: Option<u32>,
     pub explicit_null: Option<bool>,
+    pub color: [u8; 3],
     pub state: State,
     pub source: Source,
 }
@@ -45,6 +46,7 @@ pub enum Source {
 const registry = parseDeclarations(rustFiles(directory));
 const output = renderReachable(registry, ["Root"]);
 assert.match(output, /requiredValue: string/);
+assert.match(output, /color: \[number, number, number\]/);
 assert.match(output, /omittedWhenNone\?: number/);
 assert.match(output, /explicitNull: boolean \| null/);
 assert.match(output, /kind: "running"/);

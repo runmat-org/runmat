@@ -1083,12 +1083,46 @@ impl PlotOverlay {
 
         // Store plot area for next frame
         self.plot_area = plot_area;
+        crate::collaboration::render_presence(ctx, &plot_renderer.presence().revision, plot_renderer.presence(), &self.presence_projections(plot_renderer));
 
         FrameInfo {
             plot_area,
             consumed_input,
             metrics,
         }
+    }
+
+    pub fn presence_projections(
+        &self,
+        renderer: &PlotRenderer,
+    ) -> Vec<crate::collaboration::PresenceProjection> {
+        self.axes_plot_rects
+            .iter()
+            .enumerate()
+            .filter_map(|(index, rect)| {
+                let mut camera = renderer.axes_camera(index)?.clone();
+                // The rendered viewport uses this axes rectangle, not the outer
+                // figure's aspect ratio. Rebuild the projection for the same
+                // viewport before translating collaborators' data coordinates.
+                camera.update_aspect_ratio(rect.width() / rect.height());
+                let is_3d = renderer.has_geometry_scene() || renderer.axes_has_3d_content(index);
+                Some(crate::collaboration::PresenceProjection {
+                    axes: format!("axes:{index}"),
+                    rect: [rect.min.x, rect.min.y, rect.width(), rect.height()],
+                    view_projection: camera.view_proj_matrix(),
+                    data_bounds: if is_3d {
+                        None
+                    } else {
+                        renderer
+                            .view_bounds_for_axes(index)
+                            .map(|(left, right, bottom, top)| [left, right, bottom, top])
+                    },
+                    is_3d,
+                    x_log: renderer.overlay_x_log_for_axes(index),
+                    y_log: renderer.overlay_y_log_for_axes(index),
+                })
+            })
+            .collect()
     }
 
     /// Render the sidebar with controls and information

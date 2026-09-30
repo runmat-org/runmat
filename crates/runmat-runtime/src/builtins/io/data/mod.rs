@@ -3064,15 +3064,9 @@ async fn apply_slice_write_chunked_async(
 
         let chunk_bytes = serde_json::to_vec(&chunk_payload)
             .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
-        let chunk_path = root.join(&entry.data_path);
-        runmat_filesystem::write_async(&chunk_path, &chunk_bytes)
-            .await
-            .map_err(|err| {
-                data_error(format!(
-                    "failed to write chunk payload '{}': {err}",
-                    chunk_path.display()
-                ))
-            })?;
+        let chunk_path = crate::data::objects::write_object(root, &chunk_bytes).await?;
+        entry.object_id = sha256_hex(&chunk_bytes);
+        entry.data_path = make_rel_data_path(root, &chunk_path)?;
 
         entry.coords = coords.clone();
         entry.shape = chunk_extent.clone();
@@ -3107,18 +3101,11 @@ async fn apply_slice_write_chunked_async(
     );
     let index_write = serde_json::to_vec(&chunk_index)
         .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
-    runmat_filesystem::write_async(&index_path, &index_write)
-        .await
-        .map_err(|err| {
-            data_error(format!(
-                "failed to write chunk index '{}': {err}",
-                index_path.display()
-            ))
-        })?;
+    let next_index_path = crate::data::objects::write_chunk_index(root, array_name, &index_write).await?;
 
     if let Some(updated) = manifest.arrays.get_mut(array_name) {
         updated.shape = meta.shape.clone();
-        updated.chunk_index_path = Some(index_rel_path.clone());
+        updated.chunk_index_path = Some(make_rel_data_path(root, &next_index_path)?);
     }
     Ok(true)
 }
@@ -4218,6 +4205,7 @@ mod tests {
     struct CountingDataUploadProvider {
         inner: NativeFsProvider,
         uploaded_keys: Arc<Mutex<Vec<String>>>,
+        reject_manifest: std::sync::atomic::AtomicBool,
     }
 
     struct HttpDataUploadProvider {
@@ -4238,6 +4226,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl FsProvider for HttpDataUploadProvider {
+        async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> std::io::Result<runmat_filesystem::AtomicCreateResult> {
+            self.inner.atomic_create_new(path, bytes).await
+        }
+
         fn open(&self, path: &Path, flags: &OpenFlags) -> std::io::Result<Box<dyn FileHandle>> {
             self.inner.open(path, flags)
         }
@@ -4443,6 +4435,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl FsProvider for CountingDataUploadProvider {
+        async fn atomic_create_new(&self, path: &Path, bytes: &[u8]) -> std::io::Result<runmat_filesystem::AtomicCreateResult> {
+            self.inner.atomic_create_new(path, bytes).await
+        }
+
         fn open(&self, path: &Path, flags: &OpenFlags) -> std::io::Result<Box<dyn FileHandle>> {
             self.inner.open(path, flags)
         }
@@ -4452,6 +4448,9 @@ mod tests {
         }
 
         async fn write(&self, path: &Path, data: &[u8]) -> std::io::Result<()> {
+            if path.file_name().is_some_and(|name| name == "manifest.json") && self.reject_manifest.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "manifest head changed"));
+            }
             self.inner.write(path, data).await
         }
 
@@ -4648,7 +4647,8 @@ mod tests {
     #[test]
     fn slice_write_updates_only_touched_chunks() {
         let _serial = serial_test_guard();
-        let _provider_guard = native_provider_guard();
+        let provider = Arc::new(CountingDataUploadProvider::default());
+        let _provider_guard = runmat_filesystem::replace_provider(provider.clone());
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir
             .path()
@@ -4694,8 +4694,17 @@ mod tests {
         call_builtin("DataArray.write", &[arr.clone(), full]).expect("initial write");
 
         let root = std::path::PathBuf::from(&path);
-        let untouched_path = root.join("arrays/temperature/chunks/obj_1_1.json");
-        let touched_path = root.join("arrays/temperature/chunks/obj_0_0.json");
+        let read_index = || futures::executor::block_on(async {
+            let manifest = read_manifest_async(&root).await.unwrap();
+            let index = manifest.arrays["temperature"].chunk_index_path.as_ref().unwrap();
+            let bytes = runmat_filesystem::read_async(root.join(index)).await.unwrap();
+            serde_json::from_slice::<DataChunkIndex>(&bytes).unwrap()
+        });
+        let before = read_index();
+        let untouched_entry = before.chunks.iter().find(|e| e.coords == [1, 1]).unwrap();
+        let touched_entry = before.chunks.iter().find(|e| e.coords == [0, 0]).unwrap();
+        let untouched_path = root.join(&untouched_entry.data_path);
+        let touched_path = root.join(&touched_entry.data_path);
         let untouched_before =
             futures::executor::block_on(runmat_filesystem::read_async(&untouched_path))
                 .expect("read untouched before");
@@ -4725,7 +4734,20 @@ mod tests {
             futures::executor::block_on(runmat_filesystem::read_async(&touched_path))
                 .expect("read touched after");
         assert_eq!(untouched_before, untouched_after);
-        assert_ne!(touched_before, touched_after);
+        assert_eq!(touched_before, touched_after, "old manifest still reads the old chunk");
+        let after = read_index();
+        let next_untouched = after.chunks.iter().find(|e| e.coords == [1, 1]).unwrap();
+        let next_touched = after.chunks.iter().find(|e| e.coords == [0, 0]).unwrap();
+        assert_eq!(untouched_entry.data_path, next_untouched.data_path);
+        assert_ne!(touched_entry.data_path, next_touched.data_path);
+        let new_bytes = futures::executor::block_on(runmat_filesystem::read_async(root.join(&next_touched.data_path))).unwrap();
+        assert_ne!(touched_before, new_bytes);
+        let published_manifest = futures::executor::block_on(runmat_filesystem::read_async(root.join("manifest.json"))).unwrap();
+        provider.reject_manifest.store(true, std::sync::atomic::Ordering::Relaxed);
+        let replacement = Value::Tensor(Tensor::new(vec![42.0; 16], vec![4, 4]).unwrap());
+        assert!(call_builtin("DataArray.write", &[arr, replacement]).is_err());
+        assert_eq!(published_manifest, futures::executor::block_on(runmat_filesystem::read_async(root.join("manifest.json"))).unwrap());
+        assert_eq!(new_bytes, futures::executor::block_on(runmat_filesystem::read_async(root.join(&next_touched.data_path))).unwrap());
     }
 
     #[test]

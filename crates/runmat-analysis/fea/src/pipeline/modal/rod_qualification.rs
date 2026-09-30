@@ -39,6 +39,7 @@ const WAVE_SPEED: f64 = 10.0;
 const PHASOR: [f64; 2] = [1.0, 0.4];
 
 mod damped;
+mod damped_modal;
 mod execution;
 
 fn rod_model(mesh: &SolverMeshArtifact, wave_numbers: &[f64]) -> AnalysisModel {

@@ -51,6 +51,7 @@ pub fn is_exposed_analysis_identity(
             )
             | (PhysicsFamily::Thermal, AnalysisProcedure::Static)
             | (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse)
+            | (PhysicsFamily::Electromagnetic, AnalysisProcedure::Static)
             | (
                 PhysicsFamily::Electromagnetic,
                 AnalysisProcedure::HarmonicResponse
@@ -116,6 +117,7 @@ mod tests {
             ),
             (PhysicsFamily::Thermal, AnalysisProcedure::Static),
             (PhysicsFamily::Thermal, AnalysisProcedure::TransientResponse),
+            (PhysicsFamily::Electromagnetic, AnalysisProcedure::Static),
             (
                 PhysicsFamily::Electromagnetic,
                 AnalysisProcedure::HarmonicResponse,

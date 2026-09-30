@@ -1,3 +1,4 @@
+import type { AtomicCreateResult } from "../generated/collaboration-contracts.js";
 import { basename, dirname, isSubPath, normalizePath } from "./path.js";
 import type {
   RunMatFilesystemDirEntry,
@@ -119,6 +120,18 @@ export class MemoryVolume {
         return null;
       }
     });
+  }
+
+  atomicCreateNew(path: string, data: Uint8Array): AtomicCreateResult {
+    const normalized = normalizeAbsolute(path);
+    const existing = this.entries.get(normalized);
+    if (existing) {
+      if (existing.kind !== "file") throw new Error(`Path ${normalized} is a directory`);
+      return { kind: "existing", result: Array.from(existing.data) };
+    }
+    // No await: observation and insertion belong to one volume operation.
+    this.writeFile(normalized, data);
+    return { kind: "published", result: { durability: "atomic_visibility" } };
   }
 
   writeFile(path: string, data: Uint8Array, readonly = false, modified?: number): void {
@@ -409,6 +422,12 @@ class MemoryProvider implements RunMatFilesystemProvider {
 
   readMany(paths: string[]): Array<Uint8Array | null> {
     return this.volume.readMany(paths);
+  }
+
+  atomicCreateNew(path: string, data: Uint8Array): AtomicCreateResult {
+    const result = this.volume.atomicCreateNew(path, data);
+    if (result.kind === "published") this.onMutate?.();
+    return result;
   }
 
   writeFile(path: string, data: Uint8Array | ArrayBuffer | ArrayBufferView): void {
