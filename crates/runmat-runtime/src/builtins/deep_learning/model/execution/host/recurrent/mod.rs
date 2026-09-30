@@ -10,8 +10,7 @@ pub(in crate::builtins::deep_learning) use backward::backward;
 pub(in crate::builtins::deep_learning) use forward::{forward, RecurrentBackwardCache};
 pub(in crate::builtins::deep_learning) use gates::RecurrentGateRows;
 pub(in crate::builtins::deep_learning) use geometry::{
-    Activation, GateActivation, OutputMode, RecurrentError, RecurrentOptions,
-    RecurrentParameterShapes,
+    RecurrentError, RecurrentOptions, RecurrentParameterShapes,
 };
 
 pub(in crate::builtins::deep_learning) fn admit(

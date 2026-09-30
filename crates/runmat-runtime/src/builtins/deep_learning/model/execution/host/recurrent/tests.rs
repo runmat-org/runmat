@@ -5,6 +5,7 @@ use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
 
 use super::forward::{RecurrentOutput, RecurrentTrace};
 use super::gates::{gate_derivative, state, state_derivative};
+use super::geometry::{Activation, GateActivation, OutputMode};
 use super::*;
 
 fn tensor(data: Vec<f64>, shape: &[usize]) -> Tensor {

@@ -1,5 +1,6 @@
 use super::*;
 use futures::executor::block_on;
+use runmat_builtins::{BILSTM_LAYER_CLASS, LSTM_LAYER_CLASS};
 
 fn assert_class(value: Value, expected: runmat_types::StaticClassIdentity) {
     let Value::Object(layer) = value else {
