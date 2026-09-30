@@ -22,8 +22,10 @@ use crate::{
 mod backend_evidence;
 mod diagnostics;
 mod snapshots;
+mod transient;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
 use snapshots::{scalar_snapshots, vector_snapshots};
+use transient::{solve_transient, TransientSolveInput};
 
 pub(super) fn run(
     model: &AnalysisModel,
@@ -308,7 +310,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             .map(|(value, reference)| value - reference)
             .collect::<Vec<_>>()
     });
-    let rhs_norm = rhs_norm(operator.load());
+    let rhs_norm = rhs_norm(&operator.linear_rhs());
     let mut solve = solve_checked(
         &operator,
         requested_solver_backend,
@@ -328,9 +330,9 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         *temperature = prescribed.unwrap_or(*temperature + reference);
     }
     let mut recovered = RecoveredSnapshots::with_capacity(1);
-    push_recovered_snapshot(assembly, &solve.solution, None, 1.0, &mut recovered)?;
+    push_recovered_snapshot(assembly, &solve.solution, None, 1.0, 0.0, &mut recovered)?;
     let energy_balance = assembly
-        .energy_balance(model, sample, &solve.solution, &solve.solution, 1.0)
+        .energy_balance(model, sample, &solve.solution, &solve.solution, 1.0, 0.0)
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let mut accelerator_evidence = Vec::new();
     backend_evidence::retain(
@@ -349,123 +351,6 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         device_apply_attempt_count: solve.device_apply_k_attempt_count,
         accelerator_evidence,
         last_solve: solve,
-    })
-}
-
-struct TransientSolveInput<'a> {
-    properties: &'a crate::properties::CompiledPropertyMap,
-    model: &'a AnalysisModel,
-    mesh: &'a runmat_meshing_core::SolverMeshArtifact,
-    step: &'a runmat_analysis_core::ProcedureStep,
-    initial_assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
-    initial_temperature_k: &'a [f64],
-    schedule: &'a crate::execution::ThermalSolveSchedule,
-    facts: &'a crate::planning::resource::ThermalPreassemblyResourceFacts,
-    requested_solver_backend: LinearAlgebraBackendKind,
-    algebra: &'a dyn LinearAlgebraBackend,
-    residual_target: f64,
-}
-
-fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
-    let operators = &input.facts.operators;
-    let solve_times = input.schedule.points_s();
-    let mut time_points_s = Vec::with_capacity(solve_times.len());
-    let mut recovered = RecoveredSnapshots::with_capacity(solve_times.len());
-    let mut residual_norms = Vec::with_capacity(solve_times.len() - 1);
-    let mut energy_balances = Vec::with_capacity(solve_times.len() - 1);
-    let mut source_evidence = input.initial_assembly.source_evidence.clone();
-    let mut previous = input.initial_temperature_k.to_vec();
-    push_recovered_snapshot(
-        input.initial_assembly,
-        &previous,
-        None,
-        solve_times[1] - solve_times[0],
-        &mut recovered,
-    )?;
-    time_points_s.push(solve_times[0]);
-    let mut last_solve = None;
-    let mut host_sync_count = 0_u32;
-    let mut device_apply_count = 0_u32;
-    let mut device_apply_attempt_count = 0_u32;
-    let mut accelerator_evidence = Vec::new();
-    for step_index in 1..solve_times.len() {
-        check_cancelled("fea.run_thermal")?;
-        let previous_time_s = solve_times[step_index - 1];
-        let time_s = solve_times[step_index];
-        let time_step_s = time_s - previous_time_s;
-        emit_phase(
-            "fea.run_thermal",
-            FeaProgressPhase::Solve,
-            FeaProgressStatus::Advanced,
-            format!("solving physical thermal step {}", step_index + 1),
-            Some(step_index as u64),
-            Some(solve_times.len() as u64),
-        );
-        let approach = input.schedule.approach(step_index);
-        let sample = sample_point(input.step, time_s, approach)?;
-        let excitations = realize_excitations_for_step(input.model, input.step, sample)?;
-        let assembly = assemble_thermal_operator(
-            input.model,
-            input.mesh,
-            input.properties,
-            operators.support(),
-            &excitations,
-            sample,
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        drop(excitations);
-        operators.verify_matrix(&assembly.conductivity)?;
-        operators.verify_matrix(&assembly.capacity)?;
-        source_evidence.extend(assembly.source_evidence.clone());
-        let operator = assembly
-            .transient_operator(time_step_s, &previous)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let rhs_norm = rhs_norm(operator.load());
-        let mut solve = solve_checked(
-            &operator,
-            input.requested_solver_backend,
-            input.algebra,
-            Some(&previous),
-            operators,
-            input.residual_target,
-        )?;
-        host_sync_count = host_sync_count.saturating_add(solve.host_sync_count);
-        device_apply_count = device_apply_count.saturating_add(solve.device_apply_k_count);
-        device_apply_attempt_count =
-            device_apply_attempt_count.saturating_add(solve.device_apply_k_attempt_count);
-        backend_evidence::retain(
-            &mut accelerator_evidence,
-            &mut solve.accelerator_evidence,
-            &input.facts.metadata.backend_evidence,
-        )?;
-        residual_norms.push(solve.residual_norm / rhs_norm);
-        energy_balances.push(
-            assembly
-                .energy_balance(input.model, sample, &previous, &solve.solution, time_step_s)
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))?,
-        );
-        push_recovered_snapshot(
-            &assembly,
-            &solve.solution,
-            Some(&previous),
-            time_step_s,
-            &mut recovered,
-        )?;
-        previous = solve.solution.clone();
-        time_points_s.push(time_s);
-        last_solve = Some(solve);
-    }
-    Ok(ProcedureOutcome {
-        time_points_s,
-        recovered,
-        residual_norms,
-        energy_balances,
-        source_evidence,
-        last_solve: last_solve.expect("validated transient controls perform at least one solve"),
-        host_sync_count,
-        device_apply_count,
-        device_apply_attempt_count,
-        accelerator_evidence,
     })
 }
 
@@ -567,9 +452,19 @@ fn push_recovered_snapshot(
     temperature_k: &[f64],
     previous_temperature_k: Option<&[f64]>,
     time_step_s: f64,
+    reference_temperature_k: f64,
     recovered: &mut RecoveredSnapshots,
 ) -> Result<(), FeaRunError> {
-    recovered.temperatures.push(temperature_k.to_vec());
+    recovered.temperatures.push(
+        temperature_k
+            .iter()
+            .enumerate()
+            .map(|(node, temperature)| {
+                assembly.prescribed_temperature_k[node]
+                    .unwrap_or(temperature + reference_temperature_k)
+            })
+            .collect(),
+    );
     recovered.gradients.push(
         assembly
             .recover_element_temperature_gradients(temperature_k)

@@ -35,7 +35,6 @@ pub(crate) struct ThermalOperatorAssembly {
     pub projection: AnalysisProjection,
     pub conductivity: RealSparseMatrix,
     pub capacity: RealSparseMatrix,
-    pub source: Vec<f64>,
     /// Applied generation/flux only; excludes the algebraic Robin ambient forcing.
     pub applied_source: Vec<f64>,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
@@ -48,9 +47,23 @@ pub(crate) struct ThermalOperatorAssembly {
 impl ThermalOperatorAssembly {
     pub(crate) fn transient_operator(
         &self,
+        model: &AnalysisModel,
+        sample: ExcitationSamplePoint<'_>,
         time_step_s: f64,
         previous_temperature_k: &[f64],
+        reference_temperature_k: &[f64],
     ) -> Result<AssembledRealSystem, ThermalAssemblyError> {
+        if !time_step_s.is_finite()
+            || time_step_s <= 0.0
+            || previous_temperature_k.len() != self.projection.nodes.len()
+            || previous_temperature_k
+                .iter()
+                .any(|value| !value.is_finite())
+        {
+            return Err(ThermalAssemblyError::InvalidProjection(
+                "transient thermal coordinates require a positive finite time step and one finite departure per node".into(),
+            ));
+        }
         let inverse_time_step = time_step_s.recip();
         let support = self
             .conductivity
@@ -69,13 +82,15 @@ impl ThermalOperatorAssembly {
             .finish()
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
         let capacity_temperature = apply_matrix(&self.capacity, previous_temperature_k);
-        let mut rhs = self
-            .source
-            .iter()
-            .zip(capacity_temperature)
-            .map(|(source, stored_energy)| source + inverse_time_step * stored_energy)
-            .collect::<Vec<_>>();
-        apply_prescribed_values(&self.prescribed_temperature_k, &mut rhs);
+        let mut rhs = self.relative_source(model, sample, reference_temperature_k)?;
+        for (source, stored_energy) in rhs.iter_mut().zip(capacity_temperature) {
+            *source += inverse_time_step * stored_energy;
+        }
+        for (node, value) in self.prescribed_temperature_k.iter().enumerate() {
+            if let Some(value) = value {
+                rhs[node] = value - reference_temperature_k[node];
+            }
+        }
         let constrained = self
             .prescribed_temperature_k
             .iter()
@@ -250,7 +265,7 @@ pub(crate) fn assemble(
             .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
     }
 
-    let mut source = vec![0.0; projection.nodes.len()];
+    let mut applied_source = vec![0.0; projection.nodes.len()];
     let mut source_evidence = Vec::new();
     for excitation in excitations.iter() {
         let (value, rule) = match excitation.kind {
@@ -305,7 +320,7 @@ pub(crate) fn assemble(
                                 element.node_indices.iter().zip(point.shape_values())
                             {
                                 let nodal = integrated * shape;
-                                source[node] += nodal;
+                                applied_source[node] += nodal;
                                 evidence.add_projected(node, nodal, 0.0);
                             }
                         })
@@ -324,7 +339,7 @@ pub(crate) fn assemble(
                                 face.node_indices.iter().zip(point.shape_values())
                             {
                                 let nodal = integrated * shape;
-                                source[node] += nodal;
+                                applied_source[node] += nodal;
                                 evidence.add_projected(node, nodal, 0.0);
                             }
                         })
@@ -349,7 +364,6 @@ pub(crate) fn assemble(
         source_evidence.push(evidence);
     }
 
-    let mut applied_source = source.clone();
     let mut prescribed_temperature_k =
         temperature_field::prescribed_temperatures(&projection, excitations)?;
     let mut positive_robin_weight = vec![0.0; projection.nodes.len()];
@@ -425,7 +439,6 @@ pub(crate) fn assemble(
                             for (&node, &shape) in
                                 face.node_indices.iter().zip(point.shape_values())
                             {
-                                source[node] += power * shape;
                                 applied_source[node] += power * shape;
                             }
                         })
@@ -438,7 +451,7 @@ pub(crate) fn assemble(
                 ambient_temperature,
                 coefficient,
             } => {
-                let ambient = sample_ambient_temperature(
+                sample_ambient_temperature(
                     model,
                     &boundary.boundary_id,
                     ambient_temperature,
@@ -461,8 +474,6 @@ pub(crate) fn assemble(
                                         * row_shape
                                         * point.area_weight_m2;
                                 }
-                                source[row] +=
-                                    heat_transfer * ambient * row_shape * point.area_weight_m2;
                                 for (local_column, &column) in face.node_indices.iter().enumerate()
                                 {
                                     conductivity.add(
@@ -506,7 +517,6 @@ pub(crate) fn assemble(
         capacity: capacity
             .finish()
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?,
-        source,
         applied_source,
         source_evidence,
         prescribed_temperature_k,
@@ -575,14 +585,6 @@ fn add_scaled_matrix(assembler: &mut RealSparseAssembler, matrix: &RealSparseMat
 
 pub(super) fn apply_matrix(matrix: &RealSparseMatrix, vector: &[f64]) -> Vec<f64> {
     spmv(matrix, vector).expect("validated thermal operator dimensions")
-}
-
-fn apply_prescribed_values(prescribed: &[Option<f64>], rhs: &mut [f64]) {
-    for (right_hand_side, value) in rhs.iter_mut().zip(prescribed) {
-        if let Some(value) = value {
-            *right_hand_side = *value;
-        }
-    }
 }
 
 #[cfg(test)]

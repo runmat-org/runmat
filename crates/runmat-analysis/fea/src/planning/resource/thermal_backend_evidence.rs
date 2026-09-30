@@ -13,7 +13,7 @@ pub struct ThermalBackendEvidenceResourceFacts {
 impl ThermalBackendEvidenceResourceFacts {
     pub fn derive(schedule: &ThermalSolveSchedule) -> Result<Self, ResourcePlanningError> {
         Ok(Self {
-            maximum_records: schedule.solve_count(),
+            maximum_records: schedule.maximum_linear_solve_count()?,
             record: AcceleratorSolveEvidence::completed_profile()
                 .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
         })

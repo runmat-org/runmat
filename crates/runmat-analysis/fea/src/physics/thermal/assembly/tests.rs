@@ -229,8 +229,8 @@ fn prepared_properties_are_reused_across_load_samples_and_reject_topology_substi
     .unwrap();
     assert_eq!(second.conductivity, fresh.conductivity);
     assert_eq!(second.capacity, fresh.capacity);
-    assert_eq!(second.source, fresh.source);
-    for (one, two) in first.source.iter().zip(&second.source) {
+    assert_eq!(second.applied_source, fresh.applied_source);
+    for (one, two) in first.applied_source.iter().zip(&second.applied_source) {
         assert!((two - 2.0 * one).abs() < 1e-14);
     }
     let mut substituted = properties.clone();

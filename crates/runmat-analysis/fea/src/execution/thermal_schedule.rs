@@ -116,6 +116,15 @@ impl ThermalSolveSchedule {
             1
         }
     }
+    /// One primary solve per interval, plus at most one energy-driven refinement.
+    /// This is an execution/evidence bound, not another physical field sample.
+    pub(crate) fn maximum_linear_solve_count(&self) -> Result<usize, ResourcePlanningError> {
+        self.solve_count()
+            .checked_mul(if self.transient { 2 } else { 1 })
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal linear solve count",
+            ))
+    }
     pub(crate) fn approach(&self, index: usize) -> SignalSampleApproach {
         if self
             .events_s

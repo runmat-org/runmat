@@ -19,6 +19,7 @@ impl ThermalOperatorAssembly {
         previous_temperature_k: &[f64],
         temperature_k: &[f64],
         time_step_s: f64,
+        reference_temperature_k: f64,
     ) -> Result<ThermalEnergyBalance, ThermalAssemblyError> {
         let rate = previous_temperature_k
             .iter()
@@ -107,7 +108,9 @@ impl ThermalOperatorAssembly {
                             .node_indices
                             .iter()
                             .zip(point.shape_values())
-                            .map(|(&node, &shape)| shape * (temperature_k[node] - ambient))
+                            .map(|(&node, &shape)| {
+                                shape * (temperature_k[node] - (ambient - reference_temperature_k))
+                            })
                             .sum::<f64>();
                         let power = coefficient.watts_per_square_meter_kelvin
                             * temperature_difference

@@ -93,6 +93,7 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                     &reference,
                     &reference,
                     1.0,
+                    0.0,
                 )
                 .unwrap();
             assert_eq!(energy.residual_w, 0.0);

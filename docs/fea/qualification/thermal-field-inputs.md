@@ -43,6 +43,32 @@ checks include combined model/field input rejection before owned field preparati
 
 ## Admission, provenance and execution boundary
 
+### Transient numerical coordinates
+
+Backward Euler retains `theta = T - T_reference` between steps. Constant-property
+conduction annihilates the constant reference; Robin forcing uses
+`h * (T_ambient - T_reference)`, and prescribed temperatures use the same shift.
+Gradient, flux, storage and energy recovery operate on departures. Only published
+temperature snapshots reconstruct absolute Kelvin, with prescribed values retained
+exactly. This is a coordinate change, not recomputation of an input field or a change
+to the heat equation, time grid, or retained physical acceptance thresholds.
+
+If a primary solve fails the requested physical energy balance, one bounded tighter
+linear solve uses the measured physical power scale and
+`|sum r_i| <= sqrt(N) * ||r||_2`. Its normalization follows the shared Dirichlet-lifted
+RHS (or initial residual for a zero RHS). The physical balance is recovered again;
+the final acceptance gate is never rewritten. Both attempts' backend work/evidence
+are counted and admitted, without raising authored resource ceilings.
+
+An independent insulated uniform-heating regression on Tet4/Tet10 checks two steps
+against `theta = q * t / (rho*c)` for increments below one absolute-temperature ulp
+at 300/3000 K. Existing initial-field patches and assembly convergence tests remain
+separate evidence. This correction does not qualify continuum cooling: its additional
+coarse Tet4 temperature-rate and finest heat-content gates remain failed. It does not
+establish process restart, accelerator execution, or whole thermal qualification.
+
+### Immutable field inputs
+
 The binding retains the complete existing recovered-field artifact and authored
 reference. Content and topology digests, unique field/sample selection, typed
 quantity, real scalar/vector storage shape, complete node count, global frame

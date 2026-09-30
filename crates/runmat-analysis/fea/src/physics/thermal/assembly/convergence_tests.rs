@@ -215,7 +215,13 @@ fn transient_slab_has_second_order_spatial_convergence() {
             .collect::<Vec<_>>();
         for _ in 0..256 {
             let operator = assembly
-                .transient_operator(time_step_s, &temperature)
+                .transient_operator(
+                    &model,
+                    ExcitationSamplePoint::Static,
+                    time_step_s,
+                    &temperature,
+                    &vec![0.0; temperature.len()],
+                )
                 .unwrap();
             let solve = solve_operator_system(
                 &operator,

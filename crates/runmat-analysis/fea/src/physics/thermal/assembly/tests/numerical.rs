@@ -1,6 +1,70 @@
 use super::*;
 
 #[test]
+fn transient_departures_retain_heating_below_absolute_temperature_resolution() {
+    // rho*c=1 and insulated uniform heating: each BE step adds q*dt exactly.
+    // This increment is smaller than one absolute-Kelvin ulp at both references.
+    let generation = 2.0_f64.powi(-44);
+    let dt = 0.125;
+    let increment = generation * dt;
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let (model, _, _, _) = thermal_reference_model();
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+        let assembly = assemble(
+            &model,
+            &mesh,
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+                .unwrap()
+                .support(),
+            &heat_generation(generation),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let mut reference_results = Vec::new();
+        for reference in [300.0, 3000.0] {
+            assert_eq!(reference + increment, reference);
+            let mut previous = vec![0.0; assembly.projection.nodes.len()];
+            for step in 1..=2 {
+                let operator = assembly
+                    .transient_operator(
+                        &model,
+                        ExcitationSamplePoint::Static,
+                        dt,
+                        &previous,
+                        &vec![reference; previous.len()],
+                    )
+                    .unwrap();
+                let solve = solve_operator_system(
+                    &operator,
+                    SpdPreconditionerKind::Jacobi,
+                    LinearAlgebraBackendKind::CpuReference,
+                    &CpuReferenceBackend,
+                    Some(&previous),
+                );
+                for value in &solve.solution {
+                    let expected = f64::from(step) * increment;
+                    assert!((value - expected).abs() <= expected * 1e-8);
+                }
+                let balance = assembly
+                    .energy_balance(
+                        &model,
+                        ExcitationSamplePoint::Static,
+                        &previous,
+                        &solve.solution,
+                        dt,
+                        reference,
+                    )
+                    .unwrap();
+                assert!(balance.relative_residual < 1e-8);
+                previous = solve.solution;
+            }
+            reference_results.push(previous);
+        }
+        assert_eq!(reference_results[0], reference_results[1]);
+    }
+}
+
+#[test]
 fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let mesh =
@@ -71,7 +135,7 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     )
     .unwrap();
     let expected_source = density * assembly.projection.elements[0].signed_volume_m3;
-    let projected_source = assembly.source.iter().sum::<f64>();
+    let projected_source = assembly.applied_source.iter().sum::<f64>();
     assert!((projected_source - expected_source).abs() <= expected_source * 1.0e-12);
     assert_eq!(assembly.source_evidence.len(), 1);
     assert!(assembly.source_evidence[0].accepted);
@@ -80,7 +144,15 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
         crate::excitation::ProjectionSample::Static
     );
     let heated_initial = vec![300.0; assembly.projection.nodes.len()];
-    let heated_operator = assembly.transient_operator(0.1, &heated_initial).unwrap();
+    let heated_operator = assembly
+        .transient_operator(
+            &model,
+            ExcitationSamplePoint::Static,
+            0.1,
+            &heated_initial,
+            &vec![0.0; heated_initial.len()],
+        )
+        .unwrap();
     let heated = solve_operator_system(
         &heated_operator,
         SpdPreconditionerKind::Jacobi,
@@ -96,7 +168,8 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
                 ExcitationSamplePoint::Static,
                 &heated_initial,
                 &heated.solution,
-                0.1
+                0.1,
+                0.0
             )
             .unwrap()
             .relative_residual
@@ -114,7 +187,15 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     )
     .unwrap();
     let initial = vec![315.0; no_source.projection.nodes.len()];
-    let operator = no_source.transient_operator(0.25, &initial).unwrap();
+    let operator = no_source
+        .transient_operator(
+            &model,
+            ExcitationSamplePoint::Static,
+            0.25,
+            &initial,
+            &vec![0.0; initial.len()],
+        )
+        .unwrap();
     let solved = solve_operator_system(
         &operator,
         SpdPreconditionerKind::Jacobi,
@@ -153,7 +234,10 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     )
     .unwrap();
     let expected_power = 240.0 * face.area_m2;
-    assert!((flux.source.iter().sum::<f64>() - expected_power).abs() <= expected_power * 1.0e-12);
+    assert!(
+        (flux.applied_source.iter().sum::<f64>() - expected_power).abs()
+            <= expected_power * 1.0e-12
+    );
 
     model.boundaries = vec![AnalysisBoundary {
         boundary_id: "ambient_convection".into(),
@@ -174,7 +258,15 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     )
     .unwrap();
     let initial = vec![305.0; convection.projection.nodes.len()];
-    let operator = convection.transient_operator(0.25, &initial).unwrap();
+    let operator = convection
+        .transient_operator(
+            &model,
+            ExcitationSamplePoint::Static,
+            0.25,
+            &initial,
+            &vec![0.0; initial.len()],
+        )
+        .unwrap();
     let solved = solve_operator_system(
         &operator,
         SpdPreconditionerKind::Jacobi,
@@ -194,7 +286,8 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
                 ExcitationSamplePoint::Static,
                 &initial,
                 &solved.solution,
-                0.25
+                0.25,
+                0.0
             )
             .unwrap()
             .relative_residual
@@ -229,7 +322,15 @@ fn prescribed_face_temperature_is_enforced_exactly() {
     )
     .unwrap();
     let initial = vec![315.0; assembly.projection.nodes.len()];
-    let operator = assembly.transient_operator(0.25, &initial).unwrap();
+    let operator = assembly
+        .transient_operator(
+            &model,
+            ExcitationSamplePoint::Static,
+            0.25,
+            &initial,
+            &vec![0.0; initial.len()],
+        )
+        .unwrap();
     let solved = solve_operator_system(
         &operator,
         SpdPreconditionerKind::Jacobi,
@@ -248,7 +349,8 @@ fn prescribed_face_temperature_is_enforced_exactly() {
                 ExcitationSamplePoint::Static,
                 &initial,
                 &solved.solution,
-                0.25
+                0.25,
+                0.0
             )
             .unwrap()
             .relative_residual
@@ -280,7 +382,13 @@ fn backward_euler_converges_at_first_order_to_the_closed_form_tetrahedron_mode()
         temperature[free_node] = 400.0;
         for _ in 0..step_count {
             let operator = assembly
-                .transient_operator(time_step_s, &temperature)
+                .transient_operator(
+                    &model,
+                    ExcitationSamplePoint::Static,
+                    time_step_s,
+                    &temperature,
+                    &vec![0.0; temperature.len()],
+                )
                 .unwrap();
             let solve = solve_operator_system(
                 &operator,

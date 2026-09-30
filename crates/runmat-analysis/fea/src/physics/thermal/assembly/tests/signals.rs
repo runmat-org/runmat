@@ -126,8 +126,8 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
         .iter()
         .flatten()
         .all(|value| *value == 320.0));
-    let start_flux_power = at_start.source.iter().sum::<f64>();
-    let end_flux_power = at_end.source.iter().sum::<f64>();
+    let start_flux_power = at_start.applied_source.iter().sum::<f64>();
+    let end_flux_power = at_end.applied_source.iter().sum::<f64>();
     assert!((end_flux_power - 2.0 * start_flux_power).abs() <= 1.0e-12);
 
     model.boundaries = vec![AnalysisBoundary {
@@ -158,8 +158,17 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
         ExcitationSamplePoint::time(1.0),
     )
     .unwrap();
-    let cold_ambient_power = cold.source.iter().sum::<f64>();
-    let hot_ambient_power = hot.source.iter().sum::<f64>();
+    let reference = vec![0.0; cold.projection.nodes.len()];
+    let cold_ambient_power = cold
+        .relative_source(&model, ExcitationSamplePoint::time(0.0), &reference)
+        .unwrap()
+        .iter()
+        .sum::<f64>();
+    let hot_ambient_power = hot
+        .relative_source(&model, ExcitationSamplePoint::time(1.0), &reference)
+        .unwrap()
+        .iter()
+        .sum::<f64>();
     assert!((hot_ambient_power / cold_ambient_power - 340.0 / 280.0).abs() <= 1.0e-12);
     assert_eq!(cold.conductivity, hot.conductivity);
 }
@@ -221,7 +230,7 @@ fn energy_recovery_uses_the_same_robin_signal_side_as_assembly() {
         .unwrap();
         let equilibrium = vec![ambient; projection.nodes.len()];
         let energy = assembly
-            .energy_balance(&model, sample, &equilibrium, &equilibrium, 1.0)
+            .energy_balance(&model, sample, &equilibrium, &equilibrium, 1.0, 0.0)
             .unwrap();
         assert_eq!(energy.boundary_loss_w, 0.0, "{approach:?}");
         assert_eq!(energy.applied_power_w, 0.0);

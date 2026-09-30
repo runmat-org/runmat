@@ -49,11 +49,12 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
         }
         let expected_power = 240.0 * selected.area_m2;
         assert!(
-            (flux.source.iter().sum::<f64>() - expected_power).abs() <= expected_power * 1.0e-12
+            (flux.applied_source.iter().sum::<f64>() - expected_power).abs()
+                <= expected_power * 1.0e-12
         );
         for &node in &other.node_indices {
             if !selected.node_indices.contains(&node) {
-                assert_eq!(flux.source[node], 0.0);
+                assert_eq!(flux.applied_source[node], 0.0);
             }
         }
         model.boundaries[0].operator = BoundaryOperator::ThermalConvection {
@@ -61,9 +62,13 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
             coefficient: HeatTransferCoefficient::new(18.0),
         };
         let convection = assemble_model(&model);
+        let reference = vec![0.0; projection.nodes.len()];
+        let convection_source = convection
+            .relative_source(&model, ExcitationSamplePoint::Static, &reference)
+            .unwrap();
         let expected_power = 18.0 * 305.0 * selected.area_m2;
         assert!(
-            (convection.source.iter().sum::<f64>() - expected_power).abs()
+            (convection_source.iter().sum::<f64>() - expected_power).abs()
                 <= expected_power * 1.0e-12
         );
 
@@ -79,7 +84,12 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
         };
         *target = direct;
         let direct = assemble_model(&model);
-        assert_eq!(direct.source, convection.source);
+        assert_eq!(
+            direct
+                .relative_source(&model, ExcitationSamplePoint::Static, &reference)
+                .unwrap(),
+            convection_source
+        );
         assert_eq!(
             direct.prescribed_temperature_k,
             convection.prescribed_temperature_k

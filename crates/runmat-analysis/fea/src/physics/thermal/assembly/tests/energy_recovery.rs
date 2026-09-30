@@ -25,6 +25,7 @@ fn transient_reaction_power_and_scale_share_the_same_nodal_transfers() {
                     &previous,
                     &temperature,
                     1.0,
+                    0.0,
                 )
                 .unwrap();
             assert!(
@@ -66,6 +67,7 @@ fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() 
                 &uniform,
                 &uniform,
                 0.25,
+                0.0,
             )
             .unwrap();
         assert_eq!(energy.residual_w, 0.0);
@@ -89,6 +91,7 @@ fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() 
                 &nonuniform,
                 &nonuniform,
                 0.25,
+                0.0,
             )
             .unwrap();
         assert_eq!(energy.boundary_loss_w, 0.0);
@@ -122,6 +125,7 @@ fn conductive_prescribed_reactions_have_analytical_sign_and_cancel_internal_pair
                 &temperature,
                 &temperature,
                 1.0,
+                0.0,
             )
             .unwrap();
         // This imposed linear field does not satisfy the other faces' zero-natural-flux
@@ -152,6 +156,7 @@ fn conductive_prescribed_reactions_have_analytical_sign_and_cancel_internal_pair
                 &temperature,
                 &temperature,
                 1.0,
+                0.0,
             )
             .unwrap();
         all_prescribed.validate().unwrap();
@@ -195,6 +200,7 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
                     &equilibrium,
                     &equilibrium,
                     0.25,
+                    0.0,
                 )
                 .unwrap();
             assert_eq!(energy.applied_power_w, 0.0);
@@ -209,6 +215,7 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
                         &temperature,
                         &temperature,
                         0.25,
+                        0.0,
                     )
                     .unwrap();
                 let expected = 18.0 * difference * face.area_m2;
@@ -225,6 +232,7 @@ fn robin_net_transfer_is_physical_and_never_hides_unrecovered_tiny_heating() {
                         &equilibrium,
                         &equilibrium,
                         0.25,
+                        0.0,
                     )
                     .unwrap();
                 assert!(energy.applied_power_w > 0.0);
@@ -280,6 +288,7 @@ fn small_boundary_flux_is_not_lost_in_robin_forcing_regardless_of_operator_order
                 &temperature,
                 &temperature,
                 1.0,
+                0.0,
             )
             .unwrap();
         let expected = 1.0e-30 * face.area_m2;
@@ -328,6 +337,7 @@ fn opposing_prescribed_heat_flows_keep_their_physical_scale_after_cancellation()
                 &temperature,
                 &temperature,
                 1.0,
+                0.0,
             )
             .unwrap();
         balance.validate().unwrap();
@@ -352,6 +362,7 @@ fn opposing_prescribed_heat_flows_keep_their_physical_scale_after_cancellation()
                 &temperature,
                 &temperature,
                 1.0,
+                0.0,
             )
             .unwrap();
         assert!(
@@ -425,6 +436,7 @@ fn steady_increment_formulation_preserves_exact_equilibrium_without_erasing_smal
                     &temperature,
                     &temperature,
                     1.0,
+                    0.0,
                 )
                 .unwrap();
             assert_eq!(energy.relative_residual, 0.0);

@@ -33,19 +33,22 @@ impl ThermalWorkspaceResourceFacts {
     ) -> Result<Self, ResourcePlanningError> {
         // Jacobi-PCG: diagonal + x/r/z/p + ap + replacement z = 7N doubles.
         // Derived/prepared RHS = 2N; driver initial/previous/prior solution = 3N.
-        // Reserve another 2N for steady nodal references and the shifted initial guess.
+        // Reserve another 2N for steady nodal references/shifted initial guess, or the
+        // transient constant nodal reference and retained departure coordinates.
+        // Absolute snapshots are retained history, not extra solver scratch; reconstruction
+        // writes directly into that destination after energy/flux/storage recovery.
         // Two system masks plus a possible accelerator prepared-mask clone = 3N bools.
         // Accelerator host iteration uses fewer vectors; device/provider storage is excluded.
         let solver_vector_bytes = add(
             scale(nodes, 14 * 8)?,
             scale(nodes, 3 * std::mem::size_of::<bool>() as u64)?,
         )?;
-        // Initial assembly remains live during step assembly: each has algebraic and applied
-        // source vectors, Robin weight,
+        // Initial assembly remains live during step assembly: each has applied source,
+        // Robin weight,
         // prescribed Option<f64>, conductivity and volumetric capacity. Construction also
         // retains specific-heat and density arrays for the new assembly (two extra E doubles).
         let assembly_vector_bytes = add(
-            scale(nodes, 6 * 8 + 2 * std::mem::size_of::<Option<f64>>() as u64)?,
+            scale(nodes, 4 * 8 + 2 * std::mem::size_of::<Option<f64>>() as u64)?,
             scale(elements, 6 * 8)?,
         )?;
         // Recovery can hold vector-valued gradients/flux and a flattened destination together.
@@ -118,7 +121,7 @@ mod tests {
         assert_eq!(facts.solver_vector_bytes.0, 10 * (14 * 8 + 3));
         assert_eq!(
             facts.assembly_vector_bytes.0,
-            10 * (48 + 2 * std::mem::size_of::<Option<f64>>() as u64) + 2 * 48
+            10 * (32 + 2 * std::mem::size_of::<Option<f64>>() as u64) + 2 * 48
         );
         assert_eq!(facts.recovery_scratch_bytes.0, 96 + 10 * 8);
         assert_eq!(

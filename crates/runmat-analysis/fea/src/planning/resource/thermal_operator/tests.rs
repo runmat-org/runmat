@@ -89,8 +89,7 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
             rejected.to_string().contains("OutsidePlannedPattern"),
             "{rejected}"
         );
-        let live_assembly_arrays = std::mem::size_of_val(assembly.source.as_slice())
-            + std::mem::size_of_val(assembly.applied_source.as_slice())
+        let live_assembly_arrays = std::mem::size_of_val(assembly.applied_source.as_slice())
             + std::mem::size_of_val(assembly.positive_robin_weight.as_slice())
             + std::mem::size_of_val(assembly.prescribed_temperature_k.as_slice())
             + std::mem::size_of_val(assembly.element_conductivity_w_per_mk.as_slice())
@@ -116,7 +115,13 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
                 )
                 .unwrap(),
             assembly
-                .transient_operator(0.25, &vec![293.15; projection.nodes.len()])
+                .transient_operator(
+                    &workload.model,
+                    sample,
+                    0.25,
+                    &vec![293.15; projection.nodes.len()],
+                    &vec![0.0; projection.nodes.len()],
+                )
                 .unwrap(),
         ] {
             let prepared = operator.prepare_linear().unwrap();

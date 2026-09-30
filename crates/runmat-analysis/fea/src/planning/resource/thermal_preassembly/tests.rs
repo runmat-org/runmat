@@ -117,13 +117,13 @@ fn backend_evidence_bound_tracks_solves_and_rejects_overflow() {
         (crate::ThermalProcedureControl::Steady, 1),
         (
             crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
-            2,
+            4,
         ),
         (
             crate::ThermalProcedureControl::BackwardEuler {
                 snapshot_count: 257,
             },
-            256,
+            512,
         ),
     ] {
         workload.procedure = procedure;
