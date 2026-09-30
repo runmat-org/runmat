@@ -11,6 +11,11 @@ use runmat_accelerate_api::{
 use runmat_runtime::call_builtin;
 use runmat_value::{CellArray, Tensor, Value};
 
+#[path = "deep_learning_mixed_wgpu/routes.rs"]
+mod routes;
+#[path = "deep_learning_mixed_wgpu/fixture.rs"]
+mod fixture;
+
 #[test]
 #[ignore = "requires an actual WGPU device; run explicitly for both native precisions"]
 fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracle() {
