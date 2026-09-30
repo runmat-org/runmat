@@ -37,6 +37,7 @@ use crate::{
     },
 };
 
+mod assembly;
 mod constraint_admission;
 mod finalization;
 mod modal_motion;
@@ -47,6 +48,7 @@ mod preassembly_tests;
 mod reconstruction;
 mod recovery;
 
+use assembly::TransientAssemblySampler;
 use finalization::{finish_transient_run, TransientRunFinalization};
 pub(crate) use preassembly::{prepare_transient_preassembly, PreparedTransientPreassembly};
 
@@ -304,31 +306,13 @@ pub fn run_transient_block(
                 displacement: initial_state.displacement,
                 velocity: initial_state.velocity,
             });
-    let mut assemble_at = |time_s, approach| {
-        let excitations = realize_step_excitations(
-            &basis.active_model,
-            &basis.execution_step,
-            ExcitationSamplePoint::TimeSeconds {
-                value: time_s,
-                approach,
-            },
-        )
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-        let assembly = assemble_structural_system_borrowed(
-            &basis.active_model,
-            &excitations,
-            Some(input.solver_mesh),
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        if assembly.dof_count != basis.initial_assembly.dof_count {
-            return Err(FeaRunError::Assembly(format!(
-                "transient reassembly changed structural DOF count from {} to {}",
-                basis.initial_assembly.dof_count, assembly.dof_count
-            )));
-        }
-        Ok(assembly)
-    };
+    let assembly_sampler = TransientAssemblySampler::new(
+        &basis.active_model,
+        &basis.execution_step,
+        Some(input.solver_mesh),
+        &basis.initial_assembly,
+    )?;
+    let mut assemble_at = |time_s, approach| assembly_sampler.sample(time_s, approach);
     let block_input = StructuralTransientBlockSolveInput {
         request: input.request,
         predecessor: input.predecessor,
@@ -493,31 +477,13 @@ pub fn run_transient_with_options(
         Some(2),
         Some(5),
     );
-    let assemble_at = |time_s, approach| {
-        let excitations = realize_step_excitations(
-            &active_model,
-            execution_step,
-            ExcitationSamplePoint::TimeSeconds {
-                value: time_s,
-                approach,
-            },
-        )
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-        let assembly = assemble_structural_system_borrowed(
-            &active_model,
-            &excitations,
-            options.solver_mesh.as_ref(),
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        if assembly.dof_count != summary.dof_count {
-            return Err(FeaRunError::Assembly(format!(
-                "transient reassembly changed structural DOF count from {} to {}",
-                summary.dof_count, assembly.dof_count
-            )));
-        }
-        Ok::<AssemblySummary, FeaRunError>(assembly)
-    };
+    let assembly_sampler = TransientAssemblySampler::new(
+        &active_model,
+        execution_step,
+        options.solver_mesh.as_ref(),
+        &summary,
+    )?;
+    let assemble_at = |time_s, approach| assembly_sampler.sample(time_s, approach);
     let transient = if structural_motions.is_empty() {
         solve_transient_system_with_assembly(
             &summary,

@@ -22,6 +22,8 @@ pub mod solver_solid;
 mod solver_solid_boundary;
 mod structural_inputs;
 mod structural_loads;
+mod transient_basis;
+pub(crate) use transient_basis::PreparedStructuralTransientBasis;
 pub(crate) mod thermoelastic_load;
 
 use std::{collections::BTreeMap, fmt};
@@ -918,71 +920,20 @@ pub(super) fn assemble_linear_system_impl(
                     "canonical solid assembly has no compiled constraint plan".into(),
                 ))
             })?;
-            let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(mesh)
-                .map_err(|error| {
-                    LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(
-                        error.to_string(),
-                    ))
-                })?;
-            let source_projection = compile_solid_load_plan(
+            let forcing = transient_basis::forcing::lower(
                 excitations,
                 mesh,
                 constraint_plan,
-                &topology,
                 &structural_dof_layout,
-            )
-            .map_err(|error| {
-                LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(
-                    error.to_string(),
-                ))
-            })?;
-            apply_structural_load_plan(
-                &source_projection.plan,
-                &topology,
-                &constraint_plan.reference_points,
-                &structural_dof_layout,
-                &mut rhs,
-            )
-            .map_err(|error| {
-                LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(
-                    error.to_string(),
-                ))
-            })?;
-            structural_moment_projection = source_projection.moment_projection;
-            spatial_projection_evidence = source_projection
-                .plan
-                .entries
-                .iter()
-                .flat_map(|entry| entry.evidence.iter().cloned())
-                .collect();
-            structural_load_plan_identity = Some(source_projection.plan.plan_digest);
-            physical_load = rhs.clone();
-            constrained.fill(false);
-            if constraint_plan.enforcement
-                != crate::constraints::ConstraintEnforcement::DirectElimination
-            {
-                let matrix =
-                    resolve_solid_constraint_matrix(constraint_plan, mesh, &structural_dof_layout)
-                        .map_err(LinearAssemblyError::ConstraintAlgebra)?;
-                if constraint_plan.enforcement
-                    != crate::constraints::ConstraintEnforcement::LagrangeMultiplier
-                {
-                    affine_constraint_reduction = Some(
-                        matrix
-                            .affine_reduction()
-                            .map_err(LinearAssemblyError::ConstraintAlgebra)?,
-                    );
-                }
-                constraint_matrix = Some(matrix);
-            } else {
-                let mut direct_constraints =
-                    DirectConstraintAssignments::new(&structural_dof_layout);
-                lower_solid_direct_constraints(constraint_plan, mesh, &mut direct_constraints)
-                    .map_err(LinearAssemblyError::Structural)?;
-                constrained = direct_constraints
-                    .apply(&mut rhs)
-                    .map_err(LinearAssemblyError::Structural)?;
-            }
+            )?;
+            rhs = forcing.rhs;
+            physical_load = forcing.physical_load;
+            constrained = forcing.constrained;
+            constraint_matrix = forcing.constraint_matrix;
+            affine_constraint_reduction = forcing.affine_constraint_reduction;
+            structural_moment_projection = forcing.moment_projection;
+            spatial_projection_evidence = forcing.projection_evidence;
+            structural_load_plan_identity = forcing.plan_identity;
         }
     }
 
@@ -1190,6 +1141,8 @@ pub(super) fn assemble_linear_system_impl(
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())
         .map(|(mesh, properties)| {
+            #[cfg(test)]
+            transient_basis::tests::record_operator_assembly();
             assemble_solver_solid_operators_with_execution(mesh, properties, local_execution)
         })
         .transpose()

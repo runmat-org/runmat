@@ -1,0 +1,93 @@
+//! Shared authoritative solid load and essential-constraint lowering.
+
+use super::super::*;
+
+pub(in crate::assembly) struct SolidForcing {
+    pub rhs: Vec<f64>,
+    pub physical_load: Vec<f64>,
+    pub constrained: Vec<bool>,
+    pub constraint_matrix: Option<ResolvedConstraintMatrix>,
+    pub affine_constraint_reduction: Option<AffineConstraintReduction>,
+    pub moment_projection: Vec<MomentProjectionSummary>,
+    pub projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
+    pub plan_identity: Option<runmat_execution::Digest>,
+}
+
+pub(in crate::assembly) fn lower(
+    excitations: &RealizedExcitations,
+    mesh: &SolverMeshArtifact,
+    constraint_plan: &CanonicalStructuralConstraintPlan,
+    structural_dof_layout: &StructuralDofLayout,
+) -> Result<SolidForcing, LinearAssemblyError> {
+    let mut rhs = vec![0.0; structural_dof_layout.total_dof_count()];
+    let mut constrained = vec![false; rhs.len()];
+    let mut constraint_matrix = None;
+    let mut affine_constraint_reduction = None;
+    let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(mesh)
+                .map_err(|error| {
+                    LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(
+                        error.to_string(),
+                    ))
+                })?;
+    let source_projection = compile_solid_load_plan(
+        excitations,
+        mesh,
+        constraint_plan,
+        &topology,
+        structural_dof_layout,
+    )
+    .map_err(|error| {
+        LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error.to_string()))
+    })?;
+    apply_structural_load_plan(
+        &source_projection.plan,
+        &topology,
+        &constraint_plan.reference_points,
+        structural_dof_layout,
+        &mut rhs,
+    )
+    .map_err(|error| {
+        LinearAssemblyError::Structural(StructuralAssemblyError::InvalidLoadPlan(error.to_string()))
+    })?;
+    let structural_moment_projection = source_projection.moment_projection;
+    let spatial_projection_evidence = source_projection
+        .plan
+        .entries
+        .iter()
+        .flat_map(|entry| entry.evidence.iter().cloned())
+        .collect();
+    let structural_load_plan_identity = Some(source_projection.plan.plan_digest);
+    let physical_load = rhs.clone();
+    constrained.fill(false);
+    if constraint_plan.enforcement != crate::constraints::ConstraintEnforcement::DirectElimination {
+        let matrix = resolve_solid_constraint_matrix(constraint_plan, mesh, structural_dof_layout)
+            .map_err(LinearAssemblyError::ConstraintAlgebra)?;
+        if constraint_plan.enforcement
+            != crate::constraints::ConstraintEnforcement::LagrangeMultiplier
+        {
+            affine_constraint_reduction = Some(
+                matrix
+                    .affine_reduction()
+                    .map_err(LinearAssemblyError::ConstraintAlgebra)?,
+            );
+        }
+        constraint_matrix = Some(matrix);
+    } else {
+        let mut direct_constraints = DirectConstraintAssignments::new(structural_dof_layout);
+        lower_solid_direct_constraints(constraint_plan, mesh, &mut direct_constraints)
+            .map_err(LinearAssemblyError::Structural)?;
+        constrained = direct_constraints
+            .apply(&mut rhs)
+            .map_err(LinearAssemblyError::Structural)?;
+    }
+    Ok(SolidForcing {
+        rhs,
+        physical_load,
+        constrained,
+        constraint_matrix,
+        affine_constraint_reduction,
+        moment_projection: structural_moment_projection,
+        projection_evidence: spatial_projection_evidence,
+        plan_identity: structural_load_plan_identity,
+    })
+}
