@@ -1,5 +1,5 @@
 use super::super::*;
-use super::dlarray_object_node_id;
+use super::{dlarray_object_node_id, push_source_node};
 
 mod network;
 use network::annotate_network_object;
@@ -87,7 +87,11 @@ fn annotate_dlarray_object_with_tensor(
     if dlarray_object_node_id(object).is_some() {
         return Ok(());
     }
-    let node = push_node(tensor, NodeKind::Leaf)?;
+    let data = object
+        .properties
+        .get("Data")
+        .ok_or_else(|| deep_learning_error("dlarray", "dlarray: traced object is missing Data"))?;
+    let node = push_source_node(tensor, data)?;
     let tape_id = active_tape()
         .expect("node insertion requires active tape")
         .borrow()

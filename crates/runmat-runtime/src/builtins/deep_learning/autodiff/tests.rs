@@ -1,6 +1,6 @@
 use super::tape::{Tape, TapeActivation, TapeFuture};
 use super::*;
-use runmat_value::{IntValue, IntegerStorage, StructArray};
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, StructArray};
 use std::collections::HashMap;
 
 #[test]
@@ -77,6 +77,116 @@ fn traced_node_ids_are_exact_and_belong_only_to_the_active_tape() {
         object.properties.insert(AD_NODE_PROPERTY.into(), id);
         assert_eq!(dlarray_node_id(&forged), None);
     }
+}
+
+#[test]
+fn tape_identity_requires_original_dense_storage_class_and_shape() {
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    let _activation = TapeActivation::enter(tape.clone());
+    let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap();
+    let traced = annotate_dlarray_value(wrapped(Value::Tensor(tensor.clone()))).unwrap();
+    assert_eq!(dlarray_node_id(&traced), Some(0));
+
+    let mut reshaped = traced.clone();
+    let Value::Object(object) = &mut reshaped else {
+        unreachable!()
+    };
+    object.properties.insert(
+        "Data".into(),
+        Value::Tensor(tensor.clone().reshape(vec![1, 2]).unwrap()),
+    );
+    assert_eq!(dlarray_node_id(&reshaped), None);
+
+    let mut replaced = traced.clone();
+    let Value::Object(object) = &mut replaced else {
+        unreachable!()
+    };
+    object.properties.insert(
+        "Data".into(),
+        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+    );
+    assert_eq!(dlarray_node_id(&replaced), None);
+
+    let mut changed = traced.clone();
+    let Value::Object(object) = &mut changed else {
+        unreachable!()
+    };
+    let Some(Value::Tensor(current)) = object.properties.get_mut("Data") else {
+        unreachable!()
+    };
+    current
+        .set_numeric_assignment_at(0, NumericScalar::F32(9.0))
+        .unwrap();
+    assert_eq!(dlarray_node_id(&changed), None);
+    assert_eq!(dlarray_node_id(&traced), Some(0));
+    assert_eq!(tape.borrow().nodes.len(), 1);
+}
+
+#[test]
+fn scalar_and_logical_tape_sources_preserve_exact_provenance_without_payload_scans() {
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    let _activation = TapeActivation::enter(tape.clone());
+    let negative_zero = annotate_dlarray_value(wrapped(Value::Num(-0.0))).unwrap();
+    assert_eq!(dlarray_node_id(&negative_zero), Some(0));
+    let mut positive_zero = negative_zero.clone();
+    let Value::Object(object) = &mut positive_zero else {
+        unreachable!()
+    };
+    object.properties.insert("Data".into(), Value::Num(0.0));
+    assert_eq!(dlarray_node_id(&positive_zero), None);
+
+    let nan = f64::from_bits(0x7ff8_0000_0000_0042);
+    let traced_nan = annotate_dlarray_value(wrapped(Value::Num(nan))).unwrap();
+    assert_eq!(dlarray_node_id(&traced_nan), Some(1));
+    let mut other_nan = traced_nan.clone();
+    let Value::Object(object) = &mut other_nan else {
+        unreachable!()
+    };
+    object.properties.insert(
+        "Data".into(),
+        Value::Num(f64::from_bits(0x7ff8_0000_0000_0043)),
+    );
+    assert_eq!(dlarray_node_id(&other_nan), None);
+
+    let logical = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
+    let traced_logical =
+        annotate_dlarray_value(wrapped(Value::LogicalArray(logical.clone()))).unwrap();
+    assert_eq!(dlarray_node_id(&traced_logical), Some(2));
+    let mut changed_logical = traced_logical.clone();
+    let Value::Object(object) = &mut changed_logical else {
+        unreachable!()
+    };
+    object.properties.insert(
+        "Data".into(),
+        Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap()),
+    );
+    assert_eq!(dlarray_node_id(&changed_logical), None);
+    let Value::Object(object) = &traced_logical else {
+        unreachable!()
+    };
+    let Some(Value::LogicalArray(source)) = object.properties.get("Data") else {
+        unreachable!()
+    };
+    assert!(source.data.shares_allocation_with(&logical.data));
+    assert_eq!(tape.borrow().nodes.len(), 3);
+}
+
+#[test]
+fn arithmetic_detaches_an_edited_data_tag_until_explicit_reannotation() {
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    let _activation = TapeActivation::enter(tape.clone());
+    let mut stale = annotate_dlarray_value(dlarray(2.0)).unwrap();
+    let Value::Object(object) = &mut stale else {
+        unreachable!()
+    };
+    object.properties.insert("Data".into(), Value::Num(3.0));
+    assert_eq!(dlarray_node_id(&stale), None);
+    let detached = dlarray_plus_builtin(stale.clone(), dlarray(4.0)).unwrap();
+    assert_eq!(dlarray_node_id(&detached), None);
+    assert_eq!(tape.borrow().nodes.len(), 1);
+    let retraced = annotate_dlarray_value(stale).unwrap();
+    assert_eq!(dlarray_node_id(&retraced), Some(1));
+    assert_eq!(tape.borrow().nodes.len(), 2);
 }
 
 fn wrapped(data: Value) -> Value {

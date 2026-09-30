@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::builtins::deep_learning::autodiff::tape::{Tape, TapeActivation};
+use futures::executor::block_on;
 use runmat_builtins::DeepLearningLayerKind;
 use runmat_value::{IntegerStorage, NumericDType};
 
@@ -256,6 +257,124 @@ fn invalid_last_parameter_is_rejected_before_creating_any_leaf() {
         last.properties.get("Offset"),
         Some(&Value::String("invalid".into()))
     );
+}
+
+#[test]
+fn public_learnables_setter_cannot_reuse_a_tag_after_data_replacement() {
+    let network = network(vec![
+        layer(
+            DeepLearningLayerKind::FeatureInput,
+            "input",
+            &[("InputSize", Value::Num(2.0))],
+        ),
+        layer(
+            DeepLearningLayerKind::FullyConnected,
+            "dense",
+            &[
+                ("OutputSize", Value::Num(2.0)),
+                ("Weights", tensor(&[2, 2], true)),
+                ("Bias", tensor(&[2, 1], true)),
+            ],
+        ),
+    ]);
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    let _activation = TapeActivation::enter(tape.clone());
+    let annotated = annotate_tree(Value::Object(network)).unwrap();
+    assert_eq!(tape.borrow().nodes.len(), 2);
+    let table = block_on(model::get_learnables_builtin(annotated.clone())).unwrap();
+    let Value::Object(table_object) = &table else {
+        panic!("Learnables table expected")
+    };
+    let mut variables = crate::builtins::table::table_variables(table_object).unwrap();
+    let Some(Value::Cell(values)) = variables.fields.get_mut("Value") else {
+        panic!("Value column expected")
+    };
+    let Value::Object(weights) = &mut values.data[0] else {
+        panic!("traced Weights dlarray expected")
+    };
+    let old_node = dlarray_object_node_id(weights).expect("original Weights tag");
+    weights.properties.insert(
+        "Data".into(),
+        Value::Tensor(Tensor::from_f32(vec![2.0; 4], vec![2, 2]).unwrap()),
+    );
+    assert!(weights.properties.contains_key(AD_NODE_PROPERTY));
+    assert_eq!(dlarray_object_node_id(weights), None);
+    let replacement =
+        crate::builtins::table::table_replace_variables_like(table_object, variables).unwrap();
+    let Value::Object(mut updated) =
+        block_on(model::set_learnables_builtin(annotated, replacement)).unwrap()
+    else {
+        panic!("updated network expected")
+    };
+    let rows = parameters::view(&updated, "dlfeval").unwrap();
+    assert_eq!(dlarray_node_id(rows[0].value.unwrap()), None);
+    assert_eq!(dlarray_node_id(rows[1].value.unwrap()), Some(1));
+    assert_eq!(
+        tape.borrow().nodes[old_node].value.as_f32_slice().unwrap(),
+        &[1.0; 4]
+    );
+    annotate_network_object(&mut updated).unwrap();
+    assert_eq!(tape.borrow().nodes.len(), 3);
+    let rows = parameters::view(&updated, "dlfeval").unwrap();
+    assert_eq!(dlarray_node_id(rows[0].value.unwrap()), Some(2));
+    assert_eq!(dlarray_node_id(rows[1].value.unwrap()), Some(1));
+}
+
+#[test]
+fn public_state_setter_detaches_edited_cell_state_without_disturbing_hidden_state() {
+    let network = network(vec![
+        layer(
+            DeepLearningLayerKind::SequenceInput,
+            "input",
+            &[("InputSize", Value::Num(2.0))],
+        ),
+        layer(
+            DeepLearningLayerKind::Lstm,
+            "lstm",
+            &[
+                ("NumHiddenUnits", Value::Num(3.0)),
+                ("InputWeights", tensor(&[12, 2], true)),
+                ("RecurrentWeights", tensor(&[12, 3], true)),
+                ("Bias", tensor(&[12, 1], true)),
+                ("HiddenState", tensor(&[3, 1], true)),
+                ("CellState", tensor(&[3, 1], true)),
+            ],
+        ),
+    ]);
+    let tape = Rc::new(RefCell::new(Tape::new()));
+    let _activation = TapeActivation::enter(tape.clone());
+    let annotated = annotate_tree(Value::Object(network)).unwrap();
+    assert_eq!(tape.borrow().nodes.len(), 5);
+    let table = block_on(model::get_state_builtin(annotated.clone())).unwrap();
+    let Value::Object(table_object) = &table else {
+        panic!("State table expected")
+    };
+    let mut variables = crate::builtins::table::table_variables(table_object).unwrap();
+    let Some(Value::Cell(values)) = variables.fields.get_mut("Value") else {
+        panic!("Value column expected")
+    };
+    let Value::Object(cell) = &mut values.data[1] else {
+        panic!("traced CellState dlarray expected")
+    };
+    cell.properties.insert(
+        "Data".into(),
+        Value::Tensor(Tensor::from_f32(vec![2.0; 3], vec![3, 1]).unwrap()),
+    );
+    let replacement =
+        crate::builtins::table::table_replace_variables_like(table_object, variables).unwrap();
+    let Value::Object(mut updated) =
+        block_on(model::set_state_builtin(annotated, replacement)).unwrap()
+    else {
+        panic!("updated network expected")
+    };
+    let rows = state::view(&updated, "dlfeval").unwrap();
+    assert_eq!(dlarray_node_id(rows[0].value), Some(3));
+    assert_eq!(dlarray_node_id(rows[1].value), None);
+    annotate_network_object(&mut updated).unwrap();
+    assert_eq!(tape.borrow().nodes.len(), 6);
+    let rows = state::view(&updated, "dlfeval").unwrap();
+    assert_eq!(dlarray_node_id(rows[0].value), Some(3));
+    assert_eq!(dlarray_node_id(rows[1].value), Some(5));
 }
 
 #[test]

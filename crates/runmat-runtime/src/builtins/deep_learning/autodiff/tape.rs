@@ -1,9 +1,11 @@
 use super::*;
 mod input;
+mod provenance;
 pub(in crate::builtins::deep_learning) use input::annotate_dlarray_value;
 #[cfg(test)]
 pub(super) use input::annotate_tree;
 use input::prepare_tape_inputs;
+use provenance::DataProvenance;
 
 pub(super) const AD_NODE_PROPERTY: &str = "__runmat_ad_node";
 pub(super) const AD_TAPE_PROPERTY: &str = "__runmat_ad_tape";
@@ -85,6 +87,7 @@ impl Tape {
 pub(super) struct Node {
     pub(super) value: Tensor,
     pub(super) kind: NodeKind,
+    provenance: DataProvenance,
 }
 
 pub(super) enum NodeKind {
@@ -177,10 +180,30 @@ pub(super) fn dlarray_object_node_id(object: &ObjectInstance) -> Option<usize> {
             Value::Int(IntValue::U64(id)) => usize::try_from(*id).ok(),
             _ => None,
         })?;
-    (id < tape.nodes.len()).then_some(id)
+    let node = tape.nodes.get(id)?;
+    let data = object.properties.get("Data")?;
+    node.provenance.matches(data, &node.value).then_some(id)
 }
 
 pub(super) fn push_node(value: Tensor, kind: NodeKind) -> BuiltinResult<usize> {
+    push_node_with_provenance(value, kind, DataProvenance::Dense)
+}
+
+pub(super) fn push_source_node(value: Tensor, data: &Value) -> BuiltinResult<usize> {
+    let provenance = DataProvenance::from_data(data).ok_or_else(|| {
+        deep_learning_error(
+            "dlarray",
+            "dlarray: tape source has unsupported Data storage",
+        )
+    })?;
+    push_node_with_provenance(value, NodeKind::Leaf, provenance)
+}
+
+fn push_node_with_provenance(
+    value: Tensor,
+    kind: NodeKind,
+    provenance: DataProvenance,
+) -> BuiltinResult<usize> {
     let tape = active_tape().ok_or_else(|| {
         deep_learning_error(
             "dlgradient",
@@ -189,7 +212,11 @@ pub(super) fn push_node(value: Tensor, kind: NodeKind) -> BuiltinResult<usize> {
     })?;
     let mut tape = tape.borrow_mut();
     let id = tape.nodes.len();
-    tape.nodes.push(Node { value, kind });
+    tape.nodes.push(Node {
+        value,
+        kind,
+        provenance,
+    });
     Ok(id)
 }
 
