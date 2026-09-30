@@ -116,31 +116,25 @@ fn every_identity_rejects_excess_outputs_before_provider_access() {
     let _provider = ThreadProviderGuard::set(Some(provider));
     let source = || provider.source();
     provider.downloads.store(0, Ordering::Relaxed);
-    for name in [
-        "bitcmp",
-        "bitget",
-        "bitset",
-        "bitshift",
-        "swapbytes",
-        "bitand",
-        "bitor",
-        "bitxor",
+    for (name, second_operand) in [
+        ("bitcmp", None),
+        ("bitget", Some(Value::Num(1.0))),
+        ("bitset", Some(Value::Num(1.0))),
+        ("bitshift", Some(Value::Num(1.0))),
+        ("swapbytes", None),
+        ("bitand", Some(Value::Num(1.0))),
+        ("bitor", Some(Value::Num(1.0))),
+        ("bitxor", Some(Value::Num(1.0))),
     ] {
-        let args = if matches!(name, "bitcmp" | "swapbytes") {
-            vec![source()]
-        } else {
-            vec![source(), Value::Num(1.0)]
-        };
+        let mut args = vec![source()];
+        args.extend(second_operand.clone());
         assert!(block_on(crate::dispatcher::call_builtin_async_with_outputs(
             name, &args, 2
         ))
         .is_err());
         assert_eq!(provider.downloads.load(Ordering::Relaxed), 0, "{name}");
-        let args = if matches!(name, "bitcmp" | "swapbytes") {
-            vec![Value::Num(3.0)]
-        } else {
-            vec![Value::Num(3.0), Value::Num(1.0)]
-        };
+        let mut args = vec![Value::Num(3.0)];
+        args.extend(second_operand);
         for count in [0, 1] {
             block_on(crate::dispatcher::call_builtin_async_with_outputs(
                 name, &args, count,
