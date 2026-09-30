@@ -1,5 +1,6 @@
 use super::*;
 use runmat_builtins::TrainingOptionKey as O;
+pub(super) use runmat_builtins::TrainingSolver as Solver;
 use runmat_value::ObjectInstance;
 use std::collections::HashMap;
 
@@ -80,21 +81,6 @@ impl<'a> TrainingOptionsView<'a> {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(super) enum Solver {
-    Sgdm,
-    Adam,
-}
-
-impl Solver {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::Sgdm => "sgdm",
-            Self::Adam => "adam",
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) enum ShuffleMode {
     Never,
@@ -133,45 +119,42 @@ impl TrainingConfig {
         let options = TrainingOptionsView::parse(object, function)?;
         options.admit_unsupported(function)?;
         let solver_name = text_property(&options, O::SolverName, "sgdm", function)?;
-        let solver = match solver_name.to_ascii_lowercase().as_str() {
-            "sgdm" => Solver::Sgdm,
-            "adam" => Solver::Adam,
-            "rmsprop" => {
-                return Err(deep_learning_error(
-                    function,
-                    format!("{function}: RMSProp training is not supported in this slice"),
-                ));
-            }
-            other => {
-                return Err(deep_learning_error(
-                    function,
-                    format!("{function}: unsupported solver '{other}'"),
-                ));
-            }
-        };
-        if solver == Solver::Adam && options.get(O::Momentum).is_some() {
+        let solver = Solver::from_name(&solver_name).ok_or_else(|| {
+            deep_learning_error(
+                function,
+                format!("{function}: unsupported solver '{solver_name}'"),
+            )
+        })?;
+        if solver != Solver::Sgdm && options.get(O::Momentum).is_some() {
             return Err(deep_learning_error(
                 function,
-                format!("{function}: Momentum is not consumed by Adam training"),
+                format!("{function}: Momentum is consumed only by SGDM training"),
+            ));
+        }
+        if solver != Solver::Adam && options.get(O::GradientDecayFactor).is_some() {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: GradientDecayFactor is consumed only by Adam training"),
             ));
         }
         if solver == Solver::Sgdm
-            && [
-                O::GradientDecayFactor,
-                O::SquaredGradientDecayFactor,
-                O::Epsilon,
-            ]
-            .iter()
-            .any(|&key| options.get(key).is_some())
+            && [O::SquaredGradientDecayFactor, O::Epsilon]
+                .iter()
+                .any(|&key| options.get(key).is_some())
         {
             return Err(deep_learning_error(
                 function,
-                format!("{function}: Adam controls are not consumed by SGDM training"),
+                format!("{function}: adaptive solver controls are not consumed by SGDM training"),
             ));
         }
         let max_epochs = positive_option_usize(&options, O::MaxEpochs, 30, function)?;
         let mini_batch_size = positive_option_usize(&options, O::MiniBatchSize, 128, function)?;
-        let learn_rate = positive_option_f64(&options, O::InitialLearnRate, 0.01, function)?;
+        let learn_rate = positive_option_f64(
+            &options,
+            O::InitialLearnRate,
+            solver.default_initial_learn_rate(),
+            function,
+        )?;
         validate_execution_environment(&options, function)?;
         Ok(Self {
             solver,
@@ -188,7 +171,7 @@ impl TrainingConfig {
             squared_gradient_decay_factor: unit_option_f64(
                 &options,
                 O::SquaredGradientDecayFactor,
-                0.999,
+                solver.default_squared_gradient_decay_factor(),
                 function,
             )?,
             epsilon: positive_option_f64(&options, O::Epsilon, 1.0e-8, function)?,

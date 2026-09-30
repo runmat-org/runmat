@@ -74,3 +74,32 @@ fn dynamic_name_cannot_prove_default_properties_and_bad_solver_diagnoses() {
         Some("RunMat:deepLearning:InvalidInput")
     );
 }
+
+#[test]
+fn solver_literal_controls_closed_property_set_but_unknown_solver_keeps_common_facts() {
+    for (name, expected_squared) in [("sgdm", false), ("adam", true), ("rmsprop", true)] {
+        let result = infer(
+            vec![ValueFact::scalar(ValueKindFact::String)],
+            vec![LiteralValue::String(name.into())],
+        );
+        let ValueKindFact::Object(object) = &result.outputs[0].kind else {
+            panic!("expected options object")
+        };
+        assert!(object.properties_complete, "{name}");
+        assert_eq!(
+            object.properties.contains_key("SquaredGradientDecayFactor"),
+            expected_squared,
+            "{name}"
+        );
+    }
+    let unknown = infer(
+        vec![ValueFact::scalar(ValueKindFact::String)],
+        vec![LiteralValue::Unknown],
+    );
+    let ValueKindFact::Object(object) = &unknown.outputs[0].kind else {
+        panic!("expected options object")
+    };
+    assert!(!object.properties_complete);
+    assert!(object.properties.contains_key("InitialLearnRate"));
+    assert!(!object.properties.contains_key("SquaredGradientDecayFactor"));
+}

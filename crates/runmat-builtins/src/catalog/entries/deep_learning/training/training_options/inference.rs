@@ -36,6 +36,13 @@ fn defaults() -> BTreeMap<String, ValueFact> {
         ),
         ("Shuffle".into(), ValueFact::scalar(ValueKindFact::String)),
         ("Verbose".into(), ValueFact::scalar(ValueKindFact::Logical)),
+        (
+            "L2Regularization".into(),
+            ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
+                class: runmat_types::NumericClass::Double,
+                domain: runmat_types::NumericDomain::Real,
+            })),
+        ),
         ("Plots".into(), ValueFact::scalar(ValueKindFact::String)),
         (
             "ExecutionEnvironment".into(),
@@ -74,10 +81,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
         if let Some(name) = request.literals.literal_string_at(0) {
-            if !matches!(
-                name.to_ascii_lowercase().as_str(),
-                "sgdm" | "adam" | "rmsprop"
-            ) {
+            if super::TrainingSolver::from_name(&name).is_none() {
                 diagnostics.push(argument_error(
                     "RM-DL-TRAININGOPTIONS-SOLVER",
                     "unsupported training solver",
@@ -86,8 +90,25 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             }
         }
     }
+    let solver = request
+        .literals
+        .literal_string_at(0)
+        .and_then(|name| super::TrainingSolver::from_name(&name));
     let mut properties = defaults();
-    let mut complete = true;
+    if solver.is_some_and(|solver| solver != super::TrainingSolver::Sgdm) {
+        properties.insert(
+            "SquaredGradientDecayFactor".into(),
+            ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
+                class: runmat_types::NumericClass::Double,
+                domain: runmat_types::NumericDomain::Real,
+            })),
+        );
+    }
+    // A nonliteral positional solver determines whether the constructor adds
+    // SquaredGradientDecayFactor. The common properties remain guaranteed,
+    // but this cannot be described as a closed property set.
+    let mut complete = solver.is_some();
+    let mut dynamic_key = false;
     for index in (1..request.arguments.len()).step_by(2) {
         if !host_scalar_text(&request.arguments[index]) {
             diagnostics.push(argument_error(
@@ -98,13 +119,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
         let Some(name) = request.literals.literal_string_at(index) else {
             complete = false;
+            dynamic_key = true;
             continue;
         };
         if let Some(value) = request.arguments.get(index + 1) {
             properties.insert(super::canonical_training_option_name(&name), value.clone());
         }
     }
-    if !complete {
+    if dynamic_key {
         // A dynamic key may overwrite any default property, so none of those
         // facts can be considered proven until the name is known.
         properties.clear();

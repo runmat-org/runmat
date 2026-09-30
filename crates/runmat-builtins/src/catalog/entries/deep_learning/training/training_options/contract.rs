@@ -3,6 +3,49 @@ use crate::*;
 pub const TRAINING_OPTIONS_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptions");
 
+/// Solver identity and solver-dependent defaults shared by the constructor,
+/// static inference, and the runtime consumer. Text is parsed only at the
+/// public boundary; internal training decisions use this enum.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrainingSolver {
+    Sgdm,
+    Rmsprop,
+    Adam,
+}
+
+impl TrainingSolver {
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "sgdm" => Self::Sgdm,
+            "rmsprop" => Self::Rmsprop,
+            "adam" => Self::Adam,
+            _ => return None,
+        })
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sgdm => "sgdm",
+            Self::Rmsprop => "rmsprop",
+            Self::Adam => "adam",
+        }
+    }
+
+    pub const fn default_initial_learn_rate(self) -> f64 {
+        match self {
+            Self::Sgdm => 0.01,
+            Self::Rmsprop | Self::Adam => 0.001,
+        }
+    }
+
+    pub const fn default_squared_gradient_decay_factor(self) -> f64 {
+        match self {
+            Self::Rmsprop => 0.9,
+            Self::Sgdm | Self::Adam => 0.999,
+        }
+    }
+}
+
 /// Canonical training-configuration property identity. Parsing is confined to
 /// the public name-value/object boundary; consumers match these roles.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

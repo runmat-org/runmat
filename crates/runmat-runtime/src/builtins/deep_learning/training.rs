@@ -32,23 +32,23 @@ pub(super) async fn training_options_builtin(
         "trainingOptions",
         &runmat_builtins::TRAINING_OPTIONS_INVALID_INPUT,
     )?;
-    let solver = scalar_text(&solver, "trainingOptions")?.to_ascii_lowercase();
-    match solver.as_str() {
-        "sgdm" | "adam" | "rmsprop" => {}
-        other => {
-            return Err(deep_learning_error(
-                "trainingOptions",
-                format!("trainingOptions: unsupported solver '{other}'"),
-            ));
-        }
-    }
+    let solver_name = scalar_text(&solver, "trainingOptions")?;
+    let solver = runmat_builtins::TrainingSolver::from_name(&solver_name).ok_or_else(|| {
+        deep_learning_error(
+            "trainingOptions",
+            format!("trainingOptions: unsupported solver '{solver_name}'"),
+        )
+    })?;
     let mut properties = vec![
-        ("SolverName".to_string(), Value::String(solver.clone())),
+        (
+            "SolverName".to_string(),
+            Value::String(solver.as_str().into()),
+        ),
         ("MaxEpochs".to_string(), Value::Num(30.0)),
         ("MiniBatchSize".to_string(), Value::Num(128.0)),
         (
             "InitialLearnRate".to_string(),
-            Value::Num(if solver == "sgdm" { 0.01 } else { 0.001 }),
+            Value::Num(solver.default_initial_learn_rate()),
         ),
         ("Shuffle".to_string(), Value::String("once".into())),
         ("Verbose".to_string(), Value::Bool(true)),
@@ -59,6 +59,12 @@ pub(super) async fn training_options_builtin(
             Value::String("auto".into()),
         ),
     ];
+    if solver != runmat_builtins::TrainingSolver::Sgdm {
+        properties.push((
+            "SquaredGradientDecayFactor".to_string(),
+            Value::Num(solver.default_squared_gradient_decay_factor()),
+        ));
+    }
     // An options object stores its values; construction has no reason to
     // download resident values just to copy them into metadata.
     for (key, value) in parse_name_values(rest, "trainingOptions")? {

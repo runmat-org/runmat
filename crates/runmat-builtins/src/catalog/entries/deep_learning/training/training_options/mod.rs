@@ -10,7 +10,7 @@ mod inference;
 mod tests;
 
 pub use contract::{
-    canonical_training_option_name, TrainingOptionKey, TRAINING_OPTIONS_CLASS,
+    canonical_training_option_name, TrainingOptionKey, TrainingSolver, TRAINING_OPTIONS_CLASS,
     TRAINING_OPTIONS_DESCRIPTOR, TRAINING_OPTIONS_INVALID_INPUT,
 };
 

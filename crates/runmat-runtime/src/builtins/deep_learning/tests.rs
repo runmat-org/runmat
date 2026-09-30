@@ -2768,6 +2768,48 @@ fn supervised_l2_regularizes_weights_but_not_default_bias() {
 }
 
 #[test]
+fn train_network_rmsprop_executes_native_optimizer_step() {
+    let options = block_on(training_options_builtin(
+        Value::String("rmsprop".into()),
+        vec![
+            Value::String("MaxEpochs".into()),
+            Value::Num(1.0),
+            Value::String("MiniBatchSize".into()),
+            Value::Num(2.0),
+            Value::String("InitialLearnRate".into()),
+            Value::Num(0.01),
+            Value::String("Verbose".into()),
+            Value::Bool(false),
+        ],
+    ))
+    .unwrap();
+    let trained = block_on(train_network_builtin(vec![
+        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+        regression_training_layers(),
+        options,
+    ]))
+    .unwrap();
+    let Value::Object(network) = trained else {
+        panic!("expected trained network")
+    };
+    assert_eq!(
+        network.properties.get("TrainedWith"),
+        Some(&Value::String("rmsprop".into()))
+    );
+    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+        panic!("expected canonical Layers")
+    };
+    let Value::Object(dense) = &layers.data[1] else {
+        panic!("expected fully connected layer")
+    };
+    let Some(Value::Tensor(weights)) = dense.properties.get("Weights") else {
+        panic!("expected trained Weights")
+    };
+    assert!(weights.as_f64_slice().unwrap()[0] > 0.0);
+}
+
+#[test]
 fn combvec_matches_neural_network_column_order() {
     let out = block_on(combvec_builtin(vec![
         Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap()),

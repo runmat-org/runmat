@@ -148,8 +148,12 @@ impl NativeOptimizer {
                         .slots
                         .entry(key.clone())
                         .or_insert_with(|| Slot::Single {
-                            first: vec![0.; current.len()],
-                            second: if matches!(config.solver, Solver::Adam) {
+                            first: if matches!(config.solver, Solver::Rmsprop) {
+                                Vec::new()
+                            } else {
+                                vec![0.; current.len()]
+                            },
+                            second: if matches!(config.solver, Solver::Adam | Solver::Rmsprop) {
                                 vec![0.; current.len()]
                             } else {
                                 Vec::new()
@@ -177,8 +181,12 @@ impl NativeOptimizer {
                         .slots
                         .entry(key.clone())
                         .or_insert_with(|| Slot::Double {
-                            first: vec![0.; current.len()],
-                            second: if matches!(config.solver, Solver::Adam) {
+                            first: if matches!(config.solver, Solver::Rmsprop) {
+                                Vec::new()
+                            } else {
+                                vec![0.; current.len()]
+                            },
+                            second: if matches!(config.solver, Solver::Adam | Solver::Rmsprop) {
                                 vec![0.; current.len()]
                             } else {
                                 Vec::new()
@@ -221,8 +229,9 @@ fn step_values<T: crate::builtins::deep_learning::model::execution::host::numeri
     function: &'static str,
 ) -> BuiltinResult<Vec<T>> {
     if current.len() != gradient.len()
-        || current.len() != first.len()
-        || (matches!(config.solver, Solver::Adam) && current.len() != second.len())
+        || (!matches!(config.solver, Solver::Rmsprop) && current.len() != first.len())
+        || (matches!(config.solver, Solver::Adam | Solver::Rmsprop)
+            && current.len() != second.len())
     {
         return Err(fail(function, "optimizer slot geometry changed"));
     }
@@ -276,10 +285,15 @@ fn step_values<T: crate::builtins::deep_learning::model::execution::host::numeri
                 let variance = second[index] / correction2;
                 value - rate * mean / (variance.sqrt() + epsilon)
             }
+            Solver::Rmsprop => {
+                second[index] = beta2 * second[index] + (T::one() - beta2) * grad * grad;
+                value - rate * grad / (second[index].sqrt() + epsilon)
+            }
         };
         if !updated.is_finite()
-            || !first[index].is_finite()
-            || (matches!(config.solver, Solver::Adam) && !second[index].is_finite())
+            || (!matches!(config.solver, Solver::Rmsprop) && !first[index].is_finite())
+            || (matches!(config.solver, Solver::Adam | Solver::Rmsprop)
+                && !second[index].is_finite())
         {
             return Err(fail(function, "optimizer step exceeds native precision"));
         }
@@ -327,6 +341,29 @@ mod tests {
         .unwrap();
         assert_eq!(updated, vec![1.9]);
         assert_eq!(first, [-0.1]);
+    }
+
+    #[test]
+    fn rmsprop_updates_from_native_squared_gradient_without_bias_correction() {
+        let mut config = config(Solver::Rmsprop);
+        config.squared_gradient_decay_factor = 0.0;
+        config.epsilon = 1.0;
+        let mut first = [];
+        let mut second = [0.0_f32];
+        let updated = step_values(
+            &[2.0_f32],
+            &[3.0_f32],
+            &mut first,
+            &mut second,
+            &config,
+            1.0,
+            0.0,
+            1,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(second, [9.0]);
+        assert!((updated[0] - 1.925).abs() < 1.0e-6);
     }
 
     #[test]
