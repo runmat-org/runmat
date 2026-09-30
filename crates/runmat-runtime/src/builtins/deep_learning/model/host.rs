@@ -7,6 +7,15 @@ pub(crate) fn predict_deep_learning_object(
     rest: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
     let options = parse_predict_options(rest)?;
+    validate_sequential_connections(&object, "predict")?;
+    let layers = object
+        .properties
+        .get("Layers")
+        .map(|value| layer_slice(value, "predict"))
+        .transpose()?
+        .unwrap_or(&[]);
+    validate_forward_layers(layers, "predict")?;
+    super::topology::require_feature_input(layers, "predict")?;
     let tensor = input_tensor(xnew, "predict")?;
     let input = match options.observations_in {
         ObservationsIn::Rows => tensor,
@@ -62,6 +71,7 @@ pub(super) fn evaluate_network(
         .transpose()?
         .unwrap_or(&[]);
     validate_forward_layers(layers, function)?;
+    super::topology::require_feature_input(layers, function)?;
     let mut current = require_2d(input, function, "input")?;
     let mut saw_input = false;
     for layer in layers {

@@ -16,6 +16,7 @@ pub(in crate::builtins) fn layers_from_network_value(
             if object.class_name.is(super::LAYER_GRAPH_CLASS)
                 || is_deep_learning_network_object(&object) =>
         {
+            validate_sequential_connections(&object, function)?;
             match object.properties.remove("Layers") {
                 Some(layers) => layers_from_network_value(layers, function),
                 None => Ok(Vec::new()),
@@ -43,6 +44,7 @@ pub(in crate::builtins) fn layers_from_network_ref<'a>(
             if object.class_name.is(super::LAYER_GRAPH_CLASS)
                 || is_deep_learning_network_object(object) =>
         {
+            validate_sequential_connections(object, function)?;
             match object.properties.get("Layers") {
                 Some(layers) => layer_slice(layers, function),
                 None => Ok(&[]),
@@ -314,37 +316,4 @@ fn deterministic_weights(
         }
     }
     tensor_value(values, vec![output_size, input_width], function)
-}
-
-pub(in crate::builtins) fn validate_forward_layers(
-    layers: &[Value],
-    function: &'static str,
-) -> BuiltinResult<()> {
-    if layers.is_empty() {
-        return Err(deep_learning_error(
-            function,
-            format!("{function}: network must contain at least one layer"),
-        ));
-    }
-    for layer in layers {
-        let Value::Object(object) = layer else {
-            return Err(deep_learning_error(
-                function,
-                format!("{function}: network layers must be layer objects"),
-            ));
-        };
-        match ForwardLayerKind::from_identity(&object.class_name) {
-            Some(_) => {}
-            None => {
-                return Err(deep_learning_error(
-                    function,
-                    format!(
-                        "{function}: layer type '{}' is not supported for RunMat forward execution",
-                        object.class_name
-                    ),
-                ));
-            }
-        }
-    }
-    Ok(())
 }

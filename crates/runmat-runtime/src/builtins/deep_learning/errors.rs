@@ -1,6 +1,7 @@
 use super::contracts::{ERROR_INVALID_INPUT, ERROR_UNSUPPORTED};
 use super::*;
 
+#[cfg(test)]
 pub(in crate::builtins) fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }

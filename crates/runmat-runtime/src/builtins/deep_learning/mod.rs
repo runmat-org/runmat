@@ -31,7 +31,9 @@ pub(super) use self::contracts::{
     FULLY_CONNECTED_LAYER_CLASS, LAYER_GRAPH_CLASS, MAX_COMBVEC_COLUMNS, MAX_PAD_ELEMENTS,
     REGRESSION_OUTPUT_LAYER_CLASS, RELU_LAYER_CLASS, SOFTMAX_LAYER_CLASS, TRAINING_OPTIONS_CLASS,
 };
-pub(super) use self::errors::{any_type, deep_learning_error, gather_args, unsupported_error};
+#[cfg(test)]
+pub(super) use self::errors::any_type;
+pub(super) use self::errors::{deep_learning_error, gather_args, unsupported_error};
 pub(super) use self::layer_helpers::{
     layer_names, layer_object, layers_from_value, parse_name_values,
 };

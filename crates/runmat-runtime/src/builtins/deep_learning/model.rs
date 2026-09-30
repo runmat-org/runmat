@@ -21,6 +21,7 @@ mod construction;
 mod gpu;
 mod host;
 mod properties;
+mod topology;
 
 use admission::{
     forward_data, gpu_backed_dlarray_handle, network_consumed_integer, preflight_forward_network,
@@ -36,12 +37,15 @@ use properties::normalize_numeric_tensor;
 
 pub(in crate::builtins) use construction::{
     initialise_fully_connected_layers, is_deep_learning_network_object, layers_from_network_ref,
-    layers_from_network_value, learnables_struct, network_object, validate_forward_layers,
+    layers_from_network_value, learnables_struct, network_object,
 };
 pub(in crate::builtins) use host::predict_deep_learning_object;
 pub(in crate::builtins) use properties::{
     feature_input_width, fully_connected_output_width, layer_name, positive_property_usize,
     tensor_property, tensor_property_value,
+};
+pub(in crate::builtins) use topology::{
+    validate_forward_layers, validate_sequential_connections, validate_sequential_topology,
 };
 
 pub(crate) const DLNETWORK_CLASS: runmat_types::StaticClassIdentity =

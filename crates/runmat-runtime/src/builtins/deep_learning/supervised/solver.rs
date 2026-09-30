@@ -76,7 +76,7 @@ pub(super) fn loss_and_gradient(
     }
 }
 
-enum LayerCache {
+pub(super) enum LayerCache {
     FullyConnected {
         layer_index: usize,
         input: Matrix,

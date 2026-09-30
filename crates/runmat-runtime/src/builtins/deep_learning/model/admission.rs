@@ -94,6 +94,7 @@ pub(super) fn preflight_forward_network(
     input: &Value,
     function: &'static str,
 ) -> BuiltinResult<()> {
+    validate_sequential_connections(network, function)?;
     let shape = forward_input_shape(input)?;
     if shape.len() > 2 {
         return Err(deep_learning_error(

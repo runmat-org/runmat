@@ -1927,21 +1927,6 @@ fn supervised_rejects_empty_predictor_observations() {
 }
 
 #[test]
-fn supervised_host_matrix_reads_single_and_logical_storage() {
-    let single = Value::Tensor(
-        Tensor::new_with_dtype(vec![1.5, -2.0], vec![2, 1], NumericDType::F32).unwrap(),
-    );
-    let parsed = numeric_matrix_ref(&single, "trainNetwork", "X").unwrap();
-    assert_eq!((parsed.rows, parsed.cols), (2, 1));
-    assert_eq!(parsed.data, vec![1.5, -2.0]);
-
-    let logical = Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap());
-    let parsed = numeric_matrix_ref(&logical, "trainNetwork", "X").unwrap();
-    assert_eq!((parsed.rows, parsed.cols), (1, 2));
-    assert_eq!(parsed.data, vec![1.0, 0.0]);
-}
-
-#[test]
 fn supervised_training_observes_pre_cancelled_execution() {
     let cancellation = runmat_execution::cancellation::CancellationSource::new();
     cancellation.cancel(runmat_execution::CancellationReason::User);
@@ -1968,14 +1953,14 @@ fn supervised_two_outputs_include_typed_loss_history() {
         vec![Value::String("MaxEpochs".into()), Value::Num(2.0)],
     ))
     .unwrap();
-    let _guard = crate::output_count::push_output_count(Some(2));
-    let result = block_on(train_network_builtin(vec![
+    let args = vec![
         Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
         regression_training_layers(),
         options,
-    ]))
-    .unwrap();
+    ];
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let result = block_on(train_network_builtin(args)).unwrap();
     let Value::OutputList(outputs) = result else {
         panic!("expected two requested outputs")
     };

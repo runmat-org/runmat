@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone)]
 pub(super) struct Matrix {
     pub(super) data: Vec<f64>,
@@ -8,7 +11,11 @@ pub(super) struct Matrix {
 }
 
 impl Matrix {
-    fn from_tensor(tensor: Tensor, function: &'static str, label: &str) -> BuiltinResult<Self> {
+    pub(super) fn from_tensor(
+        tensor: Tensor,
+        function: &'static str,
+        label: &str,
+    ) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
             return Err(deep_learning_error(
                 function,

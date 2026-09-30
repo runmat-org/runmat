@@ -91,12 +91,14 @@ fn preflight_layers(
     layers: &[Value],
     options: &std::collections::BTreeMap<String, Value>,
 ) -> BuiltinResult<()> {
+    model::validate_sequential_connections(network, EXPORT_ONNX)?;
     if layers.is_empty() {
         return Err(deep_learning_error(
             EXPORT_ONNX,
             "exportONNXNetwork: network must contain at least one layer",
         ));
     }
+    model::validate_sequential_topology(layers, EXPORT_ONNX)?;
     let names = super::layer_names(layers, EXPORT_ONNX)?;
     let mut seen = BTreeSet::new();
     for name in names {
