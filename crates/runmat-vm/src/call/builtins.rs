@@ -1148,6 +1148,7 @@ fn imported_builtin_qualified_name(path: &[String], leaf: Option<&str>) -> Optio
 }
 
 pub async fn resolve_imported_builtin(
+    runtime: &runmat_runtime::context::RuntimeContext,
     name: &str,
     imports: &[(Vec<String>, bool)],
     args: &[Value],
@@ -1162,8 +1163,13 @@ pub async fn resolve_imported_builtin(
             let Some(qual) = imported_builtin_qualified_name(path, None) else {
                 continue;
             };
-            let result =
-                crate::call::call_builtin_async_with_outputs(&qual, args, requested_outputs).await;
+            let result = crate::call::call_builtin_async_with_outputs(
+                runtime,
+                &qual,
+                args,
+                requested_outputs,
+            )
+            .await;
             if let Ok(value) = result {
                 specific_matches.push((qual, value));
             }
@@ -1193,7 +1199,8 @@ pub async fn resolve_imported_builtin(
             continue;
         };
         let result =
-            crate::call::call_builtin_async_with_outputs(&qual, args, requested_outputs).await;
+            crate::call::call_builtin_async_with_outputs(runtime, &qual, args, requested_outputs)
+                .await;
         if let Ok(value) = result {
             wildcard_matches.push((qual, value));
         }

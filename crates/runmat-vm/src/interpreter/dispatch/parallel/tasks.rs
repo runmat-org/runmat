@@ -282,7 +282,11 @@ async fn await_sequence(
                 );
                 let result = match &call.invocation {
                     runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
-                        crate::call::execute_callable_descriptor(descriptor.clone()).await
+                        crate::call::execute_callable_descriptor(
+                            &context.runtime,
+                            descriptor.clone(),
+                        )
+                        .await
                     }
                     runmat_runtime::execution::DeferredInvocation::Program { .. } => {
                         crate::execute_deferred_program_in_context(*call, context.runtime.clone())
@@ -420,7 +424,7 @@ pub(super) async fn fetch_outputs(
                 runmat_hir::CallableFallbackPolicy::None,
                 runmat_runtime::call::descriptor::CallableCallKind::Direct,
             );
-            let mut values = crate::call::execute_callable_descriptor(descriptor)
+            let mut values = crate::call::execute_callable_descriptor(&context.runtime, descriptor)
                 .await?
                 .resolve(
                     runmat_types::SequenceUse::RequireSingle,

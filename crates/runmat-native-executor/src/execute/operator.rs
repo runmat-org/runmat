@@ -14,6 +14,7 @@ pub(super) fn evaluate(
     let name = operator
         .overload_name()
         .expect("short-circuit operators do not reach runtime evaluation");
+    let runtime = state.runtime.clone();
     let future = async {
         let unary = match operator {
             OperatorKind::UnaryPlus => {
@@ -31,7 +32,12 @@ pub(super) fn evaluate(
                     "unary arithmetic requires one operand",
                 ));
             };
-            return runmat_runtime::unary_arithmetic::evaluate(operation, argument.clone()).await;
+            return runmat_runtime::unary_arithmetic::evaluate_in_context(
+                Some(&runtime),
+                operation,
+                argument.clone(),
+            )
+            .await;
         }
         if arguments.len() == 2
             && !matches!(arguments[0], Value::Object(_) | Value::HandleObject(_))
@@ -44,7 +50,8 @@ pub(super) fn evaluate(
             )
             .await;
         }
-        runmat_runtime::call_builtin_async(name.display_name(), &arguments).await
+        runmat_runtime::call_builtin_async_in_context(&runtime, name.display_name(), &arguments)
+            .await
     };
     let value =
         super::sync::complete(&state.runtime, future, "operator evaluation").finish(state)?;

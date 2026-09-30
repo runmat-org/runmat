@@ -32,10 +32,7 @@ pub fn selected_builtin_binding(
     expected: Option<BuiltinBindingIdentity>,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Option<crate::builtin::RuntimeBuiltinBinding> {
-    let active = crate::context::legacy::active();
-    let service = context
-        .or(active.as_ref())
-        .and_then(|context| context.service_ports().builtin());
+    let service = context.and_then(|context| context.service_ports().builtin());
     let entry = builtin_catalog_entry_by_name(name)?;
     let [binding] = entry.bindings else {
         return None;
@@ -74,10 +71,7 @@ pub fn selected_fusion_binding(
     expected: Option<BuiltinBindingIdentity>,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Option<SelectedFusionBinding> {
-    let active = crate::context::legacy::active();
-    let service = context
-        .or(active.as_ref())
-        .and_then(|context| context.service_ports().builtin());
+    let service = context.and_then(|context| context.service_ports().builtin());
     if builtin_catalog_entry_by_name(name).is_some() {
         let identity = selected_builtin_binding(name, expected, context)?.identity;
         let declaration = canonical_fusion_declaration(identity)?;

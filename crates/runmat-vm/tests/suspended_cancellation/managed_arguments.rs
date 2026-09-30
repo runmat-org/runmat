@@ -4,7 +4,9 @@ use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
     GpuTensorStorage, NumericElementType,
 };
-use runmat_runtime::builtin::{RuntimeBuiltinBinding, RuntimeBuiltinFuture};
+use runmat_runtime::builtin::{
+    RuntimeBuiltinBinding, RuntimeBuiltinFuture, RuntimeBuiltinInvocation,
+};
 use runmat_runtime::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
 use runmat_value::{HandleRef, Value};
 use std::{
@@ -33,7 +35,7 @@ fn state() -> Rc<RefCell<State>> {
     STATE.with(|state| state.borrow().as_ref().unwrap().clone())
 }
 
-fn produce(_: &[Value]) -> RuntimeBuiltinFuture {
+fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async {
         let allocation = TestAllocationOwner::new()
             .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
@@ -58,8 +60,8 @@ fn produce(_: &[Value]) -> RuntimeBuiltinFuture {
     })
 }
 
-fn consume(args: &[Value]) -> RuntimeBuiltinFuture {
-    let argument = args.first().expect("managed argument").clone();
+fn consume(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
+    let argument = invocation.args.first().expect("managed argument").clone();
     let receiver = state()
         .borrow_mut()
         .receiver

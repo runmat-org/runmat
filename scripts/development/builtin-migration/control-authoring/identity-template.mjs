@@ -82,5 +82,5 @@ function constantImplementationTemplate(proposal) {
 }
 
 function nativeSymbol(name, variant) {
-  return `runmat_builtin_binding_v1_${Buffer.from(name).toString("hex")}_${Buffer.from(variant).toString("hex")}`;
+  return `runmat_builtin_binding_v2_${Buffer.from(name).toString("hex")}_${Buffer.from(variant).toString("hex")}`;
 }

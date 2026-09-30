@@ -180,7 +180,7 @@ async fn dispatch_custom_display_method(value: &Value) -> crate::BuiltinResult<b
         _ => return Ok(false),
     }
     let args = vec![value.clone()];
-    crate::dispatcher::try_call_registered_instance_method("display", &args, Some(0))
+    crate::dispatcher::try_call_registered_instance_method("display", &args, Some(0), None)
         .await
         .map(|result| result.is_some())
 }
@@ -191,7 +191,7 @@ async fn dispatch_custom_disp_method(value: &Value) -> crate::BuiltinResult<bool
         _ => return Ok(false),
     }
     let args = vec![value.clone()];
-    crate::dispatcher::try_call_registered_instance_method("disp", &args, Some(0))
+    crate::dispatcher::try_call_registered_instance_method("disp", &args, Some(0), None)
         .await
         .map(|result| result.is_some())
 }

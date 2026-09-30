@@ -27,6 +27,9 @@ static WASM_REGISTRY_INIT: OnceLock<()> = OnceLock::new();
 ///
 /// This registers the function with the `runmat-builtins` inventory
 /// so the runtime can discover it at start-up.
+/// Canonical `binding_variant` functions may opt into `context = true`
+/// and `requested_outputs = true`. Those leading, structurally typed
+/// invocation parameters are not user arguments and do not affect arity.
 #[proc_macro_attribute]
 pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     // Parse attribute arguments as `name = "..."`
@@ -49,6 +52,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut integer_capabilities_path: Option<syn::Path> = None;
     let mut integer_audit_path: Option<syn::Path> = None;
     let mut binding_variant_lit: Option<LitStr> = None;
+    let mut explicit_context = false;
+    let mut explicit_requested_outputs = false;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
     let mut process_execution_stack = false;
@@ -130,6 +135,18 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                         binding_variant_lit = Some(ls);
                     } else {
                         panic!("binding_variant must be a string literal");
+                    }
+                } else if path.is_ident("context") {
+                    if let Lit::Bool(value) = lit {
+                        explicit_context = value.value;
+                    } else {
+                        panic!("context must be a boolean literal");
+                    }
+                } else if path.is_ident("requested_outputs") {
+                    if let Lit::Bool(value) = lit {
+                        explicit_requested_outputs = value.value;
+                    } else {
+                        panic!("requested_outputs must be a boolean literal");
                     }
                 } else if path.is_ident("type_resolver") {
                     if let Lit::Str(ls) = lit {
@@ -247,6 +264,31 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             _ => panic!("self parameter not allowed"),
         }
     }
+    if (explicit_context || explicit_requested_outputs) && binding_variant_lit.is_none() {
+        panic!("invocation metadata requires a canonical binding_variant");
+    }
+    let context_param = if explicit_context {
+        let context_type = param_types
+            .first()
+            .expect("context injection requires a first Option<RuntimeContext> parameter");
+        if !is_optional_runtime_context(context_type) {
+            panic!("context injection requires Option<RuntimeContext> as the first parameter");
+        }
+        Some((param_idents.remove(0), param_types.remove(0)))
+    } else {
+        None
+    };
+    let requested_outputs_param = if explicit_requested_outputs {
+        let output_type = param_types.first().expect(
+            "requested_outputs injection requires an Option<usize> parameter after context",
+        );
+        if !is_optional_usize(output_type) {
+            panic!("requested_outputs injection requires Option<usize> after context");
+        }
+        Some((param_idents.remove(0), param_types.remove(0)))
+    } else {
+        None
+    };
     let param_len = param_idents.len();
 
     // Infer parameter types for BuiltinFunction
@@ -330,16 +372,46 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             .collect()
     };
 
+    let invocation_parameters = context_param
+        .iter()
+        .chain(requested_outputs_param.iter())
+        .map(|(ident, _)| ident)
+        .collect::<Vec<_>>();
     let call_expr = if is_async {
-        quote! { #ident(#(#param_idents),*).await? }
+        quote! { #ident(#(#invocation_parameters,)* #(#param_idents),*).await? }
     } else {
-        quote! { #ident(#(#param_idents),*)? }
+        quote! { #ident(#(#invocation_parameters,)* #(#param_idents),*)? }
+    };
+
+    let context_binding = context_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = invocation.context; }
+    });
+    let requested_outputs_binding = requested_outputs_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = invocation.requested_outputs; }
+    });
+
+    let wrapper_input = if binding_variant_lit.is_some() {
+        quote! { invocation: crate::builtin::RuntimeBuiltinInvocation<'_> }
+    } else {
+        quote! { args: &[runmat_value::Value] }
+    };
+    let wrapper_return = if binding_variant_lit.is_some() {
+        quote! { crate::builtin::RuntimeBuiltinFuture }
+    } else {
+        quote! { runmat_builtins::BuiltinFuture }
+    };
+    let wrapper_args = if binding_variant_lit.is_some() {
+        quote! { let args = invocation.args.to_vec(); }
+    } else {
+        quote! { let args = args.to_vec(); }
     };
 
     let wrapper = quote! {
-        fn #wrapper_ident(args: &[runmat_value::Value]) -> runmat_builtins::BuiltinFuture {
+        fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
             #![allow(unused_variables)]
-            let args = args.to_vec();
+            #wrapper_args
+            #context_binding
+            #requested_outputs_binding
             Box::pin(async move {
                 if #is_last_variadic {
                     if args.len() < #param_len - 1 {
@@ -1205,6 +1277,67 @@ fn helper_ident_from_name(prefix: &str, name: &str) -> proc_macro2::Ident {
         }
     }
     format_ident!("{}{}", prefix, sanitized)
+}
+
+fn is_optional_runtime_context(ty: &syn::Type) -> bool {
+    let syn::Type::Path(outer) = ty else {
+        return false;
+    };
+    let Some(option) = outer.path.segments.last() else {
+        return false;
+    };
+    if option.ident != "Option" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(arguments) = &option.arguments else {
+        return false;
+    };
+    if arguments.args.len() != 1 {
+        return false;
+    }
+    matches!(
+        arguments.args.first(),
+        Some(syn::GenericArgument::Type(syn::Type::Path(inner)))
+            if inner.path.segments.last().is_some_and(|segment| segment.ident == "RuntimeContext")
+    )
+}
+
+fn is_optional_usize(ty: &syn::Type) -> bool {
+    let syn::Type::Path(outer) = ty else {
+        return false;
+    };
+    let Some(option) = outer.path.segments.last() else {
+        return false;
+    };
+    if option.ident != "Option" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(arguments) = &option.arguments else {
+        return false;
+    };
+    matches!(
+        arguments.args.first(),
+        Some(syn::GenericArgument::Type(syn::Type::Path(inner)))
+            if arguments.args.len() == 1 && inner.path.is_ident("usize")
+    )
+}
+
+#[cfg(test)]
+mod invocation_parameter_tests {
+    use super::{is_optional_runtime_context, is_optional_usize};
+
+    #[test]
+    fn invocation_metadata_requires_structural_types() {
+        let context =
+            syn::parse_str::<syn::Type>("Option<crate::context::RuntimeContext>").unwrap();
+        let outputs = syn::parse_str::<syn::Type>("Option<usize>").unwrap();
+        let wrong_context = syn::parse_str::<syn::Type>("Option<Value>").unwrap();
+        let wrong_outputs = syn::parse_str::<syn::Type>("Option<u32>").unwrap();
+        assert!(is_optional_runtime_context(&context));
+        assert!(is_optional_usize(&outputs));
+        assert!(!is_optional_runtime_context(&wrong_context));
+        assert!(!is_optional_usize(&wrong_outputs));
+    }
 }
 
 /// Smart type inference from Rust types to our enhanced Type enum

@@ -726,7 +726,7 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        _ if arithmetic::dispatch_arithmetic(instr, stack).await? => Ok(Some(
+        _ if arithmetic::dispatch_arithmetic(instr, stack, &context.runtime).await? => Ok(Some(
             DispatchHandled::Generic(DispatchDecision::FallThrough),
         )),
         Instr::EmitStackTop { label } => {
@@ -1106,7 +1106,7 @@ pub async fn dispatch_instruction(
         }
         Instr::CreateRange(has_step) => {
             create_range(stack, *has_step, |args| async move {
-                crate::call::call_builtin_async("colon", &args).await
+                crate::call::call_builtin_async(&context.runtime, "colon", &args).await
             })
             .await?;
             Ok(Some(DispatchHandled::Generic(
@@ -1176,6 +1176,7 @@ pub async fn dispatch_instruction(
         Instr::CallBuiltinMulti(name, arg_count, out_count) => {
             match handle_builtin_call_multi(
                 calls::BuiltinCallContext {
+                    runtime: &context.runtime,
                     stack,
                     name,
                     arg_count: *arg_count,
@@ -1215,6 +1216,7 @@ pub async fn dispatch_instruction(
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
             match handle_builtin_call_multi(
                 calls::BuiltinCallContext {
+                    runtime: &context.runtime,
                     stack,
                     name,
                     arg_count: *arg_count,
@@ -1308,8 +1310,14 @@ pub async fn dispatch_instruction(
                     source_id,
                     call_arg_spans.clone(),
                 );
-            match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
-                .await?
+            match crate::call::feval::execute_feval(
+                &context.runtime,
+                func_val,
+                args,
+                *out_count,
+                function_registry,
+            )
+            .await?
             {
                 crate::call::feval::FevalDispatch::Completed(sequence) => {
                     calls::publish_fixed_outputs(stack, sequence, *out_count)?;
@@ -1328,8 +1336,14 @@ pub async fn dispatch_instruction(
                     source_id,
                     call_arg_spans.clone(),
                 );
-            match crate::call::feval::execute_feval(func_val, args, out_count, function_registry)
-                .await?
+            match crate::call::feval::execute_feval(
+                &context.runtime,
+                func_val,
+                args,
+                out_count,
+                function_registry,
+            )
+            .await?
             {
                 crate::call::feval::FevalDispatch::Completed(sequence) => {
                     sequence_register.stage_call_output_sequence(stack, sequence)?;
@@ -1349,8 +1363,14 @@ pub async fn dispatch_instruction(
                     source_id,
                     call_arg_spans.clone(),
                 );
-            match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
-                .await?
+            match crate::call::feval::execute_feval(
+                &context.runtime,
+                func_val,
+                args,
+                *out_count,
+                function_registry,
+            )
+            .await?
             {
                 crate::call::feval::FevalDispatch::Completed(sequence) => {
                     calls::publish_fixed_outputs(stack, sequence, *out_count)?;
@@ -1371,8 +1391,14 @@ pub async fn dispatch_instruction(
                     source_id,
                     call_arg_spans.clone(),
                 );
-            match crate::call::feval::execute_feval(func_val, args, out_count, function_registry)
-                .await?
+            match crate::call::feval::execute_feval(
+                &context.runtime,
+                func_val,
+                args,
+                out_count,
+                function_registry,
+            )
+            .await?
             {
                 crate::call::feval::FevalDispatch::Completed(sequence) => {
                     sequence_register.stage_call_output_sequence(stack, sequence)?;
@@ -1386,6 +1412,7 @@ pub async fn dispatch_instruction(
             match handle_user_function_call(
                 calls::UserCallContext {
                     stack,
+                    runtime: &context.runtime,
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
@@ -1424,6 +1451,7 @@ pub async fn dispatch_instruction(
             match handle_user_function_call(
                 calls::UserCallContext {
                     stack,
+                    runtime: &context.runtime,
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count,
@@ -1551,6 +1579,7 @@ pub async fn dispatch_instruction(
             match handle_user_function_call(
                 calls::UserCallContext {
                     stack,
+                    runtime: &context.runtime,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
@@ -1594,6 +1623,7 @@ pub async fn dispatch_instruction(
             match handle_user_function_call(
                 calls::UserCallContext {
                     stack,
+                    runtime: &context.runtime,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count,
@@ -1639,6 +1669,7 @@ pub async fn dispatch_instruction(
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
                     stack,
+                    runtime: &context.runtime,
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
@@ -1688,6 +1719,7 @@ pub async fn dispatch_instruction(
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
                     stack,
+                    runtime: &context.runtime,
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
@@ -1729,8 +1761,13 @@ pub async fn dispatch_instruction(
                 build_builtin_expand_multi_args(stack, specs, sequence_register, &context.runtime)
                     .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
-            let result =
-                crate::call::call_builtin_async_with_outputs(name, &args, *out_count).await?;
+            let result = crate::call::call_builtin_async_with_outputs(
+                &context.runtime,
+                name,
+                &args,
+                *out_count,
+            )
+            .await?;
             calls::publish_fixed_outputs(
                 stack,
                 runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
@@ -1818,6 +1855,7 @@ pub async fn dispatch_instruction(
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
+                    runtime: &context.runtime,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
@@ -1869,6 +1907,7 @@ pub async fn dispatch_instruction(
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
                     stack,
+                    runtime: &context.runtime,
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
@@ -1924,6 +1963,7 @@ pub async fn dispatch_instruction(
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
                     stack,
+                    runtime: &context.runtime,
                     workspace_name: name,
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
@@ -1971,6 +2011,7 @@ pub async fn dispatch_instruction(
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
+                    runtime: &context.runtime,
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,

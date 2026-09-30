@@ -67,6 +67,7 @@ pub struct ExceptionRouteContext<'a> {
 }
 
 pub struct BuiltinCallContext<'a> {
+    pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub stack: &'a mut Vec<Value>,
     pub name: &'a str,
     pub arg_count: usize,
@@ -81,6 +82,7 @@ pub struct BuiltinCallContext<'a> {
 
 pub struct UserCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
+    pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub identity: CallableIdentity,
     pub fallback_policy: CallableFallbackPolicy,
     pub out_count: usize,
@@ -93,6 +95,7 @@ pub struct UserCallContext<'a> {
 
 pub struct WorkspaceFirstCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
+    pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub workspace_name: &'a str,
     pub identity: CallableIdentity,
     pub fallback_policy: CallableFallbackPolicy,
@@ -243,6 +246,7 @@ async fn handle_builtin_call_inner(
     requested_outputs: usize,
 ) -> Result<BuiltinHandling, RuntimeError> {
     let BuiltinCallContext {
+        runtime,
         stack,
         name,
         arg_count,
@@ -301,10 +305,12 @@ async fn handle_builtin_call_inner(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
-    let result = crate::call::call_builtin_async_with_outputs(name, &args, requested_outputs).await;
+    let result =
+        crate::call::call_builtin_async_with_outputs(runtime, name, &args, requested_outputs).await;
     let _result_roots = root_values(result.as_ref().ok())?;
     let imported =
-        call_builtins::resolve_imported_builtin(name, imports, &args, requested_outputs).await?;
+        call_builtins::resolve_imported_builtin(runtime, name, imports, &args, requested_outputs)
+            .await?;
     if result.is_err() {
         if let Some(err) = call_builtins::rethrow_without_explicit_exception(
             name,
@@ -333,6 +339,7 @@ pub async fn handle_prepared_user_function_call(
     let _roots = root_values(&args)?;
     let UserCallContext {
         stack: _,
+        runtime,
         identity,
         fallback_policy,
         out_count,
@@ -430,7 +437,8 @@ pub async fn handle_prepared_user_function_call(
                             runmat_hir::CallableFallbackPolicy::ExternalBoundary,
                             CallableCallKind::Direct,
                         );
-                        let result = execute_callable_descriptor(static_descriptor).await?;
+                        let result =
+                            execute_callable_descriptor(runtime, static_descriptor).await?;
                         return Ok(UserCallHandling::Completed(result));
                     }
                 }
@@ -497,7 +505,7 @@ pub async fn handle_prepared_user_function_call(
                     runmat_hir::CallableFallbackPolicy::ExternalBoundary,
                     CallableCallKind::Direct,
                 );
-                let result = execute_callable_descriptor(static_descriptor).await?;
+                let result = execute_callable_descriptor(runtime, static_descriptor).await?;
                 return Ok(UserCallHandling::Completed(result));
             }
         }
@@ -546,7 +554,7 @@ pub async fn handle_prepared_user_function_call(
                         runmat_hir::CallableFallbackPolicy::ExternalBoundary,
                         CallableCallKind::Direct,
                     );
-                    let result = execute_callable_descriptor(static_descriptor).await?;
+                    let result = execute_callable_descriptor(runtime, static_descriptor).await?;
                     return Ok(UserCallHandling::Completed(result));
                 }
             }
@@ -563,7 +571,7 @@ pub async fn handle_prepared_user_function_call(
     let _access_guard = current_class_context
         .clone()
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
-    match execute_callable_descriptor(descriptor).await {
+    match execute_callable_descriptor(runtime, descriptor).await {
         Ok(result) => Ok(UserCallHandling::Completed(result)),
         Err(err) => Ok(
             match redirect_exception_to_catch(
@@ -598,6 +606,7 @@ pub async fn handle_workspace_first_prepared_call(
     let _roots = root_values(&args)?;
     let WorkspaceFirstCallContext {
         stack,
+        runtime,
         workspace_name,
         identity,
         fallback_policy,
@@ -620,8 +629,14 @@ pub async fn handle_workspace_first_prepared_call(
         }
         let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
         let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
-        let result =
-            super::indexing::paren_index_sequence(base, args, out_count, function_registry).await;
+        let result = super::indexing::paren_index_sequence(
+            runtime,
+            base,
+            args,
+            out_count,
+            function_registry,
+        )
+        .await;
         let ExceptionRouteContext {
             try_stack,
             vars,
@@ -691,6 +706,7 @@ pub async fn handle_workspace_first_prepared_call(
     handle_prepared_user_function_call(
         UserCallContext {
             stack,
+            runtime,
             identity,
             fallback_policy,
             out_count,

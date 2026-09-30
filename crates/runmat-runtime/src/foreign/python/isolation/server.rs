@@ -258,6 +258,7 @@ impl RuntimeCallService for HostCallbackRouter {
 
     fn invoke(
         &self,
+        _runtime: RuntimeContext,
         request: RuntimeCallRequest,
     ) -> Pin<Box<dyn Future<Output = Result<runmat_value::ValueSequence, RuntimeError>> + 'static>>
     {

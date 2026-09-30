@@ -30,11 +30,12 @@ impl MexHostServices for RuntimeMexHostServices {
     }
 
     fn eval(&self, command: &str) -> Result<(), MexDiagnostic> {
-        pollster::block_on(self.runtime.scope(crate::call_builtin_async_with_outputs(
+        pollster::block_on(crate::call_builtin_async_with_outputs_in_context(
+            &self.runtime,
             "eval",
             &[Value::String(command.to_string())],
             0,
-        )))
+        ))
         .map(|_| ())
         .map_err(runtime_diagnostic)
     }
@@ -49,11 +50,12 @@ impl MexHostServices for RuntimeMexHostServices {
         arguments: Vec<Value>,
         requested_outputs: usize,
     ) -> Result<Vec<Value>, MexDiagnostic> {
-        let value = pollster::block_on(self.runtime.scope(crate::call_feval_async_with_outputs(
+        let value = pollster::block_on(crate::call_feval_async_with_outputs_in_context(
+            &self.runtime,
             Value::from(function),
             &arguments,
             requested_outputs,
-        )))
+        ))
         .map_err(runtime_diagnostic)?;
         let sequence = crate::call::arguments::adapt_legacy_builtin_result(value)
             .map_err(runtime_diagnostic)?;

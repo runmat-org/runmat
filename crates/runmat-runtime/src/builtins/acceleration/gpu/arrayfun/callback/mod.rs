@@ -23,8 +23,12 @@ impl Callable {
 
     pub(in crate::builtins::acceleration::gpu::arrayfun) async fn call(
         &self,
+        context: Option<&crate::context::RuntimeContext>,
         arguments: &[Value],
     ) -> BuiltinResult<Value> {
-        self.0.invoke(arguments).await.map_err(error_map::call)
+        self.0
+            .invoke_with_outputs_in_context(context, arguments, 1)
+            .await
+            .map_err(error_map::call)
     }
 }

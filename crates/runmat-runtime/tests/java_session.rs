@@ -25,6 +25,7 @@ impl RuntimeCallService for IncrementingCallService {
 
     fn invoke(
         &self,
+        _runtime: RuntimeContext,
         request: RuntimeCallRequest,
     ) -> Pin<Box<dyn Future<Output = Result<ValueSequence, runmat_runtime::RuntimeError>> + 'static>>
     {
@@ -75,6 +76,7 @@ fn invoke(
         .expect("foreign service")
         .clone();
     let sequence = futures::executor::block_on(context.scope(service.invoke(
+        context.clone(),
         context.clone(),
         ForeignCall {
             adapter: JAVA_ADAPTER_ID.into(),

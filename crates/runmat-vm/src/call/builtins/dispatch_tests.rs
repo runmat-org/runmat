@@ -45,6 +45,7 @@ fn imported_call_uses_runtime_dispatch_with_original_arguments() {
                 runmat_value::Tensor::new(vec![1.; 6], vec![2, 3]).unwrap(),
             )];
             let result = crate::call::builtins::resolve_imported_builtin(
+                &runtime,
                 "numel",
                 &[(vec!["numel".into()], false)],
                 &args,

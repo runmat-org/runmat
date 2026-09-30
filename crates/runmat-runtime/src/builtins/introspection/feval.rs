@@ -3,10 +3,17 @@ use runmat_value::Value;
 #[runmat_macros::runtime_builtin(
     name = "feval",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::introspection::feval"
 )]
-pub async fn feval_builtin_registered(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    crate::feval_builtin(f, rest).await
+pub async fn feval_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    f: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    crate::feval_builtin_in_runtime(runtime.as_ref(), requested_outputs, f, rest).await
 }
 
 #[cfg(test)]

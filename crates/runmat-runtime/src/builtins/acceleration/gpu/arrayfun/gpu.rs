@@ -8,6 +8,7 @@ use runmat_builtins::{arrayfun_gpu_callback, ArrayfunGpuCallback, ArrayfunGpuUna
 use runmat_value::Value;
 
 pub(super) async fn try_fast_path(
+    context: Option<&crate::context::RuntimeContext>,
     callable: &Callable,
     inputs: &[Value],
     error_handler: Option<&Callable>,
@@ -36,7 +37,7 @@ pub(super) async fn try_fast_path(
         return Ok(None);
     }
     let Some(binding) =
-        crate::builtins::common::spec::selected_builtin_binding(identity.name, None, None)
+        crate::builtins::common::spec::selected_builtin_binding(identity.name, None, context)
     else {
         return Ok(None);
     };
@@ -52,9 +53,14 @@ pub(super) async fn try_fast_path(
     }
     // Canonical dispatch owns preparation, class promotion, exact provider,
     // unsupported fallback and output admission. Never retry an execution error.
-    let result = crate::dispatcher::call_selected_builtin_async_with_outputs(binding, inputs, 1)
-        .await
-        .map_err(callback_error)?;
+    let result = crate::dispatcher::call_selected_builtin_async_with_outputs(
+        binding,
+        inputs,
+        1,
+        context.cloned(),
+    )
+    .await
+    .map_err(callback_error)?;
     normalize::uniform(result, &shape, inputs).await.map(Some)
 }
 

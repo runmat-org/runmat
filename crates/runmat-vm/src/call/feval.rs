@@ -9,6 +9,7 @@ pub enum FevalDispatch {
 }
 
 pub async fn execute_feval(
+    runtime: &runmat_runtime::context::RuntimeContext,
     func_val: Value,
     args: Vec<Value>,
     requested_outputs: usize,
@@ -18,6 +19,6 @@ pub async fn execute_feval(
     let descriptor =
         CallableDescriptor::from_feval_value(func_val, args, requested_outputs, function_registry);
     Ok(FevalDispatch::Completed(
-        execute_callable_descriptor(descriptor).await?,
+        execute_callable_descriptor(runtime, descriptor).await?,
     ))
 }

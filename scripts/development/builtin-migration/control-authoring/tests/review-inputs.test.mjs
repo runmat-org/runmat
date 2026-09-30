@@ -626,7 +626,7 @@ function reviewFixture({ sourceMigration = false } = {}) {
       callable: { kind: "owned", owner_path: runtimeOwner, bindings: [{
         kind: "canonical_binding", function: `${id}_builtin`,
         variant: "default", builtin_path: `builtins::${id}`,
-        native_symbol: `runmat_builtin_binding_v1_${Buffer.from(id).toString("hex")}_${Buffer.from("default").toString("hex")}`,
+        native_symbol: `runmat_builtin_binding_v2_${Buffer.from(id).toString("hex")}_${Buffer.from("default").toString("hex")}`,
       }] },
       constant: { kind: "none", reason: "no-constant-form" },
     },

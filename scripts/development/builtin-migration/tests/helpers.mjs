@@ -556,7 +556,7 @@ function catalogEntryFixture(id, family) {
   };
 }
 
-function nativeSymbol(name, variant) { return `runmat_builtin_binding_v1_${Buffer.from(name).toString("hex")}_${Buffer.from(variant).toString("hex")}`; }
+function nativeSymbol(name, variant) { return `runmat_builtin_binding_v2_${Buffer.from(name).toString("hex")}_${Buffer.from(variant).toString("hex")}`; }
 
 function gpuGroupFixture(id, family) {
   return { key: "data.*", declaration: "FIXTURE_GPU_SPEC", builtin_path: `builtins::${id}`, source_file: `crates/runmat-runtime/src/builtins/math/${family}/${id}.rs`, module_path: `builtins::${id}`, owner: { kind: "legacy_group", raw: "data.*", affected_identities: [{ name: id }] }, operation: "custom:data", supported_precisions: [], broadcast: "none", provider_hooks: [], constant_strategy: "inline_literal", residency: "inherit_inputs", nan_mode: "include", two_pass_threshold: null, workgroup_size: null, accepts_nan_mode: false, notes: "fixture" };

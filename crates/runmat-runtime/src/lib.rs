@@ -363,11 +363,17 @@ pub(crate) async fn dispatch_object_external_member(
 }
 
 async fn dispatch_named_with_requested_outputs(
+    runtime: Option<&crate::context::RuntimeContext>,
     name: &str,
     args: &[Value],
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
-    call_builtin_async_with_outputs(name, args, requested_outputs).await
+    match runtime {
+        Some(runtime) => {
+            call_builtin_async_with_outputs_in_context(runtime, name, args, requested_outputs).await
+        }
+        None => call_builtin_async_with_outputs(name, args, requested_outputs).await,
+    }
 }
 
 fn require_single_sequence(sequence: runmat_value::ValueSequence) -> BuiltinResult<Value> {
@@ -386,6 +392,23 @@ pub(crate) async fn dispatch_callable_with_policy(
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
+    dispatch_callable_with_policy_in_runtime(
+        None,
+        identity,
+        fallback_policy,
+        args,
+        requested_outputs,
+    )
+    .await
+}
+
+async fn dispatch_callable_with_policy_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    identity: runmat_types::CallableIdentity,
+    fallback_policy: runmat_types::CallableFallbackPolicy,
+    args: Vec<Value>,
+    requested_outputs: usize,
+) -> BuiltinResult<Value> {
     let request = crate::user_functions::CallableRequest::resolved(
         identity.clone(),
         fallback_policy,
@@ -397,12 +420,15 @@ pub(crate) async fn dispatch_callable_with_policy(
     }
 
     if let Some(name) = fallback_policy.vm_fallback_name_for(&identity) {
-        return dispatch_named_with_requested_outputs(&name, &args, requested_outputs).await;
+        return dispatch_named_with_requested_outputs(runtime, &name, &args, requested_outputs)
+            .await;
     }
 
     Err(undefined_callable_error(&identity))
 }
 
+/// Direct embedding callback call; no session binding authority is inferred
+/// from an ambient poll scope.
 pub async fn call_feval_async_with_outputs(
     func_value: Value,
     args: &[Value],
@@ -411,7 +437,29 @@ pub async fn call_feval_async_with_outputs(
     runmat_value::validate_output_count(requested_outputs)
         .map_err(crate::sequence::sequence_error_to_runtime)?;
     let _guard = crate::output_count::push_output_count(Some(requested_outputs));
-    feval_builtin(func_value, args.to_vec()).await
+    feval_builtin_in_runtime(None, Some(requested_outputs), func_value, args.to_vec()).await
+}
+
+pub async fn call_feval_async_with_outputs_in_context(
+    runtime: &crate::context::RuntimeContext,
+    func_value: Value,
+    args: &[Value],
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    runmat_value::validate_output_count(requested_outputs)
+        .map_err(crate::sequence::sequence_error_to_runtime)?;
+    runtime
+        .scope(async {
+            let _guard = crate::output_count::push_output_count(Some(requested_outputs));
+            feval_builtin_in_runtime(
+                Some(runtime),
+                Some(requested_outputs),
+                func_value,
+                args.to_vec(),
+            )
+            .await
+        })
+        .await
 }
 
 pub use runtime_error::{
@@ -436,9 +484,10 @@ extern "C" {}
 extern crate openblas_src;
 
 pub use dispatcher::{
-    call_builtin, call_builtin_async, call_builtin_async_with_outputs, class_access_context,
-    gather_if_needed, gather_if_needed_async, is_gpu_value, push_class_access_context,
-    value_contains_gpu,
+    call_builtin, call_builtin_async, call_builtin_async_in_context,
+    call_builtin_async_with_outputs, call_builtin_async_with_outputs_in_context,
+    class_access_context, gather_if_needed, gather_if_needed_async, is_gpu_value,
+    push_class_access_context, value_contains_gpu,
 };
 
 #[cfg(feature = "plot-core")]
@@ -1403,22 +1452,39 @@ pub async fn test_register_classes() {
 }
 
 pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    feval_builtin_in_runtime(None, None, f, rest).await
+}
+
+async fn feval_builtin_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    invocation_outputs: Option<usize>,
+    f: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     fn normalize_feval_handle_name(name: &str) -> Option<String> {
         let trimmed = name.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_string())
     }
 
     async fn call_by_identity(
+        runtime: Option<&crate::context::RuntimeContext>,
         identity: runmat_types::CallableIdentity,
         fallback_policy: runmat_types::CallableFallbackPolicy,
         args: &[Value],
         requested_outputs: usize,
     ) -> crate::BuiltinResult<Value> {
-        dispatch_callable_with_policy(identity, fallback_policy, args.to_vec(), requested_outputs)
-            .await
+        dispatch_callable_with_policy_in_runtime(
+            runtime,
+            identity,
+            fallback_policy,
+            args.to_vec(),
+            requested_outputs,
+        )
+        .await
     }
 
     async fn call_by_name(
+        runtime: Option<&crate::context::RuntimeContext>,
         name: &str,
         args: &[Value],
         requested_outputs: usize,
@@ -1426,7 +1492,7 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
         let normalized = normalize_feval_handle_name(name)
             .ok_or_else(|| runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID))?;
         let (identity, fallback_policy) = callable_identity_for_handle_name(&normalized);
-        call_by_identity(identity, fallback_policy, args, requested_outputs).await
+        call_by_identity(runtime, identity, fallback_policy, args, requested_outputs).await
     }
 
     fn text_target_name(text: &str) -> Option<&str> {
@@ -1464,14 +1530,16 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
         )?;
     }
 
-    let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
+    let requested_outputs = invocation_outputs
+        .or_else(crate::output_count::current_output_count)
+        .unwrap_or(1);
 
     match f {
         Value::String(s) => {
             let name = text_target_name(&s).ok_or_else(|| {
                 runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
             })?;
-            call_by_name(name, &rest, requested_outputs).await
+            call_by_name(runtime, name, &rest, requested_outputs).await
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
@@ -1479,7 +1547,7 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                 let name = text_target_name(&s).ok_or_else(|| {
                     runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
                 })?;
-                call_by_name(name, &rest, requested_outputs).await
+                call_by_name(runtime, name, &rest, requested_outputs).await
             } else {
                 Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1494,7 +1562,7 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                 let name = text_target_name(s).ok_or_else(|| {
                     runtime_descriptor_error("feval", &FEVAL_ERROR_HANDLE_NAME_INVALID)
                 })?;
-                call_by_name(name, &rest, requested_outputs).await
+                call_by_name(runtime, name, &rest, requested_outputs).await
             } else {
                 Err(runtime_descriptor_error_with_detail(
                     "feval",
@@ -1503,8 +1571,10 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                 ))
             }
         }
-        Value::FunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
-        Value::ExternalFunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
+        Value::FunctionHandle(name) => call_by_name(runtime, &name, &rest, requested_outputs).await,
+        Value::ExternalFunctionHandle(name) => {
+            call_by_name(runtime, &name, &rest, requested_outputs).await
+        }
         Value::MethodFunctionHandle(name) => {
             let method_name = name.trim().to_string();
             if method_name.is_empty() {
@@ -1513,7 +1583,8 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                     &FEVAL_ERROR_HANDLE_NAME_INVALID,
                 ));
             }
-            dispatch_callable_with_policy(
+            dispatch_callable_with_policy_in_runtime(
+                runtime,
                 runmat_types::CallableIdentity::Method(runmat_types::MethodId(method_name)),
                 runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
                 rest,
@@ -1601,7 +1672,7 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                     return result.map(crate::call::arguments::project_legacy_builtin_value_abi);
                 }
             }
-            call_by_name(&c.function_name, &args, requested_outputs).await
+            call_by_name(runtime, &c.function_name, &args, requested_outputs).await
         }
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
             let path = crate::object::indexing::ObjectSubscriptPath::single(

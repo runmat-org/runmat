@@ -16,7 +16,7 @@ impl RuntimeBuiltinService for Selected {
             .collect()
     }
 }
-fn replacement(_: &[runmat_value::Value]) -> RuntimeBuiltinFuture {
+fn replacement(_: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async { Ok(runmat_value::Value::Num(99.0)) })
 }
 fn context(bindings: Vec<RuntimeBuiltinBinding>) -> RuntimeContext {

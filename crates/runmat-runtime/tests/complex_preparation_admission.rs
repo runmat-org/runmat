@@ -63,9 +63,12 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
             for outputs in [0, 1] {
                 let before = calls.get();
                 let args = vec![data(single); count];
-                let result =
-                    block_on(context.scope(call_builtin_async_with_outputs(name, &args, outputs)))
-                        .unwrap();
+                let result = block_on(context.scope(
+                    runmat_runtime::call_builtin_async_with_outputs_in_context(
+                        &context, name, &args, outputs,
+                    ),
+                ))
+                .unwrap();
                 let expected_class = if single {
                     NumericDType::F32
                 } else {
@@ -106,11 +109,14 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
                 assert_eq!(calls.get(), before + 1, "{name}");
             }
             let before = calls.get();
-            assert!(block_on(context.scope(call_builtin_async_with_outputs(
-                name,
-                &vec![data(single); count],
-                2
-            )))
+            assert!(block_on(context.scope(
+                runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &context,
+                    name,
+                    &vec![data(single); count],
+                    2
+                )
+            ))
             .is_err());
             assert_eq!(calls.get(), before);
         }
@@ -124,9 +130,12 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
         ],
         vec![data(false), data(false), data(false)],
     ] {
-        assert!(
-            block_on(context.scope(call_builtin_async_with_outputs("complex", &args, 1))).is_err()
-        );
+        assert!(block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context, "complex", &args, 1
+            )
+        ))
+        .is_err());
     }
     assert_eq!(calls.get(), before);
 }

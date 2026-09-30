@@ -62,11 +62,14 @@ fn actual_dispatch_admits_only_valid_real_domain_forms_before_preparation() {
         };
         for outputs in [0, 1] {
             let before = records.borrow().len();
-            block_on(context.scope(call_builtin_async_with_outputs(
-                name,
-                &[tensor(vec![1.0, 4.0])],
-                outputs,
-            )))
+            block_on(
+                context.scope(runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &context,
+                    name,
+                    &[tensor(vec![1.0, 4.0])],
+                    outputs,
+                )),
+            )
             .unwrap();
             assert_eq!(records.borrow().len(), before + 1);
             assert_eq!(records.borrow().last(), Some(&(name, predicate)));
@@ -77,38 +80,53 @@ fn actual_dispatch_admits_only_valid_real_domain_forms_before_preparation() {
             vec![Value::String("invalid".into())],
             vec![tensor(vec![1.0]), Value::Num(2.0)],
         ] {
-            assert!(
-                block_on(context.scope(call_builtin_async_with_outputs(name, &args, 1))).is_err()
-            );
+            assert!(block_on(context.scope(
+                runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &context, name, &args, 1
+                )
+            ))
+            .is_err());
         }
-        assert!(block_on(context.scope(call_builtin_async_with_outputs(
-            name,
-            &[tensor(vec![1.0])],
-            3
-        )))
+        assert!(block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context,
+                name,
+                &[tensor(vec![1.0])],
+                3
+            )
+        ))
         .is_err());
-        let negative = block_on(context.scope(call_builtin_async_with_outputs(
-            name,
-            &[tensor(vec![-4.0, 1.0])],
-            1,
-        )));
+        let negative = block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context,
+                name,
+                &[tensor(vec![-4.0, 1.0])],
+                1,
+            ),
+        ));
         if name == "realsqrt" {
             assert!(negative.is_err());
         } else {
             assert!(matches!(negative.unwrap(), Value::ComplexTensor(_)));
         }
-        block_on(context.scope(call_builtin_async_with_outputs(
-            name,
-            &[tensor(vec![f64::NAN])],
-            1,
-        )))
+        block_on(
+            context.scope(runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context,
+                name,
+                &[tensor(vec![f64::NAN])],
+                1,
+            )),
+        )
         .unwrap();
         let _strict = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
-        assert!(block_on(context.scope(call_builtin_async_with_outputs(
-            name,
-            &[Value::Int(IntValue::U16(4))],
-            1
-        )))
+        assert!(block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context,
+                name,
+                &[Value::Int(IntValue::U16(4))],
+                1
+            )
+        ))
         .is_err());
         assert_eq!(
             records.borrow().len(),
@@ -117,11 +135,14 @@ fn actual_dispatch_admits_only_valid_real_domain_forms_before_preparation() {
         );
     }
     let before = records.borrow().len();
-    block_on(context.scope(call_builtin_async_with_outputs(
-        "log2",
-        &[tensor(vec![1.0, 4.0])],
-        2,
-    )))
+    block_on(
+        context.scope(runmat_runtime::call_builtin_async_with_outputs_in_context(
+            &context,
+            "log2",
+            &[tensor(vec![1.0, 4.0])],
+            2,
+        )),
+    )
     .unwrap();
     assert_eq!(
         records.borrow().len(),

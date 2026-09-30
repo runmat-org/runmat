@@ -21,6 +21,7 @@ compiler = [
 
 [dependencies]
 runmat-execution = { workspace = true }
+runmat-builtins = { workspace = true }
 runmat-mir = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }

@@ -417,7 +417,11 @@ fn execute_terminator(
                 let case = state.arena.get(value_for(state, *case)?)?.clone();
                 let equal = super::sync::complete(
                     &state.runtime,
-                    runmat_runtime::call_builtin_async("eq", &[discriminant.clone(), case]),
+                    runmat_runtime::call_builtin_async_in_context(
+                        &state.runtime,
+                        "eq",
+                        &[discriminant.clone(), case],
+                    ),
                     "switch comparison",
                 )
                 .finish(state)?;

@@ -44,8 +44,8 @@ impl RuntimeBuiltinService for ObserveFunctionContext {
                 builtin: runmat_builtins::LOGICAL_CATALOG_ENTRY.identity,
                 variant: "default",
             },
-            |args| {
-                assert_eq!(args, &[Value::Bool(true)]);
+            |invocation| {
+                assert_eq!(invocation.args, &[Value::Bool(true)]);
                 Box::pin(async { Ok(Value::Bool(true)) })
             },
         )]

@@ -16,7 +16,7 @@ impl RuntimeBuiltinService for Override {
         bindings
     }
 }
-fn replacement(_: &[Value]) -> RuntimeBuiltinFuture {
+fn replacement(_: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async { Ok(Value::Num(99.)) })
 }
 

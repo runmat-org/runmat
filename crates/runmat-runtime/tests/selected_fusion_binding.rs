@@ -32,7 +32,7 @@ impl RuntimeBuiltinService for ChangingService {
     }
 }
 
-fn replacement(_: &[Value]) -> RuntimeBuiltinFuture {
+fn replacement(_: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     Box::pin(async { Ok(Value::Num(99.0)) })
 }
 

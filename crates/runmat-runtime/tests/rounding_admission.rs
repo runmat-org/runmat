@@ -84,11 +84,14 @@ fn admitted_floating_remainder_validates_shape_and_outputs_before_preparation() 
     ] {
         for outputs in [0, 1] {
             let before = records.borrow().len();
-            let result = block_on(context.scope(call_builtin_async_with_outputs(
-                name,
-                &[left.clone(), right.clone()],
-                outputs,
-            )))
+            let result = block_on(context.scope(
+                runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &context,
+                    name,
+                    &[left.clone(), right.clone()],
+                    outputs,
+                ),
+            ))
             .unwrap();
             assert_eq!(records.borrow().len(), before + 1);
             if outputs == 1 {
@@ -100,24 +103,33 @@ fn admitted_floating_remainder_validates_shape_and_outputs_before_preparation() 
             }
         }
         let before = records.borrow().len();
-        assert!(block_on(context.scope(call_builtin_async_with_outputs(
-            name,
-            &[left.clone(), right.clone()],
-            2
-        )))
+        assert!(block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context,
+                name,
+                &[left.clone(), right.clone()],
+                2
+            )
+        ))
         .is_err());
         let wrong = Value::Tensor(Tensor::new(vec![1.0; 3], vec![3, 1]).unwrap());
-        assert!(block_on(context.scope(call_builtin_async_with_outputs(
-            name,
-            &[left.clone(), wrong],
-            1
-        )))
+        assert!(block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context,
+                name,
+                &[left.clone(), wrong],
+                1
+            )
+        ))
         .is_err());
-        assert!(block_on(context.scope(call_builtin_async_with_outputs(
-            name,
-            &[Value::Complex(1.0, 2.0), right.clone()],
-            1
-        )))
+        assert!(block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context,
+                name,
+                &[Value::Complex(1.0, 2.0), right.clone()],
+                1
+            )
+        ))
         .is_err());
         assert_eq!(records.borrow().len(), before);
     }
@@ -141,11 +153,14 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
     ] {
         for outputs in [0, 1] {
             let before = records.borrow().len();
-            let output = block_on(context.scope(call_builtin_async_with_outputs(
-                name,
-                std::slice::from_ref(&input),
-                outputs,
-            )))
+            let output = block_on(context.scope(
+                runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &context,
+                    name,
+                    std::slice::from_ref(&input),
+                    outputs,
+                ),
+            ))
             .unwrap();
             assert_eq!(records.borrow().len(), before + 1);
             assert_eq!(records.borrow().last(), Some(&name));
@@ -163,15 +178,21 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
             vec![Value::String("invalid".into())],
             vec![input.clone(), Value::String("bad option".into())],
         ] {
-            assert!(
-                block_on(context.scope(call_builtin_async_with_outputs(name, &args, 1))).is_err()
-            );
+            assert!(block_on(context.scope(
+                runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &context, name, &args, 1
+                )
+            ))
+            .is_err());
         }
-        assert!(block_on(context.scope(call_builtin_async_with_outputs(
-            name,
-            std::slice::from_ref(&input),
-            2
-        )))
+        assert!(block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(
+                &context,
+                name,
+                std::slice::from_ref(&input),
+                2
+            )
+        ))
         .is_err());
         assert_eq!(records.borrow().len(), before);
     }
@@ -189,8 +210,10 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
         let before = records.borrow().len();
         let mut args = vec![input.clone()];
         args.extend(controls);
-        let output =
-            block_on(context.scope(call_builtin_async_with_outputs("round", &args, 1))).unwrap();
+        let output = block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(&context, "round", &args, 1),
+        ))
+        .unwrap();
         assert_eq!(records.borrow().len(), before + 1);
         let Value::Tensor(output) = output else {
             panic!("round pages")
@@ -206,9 +229,10 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
     ] {
         let mut args = vec![input.clone()];
         args.extend(controls);
-        assert!(
-            block_on(context.scope(call_builtin_async_with_outputs("round", &args, 1))).is_err()
-        );
+        assert!(block_on(context.scope(
+            runmat_runtime::call_builtin_async_with_outputs_in_context(&context, "round", &args, 1)
+        ))
+        .is_err());
     }
     assert_eq!(records.borrow().len(), before);
 }

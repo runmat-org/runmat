@@ -8,7 +8,11 @@ use super::options::Invocation;
 use super::output::{empty_uniform, maybe_upload_uniform, OutputContract, UniformCollector};
 use super::plan::InputPlan;
 
-pub(super) async fn execute(func: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn execute(
+    context: Option<&crate::context::RuntimeContext>,
+    func: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     let invocation = Invocation::parse(func, rest)?;
     let Invocation {
         callable,
@@ -26,7 +30,7 @@ pub(super) async fn execute(func: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     let has_gpu_input = !resident_inputs.is_empty();
     if uniform_output {
         if let Some(gpu_result) =
-            gpu::try_fast_path(&callable, &inputs, error_handler.as_ref()).await?
+            gpu::try_fast_path(context, &callable, &inputs, error_handler.as_ref()).await?
         {
             return Ok(gpu_result);
         }
@@ -63,7 +67,7 @@ pub(super) async fn execute(func: Value, rest: Vec<Value>) -> BuiltinResult<Valu
             args.push(input.value_at(idx, &base_shape)?);
         }
 
-        let result = match callable.call(&args).await {
+        let result = match callable.call(context, &args).await {
             Ok(value) => value,
             Err(err) => {
                 let handler = match error_handler.as_ref() {
@@ -80,7 +84,7 @@ pub(super) async fn execute(func: Value, rest: Vec<Value>) -> BuiltinResult<Valu
                 let mut handler_args = Vec::with_capacity(1 + args.len());
                 handler_args.push(err_value);
                 handler_args.extend(args.clone());
-                handler.call(&handler_args).await?
+                handler.call(context, &handler_args).await?
             }
         };
 

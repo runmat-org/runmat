@@ -63,6 +63,7 @@ impl fmt::Display for ParallelPlacementRejection {
 }
 
 pub(crate) async fn prepare(
+    runtime: &runmat_runtime::context::RuntimeContext,
     executable: &BytecodeParforRegion,
     inputs: &[Value],
     backend: PoolBackend,
@@ -116,14 +117,18 @@ pub(crate) async fn prepare(
 
         match variable.contract.role {
             ParallelVariableRole::Reduction { operator } => {
-                let identity = runmat_runtime::parallel::reduction::identity(operator, &host_value)
-                    .await
-                    .map_err(
-                        |error| ParallelPlacementRejection::RuntimeValueNotTransferable {
-                            slot,
-                            reason: error.to_string(),
-                        },
-                    )?;
+                let identity = runmat_runtime::parallel::reduction::identity_in_context(
+                    Some(runtime),
+                    operator,
+                    &host_value,
+                )
+                .await
+                .map_err(|error| {
+                    ParallelPlacementRejection::RuntimeValueNotTransferable {
+                        slot,
+                        reason: error.to_string(),
+                    }
+                })?;
                 task_inputs.push(identity);
             }
             ParallelVariableRole::Sliced { .. } => {

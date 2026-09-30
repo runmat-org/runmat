@@ -688,6 +688,7 @@ async fn execute_brace_operation_from_stack(
 }
 
 pub async fn paren_index_sequence(
+    runtime: &runmat_runtime::context::RuntimeContext,
     base: Value,
     raw_indices: Vec<Value>,
     requested_outputs: usize,
@@ -726,6 +727,7 @@ pub async fn paren_index_sequence(
             | Value::Closure(_)
     ) {
         return match crate::call::feval::execute_feval(
+            runtime,
             base,
             raw_indices,
             requested_outputs,
@@ -787,13 +789,20 @@ pub async fn paren_index_sequence(
 }
 
 pub async fn paren_index_value(
+    runtime: &runmat_runtime::context::RuntimeContext,
     base: Value,
     raw_indices: Vec<Value>,
     requested_outputs: usize,
     function_registry: &crate::bytecode::FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
-    let sequence =
-        paren_index_sequence(base, raw_indices, requested_outputs, function_registry).await?;
+    let sequence = paren_index_sequence(
+        runtime,
+        base,
+        raw_indices,
+        requested_outputs,
+        function_registry,
+    )
+    .await?;
     resolve_single_sequence(sequence)
 }
 
@@ -870,7 +879,7 @@ pub async fn dispatch_indexing(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            stack.push(paren_index_value(base, raw_indices, 1, function_registry).await?);
+            stack.push(paren_index_value(runtime, base, raw_indices, 1, function_registry).await?);
             Ok(true)
         }
         crate::bytecode::Instr::IndexCell { num_indices } => {
@@ -1214,8 +1223,14 @@ pub async fn dispatch_indexing(
                         ));
                     }
                     let args = numeric;
-                    match crate::call::feval::execute_feval(base, args, 1, function_registry)
-                        .await?
+                    match crate::call::feval::execute_feval(
+                        runtime,
+                        base,
+                        args,
+                        1,
+                        function_registry,
+                    )
+                    .await?
                     {
                         crate::call::feval::FevalDispatch::Completed(sequence) => {
                             stack.push(resolve_single_sequence(sequence)?)
@@ -1752,8 +1767,12 @@ mod tests {
         let array =
             Value::ObjectArray(ObjectArray::row("matlab.unittest.TestResult", values).unwrap());
         let registry = crate::bytecode::FunctionRegistry::default();
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
 
         let scalar = block_on(super::paren_index_value(
+            &runtime,
             array.clone(),
             vec![Value::Num(2.0)],
             1,
@@ -1769,6 +1788,7 @@ mod tests {
         let selector =
             Value::Tensor(runmat_value::Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap());
         let slice = block_on(super::paren_index_value(
+            &runtime,
             array,
             vec![selector],
             1,

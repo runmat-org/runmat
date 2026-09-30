@@ -12,18 +12,19 @@ pub(super) async fn prepare_selected(
     origin: SelectedBindingOrigin,
     name: &str,
     args: &[Value],
+    context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<Vec<Value>>, RuntimeError> {
     if !matches!(origin, SelectedBindingOrigin::LegacyInventory) {
         return Ok(None);
     }
-    let Some(context) = crate::context::legacy::active() else {
+    let Some(context) = context else {
         return Ok(None);
     };
     let Some(service) = context.service_ports().acceleration().cloned() else {
         return Ok(None);
     };
     service
-        .prepare_legacy(context, name.to_owned(), args.to_vec())
+        .prepare_legacy(context.clone(), name.to_owned(), args.to_vec())
         .await
         .map(Some)
 }

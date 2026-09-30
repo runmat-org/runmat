@@ -776,7 +776,9 @@ async fn execute_function_request(
                 runmat_runtime::call::descriptor::CallableCallKind::Direct,
             );
             runtime
-                .scope(crate::call::execute_callable_descriptor(descriptor))
+                .scope(crate::call::execute_callable_descriptor(
+                    &runtime, descriptor,
+                ))
                 .await
         }
         runmat_execution::ProgramCallable::ParallelRegion { .. }

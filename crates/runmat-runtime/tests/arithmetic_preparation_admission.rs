@@ -66,11 +66,14 @@ fn actual_dispatch_prepares_admitted_pairs_and_preserves_results() {
     ] {
         for outputs in [0, 1] {
             let before = calls.get();
-            let result = block_on(context.scope(call_builtin_async_with_outputs(
-                name,
-                &[tensor(&[2.0, 4.0], &[1, 2]), tensor(&[1.0, 2.0], &[1, 2])],
-                outputs,
-            )))
+            let result = block_on(context.scope(
+                runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &context,
+                    name,
+                    &[tensor(&[2.0, 4.0], &[1, 2]), tensor(&[1.0, 2.0], &[1, 2])],
+                    outputs,
+                ),
+            ))
             .unwrap();
             let Value::Tensor(value) = result else {
                 panic!("{name}: expected tensor")
@@ -102,8 +105,12 @@ fn actual_dispatch_prepares_admitted_pairs_and_preserves_results() {
             ),
         ] {
             assert!(
-                block_on(context.scope(call_builtin_async_with_outputs(name, &args, outputs)))
-                    .is_err(),
+                block_on(context.scope(
+                    runmat_runtime::call_builtin_async_with_outputs_in_context(
+                        &context, name, &args, outputs
+                    )
+                ))
+                .is_err(),
                 "{name}"
             );
         }

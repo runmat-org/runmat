@@ -28,10 +28,15 @@ pub(super) const BUILTIN_NAME: &str = "arrayfun";
 #[runtime_builtin(
     name = "arrayfun",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
-async fn arrayfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    execution::execute(func, rest).await
+async fn arrayfun_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    func: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    execution::execute(context.as_ref(), func, rest).await
 }
 
 #[cfg(test)]

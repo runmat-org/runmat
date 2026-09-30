@@ -71,11 +71,14 @@ pub fn invoke_foreign_callback(
             .map_err(|error| error.into_runtime_error())?
             .clone();
         context
-            .scope(service.invoke(RuntimeCallRequest {
-                identity: request.callable,
-                arguments: request.arguments,
-                requested_outputs: request.requested_outputs,
-            }))
+            .scope(service.invoke(
+                context.clone(),
+                RuntimeCallRequest {
+                    identity: request.callable,
+                    arguments: request.arguments,
+                    requested_outputs: request.requested_outputs,
+                },
+            ))
             .await
     })
 }
@@ -101,6 +104,7 @@ mod tests {
 
         fn invoke(
             &self,
+            _runtime: RuntimeContext,
             request: RuntimeCallRequest,
         ) -> Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>> {
             self.requests.borrow_mut().push(request);

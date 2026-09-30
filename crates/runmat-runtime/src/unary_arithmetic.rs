@@ -11,6 +11,14 @@ pub enum UnaryArithmeticOperation {
 }
 
 pub async fn evaluate(operation: UnaryArithmeticOperation, value: Value) -> BuiltinResult<Value> {
+    evaluate_in_context(None, operation, value).await
+}
+
+pub async fn evaluate_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    operation: UnaryArithmeticOperation,
+    value: Value,
+) -> BuiltinResult<Value> {
     if matches!(&value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()) {
         return Err(crate::runtime_error::semantic_error(
             "ComplexIntegerArithmetic",
@@ -31,6 +39,7 @@ pub async fn evaluate(operation: UnaryArithmeticOperation, value: Value) -> Buil
         method.display_name(),
         std::slice::from_ref(&value),
         Some(1),
+        context,
     )
     .await?
     {
@@ -43,9 +52,13 @@ pub async fn evaluate(operation: UnaryArithmeticOperation, value: Value) -> Buil
 
     match operation {
         UnaryArithmeticOperation::Plus => Ok(value),
-        UnaryArithmeticOperation::Minus => {
-            crate::call_builtin_async("times", &[value, Value::Num(-1.0)]).await
-        }
+        UnaryArithmeticOperation::Minus => match context {
+            Some(context) => {
+                crate::call_builtin_async_in_context(context, "times", &[value, Value::Num(-1.0)])
+                    .await
+            }
+            None => crate::call_builtin_async("times", &[value, Value::Num(-1.0)]).await,
+        },
     }
 }
 

@@ -45,7 +45,13 @@ pub(super) async fn execute(
             invocation,
         })
         .await?;
-    collective_response(response, operation, &bytecode.function_registry).await
+    collective_response(
+        &execution.runtime,
+        response,
+        operation,
+        &bytecode.function_registry,
+    )
+    .await
 }
 
 fn collective_operation_matches(
@@ -232,6 +238,7 @@ fn collective_invocation(
 }
 
 async fn collective_response(
+    runtime: &runmat_runtime::context::RuntimeContext,
     response: runmat_execution::CollectiveResponse,
     operation: crate::BytecodeCollectiveOp,
     function_registry: &crate::FunctionRegistry,
@@ -294,7 +301,8 @@ async fn collective_response(
                 )
             })?;
             for contribution in values {
-                accumulator = runmat_runtime::parallel::reduction::combine(
+                accumulator = runmat_runtime::parallel::reduction::combine_in_context(
+                    Some(runtime),
                     operator,
                     accumulator,
                     contribution,
@@ -319,6 +327,7 @@ async fn collective_response(
                     .map_err(value_codec_error)?,
             );
             crate::call::execute_callable_descriptor(
+                runtime,
                 runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                     runmat_hir::CallableIdentity::Builtin(runmat_types::BuiltinId("cat".into())),
                     arguments,
@@ -353,7 +362,7 @@ async fn collective_response(
                         function_registry,
                     );
                 let mut outputs =
-                    crate::call::execute_callable_descriptor(descriptor)
+                    crate::call::execute_callable_descriptor(runtime, descriptor)
                         .await?
                         .resolve(
                             runmat_types::SequenceUse::RequireSingle,

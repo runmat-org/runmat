@@ -30,6 +30,7 @@ pub trait RuntimeCallService {
 
     fn invoke(
         &self,
+        runtime: super::RuntimeContext,
         request: RuntimeCallRequest,
     ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>>;
 
@@ -56,6 +57,7 @@ impl RuntimeCallService for RuntimeCallRouter {
 
     fn invoke(
         &self,
+        runtime: super::RuntimeContext,
         request: RuntimeCallRequest,
     ) -> RuntimeServiceFuture<Result<ValueSequence, RuntimeError>> {
         let fallback_policy = match &request.identity {
@@ -66,7 +68,8 @@ impl RuntimeCallService for RuntimeCallRouter {
             _ => CallableFallbackPolicy::None,
         };
         Box::pin(async move {
-            crate::call::descriptor::execute_callable_descriptor(
+            crate::call::descriptor::execute_callable_descriptor_in_context(
+                &runtime,
                 crate::call::descriptor::CallableDescriptor::resolved(
                     request.identity,
                     request.arguments,

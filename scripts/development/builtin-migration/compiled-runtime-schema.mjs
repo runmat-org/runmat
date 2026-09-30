@@ -33,7 +33,7 @@ export function registrationManifestEntry(value) {
 export function runtimeBinding(value) {
   exact(value, ["name", "variant", "native_symbol"], "compiled runtime binding");
   identity(value.name, "compiled runtime binding name"); nonempty(value.variant, "compiled runtime binding variant");
-  const expected = `runmat_builtin_binding_v1_${Buffer.from(value.name).toString("hex")}_${Buffer.from(value.variant).toString("hex")}`;
+  const expected = `runmat_builtin_binding_v2_${Buffer.from(value.name).toString("hex")}_${Buffer.from(value.variant).toString("hex")}`;
   if (value.native_symbol !== expected) throw new Error("compiled native symbol does not encode its exact binding identity");
 }
 

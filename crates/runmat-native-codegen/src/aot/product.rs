@@ -4,7 +4,7 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 use crate::NativeTarget;
 
 pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 5;
-pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 2;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 3;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
@@ -36,7 +36,8 @@ impl AotBuiltinBinding {
     fn validate(&self) -> Result<(), crate::NativeCodegenError> {
         if !valid_identity(&self.name, 512)
             || !valid_identity(&self.variant, 256)
-            || !valid_link_symbol(&self.native_symbol)
+            || self.native_symbol
+                != runmat_builtins::native_binding_symbol(&self.name, &self.variant)
         {
             return Err(crate::NativeCodegenError::new(
                 "native.aot.builtin_binding",
@@ -227,7 +228,7 @@ impl AotProgramManifest {
 
 #[cfg(test)]
 mod admission_tests {
-    use super::AotProgramManifest;
+    use super::{AotBuiltinBinding, AotProgramManifest};
 
     #[test]
     fn stale_program_manifest_is_rejected_before_changed_function_shape() {
@@ -236,7 +237,25 @@ mod admission_tests {
         )
         .unwrap_err();
         assert_eq!(error.code, "native.aot.program.schema");
-        assert!(error.message.contains("actual 1, expected 2"));
+        assert!(error.message.contains("actual 1, expected 3"));
+    }
+
+    #[test]
+    fn obsolete_builtin_signature_is_rejected_before_resolution() {
+        let binding = AotBuiltinBinding {
+            name: "sin".into(),
+            variant: "default".into(),
+            native_symbol: "runmat_builtin_binding_v1_73696e_64656661756c74".into(),
+        };
+        let error = binding
+            .validate()
+            .expect_err("old pointer signature must be inadmissible");
+        assert_eq!(error.code, "native.aot.builtin_binding");
+        let current = AotBuiltinBinding {
+            native_symbol: runmat_builtins::native_binding_symbol(&binding.name, &binding.variant),
+            ..binding
+        };
+        current.validate().expect("current signature is admissible");
     }
 }
 

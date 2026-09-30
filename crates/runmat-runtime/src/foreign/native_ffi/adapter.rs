@@ -1081,11 +1081,12 @@ impl NativeFfiAdapter {
                     {
                         return router.dispatch(callback_id, callback_arguments);
                     }
-                    pollster::block_on(context.scope(crate::call_feval_async_with_outputs(
+                    pollster::block_on(crate::call_feval_async_with_outputs_in_context(
+                        &context,
                         callable.clone(),
                         callback_arguments,
                         1,
-                    )))
+                    ))
                     .map_err(|error| error.to_string())
                 }) as Box<dyn runmat_native_ffi::CallbackDispatch>
             })

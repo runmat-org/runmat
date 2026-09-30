@@ -5,10 +5,20 @@ use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
 pub async fn identity(operator: OperatorKind, prototype: &Value) -> Result<Value, RuntimeError> {
+    identity_in_context(None, operator, prototype).await
+}
+
+pub async fn identity_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    operator: OperatorKind,
+    prototype: &Value,
+) -> Result<Value, RuntimeError> {
     match operator {
-        OperatorKind::Add | OperatorKind::Subtract => like_constructor("zeros", prototype).await,
-        OperatorKind::ElementwiseMultiply => like_constructor("ones", prototype).await,
-        OperatorKind::MatrixMultiply => matrix_identity(prototype).await,
+        OperatorKind::Add | OperatorKind::Subtract => {
+            like_constructor(context, "zeros", prototype).await
+        }
+        OperatorKind::ElementwiseMultiply => like_constructor(context, "ones", prototype).await,
+        OperatorKind::MatrixMultiply => matrix_identity(context, prototype).await,
         OperatorKind::ElementwiseAnd => logical_identity(prototype, true),
         OperatorKind::ElementwiseOr => logical_identity(prototype, false),
         _ => Err(unsupported(operator)),
@@ -16,6 +26,15 @@ pub async fn identity(operator: OperatorKind, prototype: &Value) -> Result<Value
 }
 
 pub async fn combine(
+    operator: OperatorKind,
+    accumulator: Value,
+    contribution: Value,
+) -> Result<Value, RuntimeError> {
+    combine_in_context(None, operator, accumulator, contribution).await
+}
+
+pub async fn combine_in_context(
+    context: Option<&crate::context::RuntimeContext>,
     operator: OperatorKind,
     accumulator: Value,
     contribution: Value,
@@ -28,14 +47,37 @@ pub async fn combine(
         OperatorKind::ElementwiseOr => "or",
         _ => return Err(unsupported(operator)),
     };
-    crate::call_builtin_async(name, &[accumulator, contribution]).await
+    dispatch(context, name, &[accumulator, contribution]).await
 }
 
-async fn like_constructor(name: &str, prototype: &Value) -> Result<Value, RuntimeError> {
-    crate::call_builtin_async(name, &[Value::String("like".into()), prototype.clone()]).await
+async fn dispatch(
+    context: Option<&crate::context::RuntimeContext>,
+    name: &str,
+    arguments: &[Value],
+) -> Result<Value, RuntimeError> {
+    match context {
+        Some(context) => crate::call_builtin_async_in_context(context, name, arguments).await,
+        None => crate::call_builtin_async(name, arguments).await,
+    }
 }
 
-async fn matrix_identity(prototype: &Value) -> Result<Value, RuntimeError> {
+async fn like_constructor(
+    context: Option<&crate::context::RuntimeContext>,
+    name: &str,
+    prototype: &Value,
+) -> Result<Value, RuntimeError> {
+    dispatch(
+        context,
+        name,
+        &[Value::String("like".into()), prototype.clone()],
+    )
+    .await
+}
+
+async fn matrix_identity(
+    context: Option<&crate::context::RuntimeContext>,
+    prototype: &Value,
+) -> Result<Value, RuntimeError> {
     let shape =
         numeric_shape(prototype).ok_or_else(|| unsupported(OperatorKind::MatrixMultiply))?;
     let rows = shape.first().copied().unwrap_or(1);
@@ -46,7 +88,8 @@ async fn matrix_identity(prototype: &Value) -> Result<Value, RuntimeError> {
             "matrix-product reduction requires a square accumulator",
         ));
     }
-    crate::call_builtin_async(
+    dispatch(
+        context,
         "eye",
         &[
             Value::Int(runmat_value::IntValue::U64(u64::try_from(rows).map_err(

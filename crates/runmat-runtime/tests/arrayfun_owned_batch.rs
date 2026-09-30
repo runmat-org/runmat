@@ -204,7 +204,9 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
     struct Service {
         sin_lookups: Cell<usize>,
     }
-    fn replacement(_: &[Value]) -> RuntimeBuiltinFuture {
+    fn replacement(
+        _: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>,
+    ) -> RuntimeBuiltinFuture {
         Box::pin(async { Ok(Value::Num(99.0)) })
     }
     impl RuntimeBuiltinService for Service {
@@ -237,8 +239,10 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
             Value::FunctionHandle("sin".into()),
             Value::GpuTensor(source.clone()),
         ];
-        let first =
-            block_on(context.scope(call_builtin_async_with_outputs("arrayfun", &args, 1))).unwrap();
+        let first = block_on(runmat_runtime::call_builtin_async_with_outputs_in_context(
+            &context, "arrayfun", &args, 1,
+        ))
+        .unwrap();
         same_result(
             first,
             Value::Tensor(Tensor::new(vec![0.0, 1.0f64.sin()], vec![1, 2]).unwrap()),
@@ -249,8 +253,10 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
             1,
             "execution consumes the admitted binding without another service lookup"
         );
-        let second =
-            block_on(context.scope(call_builtin_async_with_outputs("arrayfun", &args, 1))).unwrap();
+        let second = block_on(runmat_runtime::call_builtin_async_with_outputs_in_context(
+            &context, "arrayfun", &args, 1,
+        ))
+        .unwrap();
         same_result(
             second,
             Value::Tensor(Tensor::new(vec![99.0, 99.0], vec![1, 2]).unwrap()),
@@ -293,8 +299,10 @@ fn empty_mapping_does_not_select_or_execute_the_callback() {
             Value::FunctionHandle("log".into()),
             Value::GpuTensor(source.clone()),
         ];
-        let output =
-            block_on(context.scope(call_builtin_async_with_outputs("arrayfun", &args, 1))).unwrap();
+        let output = block_on(runmat_runtime::call_builtin_async_with_outputs_in_context(
+            &context, "arrayfun", &args, 1,
+        ))
+        .unwrap();
         same_result(
             output,
             Value::Tensor(Tensor::new(vec![], vec![0, 3]).unwrap()),

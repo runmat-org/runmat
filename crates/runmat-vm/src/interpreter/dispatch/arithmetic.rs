@@ -25,6 +25,7 @@ async fn call_right_operator_method_ordered(
 pub async fn dispatch_arithmetic(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<bool, RuntimeError> {
     match instr {
         crate::bytecode::Instr::Add => {
@@ -35,7 +36,7 @@ pub async fn dispatch_arithmetic(
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    crate::call::call_builtin_async("plus", &[a_acc, b_acc]).await
+                    crate::call::call_builtin_async(runtime, "plus", &[a_acc, b_acc]).await
                 },
             )
             .await?;
@@ -49,7 +50,7 @@ pub async fn dispatch_arithmetic(
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    crate::call::call_builtin_async("minus", &[a_acc, b_acc]).await
+                    crate::call::call_builtin_async(runtime, "minus", &[a_acc, b_acc]).await
                 },
             )
             .await?;
@@ -77,7 +78,7 @@ pub async fn dispatch_arithmetic(
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    crate::call::call_builtin_async("times", &[a_acc, b_acc]).await
+                    crate::call::call_builtin_async(runtime, "times", &[a_acc, b_acc]).await
                 },
             )
             .await?;
@@ -92,7 +93,7 @@ pub async fn dispatch_arithmetic(
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    crate::call::call_builtin_async("rdivide", &[a_acc, b_acc]).await
+                    crate::call::call_builtin_async(runtime, "rdivide", &[a_acc, b_acc]).await
                 },
             )
             .await?;
@@ -102,13 +103,13 @@ pub async fn dispatch_arithmetic(
             arithmetic_ops::power(
                 stack,
                 |obj, _method, arg| async move {
-                    crate::call::call_builtin_async("power", &[obj, arg]).await
+                    crate::call::call_builtin_async(runtime, "power", &[obj, arg]).await
                 },
                 call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    crate::call::call_builtin_async("power", &[a_acc, b_acc]).await
+                    crate::call::call_builtin_async(runtime, "power", &[a_acc, b_acc]).await
                 },
             )
             .await?;
@@ -123,7 +124,7 @@ pub async fn dispatch_arithmetic(
                 |a, b| async move {
                     let (b_acc, a_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
-                    crate::call::call_builtin_async("rdivide", &[b_acc, a_acc]).await
+                    crate::call::call_builtin_async(runtime, "rdivide", &[b_acc, a_acc]).await
                 },
             )
             .await?;
@@ -139,10 +140,11 @@ pub async fn dispatch_arithmetic(
                     |lhs, rhs| async move {
                         let (lhs_acc, rhs_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &lhs, &rhs).await?;
-                        crate::call::call_builtin_async("rdivide", &[lhs_acc, rhs_acc]).await
+                        crate::call::call_builtin_async(runtime, "rdivide", &[lhs_acc, rhs_acc])
+                            .await
                     },
                     |lhs, rhs| async move {
-                        crate::call::call_builtin_async("mrdivide", &[lhs, rhs]).await
+                        crate::call::call_builtin_async(runtime, "mrdivide", &[lhs, rhs]).await
                     },
                 )
                 .await
@@ -160,10 +162,11 @@ pub async fn dispatch_arithmetic(
                     |lhs, rhs| async move {
                         let (rhs_acc, lhs_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &rhs, &lhs).await?;
-                        crate::call::call_builtin_async("rdivide", &[rhs_acc, lhs_acc]).await
+                        crate::call::call_builtin_async(runtime, "rdivide", &[rhs_acc, lhs_acc])
+                            .await
                     },
                     |lhs, rhs| async move {
-                        crate::call::call_builtin_async("mldivide", &[lhs, rhs]).await
+                        crate::call::call_builtin_async(runtime, "mldivide", &[lhs, rhs]).await
                     },
                 )
                 .await
@@ -173,7 +176,8 @@ pub async fn dispatch_arithmetic(
         }
         crate::bytecode::Instr::Neg => {
             arithmetic_ops::unary_arithmetic(stack, |value| async move {
-                runmat_runtime::unary_arithmetic::evaluate(
+                runmat_runtime::unary_arithmetic::evaluate_in_context(
+                    Some(runtime),
                     runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Minus,
                     value,
                 )
@@ -196,7 +200,7 @@ pub async fn dispatch_arithmetic(
                             | (_, Value::SymbolicArray(_))
                     ) {
                         let args = [a, b];
-                        return crate::call::call_builtin_async("power", &args).await;
+                        return crate::call::call_builtin_async(runtime, "power", &args).await;
                     }
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
@@ -208,7 +212,8 @@ pub async fn dispatch_arithmetic(
         }
         crate::bytecode::Instr::UPlus => {
             arithmetic_ops::unary_arithmetic(stack, |value| async move {
-                runmat_runtime::unary_arithmetic::evaluate(
+                runmat_runtime::unary_arithmetic::evaluate_in_context(
+                    Some(runtime),
                     runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Plus,
                     value,
                 )
@@ -220,7 +225,7 @@ pub async fn dispatch_arithmetic(
         crate::bytecode::Instr::Transpose => {
             arithmetic_ops::unary(stack, |value| async move {
                 let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                crate::call::call_builtin_async("transpose", &[promoted]).await
+                crate::call::call_builtin_async(runtime, "transpose", &[promoted]).await
             })
             .await?;
             Ok(true)
@@ -228,7 +233,7 @@ pub async fn dispatch_arithmetic(
         crate::bytecode::Instr::ConjugateTranspose => {
             arithmetic_ops::unary(stack, |value| async move {
                 let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                crate::call::call_builtin_async("ctranspose", &[promoted]).await
+                crate::call::call_builtin_async(runtime, "ctranspose", &[promoted]).await
             })
             .await?;
             Ok(true)
@@ -244,7 +249,9 @@ pub async fn dispatch_arithmetic(
                     predicate: |aa, bb| aa <= bb,
                 },
                 call_operator_method,
-                |name, a, b| async move { crate::call::call_builtin_async(name, &[a, b]).await },
+                |name, a, b| async move {
+                    crate::call::call_builtin_async(runtime, name, &[a, b]).await
+                },
                 |v, label| async move { logical_truth_from_value(&v, &label).await },
             )
             .await?;
@@ -257,7 +264,9 @@ pub async fn dispatch_arithmetic(
                 "gt",
                 |aa, bb| aa < bb,
                 call_operator_method,
-                |name, a, b| async move { crate::call::call_builtin_async(name, &[a, b]).await },
+                |name, a, b| async move {
+                    crate::call::call_builtin_async(runtime, name, &[a, b]).await
+                },
             )
             .await?;
             Ok(true)
@@ -269,7 +278,9 @@ pub async fn dispatch_arithmetic(
                 "lt",
                 |aa, bb| aa > bb,
                 call_operator_method,
-                |name, a, b| async move { crate::call::call_builtin_async(name, &[a, b]).await },
+                |name, a, b| async move {
+                    crate::call::call_builtin_async(runtime, name, &[a, b]).await
+                },
             )
             .await?;
             Ok(true)
@@ -285,7 +296,9 @@ pub async fn dispatch_arithmetic(
                     predicate: |aa, bb| aa >= bb,
                 },
                 call_operator_method,
-                |name, a, b| async move { crate::call::call_builtin_async(name, &[a, b]).await },
+                |name, a, b| async move {
+                    crate::call::call_builtin_async(runtime, name, &[a, b]).await
+                },
                 |v, label| async move { logical_truth_from_value(&v, &label).await },
             )
             .await?;
@@ -295,7 +308,9 @@ pub async fn dispatch_arithmetic(
             comparison_ops::equal(
                 stack,
                 call_operator_method,
-                |name, a, b| async move { crate::call::call_builtin_async(name, &[a, b]).await },
+                |name, a, b| async move {
+                    crate::call::call_builtin_async(runtime, name, &[a, b]).await
+                },
                 |_v, _label| async move { Ok(false) },
             )
             .await?;
@@ -305,7 +320,9 @@ pub async fn dispatch_arithmetic(
             comparison_ops::not_equal(
                 stack,
                 call_operator_method,
-                |name, a, b| async move { crate::call::call_builtin_async(name, &[a, b]).await },
+                |name, a, b| async move {
+                    crate::call::call_builtin_async(runtime, name, &[a, b]).await
+                },
                 |v, label| async move { logical_truth_from_value(&v, &label).await },
             )
             .await?;
@@ -315,7 +332,7 @@ pub async fn dispatch_arithmetic(
             let value = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
             })?;
-            stack.push(crate::call::call_builtin_async("not", &[value]).await?);
+            stack.push(crate::call::call_builtin_async(runtime, "not", &[value]).await?);
             Ok(true)
         }
         crate::bytecode::Instr::LogicalAnd => {
@@ -325,7 +342,7 @@ pub async fn dispatch_arithmetic(
             let lhs = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
             })?;
-            stack.push(crate::call::call_builtin_async("and", &[lhs, rhs]).await?);
+            stack.push(crate::call::call_builtin_async(runtime, "and", &[lhs, rhs]).await?);
             Ok(true)
         }
         crate::bytecode::Instr::LogicalOr => {
@@ -335,7 +352,7 @@ pub async fn dispatch_arithmetic(
             let lhs = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
             })?;
-            stack.push(crate::call::call_builtin_async("or", &[lhs, rhs]).await?);
+            stack.push(crate::call::call_builtin_async(runtime, "or", &[lhs, rhs]).await?);
             Ok(true)
         }
         _ => Ok(false),

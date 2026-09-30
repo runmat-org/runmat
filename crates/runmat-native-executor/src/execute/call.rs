@@ -117,18 +117,26 @@ fn evaluate_inner(
                 call.fallback_policy,
                 CallableCallKind::Direct,
             );
+            let runtime = state.runtime.clone();
             complete_call(
                 state,
                 embedded.cloned(),
-                runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
+                async move {
+                    runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(
+                        &runtime, descriptor,
+                    )
+                    .await
+                },
                 requested_outputs,
             )
         }
         MirCallee::Dynamic(operand) => {
             let target = materialize_operand(state, operand)?;
+            let runtime = state.runtime.clone();
             let value = super::sync::complete(
                 &state.runtime,
-                runmat_runtime::call_feval_async_with_outputs(
+                runmat_runtime::call_feval_async_with_outputs_in_context(
+                    &runtime,
                     target,
                     &arguments,
                     requested_outputs,
@@ -369,8 +377,10 @@ fn builtin_inner(
         embedded.cloned(),
         {
             let name = name.to_owned();
+            let runtime = state.runtime.clone();
             async move {
-                let value = runmat_runtime::call_builtin_async_with_outputs(
+                let value = runmat_runtime::call_builtin_async_with_outputs_in_context(
+                    &runtime,
                     &name,
                     &arguments,
                     requested_outputs,

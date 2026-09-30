@@ -414,9 +414,11 @@ fn read_paren(
                 "Function handle call does not support colon or end selector syntax",
             )));
         }
+        let runtime = state.runtime.clone();
         let value = super::sync::complete(
             &state.runtime,
-            runmat_runtime::call_feval_async_with_outputs(
+            runmat_runtime::call_feval_async_with_outputs_in_context(
+                &runtime,
                 base,
                 &selectors.numeric,
                 requested_outputs,

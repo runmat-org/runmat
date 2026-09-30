@@ -36,8 +36,8 @@ impl crate::context::RuntimeBuiltinService for Override {
                 builtin: entry.identity,
                 variant: "default",
             },
-            |args| {
-                let value = args[0].clone();
+            |invocation| {
+                let value = invocation.args[0].clone();
                 assert!(matches!(value, Value::Tensor(_)));
                 Box::pin(async { Ok(value) })
             },
@@ -57,7 +57,12 @@ fn selected_override_receives_original_operands_without_legacy_preparation() {
     let _scope = context.enter();
     let input = Value::Tensor(runmat_value::Tensor::new(vec![1.; 4], vec![1, 4]).unwrap());
     assert_eq!(
-        call_builtin("logical", std::slice::from_ref(&input)).unwrap(),
+        futures::executor::block_on(call_builtin_async_in_context(
+            &context,
+            "logical",
+            std::slice::from_ref(&input)
+        ))
+        .unwrap(),
         input
     );
     assert!(probe.0.borrow().is_empty());
@@ -68,7 +73,12 @@ fn canonical_execution_never_enters_legacy_preparation() {
     let probe = Rc::new(Probe::default());
     let context = runtime(&probe);
     let _scope = context.enter();
-    call_builtin("full", &[Value::Num(3.)]).unwrap();
+    futures::executor::block_on(call_builtin_async_in_context(
+        &context,
+        "full",
+        &[Value::Num(3.)],
+    ))
+    .unwrap();
     assert!(probe.0.borrow().is_empty());
 }
 
@@ -78,7 +88,12 @@ fn inventory_execution_enters_legacy_preparation_after_selection() {
     let probe = Rc::new(Probe::default());
     let context = runtime(&probe);
     let _scope = context.enter();
-    call_builtin("mean", &[Value::Num(3.)]).unwrap();
+    futures::executor::block_on(call_builtin_async_in_context(
+        &context,
+        "mean",
+        &[Value::Num(3.)],
+    ))
+    .unwrap();
     assert_eq!(&*probe.0.borrow(), &["mean"]);
 }
 
@@ -121,6 +136,10 @@ fn registered_instance_method_sees_original_operand_and_skips_legacy_service() {
         Value::Object(runmat_value::ObjectInstance::new(class)),
         Value::Tensor(runmat_value::Tensor::new(vec![1.; 4], vec![1, 4]).unwrap()),
     ];
-    assert_eq!(call_builtin("mean", &args).unwrap(), Value::Num(9.));
+    assert_eq!(
+        futures::executor::block_on(call_builtin_async_in_context(&context, "mean", &args))
+            .unwrap(),
+        Value::Num(9.)
+    );
     assert!(probe.0.borrow().is_empty());
 }

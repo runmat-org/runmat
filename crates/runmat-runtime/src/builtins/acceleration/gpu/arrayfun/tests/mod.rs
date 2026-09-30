@@ -21,7 +21,7 @@ use runmat_value::{
 use std::sync::Arc;
 
 fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(arrayfun_builtin(func, rest))
+    block_on(arrayfun_builtin(None, func, rest))
 }
 
 fn values(tensor: &Tensor) -> Vec<f64> {

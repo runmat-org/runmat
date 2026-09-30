@@ -247,6 +247,7 @@ struct ResolvedBuiltinName<'a> {
 mod preparation;
 mod selected_execution;
 use preparation::SelectedBindingOrigin;
+use selected_execution::SelectedImplementation;
 
 impl<'a> ResolvedBuiltinName<'a> {
     fn resolve(requested: &'a str) -> Self {
@@ -262,6 +263,7 @@ async fn call_builtin_async_impl(
     name: &str,
     args: &[Value],
     output_count: Option<usize>,
+    context: Option<crate::context::RuntimeContext>,
 ) -> Result<Value, RuntimeError> {
     ensure_wasm_builtins_registered();
 
@@ -269,10 +271,13 @@ async fn call_builtin_async_impl(
     let name = resolved_name.canonical;
 
     let _output_guard = crate::output_count::push_output_count(output_count);
-    if let Some(result) = try_distributed_builtin(name, args, output_count).await? {
+    if let Some(result) =
+        try_distributed_builtin(name, args, output_count, context.as_ref()).await?
+    {
         return Ok(result);
     }
-    let scoped_builtin_service = crate::context::legacy::active()
+    let scoped_builtin_service = context
+        .as_ref()
         .and_then(|context| context.service_ports().builtin().cloned());
     let matching_bindings = scoped_builtin_service.as_ref().map_or_else(
         || crate::builtin::runtime_builtin_bindings_by_name(name),
@@ -298,10 +303,14 @@ async fn call_builtin_async_impl(
     }
 
     if matching_bindings.is_empty() && matching_builtins.is_empty() {
-        if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
+        if let Some(result) =
+            try_call_registered_instance_method(name, args, output_count, context.as_ref()).await?
+        {
             return compatibility_checked_builtin_result(name, args, result);
         }
-        if let Some(result) = try_call_registered_static_method(name, args, output_count).await? {
+        if let Some(result) =
+            try_call_registered_static_method(name, args, output_count, context.as_ref()).await?
+        {
             return compatibility_checked_builtin_result(name, args, result);
         }
         // Fallback: treat as class constructor if class is registered.
@@ -310,7 +319,9 @@ async fn call_builtin_async_impl(
             .and_then(|identity| crate::class_registry::get_class(&identity))
             .is_some()
         {
-            let result = call_registered_class_constructor(name, args, output_count).await?;
+            let result =
+                call_registered_class_constructor(name, args, output_count, context.as_ref())
+                    .await?;
             return compatibility_checked_builtin_result(name, args, result);
         }
         return Err(build_runtime_error(format!(
@@ -321,7 +332,9 @@ async fn call_builtin_async_impl(
         .build());
     }
 
-    if let Some(result) = try_call_registered_instance_method(name, args, output_count).await? {
+    if let Some(result) =
+        try_call_registered_instance_method(name, args, output_count, context.as_ref()).await?
+    {
         return compatibility_checked_builtin_result(name, args, result);
     }
 
@@ -341,7 +354,7 @@ async fn call_builtin_async_impl(
         .map(|binding| {
             (
                 SelectedBindingOrigin::CanonicalOrScoped,
-                binding.implementation,
+                SelectedImplementation::Canonical(binding.implementation),
             )
         })
         .chain(
@@ -352,7 +365,7 @@ async fn call_builtin_async_impl(
                 .map(|builtin| {
                     (
                         SelectedBindingOrigin::LegacyInventory,
-                        builtin.implementation,
+                        SelectedImplementation::Legacy(builtin.implementation),
                     )
                 }),
         );
@@ -364,10 +377,15 @@ async fn call_builtin_async_impl(
     let (origin, implementation) = implementations
         .next()
         .expect("nonempty builtin authority has a selected implementation");
-    let prepared = preparation::prepare_selected(origin, name, args).await?;
+    let prepared = preparation::prepare_selected(origin, name, args, context.as_ref()).await?;
     // Explicit Requested gather adaptation stays within this one implementation.
-    let result =
-        selected_execution::execute(implementation, prepared.as_deref().unwrap_or(args)).await?;
+    let result = selected_execution::execute(
+        implementation,
+        prepared.as_deref().unwrap_or(args),
+        context,
+        output_count,
+    )
+    .await?;
     compatibility_checked_builtin_result(name, args, result)
 }
 
@@ -375,6 +393,7 @@ async fn try_distributed_builtin(
     name: &str,
     args: &[Value],
     output_count: Option<usize>,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<Value>, RuntimeError> {
     if !args
         .iter()
@@ -397,7 +416,7 @@ async fn try_distributed_builtin(
         .build()),
         runmat_builtins::BuiltinDistributedPolicy::InspectHandles => Ok(None),
         runmat_builtins::BuiltinDistributedPolicy::MaterializeArguments => {
-            let (context, service) = distributed_service(name)?;
+            let (context, service) = distributed_service(name, runtime)?;
             let mut materialized = Vec::with_capacity(args.len());
             for argument in args {
                 if let Value::Distributed(handle) = argument {
@@ -407,14 +426,14 @@ async fn try_distributed_builtin(
                     materialized.push(argument.clone());
                 }
             }
-            call_builtin_async_impl(name, &materialized, output_count)
+            call_builtin_async_impl(name, &materialized, output_count, Some(context))
                 .await
                 .map(Some)
         }
         runmat_builtins::BuiltinDistributedPolicy::MapUnary
         | runmat_builtins::BuiltinDistributedPolicy::MapUnaryConstrained(_)
         | runmat_builtins::BuiltinDistributedPolicy::ScalarLikePrototype => {
-            let (context, service) = distributed_service(name)?;
+            let (context, service) = distributed_service(name, runtime)?;
             for argument in args {
                 if let Value::Distributed(handle) = argument {
                     crate::parallel::lease::validate_distributed(&context, handle)?;
@@ -491,6 +510,7 @@ fn distributed_literal_context(args: &[Value]) -> runmat_types::LiteralContext {
 
 fn distributed_service(
     name: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<
     (
         crate::context::RuntimeContext,
@@ -498,7 +518,7 @@ fn distributed_service(
     ),
     RuntimeError,
 > {
-    let context = crate::context::legacy::active().ok_or_else(|| {
+    let context = runtime.cloned().ok_or_else(|| {
         build_runtime_error(format!(
             "{name}: distributed arguments require an active RunMat execution context"
         ))
@@ -623,6 +643,7 @@ pub(crate) async fn try_call_registered_instance_method(
     method_name: &str,
     args: &[Value],
     output_count: Option<usize>,
+    context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<Value>, RuntimeError> {
     let Some(receiver) = args.first() else {
         return Ok(None);
@@ -668,7 +689,9 @@ pub(crate) async fn try_call_registered_instance_method(
     if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != method_name
     {
-        let result = call_builtin_async_impl(&method.function_name, args, output_count).await;
+        let result =
+            call_builtin_async_impl(&method.function_name, args, output_count, context.cloned())
+                .await;
         return finalize_instance_method_result(
             &method_identity,
             receiver,
@@ -690,7 +713,9 @@ pub(crate) async fn try_call_registered_instance_method(
         if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != method_name
         {
-            let result = call_builtin_async_impl(&owner_qualified, args, output_count).await;
+            let result =
+                call_builtin_async_impl(&owner_qualified, args, output_count, context.cloned())
+                    .await;
             return finalize_instance_method_result(
                 &method_identity,
                 receiver,
@@ -729,6 +754,7 @@ async fn try_call_registered_static_method(
     qualified_name: &str,
     args: &[Value],
     output_count: Option<usize>,
+    context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<Value>, RuntimeError> {
     let Some((class_name, method_name)) = qualified_name.rsplit_once('.') else {
         return Ok(None);
@@ -765,9 +791,14 @@ async fn try_call_registered_static_method(
     if runmat_builtins::builtin_name_is_known(&method.function_name)
         && method.function_name != qualified_name
     {
-        return call_builtin_async_impl(&method.function_name, args, output_count)
-            .await
-            .map(Some);
+        return call_builtin_async_impl(
+            &method.function_name,
+            args,
+            output_count,
+            context.cloned(),
+        )
+        .await
+        .map(Some);
     }
     let owner_qualified = format!("{owner}.{method_name}");
     if owner_qualified != method.function_name {
@@ -785,7 +816,7 @@ async fn try_call_registered_static_method(
         if runmat_builtins::builtin_name_is_known(&owner_qualified)
             && owner_qualified != qualified_name
         {
-            return call_builtin_async_impl(&owner_qualified, args, output_count)
+            return call_builtin_async_impl(&owner_qualified, args, output_count, context.cloned())
                 .await
                 .map(Some);
         }
@@ -797,6 +828,7 @@ async fn call_registered_class_constructor(
     class_name: &str,
     args: &[Value],
     output_count: Option<usize>,
+    context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Value, RuntimeError> {
     let requested_outputs = output_count.unwrap_or(1);
     let class_identity = ClassIdentity::new(class_name).map_err(|error| {
@@ -847,7 +879,9 @@ async fn call_registered_class_constructor(
         if runmat_builtins::builtin_name_is_known(&ctor.function_name)
             && ctor.function_name != class_name
         {
-            let result = call_builtin_async_impl(&ctor.function_name, args, output_count).await?;
+            let result =
+                call_builtin_async_impl(&ctor.function_name, args, output_count, context.cloned())
+                    .await?;
             return Ok::<Option<Value>, RuntimeError>(Some(result));
         }
         if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
@@ -861,7 +895,9 @@ async fn call_registered_class_constructor(
         }
         if runmat_builtins::builtin_name_is_known(&owner_qualified) && owner_qualified != class_name
         {
-            let result = call_builtin_async_impl(&owner_qualified, args, output_count).await?;
+            let result =
+                call_builtin_async_impl(&owner_qualified, args, output_count, context.cloned())
+                    .await?;
             return Ok::<Option<Value>, RuntimeError>(Some(result));
         }
         Ok::<Option<Value>, RuntimeError>(None)
@@ -938,16 +974,55 @@ fn normalize_constructor_result(
     }
 }
 
+/// Direct embedding call with no session binding authority. Entering a
+/// runtime's poll-local scope does not change this selection contract; session
+/// callers must use `call_builtin_async_in_context`.
 pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
-    call_builtin_async_impl(name, args, None).await
+    call_builtin_async_impl(name, args, None, None).await
 }
 
+/// Session-owned entrypoint. Binding selection, preparation and execution all
+/// receive this same authority; poll-local scope serves existing subordinate
+/// APIs without becoming the selection mechanism.
+pub async fn call_builtin_async_in_context(
+    context: &crate::context::RuntimeContext,
+    name: &str,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    context
+        .scope(call_builtin_async_impl(
+            name,
+            args,
+            None,
+            Some(context.clone()),
+        ))
+        .await
+}
+
+/// Direct embedding call with no session binding authority. Use the
+/// in-context variant when the call belongs to a VM, native, or foreign session.
 pub async fn call_builtin_async_with_outputs(
     name: &str,
     args: &[Value],
     output_count: usize,
 ) -> Result<Value, RuntimeError> {
-    call_builtin_async_impl(name, args, Some(output_count)).await
+    call_builtin_async_impl(name, args, Some(output_count), None).await
+}
+
+pub async fn call_builtin_async_with_outputs_in_context(
+    context: &crate::context::RuntimeContext,
+    name: &str,
+    args: &[Value],
+    output_count: usize,
+) -> Result<Value, RuntimeError> {
+    context
+        .scope(call_builtin_async_impl(
+            name,
+            args,
+            Some(output_count),
+            Some(context.clone()),
+        ))
+        .await
 }
 
 /// Invoke the implementation already selected for this invocation. Re-resolving
@@ -956,22 +1031,35 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
     binding: crate::builtin::RuntimeBuiltinBinding,
     args: &[Value],
     output_count: usize,
+    context: Option<crate::context::RuntimeContext>,
 ) -> Result<Value, RuntimeError> {
     let name = binding.identity.builtin.name;
     let _output_guard = crate::output_count::push_output_count(Some(output_count));
-    if let Some(result) = try_distributed_builtin(name, args, Some(output_count)).await? {
+    if let Some(result) =
+        try_distributed_builtin(name, args, Some(output_count), context.as_ref()).await?
+    {
         return Ok(result);
     }
     if let Some(result) =
-        try_call_registered_instance_method(name, args, Some(output_count)).await?
+        try_call_registered_instance_method(name, args, Some(output_count), context.as_ref())
+            .await?
     {
         return compatibility_checked_builtin_result(name, args, result);
     }
-    let prepared =
-        preparation::prepare_selected(SelectedBindingOrigin::CanonicalOrScoped, name, args).await?;
-    let result =
-        selected_execution::execute(binding.implementation, prepared.as_deref().unwrap_or(args))
-            .await?;
+    let prepared = preparation::prepare_selected(
+        SelectedBindingOrigin::CanonicalOrScoped,
+        name,
+        args,
+        context.as_ref(),
+    )
+    .await?;
+    let result = selected_execution::execute(
+        SelectedImplementation::Canonical(binding.implementation),
+        prepared.as_deref().unwrap_or(args),
+        context,
+        Some(output_count),
+    )
+    .await?;
     compatibility_checked_builtin_result(name, args, result)
 }
 

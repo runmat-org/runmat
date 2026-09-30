@@ -51,7 +51,7 @@ fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
     let callable = Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".into()))
         .expect("external handle should parse");
     assert_eq!(
-        block_on(callable.call(&[Value::Num(4.0)])).unwrap(),
+        block_on(callable.call(None, &[Value::Num(4.0)])).unwrap(),
         Value::Num(8.0)
     );
 }
@@ -76,7 +76,7 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
     }))
     .expect("closure callback should parse");
     assert_eq!(
-        block_on(callable.call(&[Value::Num(4.0)])).unwrap(),
+        block_on(callable.call(None, &[Value::Num(4.0)])).unwrap(),
         Value::Num(9.0)
     );
 }
@@ -101,7 +101,7 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
         captures: vec![Value::Num(5.0)],
     }))
     .expect("closure callback should parse");
-    let value = block_on(callable.call(&[Value::Num(4.0)])).expect("closure call");
+    let value = block_on(callable.call(None, &[Value::Num(4.0)])).expect("closure call");
     assert_eq!(value, Value::Num(9.0));
 }
 

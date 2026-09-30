@@ -77,6 +77,7 @@ pub(super) async fn execute(
         .unwrap_or(pool.workers)
         .max(1);
     let scheduled_inputs = crate::interpreter::parallel_placement::prepare(
+        &context.runtime,
         executable,
         &inputs,
         pool.backend,
@@ -505,7 +506,8 @@ async fn assemble_sliced_results(
                         ));
                     };
                     for contribution in &contributions.data {
-                        accumulator = runmat_runtime::parallel::reduction::combine(
+                        accumulator = runmat_runtime::parallel::reduction::combine_in_context(
+                            Some(&context.runtime),
                             *operator,
                             accumulator,
                             contribution.clone(),

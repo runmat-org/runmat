@@ -5,7 +5,8 @@ use super::{CallableCallError, MappedCallable};
 
 impl MappedCallable {
     pub(crate) async fn invoke(&self, arguments: &[Value]) -> Result<Value, CallableCallError> {
-        self.invoke_with_outputs(arguments, 1).await
+        self.invoke_with_outputs_in_context(None, arguments, 1)
+            .await
     }
 
     pub(crate) async fn invoke_with_outputs(
@@ -13,25 +14,41 @@ impl MappedCallable {
         arguments: &[Value],
         requested_outputs: usize,
     ) -> Result<Value, CallableCallError> {
+        self.invoke_with_outputs_in_context(None, arguments, requested_outputs)
+            .await
+    }
+
+    pub(crate) async fn invoke_with_outputs_in_context(
+        &self,
+        context: Option<&crate::context::RuntimeContext>,
+        arguments: &[Value],
+        requested_outputs: usize,
+    ) -> Result<Value, CallableCallError> {
         match self {
             Self::Builtin { identity } => {
-                invoke_builtin(identity.name, arguments, requested_outputs).await
+                invoke_builtin(context, identity.name, arguments, requested_outputs).await
             }
-            Self::DynamicName { name } => invoke_dynamic(name, arguments, requested_outputs).await,
+            Self::DynamicName { name } => {
+                invoke_dynamic(context, name, arguments, requested_outputs).await
+            }
             Self::ExternalName { name } => {
                 invoke_external(name, arguments, requested_outputs).await
             }
-            Self::Closure(closure) => invoke_closure(closure, arguments, requested_outputs).await,
+            Self::Closure(closure) => {
+                invoke_closure(context, closure, arguments, requested_outputs).await
+            }
         }
     }
 }
 
 async fn invoke_builtin(
+    context: Option<&crate::context::RuntimeContext>,
     name: &'static str,
     arguments: &[Value],
     requested_outputs: usize,
 ) -> Result<Value, CallableCallError> {
     invoke_resolved(
+        context,
         runmat_types::CallableIdentity::Builtin(runmat_types::BuiltinId(name.into())),
         name,
         arguments,
@@ -41,11 +58,13 @@ async fn invoke_builtin(
 }
 
 async fn invoke_dynamic(
+    context: Option<&crate::context::RuntimeContext>,
     name: &str,
     arguments: &[Value],
     requested_outputs: usize,
 ) -> Result<Value, CallableCallError> {
     invoke_resolved(
+        context,
         runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(name.into())),
         name,
         arguments,
@@ -55,6 +74,7 @@ async fn invoke_dynamic(
 }
 
 async fn invoke_resolved(
+    context: Option<&crate::context::RuntimeContext>,
     identity: runmat_types::CallableIdentity,
     name: &str,
     arguments: &[Value],
@@ -71,9 +91,7 @@ async fn invoke_resolved(
             .map(crate::call::arguments::project_legacy_builtin_value_abi)
             .map_err(CallableCallError::Runtime);
     }
-    crate::call_builtin_async_with_outputs(name, arguments, requested_outputs)
-        .await
-        .map_err(CallableCallError::Runtime)
+    invoke_builtin_dispatch(context, name, arguments, requested_outputs).await
 }
 
 async fn invoke_external(
@@ -97,6 +115,7 @@ async fn invoke_external(
 }
 
 async fn invoke_closure(
+    context: Option<&crate::context::RuntimeContext>,
     closure: &runmat_value::Closure,
     arguments: &[Value],
     requested_outputs: usize,
@@ -127,7 +146,26 @@ async fn invoke_closure(
                 .map_err(CallableCallError::Runtime);
         }
     }
-    crate::call_builtin_async_with_outputs(&closure.function_name, &merged, requested_outputs)
-        .await
-        .map_err(CallableCallError::Runtime)
+    invoke_builtin_dispatch(context, &closure.function_name, &merged, requested_outputs).await
+}
+
+async fn invoke_builtin_dispatch(
+    context: Option<&crate::context::RuntimeContext>,
+    name: &str,
+    arguments: &[Value],
+    requested_outputs: usize,
+) -> Result<Value, CallableCallError> {
+    let result = match context {
+        Some(context) => {
+            crate::call_builtin_async_with_outputs_in_context(
+                context,
+                name,
+                arguments,
+                requested_outputs,
+            )
+            .await
+        }
+        None => crate::call_builtin_async_with_outputs(name, arguments, requested_outputs).await,
+    };
+    result.map_err(CallableCallError::Runtime)
 }

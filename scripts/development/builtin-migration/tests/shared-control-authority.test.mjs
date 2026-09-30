@@ -303,7 +303,7 @@ function fixtureControls() {
           function: "alpha_builtin",
           variant: "default",
           builtin_path: "builtins::alpha",
-          native_symbol: "runmat_builtin_binding_v1_616c706861_64656661756c74",
+          native_symbol: "runmat_builtin_binding_v2_616c706861_64656661756c74",
         }],
       },
       constant: { kind: "none", reason: "no-constant-form" },

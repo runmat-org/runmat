@@ -117,13 +117,10 @@ pub(super) async fn complete(
                 let requested_outputs = call.invocation.requested_outputs();
                 let result = match call.invocation {
                     runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
-                        runtime
-                            .scope(
-                                runmat_runtime::call::descriptor::execute_callable_descriptor(
-                                    descriptor,
-                                ),
-                            )
-                            .await
+                        runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(
+                            &runtime, descriptor,
+                        )
+                        .await
                     }
                     runmat_runtime::execution::DeferredInvocation::Program { .. } => {
                         Err(runmat_runtime::runtime_error::semantic_error(

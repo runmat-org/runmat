@@ -285,14 +285,12 @@ impl IsolatedNativeFfiClient {
                     }
                 }
             }
-            let result = runtime
-                .scope(crate::call_feval_async_with_outputs(
-                    callable, &arguments, 1,
-                ))
-                .await
-                .map_err(|error| {
-                    wire_error("RunMat:NativeFFI:CallbackFailed", error.to_string())
-                })?;
+            let result =
+                crate::call_feval_async_with_outputs_in_context(&runtime, callable, &arguments, 1)
+                    .await
+                    .map_err(|error| {
+                        wire_error("RunMat:NativeFFI:CallbackFailed", error.to_string())
+                    })?;
             let host_value = crate::gather_if_needed_async(&result)
                 .await
                 .map_err(|error| wire_error("RunMat:NativeFFI:ValueGather", error.to_string()))?;

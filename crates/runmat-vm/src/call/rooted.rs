@@ -11,6 +11,7 @@ pub(crate) fn root_values<'a>(
 }
 
 pub(crate) async fn execute_callable_descriptor(
+    runtime: &runmat_runtime::context::RuntimeContext,
     descriptor: CallableDescriptor,
 ) -> Result<ValueSequence, RuntimeError> {
     let callable = match &descriptor.target {
@@ -18,19 +19,25 @@ pub(crate) async fn execute_callable_descriptor(
         CallableTarget::Resolved { .. } => None,
     };
     let _roots = root_values(descriptor.args.iter().chain(callable))?;
-    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor).await
+    runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(runtime, descriptor)
+        .await
 }
 
-pub(crate) async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+pub(crate) async fn call_builtin_async(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    name: &str,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
     let _roots = root_values(args)?;
-    runmat_runtime::call_builtin_async(name, args).await
+    runmat_runtime::call_builtin_async_in_context(runtime, name, args).await
 }
 
 pub(crate) async fn call_builtin_async_with_outputs(
+    runtime: &runmat_runtime::context::RuntimeContext,
     name: &str,
     args: &[Value],
     outputs: usize,
 ) -> Result<Value, RuntimeError> {
     let _roots = root_values(args)?;
-    runmat_runtime::call_builtin_async_with_outputs(name, args, outputs).await
+    runmat_runtime::call_builtin_async_with_outputs_in_context(runtime, name, args, outputs).await
 }
