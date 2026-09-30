@@ -19,7 +19,7 @@ macro_rules! layer_documentation {
             sections: &[
                 BuiltinDocumentationSection { heading: "Layer metadata", paragraphs: &[
                     $detail,
-                    "The result is a host layer object. `Name` and `Description` are text; additional name-value options become object properties. The object can be stored in a layer graph. Only the supported execution layer kinds and options are consumed by `forward`; constructing metadata does not imply that every toolbox layer executes in a network.",
+                    "The result is a host layer object. `Name` and `Description` are text. Recognized name-value options are stored under their canonical property names; unknown, duplicate, and cross-layer option names are rejected. A layer graph can retain recognized options that are not yet executable by `forward` or training.",
                 ] },
                 BuiltinDocumentationSection { heading: "Placement and validation", paragraphs: &[
                     "The constructor validates required sizes and host option syntax before downloading option values. Valid resident option values are gathered to build the host metadata object. It does not execute a GPU kernel. Invalid host text options reject without downloading earlier resident values.",
@@ -36,7 +36,7 @@ macro_rules! layer_documentation {
             example_exemption: None,
             faqs: &[
                 BuiltinDocumentationFaq { question: "Does constructing the layer run a model or GPU kernel?", answer: "No. This call creates a host layer object; model execution is a separate operation." },
-                BuiltinDocumentationFaq { question: "Are all toolbox layer options implemented by forward?", answer: "No. Extra options can be retained as metadata, but only supported layer kinds and properties participate in execution." },
+                BuiltinDocumentationFaq { question: "Are all recognized layer options implemented by forward?", answer: "No. Constructor acceptance records canonical options but does not establish an executable network form. Pending operational options require separate execution admission." },
             ],
             links: &[SOURCE, BuiltinDocumentationLink { label: "layerGraph", target: BuiltinDocumentationLinkTarget::Builtin("layerGraph") }],
             media: &[],

@@ -1,4 +1,8 @@
 use super::*;
+use runmat_builtins::{DeepLearningLayerKind, DeepLearningLayerOption};
+use std::collections::BTreeMap;
+
+mod options;
 
 pub(in crate::builtins) fn layer_object(
     class_name: runmat_types::StaticClassIdentity,
@@ -13,54 +17,56 @@ pub(in crate::builtins) fn layer_object(
         .collect::<Vec<_>>();
     let mut name = String::new();
     let mut description = String::new();
-    let mut extra = parse_name_values(rest, function)?;
-    if let Some(value) = extra.remove("name") {
+    let kind = DeepLearningLayerKind::from_identity(&class_name.owned())
+        .ok_or_else(|| deep_learning_error(function, format!("{function}: unknown layer class")))?;
+    let mut extra = parse_layer_options(&rest, kind, function)?;
+    if let Some(value) = extra.remove(&DeepLearningLayerOption::Name) {
         name = scalar_text(&value, function)?;
     }
-    if let Some(value) = extra.remove("description") {
+    if let Some(value) = extra.remove(&DeepLearningLayerOption::Description) {
         description = scalar_text(&value, function)?;
     }
     owned_properties.push(("Type".to_string(), Value::String(type_name.to_string())));
     owned_properties.push(("Name".to_string(), Value::String(name)));
     owned_properties.push(("Description".to_string(), Value::String(description)));
     for (key, value) in extra {
-        owned_properties.push((canonical_property_name(&key), value));
+        owned_properties.push((key.canonical_name().to_string(), value));
     }
     Ok(object_with_identity(class_name, owned_properties))
 }
 
-pub(super) fn canonical_property_name(name: &str) -> String {
-    match name.to_ascii_lowercase().as_str() {
-        "biaslearnratefactor" => "BiasLearnRateFactor",
-        "biasl2factor" => "BiasL2Factor",
-        "biasinitializer" => "BiasInitializer",
-        "weightslearnratefactor" => "WeightsLearnRateFactor",
-        "weightsl2factor" => "WeightsL2Factor",
-        "weightsinitializer" => "WeightsInitializer",
-        "inputnames" => "InputNames",
-        "outputnames" => "OutputNames",
-        "padding" => "Padding",
-        "stride" => "Stride",
-        "dilationfactor" => "DilationFactor",
-        "numchannels" => "NumChannels",
-        "hasstateinputs" => "HasStateInputs",
-        "hasstateoutputs" => "HasStateOutputs",
-        "outputmode" => "OutputMode",
-        "stateactivationfunction" => "StateActivationFunction",
-        "gateactivationfunction" => "GateActivationFunction",
-        "normalization" => "Normalization",
-        "splitcomplexinputs" => "SplitComplexInputs",
-        "weights" => "Weights",
-        "bias" => "Bias",
-        "classes" => "Classes",
-        "epsilon" => "Epsilon",
-        "alphalearnratefactor" => "AlphaLearnRateFactor",
-        "betalearnratefactor" => "BetaLearnRateFactor",
-        "offset" => "Offset",
-        "scale" => "Scale",
-        other => other,
+pub(super) fn parse_layer_options(
+    args: &[Value],
+    kind: DeepLearningLayerKind,
+    function: &'static str,
+) -> BuiltinResult<BTreeMap<DeepLearningLayerOption, Value>> {
+    if !args.len().is_multiple_of(2) {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: name-value options must be paired"),
+        ));
     }
-    .to_string()
+    let mut parsed = BTreeMap::new();
+    for pair in args.chunks_exact(2) {
+        let name = scalar_text(&pair[0], function)?;
+        let option = kind.option(&name).ok_or_else(|| {
+            deep_learning_error(
+                function,
+                format!("{function}: {name} is not a supported option for this layer"),
+            )
+        })?;
+        options::validate(kind, option, &pair[1], function)?;
+        if parsed.insert(option, pair[1].clone()).is_some() {
+            return Err(deep_learning_error(
+                function,
+                format!(
+                    "{function}: {} is specified more than once",
+                    option.canonical_name()
+                ),
+            ));
+        }
+    }
+    Ok(parsed)
 }
 
 pub(in crate::builtins) fn parse_name_values(

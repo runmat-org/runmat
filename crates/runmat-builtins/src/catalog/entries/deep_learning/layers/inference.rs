@@ -1,65 +1,15 @@
+use super::schema::{
+    DeepLearningLayerKind as LayerKind, DeepLearningLayerOption, DeepLearningNormalizationAxes,
+};
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
-    BuiltinCatalogEntry, BILSTM_LAYER_CLASS, CLASSIFICATION_OUTPUT_LAYER_CLASS,
-    CONVOLUTION_1D_LAYER_CLASS, ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS,
-    FULLY_CONNECTED_LAYER_CLASS, GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS,
-    LAYER_NORMALIZATION_LAYER_CLASS, LSTM_LAYER_CLASS, REGRESSION_OUTPUT_LAYER_CLASS,
-    RELU_LAYER_CLASS, SEQUENCE_INPUT_LAYER_CLASS, SOFTMAX_LAYER_CLASS,
+    BuiltinCatalogEntry,
 };
 use runmat_types::{
     CallInference, CallRequest, LiteralValue, NumericClass, NumericDomain, NumericFact, ObjectFact,
-    ShapeFact, StaticClassIdentity, StorageFact, ValueFact, ValueKindFact,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
-use std::collections::BTreeMap;
-
-#[derive(Clone, Copy)]
-enum LayerKind {
-    FullyConnected,
-    FeatureInput,
-    SequenceInput,
-    Relu,
-    Elu,
-    Softmax,
-    Classification,
-    Regression,
-    LayerNorm,
-    GlobalPool,
-    Lstm,
-    Bilstm,
-    Convolution,
-}
-
-impl LayerKind {
-    fn class(self) -> StaticClassIdentity {
-        match self {
-            Self::FullyConnected => FULLY_CONNECTED_LAYER_CLASS,
-            Self::FeatureInput => FEATURE_INPUT_LAYER_CLASS,
-            Self::SequenceInput => SEQUENCE_INPUT_LAYER_CLASS,
-            Self::Relu => RELU_LAYER_CLASS,
-            Self::Elu => ELU_LAYER_CLASS,
-            Self::Softmax => SOFTMAX_LAYER_CLASS,
-            Self::Classification => CLASSIFICATION_OUTPUT_LAYER_CLASS,
-            Self::Regression => REGRESSION_OUTPUT_LAYER_CLASS,
-            Self::LayerNorm => LAYER_NORMALIZATION_LAYER_CLASS,
-            Self::GlobalPool => GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS,
-            Self::Lstm => LSTM_LAYER_CLASS,
-            Self::Bilstm => BILSTM_LAYER_CLASS,
-            Self::Convolution => CONVOLUTION_1D_LAYER_CLASS,
-        }
-    }
-
-    fn required_sizes(self) -> usize {
-        match self {
-            Self::FullyConnected
-            | Self::FeatureInput
-            | Self::SequenceInput
-            | Self::Lstm
-            | Self::Bilstm => 1,
-            Self::Convolution => 2,
-            _ => 0,
-        }
-    }
-}
+use std::collections::{BTreeMap, BTreeSet};
 
 fn number() -> ValueFact {
     ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
@@ -162,6 +112,36 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, kind: LayerKind) ->
             ));
         }
     }
+    let mut positional_dimension = None;
+    if matches!(kind, LayerKind::FullyConnected) {
+        if let Some(dimension) = request.arguments.get(1) {
+            let documented_text = request
+                .literals
+                .literal_string_at(1)
+                .is_some_and(|value| value.eq_ignore_ascii_case("spatial-channel"));
+            if documented_text || matches!(dimension.kind, ValueKindFact::Numeric(_)) {
+                options_start = Some(2);
+                positional_dimension = Some(dimension.clone());
+                if !documented_text
+                    && (!numeric_possible(dimension, true)
+                        || request
+                            .literals
+                            .literal_args
+                            .get(1)
+                            .is_some_and(invalid_dimension_literal))
+                {
+                    diagnostics.push(argument_error(
+                        "RM-DL-LAYER-DIMENSION",
+                        "operation dimension must be spatial-channel or a positive integer",
+                        1,
+                    ));
+                }
+            } else if matches!(dimension.kind, ValueKindFact::Unknown) {
+                // Could be a dynamic option name or the positional dimension.
+                options_start = None;
+            }
+        }
+    }
     if let Some(start) = options_start {
         if request.arguments.len() >= start && !(request.arguments.len() - start).is_multiple_of(2)
         {
@@ -171,6 +151,12 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, kind: LayerKind) ->
                 request.arguments.len().saturating_sub(1),
             ));
         }
+    }
+    let mut supplied_options = BTreeMap::new();
+    let mut seen_options = BTreeSet::new();
+    if let Some(dimension) = positional_dimension {
+        seen_options.insert(DeepLearningLayerOption::OperationDimension);
+        supplied_options.insert("OperationDimension".into(), dimension);
     }
     for index in
         (options_start.unwrap_or(request.arguments.len())..request.arguments.len()).step_by(2)
@@ -186,11 +172,79 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, kind: LayerKind) ->
                 index,
             ));
         }
-        if request
-            .literals
-            .literal_string_at(index)
-            .is_some_and(|name| matches!(name.as_str(), "name" | "description"))
-        {
+        let known_option = request.literals.literal_string_at(index).and_then(|name| {
+            let option = kind.option(&name);
+            if option.is_none() {
+                diagnostics.push(argument_error(
+                    "RM-DL-LAYER-OPTION-UNKNOWN",
+                    "option is not accepted by this layer constructor",
+                    index,
+                ));
+            }
+            option
+        });
+        if let Some(option) = known_option {
+            if !seen_options.insert(option) {
+                diagnostics.push(argument_error(
+                    "RM-DL-LAYER-OPTION-DUPLICATE",
+                    "layer option is specified more than once",
+                    index,
+                ));
+            }
+            if let Some(value) = request.arguments.get(index + 1) {
+                supplied_options.insert(option.canonical_name().into(), value.clone());
+                if matches!(
+                    option,
+                    DeepLearningLayerOption::OutputMode
+                        | DeepLearningLayerOption::NormalizationDimension
+                        | DeepLearningLayerOption::StateActivationFunction
+                        | DeepLearningLayerOption::GateActivationFunction
+                ) && !matches!(
+                    value.kind,
+                    ValueKindFact::Unknown | ValueKindFact::String | ValueKindFact::Character
+                ) {
+                    diagnostics.push(argument_error(
+                        "RM-DL-LAYER-OPTION-VALUE",
+                        "option value must be one of the documented text choices",
+                        index + 1,
+                    ));
+                }
+                if let (Some(text), Some(choices)) = (
+                    request.literals.literal_string_at(index + 1),
+                    option.text_values_for(kind),
+                ) {
+                    if !choices
+                        .iter()
+                        .any(|choice| text.eq_ignore_ascii_case(choice))
+                    {
+                        diagnostics.push(argument_error(
+                            "RM-DL-LAYER-OPTION-VALUE",
+                            "option text is not accepted by this layer",
+                            index + 1,
+                        ));
+                    }
+                }
+                if matches!(kind, LayerKind::LayerNormalization)
+                    && matches!(option, DeepLearningLayerOption::OperationDimension)
+                    && request
+                        .literals
+                        .literal_string_at(index + 1)
+                        .is_some_and(|text| {
+                            DeepLearningNormalizationAxes::from_name(&text).is_none()
+                        })
+                {
+                    diagnostics.push(argument_error(
+                        "RM-DL-LAYER-OPTION-VALUE",
+                        "normalization axis is not accepted by this layer",
+                        index + 1,
+                    ));
+                }
+            }
+        }
+        if matches!(
+            known_option,
+            Some(DeepLearningLayerOption::Name | DeepLearningLayerOption::Description)
+        ) {
             if let Some(value) = request.arguments.get(index + 1) {
                 if !matches!(
                     value.kind,
@@ -233,12 +287,13 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, kind: LayerKind) ->
         LayerKind::Lstm | LayerKind::Bilstm => {
             properties.insert("NumHiddenUnits".into(), number());
         }
-        LayerKind::Convolution => {
+        LayerKind::Convolution1D => {
             properties.insert("FilterSize".into(), number());
             properties.insert("NumFilters".into(), number());
         }
         _ => {}
     }
+    properties.extend(supplied_options);
     let result = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
@@ -270,10 +325,10 @@ layer_inference!(sequence_input, SequenceInput);
 layer_inference!(relu, Relu);
 layer_inference!(elu, Elu);
 layer_inference!(softmax, Softmax);
-layer_inference!(classification, Classification);
-layer_inference!(regression, Regression);
-layer_inference!(layer_norm, LayerNorm);
-layer_inference!(global_pool, GlobalPool);
+layer_inference!(classification, ClassificationOutput);
+layer_inference!(regression, RegressionOutput);
+layer_inference!(layer_norm, LayerNormalization);
+layer_inference!(global_pool, GlobalAveragePooling1D);
 layer_inference!(lstm, Lstm);
 layer_inference!(bilstm, Bilstm);
-layer_inference!(convolution, Convolution);
+layer_inference!(convolution, Convolution1D);

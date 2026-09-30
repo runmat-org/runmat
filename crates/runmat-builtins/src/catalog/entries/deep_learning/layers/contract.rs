@@ -5,7 +5,8 @@ const OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Variadic,
     default: None,
-    description: "Paired layer property names and values.",
+    description:
+        "Paired, layer-specific recognized property names and values; duplicate names are invalid.",
 };
 const SIZE: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "size",
@@ -24,6 +25,14 @@ const OUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 const NO_SIZES: [BuiltinParamDescriptor; 1] = [OPTIONS];
 const ONE_SIZE: [BuiltinParamDescriptor; 2] = [SIZE, OPTIONS];
 const TWO_SIZES: [BuiltinParamDescriptor; 3] = [SIZE, SIZE, OPTIONS];
+const FC_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "dim",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Positive operation dimension or spatial-channel (R2026a positional form).",
+};
+const FC_WITH_DIM: [BuiltinParamDescriptor; 3] = [SIZE, FC_DIM, OPTIONS];
 const OPTIONAL_ALPHA: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "alpha",
@@ -157,12 +166,24 @@ macro_rules! layer_descriptor {
     };
 }
 
-layer_descriptor!(
-    FULLY_CONNECTED_SIGNATURES,
-    FULLY_CONNECTED_DESCRIPTOR,
-    "layer = fullyConnectedLayer(outputSize, Name, Value)",
-    ONE_SIZE
-);
+const FULLY_CONNECTED_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "layer = fullyConnectedLayer(outputSize, Name, Value)",
+        inputs: &ONE_SIZE,
+        outputs: &OUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "layer = fullyConnectedLayer(outputSize, dim, Name, Value)",
+        inputs: &FC_WITH_DIM,
+        outputs: &OUT,
+    },
+];
+pub const FULLY_CONNECTED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FULLY_CONNECTED_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORS,
+};
 layer_descriptor!(
     FEATURE_INPUT_SIGNATURES,
     FEATURE_INPUT_DESCRIPTOR,

@@ -1,9 +1,9 @@
 use runmat_builtins::{
-    BILSTM_LAYER_CLASS, CLASSIFICATION_OUTPUT_LAYER_CLASS, CONVOLUTION_1D_LAYER_CLASS,
-    ELU_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS,
-    GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS, LAYER_NORMALIZATION_LAYER_CLASS, LSTM_LAYER_CLASS,
-    REGRESSION_OUTPUT_LAYER_CLASS, RELU_LAYER_CLASS, SEQUENCE_INPUT_LAYER_CLASS,
-    SOFTMAX_LAYER_CLASS,
+    DeepLearningLayerKind, DeepLearningLayerOption, BILSTM_LAYER_CLASS,
+    CLASSIFICATION_OUTPUT_LAYER_CLASS, CONVOLUTION_1D_LAYER_CLASS, ELU_LAYER_CLASS,
+    FEATURE_INPUT_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS, GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS,
+    LAYER_NORMALIZATION_LAYER_CLASS, LSTM_LAYER_CLASS, REGRESSION_OUTPUT_LAYER_CLASS,
+    RELU_LAYER_CLASS, SEQUENCE_INPUT_LAYER_CLASS, SOFTMAX_LAYER_CLASS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -11,8 +11,8 @@ use runmat_value::Value;
 use crate::{gather_if_needed_async, BuiltinResult};
 
 use super::{
-    deep_learning_error, gather_args, layer_object, numeric_scalar, numeric_vector,
-    parse_name_values, positive_usize, scalar_text, tensor_value,
+    deep_learning_error, gather_args, layer_object, numeric_scalar, numeric_vector, positive_usize,
+    scalar_text, tensor_value,
 };
 
 // Structural layer dimensions are exposed as double-valued metadata. Admit
@@ -50,9 +50,14 @@ async fn admitted_layer_options(
 }
 
 fn preflight_layer_options(rest: &[Value], function: &'static str) -> BuiltinResult<()> {
-    let options = parse_name_values(rest.to_vec(), function)?;
+    let kind = DeepLearningLayerKind::from_constructor(function)
+        .expect("layer constructor must have a catalog identity");
+    let options = super::layer_helpers::parse_layer_options(rest, kind, function)?;
     for (name, value) in options {
-        if matches!(name.as_str(), "name" | "description") {
+        if matches!(
+            name,
+            DeepLearningLayerOption::Name | DeepLearningLayerOption::Description
+        ) {
             scalar_text(&value, function)?;
         }
     }
@@ -91,11 +96,23 @@ pub(super) async fn fully_connected_layer_builtin(
         &runmat_builtins::LAYER_INVALID_INPUT,
     )?;
     let output_size = metadata_size(&output_size, "fullyConnectedLayer", "outputSize")?;
+    let mut options = rest;
+    if options.first().is_some_and(|value| {
+        is_numeric_scalar(value)
+            || scalar_text(value, "fullyConnectedLayer")
+                .is_ok_and(|text| text.eq_ignore_ascii_case("spatial-channel"))
+    }) {
+        let dimension = options.remove(0);
+        options.splice(
+            0..0,
+            [Value::String("OperationDimension".into()), dimension],
+        );
+    }
     layer_object(
         FULLY_CONNECTED_LAYER_CLASS,
         "Fully Connected",
         vec![("OutputSize", Value::Num(output_size as f64))],
-        admitted_layer_options(rest, "fullyConnectedLayer").await?,
+        admitted_layer_options(options, "fullyConnectedLayer").await?,
         "fullyConnectedLayer",
     )
 }

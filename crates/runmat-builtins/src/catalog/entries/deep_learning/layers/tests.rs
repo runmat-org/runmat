@@ -152,6 +152,112 @@ fn invalid_sizes_and_known_invalid_options_are_diagnosed() {
 }
 
 #[test]
+fn known_layer_options_have_canonical_static_facts_and_reject_unknown_keys() {
+    let accepted = infer(
+        &SEQUENCE_INPUT_CATALOG_ENTRY,
+        vec![numeric(), character(), numeric()],
+        vec![
+            LiteralValue::Number(3.0),
+            LiteralValue::Character("MinLength".into()),
+            LiteralValue::Number(2.0),
+        ],
+    );
+    assert!(
+        accepted.diagnostics.is_empty(),
+        "{:?}",
+        accepted.diagnostics
+    );
+    let ValueKindFact::Object(object) = &accepted.outputs[0].kind else {
+        panic!("layer")
+    };
+    assert_eq!(
+        object.properties["MinLength"].numeric().unwrap().class,
+        NumericClass::Double
+    );
+
+    let rejected = infer(
+        &RELU_CATALOG_ENTRY,
+        vec![character(), numeric()],
+        vec![
+            LiteralValue::Character("Padding".into()),
+            LiteralValue::Number(1.0),
+        ],
+    );
+    assert!(rejected
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-LAYER-OPTION-UNKNOWN"));
+
+    let duplicate = infer(
+        &RELU_CATALOG_ENTRY,
+        vec![character(), character(), character(), character()],
+        vec![
+            LiteralValue::Character("Name".into()),
+            LiteralValue::Character("one".into()),
+            LiteralValue::Character("name".into()),
+            LiteralValue::Character("two".into()),
+        ],
+    );
+    assert!(duplicate
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-LAYER-OPTION-DUPLICATE"));
+}
+
+#[test]
+fn fully_connected_positional_dimension_has_a_canonical_fact() {
+    let result = infer(
+        &FULLY_CONNECTED_CATALOG_ENTRY,
+        vec![numeric(), character(), character(), character()],
+        vec![
+            LiteralValue::Number(4.0),
+            LiteralValue::Character("spatial-channel".into()),
+            LiteralValue::Character("Name".into()),
+            LiteralValue::Character("dense".into()),
+        ],
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let ValueKindFact::Object(object) = &result.outputs[0].kind else {
+        panic!("layer")
+    };
+    assert_eq!(
+        object.properties["OperationDimension"].kind,
+        ValueKindFact::Character
+    );
+    assert_eq!(FULLY_CONNECTED_DESCRIPTOR.signatures.len(), 2);
+}
+
+#[test]
+fn layer_normalization_axis_uses_the_closed_typed_choices() {
+    let accepted = infer(
+        &LAYER_NORM_CATALOG_ENTRY,
+        vec![character(), character()],
+        vec![
+            LiteralValue::Character("OperationDimension".into()),
+            LiteralValue::Character("batch-excluded".into()),
+        ],
+    );
+    assert!(
+        accepted.diagnostics.is_empty(),
+        "{:?}",
+        accepted.diagnostics
+    );
+
+    let rejected = infer(
+        &LAYER_NORM_CATALOG_ENTRY,
+        vec![character(), character()],
+        vec![
+            LiteralValue::Character("OperationDimension".into()),
+            LiteralValue::Character("unrecognized-axis".into()),
+        ],
+    );
+    assert!(rejected
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-LAYER-OPTION-VALUE"));
+}
+
+#[test]
 fn feature_vector_extension_and_integer_control_forms_are_declared() {
     assert_eq!(FEATURE_INPUT_CATALOG_ENTRY.extensions.len(), 1);
     assert_eq!(
