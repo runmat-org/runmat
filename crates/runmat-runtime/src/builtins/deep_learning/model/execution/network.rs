@@ -43,14 +43,12 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
         let Some(Value::Cell(layers)) = request.network.properties.get("Layers") else {
             unreachable!("whole-network admission validated Layers")
         };
-        let route = gpu::GpuForwardLayout::from_axes(plan.input_axes()).filter(|layout| {
-            gpu::validate_gpu_forward_layers(&layers.data, handle, *layout, function).is_ok()
-        });
-        if let Some(layout) = route {
+        let route = gpu::admit_gpu_forward(&layers.data, handle, plan.input_axes(), function)?;
+        if let gpu::GpuForwardAdmission::Ready(layout) = &route {
             if let Some(output) = evaluate_network_gpu(
                 request.network,
                 handle,
-                layout,
+                *layout,
                 request.output_layout,
                 function,
             )
@@ -76,11 +74,15 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
             }
         }
         if runmat_accelerate_api::handle_is_explicit(handle) {
+            let detail = match route {
+                gpu::GpuForwardAdmission::UnsupportedCapability(reason) => reason,
+                gpu::GpuForwardAdmission::Ready(_) => {
+                    "provider does not implement a required resident operation".into()
+                }
+            };
             return Err(unsupported_error(
                 function,
-                format!(
-                    "{function}: this network has no resident execution route for an explicit gpuArray input"
-                ),
+                format!("{function}: {detail} for an explicit gpuArray input"),
             ));
         }
     }

@@ -227,3 +227,173 @@ fn singleton_axis_transpose_accepts_a_valid_resident_view() {
         assert_eq!(gathered.materialize_f64(), source);
     });
 }
+
+#[test]
+fn gpu_route_distinguishes_missing_kernel_from_invalid_feature_geometry() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                shape: &[2, 3],
+            })
+            .unwrap();
+        let axes = AxisPlan::new(
+            runmat_builtins::DeepLearningAxisLayout::parse("BC", 2).unwrap(),
+            input.shape(),
+        )
+        .unwrap();
+        let sequence = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+        assert!(matches!(
+            super::admit_gpu_forward(&[sequence], &input, &axes, "forward").unwrap(),
+            super::GpuForwardAdmission::UnsupportedCapability(_)
+        ));
+
+        let feature = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+        let relu = block_on(relu_layer_builtin(vec![])).unwrap();
+        provider.reset_telemetry();
+        let error =
+            super::admit_gpu_forward(&[feature, relu], &input, &axes, "forward").unwrap_err();
+        assert!(error.message().contains("3 features"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn gpu_route_keeps_supported_fully_connected_execution_ready() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[2, 2],
+            })
+            .unwrap();
+        let axes = AxisPlan::new(
+            runmat_builtins::DeepLearningAxisLayout::parse("BC", 2).unwrap(),
+            input.shape(),
+        )
+        .unwrap();
+        let Value::Object(network) = dense_network() else {
+            panic!("network object expected")
+        };
+        let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+            panic!("network layers expected")
+        };
+        provider.reset_telemetry();
+        assert!(matches!(
+            super::admit_gpu_forward(&layers.data, &input, &axes, "forward").unwrap(),
+            super::GpuForwardAdmission::Ready(super::GpuForwardLayout::BatchChannels)
+        ));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+    });
+}
+
+#[test]
+fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[2, 2],
+            })
+            .unwrap();
+        let foreign = TestAllocationOwner::new()
+            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let axes = AxisPlan::new(
+            runmat_builtins::DeepLearningAxisLayout::parse("BC", 2).unwrap(),
+            input.shape(),
+        )
+        .unwrap();
+        let feature = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+        let dense = object_with_identity(
+            FULLY_CONNECTED_LAYER_CLASS,
+            vec![
+                ("OutputSize", Value::Num(1.0)),
+                ("Weights", Value::GpuTensor(foreign.handle.clone())),
+            ],
+        );
+        provider.reset_telemetry();
+        let error =
+            super::admit_gpu_forward(&[feature, dense], &input, &axes, "forward").unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:gpu:ProviderPayloadMismatch")
+        );
+        assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+        assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(foreign.probe.retirements(), 0);
+    });
+}
+
+#[test]
+fn malformed_unary_and_binary_results_retire_their_returned_lease() {
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0],
+                shape: &[2, 2],
+            })
+            .unwrap();
+        let owner = TestAllocationOwner::new();
+        let unary = owner
+            .allocate_zeroed(
+                vec![2, 2],
+                NumericElementType::F64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
+            .unwrap();
+        let unary_probe = unary.probe;
+        let error = super::validate_unary_forward_result(unary.handle, &input, provider, "forward")
+            .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:gpu:ProviderPayloadMismatch")
+        );
+        assert_eq!(unary_probe.retirements(), 1);
+
+        let binary = owner
+            .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let binary_probe = binary.probe;
+        let error = super::validate_binary_forward_result(
+            binary.handle,
+            &input,
+            &input,
+            provider,
+            &[2, 2],
+            runmat_accelerate_api::ProviderPrecision::F64,
+            "forward",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:gpu:ProviderPayloadMismatch")
+        );
+        assert_eq!(binary_probe.retirements(), 1);
+        let alias_error = super::validate_binary_forward_result(
+            input.clone(),
+            &input,
+            &input,
+            provider,
+            &[2, 2],
+            runmat_accelerate_api::ProviderPrecision::F64,
+            "forward",
+        )
+        .unwrap_err();
+        assert_eq!(
+            alias_error.identifier(),
+            Some("RunMat:gpu:ProviderPayloadMismatch")
+        );
+        let retained =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(input)).unwrap();
+        assert_eq!(retained.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
+    });
+}
