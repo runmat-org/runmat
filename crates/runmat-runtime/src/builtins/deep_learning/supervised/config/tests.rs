@@ -29,7 +29,7 @@ fn training_controls_have_one_typed_admission_authority() {
         ("Plots", Value::String("training-progress".into())),
         ("Mystery", Value::Num(1.0)),
     ] {
-        let value = options("adam", &[extra.clone()]);
+        let value = options("adam", std::slice::from_ref(&extra));
         let error = TrainingConfig::from_value(&value, "trainnet")
             .err()
             .unwrap();
