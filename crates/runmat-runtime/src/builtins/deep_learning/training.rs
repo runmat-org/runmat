@@ -122,7 +122,7 @@ fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(super) async fn dlfeval_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
-    let Some((function, rest)) = args.split_first() else {
+    let Some(function) = args.first() else {
         return Err(super::errors::descriptor_error(
             "dlfeval",
             "dlfeval: expected a function handle followed by input arguments",

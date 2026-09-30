@@ -313,7 +313,20 @@ pub fn unary_gpu_output_matches(
     provider: &'static dyn AccelProvider,
     contract: UnaryGpuOutputContract,
 ) -> bool {
-    output.shape() == input.shape()
+    unary_gpu_output_matches_shape(output, input, provider, input.shape(), contract)
+}
+
+/// Validate a unary result whose operation changes logical shape, such as
+/// transpose or reshape. Ownership and numerical class checks are identical
+/// to shape-preserving unary operations.
+pub fn unary_gpu_output_matches_shape(
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    provider: &'static dyn AccelProvider,
+    shape: &[usize],
+    contract: UnaryGpuOutputContract,
+) -> bool {
+    output.shape() == shape
         && output.device_id() == input.device_id()
         && contract.alias.accepts(output, input)
         // Device namespace was checked above and by exact_provider_for_handle.

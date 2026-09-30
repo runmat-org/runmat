@@ -133,3 +133,13 @@ fn unpolled_future_cannot_publish_an_output_or_download_inputs() {
     assert!(left.allocation_lease().validate_live().is_ok());
     assert!(right.allocation_lease().validate_live().is_ok());
 }
+
+#[test]
+fn empty_operands_cannot_trigger_an_infallible_huge_output_allocation() {
+    let geometry = Geometry::new(&[usize::MAX, 0], &[0, 1]).unwrap();
+    let error = multiply_typed::<f64>(&[], &[], geometry).unwrap_err();
+    assert!(error.to_string().contains("output allocation failed"));
+    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+        &error
+    ));
+}

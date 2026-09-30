@@ -56,11 +56,11 @@ pub(super) fn multiply(
         let data = match (left, right) {
             (InProcessNumericData::F32(left), InProcessNumericData::F32(right)) => {
                 geometry.validate_payloads(left.len(), right.len())?;
-                InProcessNumericData::F32(multiply_typed(left, right, geometry))
+                InProcessNumericData::F32(multiply_typed(left, right, geometry)?)
             }
             (InProcessNumericData::F64(left), InProcessNumericData::F64(right)) => {
                 geometry.validate_payloads(left.len(), right.len())?;
-                InProcessNumericData::F64(multiply_typed(left, right, geometry))
+                InProcessNumericData::F64(multiply_typed(left, right, geometry)?)
             }
             _ => {
                 return Err(unsupported_provider_operation(
@@ -120,11 +120,15 @@ impl Geometry {
     }
 }
 
-fn multiply_typed<T>(left: &[T], right: &[T], geometry: Geometry) -> Vec<T>
+fn multiply_typed<T>(left: &[T], right: &[T], geometry: Geometry) -> Result<Vec<T>>
 where
     T: Copy + Default + AddAssign + Mul<Output = T>,
 {
-    let mut output = vec![T::default(); geometry.output_len];
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(geometry.output_len)
+        .map_err(|error| anyhow!("matmul: output allocation failed: {error}"))?;
+    output.resize(geometry.output_len, T::default());
     for column in 0..geometry.columns {
         for row in 0..geometry.rows {
             let mut sum = T::default();
@@ -136,5 +140,5 @@ where
             output[row + column * geometry.rows] = sum;
         }
     }
-    output
+    Ok(output)
 }

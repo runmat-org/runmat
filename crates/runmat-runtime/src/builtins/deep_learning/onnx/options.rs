@@ -42,10 +42,29 @@ pub(super) fn parse_export_options(
 }
 
 pub(super) fn validate_option(key: &str, value: &Value) -> BuiltinResult<()> {
-    if matches!(value, Value::GpuTensor(_))
-        && matches!(key, "opsetversion" | "batchsize" | "verbose")
-    {
-        return Ok(());
+    if let Value::GpuTensor(handle) = value {
+        if matches!(key, "opsetversion" | "batchsize" | "verbose") {
+            let scalar = handle
+                .shape()
+                .iter()
+                .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
+                == Some(1);
+            let numeric = runmat_accelerate_api::handle_precision(handle).is_some()
+                || runmat_accelerate_api::handle_integer_type(handle).is_some();
+            let logical = runmat_accelerate_api::handle_is_logical(handle);
+            let admitted_class = if logical { key == "verbose" } else { numeric };
+            if scalar
+                && runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real
+                && admitted_class
+            {
+                return Ok(());
+            }
+            return Err(deep_learning_error(
+                EXPORT_ONNX,
+                format!("exportONNXNetwork: {key} must have supported real scalar storage"),
+            ));
+        }
     }
     match key {
         "opsetversion" => {

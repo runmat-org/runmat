@@ -47,6 +47,11 @@ pub(in crate::builtins) fn logical_scalar(
     if let Value::Bool(flag) = value {
         return Ok(*flag);
     }
+    if let Value::LogicalArray(array) = value {
+        if array.data.len() == 1 {
+            return Ok(array.data[0] != 0);
+        }
+    }
     if let Some(integer) = crate::builtins::common::tensor::scalar_integer_value(value) {
         return match integer.try_to_i64() {
             Some(0) => Ok(false),

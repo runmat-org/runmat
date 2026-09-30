@@ -70,7 +70,7 @@ pub(super) async fn admit_export_call(mut args: Vec<Value>) -> BuiltinResult<Adm
             for property in ["Weights", "Bias"] {
                 let value = object
                     .properties
-                    .get(property)
+                    .remove(property)
                     .expect("preflight verified learnable property");
                 let gathered = gather_learnable(value).await?;
                 object.properties.insert(property.to_string(), gathered);
@@ -184,27 +184,24 @@ fn preflight_layers(
     Ok(())
 }
 
-fn learnable_data(value: &Value) -> BuiltinResult<&Value> {
+async fn gather_learnable(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => {
-            object.properties.get("Data").ok_or_else(|| {
+        Value::Object(mut object) if object.class_name.is(super::DLARRAY_CLASS) => {
+            let data = object.properties.remove("Data").ok_or_else(|| {
                 deep_learning_error(EXPORT_ONNX, "exportONNXNetwork: dlarray is missing Data")
-            })
-        }
-        other => Ok(other),
-    }
-}
-
-async fn gather_learnable(value: &Value) -> BuiltinResult<Value> {
-    match value {
-        Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => {
-            let data = learnable_data(value)?;
-            let gathered = crate::gather_if_needed_async(data).await?;
-            let mut object = object.clone();
+            })?;
+            let gathered = gather_owned_data(data).await?;
             object.properties.insert("Data".to_string(), gathered);
             Ok(Value::Object(object))
         }
-        _ => Ok(crate::gather_if_needed_async(value).await?),
+        other => gather_owned_data(other).await,
+    }
+}
+
+async fn gather_owned_data(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(handle) => crate::gather_if_needed_async(&Value::GpuTensor(handle)).await,
+        other => Ok(other),
     }
 }
 
@@ -274,6 +271,62 @@ mod tests {
             assert!(error.message.contains("OutputSize"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
+    }
+
+    #[test]
+    fn resident_nonscalar_options_reject_before_any_export_download() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            for option in ["OpsetVersion", "BatchSize", "Verbose"] {
+                let control = provider
+                    .upload(&HostTensorView {
+                        data: &[1.0, 2.0],
+                        shape: &[1, 2],
+                    })
+                    .unwrap();
+                let weights = provider
+                    .upload(&HostTensorView {
+                        data: &[1.0, 2.0],
+                        shape: &[1, 2],
+                    })
+                    .unwrap();
+                let net = network(Value::GpuTensor(weights.clone()), Value::Num(1.0));
+                provider.reset_telemetry();
+                let error = futures::executor::block_on(admit_export_call(vec![
+                    net,
+                    Value::String("unused.onnx".into()),
+                    Value::String(option.into()),
+                    Value::GpuTensor(control.clone()),
+                ]))
+                .unwrap_err();
+                assert!(
+                    error.message.contains("scalar storage"),
+                    "{option}: {error}"
+                );
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+                for retained in [control, weights] {
+                    let actual =
+                        crate::builtins::common::test_support::gather(Value::GpuTensor(retained))
+                            .unwrap();
+                    assert_eq!(actual.materialize_f64(), vec![1.0, 2.0]);
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn verbose_accepts_scalar_host_logical_storage() {
+        let options = parse_export_options(std::collections::BTreeMap::from([(
+            "verbose".into(),
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+        )]))
+        .unwrap();
+        assert_eq!(
+            options.opset_version,
+            ExportOptions::default().opset_version
+        );
+        let nonscalar =
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap());
+        assert!(validate_option("verbose", &nonscalar).is_err());
     }
 
     #[test]

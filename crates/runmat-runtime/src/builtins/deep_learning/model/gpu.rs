@@ -1,6 +1,8 @@
 //! Provider-resident forward execution and result ownership validation.
 use super::*;
 
+mod parameters;
+
 /// Execute the subset of sequential feed-forward networks for which every
 /// operation is available through the acceleration provider. The complete
 /// layer sequence is validated before the first upload or dispatch so a
@@ -251,61 +253,11 @@ async fn fully_connected_forward_gpu(
             format!("{function}: input has no floating precision"),
         )
     })?;
-    let dtype = match precision {
-        ProviderPrecision::F32 => NumericDType::F32,
-        ProviderPrecision::F64 => NumericDType::F64,
-    };
-    // Only these consumed parameters cross the host boundary. Other network
-    // metadata and learnables retain their original residency and owner.
-    let mut prepared = layer.clone();
-    for name in ["Weights", "Bias"] {
-        let value = layer
-            .properties
-            .get(name)
-            .expect("preflight admitted parameter");
-        prepared
-            .properties
-            .insert(name.into(), crate::gather_if_needed_async(value).await?);
-    }
-    let weights = tensor_property(&prepared, "Weights", function)?;
-    let bias = tensor_property(&prepared, "Bias", function)?;
-    let weights_transposed = transpose_2d(&weights, function)?;
-    let weights_transposed = floating_tensor_from_f64(
-        tensor::tensor_values_f64(&weights_transposed),
-        weights_transposed.shape,
-        dtype,
-        function,
-    )?;
-    let bias_row = floating_tensor_from_f64(
-        tensor::tensor_values_f64(&bias),
-        vec![1, weights.rows],
-        dtype,
-        function,
-    )?;
-    let weights_handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
-        provider,
-        &weights_transposed,
-        &[&current],
-    )
-    .map_err(|err| {
-        provider_failure(
-            function,
-            "weight upload",
-            ProviderExecutionError::from_source(err),
-        )
-    })?;
-    let bias_handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
-        provider,
-        &bias_row,
-        &[&current, &weights_handle],
-    )
-    .map_err(|err| {
-        provider_failure(
-            function,
-            "bias upload",
-            ProviderExecutionError::from_source(err),
-        )
-    })?;
+    let width = fully_connected_output_width(layer, current.shape()[1], function)?;
+    let weights_handle = parameters::prepare_weights(provider, layer, &current, function).await?;
+    let bias_handle =
+        parameters::prepare_bias(provider, layer, &current, &weights_handle, width, function)
+            .await?;
     let product = provider
         .matmul(&current, &weights_handle)
         .await
@@ -315,7 +267,7 @@ async fn fully_connected_forward_gpu(
         &current,
         &weights_handle,
         provider,
-        &[current.shape()[0], weights.rows],
+        &[current.shape()[0], width],
         precision,
         function,
     )?;
@@ -328,7 +280,7 @@ async fn fully_connected_forward_gpu(
         &product,
         &bias_handle,
         provider,
-        &[current.shape()[0], weights.rows],
+        &[current.shape()[0], width],
         precision,
         function,
     )?;

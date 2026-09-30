@@ -40,7 +40,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Placement",
             paragraphs: &[
-                "Supported real, two-dimensional GPU-backed `dlarray` inputs execute through provider operations and return resident `dlarray` Data. Consumed fully connected parameters are selectively prepared: resident weights and bias are downloaded, converted to the input's single/double precision, and uploaded to the input provider. Other network properties are not downloaded. Unsupported resident forms are rejected explicitly; provider-resident autodiff is not provided by this path. Plain resident numeric inputs currently gather to the host numerical path and return a host array. Provider operations can suspend; a resident result retains its provider ownership.",
+                "Supported real, two-dimensional GPU-backed `dlarray` inputs execute through provider operations and return resident `dlarray` Data. Fully connected weights and bias already resident in the input's single/double precision stay on the provider: weights are transposed and bias is reshaped without host transfers. Host parameters are converted and uploaded; resident parameters with a different precision currently cross the host conversion boundary. Other network properties are not downloaded. Unsupported resident forms are rejected explicitly; provider-resident autodiff is not provided by this path. Plain resident numeric inputs currently gather to the host numerical path and return a host array. Provider operations can suspend; a resident result retains its provider ownership.",
             ],
         },
     ],
