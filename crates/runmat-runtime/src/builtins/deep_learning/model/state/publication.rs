@@ -8,6 +8,51 @@ pub(in crate::builtins::deep_learning) struct StateUpdate {
     pub value: Tensor,
 }
 
+/// Check every returned State row before a network execution is recorded on
+/// the autodiff tape. Publication remains the only owner of the output table.
+pub(in crate::builtins::deep_learning) fn admit_updates(
+    network: &ObjectInstance,
+    updates: &[StateUpdate],
+    function: &'static str,
+) -> BuiltinResult<()> {
+    let rows = view(network, function)?;
+    let mut supplied = HashMap::with_capacity(updates.len());
+    for update in updates {
+        if supplied
+            .insert((update.layer_index, update.role), &update.value)
+            .is_some()
+        {
+            return Err(deep_learning_error(
+                function,
+                format!("{function}: duplicate execution State update"),
+            ));
+        }
+    }
+    let mut batch = None;
+    for row in rows {
+        let update = supplied.remove(&(row.key.layer_index, row.key.role));
+        let candidate = update.map(|tensor| Value::Tensor(tensor.clone()));
+        let value = candidate.as_ref().unwrap_or(row.value);
+        schema::validate_value(value, &row.key, function)?;
+        if let Some(current) = schema::batch_size(value, function)? {
+            if batch.is_some_and(|prior| prior != current) {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: State rows have inconsistent batch dimensions"),
+                ));
+            }
+            batch = Some(current);
+        }
+    }
+    if !supplied.is_empty() {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: execution State update has no canonical row"),
+        ));
+    }
+    Ok(())
+}
+
 /// Publish one canonical table only after every supplied row is admitted.
 /// Unchanged values share their existing storage; updates move their payloads.
 pub(in crate::builtins::deep_learning) fn publish_updates(
@@ -155,8 +200,20 @@ mod tests {
                 update(StateRole::CellState, vec![3, 2], 2.0),
             ],
         ] {
+            assert!(admit_updates(&network, &updates, "forward").is_err());
             assert!(publish_updates(&network, updates, "forward").is_err());
             assert_eq!(project(&network, "forward").unwrap(), before);
         }
+    }
+
+    #[test]
+    fn admits_complete_returned_state_without_replacing_input_rows() {
+        let network = super::super::tests::recurrent_network();
+        let updates = [
+            update(StateRole::HiddenState, vec![3, 2], 2.0),
+            update(StateRole::CellState, vec![3, 2], 4.0),
+        ];
+        assert!(admit_updates(&network, &updates, "forward").is_ok());
+        assert_eq!(view(&network, "forward").unwrap().len(), 2);
     }
 }

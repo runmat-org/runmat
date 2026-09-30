@@ -1,5 +1,5 @@
 //! Public network output presentation after one admitted numerical execution.
-//! The immutable execution trace is recorded before any wrapper is built.
+//! State updates are admitted before the immutable execution trace is recorded.
 
 use runmat_value::{ObjectInstance, Value};
 
@@ -45,6 +45,9 @@ pub(super) fn present(
         state_updates,
         trace,
     } = outcome;
+    if requested_state {
+        state::admit_updates(network, &state_updates, function)?;
+    }
     let (data, state_updates, nodes) = if trace.is_some() {
         let value = match data {
             Value::Tensor(tensor) => HostValue::Real(tensor),

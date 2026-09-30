@@ -9,7 +9,9 @@ mod table;
 mod publication;
 mod tape_values;
 
-pub(in crate::builtins::deep_learning) use publication::{publish_updates, StateUpdate};
+pub(in crate::builtins::deep_learning) use publication::{
+    admit_updates, publish_updates, StateUpdate,
+};
 pub(in crate::builtins::deep_learning) use schema::{StateKey, StateRole};
 pub(in crate::builtins::deep_learning) use tape_values::{
     install_annotated, map_result_values, stage_annotated,
