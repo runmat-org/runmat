@@ -65,6 +65,19 @@ impl<'a> HostNetworkPlan<'a> {
     pub(in crate::builtins::deep_learning) fn parameter_views(&self) -> &[ParameterView<'a>] {
         &self.parameters
     }
+
+    pub(in crate::builtins::deep_learning) fn state_views(&self) -> &[StateView<'a>] {
+        &self.state
+    }
+
+    pub(in crate::builtins::deep_learning) fn execution_precision(&self) -> NumericDType {
+        self.precision
+    }
+
+    pub(in crate::builtins::deep_learning) fn function(&self) -> &'static str {
+        self.function
+    }
+
     /// A bounded first resident route. The same admitted geometry is used by
     /// host execution; future composed device stages consume these steps.
     pub(in crate::builtins::deep_learning) fn standalone_normalization(
