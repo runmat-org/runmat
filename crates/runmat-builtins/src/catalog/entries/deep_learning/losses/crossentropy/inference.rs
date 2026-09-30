@@ -86,7 +86,7 @@ fn check_literal_option(
         CrossentropyOptionKey::WeightsFormat => {
             let positional = request.arguments.get(2).is_some_and(|value| {
                 matches!(
-                    value.kind,
+                    &value.kind,
                     ValueKindFact::Numeric(_) | ValueKindFact::Logical
                 )
             });
