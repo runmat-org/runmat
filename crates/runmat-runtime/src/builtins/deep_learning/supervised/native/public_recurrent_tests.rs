@@ -202,3 +202,23 @@ fn public_bilstm_single_train_network_applies_directional_gate_factors() {
 fn public_bilstm_double_trainnet_applies_directional_gate_factors() {
     one_public_step(false, true, true);
 }
+
+#[test]
+fn public_lstm_single_train_network_applies_candidate_gate_factor() {
+    one_public_step(true, false, false);
+}
+
+#[test]
+fn public_lstm_double_trainnet_applies_candidate_gate_factor() {
+    one_public_step(false, false, true);
+}
+
+#[test]
+fn public_bilstm_single_trainnet_applies_directional_gate_factors() {
+    one_public_step(true, true, true);
+}
+
+#[test]
+fn public_bilstm_double_train_network_applies_directional_gate_factors() {
+    one_public_step(false, true, false);
+}
