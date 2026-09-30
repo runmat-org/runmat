@@ -6,7 +6,7 @@
   "description": "`lstmLayer(numHiddenUnits)` creates metadata for LSTM recurrent layers.",
   "behaviors": [
     "`numHiddenUnits` must be a positive integer.",
-    "`OutputMode` defaults to `last` and can be overridden with a name-value option.",
+    "`OutputMode` defaults to `sequence` and can be set to `last` with a name-value option.",
     "Common recurrent-layer options are preserved as properties."
   ],
   "examples": [
@@ -23,5 +23,5 @@
       "output": "Layer compatibility object."
     }
   },
-  "gpu_residency": "Layer construction is host metadata work and has no provider kernel."
+  "gpu_residency": "Layer construction is host metadata work. Host network execution uses a native recurrent kernel; explicit resident inputs are not silently gathered into that host route."
 }

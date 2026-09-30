@@ -32,4 +32,6 @@ pub(in crate::builtins::deep_learning) fn reverse(
 }
 
 #[cfg(test)]
+mod default_tests;
+#[cfg(test)]
 mod tests;

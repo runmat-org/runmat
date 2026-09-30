@@ -1,9 +1,9 @@
 use runmat_builtins::{
-    DeepLearningLayerKind, DeepLearningLayerOption, BILSTM_LAYER_CLASS,
+    DeepLearningLayerKind, DeepLearningLayerOption, LayerOptionDefault,
     CLASSIFICATION_OUTPUT_LAYER_CLASS, CONVOLUTION_1D_LAYER_CLASS, ELU_LAYER_CLASS,
     FEATURE_INPUT_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS, GLOBAL_AVERAGE_POOLING_1D_LAYER_CLASS,
-    LAYER_NORMALIZATION_LAYER_CLASS, LSTM_LAYER_CLASS, REGRESSION_OUTPUT_LAYER_CLASS,
-    RELU_LAYER_CLASS, SEQUENCE_INPUT_LAYER_CLASS, SOFTMAX_LAYER_CLASS,
+    LAYER_NORMALIZATION_LAYER_CLASS, REGRESSION_OUTPUT_LAYER_CLASS, RELU_LAYER_CLASS,
+    SEQUENCE_INPUT_LAYER_CLASS, SOFTMAX_LAYER_CLASS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -55,6 +55,20 @@ async fn admitted_layer_options(
         }
     }
     Ok(options)
+}
+
+fn declared_constructor_default(
+    kind: DeepLearningLayerKind,
+    option: DeepLearningLayerOption,
+) -> Value {
+    match option
+        .default_for(kind)
+        .expect("constructor property must have a declared catalog default")
+    {
+        LayerOptionDefault::Text(value) => Value::String(value.into()),
+        LayerOptionDefault::Number(value) => Value::Num(value),
+        LayerOptionDefault::Bool(value) => Value::Bool(value),
+    }
 }
 
 fn preflight_layer_options(rest: &[Value], function: &'static str) -> BuiltinResult<()> {
@@ -328,7 +342,7 @@ pub(super) async fn lstm_layer_builtin(
     super::errors::admit_single_output("lstmLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     recurrent_layer(
         "lstmLayer",
-        LSTM_LAYER_CLASS,
+        DeepLearningLayerKind::Lstm,
         "LSTM",
         num_hidden_units,
         rest,
@@ -348,7 +362,7 @@ pub(super) async fn bilstm_layer_builtin(
     super::errors::admit_single_output("bilstmLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     recurrent_layer(
         "bilstmLayer",
-        BILSTM_LAYER_CLASS,
+        DeepLearningLayerKind::Bilstm,
         "BiLSTM",
         num_hidden_units,
         rest,
@@ -358,18 +372,21 @@ pub(super) async fn bilstm_layer_builtin(
 
 pub(super) async fn recurrent_layer(
     function: &'static str,
-    class_name: runmat_types::StaticClassIdentity,
+    kind: DeepLearningLayerKind,
     type_name: &str,
     num_hidden_units: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let units = metadata_size(&num_hidden_units, function, "numHiddenUnits")?;
     layer_object(
-        class_name,
+        kind.class(),
         type_name,
         vec![
             ("NumHiddenUnits", Value::Num(units as f64)),
-            ("OutputMode", Value::String("sequence".into())),
+            (
+                DeepLearningLayerOption::OutputMode.canonical_name(),
+                declared_constructor_default(kind, DeepLearningLayerOption::OutputMode),
+            ),
         ],
         admitted_layer_options(rest, function).await?,
         function,
@@ -398,8 +415,20 @@ pub(super) async fn convolution_1d_layer_builtin(
         vec![
             ("FilterSize", Value::Num(filter_size as f64)),
             ("NumFilters", Value::Num(num_filters as f64)),
-            ("Stride", Value::Num(1.0)),
-            ("Padding", Value::String("same".into())),
+            (
+                DeepLearningLayerOption::Stride.canonical_name(),
+                declared_constructor_default(
+                    DeepLearningLayerKind::Convolution1D,
+                    DeepLearningLayerOption::Stride,
+                ),
+            ),
+            (
+                DeepLearningLayerOption::Padding.canonical_name(),
+                declared_constructor_default(
+                    DeepLearningLayerKind::Convolution1D,
+                    DeepLearningLayerOption::Padding,
+                ),
+            ),
         ],
         admitted_layer_options(rest, "convolution1dLayer").await?,
         "convolution1dLayer",

@@ -6,7 +6,7 @@
   "description": "`convolution1dLayer(filterSize,numFilters)` creates metadata for 1-D convolution layers.",
   "behaviors": [
     "`filterSize` and `numFilters` must be positive integers.",
-    "`Stride` defaults to `1`; `Padding` defaults to `same`.",
+    "`Stride` defaults to `1`; `Padding` defaults to zero on both sides. Set `Padding` to `same` or `causal` explicitly to use those modes.",
     "Common convolution name-value options are preserved as properties."
   ],
   "examples": [
@@ -23,5 +23,5 @@
       "output": "Layer compatibility object."
     }
   },
-  "gpu_residency": "Layer construction is host metadata work. Convolution execution kernels remain future training/inference work."
+  "gpu_residency": "Layer construction is host metadata work. Host network execution uses the convolution kernel; explicit resident inputs are not silently gathered into that host route."
 }
