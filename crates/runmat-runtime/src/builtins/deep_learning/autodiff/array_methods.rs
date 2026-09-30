@@ -244,10 +244,9 @@ pub(crate) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResu
         "sum",
         &runmat_builtins::DLARRAY_METHOD_INVALID_INPUT,
     )?;
-    if rest
-        .iter()
-        .any(|value| !matches!(value, Value::String(text) if text.eq_ignore_ascii_case("all")))
-    {
+    if rest.iter().any(|value| {
+        !super::super::scalar_text(value, "sum").is_ok_and(|text| text.eq_ignore_ascii_case("all"))
+    }) {
         return Err(deep_learning_error(
             "sum",
             "sum: dlarray autodiff supports scalar reductions over all elements",

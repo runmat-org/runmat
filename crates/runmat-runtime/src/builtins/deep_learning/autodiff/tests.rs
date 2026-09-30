@@ -301,6 +301,34 @@ fn repeated_single_target_gradients_accumulate_without_class_mismatch() {
 }
 
 #[test]
+fn sum_all_accepts_character_and_string_text_with_typed_gradients() {
+    for option in [
+        Value::String("all".into()),
+        Value::CharArray(runmat_value::CharArray::new_row("all")),
+        Value::StringArray(runmat_value::StringArray::new(vec!["ALL".into()], vec![1, 1]).unwrap()),
+    ] {
+        let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+        let input = annotate_dlarray_value(wrapped(Value::Tensor(
+            Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(),
+        )))
+        .unwrap();
+        let squared = dlarray_times_builtin(input.clone(), input.clone()).unwrap();
+        let loss = dlarray_sum_builtin(squared, vec![option]).unwrap();
+        let Value::Object(gradient) =
+            futures::executor::block_on(dlgradient_builtin(loss, vec![input])).unwrap()
+        else {
+            panic!("dlarray gradient")
+        };
+        let Some(Value::Tensor(data)) = gradient.properties.get("Data") else {
+            panic!("gradient Data")
+        };
+        assert_eq!(data.numeric_dtype(), NumericDType::F32);
+        assert_eq!(data.shape, [1, 3]);
+        assert_eq!(data.materialize_f64(), [2.0, 4.0, 6.0]);
+    }
+}
+
+#[test]
 fn matrix_method_supports_scalar_multiplication_but_rejects_nd_matrices() {
     let mut right = ObjectInstance::new(DLARRAY_CLASS.to_string());
     right.properties.insert(
