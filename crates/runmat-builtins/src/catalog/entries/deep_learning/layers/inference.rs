@@ -193,6 +193,26 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry, kind: LayerKind) ->
             }
             if let Some(value) = request.arguments.get(index + 1) {
                 supplied_options.insert(option.canonical_name().into(), value.clone());
+                if let Some(gate_count) = kind
+                    .recurrent_gate_count()
+                    .filter(|_| option.is_recurrent_gate_factor())
+                {
+                    let scalar = value.shape.element_count() == Some(1);
+                    let documented_row = value
+                        .shape
+                        .known_dims()
+                        .is_some_and(|dims| dims.as_slice() == [Some(1), Some(gate_count)]);
+                    if !numeric_possible(value, false)
+                        || value.shape.element_count() == Some(0)
+                        || (value.shape.element_count().is_some() && !scalar && !documented_row)
+                    {
+                        diagnostics.push(argument_error(
+                            "RM-DL-LAYER-OPTION-VALUE",
+                            "recurrent gate factor must be a numeric scalar or a 1-by-4/1-by-8 row vector",
+                            index + 1,
+                        ));
+                    }
+                }
                 if matches!(
                     option,
                     DeepLearningLayerOption::OutputMode

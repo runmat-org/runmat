@@ -205,6 +205,34 @@ fn known_layer_options_have_canonical_static_facts_and_reject_unknown_keys() {
 }
 
 #[test]
+fn recurrent_gate_factor_facts_admit_only_scalar_or_documented_row_geometry() {
+    let factor = |shape| ValueFact { shape, ..numeric() };
+    for (entry, width) in [(&LSTM_CATALOG_ENTRY, 4), (&BILSTM_CATALOG_ENTRY, 8)] {
+        let arguments = |shape| vec![numeric(), character(), factor(shape)];
+        let literals = vec![
+            LiteralValue::Number(2.0),
+            LiteralValue::Character("InputWeightsLearnRateFactor".into()),
+            LiteralValue::Unknown,
+        ];
+        let row = infer(
+            entry,
+            arguments(ShapeFact::from(vec![Some(1), Some(width)])),
+            literals.clone(),
+        );
+        assert!(row.diagnostics.is_empty(), "{:?}", row.diagnostics);
+        let column = infer(
+            entry,
+            arguments(ShapeFact::from(vec![Some(width), Some(1)])),
+            literals,
+        );
+        assert!(column
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-DL-LAYER-OPTION-VALUE"));
+    }
+}
+
+#[test]
 fn fully_connected_positional_dimension_has_a_canonical_fact() {
     let result = infer(
         &FULLY_CONNECTED_CATALOG_ENTRY,

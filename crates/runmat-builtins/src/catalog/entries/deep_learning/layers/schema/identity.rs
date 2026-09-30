@@ -35,6 +35,14 @@ impl DeepLearningLayerKind {
         matches!(self, Self::ClassificationOutput | Self::RegressionOutput)
     }
 
+    pub const fn recurrent_gate_count(self) -> Option<usize> {
+        match self {
+            Self::Lstm => Some(4),
+            Self::Bilstm => Some(8),
+            _ => None,
+        }
+    }
+
     pub const ALL: [Self; 13] = [
         Self::FeatureInput,
         Self::SequenceInput,

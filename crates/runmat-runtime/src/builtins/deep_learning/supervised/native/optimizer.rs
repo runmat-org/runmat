@@ -17,7 +17,7 @@ use crate::builtins::deep_learning::{
 use crate::BuiltinResult;
 
 use super::super::{Solver, TrainingConfig};
-use super::factors::FactorPlan;
+use super::factors::{FactorPlan, NativeFactors};
 
 fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::RuntimeError {
     deep_learning_error(function, format!("{function}: {detail}"))
@@ -132,10 +132,6 @@ impl NativeOptimizer {
         let mut updates = Vec::with_capacity(admitted.len());
         for (key, value, gradient, dtype) in admitted {
             let factors = self.factors.get(&key, function)?;
-            let l2 = config.l2_regularization * factors.l2;
-            if !l2.is_finite() || l2 < 0.0 {
-                return Err(fail(function, "effective L2 factor is invalid"));
-            }
             if value.shape != gradient.shape || value.numeric_dtype() != dtype {
                 return Err(fail(function, "prepared parameter changed after admission"));
             }
@@ -144,6 +140,11 @@ impl NativeOptimizer {
                 NumericDType::F32 => {
                     let current = value.as_f32_slice().expect("admitted F32");
                     let gradient = gradient.as_f32_slice().expect("projected F32");
+                    let native_factors = factors.native::<f32>(
+                        config.learn_rate,
+                        config.l2_regularization,
+                        function,
+                    )?;
                     let slot = self
                         .slots
                         .entry(key.clone())
@@ -168,8 +169,7 @@ impl NativeOptimizer {
                         first,
                         second,
                         config,
-                        factors.learning,
-                        l2,
+                        &native_factors,
                         iteration,
                         function,
                     )?)
@@ -177,6 +177,11 @@ impl NativeOptimizer {
                 NumericDType::F64 => {
                     let current = value.as_f64_slice().expect("admitted F64");
                     let gradient = gradient.as_f64_slice().expect("projected F64");
+                    let native_factors = factors.native::<f64>(
+                        config.learn_rate,
+                        config.l2_regularization,
+                        function,
+                    )?;
                     let slot = self
                         .slots
                         .entry(key.clone())
@@ -201,8 +206,7 @@ impl NativeOptimizer {
                         first,
                         second,
                         config,
-                        factors.learning,
-                        l2,
+                        &native_factors,
                         iteration,
                         function,
                     )?)
@@ -223,8 +227,7 @@ fn step_values<T: crate::builtins::deep_learning::model::execution::host::numeri
     first: &mut [T],
     second: &mut [T],
     config: &TrainingConfig,
-    learning_factor: f64,
-    l2_coefficient: f64,
+    factors: &NativeFactors<T>,
     iteration: usize,
     function: &'static str,
 ) -> BuiltinResult<Vec<T>> {
@@ -235,19 +238,11 @@ fn step_values<T: crate::builtins::deep_learning::model::execution::host::numeri
     {
         return Err(fail(function, "optimizer slot geometry changed"));
     }
-    let rate = T::from_f64(config.learn_rate * learning_factor);
-    let regularization = T::from_f64(l2_coefficient);
     let momentum = T::from_f64(config.momentum);
     let beta1 = T::from_f64(config.gradient_decay_factor);
     let beta2 = T::from_f64(config.squared_gradient_decay_factor);
     let epsilon = T::from_f64(config.epsilon);
-    if !rate.is_finite()
-        || rate < T::zero()
-        || !regularization.is_finite()
-        || regularization < T::zero()
-        || !epsilon.is_finite()
-        || epsilon <= T::zero()
-    {
+    if !epsilon.is_finite() || epsilon <= T::zero() {
         return Err(fail(
             function,
             "optimizer controls are not representable in parameter precision",
@@ -266,6 +261,7 @@ fn step_values<T: crate::builtins::deep_learning::model::execution::host::numeri
         .map_err(|_| fail(function, "cannot reserve updated parameter storage"))?;
     for index in 0..current.len() {
         let value = current[index];
+        let (rate, regularization) = factors.at(index);
         let grad = gradient[index] + regularization * value;
         if !value.is_finite() || !grad.is_finite() {
             return Err(fail(
@@ -304,6 +300,7 @@ fn step_values<T: crate::builtins::deep_learning::model::execution::host::numeri
 
 #[cfg(test)]
 mod tests {
+    use super::super::factors::Factors;
     use super::*;
     use crate::builtins::deep_learning::supervised::{ShuffleMode, Solver};
 
@@ -323,6 +320,16 @@ mod tests {
         }
     }
 
+    fn native_factors<T: crate::builtins::deep_learning::model::execution::host::numeric::Real>(
+        config: &TrainingConfig,
+        learning: f64,
+        l2: f64,
+    ) -> NativeFactors<T> {
+        Factors::uniform(learning, l2)
+            .native(config.learn_rate, 1.0, "test")
+            .unwrap()
+    }
+
     #[test]
     fn l2_regularization_adds_weight_decay_to_native_sgdm_gradient() {
         let mut first = [0.0_f64];
@@ -333,8 +340,7 @@ mod tests {
             &mut first,
             &mut second,
             &config(Solver::Sgdm),
-            1.0,
-            0.5,
+            &native_factors(&config(Solver::Sgdm), 1.0, 0.5),
             1,
             "test",
         )
@@ -356,8 +362,7 @@ mod tests {
             &mut first,
             &mut second,
             &config,
-            1.0,
-            0.0,
+            &native_factors(&config, 1.0, 0.0),
             1,
             "test",
         )
@@ -378,8 +383,7 @@ mod tests {
             &mut first,
             &mut second,
             &config(Solver::Sgdm),
-            1.0,
-            0.0,
+            &native_factors(&config(Solver::Sgdm), 1.0, 0.0),
             1,
             "test",
         )
@@ -394,8 +398,7 @@ mod tests {
             &mut first,
             &mut second,
             &config(Solver::Adam),
-            1.0,
-            0.0,
+            &native_factors(&config(Solver::Adam), 1.0, 0.0),
             1,
             "test",
         )
@@ -412,8 +415,7 @@ mod tests {
             &mut first,
             &mut second,
             &config(Solver::Sgdm),
-            2.0,
-            0.5,
+            &native_factors(&config(Solver::Sgdm), 2.0, 0.5),
             1,
             "test",
         )
@@ -422,3 +424,7 @@ mod tests {
         assert!((result[0] - 1.2).abs() < 1.0e-6);
     }
 }
+
+#[cfg(test)]
+#[path = "optimizer/defaults_tests.rs"]
+mod defaults_tests;

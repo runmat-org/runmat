@@ -92,7 +92,13 @@ pub(super) fn validate(
         | O::ScaleLearnRateFactor
         | O::OffsetLearnRateFactor
         | O::ScaleL2Factor
-        | O::OffsetL2Factor => finite_scalar_or_deferred(value, function, label, Some(0.0), false)?,
+        | O::OffsetL2Factor => {
+            if kind.recurrent_gate_count().is_some() && option.is_recurrent_gate_factor() {
+                recurrent_factor(value, kind, function, label)?;
+            } else {
+                finite_scalar_or_deferred(value, function, label, Some(0.0), false)?;
+            }
+        }
         O::HasStateInputs | O::HasStateOutputs | O::SplitComplexInputs => {
             if let Value::GpuTensor(handle) = value {
                 if !handle.shape().iter().all(|dimension| *dimension == 1) {
@@ -221,6 +227,31 @@ fn finite_scalar_or_deferred(
     } else {
         Ok(())
     }
+}
+
+fn recurrent_factor(
+    value: &Value,
+    kind: DeepLearningLayerKind,
+    function: &'static str,
+    label: &str,
+) -> BuiltinResult<()> {
+    let count = kind
+        .recurrent_gate_count()
+        .ok_or_else(|| invalid_value(function, label))?;
+    if let Value::Tensor(tensor) = value {
+        if tensor.shape.as_slice() == [1, count] {
+            let values = numeric_values(value, function, label)?;
+            return if values
+                .iter()
+                .all(|factor| factor.is_finite() && *factor >= 0.0)
+            {
+                Ok(())
+            } else {
+                Err(invalid_value(function, label))
+            };
+        }
+    }
+    finite_scalar_or_deferred(value, function, label, Some(0.0), false)
 }
 
 fn validate_padding(value: &Value, function: &'static str) -> BuiltinResult<()> {

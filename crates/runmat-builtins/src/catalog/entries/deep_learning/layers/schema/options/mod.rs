@@ -91,6 +91,19 @@ pub enum LayerOptionDefault {
 }
 
 impl DeepLearningLayerOption {
+    pub const fn is_recurrent_gate_factor(self) -> bool {
+        use DeepLearningLayerOption as O;
+        matches!(
+            self,
+            O::BiasLearnRateFactor
+                | O::BiasL2Factor
+                | O::InputWeightsLearnRateFactor
+                | O::RecurrentWeightsLearnRateFactor
+                | O::InputWeightsL2Factor
+                | O::RecurrentWeightsL2Factor
+        )
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         use DeepLearningLayerOption as O;
         Some(match name.to_ascii_lowercase().as_str() {

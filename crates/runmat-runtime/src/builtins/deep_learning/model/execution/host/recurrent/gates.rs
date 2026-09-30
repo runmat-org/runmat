@@ -79,6 +79,35 @@ pub(super) fn gate_row(direction: usize, gate: Gate, unit: usize, hidden_size: u
     direction * 4 * hidden_size + gate.index() * hidden_size + unit
 }
 
+/// The row ordering shared by recurrent kernels and per-gate training factors.
+/// Each direction contains four contiguous hidden-unit blocks in gate order.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::builtins::deep_learning) struct RecurrentGateRows {
+    rows: usize,
+    hidden_size: usize,
+}
+
+impl RecurrentGateRows {
+    pub(in crate::builtins::deep_learning) fn for_layer(
+        rows: usize,
+        kind: runmat_builtins::DeepLearningLayerKind,
+    ) -> Option<Self> {
+        let blocks = kind.recurrent_gate_count()?;
+        let hidden_size = rows.checked_div(blocks)?;
+        (hidden_size > 0 && hidden_size.checked_mul(blocks) == Some(rows))
+            .then_some(Self { rows, hidden_size })
+    }
+
+    /// `index` is a column-major element index in any recurrent parameter.
+    pub(in crate::builtins::deep_learning) fn factor_index(self, index: usize) -> usize {
+        (index % self.rows) / self.hidden_size
+    }
+
+    pub(in crate::builtins::deep_learning) fn factor_count(self) -> usize {
+        self.rows / self.hidden_size
+    }
+}
+
 pub(super) fn state<T: Real>(kind: Activation, value: T) -> T {
     match kind {
         Activation::Tanh => value.tanh(),
