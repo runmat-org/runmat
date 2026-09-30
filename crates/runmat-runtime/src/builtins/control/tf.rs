@@ -21,7 +21,7 @@ use crate::builtins::control::tf_model::{
 };
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 
-mod methods;
+pub(in crate::builtins) mod methods;
 
 const BUILTIN_NAME: &str = "tf";
 const DEFAULT_VARIABLE: &str = "s";

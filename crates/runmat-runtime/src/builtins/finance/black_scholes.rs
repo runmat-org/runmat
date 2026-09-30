@@ -162,7 +162,7 @@ async fn blsprice_builtin(
     }
 }
 
-mod implied_volatility;
+pub(in crate::builtins) mod implied_volatility;
 #[cfg(test)]
 use implied_volatility::blsimpv_builtin;
 
