@@ -24,19 +24,21 @@ const DLUPDATE_MAX_DEPTH: usize = 256;
 pub(in crate::builtins::deep_learning) async fn dlupdate_builtin(
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let Some((function, rest)) = args.split_first() else {
+    let mut args = args.into_iter();
+    let Some(function) = args.next() else {
         return Err(deep_learning_error(
             "dlupdate",
             "dlupdate: expected a function handle followed by one or more parameter trees",
         ));
     };
-    if !is_function_handle(function) {
+    if !is_function_handle(&function) {
         return Err(deep_learning_error(
             "dlupdate",
             format!("dlupdate: expected a function handle, got {function:?}"),
         ));
     }
-    if rest.is_empty() {
+    let trees = args.collect::<Vec<_>>();
+    if trees.is_empty() {
         return Err(deep_learning_error(
             "dlupdate",
             "dlupdate: expected at least one parameter tree",
@@ -44,8 +46,8 @@ pub(in crate::builtins::deep_learning) async fn dlupdate_builtin(
     }
 
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
-    preflight::matching_trees(rest)?;
-    let outputs = dlupdate_node(function, rest, requested_outputs, 0).await?;
+    preflight::matching_trees(&trees)?;
+    let outputs = dlupdate_node(&function, &trees, requested_outputs, 0).await?;
     if requested_outputs == 0 {
         Ok(Value::OutputList(Vec::new()))
     } else if requested_outputs == 1 {

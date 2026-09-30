@@ -33,7 +33,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Layers and initialization",
             paragraphs: &[
                 "A layer object, cell collection, or layer graph can supply the layers. The supported forward sequence uses `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`. Branching graph connections, recurrent, convolutional, normalization, sequence and image-input layers, custom layers, and general training graphs are not executed by this constructor.",
-                "The result stores `Layers`, `LayerNames`, `InputNames`, `OutputNames`, `Connections`, `Learnables`, `State`, and `Initialized`. Supplied fully connected weights and bias are retained. With the default `Initialize=true`, missing weights receive deterministic values based on the preceding feature width and missing bias values are zero. `Initialize=false` retains missing parameters and marks the network uninitialized; `forward` requires the parameters before execution.",
+                "The result stores `Layers`, `LayerNames`, `InputNames`, `OutputNames`, `Connections`, `State`, and `Initialized`. `Learnables` is an editable table projected from the parameter values in `Layers`; it is not a second parameter store. Supplied fully connected weights and bias are retained. With the default `Initialize=true`, missing weights receive deterministic values based on the preceding feature width and missing bias values are zero. `Initialize=false` retains missing parameters and marks the network uninitialized; `forward` requires the parameters before execution.",
                 "The supported `OutputNames` option names the final layer of this single-output sequential network. Unknown options and a name that does not identify that final layer are rejected. InputNames is derived from the first layer, not an accepted constructor option.",
                 "A vector-valued feature input can be stored as layer metadata in RunMat mode, but this sequential forward implementation requires one feature dimension and rejects a vector width when it must execute or initialize a following fully connected layer.",
             ],
@@ -43,6 +43,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "Construction creates host metadata without downloading nested numeric learnables. A resident weight remains owned by its input layer until a consumer explicitly prepares that weight. The constructor does not run a GPU kernel or start a training tape.",
                 "Within `dlfeval`, supported fully connected learnables can be traced for `dlgradient` in custom training loops. This does not imply support for every network architecture or provider-resident training operation.",
+                "Assigning a complete `Learnables` table validates parameter identities, storage, and dimensions before changing the value network. Empty parameter values mark it uninitialized; replacing every required value can initialize it. Parameter values in GPU storage remain resident during projection and assignment.",
             ],
         },
     ],
@@ -71,6 +72,19 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
                 source: "assert(~net.Initialized); assert(numel(net.Layers) == 2);",
+            },
+        },
+        BuiltinExample {
+            id: "edit-learnables",
+            title: "Edit the Learnables table",
+            program: "layers = {featureInputLayer(2, 'Name', 'input'); fullyConnectedLayer(1, 'Name', 'fc')}; net = dlnetwork(layers); params = net.Learnables; params.Value{2} = dlarray(3); net.Learnables = params; fprintf('%d\n', net.Initialized);",
+            display_output: Some("1"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions {
+                source: "assert(istable(net.Learnables)); assert(net.Initialized); assert(isa(net.Learnables.Value{2}, 'dlarray'));",
             },
         },
     ],

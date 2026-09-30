@@ -1,5 +1,13 @@
 use super::contracts::DLARRAY_CLASS_REGISTERED;
 use super::*;
+use runmat_types::MemberAccess;
+
+static DLNETWORK_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(runmat_types::standard::DL_NETWORK);
+static SERIES_NETWORK_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(runmat_types::standard::SERIES_NETWORK);
+static DAG_NETWORK_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(runmat_types::standard::DAG_NETWORK);
 
 pub(in crate::builtins) fn ensure_dlarray_class_registered() {
     DLARRAY_CLASS_REGISTERED.ensure(|| {
@@ -9,6 +17,83 @@ pub(in crate::builtins) fn ensure_dlarray_class_registered() {
             name: runmat_types::standard::DL_ARRAY.owned(),
             parent: None,
             properties: HashMap::new(),
+            methods,
+        });
+    });
+}
+
+pub(in crate::builtins) fn ensure_network_class_registered(
+    identity: runmat_types::StaticClassIdentity,
+) {
+    let registration = if identity == runmat_types::standard::DL_NETWORK {
+        &DLNETWORK_REGISTERED
+    } else if identity == runmat_types::standard::SERIES_NETWORK {
+        &SERIES_NETWORK_REGISTERED
+    } else if identity == runmat_types::standard::DAG_NETWORK {
+        &DAG_NETWORK_REGISTERED
+    } else {
+        return;
+    };
+    registration.ensure(|| {
+        let mut properties = HashMap::new();
+        for name in [
+            "Layers",
+            "LayerNames",
+            "InputNames",
+            "OutputNames",
+            "Connections",
+            "State",
+            "Initialized",
+            "Initialize",
+            "SupportedExecution",
+            "TrainingInfo",
+            "TrainingLoss",
+            "TrainedWith",
+        ] {
+            properties.insert(
+                name.into(),
+                crate::class_registry::RuntimeProperty {
+                    name: name.into(),
+                    is_static: false,
+                    is_constant: false,
+                    is_dependent: false,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Private,
+                    default_value: None,
+                },
+            );
+        }
+        properties.insert(
+            "Learnables".into(),
+            crate::class_registry::RuntimeProperty {
+                name: "Learnables".into(),
+                is_static: false,
+                is_constant: false,
+                is_dependent: true,
+                get_access: MemberAccess::Public,
+                set_access: MemberAccess::Public,
+                default_value: None,
+            },
+        );
+        let mut methods = HashMap::new();
+        for name in ["get.Learnables", "set.Learnables"] {
+            methods.insert(
+                name.into(),
+                crate::class_registry::RuntimeMethod {
+                    name: name.into(),
+                    is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
+                    access: MemberAccess::Public,
+                    function_name: name.into(),
+                    implicit_class_argument: None,
+                },
+            );
+        }
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            name: identity.owned(),
+            parent: None,
+            properties,
             methods,
         });
     });

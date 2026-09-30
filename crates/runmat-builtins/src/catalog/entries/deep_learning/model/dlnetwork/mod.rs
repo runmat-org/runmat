@@ -6,12 +6,17 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 mod contract;
 mod documentation;
 mod inference;
+mod property_access;
 #[cfg(test)]
 mod tests;
 
 pub use contract::{DLNETWORK_DESCRIPTOR, DLNETWORK_INVALID_INPUT};
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&DLNETWORK_CATALOG_ENTRY];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &DLNETWORK_CATALOG_ENTRY,
+    &property_access::GET_LEARNABLES_CATALOG_ENTRY,
+    &property_access::SET_LEARNABLES_CATALOG_ENTRY,
+];
 
 pub const DLNETWORK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

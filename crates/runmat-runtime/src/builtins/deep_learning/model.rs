@@ -20,6 +20,7 @@ mod admission;
 mod construction;
 mod gpu;
 mod host;
+mod parameters;
 mod properties;
 mod topology;
 
@@ -37,12 +38,60 @@ use properties::normalize_numeric_tensor;
 
 pub(in crate::builtins) use construction::{
     initialise_fully_connected_layers, is_deep_learning_network_object, layers_from_network_ref,
-    layers_from_network_value, learnables_struct, network_object,
+    layers_from_network_value, network_object,
 };
+pub(in crate::builtins) use parameters::{
+    apply as apply_learnables, project as project_learnables, validate_matching_networks,
+};
+
+#[runtime_builtin(
+    name = "get.Learnables",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::deep_learning::model"
+)]
+pub(super) async fn get_learnables_builtin(network: Value) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+        return Err(deep_learning_error(
+            "get.Learnables",
+            "get.Learnables: at most one output is supported",
+        ));
+    }
+    let Value::Object(network) = network else {
+        return Err(deep_learning_error(
+            "get.Learnables",
+            "get.Learnables: expected network object",
+        ));
+    };
+    project_learnables(&network, "get.Learnables")
+}
+
+#[runtime_builtin(
+    name = "set.Learnables",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::deep_learning::model"
+)]
+pub(super) async fn set_learnables_builtin(
+    network: Value,
+    learnables: Value,
+) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+        return Err(deep_learning_error(
+            "set.Learnables",
+            "set.Learnables: at most one output is supported",
+        ));
+    }
+    let Value::Object(network) = network else {
+        return Err(deep_learning_error(
+            "set.Learnables",
+            "set.Learnables: expected network object",
+        ));
+    };
+    apply_learnables(network, learnables, "set.Learnables")
+}
 pub(in crate::builtins) use host::predict_deep_learning_object;
 pub(in crate::builtins) use properties::{
-    feature_input_width, fully_connected_output_width, layer_name, positive_property_usize,
-    tensor_property, tensor_property_value,
+    feature_input_width, fully_connected_output_width, positive_property_usize, tensor_property,
+    tensor_property_value,
 };
 pub(in crate::builtins) use topology::{
     validate_forward_layers, validate_sequential_connections, validate_sequential_topology,
@@ -54,6 +103,14 @@ pub(crate) const SERIES_NETWORK_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::standard::SERIES_NETWORK;
 pub(crate) const DAG_NETWORK_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::standard::DAG_NETWORK;
+
+/// Install network property protocols in the active session, including when
+/// a value was restored rather than constructed in this invocation.
+pub(crate) fn ensure_network_classes_registered() {
+    for identity in [DLNETWORK_CLASS, SERIES_NETWORK_CLASS, DAG_NETWORK_CLASS] {
+        super::class_registration::ensure_network_class_registered(identity);
+    }
+}
 
 #[runtime_builtin(
     name = "dlnetwork",
@@ -76,7 +133,12 @@ pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     let options = parse_network_options(rest)?;
     let layers = layers_from_network_ref(layers_value, "dlnetwork")?;
     validate_forward_layers(layers, "dlnetwork")?;
-    let mut layers = layers.to_vec();
+    let mut layers = layers_from_network_value(
+        args.into_iter()
+            .next()
+            .expect("validated first layer argument"),
+        "dlnetwork",
+    )?;
     if options.initialize {
         initialise_fully_connected_layers(&mut layers, "dlnetwork")?;
     }

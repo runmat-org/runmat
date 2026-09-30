@@ -59,7 +59,7 @@ const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Host dlnetwork object containing Layers, names, Learnables, State, and initialization metadata.",
+    description: "Value-backed dlnetwork with canonical Layers and a derived Learnables table.",
 }];
 const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {

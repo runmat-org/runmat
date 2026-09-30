@@ -96,7 +96,6 @@ pub(in crate::builtins) fn network_object(
         .cloned()
         .map(|name| vec![name])
         .unwrap_or_default();
-    let learnables = learnables_struct(&layers, function)?;
     let layers_cell = CellArray::new(layers, layer_count, 1)
         .map(Value::Cell)
         .map_err(|err| deep_learning_error(function, err))?;
@@ -123,7 +122,6 @@ pub(in crate::builtins) fn network_object(
             )?,
         ),
         ("Connections".to_string(), Value::Struct(StructValue::new())),
-        ("Learnables".to_string(), learnables),
         ("State".to_string(), Value::Struct(StructValue::new())),
         ("Initialized".to_string(), Value::Bool(true)),
         (
@@ -139,6 +137,7 @@ pub(in crate::builtins) fn network_object(
     for (name, value) in options {
         properties.push((name, value));
     }
+    super::super::class_registration::ensure_network_class_registered(class_name);
     Ok(super::object_with_identity(class_name, properties))
 }
 
@@ -194,52 +193,6 @@ fn remove_case_insensitive_option(
         .find(|key| key.eq_ignore_ascii_case(name))
         .cloned()?;
     options.remove(&key)
-}
-
-pub(in crate::builtins) fn learnables_struct(
-    layers: &[Value],
-    function: &'static str,
-) -> BuiltinResult<Value> {
-    let mut layer_names = Vec::new();
-    let mut parameter_names = Vec::new();
-    let mut values = Vec::new();
-    for layer in layers {
-        let Value::Object(object) = layer else {
-            continue;
-        };
-        if !object.class_name.is(super::FULLY_CONNECTED_LAYER_CLASS) {
-            continue;
-        }
-        let name = layer_name(object);
-        for parameter in ["Weights", "Bias"] {
-            if let Some(value) = object.properties.get(parameter).cloned() {
-                layer_names.push(Value::String(name.clone()));
-                parameter_names.push(Value::String(parameter.to_string()));
-                values.push(value);
-            }
-        }
-    }
-    let rows = values.len();
-    let mut st = StructValue::new();
-    st.insert(
-        "Layer",
-        CellArray::new(layer_names, rows, 1)
-            .map(Value::Cell)
-            .map_err(|err| deep_learning_error(function, err))?,
-    );
-    st.insert(
-        "Parameter",
-        CellArray::new(parameter_names, rows, 1)
-            .map(Value::Cell)
-            .map_err(|err| deep_learning_error(function, err))?,
-    );
-    st.insert(
-        "Value",
-        CellArray::new(values, rows, 1)
-            .map(Value::Cell)
-            .map_err(|err| deep_learning_error(function, err))?,
-    );
-    Ok(Value::Struct(st))
 }
 
 pub(in crate::builtins) fn initialise_fully_connected_layers(

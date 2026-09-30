@@ -616,7 +616,9 @@ fn forward_rejects_malformed_elu_alpha_before_resident_preparation() {
             resident,
         ] {
             let error = block_on(forward_builtin(net.clone(), input, vec![])).unwrap_err();
-            assert!(error.to_string().contains("Alpha must be a finite numeric scalar"));
+            assert!(error
+                .to_string()
+                .contains("Alpha must be a finite numeric scalar"));
         }
         assert_eq!(allocation.probe.retirements(), 0);
         drop(allocation.handle);
@@ -639,13 +641,261 @@ fn dlnetwork_materializes_metadata_and_learnables() {
         panic!("expected layer names");
     };
     assert_eq!(names.data, vec!["features", "fc", "prob"]);
-    let Value::Struct(learnables) = object.properties.get("Learnables").unwrap() else {
-        panic!("expected learnables struct");
+    assert!(!object.properties.contains_key("Learnables"));
+    let Value::Object(learnables) = super::model::project_learnables(&object, "dlnetwork").unwrap()
+    else {
+        panic!("expected learnables table");
     };
-    let Value::Cell(values) = learnables.fields.get("Value").unwrap() else {
+    let variables = crate::builtins::table::table_variables(&learnables).unwrap();
+    assert!(matches!(
+        variables.fields.get("Layer"),
+        Some(Value::StringArray(_))
+    ));
+    assert!(matches!(
+        variables.fields.get("Parameter"),
+        Some(Value::StringArray(_))
+    ));
+    let Value::Cell(values) = variables.fields.get("Value").unwrap() else {
         panic!("expected learnable values");
     };
     assert_eq!(values.data.len(), 2);
+    assert!(values.data.iter().all(
+        |value| matches!(value, Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS))
+    ));
+    let property = crate::class_registry::lookup_property(
+        &object.class_name,
+        &runmat_types::MemberName::from("Learnables"),
+    )
+    .expect("network Learnables property is registered")
+    .0;
+    assert!(property.is_dependent);
+    assert!(crate::class_registry::lookup_method(
+        &object.class_name,
+        &runmat_types::MethodName::from("get.Learnables"),
+    )
+    .is_some());
+    assert!(crate::class_registry::lookup_method(
+        &object.class_name,
+        &runmat_types::MethodName::from("set.Learnables"),
+    )
+    .is_some());
+}
+
+#[test]
+fn network_learnables_setter_updates_only_canonical_layers() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let Value::Object(network) = net else {
+        panic!("expected network")
+    };
+    let Value::Object(table) =
+        super::model::project_learnables(&network, "set.Learnables").unwrap()
+    else {
+        panic!("expected table")
+    };
+    let mut variables = crate::builtins::table::table_variables(&table).unwrap();
+    let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        panic!("expected Value cell")
+    };
+    values.data[1] = Value::Tensor(Tensor::new(vec![5.0, 7.0], vec![2, 1]).unwrap());
+    let replacement =
+        crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
+    let Value::Object(updated) =
+        super::model::apply_learnables(network, replacement, "set.Learnables").unwrap()
+    else {
+        panic!("expected updated network")
+    };
+    assert!(!updated.properties.contains_key("Learnables"));
+    let Value::Cell(layers) = updated.properties.get("Layers").unwrap() else {
+        panic!("expected Layers cell")
+    };
+    let Value::Object(fc) = &layers.data[1] else {
+        panic!("expected FC layer")
+    };
+    let Value::Tensor(bias) = fc.properties.get("Bias").unwrap() else {
+        panic!("expected bias")
+    };
+    assert_eq!(bias.materialize_f64(), vec![5.0, 7.0]);
+    let Value::Object(projected) =
+        super::model::project_learnables(&updated, "get.Learnables").unwrap()
+    else {
+        panic!("expected projection")
+    };
+    let variables = crate::builtins::table::table_variables(&projected).unwrap();
+    let Value::Cell(values) = variables.fields.get("Value").unwrap() else {
+        panic!("expected Value cell")
+    };
+    let Value::Object(public_bias) = &values.data[1] else {
+        panic!("expected dlarray learnable")
+    };
+    assert_eq!(
+        public_bias.properties.get("Data"),
+        Some(&Value::Tensor(bias.clone()))
+    );
+}
+
+#[test]
+fn network_learnables_reject_mismatched_identity_and_shape_before_publish() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let Value::Object(network) = net else {
+        panic!("expected network")
+    };
+    let Value::Object(table) =
+        super::model::project_learnables(&network, "set.Learnables").unwrap()
+    else {
+        panic!("expected table")
+    };
+    let mut variables = crate::builtins::table::table_variables(&table).unwrap();
+    let Value::StringArray(names) = variables.fields.get_mut("Layer").unwrap() else {
+        panic!("expected Layer string array")
+    };
+    names.data[0] = "missing".into();
+    let bad = crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
+    assert!(
+        super::model::apply_learnables(network.clone(), bad, "set.Learnables")
+            .unwrap_err()
+            .message
+            .contains("identity differs")
+    );
+
+    let mut variables = crate::builtins::table::table_variables(&table).unwrap();
+    let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        panic!("expected Value cell")
+    };
+    values.data[0] = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+    let bad = crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
+    assert!(
+        super::model::apply_learnables(network.clone(), bad, "set.Learnables")
+            .unwrap_err()
+            .message
+            .contains("shape")
+    );
+    assert!(!network.properties.contains_key("Learnables"));
+}
+
+#[test]
+fn network_learnables_accepts_reordered_rows_but_rejects_duplicate_keys() {
+    let Value::Object(network) =
+        block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap()
+    else {
+        panic!("expected network")
+    };
+    let Value::Object(table) =
+        super::model::project_learnables(&network, "get.Learnables").unwrap()
+    else {
+        panic!("expected table")
+    };
+    let mut variables = crate::builtins::table::table_variables(&table).unwrap();
+    for name in ["Layer", "Parameter"] {
+        let Value::StringArray(column) = variables.fields.get_mut(name).unwrap() else {
+            panic!("expected string column")
+        };
+        column.data.swap(0, 1);
+    }
+    let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        panic!("expected Value cell")
+    };
+    values.data.swap(0, 1);
+    let reordered =
+        crate::builtins::table::table_replace_variables_like(&table, variables.clone()).unwrap();
+    assert!(super::model::apply_learnables(network.clone(), reordered, "set.Learnables").is_ok());
+    let Value::StringArray(parameters) = variables.fields.get_mut("Parameter").unwrap() else {
+        panic!("expected string column")
+    };
+    parameters.data[1] = parameters.data[0].clone();
+    let Value::StringArray(layers) = variables.fields.get_mut("Layer").unwrap() else {
+        panic!("expected string column")
+    };
+    layers.data[1] = layers.data[0].clone();
+    let duplicate =
+        crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
+    assert!(
+        super::model::apply_learnables(network, duplicate, "set.Learnables")
+            .unwrap_err()
+            .message
+            .contains("duplicate")
+    );
+}
+
+#[test]
+fn network_learnables_logical_storage_cannot_bypass_admission() {
+    let Value::Object(network) =
+        block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap()
+    else {
+        panic!("expected network")
+    };
+    let Value::Object(table) =
+        super::model::project_learnables(&network, "get.Learnables").unwrap()
+    else {
+        panic!("expected table")
+    };
+    let mut variables = crate::builtins::table::table_variables(&table).unwrap();
+    let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        panic!("expected Value cell")
+    };
+    values.data[0] = Value::Bool(false);
+    let invalid = crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
+    assert!(
+        super::model::apply_learnables(network, invalid, "set.Learnables")
+            .unwrap_err()
+            .message
+            .contains("real numeric storage")
+    );
+}
+
+#[test]
+fn network_learnables_empty_then_replacement_updates_initialization_lifecycle() {
+    let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
+    let Value::Object(network) = net else {
+        panic!("expected network")
+    };
+    let Value::Object(table) =
+        super::model::project_learnables(&network, "set.Learnables").unwrap()
+    else {
+        panic!("expected table")
+    };
+    let mut variables = crate::builtins::table::table_variables(&table).unwrap();
+    let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        panic!("expected Value cell")
+    };
+    values.data[1] = Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap());
+    let empty = crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
+    let Value::Object(uninitialized) =
+        super::model::apply_learnables(network, empty, "set.Learnables").unwrap()
+    else {
+        panic!("expected network")
+    };
+    assert_eq!(
+        uninitialized.properties.get("Initialized"),
+        Some(&Value::Bool(false))
+    );
+    let Value::Cell(layers) = uninitialized.properties.get("Layers").unwrap() else {
+        panic!("expected layers")
+    };
+    let Value::Object(fc) = &layers.data[1] else {
+        panic!("expected FC")
+    };
+    assert!(!fc.properties.contains_key("Bias"));
+
+    let Value::Object(table) =
+        super::model::project_learnables(&uninitialized, "get.Learnables").unwrap()
+    else {
+        panic!("expected table")
+    };
+    let mut variables = crate::builtins::table::table_variables(&table).unwrap();
+    let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        panic!("expected Value cell")
+    };
+    values.data[1] = Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2, 1]).unwrap());
+    let restored = crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
+    let Value::Object(initialized) =
+        super::model::apply_learnables(uninitialized, restored, "set.Learnables").unwrap()
+    else {
+        panic!("expected network")
+    };
+    assert_eq!(
+        initialized.properties.get("Initialized"),
+        Some(&Value::Bool(true))
+    );
 }
 
 #[test]
@@ -673,10 +923,7 @@ fn dlnetwork_rejects_unknown_options_and_preserves_resident_learnables() {
             Value::String("x".into()),
         ]))
         .unwrap_err();
-        assert_eq!(
-            err.identifier(),
-            Some("RunMat:deepLearning:InvalidInput")
-        );
+        assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
         let net = block_on(dlnetwork_builtin(vec![layers])).unwrap();
@@ -722,10 +969,7 @@ fn forward_rejects_host_known_late_matrix_error_before_resident_input_download()
             .unwrap();
         provider.reset_telemetry();
         let err = block_on(forward_builtin(net, Value::GpuTensor(input), vec![])).unwrap_err();
-        assert_eq!(
-            err.identifier(),
-            Some("RunMat:deepLearning:InvalidInput")
-        );
+        assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert!(err.message.contains("Weights must be outputSize-by-2"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
@@ -734,9 +978,8 @@ fn forward_rejects_host_known_late_matrix_error_before_resident_input_download()
 #[test]
 fn forward_integer_predictors_use_declared_runmat_extension_before_execution() {
     let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
-    let input = Value::Tensor(
-        Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).unwrap(),
-    );
+    let input =
+        Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![1, 2]).unwrap());
     {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(forward_builtin(net.clone(), input.clone(), vec![])).unwrap_err();
@@ -780,7 +1023,9 @@ fn forward_host_input_does_not_gather_unused_dlarray_metadata() {
     let Value::Object(output) = output else {
         panic!("dlarray result expected")
     };
-    assert!(matches!(output.properties.get("Data"), Some(Value::Tensor(data)) if data.shape == [1, 1]));
+    assert!(
+        matches!(output.properties.get("Data"), Some(Value::Tensor(data)) if data.shape == [1, 1])
+    );
     assert_eq!(allocation.probe.retirements(), 0);
     drop(allocation.handle);
     assert_eq!(allocation.probe.retirements(), 1);
@@ -804,13 +1049,19 @@ fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
         object.properties.get("Initialized"),
         Some(&Value::Bool(false))
     );
-    let Value::Struct(learnables) = object.properties.get("Learnables").unwrap() else {
-        panic!("expected learnables struct");
+    let Value::Object(learnables) = super::model::project_learnables(object, "dlnetwork").unwrap()
+    else {
+        panic!("expected learnables table");
     };
-    let Value::Cell(values) = learnables.fields.get("Value").unwrap() else {
+    let variables = crate::builtins::table::table_variables(&learnables).unwrap();
+    let Value::Cell(values) = variables.fields.get("Value").unwrap() else {
         panic!("expected learnable values");
     };
-    assert!(values.data.is_empty());
+    assert_eq!(values.data.len(), 2);
+    assert!(values
+        .data
+        .iter()
+        .all(|value| matches!(value, Value::Tensor(tensor) if tensor.shape == [0, 0])));
 
     let err = block_on(forward_builtin(
         net,
@@ -1026,7 +1277,10 @@ fn forward_resident_outputs_preserve_explicit_and_automatic_input_intent() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         for layers in [dense_feature_network_layers(), elu_feature_network_layers()] {
             let net = block_on(dlnetwork_builtin(vec![layers])).unwrap();
-            for intent in [GpuHandleProvenance::Automatic, GpuHandleProvenance::Explicit] {
+            for intent in [
+                GpuHandleProvenance::Automatic,
+                GpuHandleProvenance::Explicit,
+            ] {
                 let uploaded = provider
                     .upload(&HostTensorView {
                         data: &[1.0, -2.0],
@@ -1034,11 +1288,8 @@ fn forward_resident_outputs_preserve_explicit_and_automatic_input_intent() {
                     })
                     .unwrap();
                 let handle = uploaded.with_provenance(intent).unwrap();
-                let dlarray = block_on(dlarray_builtin(
-                    Value::GpuTensor(handle.clone()),
-                    vec![],
-                ))
-                .unwrap();
+                let dlarray =
+                    block_on(dlarray_builtin(Value::GpuTensor(handle.clone()), vec![])).unwrap();
                 provider.reset_telemetry();
                 let output = block_on(forward_builtin(net.clone(), dlarray, vec![])).unwrap();
                 let Value::Object(output) = output else {
@@ -1050,10 +1301,9 @@ fn forward_resident_outputs_preserve_explicit_and_automatic_input_intent() {
                 assert_eq!(handle_provenance(result), Some(intent));
                 assert_eq!(handle_provenance(&handle), Some(intent));
                 assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-                let retained = crate::builtins::common::test_support::gather(
-                    Value::GpuTensor(handle.clone()),
-                )
-                .unwrap();
+                let retained =
+                    crate::builtins::common::test_support::gather(Value::GpuTensor(handle.clone()))
+                        .unwrap();
                 assert_eq!(retained.materialize_f64(), vec![1.0, -2.0]);
             }
         }
@@ -1461,10 +1711,11 @@ fn dlgradient_returns_dlnetwork_learnable_gradients() {
         x,
     ]))
     .expect("network gradients");
-    let Value::Struct(st) = gradients else {
-        panic!("expected learnables gradient struct");
+    let Value::Object(table) = gradients else {
+        panic!("expected learnables gradient table");
     };
-    let Value::Cell(values) = st.fields.get("Value").unwrap() else {
+    let variables = crate::builtins::table::table_variables(&table).unwrap();
+    let Value::Cell(values) = variables.fields.get("Value").unwrap() else {
         panic!("expected Value cell");
     };
     let Value::Object(weight_grad) = &values.data[0] else {
@@ -1501,8 +1752,13 @@ fn dlupdate_traverses_dlnetwork_learnables_and_rebuilds_layers() {
     let Value::Object(fc) = &layers.data[1] else {
         panic!("expected fc layer");
     };
-    let Value::Tensor(weights) = fc.properties.get("Weights").unwrap() else {
-        panic!("expected tensor weights");
+    let weights = match fc.properties.get("Weights").unwrap() {
+        Value::Tensor(weights) => weights,
+        Value::Object(dlarray) => match dlarray.properties.get("Data").unwrap() {
+            Value::Tensor(weights) => weights,
+            other => panic!("expected tensor data, got {other:?}"),
+        },
+        other => panic!("expected tensor or dlarray weights, got {other:?}"),
     };
     assert_eq!(weights.materialize_f64(), vec![2.0, -2.0, 0.0, 2.0]);
 }
@@ -1974,7 +2230,10 @@ fn supervised_two_outputs_include_typed_loss_history() {
     };
     assert_eq!(loss_history.shape, vec![2, 1]);
     assert_eq!(loss_history.numeric_dtype(), NumericDType::F64);
-    assert!(loss_history.materialize_f64().iter().all(|loss| loss.is_finite()));
+    assert!(loss_history
+        .materialize_f64()
+        .iter()
+        .all(|loss| loss.is_finite()));
 }
 
 #[test]

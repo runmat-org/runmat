@@ -130,6 +130,30 @@ fn empty_struct() -> ValueFact {
     )))
 }
 
+pub(super) fn learnables_table_fact() -> ValueFact {
+    ValueFact::proven(
+        ValueKindFact::Object(ObjectFact {
+            class: None,
+            runtime_class: Some(standard::TABLE.owned()),
+            properties: BTreeMap::from([(
+                "__table_variables".into(),
+                ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+                    BTreeMap::from([
+                        ("Layer".into(), text(column(None))),
+                        ("Parameter".into(), text(column(None))),
+                        ("Value".into(), cell(column(None))),
+                    ]),
+                    true,
+                ))),
+            )]),
+            properties_complete: false,
+            handle_semantics: Some(false),
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Opaque,
+    )
+}
+
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.is_empty() || request.arguments.len().is_multiple_of(2) {
@@ -227,17 +251,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             text(ShapeFact::from(vec![Some(1), Some(1)])),
         ),
         ("Connections".into(), empty_struct()),
-        (
-            "Learnables".into(),
-            ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
-                BTreeMap::from([
-                    ("Layer".into(), cell(column(None))),
-                    ("Parameter".into(), cell(column(None))),
-                    ("Value".into(), cell(column(None))),
-                ]),
-                true,
-            ))),
-        ),
+        ("Learnables".into(), learnables_table_fact()),
         ("State".into(), empty_struct()),
         (
             "Initialized".into(),

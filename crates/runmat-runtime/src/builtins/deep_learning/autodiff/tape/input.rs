@@ -93,8 +93,7 @@ fn annotate_dlarray_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
 }
 
 fn annotate_network_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
-    let layers_value = object.properties.get("Layers").cloned();
-    let Some(Value::Cell(mut layers)) = layers_value else {
+    let Some(Value::Cell(layers)) = object.properties.get_mut("Layers") else {
         return Ok(());
     };
     for layer in &mut layers.data {
@@ -108,7 +107,7 @@ fn annotate_network_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
             continue;
         }
         for parameter in ["Weights", "Bias"] {
-            if let Some(value) = layer_object.properties.get(parameter).cloned() {
+            if let Some(value) = layer_object.properties.remove(parameter) {
                 let wrapped = match value {
                     Value::Object(object) if object.class_name == DLARRAY_CLASS => {
                         annotate_dlarray_value(Value::Object(object))?
@@ -133,12 +132,5 @@ fn annotate_network_object(object: &mut ObjectInstance) -> BuiltinResult<()> {
             }
         }
     }
-    object
-        .properties
-        .insert("Layers".to_string(), Value::Cell(layers.clone()));
-    object.properties.insert(
-        "Learnables".to_string(),
-        model::learnables_struct(&layers.data, "dlfeval")?,
-    );
     Ok(())
 }

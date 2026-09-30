@@ -20,7 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Traversal and outputs",
             paragraphs: &[
                 "The first argument must be a callable function handle or closure. Numeric values and dlarray objects are leaves. Cells, structures, and structure arrays are traversed recursively, and all supplied trees must have matching container geometry and ordered fields. The requested output count is forwarded to every leaf callback; each output is rebuilt with the original container shape.",
-                "Learnables structures, tables, and timetables preserve their Layer and Parameter metadata and apply the callback only to the Value column. A dlnetwork traverses its Learnables and rebuilds matching layer properties with the updated parameter values. Arbitrary custom objects do not have a traversal contract and return Unsupported.",
+                "Independent Learnables structures, tables, and timetables preserve their Layer and Parameter metadata and apply the callback only to the Value column. A dlnetwork projects its parameter table from canonical Layers, validates all input networks before callbacks, and applies accepted callback values back to Layers. Arbitrary custom objects do not have a traversal contract and return Unsupported.",
             ],
         },
         BuiltinDocumentationSection {

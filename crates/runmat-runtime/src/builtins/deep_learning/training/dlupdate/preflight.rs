@@ -135,15 +135,7 @@ fn matching_node(values: &[&Value], depth: usize) -> BuiltinResult<()> {
                 }
                 peers.push(other);
             }
-            let learnables = peers
-                .iter()
-                .map(|other| {
-                    other.properties.get("Learnables").ok_or_else(|| {
-                        deep_learning_error("dlupdate", "dlupdate: dlnetwork is missing Learnables")
-                    })
-                })
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            matching_node(&learnables, depth + 1)
+            model::validate_matching_networks(&peers, "dlupdate")
         }
         Value::Object(table) if crate::builtins::table::is_tabular_object(table) => {
             matching_tables(values, table, depth)

@@ -91,7 +91,7 @@ const COMMON_SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Results",
         paragraphs: &[
-            "The returned network has updated fully connected weights and Learnables, plus TrainingInfo, TrainingLoss, and TrainedWith metadata. A second requested output returns the training information structure with epoch and iteration counts, loss history, solver and stop reason. An invalid output count rejects before provider data is downloaded.",
+            "The returned network stores updated fully connected weights in Layers and exposes a derived Learnables table, plus TrainingInfo, TrainingLoss, and TrainedWith metadata. A second requested output returns the training information structure with epoch and iteration counts, loss history, solver and stop reason. An invalid output count rejects before provider data is downloaded.",
         ],
     },
 ];

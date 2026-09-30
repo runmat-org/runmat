@@ -62,6 +62,63 @@ fn static_network_identity_and_layer_geometry_follow_known_collection() {
     };
     assert_eq!(layers.elements.len(), 2);
     assert!(!network.properties_complete);
+    let ValueKindFact::Object(learnables) = &network.properties["Learnables"].kind else {
+        panic!("Learnables must be inferred as a table object")
+    };
+    assert_eq!(
+        learnables.runtime_class,
+        Some(runmat_types::standard::TABLE.owned())
+    );
+    let ValueKindFact::Struct(variables) = &learnables.properties["__table_variables"].kind else {
+        panic!("Learnables table variables must be known")
+    };
+    assert!(variables.fields.contains_key("Layer"));
+    assert!(variables.fields.contains_key("Parameter"));
+    assert!(variables.fields.contains_key("Value"));
+    for name in ["Layer", "Parameter"] {
+        assert!(matches!(variables.fields[name].kind, ValueKindFact::String));
+        assert_eq!(
+            variables.fields[name].shape,
+            ShapeFact::from(vec![None, Some(1)])
+        );
+    }
+    assert!(matches!(
+        variables.fields["Value"].kind,
+        ValueKindFact::Cell(_)
+    ));
+}
+
+#[test]
+fn dependent_learnables_accessors_preserve_table_and_network_facts() {
+    let network = infer(vec![layer()], vec![LiteralValue::Unknown])
+        .outputs
+        .remove(0);
+    let get = crate::infer_catalog_call(
+        &property_access::GET_LEARNABLES_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![network.clone()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+    );
+    assert!(get.diagnostics.is_empty());
+    let ValueKindFact::Object(table) = &get.outputs[0].kind else {
+        panic!("table fact expected")
+    };
+    assert_eq!(
+        table.runtime_class,
+        Some(runmat_types::standard::TABLE.owned())
+    );
+    let set = crate::infer_catalog_call(
+        &property_access::SET_LEARNABLES_CATALOG_ENTRY,
+        &CallRequest {
+            arguments: vec![network.clone(), get.outputs[0].clone()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+    );
+    assert!(set.diagnostics.is_empty());
+    assert_eq!(set.outputs[0].kind, network.kind);
 }
 
 #[test]

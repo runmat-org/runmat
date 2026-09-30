@@ -87,11 +87,17 @@ pub(super) fn gradient_tree_for_target(
             ))
         }
         Value::Object(object) if model::is_deep_learning_network_object(object) => {
-            if let Some(learnables) = object.properties.get("Learnables") {
-                gradient_tree_for_target(learnables, gradients)
-            } else {
-                Ok(Value::Struct(StructValue::new()))
-            }
+            let Value::Object(table) = model::project_learnables(object, "dlgradient")? else {
+                unreachable!("network learnables projection is a table")
+            };
+            let mut variables = crate::builtins::table::table_variables(&table)
+                .map_err(|error| deep_learning_error("dlgradient", error.to_string()))?;
+            let values = variables.fields.remove("Value").ok_or_else(|| {
+                deep_learning_error("dlgradient", "dlgradient: Learnables table is missing Value")
+            })?;
+            variables.insert("Value", gradient_tree_for_target(&values, gradients)?);
+            crate::builtins::table::table_replace_variables_like(&table, variables)
+                .map_err(|error| deep_learning_error("dlgradient", error.to_string()))
         }
         Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
             let variables = crate::builtins::table::table_variables(object)
