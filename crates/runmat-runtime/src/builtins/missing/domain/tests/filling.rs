@@ -41,6 +41,27 @@ fn fillmissing_rejects_invalid_method_before_resident_download() {
 }
 
 #[test]
+fn fillmissing_rejects_more_than_two_outputs_before_resident_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let _outputs = crate::output_count::push_output_count(Some(3));
+    let error = block_on(fillmissing_builtin(
+        Value::GpuTensor(allocation.handle.clone()),
+        vec![Value::from("constant"), Value::Num(0.0)],
+    ))
+    .expect_err("fillmissing has at most two outputs");
+    assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
 fn fillmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
     let expected = IntegerStorage::I32(vec![10, 20, 30]);
     let input = Tensor::new_integer(expected.clone(), vec![3, 1]).expect("integer tensor");

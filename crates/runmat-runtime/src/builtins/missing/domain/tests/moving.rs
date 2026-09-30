@@ -60,6 +60,56 @@ fn movmad_accepts_all_integer_classes_into_double_output() {
 }
 
 #[test]
+fn movmad_rejects_invalid_controls_before_resident_download() {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    for (window, rest) in [
+        (Value::Num(0.0), Vec::new()),
+        (Value::Num(3.0), vec![Value::from("unsupported-option")]),
+    ] {
+        let error = block_on(movmad_builtin(
+            Value::GpuTensor(allocation.handle.clone()),
+            window,
+            rest,
+        ))
+        .expect_err("invalid controls must be rejected before provider access");
+        assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
+        assert_eq!(allocation.probe.retirements(), 0);
+    }
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+#[cfg(feature = "wgpu")]
+fn movmad_does_not_use_global_provider_for_unowned_input() {
+    test_support::with_test_provider(|_| {
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let error = block_on(movmad_builtin(
+            Value::GpuTensor(allocation.handle.clone()),
+            Value::Num(3.0),
+            Vec::new(),
+        ))
+        .expect_err("the global provider cannot claim an unrelated allocation");
+        assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 1);
+    });
+}
+
+#[test]
 #[cfg(feature = "wgpu")]
 fn movmad_gpu_large_window_follows_compatibility_mode() {
     test_support::with_test_provider(|provider| {

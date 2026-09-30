@@ -255,6 +255,63 @@ fn nanmin_supports_pairwise_form() {
 }
 
 #[test]
+fn nanmin_empty_placeholder_selects_reduction_not_pairwise() {
+    let input = tensor(vec![f64::NAN, 2.0, 3.0, 4.0], vec![2, 2]);
+    let placeholder = Value::Tensor(
+        Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty reduction placeholder"),
+    );
+    let result = block_on(nanmin_builtin(input, vec![placeholder, Value::Num(2.0)]))
+        .expect("nanmin(A, [], dim) should reduce along dim");
+    assert!(matches!(
+        result,
+        Value::Tensor(tensor)
+            if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![3.0, 2.0]
+    ));
+}
+
+#[test]
+fn nanmin_all_option_routes_to_reduction() {
+    let result = block_on(nanmin_builtin(
+        tensor(vec![f64::NAN, 5.0, 2.0, 9.0], vec![2, 2]),
+        vec![Value::from("all")],
+    ))
+    .expect("nanmin(A, 'all') should reduce rather than compare pairwise");
+    assert!(matches!(result, Value::Num(number) if number == 2.0));
+}
+
+#[test]
+fn nanmin_reduction_returns_indices_but_pairwise_has_one_output() {
+    {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let input = tensor(vec![f64::NAN, 2.0, 3.0, 4.0], vec![2, 2]);
+        let placeholder = Value::Tensor(
+            Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty reduction placeholder"),
+        );
+        let result = block_on(nanmin_builtin(input, vec![placeholder, Value::Num(2.0)]))
+            .expect("two-output reduction");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected values and indices");
+        };
+        assert_eq!(outputs.len(), 2);
+        assert!(
+            matches!(&outputs[0], Value::Tensor(t) if t.shape == vec![2, 1] && t.materialize_f64() == vec![3.0, 2.0])
+        );
+        assert!(
+            matches!(&outputs[1], Value::Tensor(t) if t.shape == vec![2, 1] && t.materialize_f64() == vec![2.0, 1.0])
+        );
+    }
+    {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error = block_on(nanmin_builtin(
+            tensor(vec![1.0, 2.0], vec![1, 2]),
+            vec![tensor(vec![2.0, 1.0], vec![1, 2])],
+        ))
+        .expect_err("pairwise form has only one output");
+        assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
+    }
+}
+
+#[test]
 fn nanmin_pairwise_reads_typed_integer_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let left = Tensor::new_integer(IntegerStorage::U16(vec![9, 4, 3]), vec![1, 3]).unwrap();

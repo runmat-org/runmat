@@ -1,12 +1,4 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, BuiltinExtensionDescriptor};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, IntValue, LogicalArray, NumericDType, ObjectInstance, StringArray,
@@ -21,19 +13,6 @@ use crate::builtins::table::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-use self::metadata::core::MISSING_ERRORS;
-
-macro_rules! descriptor {
-    ($name:ident, $signatures:ident, $mode:expr) => {
-        pub const $name: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: $mode,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &MISSING_ERRORS,
-        };
-    };
-}
-
 mod detection;
 mod entrypoints;
 mod errors;
@@ -45,22 +24,20 @@ mod removal;
 mod standardize;
 
 use errors::{gather_error, internal_error, invalid_argument, unsupported_type};
-pub use metadata::cleanup::{
-    FILLMISSING_DESCRIPTOR, FILLMISSING_EXTENSIONS, FILLMISSING_INTEGER_CAPABILITIES,
-    RMMISSING_DESCRIPTOR, RMMISSING_EXTENSIONS, RMMISSING_INTEGER_CAPABILITIES,
+use metadata::MISSING_TEXT;
+use runmat_builtins::{
+    FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION, FILLMISSING_INTEGER_DATA_EXTENSION,
+    MOVMAD_GPU_LARGE_WINDOW_EXTENSION, NANMEAN_INTEGER_EXTENSION, NANMEDIAN_INTEGER_EXTENSION,
+    NANMIN_INTEGER_EXTENSION, NANSTD_INTEGER_EXTENSION, NANSUM_INTEGER_EXTENSION,
+    NANVAR_INTEGER_EXTENSION, RMMISSING_INTEGER_DIM_EXTENSION,
 };
-pub use metadata::nan::{
+pub use runmat_builtins::{
+    FILLMISSING_DESCRIPTOR, FILLMISSING_EXTENSIONS, FILLMISSING_INTEGER_CAPABILITIES,
     MOVMAD_EXTENSIONS, MOVMAD_INTEGER_CAPABILITIES, NANMEAN_EXTENSIONS,
     NANMEAN_INTEGER_CAPABILITIES, NANMEDIAN_EXTENSIONS, NANMEDIAN_INTEGER_CAPABILITIES,
     NANMIN_EXTENSIONS, NANMIN_INTEGER_CAPABILITIES, NANSTD_EXTENSIONS, NANSTD_INTEGER_CAPABILITIES,
     NANSUM_EXTENSIONS, NANSUM_INTEGER_CAPABILITIES, NANVAR_EXTENSIONS, NANVAR_INTEGER_CAPABILITIES,
-    NAN_AWARE_DESCRIPTOR,
-};
-use metadata::{
-    any_type, FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION, FILLMISSING_INTEGER_DATA_EXTENSION,
-    MISSING_TEXT, MOVMAD_GPU_LARGE_WINDOW_EXTENSION, NANMEAN_INTEGER_EXTENSION,
-    NANMEDIAN_INTEGER_EXTENSION, NANMIN_INTEGER_EXTENSION, NANSTD_INTEGER_CONTROL_EXTENSION,
-    NANSUM_INTEGER_EXTENSION, NANVAR_INTEGER_CONTROL_EXTENSION, RMMISSING_INTEGER_DIM_EXTENSION,
+    RMMISSING_DESCRIPTOR, RMMISSING_EXTENSIONS, RMMISSING_INTEGER_CAPABILITIES,
 };
 use runmat_builtins::{
     ISMISSING_RESIDENT_INPUT_EXTENSION, MISSING_SHAPED_ARRAY_EXTENSION,

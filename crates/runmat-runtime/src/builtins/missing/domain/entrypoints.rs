@@ -1,7 +1,9 @@
 use super::detection::{any_missing, ismissing_value, missing_string_array, parse_size_args};
 use super::filling::{fill_missing_value, FillOptions};
 use super::moving::{moving_mad, MovingOptions};
-use super::numeric::{is_numeric_data_like, pairwise_nan_min, scalar_text, scalar_usize};
+use super::numeric::{
+    is_empty_numeric_placeholder, is_numeric_data_like, pairwise_nan_min, scalar_text, scalar_usize,
+};
 use super::removal::{remove_missing_value, RemoveOptions};
 use super::standardize::{indicator_set, numeric_tensor, standardize_missing_value};
 use super::*;
@@ -122,17 +124,11 @@ pub(super) async fn standardize_missing_builtin(
 
 #[runtime_builtin(
     name = "rmmissing",
-    category = "missing",
-    summary = "Remove missing elements, rows, or columns.",
-    keywords = "rmmissing,missing,NaN,string,table",
-    accel = "cpu",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::RMMISSING_DESCRIPTOR),
-    extensions(crate::builtins::missing::RMMISSING_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::RMMISSING_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_output_arity("rmmissing", 2)?;
     if rest.iter().any(is_real_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &RMMISSING_INTEGER_DIM_EXTENSION,
@@ -179,17 +175,11 @@ pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> Builtin
 
 #[runtime_builtin(
     name = "fillmissing",
-    category = "missing",
-    summary = "Fill missing entries using constant, neighbor, or summary methods.",
-    keywords = "fillmissing,missing,NaN,string,table,previous,next,linear,constant",
-    accel = "cpu",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::FILLMISSING_DESCRIPTOR),
-    extensions(crate::builtins::missing::FILLMISSING_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::FILLMISSING_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_output_arity("fillmissing", 2)?;
     if is_real_typed_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &FILLMISSING_INTEGER_DATA_EXTENSION,
@@ -246,54 +236,37 @@ pub(super) fn fillmissing_aggregate_contains_integer(value: &Value) -> BuiltinRe
 
 #[runtime_builtin(
     name = "nanmean",
-    category = "missing",
-    summary = "Mean that ignores NaN values.",
-    keywords = "nanmean,mean,omitnan,missing",
-    accel = "reduction",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
-    extensions(crate::builtins::missing::NANMEAN_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::NANMEAN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_output_arity("nanmean", 1)?;
     ensure_nan_integer_extension(&NANMEAN_INTEGER_EXTENSION, "nanmean", &value, &rest)?;
     mean::mean_builtin(value, rest_with_omitnan(rest)).await
 }
 
 #[runtime_builtin(
     name = "nansum",
-    category = "missing",
-    summary = "Sum that ignores NaN values.",
-    keywords = "nansum,sum,omitnan,missing",
-    accel = "reduction",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
-    extensions(crate::builtins::missing::NANSUM_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::NANSUM_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn nansum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_output_arity("nansum", 1)?;
     ensure_nan_integer_extension(&NANSUM_INTEGER_EXTENSION, "nansum", &value, &rest)?;
     sum::sum_builtin(value, rest_with_omitnan(rest)).await
 }
 
 #[runtime_builtin(
     name = "nanmin",
-    category = "missing",
-    summary = "Minimum that ignores NaN values.",
-    keywords = "nanmin,min,omitnan,missing",
-    accel = "reduction",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
-    extensions(crate::builtins::missing::NANMIN_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::NANMIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_output_arity("nanmin", 2)?;
     ensure_nan_integer_extension(&NANMIN_INTEGER_EXTENSION, "nanmin", &value, &rest)?;
     if let Some(first) = rest.first() {
-        if is_numeric_data_like(first) {
+        if is_numeric_data_like(first) && !is_empty_numeric_placeholder(first) {
+            ensure_output_arity("nanmin pairwise", 1)?;
             if rest.len() != 1 {
                 return Err(invalid_argument(
                     "nanmin: pairwise form accepts exactly two numeric inputs",
@@ -307,75 +280,40 @@ pub(super) async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
 
 #[runtime_builtin(
     name = "nanmedian",
-    category = "missing",
-    summary = "Median that ignores NaN values.",
-    keywords = "nanmedian,median,omitnan,missing",
-    accel = "reduction",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
-    extensions(crate::builtins::missing::NANMEDIAN_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::NANMEDIAN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn nanmedian_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    ensure_output_arity("nanmedian", 1)?;
     ensure_nan_integer_extension(&NANMEDIAN_INTEGER_EXTENSION, "nanmedian", &value, &rest)?;
     median::median_builtin(value, rest_with_omitnan(rest)).await
 }
 
 #[runtime_builtin(
     name = "nanstd",
-    category = "missing",
-    summary = "Standard deviation that ignores NaN values.",
-    keywords = "nanstd,std,omitnan,missing",
-    accel = "reduction",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
-    extensions(crate::builtins::missing::NANSTD_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::NANSTD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn nanstd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_nan_integer_control_extension(
-        &NANSTD_INTEGER_CONTROL_EXTENSION,
-        "nanstd",
-        &value,
-        &rest,
-    )?;
+    ensure_output_arity("nanstd", 1)?;
+    ensure_nan_integer_control_extension(&NANSTD_INTEGER_EXTENSION, "nanstd", &value, &rest)?;
     std_reduction::std_builtin(value, rest_with_omitnan(rest)).await
 }
 
 #[runtime_builtin(
     name = "nanvar",
-    category = "missing",
-    summary = "Variance that ignores NaN values.",
-    keywords = "nanvar,var,omitnan,missing",
-    accel = "reduction",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
-    extensions(crate::builtins::missing::NANVAR_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::NANVAR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn nanvar_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_nan_integer_control_extension(
-        &NANVAR_INTEGER_CONTROL_EXTENSION,
-        "nanvar",
-        &value,
-        &rest,
-    )?;
+    ensure_output_arity("nanvar", 1)?;
+    ensure_nan_integer_control_extension(&NANVAR_INTEGER_EXTENSION, "nanvar", &value, &rest)?;
     var::var_builtin(value, rest_with_omitnan(rest)).await
 }
 
 #[runtime_builtin(
     name = "movmad",
-    category = "missing",
-    summary = "Moving median absolute deviation over vectors and matrix dimensions.",
-    keywords = "movmad,moving,median,absolute,deviation,missing",
-    accel = "cpu",
-    type_resolver(any_type),
-    descriptor(crate::builtins::missing::NAN_AWARE_DESCRIPTOR),
-    extensions(crate::builtins::missing::MOVMAD_EXTENSIONS),
-    integer_capabilities(crate::builtins::missing::MOVMAD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
 pub(super) async fn movmad_builtin(
@@ -383,32 +321,45 @@ pub(super) async fn movmad_builtin(
     window: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    ensure_output_arity("movmad", 1)?;
     let window = scalar_usize(&window, "movmad window")?;
-    let provider = match &value {
-        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
-            .or_else(runmat_accelerate_api::provider),
+    if window == 0 {
+        return Err(invalid_argument("movmad: window length must be positive"));
+    }
+    let options = MovingOptions::parse(&rest)?;
+    let source = match &value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     };
-    if provider.is_some() && window > 31 {
+    if source.is_some() && window > 31 {
         crate::compatibility::ensure_builtin_extension_enabled(
             &MOVMAD_GPU_LARGE_WINDOW_EXTENSION,
             "movmad",
         )?;
     }
+    if let Some(handle) = source.as_ref() {
+        gpu_helpers::exact_provider_for_handle(handle)
+            .ok_or_else(|| invalid_argument("movmad: no provider owns the resident input"))?;
+    }
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| gather_error("movmad", "input", err))?;
     let tensor = numeric_tensor(value, "movmad")?;
-    let options = MovingOptions::parse(&rest)?;
     let result = moving_mad(tensor, window, options)?;
-    match (provider, result) {
-        (Some(provider), Value::Tensor(tensor)) => {
-            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| internal_error(format!("movmad: failed to upload result: {err}")))?;
-            Ok(Value::GpuTensor(handle))
-        }
-        (_, result) => Ok(result),
+    match source {
+        Some(source) => gpu_helpers::restore_class_preserving_value(&source, result, "movmad"),
+        None => Ok(result),
     }
+}
+
+fn ensure_output_arity(builtin: &str, maximum: usize) -> BuiltinResult<()> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > maximum) {
+        return Err(invalid_argument(format!(
+            "{builtin}: at most {maximum} output{} supported",
+            if maximum == 1 { " is" } else { "s are" }
+        )));
+    }
+    Ok(())
 }
 
 pub(super) fn is_real_typed_integer_value(value: &Value) -> bool {
@@ -455,10 +406,16 @@ pub(super) fn rest_with_omitnan(mut rest: Vec<Value>) -> Vec<Value> {
 }
 
 pub(super) fn nanmin_rest_with_omitnan(mut rest: Vec<Value>) -> Vec<Value> {
-    if rest.is_empty() {
-        rest.push(Value::Tensor(
-            Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty placeholder shape"),
-        ));
+    if rest
+        .first()
+        .is_none_or(|first| !is_empty_numeric_placeholder(first))
+    {
+        rest.insert(
+            0,
+            Value::Tensor(
+                Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty placeholder shape"),
+            ),
+        );
     }
     rest.push(Value::from("omitnan"));
     rest

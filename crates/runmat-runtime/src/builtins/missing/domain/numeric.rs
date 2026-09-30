@@ -11,6 +11,14 @@ pub(super) fn is_numeric_data_like(value: &Value) -> bool {
     )
 }
 
+pub(super) fn is_empty_numeric_placeholder(value: &Value) -> bool {
+    match value {
+        Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) == 0,
+        Value::LogicalArray(array) => array.data.is_empty(),
+        _ => false,
+    }
+}
+
 pub(super) fn pairwise_nan_min(left: Value, right: Value) -> BuiltinResult<Value> {
     if crate::builtins::math::reduction::integer_native::value_has_integer_storage(&left)
         || crate::builtins::math::reduction::integer_native::value_has_integer_storage(&right)
