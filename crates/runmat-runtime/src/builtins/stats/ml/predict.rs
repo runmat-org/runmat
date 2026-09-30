@@ -108,6 +108,39 @@ pub(crate) async fn predict_builtin(
     xnew: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
+    let output = match model {
+        Value::Object(object)
+            if crate::builtins::deep_learning::model::is_deep_learning_network_object(&object) =>
+        {
+            if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
+                return Err(predict_invalid("predict: too many output arguments"));
+            }
+            crate::builtins::deep_learning::model::predict_deep_learning_object(object, xnew, rest)
+                .await?
+        }
+        model => predict_statistical(model, xnew, rest).await?,
+    };
+    match crate::output_count::current_output_count() {
+        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(1) => Ok(Value::OutputList(vec![output[0].clone()])),
+        Some(out_count) if out_count > output.len() => {
+            Err(predict_invalid("predict: too many output arguments"))
+        }
+        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
+            out_count, output,
+        )),
+        None => Ok(output
+            .into_iter()
+            .next()
+            .expect("predict dispatch always returns at least one output")),
+    }
+}
+
+async fn predict_statistical(
+    model: Value,
+    xnew: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Vec<Value>> {
     let statistical_model = matches!(
         &model,
         Value::Object(object)
@@ -148,33 +181,14 @@ pub(crate) async fn predict_builtin(
     let rest = gather_all(rest)
         .await
         .map_err(|err| predict_invalid(err.message))?;
-    let output = match model {
-        Value::Object(object)
-            if crate::builtins::deep_learning::model::is_deep_learning_network_object(&object) =>
-        {
-            crate::builtins::deep_learning::model::predict_deep_learning_object(object, xnew, rest)?
-        }
+    match model {
         Value::Object(object) if object.class_name.is(CLASSIFICATION_TREE_CLASS) => {
-            predict_classification_tree_object(object, xnew, rest)?
+            predict_classification_tree_object(object, xnew, rest)
         }
         Value::Object(object) if object.class_name.is(CLASSIFICATION_LINEAR_CLASS) => {
-            predict_classification_linear_object(object, xnew, rest)?
+            predict_classification_linear_object(object, xnew, rest)
         }
-        other => predict_linear_model_dispatch(other, xnew, rest)?,
-    };
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![output[0].clone()])),
-        Some(out_count) if out_count > output.len() => {
-            Err(predict_invalid("predict: too many output arguments"))
-        }
-        Some(out_count) => Ok(crate::output_count::output_list_with_padding(
-            out_count, output,
-        )),
-        None => Ok(output
-            .into_iter()
-            .next()
-            .expect("predict dispatch always returns at least one output")),
+        other => predict_linear_model_dispatch(other, xnew, rest),
     }
 }
 

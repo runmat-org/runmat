@@ -1,29 +1,5 @@
-//! Host forward and predict kernels and numerical representation boundaries.
+//! Host forward kernels and numerical representation boundaries.
 use super::*;
-
-pub(crate) fn predict_deep_learning_object(
-    object: ObjectInstance,
-    xnew: Value,
-    rest: Vec<Value>,
-) -> BuiltinResult<Vec<Value>> {
-    let options = parse_predict_options(rest)?;
-    validate_sequential_connections(&object, "predict")?;
-    let layers = object
-        .properties
-        .get("Layers")
-        .map(|value| layer_slice(value, "predict"))
-        .transpose()?
-        .unwrap_or(&[]);
-    validate_forward_layers(layers, "predict")?;
-    super::topology::require_feature_input(layers, "predict")?;
-    let tensor = input_tensor(xnew, "predict")?;
-    let input = match options.observations_in {
-        ObservationsIn::Rows => tensor,
-        ObservationsIn::Columns => transpose_2d(&tensor, "predict")?,
-    };
-    let scores = evaluate_network(&object, input, "predict")?;
-    Ok(vec![Value::Tensor(scores)])
-}
 
 pub(super) fn input_tensor(value: Value, function: &'static str) -> BuiltinResult<Tensor> {
     let tensor = match value {
@@ -300,53 +276,4 @@ pub(super) fn floating_tensor_from_f64(
             ),
         )),
     }
-}
-
-#[derive(Clone, Copy)]
-enum ObservationsIn {
-    Rows,
-    Columns,
-}
-
-struct PredictOptions {
-    observations_in: ObservationsIn,
-}
-
-fn parse_predict_options(values: Vec<Value>) -> BuiltinResult<PredictOptions> {
-    if !values.len().is_multiple_of(2) {
-        return Err(deep_learning_error(
-            "predict",
-            "predict: name-value options must be paired",
-        ));
-    }
-    let mut options = PredictOptions {
-        observations_in: ObservationsIn::Rows,
-    };
-    let mut idx = 0usize;
-    while idx < values.len() {
-        let name = scalar_text(&values[idx], "predict")?.to_ascii_lowercase();
-        match name.as_str() {
-            "observationsin" => {
-                let value = scalar_text(&values[idx + 1], "predict")?;
-                options.observations_in = match value.to_ascii_lowercase().as_str() {
-                    "rows" => ObservationsIn::Rows,
-                    "columns" => ObservationsIn::Columns,
-                    other => {
-                        return Err(deep_learning_error(
-                            "predict",
-                            format!("predict: unsupported ObservationsIn '{other}'"),
-                        ));
-                    }
-                };
-            }
-            other => {
-                return Err(deep_learning_error(
-                    "predict",
-                    format!("predict: unknown option '{other}'"),
-                ));
-            }
-        }
-        idx += 2;
-    }
-    Ok(options)
 }
