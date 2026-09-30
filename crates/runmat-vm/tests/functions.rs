@@ -1,6 +1,11 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
+#[path = "support/captured_arguments.rs"]
+mod captured_arguments;
+
+use captured_arguments::is_expand_all_cell_contents;
+
 use std::convert::TryFrom;
 use test_helpers::compile_source;
 use test_helpers::interpret;
@@ -49,27 +54,6 @@ fn execute_source_result_with_extensions(
 ) -> Result<Vec<runmat_value::Value>, Box<runmat_runtime::RuntimeError>> {
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source_result(source)
-}
-
-fn is_expand_all_cell_contents(
-    spec: &runmat_runtime::call::arguments::ArgumentSpec,
-    expected_num_indices: usize,
-) -> bool {
-    use runmat_runtime::call::arguments::{ArgumentExpansionSpec, ArgumentSpec};
-
-    match spec {
-        ArgumentSpec::Expansion(ArgumentExpansionSpec::CellContents {
-            num_indices,
-            expand_all,
-        }) => *expand_all && *num_indices == expected_num_indices,
-        ArgumentSpec::Single
-        | ArgumentSpec::CapturedSequence { .. }
-        | ArgumentSpec::Expansion(
-            ArgumentExpansionSpec::ReturnedOutputs
-            | ArgumentExpansionSpec::Member(_)
-            | ArgumentExpansionSpec::DynamicMember,
-        ) => false,
-    }
 }
 
 fn has_num(values: &[runmat_value::Value], expected: f64) -> bool {
@@ -741,10 +725,10 @@ fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_inst
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded zero-output feval should fail");
@@ -764,10 +748,10 @@ fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode).expect_err("unresolved qualified expanded feval should fail");
     assert_eq!(
@@ -786,10 +770,10 @@ fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_ins
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded multi-output feval should fail");
@@ -871,10 +855,10 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typ
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode).expect_err(
         "unresolved nested qualified expanded zero-output feval handle call should fail",
@@ -895,10 +879,10 @@ fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_t
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode).expect_err(
         "unresolved nested qualified expanded single-output feval handle call should fail",
@@ -919,10 +903,10 @@ fn unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instructi
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved nested qualified expanded feval handle call should fail");
@@ -1008,10 +992,10 @@ fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_type
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded zero-output direct handle call should fail");
@@ -1031,10 +1015,10 @@ fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instructio
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded direct handle call should fail");
@@ -1054,10 +1038,10 @@ fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typ
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded multi-output direct handle call should fail");
@@ -1147,10 +1131,10 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_us
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode).expect_err(
         "unresolved nested qualified external handle expanded zero-output direct call should fail",
@@ -1171,10 +1155,10 @@ fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_ins
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved nested qualified external handle expanded direct call should fail");
@@ -1195,10 +1179,10 @@ fn unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_u
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode).expect_err(
         "unresolved nested qualified external handle expanded multi-output direct call should fail",
@@ -1317,7 +1301,7 @@ fn unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_ty
     let source = "C = {1,2}; pkg.remote_inc(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified expanded zero-output direct call source should compile");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
             identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
@@ -1332,7 +1316,7 @@ fn unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_ty
             && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
             && *out_count == 0
             && specs.len() == 1
-            && is_expand_all_cell_contents(&specs[0], 0)
+            && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded zero-output direct call should fail");
@@ -1349,7 +1333,7 @@ fn unresolved_qualified_direct_call_expand_multi_output_uses_external_boundary_t
     let source = "C = {1,2}; [a,b] = pkg.remote_inc(C{:});";
     let bytecode = compile_source(source)
         .expect("qualified expanded multi-output direct call source should compile");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
             identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
@@ -1364,7 +1348,7 @@ fn unresolved_qualified_direct_call_expand_multi_output_uses_external_boundary_t
             && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
             && *out_count == 2
             && specs.len() == 1
-            && is_expand_all_cell_contents(&specs[0], 0)
+            && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded multi-output direct call should fail");
@@ -1475,7 +1459,7 @@ fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boun
     let source = "C = {1,2}; pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded zero-output direct call source should compile");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
             identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
@@ -1491,7 +1475,7 @@ fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boun
             && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
             && *out_count == 0
             && specs.len() == 1
-            && is_expand_all_cell_contents(&specs[0], 0)
+            && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved nested qualified expanded zero-output direct call should fail");
@@ -1509,7 +1493,7 @@ fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_bo
     let source = "C = {1,2}; a = pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded single-output direct call source should compile");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
             identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
@@ -1525,7 +1509,7 @@ fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_bo
             && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
             && *out_count == 1
             && specs.len() == 1
-            && is_expand_all_cell_contents(&specs[0], 0)
+            && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved nested qualified expanded single-output direct call should fail");
@@ -1543,7 +1527,7 @@ fn unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_bou
     let source = "C = {1,2}; [a,b] = pkg.sub.remote(C{:});";
     let bytecode = compile_source(source)
         .expect("nested qualified expanded multi-output direct call source should compile");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
             identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
@@ -1559,7 +1543,7 @@ fn unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_bou
             && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
             && *out_count == 2
             && specs.len() == 1
-            && is_expand_all_cell_contents(&specs[0], 0)
+            && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let err = interpret(&bytecode)
         .expect_err("unresolved nested qualified expanded multi-output direct call should fail");
@@ -2687,10 +2671,10 @@ fn feval_expand_multi_assign_uses_typed_instruction() {
         s = u + v;
     "#;
     let bytecode = compile_source(source).expect("compile semantic feval expanded multi-assign");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     let vars = interpret(&bytecode).expect("execute semantic feval expanded multi-assign");
@@ -2711,10 +2695,10 @@ fn feval_expand_zero_output_uses_typed_instruction() {
         feval(h, C{:});
     "#;
     let bytecode = compile_source(source).expect("compile semantic feval expanded zero-output");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     interpret(&bytecode).expect("execute semantic feval expanded zero-output");
 }
@@ -2731,10 +2715,10 @@ fn feval_expand_single_output_uses_typed_instruction() {
         u = feval(h, C{:});
     "#;
     let bytecode = compile_source(source).expect("compile semantic feval expanded single-output");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
     let vars = interpret(&bytecode).expect("execute semantic feval expanded single-output");
     assert!(vars
@@ -3472,10 +3456,10 @@ fn function_handle_expand_single_output_executes() {
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     let vars = interpret(&bytecode).expect("execute semantic handle expanded single-output");
@@ -3490,10 +3474,10 @@ fn function_handle_expand_zero_output_executes() {
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     interpret(&bytecode).expect("execute semantic handle expanded zero-output");
@@ -3508,10 +3492,10 @@ fn function_handle_expand_multi_output_executes() {
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     let vars = interpret(&bytecode).expect("execute semantic handle expanded multi-output");
@@ -3600,10 +3584,10 @@ fn unresolved_external_function_handle_expand_index_call_errors_with_identifier(
         instr,
         runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     let err = interpret(&bytecode)
@@ -3625,10 +3609,10 @@ fn unresolved_external_function_handle_expand_index_zero_output_errors_with_iden
         instr,
         runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     let err = interpret(&bytecode)
@@ -3650,10 +3634,10 @@ fn unresolved_external_function_handle_expand_index_multi_output_errors_with_ide
         instr,
         runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     let err = interpret(&bytecode)
@@ -4896,10 +4880,10 @@ fn object_cell_expansion_via_subsref() {
 fn method_expand_multi_output_uses_typed_instruction() {
     let source = "obj = new_object('Point'); C = {7, 3}; [a,b,c] = obj.deal(C{:}); s = b;";
     let bytecode = compile_source(source).expect("compile method expand multi-output source");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
-            if *out_count == 3 && specs.len() == 2 && is_expand_all_cell_contents(&specs[1], 0)
+            if *out_count == 3 && specs.len() == 2 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[1], 0)
     )));
 
     let vars = interpret(&bytecode).expect("execute method expand multi-output");
@@ -4936,10 +4920,10 @@ fn mixed_cell_colon_expansion_in_call_args() {
 fn builtin_expand_multi_output_uses_typed_instruction() {
     let source = "C = {7,3}; [a,b] = deal(C{:}); s = a + b;";
     let bytecode = compile_source(source).expect("compile builtin expand multi-output");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
-            if name == "deal" && *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if name == "deal" && *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     let vars = interpret(&bytecode).expect("execute builtin expand multi-output");
@@ -4952,22 +4936,26 @@ fn builtin_expand_multi_output_uses_typed_instruction() {
 fn builtin_expand_single_output_uses_typed_instruction() {
     let source = "C = {7,3}; a = max(C{:});";
     let bytecode = compile_source(source).expect("compile builtin expand single output");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
-            if name == "max" && *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if name == "max" && *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
+    let values = interpret(&bytecode).expect("execute captured builtin argument");
+    assert!(has_num(&values, 7.0));
 }
 
 #[test]
 fn expand_single_output_uses_typed_instruction() {
     let source = "function y = sum2(a,b); y = a + b; end; C = {7,8}; r = sum2(C{:});";
     let bytecode = compile_source(source).expect("compile semantic expand single output source");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
+    let values = interpret(&bytecode).expect("execute captured semantic function argument");
+    assert!(has_num(&values, 15.0));
 }
 
 #[test]
@@ -4975,10 +4963,10 @@ fn expand_multi_output_uses_typed_instruction() {
     let source =
         "function [u,v] = pair(a,b); u = a; v = b; end; C = {7,8}; [x,y] = pair(C{:}); s = x + y;";
     let bytecode = compile_source(source).expect("compile semantic expand multi-output source");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&specs[0], 0)
+            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
     )));
 
     let vars = interpret(&bytecode).expect("execute semantic expand multi-output");
@@ -4992,10 +4980,10 @@ fn expand_multi_output_uses_typed_instruction() {
 fn method_expand_single_output_uses_typed_instruction() {
     let source = "obj = new_object('Point'); C = {}; a = obj.deal(C{:});";
     let bytecode = compile_source(source).expect("compile method expand single-output source");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
+    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
-            if *out_count == 1 && specs.len() == 2 && is_expand_all_cell_contents(&specs[1], 0)
+            if *out_count == 1 && specs.len() == 2 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[1], 0)
     )));
     interpret(&bytecode).expect("execute valid method expand single-output fallback");
 }
@@ -5133,20 +5121,24 @@ fn unresolved_function_multi_output_uses_typed_instruction_and_errors() {
 fn unresolved_function_expand_single_output_uses_typed_instruction() {
     let source = "C = {7,3}; a = definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded call");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallFunctionExpandMultiOutput {
-            identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
-            fallback_policy,
-            specs,
-            out_count,
-            ..
-        } if name == "definitely_missing_callback"
-            && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
-            && *out_count == 1
-            && specs.len() == 1
-            && is_expand_all_cell_contents(&specs[0], 0)
-    )));
+    assert!(bytecode
+        .instructions
+        .iter()
+        .enumerate()
+        .any(|(call_index, instr)| matches!(
+            instr,
+            runmat_vm::Instr::CallFunctionExpandMultiOutput {
+                identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
+                fallback_policy,
+                specs,
+                out_count,
+                ..
+            } if name == "definitely_missing_callback"
+                && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                && *out_count == 1
+                && specs.len() == 1
+                && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
+        )));
 
     let err = interpret(&bytecode).expect_err("unresolved expanded call should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
@@ -5156,20 +5148,24 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
 fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
     let source = "C = {7,3}; definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded zero-output call");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallFunctionExpandMultiOutput {
-            identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
-            fallback_policy,
-            specs,
-            out_count,
-            ..
-        } if name == "definitely_missing_callback"
-            && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
-            && *out_count == 0
-            && specs.len() == 1
-            && is_expand_all_cell_contents(&specs[0], 0)
-    )));
+    assert!(bytecode
+        .instructions
+        .iter()
+        .enumerate()
+        .any(|(call_index, instr)| matches!(
+            instr,
+            runmat_vm::Instr::CallFunctionExpandMultiOutput {
+                identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
+                fallback_policy,
+                specs,
+                out_count,
+                ..
+            } if name == "definitely_missing_callback"
+                && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                && *out_count == 0
+                && specs.len() == 1
+                && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
+        )));
 
     let err = interpret(&bytecode).expect_err("unresolved expanded zero-output call should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
@@ -5179,20 +5175,24 @@ fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
 fn unresolved_function_expand_multi_output_uses_typed_instruction_and_errors() {
     let source = "C = {7,3}; [a,b] = definitely_missing_callback(C{:});";
     let bytecode = compile_source(source).expect("compile unresolved expanded call");
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallFunctionExpandMultiOutput {
-            identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
-            fallback_policy,
-            specs,
-            out_count,
-            ..
-        } if name == "definitely_missing_callback"
-            && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
-            && *out_count == 2
-            && specs.len() == 1
-            && is_expand_all_cell_contents(&specs[0], 0)
-    )));
+    assert!(bytecode
+        .instructions
+        .iter()
+        .enumerate()
+        .any(|(call_index, instr)| matches!(
+            instr,
+            runmat_vm::Instr::CallFunctionExpandMultiOutput {
+                identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
+                fallback_policy,
+                specs,
+                out_count,
+                ..
+            } if name == "definitely_missing_callback"
+                && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                && *out_count == 2
+                && specs.len() == 1
+                && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
+        )));
 
     let err = interpret(&bytecode).expect_err("unresolved expanded multi-output call should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
