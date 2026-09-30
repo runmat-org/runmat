@@ -22,6 +22,7 @@ pub(crate) struct RegionObservation {
     runtime: RuntimeContext,
     signature: PlacementSignature,
     candidate: String,
+    kind: ExecutionCandidateKind,
     started: runmat_time::Instant,
     reported: bool,
 }
@@ -42,6 +43,7 @@ impl RegionObservation {
         let _ = service.observe(PlacementFeedback {
             signature: self.signature.clone(),
             candidate: self.candidate.clone(),
+            kind: self.kind,
             total_elapsed_ns: runmat_time::duration_ns_saturating(self.started.elapsed()).max(1),
             succeeded,
         });
@@ -134,17 +136,18 @@ pub(crate) fn choose_region(
     if selected.node != format!("native.region.{}", plan.region.ordinal) {
         return RegionPlacement::Unavailable;
     }
-    let observation = |candidate| RegionObservation {
+    let observation = |candidate, kind| RegionObservation {
         runtime: runtime.clone(),
         signature: signature.clone(),
         candidate,
+        kind,
         started: runmat_time::Instant::now(),
         reported: false,
     };
     if selected.kind == generic.kind && selected.candidate == generic.identity {
-        RegionPlacement::Generic(observation(generic.identity))
+        RegionPlacement::Generic(observation(generic.identity, generic.kind))
     } else if selected.kind == vectorized.kind && selected.candidate == vectorized.identity {
-        RegionPlacement::Vectorized(observation(vectorized.identity))
+        RegionPlacement::Vectorized(observation(vectorized.identity, vectorized.kind))
     } else {
         RegionPlacement::Unavailable
     }

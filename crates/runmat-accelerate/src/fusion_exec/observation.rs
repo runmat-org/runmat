@@ -40,6 +40,7 @@ impl FusionCpuObservation {
             let _ = service.observe(runmat_execution::PlacementFeedback {
                 signature: feedback.signature,
                 candidate: feedback.candidate,
+                kind: feedback.kind,
                 total_elapsed_ns: duration_ns_saturating(self.started.elapsed()),
                 succeeded,
             });
@@ -62,7 +63,10 @@ mod tests {
     use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
     use std::rc::Rc;
 
-    fn ticket(candidate: &str) -> (LocalPlacementFeedback, Rc<PlacementSession>) {
+    fn ticket(
+        candidate: &str,
+        kind: runmat_execution::ExecutionCandidateKind,
+    ) -> (LocalPlacementFeedback, Rc<PlacementSession>) {
         let session = Rc::new(PlacementSession::default());
         let runtime = RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
@@ -85,6 +89,7 @@ mod tests {
                     },
                 },
                 candidate: candidate.into(),
+                kind,
             },
             session,
         )
@@ -92,7 +97,10 @@ mod tests {
 
     #[test]
     fn cpu_observation_records_success_once_only_after_completion() {
-        let (feedback, session) = ticket("cpu.shared.test");
+        let (feedback, session) = ticket(
+            "cpu.shared.test",
+            runmat_execution::ExecutionCandidateKind::SharedRuntime,
+        );
         let observation = FusionCpuObservation::new(Some(Box::new(feedback)));
         assert!(session.profile_snapshot().feedback.is_empty());
         observation.complete();
@@ -104,7 +112,10 @@ mod tests {
 
     #[test]
     fn abandoned_cpu_observation_never_records_success() {
-        let (feedback, session) = ticket("cpu.shared.test");
+        let (feedback, session) = ticket(
+            "cpu.shared.test",
+            runmat_execution::ExecutionCandidateKind::SharedRuntime,
+        );
         drop(FusionCpuObservation::new(Some(Box::new(feedback))));
         let snapshot = session.profile_snapshot();
         assert_eq!(snapshot.feedback[0].samples, 0);
@@ -113,7 +124,10 @@ mod tests {
 
     #[test]
     fn cancelled_future_drops_cpu_ticket_without_a_success_sample() {
-        let (feedback, session) = ticket("cpu.shared.test");
+        let (feedback, session) = ticket(
+            "cpu.shared.test",
+            runmat_execution::ExecutionCandidateKind::SharedRuntime,
+        );
         let observation = FusionCpuObservation::new(Some(Box::new(feedback)));
         let future = async move {
             std::future::pending::<()>().await;
@@ -127,7 +141,10 @@ mod tests {
 
     #[test]
     fn gpu_submission_is_not_completed_execution_feedback() {
-        let (feedback, session) = ticket("gpu.fusion.test");
+        let (feedback, session) = ticket(
+            "gpu.fusion.test",
+            runmat_execution::ExecutionCandidateKind::ProviderFusion,
+        );
         FusionPlacementSelection::new(
             FusionPlacementObserver::new(None),
             Some(feedback),
@@ -140,7 +157,10 @@ mod tests {
 
     #[test]
     fn failed_gpu_submission_retains_failure_feedback() {
-        let (feedback, session) = ticket("gpu.fusion.test");
+        let (feedback, session) = ticket(
+            "gpu.fusion.test",
+            runmat_execution::ExecutionCandidateKind::ProviderFusion,
+        );
         drop(FusionPlacementSelection::new(
             FusionPlacementObserver::new(None),
             Some(feedback),

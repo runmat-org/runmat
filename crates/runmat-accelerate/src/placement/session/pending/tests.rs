@@ -20,6 +20,7 @@ impl RuntimePlacementFeedbackSource for Source {
             .then(|| PlacementFeedback {
                 signature: self.signature.clone(),
                 candidate: "provider.test".into(),
+                kind: runmat_execution::ExecutionCandidateKind::ProviderOperation,
                 total_elapsed_ns: 19,
                 succeeded: true,
             })

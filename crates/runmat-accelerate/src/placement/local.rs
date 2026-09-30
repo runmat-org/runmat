@@ -69,6 +69,7 @@ pub(crate) struct LocalPlacementFeedback {
     pub(crate) runtime: runmat_runtime::context::RuntimeContext,
     pub(crate) signature: PlacementSignature,
     pub(crate) candidate: String,
+    pub(crate) kind: ExecutionCandidateKind,
 }
 
 /// Normalize provider feasibility and complete transfer costs before comparing
@@ -282,6 +283,7 @@ pub(crate) fn plan_local(
                         runtime: runtime.clone(),
                         signature: signature.clone(),
                         candidate: provider_candidate.identity.clone(),
+                        kind: provider_candidate.kind,
                     }));
                     provider_candidate
                 } else {
@@ -289,6 +291,7 @@ pub(crate) fn plan_local(
                         runtime: runtime.clone(),
                         signature,
                         candidate: cpu.identity.clone(),
+                        kind: cpu.kind,
                     }));
                     cpu
                 }

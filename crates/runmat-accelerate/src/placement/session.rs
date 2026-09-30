@@ -13,7 +13,7 @@ use super::{partition::evaluate_selections, partition::solve_partition, Placemen
 mod evidence;
 mod pending;
 
-pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 1;
+pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 2;
 const MAX_FEEDBACK_OBSERVATIONS: u64 = 1_048_576;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64,6 +64,7 @@ pub struct PlacementProfileSnapshot {
 pub struct PlacementFeedbackSeries {
     pub signature: runmat_execution::PlacementSignature,
     pub candidate: String,
+    pub kind: ExecutionCandidateKind,
     #[serde(with = "u64_decimal")]
     pub samples: u64,
     #[serde(with = "u64_decimal")]
@@ -152,7 +153,7 @@ struct CachedDecision {
 struct PlacementSessionState {
     tick: u64,
     decisions: BTreeMap<Digest, CachedDecision>,
-    feedback: BTreeMap<(Digest, String), PlacementFeedbackSeries>,
+    feedback: BTreeMap<(Digest, String, ExecutionCandidateKind), PlacementFeedbackSeries>,
 }
 
 pub struct PlacementSession {
@@ -268,7 +269,7 @@ impl PlacementSession {
     ) -> CandidateObservationEvidence {
         self.drain_observations();
         let state = self.state.borrow();
-        let key = (signature.cache_key(), candidate.to_owned());
+        let key = (signature.cache_key(), candidate.to_owned(), kind);
         state.feedback.get(&key).map_or(
             CandidateObservationEvidence::Unavailable(CandidateCostUnavailable::NoObservations),
             |series| evidence::from_series(series, state.tick, kind),
@@ -289,13 +290,14 @@ impl PlacementSession {
         let mut state = self.state.borrow_mut();
         let observation_tick = state.tick;
         let signature_key = feedback.signature.cache_key();
-        let key = (signature_key, feedback.candidate.clone());
+        let key = (signature_key, feedback.candidate.clone(), feedback.kind);
         let series = state
             .feedback
             .entry(key)
             .or_insert_with(|| PlacementFeedbackSeries {
                 signature: feedback.signature.clone(),
                 candidate: feedback.candidate.clone(),
+                kind: feedback.kind,
                 samples: 0,
                 failures: 0,
                 total_elapsed_ns: 0,
@@ -410,6 +412,7 @@ impl PlacementSession {
                 .cmp(&right.latest_tick)
                 .then_with(|| left.signature.cache_key().cmp(&right.signature.cache_key()))
                 .then_with(|| left.candidate.cmp(&right.candidate))
+                .then_with(|| left.kind.cmp(&right.kind))
         });
         let mut restored = BTreeMap::new();
         let mut restored_tick = 0_u64;
@@ -422,7 +425,11 @@ impl PlacementSession {
             }
             restored_tick = restored_tick.saturating_add(1);
             series.latest_tick = restored_tick;
-            let key = (series.signature.cache_key(), series.candidate.clone());
+            let key = (
+                series.signature.cache_key(),
+                series.candidate.clone(),
+                series.kind,
+            );
             if restored.insert(key, series).is_some() {
                 return Err(PlacementPlanError {
                     code: "RunMat:Placement:ProfileEntry",
@@ -525,11 +532,15 @@ fn apply_feedback_estimates(
     request: &mut PlacementPlanRequest,
     signature_key: Digest,
     tick: u64,
-    feedback: &BTreeMap<(Digest, String), PlacementFeedbackSeries>,
+    feedback: &BTreeMap<(Digest, String, ExecutionCandidateKind), PlacementFeedbackSeries>,
 ) {
     for node in &mut request.graph.nodes {
         for candidate in &mut node.candidates {
-            let key = (signature_key, candidate.descriptor.identity.clone());
+            let key = (
+                signature_key,
+                candidate.descriptor.identity.clone(),
+                candidate.descriptor.kind,
+            );
             let Some(series) = feedback.get(&key) else {
                 continue;
             };
@@ -1168,6 +1179,7 @@ mod tests {
                     .observe(PlacementFeedback {
                         signature: request.signature.clone(),
                         candidate: candidate.into(),
+                        kind: ExecutionCandidateKind::ProviderGraph,
                         total_elapsed_ns: 250_000,
                         succeeded: true,
                     })
@@ -1183,10 +1195,18 @@ mod tests {
         let encoded = serde_json::to_string(&session.profile_snapshot()).unwrap();
         assert!(encoded.contains("\"total_elapsed_ns\":\""));
         assert!(encoded.contains("\"samples\":\"2\""));
+        assert!(encoded.contains("\"kind\":\"provider_graph\""));
         let snapshot: PlacementProfileSnapshot = serde_json::from_str(&encoded).unwrap();
         let restored = PlacementSession::default();
-        restored.restore_profile(snapshot).unwrap();
+        restored.restore_profile(snapshot.clone()).unwrap();
         assert_eq!(restored.profile_snapshot().feedback.len(), 2);
+        let mut legacy = serde_json::to_value(snapshot).unwrap();
+        legacy["schema_version"] = serde_json::json!(1);
+        legacy["feedback"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("kind");
+        assert!(serde_json::from_value::<PlacementProfileSnapshot>(legacy).is_err());
     }
 
     #[test]
@@ -1210,6 +1230,7 @@ mod tests {
             .observe(PlacementFeedback {
                 signature: signature.clone(),
                 candidate: candidate.into(),
+                kind: ExecutionCandidateKind::ProviderGraph,
                 total_elapsed_ns: 8,
                 succeeded: false,
             })
@@ -1230,6 +1251,7 @@ mod tests {
                 .observe(PlacementFeedback {
                     signature: signature.clone(),
                     candidate: candidate.into(),
+                    kind: ExecutionCandidateKind::ProviderGraph,
                     total_elapsed_ns: elapsed_ns,
                     succeeded: true,
                 })
@@ -1286,6 +1308,7 @@ mod tests {
                 .observe(PlacementFeedback {
                     signature: signature.clone(),
                     candidate: candidate.into(),
+                    kind: ExecutionCandidateKind::ProviderGraph,
                     total_elapsed_ns: 110,
                     succeeded: true,
                 })
@@ -1339,6 +1362,7 @@ mod tests {
                 .observe(PlacementFeedback {
                     signature: signature.clone(),
                     candidate: candidate.into(),
+                    kind: ExecutionCandidateKind::ProviderGraph,
                     total_elapsed_ns: 100,
                     succeeded,
                 })
@@ -1352,6 +1376,25 @@ mod tests {
             ),
             E::Unavailable(Missing::RepeatedFailures { failed: 2 })
         );
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::SharedRuntime
+            ),
+            E::Unavailable(Missing::NoObservations)
+        );
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: signature.clone(),
+                    candidate: candidate.into(),
+                    kind: ExecutionCandidateKind::SharedRuntime,
+                    total_elapsed_ns: 75,
+                    succeeded: true,
+                })
+                .unwrap();
+        }
         assert!(matches!(
             session.observed_candidate_duration(
                 &signature,
@@ -1360,6 +1403,14 @@ mod tests {
             ),
             E::Observed(_)
         ));
+        assert_eq!(
+            session.observed_candidate_duration(
+                &signature,
+                candidate,
+                ExecutionCandidateKind::ProviderGraph
+            ),
+            E::Unavailable(Missing::RepeatedFailures { failed: 2 })
+        );
     }
 
     #[test]
@@ -1373,6 +1424,7 @@ mod tests {
             .observe(PlacementFeedback {
                 signature: request.signature.clone(),
                 candidate: "gpu.first".into(),
+                kind: ExecutionCandidateKind::ProviderGraph,
                 total_elapsed_ns: 20_000,
                 succeeded: true,
             })
@@ -1402,6 +1454,7 @@ mod tests {
                 .observe(PlacementFeedback {
                     signature: request.signature.clone(),
                     candidate: "gpu.first".into(),
+                    kind: ExecutionCandidateKind::ProviderGraph,
                     total_elapsed_ns: 0,
                     succeeded: false,
                 })

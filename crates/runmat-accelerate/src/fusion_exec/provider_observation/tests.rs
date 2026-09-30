@@ -48,6 +48,7 @@ fn selected(
             runtime,
             signature: signature(),
             candidate: "provider.fusion".into(),
+            kind: runmat_execution::ExecutionCandidateKind::ProviderFusion,
         }),
         receipt: Some(receipt),
     }

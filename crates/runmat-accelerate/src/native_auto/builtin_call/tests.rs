@@ -109,6 +109,11 @@ fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuil
     let feedback = LocalPlacementFeedback {
         runtime: runtime(probe),
         candidate: if provider { "provider" } else { "cpu" }.into(),
+        kind: if provider {
+            runmat_execution::ExecutionCandidateKind::ProviderOperation
+        } else {
+            runmat_execution::ExecutionCandidateKind::SharedRuntime
+        },
         signature: PlacementSignature {
             operation: "test".into(),
             region: None,

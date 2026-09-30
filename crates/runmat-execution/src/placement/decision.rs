@@ -69,6 +69,7 @@ pub struct PlacementDecision {
 pub struct PlacementFeedback {
     pub signature: PlacementSignature,
     pub candidate: String,
+    pub kind: ExecutionCandidateKind,
     /// End-to-end elapsed time for this exact candidate/signature. Detailed
     /// stage timings belong to executor/provider observations and must not be
     /// invented when only the complete duration is known.

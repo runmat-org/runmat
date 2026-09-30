@@ -165,6 +165,7 @@ impl BuiltinCallObservation {
                 let _ = service.observe(runmat_execution::PlacementFeedback {
                     signature: ticket.signature,
                     candidate: ticket.candidate,
+                    kind: ticket.kind,
                     total_elapsed_ns: duration_ns_saturating(self.started.elapsed()).max(1),
                     succeeded,
                 });

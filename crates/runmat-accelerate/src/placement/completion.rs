@@ -25,6 +25,7 @@ pub(crate) fn publish_provider_feedback(
         receipt,
         signature: feedback.signature,
         candidate: feedback.candidate,
+        kind: feedback.kind,
         cancellation,
     };
     if let Some(ready) = source.take_ready() {
@@ -40,6 +41,7 @@ struct DeferredProviderFeedback {
     receipt: ProviderOperationReceipt,
     signature: runmat_execution::PlacementSignature,
     candidate: String,
+    kind: runmat_execution::ExecutionCandidateKind,
     cancellation: runmat_execution::cancellation::CancellationToken,
 }
 
@@ -62,6 +64,7 @@ impl RuntimePlacementFeedbackSource for DeferredProviderFeedback {
         Some(runmat_execution::PlacementFeedback {
             signature: self.signature.clone(),
             candidate: self.candidate.clone(),
+            kind: self.kind,
             total_elapsed_ns: elapsed,
             succeeded,
         })

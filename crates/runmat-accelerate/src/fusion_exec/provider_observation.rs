@@ -63,6 +63,7 @@ impl Drop for FusionPlacementSelection {
         let _ = service.observe(runmat_execution::PlacementFeedback {
             signature: feedback.signature.clone(),
             candidate: feedback.candidate.clone(),
+            kind: feedback.kind,
             total_elapsed_ns: runmat_time::duration_ns_saturating(self.started.elapsed()),
             succeeded: false,
         });
