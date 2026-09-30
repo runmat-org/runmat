@@ -72,6 +72,22 @@ fn constructor_and_training_consumer_share_solver_defaults() {
 }
 
 #[test]
+fn positional_solver_cannot_be_overridden_by_a_named_property() {
+    let error = futures::executor::block_on(
+        crate::builtins::deep_learning::training::training_options_builtin(
+            Value::String("sgdm".into()),
+            vec![
+                Value::String("SolverName".into()),
+                Value::String("adam".into()),
+            ],
+        ),
+    )
+    .err()
+    .unwrap();
+    assert!(error.message().contains("SolverName"), "{error}");
+}
+
+#[test]
 fn training_controls_have_one_typed_admission_authority() {
     let valid = options(
         "adam",

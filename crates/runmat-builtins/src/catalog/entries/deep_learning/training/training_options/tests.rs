@@ -103,3 +103,23 @@ fn solver_literal_controls_closed_property_set_but_unknown_solver_keeps_common_f
     assert!(object.properties.contains_key("InitialLearnRate"));
     assert!(!object.properties.contains_key("SquaredGradientDecayFactor"));
 }
+
+#[test]
+fn solver_name_cannot_be_overridden_as_a_named_option() {
+    let result = infer(
+        vec![
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        vec![
+            LiteralValue::String("sgdm".into()),
+            LiteralValue::String("SolverName".into()),
+            LiteralValue::String("adam".into()),
+        ],
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-TRAININGOPTIONS-SOLVER"));
+}

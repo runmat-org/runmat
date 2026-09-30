@@ -68,6 +68,14 @@ pub(super) async fn training_options_builtin(
     // An options object stores its values; construction has no reason to
     // download resident values just to copy them into metadata.
     for (key, value) in parse_name_values(rest, "trainingOptions")? {
+        if runmat_builtins::TrainingOptionKey::from_name(&key)
+            == Some(runmat_builtins::TrainingOptionKey::SolverName)
+        {
+            return Err(deep_learning_error(
+                "trainingOptions",
+                "trainingOptions: solver is supplied by the required positional argument, not SolverName",
+            ));
+        }
         properties.push((runmat_builtins::canonical_training_option_name(&key), value));
     }
     Ok(object_with_identity(

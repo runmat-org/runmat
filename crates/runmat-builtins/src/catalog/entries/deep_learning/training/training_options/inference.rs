@@ -122,6 +122,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             dynamic_key = true;
             continue;
         };
+        if super::TrainingOptionKey::from_name(&name) == Some(super::TrainingOptionKey::SolverName)
+        {
+            diagnostics.push(argument_error(
+                "RM-DL-TRAININGOPTIONS-SOLVER",
+                "solver is supplied by the required positional argument, not SolverName",
+                index,
+            ));
+        }
         if let Some(value) = request.arguments.get(index + 1) {
             properties.insert(super::canonical_training_option_name(&name), value.clone());
         }
