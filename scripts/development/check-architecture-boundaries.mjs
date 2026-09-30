@@ -3172,12 +3172,16 @@ if (binaryArithmeticProviderSupportFacade.split("\n").length > 64) {
   fail("binary-arithmetic provider support facade must remain a bounded module router");
 }
 const gpuHelpers = read("crates/runmat-runtime/src/builtins/common/gpu_helpers.rs");
-const exactIntegerScalarUpload = gpuHelpers.match(
-  /pub fn upload_exact_integer_scalar_like[\s\S]*?\npub fn resident_gpu_value/
-)?.[0];
+const exactIntegerScalarUploadRegion = rustFunctionRegions(gpuHelpers).find(
+  (region) => region.name === "upload_exact_integer_scalar_like"
+);
+const exactIntegerScalarUpload = exactIntegerScalarUploadRegion && gpuHelpers.slice(
+  exactIntegerScalarUploadRegion.start,
+  exactIntegerScalarUploadRegion.end
+);
 if (
   !exactIntegerScalarUpload ||
-  !/anyhow::Result<Option<GpuTensorHandle>>/.test(exactIntegerScalarUpload)
+  !/NumericUploadResult<Option<GpuTensorHandle>>/.test(exactIntegerScalarUpload)
 ) {
   fail("exact integer scalar upload must distinguish inapplicable input from provider failure");
 }
