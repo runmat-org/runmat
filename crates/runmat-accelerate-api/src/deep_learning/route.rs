@@ -124,8 +124,9 @@ impl DeepLearningForwardRoute<'_> {
                     ),
                     DeepLearningForwardParameters::Dense { weights, bias },
                 ) => {
-                    if view.layout() != GpuTensorLayout::Contiguous
-                        || view.shape() != [*batch, *input_channels]
+                    // Dense execution uses provider matmul, which accepts
+                    // the validated lazy 2-D transpose view without a copy.
+                    if view.shape() != [*batch, *input_channels]
                         || self.parameter_view(weights, element)?.shape()
                             != [*input_channels, *output_channels]
                         || self.parameter_view(bias, element)?.shape() != [1, *output_channels]
@@ -330,6 +331,38 @@ mod tests {
         let route = dense_route(DeepLearningForwardSource::Resident(&input.handle));
         assert_eq!(route.analyze().unwrap().output_bytes, 32);
         assert_eq!(input.probe.retirements(), 0);
+    }
+
+    #[test]
+    fn nonsquare_lazy_transpose_is_a_legal_dense_input() {
+        let mut route = dense_route(DeepLearningForwardSource::Host {
+            element_type: NumericElementType::F32,
+            shape: vec![3, 2],
+        });
+        route.steps.insert(
+            0,
+            DeepLearningForwardStep {
+                operation: DeepLearningForwardOperation::View(ProviderViewStep::Transpose2D),
+                parameters: DeepLearningForwardParameters::None,
+            },
+        );
+        let geometry = route.analyze().unwrap();
+        assert_eq!(geometry.stage_inputs[1].shape(), [2, 3]);
+        assert!(matches!(
+            geometry.stage_inputs[1].layout(),
+            GpuTensorLayout::Transpose(_)
+        ));
+        assert_eq!(geometry.output_bytes, 32);
+        route.steps[1].operation =
+            DeepLearningForwardOperation::FeedForward(DeepLearningFeedForwardStage::Dense {
+                batch: 3,
+                input_channels: 2,
+                output_channels: 4,
+            });
+        assert_eq!(
+            route.analyze(),
+            Err(DeepLearningForwardRouteError::InvalidGeometry)
+        );
     }
 
     #[test]
