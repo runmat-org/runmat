@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 pub(super) type ClassificationMode = runmat_builtins::CrossentropyClassificationMode;
 pub(super) type CrossentropyReduction = runmat_builtins::CrossentropyReductionMode;
-type NormalizationMode = runmat_builtins::CrossentropyNormalizationMode;
+pub(super) type NormalizationMode = runmat_builtins::CrossentropyNormalizationMode;
 
 pub(super) fn parse_classification_mode(
     value: &Value,
@@ -86,10 +86,7 @@ impl ParsedLossOptions {
 
 #[derive(Clone, Copy)]
 pub(super) enum NormalizationFactor {
-    AllElements,
-    BatchSize,
-    MaskIncluded,
-    None,
+    Named(NormalizationMode),
     Scalar(f64),
 }
 
@@ -101,10 +98,7 @@ impl NormalizationFactor {
                     .to_ascii_lowercase()
                     .replace(['_', ' '], "-");
                 match NormalizationMode::from_name(&text) {
-                    Some(NormalizationMode::AllElements) => Ok(Self::AllElements),
-                    Some(NormalizationMode::BatchSize) => Ok(Self::BatchSize),
-                    Some(NormalizationMode::MaskIncluded) => Ok(Self::MaskIncluded),
-                    Some(NormalizationMode::None) => Ok(Self::None),
+                    Some(mode) => Ok(Self::Named(mode)),
                     None => Err(deep_learning_error(
                         "crossentropy",
                         format!("crossentropy: unsupported NormalizationFactor '{text}'"),
@@ -165,9 +159,9 @@ impl CrossentropyOptions {
             .transpose()?
             .unwrap_or_else(|| {
                 if predictions.format.is_some() || data_format.is_some() {
-                    NormalizationFactor::BatchSize
+                    NormalizationFactor::Named(NormalizationMode::BatchSize)
                 } else {
-                    NormalizationFactor::AllElements
+                    NormalizationFactor::Named(NormalizationMode::AllElements)
                 }
             });
         let weights_format = parsed
@@ -220,18 +214,22 @@ impl CrossentropyOptions {
         mask: &[f64],
     ) -> BuiltinResult<f64> {
         match self.normalization {
-            NormalizationFactor::AllElements => {
+            NormalizationFactor::Named(NormalizationMode::AllElements) => {
                 Ok(weighted_losses.iter().sum::<f64>() / predictions.data.len() as f64)
             }
-            NormalizationFactor::BatchSize => Ok(weighted_losses.iter().sum::<f64>()
-                / batch_size(predictions, self.data_format.as_ref())?),
-            NormalizationFactor::MaskIncluded => reduce_mask_included(
+            NormalizationFactor::Named(NormalizationMode::BatchSize) => {
+                Ok(weighted_losses.iter().sum::<f64>()
+                    / batch_size(predictions, self.data_format.as_ref())?)
+            }
+            NormalizationFactor::Named(NormalizationMode::MaskIncluded) => reduce_mask_included(
                 predictions,
                 weighted_losses,
                 mask,
                 self.data_format.as_ref(),
             ),
-            NormalizationFactor::None => Ok(weighted_losses.iter().sum::<f64>()),
+            NormalizationFactor::Named(NormalizationMode::None) => {
+                Ok(weighted_losses.iter().sum::<f64>())
+            }
             NormalizationFactor::Scalar(value) => Ok(weighted_losses.iter().sum::<f64>() / value),
         }
     }

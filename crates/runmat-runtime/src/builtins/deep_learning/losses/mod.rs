@@ -33,7 +33,8 @@ use host::{
 use mask::{mask_values_for_layout, LossMask};
 use options::{
     parse_classification_mode, parse_reduction, provider_mode, ClassificationMode,
-    CrossentropyOptions, CrossentropyReduction, NormalizationFactor, ParsedLossOptions,
+    CrossentropyOptions, CrossentropyReduction, NormalizationFactor, NormalizationMode,
+    ParsedLossOptions,
 };
 use runmat_builtins::CrossentropyOptionKey as OptionKey;
 use weights::LossWeights;

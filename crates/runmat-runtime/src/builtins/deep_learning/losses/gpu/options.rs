@@ -71,12 +71,15 @@ impl GpuCrossentropyOptions {
             .transpose()?
             .unwrap_or_else(|| {
                 if data_format.is_some() {
-                    NormalizationFactor::BatchSize
+                    NormalizationFactor::Named(NormalizationMode::BatchSize)
                 } else {
-                    NormalizationFactor::AllElements
+                    NormalizationFactor::Named(NormalizationMode::AllElements)
                 }
             });
-        if matches!(normalization, NormalizationFactor::MaskIncluded) {
+        if matches!(
+            normalization,
+            NormalizationFactor::Named(NormalizationMode::MaskIncluded)
+        ) {
             return Ok(None);
         }
         if let Some(first) = parsed.unsupported_name() {
@@ -101,15 +104,17 @@ impl GpuCrossentropyOptions {
         shape: &[usize],
     ) -> BuiltinResult<f64> {
         match self.normalization {
-            NormalizationFactor::AllElements => Ok(len as f64),
-            NormalizationFactor::BatchSize => {
+            NormalizationFactor::Named(NormalizationMode::AllElements) => Ok(len as f64),
+            NormalizationFactor::Named(NormalizationMode::BatchSize) => {
                 Ok(batch_size_for_shape(shape, self.data_format.as_ref()))
             }
-            NormalizationFactor::MaskIncluded => Err(deep_learning_error(
-                "crossentropy",
-                "crossentropy: gpuArray MaskIncluded normalization requires host fallback",
-            )),
-            NormalizationFactor::None => Ok(1.0),
+            NormalizationFactor::Named(NormalizationMode::MaskIncluded) => {
+                Err(deep_learning_error(
+                    "crossentropy",
+                    "crossentropy: gpuArray MaskIncluded normalization requires host fallback",
+                ))
+            }
+            NormalizationFactor::Named(NormalizationMode::None) => Ok(1.0),
             NormalizationFactor::Scalar(value) => Ok(value),
         }
     }
