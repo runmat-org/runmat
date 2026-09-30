@@ -185,7 +185,7 @@ fn host_gradient_is_new_dense_storage_and_known_invalid_data_is_not_preserved() 
     assert_eq!(gradient.storage, StorageFact::Dense);
     assert_eq!(gradient.residency, ResidencyFact::Host);
     assert_eq!(gradient.shape, ShapeFact::from(vec![Some(2), Some(2)]));
-    assert_eq!(gradient.alias, AliasFact::Unique);
+    assert_eq!(gradient.alias, AliasFact::Unknown);
     assert_eq!(gradient.view, ViewFact::Materialized);
 
     let mut sparse = shared_view;
@@ -254,4 +254,38 @@ fn host_gradient_is_new_dense_storage_and_known_invalid_data_is_not_preserved() 
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-DL-DLGRADIENT-DATA"));
     assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn repeated_target_gradients_do_not_claim_exclusive_data_ownership() {
+    let target_data = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(1)]),
+        StorageFact::Dense,
+    );
+    let target = dlarray(target_data);
+    let loss = dlarray(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Single,
+        domain: NumericDomain::Real,
+    })));
+    let request = CallRequest {
+        arguments: vec![loss, target.clone(), target],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+    };
+    let result = crate::infer_catalog_call(&DLGRADIENT_CATALOG_ENTRY, &request);
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(result.outputs.len(), 2);
+    for output in &result.outputs {
+        let ValueKindFact::Object(object) = &output.kind else {
+            panic!("gradient wrapper")
+        };
+        let gradient = &object.properties[crate::DLARRAY_DATA_PROPERTY];
+        assert_eq!(gradient.alias, AliasFact::Unknown);
+        assert_eq!(gradient.view, ViewFact::Materialized);
+        assert_eq!(gradient.numeric().unwrap().class, NumericClass::Single);
+    }
 }

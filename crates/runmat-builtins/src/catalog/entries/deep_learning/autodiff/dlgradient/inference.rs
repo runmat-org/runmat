@@ -3,8 +3,8 @@ use crate::{
     BuiltinCatalogEntry,
 };
 use runmat_types::{
-    standard, CallInference, CallRequest, DynamicReason, NumericClass, ObjectFact, ResidencyFact,
-    StorageFact, ValueFact, ValueKindFact,
+    standard, AliasFact, CallInference, CallRequest, DynamicReason, NumericClass, ObjectFact,
+    ResidencyFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -86,7 +86,7 @@ fn gradient_for_target(target: &ValueFact) -> ValueFact {
     }
     let mut properties = BTreeMap::new();
     if let Some(data) = object.properties.get(crate::DLARRAY_DATA_PROPERTY) {
-        let gradient_data = match &data.kind {
+        let mut gradient_data = match &data.kind {
             _ if known_unsupported_data(data) => {
                 ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
             }
@@ -105,6 +105,10 @@ fn gradient_for_target(target: &ValueFact) -> ValueFact {
             ),
             _ => ValueFact::unknown(DynamicReason::RuntimeValue),
         };
+        // Repeated targets and shared learnables can clone the same CoW tape
+        // gradient into more than one output. Its class and allocation layout
+        // are known, but exclusive allocation ownership is not.
+        gradient_data.alias = AliasFact::Unknown;
         properties.insert(crate::DLARRAY_DATA_PROPERTY.into(), gradient_data);
     }
     for name in ["Format", "Labels"] {

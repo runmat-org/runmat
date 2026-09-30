@@ -127,6 +127,33 @@ fn annotation_and_gradient_preserve_typed_struct_array_shape_and_schema() {
 }
 
 #[test]
+fn repeated_target_gradients_share_cached_copy_on_write_allocation() {
+    let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+    let target = annotate_dlarray_value(wrapped(Value::Tensor(
+        Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap(),
+    )))
+    .expect("traced target");
+    let target_id = dlarray_node_id(&target).expect("active node");
+    let gradient = Tensor::from_f32(vec![1.0, 1.0], vec![2, 1]).unwrap();
+    let gradients = HashMap::from([(target_id, gradient)]);
+    let first = super::gradient::gradient_tree_for_target(&target, &gradients).unwrap();
+    let second = super::gradient::gradient_tree_for_target(&target, &gradients).unwrap();
+    fn data(value: &Value) -> &Tensor {
+        let Value::Object(object) = value else {
+            panic!("gradient object")
+        };
+        let Some(Value::Tensor(data)) = object.properties.get("Data") else {
+            panic!("gradient Data")
+        };
+        data
+    }
+    assert!(data(&first)
+        .host_buffer()
+        .shares_allocation_with(data(&second).host_buffer()));
+    assert_eq!(data(&first).numeric_dtype(), NumericDType::F32);
+}
+
+#[test]
 fn dlarray_constructor_records_active_tape_and_rejects_resident_tape_input() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let resident = provider
