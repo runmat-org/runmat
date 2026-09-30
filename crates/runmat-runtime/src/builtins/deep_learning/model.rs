@@ -2,8 +2,8 @@
 
 use super::layer_identity::ForwardLayerKind;
 use super::{
-    autodiff, deep_learning_error, layer_names, logical_scalar, numeric_values, numeric_vector,
-    object, object_with_identity, parse_name_values, positive_usize, scalar_text, string_array,
+    autodiff, deep_learning_error, layer_names, logical_scalar, numeric_vector, object,
+    object_with_identity, parse_name_values, positive_usize, scalar_text, string_array,
     tensor_value, unsupported_error, DLARRAY_CLASS, ELU_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS,
     LAYER_GRAPH_CLASS, RELU_LAYER_CLASS, SOFTMAX_LAYER_CLASS,
 };

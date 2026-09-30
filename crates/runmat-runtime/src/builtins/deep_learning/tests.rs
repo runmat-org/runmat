@@ -580,6 +580,51 @@ fn elu_feature_network_layers() -> Value {
 }
 
 #[test]
+fn forward_rejects_malformed_elu_alpha_before_resident_preparation() {
+    let invalid = [
+        Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        Value::Num(f64::NAN),
+        Value::Num(f64::INFINITY),
+    ];
+    for alpha in invalid {
+        let mut net = block_on(dlnetwork_builtin(vec![elu_feature_network_layers()])).unwrap();
+        let Value::Object(network) = &mut net else {
+            panic!("network expected")
+        };
+        let Some(Value::Cell(layers)) = network.properties.get_mut("Layers") else {
+            panic!("layers expected")
+        };
+        let Value::Object(elu) = &mut layers.data[1] else {
+            panic!("ELU layer expected")
+        };
+        elu.properties.insert("Alpha".into(), alpha);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let resident = block_on(dlarray_builtin(
+            Value::GpuTensor(allocation.handle.clone()),
+            vec![],
+        ))
+        .unwrap();
+        for input in [
+            Value::Tensor(Tensor::new(vec![1.0, -1.0], vec![1, 2]).unwrap()),
+            resident,
+        ] {
+            let error = block_on(forward_builtin(net.clone(), input, vec![])).unwrap_err();
+            assert!(error.to_string().contains("Alpha must be a finite numeric scalar"));
+        }
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
+}
+
+#[test]
 fn dlnetwork_materializes_metadata_and_learnables() {
     let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
     let Value::Object(object) = net else {
@@ -972,6 +1017,46 @@ fn forward_runs_fully_connected_gpu_dlarray_without_host_gather() {
                 .expect("gather GPU output for parity assertion");
         assert_eq!(actual.shape, expected.shape);
         assert_eq!(actual.materialize_f64(), expected.materialize_f64());
+    });
+}
+
+#[test]
+fn forward_resident_outputs_preserve_explicit_and_automatic_input_intent() {
+    use runmat_accelerate_api::{handle_provenance, GpuHandleProvenance};
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        for layers in [dense_feature_network_layers(), elu_feature_network_layers()] {
+            let net = block_on(dlnetwork_builtin(vec![layers])).unwrap();
+            for intent in [GpuHandleProvenance::Automatic, GpuHandleProvenance::Explicit] {
+                let uploaded = provider
+                    .upload(&HostTensorView {
+                        data: &[1.0, -2.0],
+                        shape: &[1, 2],
+                    })
+                    .unwrap();
+                let handle = uploaded.with_provenance(intent).unwrap();
+                let dlarray = block_on(dlarray_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    vec![],
+                ))
+                .unwrap();
+                provider.reset_telemetry();
+                let output = block_on(forward_builtin(net.clone(), dlarray, vec![])).unwrap();
+                let Value::Object(output) = output else {
+                    panic!("dlarray expected")
+                };
+                let Some(Value::GpuTensor(result)) = output.properties.get("Data") else {
+                    panic!("resident output expected")
+                };
+                assert_eq!(handle_provenance(result), Some(intent));
+                assert_eq!(handle_provenance(&handle), Some(intent));
+                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+                let retained = crate::builtins::common::test_support::gather(
+                    Value::GpuTensor(handle.clone()),
+                )
+                .unwrap();
+                assert_eq!(retained.materialize_f64(), vec![1.0, -2.0]);
+            }
+        }
     });
 }
 

@@ -57,6 +57,24 @@ pub(super) async fn evaluate_network_gpu(
             current = output;
         }
     }
+    let consumed_parameters = layers.iter().filter_map(|layer| {
+        let Value::Object(layer) = layer else {
+            return None;
+        };
+        layer
+            .class_name
+            .is(super::FULLY_CONNECTED_LAYER_CLASS)
+            .then_some(layer)
+    });
+    let resident_parameters = consumed_parameters.flat_map(|layer| {
+        ["Weights", "Bias"]
+            .into_iter()
+            .filter_map(move |name| resident_parameter_handle(layer, name))
+    });
+    crate::builtins::common::gpu_helpers::propagate_output_provenance(
+        &mut current,
+        std::iter::once(input).chain(resident_parameters),
+    )?;
     Ok(current)
 }
 

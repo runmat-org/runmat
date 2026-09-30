@@ -176,9 +176,8 @@ pub(super) fn elu_alpha(layer: &ObjectInstance, function: &'static str) -> Built
     Ok(layer
         .properties
         .get("Alpha")
-        .map(|value| numeric_values(value, function, "Alpha"))
+        .map(|value| super::super::numeric_scalar(value, function, "Alpha"))
         .transpose()?
-        .and_then(|values| values.first().copied())
         .unwrap_or(1.0))
 }
 

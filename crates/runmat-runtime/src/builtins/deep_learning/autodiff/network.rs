@@ -94,9 +94,8 @@ pub(in crate::builtins::deep_learning) fn record_network_forward(
                 let alpha = layer
                     .properties
                     .get("Alpha")
-                    .map(|value| super::super::numeric_values(value, function, "Alpha"))
+                    .map(|value| super::super::numeric_scalar(value, function, "Alpha"))
                     .transpose()?
-                    .and_then(|values| values.first().copied())
                     .unwrap_or(1.0);
                 let output = map_tensor(
                     input_tensor,
