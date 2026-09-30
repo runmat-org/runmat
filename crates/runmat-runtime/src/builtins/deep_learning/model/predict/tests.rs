@@ -161,3 +161,29 @@ fn documented_integer_predictors_do_not_inherit_forward_extension_gate() {
     assert_eq!(output.shape, vec![2, 1]);
     assert_eq!(output.materialize_f64(), vec![0.5, 2.5]);
 }
+
+#[test]
+fn formatted_predictor_keeps_its_typed_axis_order() {
+    let input = object(
+        "dlarray",
+        vec![
+            (
+                "Data",
+                Value::Tensor(Tensor::new(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]).unwrap()),
+            ),
+            ("Format", Value::String("CB".into())),
+            ("Labels", Value::String("CB".into())),
+        ],
+    );
+    let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
+        network(),
+        input,
+        vec![],
+    ))
+    .unwrap();
+    let Value::Tensor(output) = output else {
+        panic!("raw score tensor expected")
+    };
+    assert_eq!(output.shape, vec![3, 1]);
+    assert_eq!(output.materialize_f64(), vec![0.5, 2.5, 4.5]);
+}

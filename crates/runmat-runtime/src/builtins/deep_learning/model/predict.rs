@@ -20,7 +20,10 @@ enum ObservationsIn {
 impl ObservationsIn {
     fn format(self) -> &'static str {
         match self {
-            Self::Rows => "BC",
+            // The input layer owns the unformatted convention: feature
+            // matrices use BC, while sequence/spatial inputs have distinct
+            // typed defaults. An explicit column-observation request is CB.
+            Self::Rows => "",
             Self::Columns => "CB",
         }
     }
@@ -32,20 +35,36 @@ pub(crate) async fn predict_deep_learning_object(
     rest: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
     let observations = parse_observations_in(&rest)?;
-    let data = match xnew {
-        Value::Object(mut value) if value.class_name.is(DLARRAY_CLASS) => value
-            .properties
-            .remove("Data")
-            .ok_or_else(|| deep_learning_error("predict", "predict: dlarray is missing Data"))?,
-        other => other,
+    let (data, input_format) = match xnew {
+        Value::Object(mut value) if value.class_name.is(DLARRAY_CLASS) => {
+            let format = match value.properties.get("Format") {
+                Some(Value::String(text)) => text.clone(),
+                None => String::new(),
+                Some(_) => {
+                    return Err(deep_learning_error(
+                        "predict",
+                        "predict: dlarray Format must be text",
+                    ))
+                }
+            };
+            let data = value.properties.remove("Data").ok_or_else(|| {
+                deep_learning_error("predict", "predict: dlarray is missing Data")
+            })?;
+            (data, Some(format))
+        }
+        other => (other, None),
     };
-    let format = observations.format();
+    let format = if observations == ObservationsIn::Rows {
+        input_format.unwrap_or_default()
+    } else {
+        observations.format().into()
+    };
     let input = object(
         "dlarray",
         vec![
             ("Data", data),
-            ("Format", Value::String(format.into())),
-            ("Labels", Value::String(format.into())),
+            ("Format", Value::String(format.clone())),
+            ("Labels", Value::String(format)),
         ],
     );
     let outcome = execute_network(NetworkExecutionRequest {
