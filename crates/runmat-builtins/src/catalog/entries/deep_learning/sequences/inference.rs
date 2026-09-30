@@ -46,12 +46,12 @@ pub(super) fn combvec(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Cal
             ));
         }
         let dims = value.shape.known_dims();
-        let row_count = dims
-            .as_ref()
-            .and_then(|dims| dims.first().copied().flatten());
-        let col_count = dims
-            .as_ref()
-            .and_then(|dims| dims.get(1).copied().flatten());
+        let (row_count, col_count) = match dims.as_deref() {
+            Some([]) => (Some(0), Some(0)),
+            Some([columns]) => (Some(1), *columns),
+            Some([rows, columns]) => (*rows, *columns),
+            _ => (None, None),
+        };
         if col_count == Some(0) || row_count == Some(0) {
             diagnostics.push(argument_error(
                 "RM-DL-COMBVEC-EMPTY",
@@ -162,7 +162,7 @@ pub(super) fn padsequences(request: &CallRequest, entry: &BuiltinCatalogEntry) -
             uniform = None;
             continue;
         };
-        match name.as_str() {
+        match name.to_ascii_lowercase().as_str() {
             "uniformoutput" => {
                 uniform = request.literals.literal_bool_at(index + 1).or_else(|| {
                     request

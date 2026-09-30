@@ -1,7 +1,7 @@
 use super::*;
 use runmat_types::{
     CallRequest, DynamicReason, LiteralContext, LiteralValue, ObjectFact, OutputSelection,
-    RequestedOutputCount, ValueFact, ValueKindFact,
+    RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -86,4 +86,70 @@ fn options_are_validated_without_claiming_dynamic_values() {
         0,
     );
     assert!(!invalid.diagnostics.is_empty());
+}
+
+#[test]
+fn numeric_controls_reject_logical_but_verbose_accepts_it() {
+    for name in ["OpsetVersion", "BatchSize"] {
+        let result = infer(
+            vec![
+                network("dlnetwork"),
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::Logical),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::String(name.into()),
+                LiteralValue::Bool(true),
+            ],
+            0,
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-DL-EXPORTONNX-OPTION-VALUE"));
+    }
+    let verbose = infer(
+        vec![
+            network("dlnetwork"),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("Verbose".into()),
+            LiteralValue::Bool(true),
+        ],
+        0,
+    );
+    assert!(verbose.diagnostics.is_empty(), "{:?}", verbose.diagnostics);
+}
+
+#[test]
+fn one_element_string_array_name_is_admitted_without_guessing_contents() {
+    let one_string = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(1), Some(1)]),
+        StorageFact::Dense,
+    );
+    let result = infer(
+        vec![
+            network("SeriesNetwork"),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            one_string,
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("InputNames".into()),
+            LiteralValue::Unknown,
+        ],
+        0,
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
 }

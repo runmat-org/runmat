@@ -84,3 +84,21 @@ fn ambient_autodiff_tape_effect_and_resident_unsupported_error_are_declared() {
         .iter()
         .any(|error| { error.identifier == Some("RunMat:deepLearning:Unsupported") }));
 }
+
+#[test]
+fn format_must_be_host_text_even_when_data_is_resident() {
+    let data = numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        ResidencyFact::Device { provider: None },
+    );
+    let mut resident_format = ValueFact::scalar(ValueKindFact::String);
+    resident_format.residency = ResidencyFact::Device { provider: None };
+    assert!(call(vec![data.clone(), resident_format])
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-DLARRAY-FORMAT"));
+    assert!(call(vec![data, ValueFact::scalar(ValueKindFact::String)])
+        .diagnostics
+        .is_empty());
+}

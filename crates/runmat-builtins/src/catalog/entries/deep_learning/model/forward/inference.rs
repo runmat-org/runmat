@@ -4,7 +4,7 @@ use crate::{
 };
 use runmat_types::{
     standard, CallInference, CallRequest, DynamicReason, NumericClass, NumericDomain, NumericFact,
-    ObjectFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    ObjectFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -133,11 +133,48 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             1,
         ));
     }
-    let output_width = known_output_width(request.arguments.first());
-    let output = match data
+    let unsupported_storage = data
         .as_ref()
-        .and_then(|data| numeric_result(data, output_width))
-    {
+        .is_some_and(|fact| fact.storage == StorageFact::Sparse);
+    if unsupported_storage {
+        diagnostics.push(argument_error(
+            "RM-DL-FORWARD-STORAGE",
+            "forward requires dense numeric or logical input storage",
+            1,
+        ));
+    }
+    let unsupported_resident_dlarray = dlarray
+        && data.as_ref().is_some_and(|fact| {
+            matches!(&fact.residency, ResidencyFact::Device { .. })
+                && matches!(
+                    &fact.kind,
+                    ValueKindFact::Logical
+                        | ValueKindFact::Numeric(NumericFact {
+                            class: NumericClass::Int8
+                                | NumericClass::Int16
+                                | NumericClass::Int32
+                                | NumericClass::Int64
+                                | NumericClass::UInt8
+                                | NumericClass::UInt16
+                                | NumericClass::UInt32
+                                | NumericClass::UInt64,
+                            ..
+                        })
+                )
+        });
+    if unsupported_resident_dlarray {
+        diagnostics.push(argument_error(
+            "RM-DL-FORWARD-RESIDENT-CLASS",
+            "provider-resident dlarray Data must have real single or double storage",
+            1,
+        ));
+    }
+    let output_width = known_output_width(request.arguments.first());
+    let output = match data.as_ref().and_then(|data| {
+        (!unsupported_storage && !unsupported_resident_dlarray)
+            .then(|| numeric_result(data, output_width))
+            .flatten()
+    }) {
         Some(mut numeric) if dlarray => {
             if let Some(data) = data.as_ref() {
                 numeric.residency = data.residency.clone();
@@ -162,7 +199,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
         Some(numeric) => numeric,
         None => {
-            if input.is_some() {
+            if input.is_some() && !unsupported_storage && !unsupported_resident_dlarray {
                 diagnostics.push(argument_error(
                     "RM-DL-FORWARD-DATA",
                     "input must be a real numeric/logical array or a dlarray containing one",

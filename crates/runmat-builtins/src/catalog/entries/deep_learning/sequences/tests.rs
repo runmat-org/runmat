@@ -90,6 +90,29 @@ fn combvec_rejects_known_invalid_without_guessing_unknown_shapes() {
 }
 
 #[test]
+fn combvec_rank_one_input_is_one_row_with_known_column_count() {
+    let result = infer(
+        &COMBVEC_CATALOG_ENTRY,
+        vec![numeric(ShapeFact::from(vec![Some(4)]))],
+        vec![],
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(4)])
+    );
+    let unknown_length = infer(
+        &COMBVEC_CATALOG_ENTRY,
+        vec![numeric(ShapeFact::Ranked { rank: 1 })],
+        vec![],
+    );
+    assert_eq!(
+        unknown_length.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), None])
+    );
+}
+
+#[test]
 fn padsequences_default_double_or_explicit_cell_output() {
     let cell = sequences(ShapeFact::from(vec![Some(1), Some(2)]));
     let dim = numeric(ShapeFact::Scalar);
@@ -114,7 +137,7 @@ fn padsequences_default_double_or_explicit_cell_output() {
         vec![
             LiteralValue::Unknown,
             LiteralValue::Number(2.0),
-            LiteralValue::String("UniformOutput".into()),
+            LiteralValue::String("UnIfOrMoUtPuT".into()),
             LiteralValue::Bool(false),
         ],
     );

@@ -66,22 +66,39 @@ pub const FORWARD_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensi
     error_identifier: Some("RunMat:compatibility:ForwardIntegerDataExtension"),
 };
 pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FORWARD_INTEGER_EXTENSION];
-const INTEGER_DATA: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X or fullyConnectedLayer Weights/Bias",
+const INTEGER_PREDICTORS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "X",
     classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Typed integer data are converted at the floating-point forward boundary; integer values outside binary64 exact range can round.",
+    notes: "Typed integer observations are converted to double at the floating-point forward boundary; values outside binary64 exact range can round.",
 }];
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [
+const INTEGER_LEARNABLES: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
+    name: "fullyConnectedLayer Weights/Bias",
+    classes: &ALL_INTEGER_CLASSES,
+    availability: BuiltinIntegerInputAvailability::RunMatOnly,
+    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
+    notes: "Consumed integer parameters are converted at the floating-point forward boundary; values outside binary64 exact range can round.",
+}];
+pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
-        form: "forward(net, typed_integer_X_or_learnable)",
-        inputs: &INTEGER_DATA,
+        form: "forward(net, typed_integer_X)",
+        inputs: &INTEGER_PREDICTORS,
         computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
         output_class: BuiltinIntegerOutputClassRule::Double,
         overflow: BuiltinIntegerOverflowRule::NotApplicable,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed integer observations and consumed fully connected parameters use the host double forward calculation in RunMat mode; this is not a resident integer GPU kernel.",
+        notes: "Typed integer observations enter the host double forward calculation in RunMat mode; this is not a resident integer GPU kernel.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "forward(net_with_typed_integer_learnables, floating_X)",
+        inputs: &INTEGER_LEARNABLES,
+        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::NotApplicable,
+        backend: BuiltinIntegerBackendRule::FunctionSpecific,
+        overload: BuiltinIntegerOverloadKind::Multiple,
+        notes: "Integer learnables are converted to the floating predictor's single or double precision. Host inputs use host execution; supported floating GPU-backed dlarray inputs selectively prepare the learnables and execute resident provider operations. This is not a resident integer GPU kernel.",
     },
 ];

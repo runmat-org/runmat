@@ -3,16 +3,14 @@ use crate::{
     BuiltinCatalogEntry,
 };
 use runmat_types::{
-    CallInference, CallRequest, ClassIdentity, ResidencyFact, StaticClassIdentity, ValueFact,
+    standard, CallInference, CallRequest, ClassIdentity, NumericDomain, ResidencyFact, ValueFact,
     ValueKindFact,
 };
 
-const DLNETWORK: StaticClassIdentity = StaticClassIdentity::new("dlnetwork");
-const SERIES_NETWORK: StaticClassIdentity = StaticClassIdentity::new("SeriesNetwork");
-const DAG_NETWORK: StaticClassIdentity = StaticClassIdentity::new("DAGNetwork");
-
 fn is_network(identity: &ClassIdentity) -> bool {
-    identity.is(DLNETWORK) || identity.is(SERIES_NETWORK) || identity.is(DAG_NETWORK)
+    identity.is(standard::DL_NETWORK)
+        || identity.is(standard::SERIES_NETWORK)
+        || identity.is(standard::DAG_NETWORK)
 }
 
 fn scalar_text(value: &ValueFact) -> bool {
@@ -89,12 +87,25 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                             || matches!(value.kind, ValueKindFact::Cell(_))
                                 && value.shape.element_count().is_none_or(|count| count == 1)
                     }
-                    "opsetversion" | "batchsize" | "verbose" => {
+                    "opsetversion" | "batchsize" => {
                         matches!(
-                            value.kind,
+                            &value.kind,
                             ValueKindFact::Unknown
-                                | ValueKindFact::Numeric(_)
+                                | ValueKindFact::Numeric(runmat_types::NumericFact {
+                                    domain: NumericDomain::Real,
+                                    ..
+                                })
+                        ) && value.shape.element_count().is_none_or(|count| count == 1)
+                    }
+                    "verbose" => {
+                        matches!(
+                            &value.kind,
+                            ValueKindFact::Unknown
                                 | ValueKindFact::Logical
+                                | ValueKindFact::Numeric(runmat_types::NumericFact {
+                                    domain: NumericDomain::Real,
+                                    ..
+                                })
                         ) && value.shape.element_count().is_none_or(|count| count == 1)
                     }
                     _ => true,

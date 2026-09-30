@@ -80,7 +80,7 @@ fn forward_uses_known_fully_connected_weight_geometry_without_guessing_values() 
                 "Weights".into(),
                 ValueFact::proven(
                     ValueKindFact::Numeric(NumericFact {
-                        class: NumericClass::Double,
+                        class: NumericClass::UInt16,
                         domain: NumericDomain::Real,
                     }),
                     ShapeFact::from(vec![Some(7), Some(4)]),
@@ -123,6 +123,10 @@ fn forward_uses_known_fully_connected_weight_geometry_without_guessing_values() 
     assert_eq!(
         inferred.outputs[0].shape,
         ShapeFact::from(vec![Some(3), Some(7)])
+    );
+    assert_eq!(
+        inferred.outputs[0].numeric().map(|fact| fact.class),
+        Some(NumericClass::Single)
     );
     let ValueKindFact::Object(object) = &mut net.kind else {
         unreachable!()
@@ -205,4 +209,61 @@ fn invalid_network_data_and_extra_options_are_diagnosed() {
     ])
     .diagnostics
     .is_empty());
+}
+
+#[test]
+fn forward_integer_forms_distinguish_predictors_from_learnables() {
+    assert_eq!(FORWARD_CATALOG_ENTRY.integer_capabilities.len(), 2);
+    assert_eq!(
+        FORWARD_CATALOG_ENTRY.integer_capabilities[0].output_class,
+        BuiltinIntegerOutputClassRule::Double
+    );
+    assert_eq!(
+        FORWARD_CATALOG_ENTRY.integer_capabilities[1].output_class,
+        BuiltinIntegerOutputClassRule::FunctionSpecific
+    );
+    assert_eq!(
+        FORWARD_CATALOG_ENTRY.integer_capabilities[1].backend,
+        BuiltinIntegerBackendRule::FunctionSpecific
+    );
+}
+
+#[test]
+fn forward_diagnoses_known_sparse_and_unsupported_resident_dlarray_classes() {
+    let mut sparse = numeric(NumericClass::Single);
+    sparse.storage = StorageFact::Sparse;
+    assert!(infer(vec![network(), sparse])
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-FORWARD-STORAGE"));
+
+    for kind in [
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt16,
+            domain: NumericDomain::Real,
+        }),
+        ValueKindFact::Logical,
+    ] {
+        let mut data = ValueFact::proven(
+            kind,
+            ShapeFact::from(vec![Some(3), Some(4)]),
+            StorageFact::Dense,
+        );
+        data.residency = ResidencyFact::Device { provider: None };
+        let wrapper = ValueFact::proven(
+            ValueKindFact::Object(ObjectFact {
+                class: None,
+                runtime_class: Some(runmat_types::standard::DL_ARRAY.owned()),
+                properties: BTreeMap::from([(crate::DLARRAY_DATA_PROPERTY.into(), data)]),
+                properties_complete: false,
+                handle_semantics: Some(false),
+            }),
+            ShapeFact::from(vec![Some(3), Some(4)]),
+            StorageFact::Opaque,
+        );
+        assert!(infer(vec![network(), wrapper])
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-DL-FORWARD-RESIDENT-CLASS"));
+    }
 }

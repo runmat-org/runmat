@@ -118,3 +118,32 @@ fn literal_unreduced_shape_is_known_but_dynamic_reduction_is_not() {
     assert!(dynamic.diagnostics.is_empty(), "{:?}", dynamic.diagnostics);
     assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
 }
+
+#[test]
+fn rejects_same_element_count_with_different_geometry_and_sparse_storage() {
+    let predictions = numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(2), Some(3)]),
+    );
+    let transposed = numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(3), Some(2)]),
+    );
+    let mismatch = infer(vec![predictions.clone(), transposed], 1);
+    assert!(mismatch
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-CROSSENTROPY-SHAPE"));
+
+    let mut sparse = predictions.clone();
+    sparse.storage = StorageFact::Sparse;
+    assert!(infer(vec![sparse, predictions.clone()], 1)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-DL-CROSSENTROPY-INPUT"));
+
+    let unknown_width = numeric(NumericClass::Single, ShapeFact::from(vec![Some(2), None]));
+    assert!(infer(vec![predictions, unknown_width], 1)
+        .diagnostics
+        .is_empty());
+}

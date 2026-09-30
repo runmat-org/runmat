@@ -8,13 +8,36 @@ use runmat_types::{
 };
 
 fn numeric_input_possible(value: &ValueFact) -> bool {
+    if value.storage == StorageFact::Sparse {
+        return false;
+    }
     match &value.kind {
         ValueKindFact::Unknown => true,
         ValueKindFact::Numeric(number) => number.domain == NumericDomain::Real,
-        ValueKindFact::Object(object) => object
-            .runtime_class
-            .as_ref()
-            .is_none_or(|class| class == &runmat_types::standard::DL_ARRAY.owned()),
+        ValueKindFact::Object(object) => {
+            object
+                .runtime_class
+                .as_ref()
+                .is_none_or(|class| class.is(runmat_types::standard::DL_ARRAY))
+                && match object.properties.get(crate::DLARRAY_DATA_PROPERTY) {
+                    Some(data) => numeric_input_possible(data),
+                    None => !object.properties_complete,
+                }
+        }
+        _ => false,
+    }
+}
+
+fn shapes_proven_different(left: &ShapeFact, right: &ShapeFact) -> bool {
+    match (left.known_dims(), right.known_dims()) {
+        (Some(left), Some(right)) => {
+            left.len() != right.len()
+                || left.iter().zip(right.iter()).any(|(left, right)| {
+                    left.as_ref()
+                        .zip(right.as_ref())
+                        .is_some_and(|(a, b)| a != b)
+                })
+        }
         _ => false,
     }
 }
@@ -117,15 +140,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     if let [predictions, targets, ..] = request.arguments.as_slice() {
-        if predictions
-            .shape
-            .element_count()
-            .zip(targets.shape.element_count())
-            .is_some_and(|(left, right)| left != right)
-        {
+        if shapes_proven_different(&predictions.shape, &targets.shape) {
             diagnostics.push(argument_error(
-                "RM-DL-CROSSENTROPY-SIZE",
-                "predictions and targets must have the same number of elements",
+                "RM-DL-CROSSENTROPY-SHAPE",
+                "predictions and targets must have the same shape",
                 1,
             ));
         }
