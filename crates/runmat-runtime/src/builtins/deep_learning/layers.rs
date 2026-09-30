@@ -11,8 +11,8 @@ use runmat_value::Value;
 use crate::{gather_if_needed_async, BuiltinResult};
 
 use super::{
-    deep_learning_error, gather_args, layer_object, numeric_scalar, numeric_vector, positive_usize,
-    scalar_text, tensor_value,
+    deep_learning_error, layer_object, numeric_scalar, numeric_vector, positive_usize, scalar_text,
+    tensor_value,
 };
 
 // Structural layer dimensions are exposed as double-valued metadata. Admit
@@ -44,24 +44,23 @@ fn metadata_sizes(value: &Value, function: &'static str, label: &str) -> Builtin
 async fn admitted_layer_options(
     rest: Vec<Value>,
     function: &'static str,
-) -> BuiltinResult<Vec<Value>> {
-    preflight_layer_options(&rest, function)?;
-    gather_args(rest).await
+) -> BuiltinResult<std::collections::BTreeMap<DeepLearningLayerOption, Value>> {
+    let kind = DeepLearningLayerKind::from_constructor(function)
+        .expect("layer constructor must have a catalog identity");
+    let mut options = super::layer_helpers::parse_layer_options(&rest, kind, function)?;
+    for (option, value) in &mut options {
+        if super::layer_helpers::options::requires_host_control(*option) {
+            *value = gather_if_needed_async(value).await?;
+            super::layer_helpers::options::validate(kind, *option, value, function)?;
+        }
+    }
+    Ok(options)
 }
 
 fn preflight_layer_options(rest: &[Value], function: &'static str) -> BuiltinResult<()> {
     let kind = DeepLearningLayerKind::from_constructor(function)
         .expect("layer constructor must have a catalog identity");
-    let options = super::layer_helpers::parse_layer_options(rest, kind, function)?;
-    for (name, value) in options {
-        if matches!(
-            name,
-            DeepLearningLayerOption::Name | DeepLearningLayerOption::Description
-        ) {
-            scalar_text(&value, function)?;
-        }
-    }
-    Ok(())
+    super::layer_helpers::parse_layer_options(rest, kind, function).map(|_| ())
 }
 
 fn is_numeric_scalar(value: &Value) -> bool {
@@ -410,3 +409,7 @@ pub(super) async fn convolution_1d_layer_builtin(
 #[cfg(test)]
 #[path = "layers/identity_tests.rs"]
 mod identity_tests;
+
+#[cfg(test)]
+#[path = "layers/residency_tests.rs"]
+mod residency_tests;

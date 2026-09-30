@@ -1,5 +1,9 @@
-use super::*;
-use crate::builtins::deep_learning::{layers::*, model::*, object};
+use super::{parameters, plan, AxisPlan, GpuCapabilityReason, HostNetworkPlan, ParameterRole};
+use crate::builtins::deep_learning::{
+    layers::{feature_input_layer_builtin, layer_normalization_layer_builtin, relu_layer_builtin},
+    model::dlnetwork_builtin,
+    object,
+};
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelProvider, DeepLearningFeedForwardCapability,

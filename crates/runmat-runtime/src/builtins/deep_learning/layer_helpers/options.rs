@@ -1,7 +1,71 @@
 use super::*;
 use runmat_builtins::DeepLearningNormalizationAxes;
 
-pub(super) fn validate(
+/// Materialize only structural controls consumed on the host. Data, state,
+/// learnables and callable captures retain their existing storage and owner.
+pub(in crate::builtins::deep_learning) fn requires_host_control(
+    option: DeepLearningLayerOption,
+) -> bool {
+    use DeepLearningLayerOption as O;
+    match option {
+        O::Stride
+        | O::DilationFactor
+        | O::MinLength
+        | O::InputSize
+        | O::NumChannels
+        | O::OperationDimension
+        | O::Epsilon
+        | O::Padding
+        | O::PaddingValue
+        | O::WeightLearnRateFactor
+        | O::WeightL2Factor
+        | O::BiasLearnRateFactor
+        | O::BiasL2Factor
+        | O::InputWeightsLearnRateFactor
+        | O::RecurrentWeightsLearnRateFactor
+        | O::InputWeightsL2Factor
+        | O::RecurrentWeightsL2Factor
+        | O::ScaleLearnRateFactor
+        | O::OffsetLearnRateFactor
+        | O::ScaleL2Factor
+        | O::OffsetL2Factor
+        | O::HasStateInputs
+        | O::HasStateOutputs
+        | O::SplitComplexInputs => true,
+        O::Name
+        | O::Description
+        | O::OutputMode
+        | O::NormalizationDimension
+        | O::Normalization
+        | O::StateActivationFunction
+        | O::GateActivationFunction
+        | O::WeightsInitializer
+        | O::BiasInitializer
+        | O::InputWeightsInitializer
+        | O::RecurrentWeightsInitializer
+        | O::ScaleInitializer
+        | O::OffsetInitializer
+        | O::Mean
+        | O::StandardDeviation
+        | O::Min
+        | O::Max
+        | O::Weights
+        | O::Bias
+        | O::InputLearnables
+        | O::OutputLearnables
+        | O::CellState
+        | O::HiddenState
+        | O::InputWeights
+        | O::RecurrentWeights
+        | O::Scale
+        | O::Offset
+        | O::Classes
+        | O::ClassWeights
+        | O::ResponseNames => false,
+    }
+}
+
+pub(in crate::builtins::deep_learning) fn validate(
     kind: DeepLearningLayerKind,
     option: DeepLearningLayerOption,
     value: &Value,

@@ -133,7 +133,9 @@ fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracl
             assert_eq!(data.device_id(), retained_input.device_id());
             assert_eq!(handle_precision(data), Some(provider.precision()));
             assert_eq!(handle_storage(data), GpuTensorStorage::Real);
-            assert_eq!(handle_provenance(data), Some(GpuHandleProvenance::Explicit));
+            assert_eq!(handle_provenance(data), Some(GpuHandleProvenance::Explicit),
+                "explicit_parameters={explicit_parameters}, lazy_source={lazy_source}, input_intent={:?}",
+                handle_provenance(&retained_input));
             assert_eq!(
                 handle_provenance(&retained_input),
                 Some(if explicit_parameters {
@@ -155,7 +157,7 @@ fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracl
                 (ProviderPrecision::F64, HostNumericDataOwned::F64(values)) => values,
                 _ => panic!("resident route changed numeric class"),
             };
-            let expected = [1.0, 1.5, 1.0].map(|difference| {
+            let expected = [1.0_f64, 1.5, 1.0].map(|difference| {
                 let centered = difference / (difference * difference + 1.0e-5).sqrt();
                 0.5 - 3.0 * centered
             });

@@ -8,7 +8,7 @@ pub(in crate::builtins) fn layer_object(
     class_name: runmat_types::StaticClassIdentity,
     type_name: &str,
     mut properties: Vec<(&str, Value)>,
-    rest: Vec<Value>,
+    mut extra: BTreeMap<DeepLearningLayerOption, Value>,
     function: &'static str,
 ) -> BuiltinResult<Value> {
     let mut owned_properties = properties
@@ -17,9 +17,12 @@ pub(in crate::builtins) fn layer_object(
         .collect::<Vec<_>>();
     let mut name = String::new();
     let mut description = String::new();
-    let kind = DeepLearningLayerKind::from_identity(&class_name.owned())
-        .ok_or_else(|| deep_learning_error(function, format!("{function}: unknown layer class")))?;
-    let mut extra = parse_layer_options(&rest, kind, function)?;
+    if DeepLearningLayerKind::from_identity(&class_name.owned()).is_none() {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: unknown layer class"),
+        ));
+    }
     if let Some(value) = extra.remove(&DeepLearningLayerOption::Name) {
         name = scalar_text(&value, function)?;
     }
