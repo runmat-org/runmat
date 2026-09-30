@@ -29,14 +29,14 @@ impl LossWeights {
     pub(super) fn materialize(
         &self,
         predictions: &LossPayload,
-        data_format: Option<&str>,
-        weights_format: Option<&str>,
+        data_format: Option<&Layout>,
+        weights_format: Option<&Layout>,
     ) -> BuiltinResult<Vec<f64>> {
         let format = predictions.format_or_default(data_format);
         self.materialize_for_layout(
             &predictions.shape,
             predictions.data.len(),
-            format.as_deref(),
+            format,
             weights_format,
         )
     }
@@ -45,8 +45,8 @@ impl LossWeights {
         &self,
         prediction_shape: &[usize],
         prediction_len: usize,
-        data_format: Option<&str>,
-        weights_format: Option<&str>,
+        data_format: Option<&Layout>,
+        weights_format: Option<&Layout>,
     ) -> BuiltinResult<Vec<f64>> {
         if self
             .data
@@ -72,10 +72,10 @@ impl LossWeights {
         if self.data.len() == prediction_len {
             return Ok(self.data.clone());
         }
-        if let Some(channel) = label_index_for_shape(data_format, 'C') {
+        if let Some(channel) = data_format.and_then(|layout| layout.index(Axis::Channel)) {
             return self.materialize_along_dimension(prediction_shape, prediction_len, channel);
         }
-        if let Some(batch) = label_index_for_shape(data_format, 'B') {
+        if let Some(batch) = data_format.and_then(|layout| layout.index(Axis::Batch)) {
             return self.materialize_along_dimension(prediction_shape, prediction_len, batch);
         }
         Err(deep_learning_error(
@@ -109,35 +109,42 @@ impl LossWeights {
         &self,
         prediction_shape: &[usize],
         prediction_len: usize,
-        data_format: Option<&str>,
-        weights_format: &str,
+        data_format: Option<&Layout>,
+        weights_format: &Layout,
     ) -> BuiltinResult<Vec<f64>> {
-        validate_format_for_shape(Some(weights_format), &self.shape, "WeightsFormat")?;
         let data_format = data_format.ok_or_else(|| {
             deep_learning_error(
                 "crossentropy",
                 "crossentropy: DataFormat is required when WeightsFormat is supplied",
             )
         })?;
-        let pred_labels = data_format.chars().collect::<Vec<_>>();
-        let weight_labels = weights_format.chars().collect::<Vec<_>>();
+        let pred_labels = data_format.axes();
+        let weight_labels = weights_format.axes();
         let pred_strides = column_major_strides(prediction_shape);
         let weight_strides = column_major_strides(&self.shape);
         let mut out = Vec::with_capacity(prediction_len);
         for pred_idx in 0..prediction_len {
             let mut weight_idx = 0usize;
             for (weight_dim, label) in weight_labels.iter().enumerate() {
-                if label.eq_ignore_ascii_case(&'U') {
+                if *label == Axis::Unspecified {
                     continue;
                 }
+                let occurrence = weight_labels[..weight_dim]
+                    .iter()
+                    .filter(|candidate| *candidate == label)
+                    .count();
                 let pred_dim = pred_labels
                     .iter()
-                    .position(|pred_label| pred_label.eq_ignore_ascii_case(label))
+                    .enumerate()
+                    .filter(|(_, pred_label)| *pred_label == label)
+                    .nth(occurrence)
+                    .map(|(index, _)| index)
                     .ok_or_else(|| {
                         deep_learning_error(
                             "crossentropy",
                             format!(
-                                "crossentropy: WeightsFormat label '{label}' is not present in DataFormat"
+                                "crossentropy: WeightsFormat label '{}' is not present in DataFormat",
+                                label.label()
                             ),
                         )
                     })?;

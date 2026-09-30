@@ -6,8 +6,14 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 mod contract;
 mod documentation;
 mod inference;
+mod schema;
 #[cfg(test)]
 mod tests;
+
+pub use schema::{
+    CrossentropyClassificationMode, CrossentropyNormalizationMode, CrossentropyOptionKey,
+    CrossentropyReductionMode,
+};
 
 pub use contract::{
     CROSSENTROPY_DESCRIPTOR, CROSSENTROPY_INTEGER_EXTENSION, CROSSENTROPY_INVALID_INPUT,

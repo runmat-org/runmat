@@ -124,7 +124,7 @@ pub(super) async fn try_crossentropy_gpu(
         targets,
         weights: weights.as_ref(),
         mask: mask.as_ref(),
-        mode: options.mode.into_provider(),
+        mode: provider_mode(options.mode),
     }) {
         Ok(result) => result,
         Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {

@@ -34,26 +34,14 @@ pub(super) fn evaluate_crossentropy_terms(
 
 pub(super) fn is_crossentropy_option_name(value: &Value) -> bool {
     scalar_text(value, "crossentropy")
-        .map(|name| {
-            matches!(
-                name.to_ascii_lowercase().as_str(),
-                "classificationmode"
-                    | "targetcategories"
-                    | "mask"
-                    | "reduction"
-                    | "normalizationfactor"
-                    | "dataformat"
-                    | "weights"
-                    | "weightsformat"
-            )
-        })
+        .map(|name| OptionKey::from_name(&name).is_some())
         .unwrap_or(false)
 }
 
 pub(super) fn require_loss_payload_compatible(
     predictions: &LossPayload,
     targets: &LossPayload,
-    data_format: Option<&str>,
+    data_format: Option<&Layout>,
 ) -> BuiltinResult<()> {
     if predictions.shape != targets.shape {
         return Err(deep_learning_error(
@@ -65,8 +53,8 @@ pub(super) fn require_loss_payload_compatible(
         ));
     }
     let effective_format = predictions.format_or_default(data_format);
-    if let (Some(pred_format), Some(target_format)) = (effective_format, targets.format.clone()) {
-        if !pred_format.eq_ignore_ascii_case(&target_format) {
+    if let (Some(pred_format), Some(target_format)) = (effective_format, targets.format.as_ref()) {
+        if pred_format != target_format {
             return Err(deep_learning_error(
                 "crossentropy",
                 "crossentropy: target dlarray format must match prediction format",
@@ -81,7 +69,7 @@ pub(super) struct LossPayload {
     pub(super) data: Vec<f64>,
     pub(super) shape: Vec<usize>,
     pub(super) dtype: NumericDType,
-    pub(super) format: Option<String>,
+    pub(super) format: Option<Layout>,
     pub(super) dlarray: bool,
 }
 
@@ -135,11 +123,12 @@ impl LossPayload {
                     deep_learning_error("crossentropy", "crossentropy: dlarray is missing Data")
                 })?;
                 let mut payload = Self::parse(data, label)?;
-                payload.format = object
+                let raw_format = object
                     .properties
                     .get("Format")
                     .and_then(|value| scalar_text(value, "crossentropy").ok())
                     .filter(|format| !format.is_empty());
+                payload.format = parse_loss_format(raw_format.as_deref(), &payload.shape, "DataFormat")?;
                 payload.dlarray = true;
                 Ok(payload)
             }
@@ -179,7 +168,7 @@ impl LossPayload {
             .map_err(|err| deep_learning_error("crossentropy", err))?;
         if self.dlarray {
             let format = if keep_format {
-                self.format.clone().unwrap_or_default()
+                self.format.as_ref().map(Layout::labels).unwrap_or_default()
             } else {
                 String::new()
             };
@@ -196,10 +185,10 @@ impl LossPayload {
         }
     }
 
-    pub(super) fn format_or_default(&self, override_format: Option<&str>) -> Option<String> {
-        override_format
-            .map(str::to_string)
-            .or_else(|| self.format.clone())
-            .filter(|format| !format.is_empty())
+    pub(super) fn format_or_default<'a>(
+        &'a self,
+        override_format: Option<&'a Layout>,
+    ) -> Option<&'a Layout> {
+        override_format.or(self.format.as_ref())
     }
 }

@@ -16,7 +16,7 @@ impl GpuLossFactor {
         value: Value,
         shape: &[usize],
         len: usize,
-        data_format: Option<&str>,
+        data_format: Option<&Layout>,
         weights_format: Option<&str>,
     ) -> BuiltinResult<GpuLossFactorParse> {
         match value {
@@ -32,8 +32,14 @@ impl GpuLossFactor {
             }
             other => {
                 let weights = LossWeights::parse(&other, "weights")?;
-                let materialized =
-                    weights.materialize_for_layout(shape, len, data_format, weights_format)?;
+                let weights_format =
+                    parse_loss_format(weights_format, &weights.shape, "WeightsFormat")?;
+                let materialized = weights.materialize_for_layout(
+                    shape,
+                    len,
+                    data_format,
+                    weights_format.as_ref(),
+                )?;
                 Ok(GpuLossFactorParse::Supported(Some(Self::Host(
                     materialized,
                 ))))

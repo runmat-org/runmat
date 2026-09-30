@@ -16,6 +16,59 @@ fn numeric(class: NumericClass, shape: ShapeFact) -> ValueFact {
     )
 }
 
+#[test]
+fn literal_modes_and_nonsquare_format_use_shared_typed_admission() {
+    let data = numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(2), Some(3), Some(4)]),
+    );
+    let request = |key: &str, value: &str| CallRequest {
+        arguments: vec![
+            data.clone(),
+            data.clone(),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String(key.into()),
+            LiteralValue::String(value.into()),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    for (key, value) in [
+        ("DataFormat", "cBt"),
+        ("ClassificationMode", "Multi_Label"),
+        ("NormalizationFactor", "mask included"),
+        ("WeightsFormat", "SSU"),
+    ] {
+        let result = crate::infer_catalog_call(&CROSSENTROPY_CATALOG_ENTRY, &request(key, value));
+        assert!(
+            result.diagnostics.is_empty(),
+            "{key}={value}: {:?}",
+            result.diagnostics
+        );
+    }
+    for (key, value) in [
+        ("DataFormat", "CCB"),
+        ("DataFormat", "CB"),
+        ("ClassificationMode", "other"),
+        ("NormalizationFactor", "other"),
+        ("WeightsFormat", "CCU"),
+    ] {
+        let result = crate::infer_catalog_call(&CROSSENTROPY_CATALOG_ENTRY, &request(key, value));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-DL-CROSSENTROPY-OPTION-VALUE"),
+            "{key}={value}: {:?}",
+            result.diagnostics
+        );
+    }
+}
+
 fn infer(arguments: Vec<ValueFact>, outputs: usize) -> CallInference {
     crate::infer_catalog_call(
         &CROSSENTROPY_CATALOG_ENTRY,

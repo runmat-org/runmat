@@ -1,3 +1,8 @@
+use super::{
+    CrossentropyClassificationMode, CrossentropyNormalizationMode, CrossentropyOptionKey,
+    CrossentropyReductionMode,
+};
+use crate::DeepLearningAxisLayout;
 use crate::{
     catalog::inference::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
@@ -42,18 +47,58 @@ fn shapes_proven_different(left: &ShapeFact, right: &ShapeFact) -> bool {
     }
 }
 
-fn option_name(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "classificationmode"
-            | "targetcategories"
-            | "reduction"
-            | "normalizationfactor"
-            | "dataformat"
-            | "weightsformat"
-            | "weights"
-            | "mask"
-    )
+fn check_literal_option(
+    request: &CallRequest,
+    key: CrossentropyOptionKey,
+    index: usize,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) {
+    let Some(value) = request.literals.literal_string_at(index) else {
+        return;
+    };
+    let valid = match key {
+        CrossentropyOptionKey::ClassificationMode | CrossentropyOptionKey::TargetCategories => {
+            CrossentropyClassificationMode::from_name(&value).is_some()
+        }
+        CrossentropyOptionKey::Reduction => return,
+        CrossentropyOptionKey::NormalizationFactor => {
+            CrossentropyNormalizationMode::from_name(&value).is_some()
+        }
+        CrossentropyOptionKey::DataFormat => {
+            if value.is_empty() {
+                true
+            } else if let Some(rank) = request.arguments.first().and_then(|input| {
+                let shape = match &input.kind {
+                    ValueKindFact::Object(object) => object
+                        .properties
+                        .get(crate::DLARRAY_DATA_PROPERTY)
+                        .map(|data| &data.shape),
+                    ValueKindFact::Numeric(_) => Some(&input.shape),
+                    _ => None,
+                }?;
+                shape.known_dims().map(|dims| dims.len())
+            }) {
+                DeepLearningAxisLayout::parse(&value.to_ascii_uppercase(), rank).is_ok()
+            } else {
+                return;
+            }
+        }
+        CrossentropyOptionKey::WeightsFormat => {
+            // The weight shape can be positional or named, and may be dynamic.
+            // Runtime validates its rank after selecting the actual weight value.
+            value.is_empty()
+                || DeepLearningAxisLayout::parse(&value.to_ascii_uppercase(), value.chars().count())
+                    .is_ok()
+        }
+        CrossentropyOptionKey::Weights | CrossentropyOptionKey::Mask => return,
+    };
+    if !valid {
+        diagnostics.push(argument_error(
+            "RM-DL-CROSSENTROPY-OPTION-VALUE",
+            "invalid crossentropy option value or dimension format",
+            index,
+        ));
+    }
 }
 
 fn reduction_role(
@@ -64,7 +109,7 @@ fn reduction_role(
         return Some(false);
     }
     let start = match request.literals.literal_string_at(2) {
-        Some(name) if option_name(&name) => 2,
+        Some(name) if CrossentropyOptionKey::from_name(&name).is_some() => 2,
         Some(_) => 3,
         None => match &request.arguments[2].kind {
             ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Object(_) => 3,
@@ -85,21 +130,22 @@ fn reduction_role(
             reduction = None;
             continue;
         };
-        if !option_name(&name) {
+        let Some(key) = CrossentropyOptionKey::from_name(&name) else {
             diagnostics.push(argument_error(
                 "RM-DL-CROSSENTROPY-OPTION",
                 "unsupported crossentropy option",
                 index,
             ));
             continue;
-        }
-        if name.eq_ignore_ascii_case("reduction") {
+        };
+        check_literal_option(request, key, index + 1, diagnostics);
+        if key == CrossentropyOptionKey::Reduction {
             reduction = request
                 .literals
                 .literal_string_at(index + 1)
-                .and_then(|value| match value.to_ascii_lowercase().as_str() {
-                    "none" => Some(true),
-                    "sum" => Some(false),
+                .and_then(|value| match CrossentropyReductionMode::from_name(&value) {
+                    Some(CrossentropyReductionMode::None) => Some(true),
+                    Some(CrossentropyReductionMode::Sum) => Some(false),
                     _ => {
                         diagnostics.push(argument_error(
                             "RM-DL-CROSSENTROPY-REDUCTION",

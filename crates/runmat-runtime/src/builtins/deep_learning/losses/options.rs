@@ -1,52 +1,85 @@
 use super::*;
+use std::collections::BTreeMap;
 
-#[derive(Clone, Copy)]
-pub(super) enum ClassificationMode {
-    SingleLabel,
-    MultiLabel,
+pub(super) type ClassificationMode = runmat_builtins::CrossentropyClassificationMode;
+pub(super) type CrossentropyReduction = runmat_builtins::CrossentropyReductionMode;
+type NormalizationMode = runmat_builtins::CrossentropyNormalizationMode;
+
+pub(super) fn parse_classification_mode(
+    value: &Value,
+    option: &str,
+) -> BuiltinResult<ClassificationMode> {
+    let text = scalar_text(value, "crossentropy")?
+        .to_ascii_lowercase()
+        .replace(['_', ' '], "-");
+    ClassificationMode::from_name(&text).ok_or_else(|| {
+        deep_learning_error(
+            "crossentropy",
+            format!("crossentropy: unsupported {option} '{text}'"),
+        )
+    })
 }
 
-impl ClassificationMode {
-    pub(super) fn parse(value: &Value, option: &str) -> BuiltinResult<Self> {
-        let text = scalar_text(value, "crossentropy")?
-            .to_ascii_lowercase()
-            .replace(['_', ' '], "-");
-        match text.as_str() {
-            "single-label" | "singlelabel" | "exclusive" => Ok(Self::SingleLabel),
-            "multi-label" | "multilabel" | "independent" => Ok(Self::MultiLabel),
-            other => Err(deep_learning_error(
-                "crossentropy",
-                format!("crossentropy: unsupported {option} '{other}'"),
-            )),
+pub(super) fn parse_reduction(value: &Value) -> BuiltinResult<CrossentropyReduction> {
+    let text = scalar_text(value, "crossentropy")?.to_ascii_lowercase();
+    CrossentropyReduction::from_name(&text).ok_or_else(|| {
+        deep_learning_error(
+            "crossentropy",
+            format!("crossentropy: unsupported Reduction '{text}'"),
+        )
+    })
+}
+
+pub(super) fn provider_mode(mode: ClassificationMode) -> ProviderCrossentropyMode {
+    match mode {
+        ClassificationMode::SingleLabel => ProviderCrossentropyMode::SingleLabel,
+        ClassificationMode::MultiLabel => ProviderCrossentropyMode::MultiLabel,
+    }
+}
+
+pub(super) struct ParsedLossOptions {
+    known: BTreeMap<OptionKey, Value>,
+    unknown: BTreeMap<String, Value>,
+}
+
+impl ParsedLossOptions {
+    pub(super) fn from_args(args: Vec<Value>) -> BuiltinResult<Self> {
+        let parsed = parse_name_values(args, "crossentropy")?;
+        let mut known = BTreeMap::new();
+        let mut unknown = BTreeMap::new();
+        for (name, value) in parsed {
+            if let Some(key) = OptionKey::from_name(&name) {
+                known.insert(key, value);
+            } else {
+                unknown.insert(name, value);
+            }
         }
+        Ok(Self { known, unknown })
     }
 
-    pub(super) fn into_provider(self) -> ProviderCrossentropyMode {
-        match self {
-            Self::SingleLabel => ProviderCrossentropyMode::SingleLabel,
-            Self::MultiLabel => ProviderCrossentropyMode::MultiLabel,
-        }
+    pub(super) fn remove(&mut self, key: OptionKey) -> Option<Value> {
+        self.known.remove(&key)
     }
-}
 
-#[derive(Clone, Copy)]
-pub(super) enum CrossentropyReduction {
-    Sum,
-    None,
-}
+    pub(super) fn get(&self, key: OptionKey) -> Option<&Value> {
+        self.known.get(&key)
+    }
 
-impl CrossentropyReduction {
-    pub(super) fn parse(value: &Value) -> BuiltinResult<Self> {
-        match scalar_text(value, "crossentropy")?
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "sum" => Ok(Self::Sum),
-            "none" => Ok(Self::None),
-            other => Err(deep_learning_error(
-                "crossentropy",
-                format!("crossentropy: unsupported Reduction '{other}'"),
-            )),
+    pub(super) fn iter(&self) -> impl Iterator<Item = (OptionKey, &Value)> {
+        self.known.iter().map(|(key, value)| (*key, value))
+    }
+
+    pub(super) fn unsupported_name(&self) -> Option<String> {
+        let known = self
+            .known
+            .keys()
+            .map(|key| key.canonical_name().to_ascii_lowercase())
+            .min();
+        match (known, self.unknown.keys().next()) {
+            (Some(known), Some(unknown)) if unknown < &known => Some(unknown.clone()),
+            (Some(known), _) => Some(known),
+            (None, Some(unknown)) => Some(unknown.clone()),
+            (None, None) => None,
         }
     }
 }
@@ -64,18 +97,17 @@ impl NormalizationFactor {
     pub(super) fn parse(value: &Value) -> BuiltinResult<Self> {
         match value {
             Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
-                match scalar_text(value, "crossentropy")?
+                let text = scalar_text(value, "crossentropy")?
                     .to_ascii_lowercase()
-                    .replace(['_', ' '], "-")
-                    .as_str()
-                {
-                    "all-elements" | "all" => Ok(Self::AllElements),
-                    "batch-size" | "batch" => Ok(Self::BatchSize),
-                    "mask-included" | "mask" => Ok(Self::MaskIncluded),
-                    "none" => Ok(Self::None),
-                    other => Err(deep_learning_error(
+                    .replace(['_', ' '], "-");
+                match NormalizationMode::from_name(&text) {
+                    Some(NormalizationMode::AllElements) => Ok(Self::AllElements),
+                    Some(NormalizationMode::BatchSize) => Ok(Self::BatchSize),
+                    Some(NormalizationMode::MaskIncluded) => Ok(Self::MaskIncluded),
+                    Some(NormalizationMode::None) => Ok(Self::None),
+                    None => Err(deep_learning_error(
                         "crossentropy",
-                        format!("crossentropy: unsupported NormalizationFactor '{other}'"),
+                        format!("crossentropy: unsupported NormalizationFactor '{text}'"),
                     )),
                 }
             }
@@ -97,33 +129,38 @@ pub(super) struct CrossentropyOptions {
     pub(super) mode: ClassificationMode,
     pub(super) reduction: CrossentropyReduction,
     pub(super) normalization: NormalizationFactor,
-    pub(super) data_format: Option<String>,
-    pub(super) weights_format: Option<String>,
+    pub(super) data_format: Option<Layout>,
+    pub(super) weights_format: Option<Layout>,
     pub(super) weights: Option<LossWeights>,
     pub(super) mask: Option<LossMask>,
 }
 
 impl CrossentropyOptions {
-    pub(super) fn from_args(args: Vec<Value>, predictions: &LossPayload) -> BuiltinResult<Self> {
-        let mut parsed = parse_name_values(args, "crossentropy")?;
+    pub(super) fn from_args(
+        args: Vec<Value>,
+        predictions: &LossPayload,
+        positional_weights: Option<LossWeights>,
+    ) -> BuiltinResult<Self> {
+        let mut parsed = ParsedLossOptions::from_args(args)?;
         let mode = parsed
-            .remove("classificationmode")
-            .or_else(|| parsed.remove("targetcategories"))
-            .map(|value| ClassificationMode::parse(&value, "ClassificationMode"))
+            .remove(OptionKey::ClassificationMode)
+            .or_else(|| parsed.remove(OptionKey::TargetCategories))
+            .map(|value| parse_classification_mode(&value, "ClassificationMode"))
             .transpose()?
             .unwrap_or(ClassificationMode::SingleLabel);
         let reduction = parsed
-            .remove("reduction")
-            .map(|value| CrossentropyReduction::parse(&value))
+            .remove(OptionKey::Reduction)
+            .map(|value| parse_reduction(&value))
             .transpose()?
             .unwrap_or(CrossentropyReduction::Sum);
         let data_format = parsed
-            .remove("dataformat")
+            .remove(OptionKey::DataFormat)
             .map(|value| scalar_text(&value, "crossentropy"))
-            .transpose()?
-            .filter(|format| !format.is_empty());
+            .transpose()?;
+        let data_format =
+            parse_loss_format(data_format.as_deref(), &predictions.shape, "DataFormat")?;
         let normalization = parsed
-            .remove("normalizationfactor")
+            .remove(OptionKey::NormalizationFactor)
             .map(|value| NormalizationFactor::parse(&value))
             .transpose()?
             .unwrap_or_else(|| {
@@ -134,37 +171,30 @@ impl CrossentropyOptions {
                 }
             });
         let weights_format = parsed
-            .remove("weightsformat")
+            .remove(OptionKey::WeightsFormat)
             .map(|value| scalar_text(&value, "crossentropy"))
-            .transpose()?
-            .filter(|format| !format.is_empty());
-        let weights = parsed
-            .remove("weights")
+            .transpose()?;
+        let named_weights = parsed
+            .remove(OptionKey::Weights)
             .map(|value| LossWeights::parse(&value, "weights"))
             .transpose()?;
+        let weights = positional_weights.or(named_weights);
         let mask = parsed
-            .remove("mask")
+            .remove(OptionKey::Mask)
             .map(|value| LossMask::parse(&value, predictions))
             .transpose()?;
-        if !parsed.is_empty() {
-            let first = parsed.keys().next().cloned().unwrap_or_default();
+        if let Some(first) = parsed.unsupported_name() {
             return Err(deep_learning_error(
                 "crossentropy",
                 format!("crossentropy: unsupported option '{first}'"),
             ));
         }
-        validate_format_for_shape(
-            predictions
-                .format_or_default(data_format.as_deref())
-                .as_deref(),
-            &predictions.shape,
-            "DataFormat",
-        )?;
-        if let Some(weights_format) = weights_format.as_deref() {
-            if let Some(weights) = &weights {
-                validate_format_for_shape(Some(weights_format), &weights.shape, "WeightsFormat")?;
-            }
-        }
+        let weights_format = if let Some(weights) = &weights {
+            parse_loss_format(weights_format.as_deref(), &weights.shape, "WeightsFormat")?
+        } else {
+            // With no weights the format is inert, but still admit its external text.
+            None
+        };
         Ok(Self {
             mode,
             reduction,
@@ -194,12 +224,12 @@ impl CrossentropyOptions {
                 Ok(weighted_losses.iter().sum::<f64>() / predictions.data.len() as f64)
             }
             NormalizationFactor::BatchSize => Ok(weighted_losses.iter().sum::<f64>()
-                / batch_size(predictions, self.data_format.as_deref())?),
+                / batch_size(predictions, self.data_format.as_ref())?),
             NormalizationFactor::MaskIncluded => reduce_mask_included(
                 predictions,
                 weighted_losses,
                 mask,
-                self.data_format.as_deref(),
+                self.data_format.as_ref(),
             ),
             NormalizationFactor::None => Ok(weighted_losses.iter().sum::<f64>()),
             NormalizationFactor::Scalar(value) => Ok(weighted_losses.iter().sum::<f64>() / value),

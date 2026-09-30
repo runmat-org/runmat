@@ -4,6 +4,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderCrossentropyMode,
     ProviderCrossentropyRequest,
 };
+use runmat_builtins::{DeepLearningAxisLabel as Axis, DeepLearningAxisLayout as Layout};
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
@@ -22,8 +23,7 @@ mod options;
 mod weights;
 
 use format::{
-    batch_size, batch_size_for_shape, column_major_strides, label_index_for_shape,
-    reduce_mask_included, validate_format_for_shape,
+    batch_size, batch_size_for_shape, column_major_strides, parse_loss_format, reduce_mask_included,
 };
 use gpu::try_crossentropy_gpu;
 use host::{
@@ -32,8 +32,10 @@ use host::{
 };
 use mask::{mask_values_for_layout, LossMask};
 use options::{
-    ClassificationMode, CrossentropyOptions, CrossentropyReduction, NormalizationFactor,
+    parse_classification_mode, parse_reduction, provider_mode, ClassificationMode,
+    CrossentropyOptions, CrossentropyReduction, NormalizationFactor, ParsedLossOptions,
 };
+use runmat_builtins::CrossentropyOptionKey as OptionKey;
 use weights::LossWeights;
 
 #[cfg(test)]
@@ -64,7 +66,7 @@ pub(super) async fn crossentropy_builtin(
                 && crate::builtins::common::validation::value_has_native_integer_class(&rest[0]))
             || options.chunks_exact(2).any(|pair| {
                 scalar_text(&pair[0], "crossentropy")
-                    .is_ok_and(|name| name.eq_ignore_ascii_case("weights"))
+                    .is_ok_and(|name| OptionKey::from_name(&name) == Some(OptionKey::Weights))
                     && crate::builtins::common::validation::value_has_native_integer_class(&pair[1])
             });
     if integer_data {
@@ -134,18 +136,15 @@ pub(super) async fn crossentropy_builtin(
     } else {
         None
     };
-    let mut options = CrossentropyOptions::from_args(args, &predictions)?;
-    if let Some(weights) = weights {
-        options.weights = Some(weights);
-    }
-    require_loss_payload_compatible(&predictions, &targets, options.data_format.as_deref())?;
+    let options = CrossentropyOptions::from_args(args, &predictions, weights)?;
+    require_loss_payload_compatible(&predictions, &targets, options.data_format.as_ref())?;
 
     let mask = options.mask_values(&predictions)?;
     let weights = match options.weights {
         Some(ref weights) => weights.materialize(
             &predictions,
-            options.data_format.as_deref(),
-            options.weights_format.as_deref(),
+            options.data_format.as_ref(),
+            options.weights_format.as_ref(),
         )?,
         None => vec![1.0; predictions.data.len()],
     };

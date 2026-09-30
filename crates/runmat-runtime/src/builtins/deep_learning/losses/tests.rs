@@ -4,6 +4,52 @@ use runmat_accelerate_api::GpuHandleProvenance;
 use runmat_value::IntegerStorage;
 
 #[test]
+fn loss_formats_admit_lowercase_repeated_spatial_axes_and_reject_bad_labels() {
+    let shape = [2, 3, 2, 2];
+    let layout = parse_loss_format(Some("sscb"), &shape, "DataFormat")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        layout.axes(),
+        &[Axis::Spatial, Axis::Spatial, Axis::Channel, Axis::Batch]
+    );
+    assert_eq!(batch_size_for_shape(&shape, Some(&layout)), 2.0);
+    assert_eq!(
+        parse_loss_format(Some("cctu"), &shape, "DataFormat")
+            .unwrap_err()
+            .identifier(),
+        Some("RunMat:deepLearning:InvalidInput")
+    );
+    assert!(parse_loss_format(Some("sscx"), &shape, "DataFormat").is_err());
+    assert!(parse_loss_format(Some("cb"), &shape, "DataFormat").is_err());
+    assert!(parse_loss_format(Some(""), &[], "DataFormat")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn repeated_spatial_weight_axes_broadcast_by_occurrence() {
+    let data_shape = [2, 3, 2, 2];
+    let data_format = parse_loss_format(Some("sscb"), &data_shape, "DataFormat")
+        .unwrap()
+        .unwrap();
+    let weight_shape = [2, 3];
+    let weight_format = parse_loss_format(Some("ss"), &weight_shape, "WeightsFormat")
+        .unwrap()
+        .unwrap();
+    let weights = LossWeights {
+        data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        shape: weight_shape.to_vec(),
+    };
+    let output = weights
+        .materialize_for_layout(&data_shape, 24, Some(&data_format), Some(&weight_format))
+        .unwrap();
+    assert_eq!(&output[..6], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    assert_eq!(&output[6..12], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    assert_eq!(&output[18..24], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+}
+
+#[test]
 fn plain_numeric_pair_is_an_explicit_runmat_extension() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let err = block_on(crossentropy_builtin(
@@ -77,6 +123,39 @@ fn malformed_host_control_rejects_before_resident_prediction_download() {
         .expect_err("invalid host reduction");
         assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn invalid_resident_data_format_rejects_before_download_and_keeps_sources_live() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let prediction = provider
+            .upload(&HostTensorView {
+                data: &[0.8, 0.2, 0.7, 0.3, 0.6, 0.4],
+                shape: &[2, 3],
+            })
+            .unwrap();
+        let target = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                shape: &[2, 3],
+            })
+            .unwrap();
+        provider.reset_telemetry();
+        let err = block_on(crossentropy_builtin(
+            Value::GpuTensor(prediction.clone()),
+            Value::GpuTensor(target.clone()),
+            vec![
+                Value::String("DataFormat".into()),
+                Value::String("CC".into()),
+            ],
+        ))
+        .expect_err("repeated channel axis");
+        assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(prediction.allocation_lease().validate_live().is_ok());
+        assert!(target.allocation_lease().validate_live().is_ok());
     });
 }
 

@@ -5,7 +5,7 @@ pub(super) struct GpuCrossentropyOptions {
     pub(super) mode: ClassificationMode,
     pub(super) reduction: CrossentropyReduction,
     normalization: NormalizationFactor,
-    data_format: Option<String>,
+    data_format: Option<Layout>,
     pub(super) weights: Option<GpuLossFactor>,
     pub(super) mask: Option<GpuLossFactor>,
 }
@@ -22,36 +22,35 @@ impl GpuCrossentropyOptions {
         } else {
             None
         };
-        let mut parsed = parse_name_values(args, "crossentropy")?;
+        let mut parsed = ParsedLossOptions::from_args(args)?;
         let mode = parsed
-            .remove("classificationmode")
-            .or_else(|| parsed.remove("targetcategories"))
-            .map(|value| ClassificationMode::parse(&value, "ClassificationMode"))
+            .remove(OptionKey::ClassificationMode)
+            .or_else(|| parsed.remove(OptionKey::TargetCategories))
+            .map(|value| parse_classification_mode(&value, "ClassificationMode"))
             .transpose()?
             .unwrap_or(ClassificationMode::SingleLabel);
         let reduction = parsed
-            .remove("reduction")
-            .map(|value| CrossentropyReduction::parse(&value))
+            .remove(OptionKey::Reduction)
+            .map(|value| parse_reduction(&value))
             .transpose()?
             .unwrap_or(CrossentropyReduction::Sum);
         let data_format = parsed
-            .remove("dataformat")
+            .remove(OptionKey::DataFormat)
             .map(|value| scalar_text(&value, "crossentropy"))
-            .transpose()?
-            .filter(|format| !format.is_empty());
+            .transpose()?;
+        let data_format = parse_loss_format(data_format.as_deref(), shape, "DataFormat")?;
         let weights_format = parsed
-            .remove("weightsformat")
+            .remove(OptionKey::WeightsFormat)
             .map(|value| scalar_text(&value, "crossentropy"))
             .transpose()?
             .filter(|format| !format.is_empty());
-        validate_format_for_shape(data_format.as_deref(), shape, "DataFormat")?;
-        let weights_value = positional_weights.or_else(|| parsed.remove("weights"));
+        let weights_value = positional_weights.or_else(|| parsed.remove(OptionKey::Weights));
         let weights = match weights_value {
             Some(value) => match GpuLossFactor::weights(
                 value,
                 shape,
                 len,
-                data_format.as_deref(),
+                data_format.as_ref(),
                 weights_format.as_deref(),
             )? {
                 GpuLossFactorParse::Supported(factor) => factor,
@@ -59,7 +58,7 @@ impl GpuCrossentropyOptions {
             },
             None => None,
         };
-        let mask = match parsed.remove("mask") {
+        let mask = match parsed.remove(OptionKey::Mask) {
             Some(value) => match GpuLossFactor::mask(value, shape, len)? {
                 GpuLossFactorParse::Supported(factor) => factor,
                 GpuLossFactorParse::Unsupported => return Ok(None),
@@ -67,7 +66,7 @@ impl GpuCrossentropyOptions {
             None => None,
         };
         let normalization = parsed
-            .remove("normalizationfactor")
+            .remove(OptionKey::NormalizationFactor)
             .map(|value| NormalizationFactor::parse(&value))
             .transpose()?
             .unwrap_or_else(|| {
@@ -80,8 +79,7 @@ impl GpuCrossentropyOptions {
         if matches!(normalization, NormalizationFactor::MaskIncluded) {
             return Ok(None);
         }
-        if !parsed.is_empty() {
-            let first = parsed.keys().next().cloned().unwrap_or_default();
+        if let Some(first) = parsed.unsupported_name() {
             return Err(deep_learning_error(
                 "crossentropy",
                 format!("crossentropy: unsupported option '{first}'"),
@@ -105,7 +103,7 @@ impl GpuCrossentropyOptions {
         match self.normalization {
             NormalizationFactor::AllElements => Ok(len as f64),
             NormalizationFactor::BatchSize => {
-                Ok(batch_size_for_shape(shape, self.data_format.as_deref()))
+                Ok(batch_size_for_shape(shape, self.data_format.as_ref()))
             }
             NormalizationFactor::MaskIncluded => Err(deep_learning_error(
                 "crossentropy",
