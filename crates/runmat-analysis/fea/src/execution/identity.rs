@@ -359,6 +359,13 @@ impl AccuracyIdentity {
 }
 
 impl NumericalPlanIdentity {
+    /// Canonical acoustic workload and topology, independent of placement and transport.
+    pub fn from_acoustic_workload(
+        workload: AnalysisWorkloadIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("acoustic-harmonic-numerical-plan", &(workload, topology))
+    }
     /// Thermal numerical intent is independent of task placement and transport chunking.
     pub fn from_thermal_intent(
         intent: ThermalNumericalIntentIdentity,

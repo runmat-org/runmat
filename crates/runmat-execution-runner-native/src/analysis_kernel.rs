@@ -93,6 +93,7 @@ use runmat_analysis_fea::{
 };
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
+mod acoustic_harmonic;
 mod buckling;
 #[cfg(test)]
 mod buckling_tests;
@@ -123,6 +124,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
         match invocation.kind {
             AnalysisWorkKind::Solve => structural_linear::execute(invocation),
             AnalysisWorkKind::SolveThermal => thermal::execute(invocation),
+            AnalysisWorkKind::SolveAcousticHarmonic => acoustic_harmonic::execute(invocation),
             AnalysisWorkKind::RecoverField => field_recovery::execute_field_recovery(invocation),
             AnalysisWorkKind::EvaluateObservationPartition => {
                 observation::execute_observation_partition(invocation)

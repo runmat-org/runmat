@@ -34,6 +34,7 @@ mod tests;
 pub enum AnalysisNumericalObjectKind {
     ThermalStudyCompletion,
     ThermalWorkload,
+    AcousticHarmonicWorkload,
     Mesh,
     Signal,
     ResponseSpectrum,

@@ -8,6 +8,9 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (Self::AcousticHarmonic(demand), AnalysisNumericalObjectKind::SolverResult) => {
+                Some(&demand.result_output)
+            }
             (
                 Self::ObservationHistoryFinalization(demand),
                 AnalysisNumericalObjectKind::History,

@@ -1,4 +1,5 @@
 mod accuracy;
+mod acoustic;
 mod common;
 mod result_publication;
 mod state_publication;
@@ -50,6 +51,10 @@ pub fn build_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
+        (
+            FeaResourcePhase::AcousticHarmonic(workload),
+            FeaResourceDemand::AcousticHarmonic(demand),
+        ) if *workload == demand.workload => acoustic::build_acoustic_plan(input.clone(), demand),
         (
             FeaResourcePhase::ResultPublication(request),
             FeaResourceDemand::ResultPublication(demand),

@@ -1,6 +1,12 @@
 //! Checked FEA resource estimation, worker admission, and usage reconciliation.
 
 mod accuracy;
+mod acoustic;
+pub use acoustic::{
+    acoustic_harmonic_result_payload_bytes_upper_bound, build_acoustic_resource_plan,
+    PreparedAcousticResourceFacts,
+};
+pub use contract::AcousticHarmonicResourceDemand;
 mod result_publication;
 mod state_publication;
 pub use contract::ResultPublicationResourceDemand;

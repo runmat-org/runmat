@@ -1,0 +1,128 @@
+use super::*;
+use crate::{
+    fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
+    physics::acoustic::AcousticHarmonicPolicy,
+    topology::test_meshes::{quadratic_slab_mesh, slab_mesh},
+};
+use runmat_analysis_core::*;
+mod source;
+
+fn workload() -> AcousticHarmonicWorkload {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    replace_fixture_excitations(&mut model, Vec::new());
+    model.constraints.clear();
+    model.boundaries.clear();
+    model.materials[0].acoustic = Some(MaterialAcousticModel {
+        speed_of_sound_m_per_s: 2.0,
+        damping_ratio: 0.0,
+    });
+    model.materials[0].mass_density_kg_per_m3 = Some(3.0);
+    model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+    let mut step = ProcedureStep::acoustic_harmonic("acoustic");
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
+    model.sequence.steps = vec![step];
+    model
+        .constraints
+        .push(AnalysisConstraint::Acoustic(AcousticConstraint {
+            constraint_id: "pressure".into(),
+            kind: AcousticConstraintKind::PrescribedPressure {
+                target: RegionTarget::boundary("slab_left"),
+                value: PrescribedValue::Constant(Pressure::new(1.0)),
+            },
+        }));
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "matched".into(),
+        target: RegionTarget::boundary("slab_right"),
+        operator: BoundaryOperator::AcousticImpedance {
+            impedance: SpecificAcousticImpedance::new(6.0),
+        },
+    });
+    AcousticHarmonicWorkload {
+        model,
+        step_id: ProcedureStepId("acoustic".into()),
+        frequency: Frequency::new(0.2),
+        formulation_requirement: FormulationRequirement::Experimental,
+        solver: AcousticHarmonicPolicy {
+            relative_tolerance: 1e-10,
+            ..Default::default()
+        },
+        power_balance_relative_tolerance: 1e-8,
+    }
+}
+
+fn facts(
+    workload: &AcousticHarmonicWorkload,
+    mesh: &SolverMeshArtifact,
+) -> PreparedAcousticResourceFacts {
+    let input =
+        (workload.canonical_bytes().unwrap().len() + mesh.canonical_encode().unwrap().len()) as u64;
+    let output = acoustic_harmonic_result_payload_bytes_upper_bound(workload, mesh).unwrap();
+    PreparedAcousticResourceFacts {
+        inputs: PreparedInputResourceFacts {
+            encoded_payload_bytes: ByteCount(input),
+            transport_closure_bytes: ByteCount(input + 2048),
+            decoded_resident_bytes_admission_budget: ByteCount(input * 16),
+        },
+        result_output: PreparedOutputResourceFacts {
+            encoded_payload_bytes_upper_bound: ByteCount(output),
+            transport_closure_bytes_upper_bound: ByteCount(output + 2048),
+            construction_resident_bytes_admission_budget: ByteCount(output * 16),
+        },
+        output_set: PreparedOutputSetResourceFacts {
+            encoded_bytes_upper_bound: ByteCount(2048),
+        },
+    }
+}
+
+#[test]
+fn canonical_results_fit_admitted_tet4_tet10_payload_and_policy_identity_is_deterministic() {
+    for mesh in [slab_mesh(2), quadratic_slab_mesh(2)] {
+        let workload = workload();
+        let prepared = facts(&workload, &mesh);
+        let result = workload.execute(&mesh).unwrap();
+        assert!(
+            result.canonical_bytes().unwrap().len() as u64
+                <= prepared.result_output.encoded_payload_bytes_upper_bound.0
+        );
+        let plan = build_acoustic_resource_plan(&workload, &mesh, prepared.clone()).unwrap();
+        assert_eq!(
+            plan,
+            build_acoustic_resource_plan(&workload, &mesh, prepared).unwrap()
+        );
+        assert_eq!(
+            plan.input.phase,
+            FeaResourcePhase::AcousticHarmonic(workload.identity().unwrap())
+        );
+        assert_eq!(plan.input.partitioning(), &PartitioningPolicy::Monolithic);
+        assert!(plan.breakdown.workspace_bytes.0 > 0);
+        let mut changed = workload.clone();
+        changed.solver.restart = 1;
+        let changed_plan =
+            build_acoustic_resource_plan(&changed, &mesh, facts(&changed, &mesh)).unwrap();
+        assert_ne!(plan.identity, changed_plan.identity);
+        assert!(plan.breakdown.workspace_bytes > changed_plan.breakdown.workspace_bytes);
+    }
+}
+
+#[test]
+fn acoustic_prepared_byte_facts_and_production_fail_closed() {
+    let mut workload = workload();
+    let mesh = slab_mesh(1);
+    for field in 0..5 {
+        let mut prepared = facts(&workload, &mesh);
+        match field {
+            0 => prepared.inputs.encoded_payload_bytes.0 -= 1,
+            1 => prepared.inputs.transport_closure_bytes = ByteCount(0),
+            2 => prepared.inputs.decoded_resident_bytes_admission_budget = ByteCount(0),
+            3 => prepared.result_output.encoded_payload_bytes_upper_bound.0 -= 1,
+            _ => {
+                prepared
+                    .result_output
+                    .construction_resident_bytes_admission_budget = ByteCount(0)
+            }
+        }
+        assert!(build_acoustic_resource_plan(&workload, &mesh, prepared).is_err());
+    }
+    workload.formulation_requirement = FormulationRequirement::Production;
+    assert!(acoustic_harmonic_result_payload_bytes_upper_bound(&workload, &mesh).is_err());
+}

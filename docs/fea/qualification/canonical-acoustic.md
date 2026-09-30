@@ -19,8 +19,8 @@ rigid walls and positive real specific impedance. Prescribed pressure uses affin
 
 Unsupported radiation, periodic/Bloch constraints, incident sources, material attenuation,
 nonuniform distributions, interior boundary selection and structural/coupled models fail
-closed. This entry has no production admission, native study integration, resource envelope,
-restart or GPU/distributed claim. The public/runtime graph route remains a separately
+closed. Production admission, authored native study dispatch, process restart and GPU/distributed
+execution remain unqualified. The public/runtime graph route remains a separately
 identified experimental proxy until its callers can migrate with qualification evidence.
 
 ## Equations and independent references
@@ -147,11 +147,47 @@ both Tet4 and Tet10.
 
 Complete authored acoustic-complex output declarations remain part of workload
 identity. This numerical entry returns result fields, not semantic lifecycle state
-publications. It does not establish process restart, scheduler allocation, bounded
-resource admission, native authoring integration or graph-caller migration.
+publications. It does not establish process restart, native authoring integration or
+graph-caller migration.
+
+### Canonical native task and resource admission
+
+`prepare_acoustic_harmonic_task` prepares an explicit CPU task with exactly a canonical
+acoustic workload, sealed mesh and typed resource plan. It is not authored-language family
+dispatch. Its numerical identity binds the workload and topology, independent of transport
+chunking and placement. The native worker rederives the exact resource plan and checks the
+authored step, numerical/execution identities and output contract before invoking the canonical
+solver. It emits one source/mesh-bound canonical result through the shared artifact bridge.
+
+The assembly-free planner counts canonical local operator supports, full real-block Krylov
+workspace, shared property/projection metadata, source evidence, input materialization and
+output construction/transport. Actual source identifiers and formulation metadata are profiled;
+output fields use conservative typed serialization ceilings. The shared serial executor checks
+actual prepared outputs against their admitted envelope. Content-addressed transport is counted
+by unique chunks, separately from logical payload and decoded residency.
+
+Tests cover driven free-DOF Tet4/Tet10 native execution, chunk-independent result identity,
+serial artifact round trips, exact resource-planned scheduler submission, and rejection of valid
+but substituted resource plans. Numerical equality with a hot solve is execution evidence, not
+an independent physics reference; duct/cavity convergence and power references above remain
+the independent numerical evidence. Serial artifact round trips are not process restart.
+
+A separate native Tet4 check uses hand-integrated unit-right-tetrahedron coefficients:
+`K44=1/18`, `M44=1/720`, `M4j=1/1440`, and `B44=sqrt(3)/72` for
+`rho=3`, `c=2`, `Z=6`. Three nodes have prescribed unit pressure; the fourth complex
+pressure is obtained by scalar complex division, without RunMat assembly. Exact shape-function
+gradients and moments `<z>=1/4`, `<z²>=1/10` independently check recovered velocity,
+intensity and energy. This is exact-element/native evidence, not continuum convergence.
+
+Reservations are conservative requested-heap estimates, not measured process peaks or arbitrary
+scale qualification. Scheduler-submission validation is not an observed remote scheduler attempt.
+Lifecycle state publication, observations, independent accuracy reports, authored/generated
+spectral equivalence and blocking release evidence remain required before promotion.
 
 ```sh
 cargo test --locked -p runmat-analysis-fea --lib physics::acoustic::canonical
+cargo test --locked -p runmat-analysis-fea --lib planning::resource::acoustic
+cargo test --locked -p runmat-execution-runner-native --lib analysis_kernel::acoustic_harmonic
 cargo test --locked -p runmat-analysis-fea --lib
 cargo clippy --locked -p runmat-analysis-fea --all-targets --no-deps -- -D warnings
 ```
@@ -165,7 +201,7 @@ Stage 8 remains open. Required follow-on work includes wider Tet10/curved contin
 heterogeneous interfaces, cavity eigenfrequencies and resonance/uniqueness diagnostics,
 radiation references, complex/frequency-dependent impedance where advertised,
 periodic/Bloch constraints, incident-field support, explicit/generated spectrum
-equivalence, prepared resource/accuracy reports, authored/native workload integration,
+equivalence, measured resource qualification and accuracy reports, authored native-study integration,
 observations/storage and cold restart, parallel frequency execution and blocking release
 evidence. These library tests do not qualify those gates or remove the graph route's
 remaining caller migration obligation.

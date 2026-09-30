@@ -103,6 +103,7 @@ identity_type!(StructuralBucklingWorkloadIdentity);
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisWorkKind {
     SolveThermal,
+    SolveAcousticHarmonic,
     MaterializeSignal,
     CompileConstraints,
     AssembleOperator,

@@ -59,6 +59,12 @@ mod structural_modal_response_spectrum_study;
 mod structural_modal_transient_study;
 mod structural_prestress_producer;
 pub use structural_prestress_producer::ThermalPrestressSource;
+mod acoustic_harmonic_plan;
+mod acoustic_harmonic_result;
+mod acoustic_harmonic_task;
+pub use acoustic_harmonic_result::{
+    import_acoustic_harmonic_result, ImportedAcousticHarmonicResult,
+};
 mod structural_prestressed_frequency_study;
 mod structural_prestressed_modal_frequency_study;
 mod structural_prestressed_modal_study;
@@ -69,6 +75,13 @@ mod structural_transient_sequence;
 mod task;
 mod thermal_execution;
 mod thermal_plan;
+pub use acoustic_harmonic_plan::{
+    prepare_acoustic_harmonic_inputs, rederive_acoustic_harmonic_resource_plan,
+    PreparedAcousticHarmonicInputs,
+};
+pub use acoustic_harmonic_task::{
+    prepare_acoustic_harmonic_task, AcousticHarmonicTaskPreparation, PreparedAcousticHarmonicTask,
+};
 pub use thermal_plan::{
     prepare_thermal_inputs, rederive_thermal_resource_plan, PreparedThermalInputs,
 };

@@ -22,6 +22,8 @@ use crate::execution::{
     StructuralTransientResultAssemblyRequestIdentity,
 };
 mod accuracy_demand;
+mod acoustic_demand;
+pub use acoustic_demand::AcousticHarmonicResourceDemand;
 mod assembly_demand;
 pub use accuracy_demand::AccuracyEvaluationResourceDemand;
 mod error;
@@ -65,7 +67,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 37;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 38;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -237,6 +239,7 @@ pub enum PartitioningPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "request")]
 pub enum FeaResourcePhase {
+    AcousticHarmonic(AnalysisWorkloadIdentity),
     ResultPublication(crate::execution::PublicationRequestIdentity),
     SemanticStatePublication(Digest),
     AccuracyEvaluation(AccuracyEvaluationRequestIdentity),
@@ -319,6 +322,7 @@ pub use observation_demand::{
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
 pub enum FeaResourceDemand {
+    AcousticHarmonic(AcousticHarmonicResourceDemand),
     ResultPublication(ResultPublicationResourceDemand),
     SemanticStatePublication(SemanticStatePublicationResourceDemand),
     AccuracyEvaluation(AccuracyEvaluationResourceDemand),
