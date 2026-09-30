@@ -34,7 +34,6 @@ pub(in crate::builtins::deep_learning) struct StepDescriptor {
 }
 
 pub(in crate::builtins::deep_learning) struct HostNetworkPlan<'a> {
-    pub(super) input: &'a Value,
     pub(super) parameters: Vec<ParameterView<'a>>,
     pub(super) state: Vec<StateView<'a>>,
     pub(super) steps: Vec<StepDescriptor>,
@@ -65,22 +64,6 @@ impl<'a> HostNetworkPlan<'a> {
 
     pub(in crate::builtins::deep_learning) fn parameter_views(&self) -> &[ParameterView<'a>] {
         &self.parameters
-    }
-
-    pub(in crate::builtins::deep_learning) fn state_views(&self) -> &[StateView<'a>] {
-        &self.state
-    }
-
-    pub(in crate::builtins::deep_learning) fn execution_precision(&self) -> NumericDType {
-        self.precision
-    }
-
-    pub(in crate::builtins::deep_learning) fn function(&self) -> &'static str {
-        self.function
-    }
-
-    pub(in crate::builtins::deep_learning) fn admitted_input(&self) -> &'a Value {
-        self.input
     }
 
     /// A bounded first resident route. The same admitted geometry is used by
@@ -117,7 +100,7 @@ impl<'a> HostNetworkPlan<'a> {
 
     pub(in crate::builtins::deep_learning) fn admit(
         network: &'a ObjectInstance,
-        input: &'a Value,
+        input: &Value,
         function: &'static str,
     ) -> BuiltinResult<Self> {
         validate_sequential_connections(network, function)?;
@@ -144,7 +127,6 @@ impl<'a> HostNetworkPlan<'a> {
         let (input_axes, axes, precision, input_payload_kind, steps) =
             admit_layers(&layers.data, first, first_kind, input, &shapes, function)?;
         Ok(Self {
-            input,
             parameters,
             state,
             steps,
