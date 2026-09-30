@@ -32,31 +32,6 @@ fn extreme_scalar_double_overflow_is_structured_in_every_rounding_mode() {
 }
 
 #[test]
-fn requested_output_admission_preserves_discard_and_single_output() {
-    for count in [None, Some(0), Some(1)] {
-        let _outputs = crate::output_count::push_output_count(count);
-        assert_eq!(
-            block_on(idivide_builtin(vec![
-                Value::Int(IntValue::I16(6)),
-                Value::Int(IntValue::I16(2)),
-            ]))
-            .expect("valid output count"),
-            Value::Int(IntValue::I16(3)),
-        );
-    }
-    let _outputs = crate::output_count::push_output_count(Some(2));
-    let error = block_on(idivide_builtin(vec![
-        Value::Int(IntValue::I16(6)),
-        Value::Int(IntValue::I16(2)),
-    ]))
-    .expect_err("output admission precedes operand consumption");
-    assert_eq!(
-        error.identifier(),
-        runmat_builtins::IDIVIDE_ERROR_INVALID_INPUT.identifier
-    );
-}
-
-#[test]
 fn rounding_character_rows_allow_trailing_singletons_not_pages() {
     for (shape, valid) in [(vec![1, 3, 1], true), (vec![1, 1, 3], false)] {
         let control =

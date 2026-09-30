@@ -1,5 +1,19 @@
 use super::*;
 
+thread_local! {
+    static OBSERVED_TARGET: std::cell::Cell<Option<runmat_gc::GcHandle>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+struct WitnessReset;
+
+impl Drop for WitnessReset {
+    fn drop(&mut self) {
+        OBSERVED_TARGET.with(|target| target.set(None));
+    }
+}
+
 const HANDLE_CLASS: &str = r#"
 classdef PendingHandle < handle
     properties
@@ -16,7 +30,9 @@ end
 const SOURCE: &str = r#"
 function output = first(value)
     global order_counter;
+    global pending_handle_witness;
     order_counter = order_counter + 1;
+    pending_handle_witness = value;
     output = struct('second', @(next) value.x + next);
 end
 global order_counter;
@@ -25,6 +41,35 @@ s = struct('first', @first);
 result = s.first(PendingHandle()).second(input('next: '));
 assert(result == 10);
 "#;
+
+fn take_temporary_target() -> runmat_gc::GcHandle {
+    let value = runmat_runtime::workspace::session::global_value("pending_handle_witness")
+        .expect("the first invocation exposes its temporary to the test observer");
+    let Value::HandleObject(handle) = value else {
+        panic!("the temporary witness must be a managed handle")
+    };
+    let expected_class = runmat_types::ClassIdentity::new("PendingHandle").unwrap();
+    assert_eq!(handle.class_name, expected_class);
+    let Value::Object(object) =
+        runmat_gc::gc_clone_value(&handle.target).expect("the observed temporary is live")
+    else {
+        panic!("the managed target must contain the authored object")
+    };
+    assert_eq!(object.class_name, expected_class);
+    assert_eq!(object.properties.get("x"), Some(&Value::Num(7.0)));
+    runmat_runtime::workspace::session::store_global_named(
+        "pending_handle_witness",
+        Value::Num(0.0),
+    );
+    assert_eq!(
+        runmat_runtime::workspace::session::global_value("pending_handle_witness"),
+        Some(Value::Num(0.0)),
+        "the observer must not retain a managed alias"
+    );
+    // The observer retains only an unrooted identity. The anonymous closure
+    // produced by the invocation must keep its own capture alive while pending.
+    handle.target
+}
 
 fn path_request(session: &RunMatSession, path: &std::path::Path) -> crate::abi::ExecutionRequest {
     crate::abi::ExecutionRequest::for_source(
@@ -38,6 +83,7 @@ fn path_request(session: &RunMatSession, path: &std::path::Path) -> crate::abi::
 #[test]
 fn temporary_managed_receiver_survives_native_pending_argument_and_major_collection() {
     runmat_gc::gc_test_context(|| {
+        let _witness = WitnessReset;
         let _cwd_lock = super::super::cwd_lock();
         let directory = tempfile::TempDir::new().expect("class fixture directory");
         std::fs::write(directory.path().join("PendingHandle.m"), HANDLE_CLASS)
@@ -60,6 +106,7 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
                 let prefix_seen = Arc::clone(&prefix_seen);
                 async move {
                     calls.fetch_add(1, Ordering::SeqCst);
+                    OBSERVED_TARGET.with(|target| target.set(Some(take_temporary_target())));
                     if runmat_runtime::workspace::session::global_value("order_counter")
                         == Some(Value::Num(1.0))
                     {
@@ -107,7 +154,11 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
         assert!(Future::poll(execution.as_mut(), &mut Context::from_waker(&waker)).is_pending());
         assert_eq!(calls.load(Ordering::SeqCst), before + 1);
         assert!(prefix_seen.load(Ordering::SeqCst));
+        let pending_target = OBSERVED_TARGET
+            .with(|target| target.get())
+            .expect("pending target identity");
         runmat_gc::gc_collect_major().expect("collect while managed receiver is pending");
+        assert!(runmat_gc::gc_clone_value(&pending_target).is_ok());
         ready.store(true, Ordering::SeqCst);
         let response = futures::executor::block_on(execution);
         let outcome = response.result.expect("resume managed receiver invocation");
@@ -135,8 +186,17 @@ fn temporary_managed_receiver_survives_native_pending_argument_and_major_collect
         let mut abandoned = Box::pin(session.execute_request(request));
         assert!(Future::poll(abandoned.as_mut(), &mut Context::from_waker(&waker)).is_pending());
         assert_eq!(calls.load(Ordering::SeqCst), before_drop + 1);
+        let abandoned_target = OBSERVED_TARGET
+            .with(|target| target.get())
+            .expect("abandoned target identity");
+        runmat_gc::gc_collect_major().expect("collect while abandoned invocation is still live");
+        assert!(runmat_gc::gc_clone_value(&abandoned_target).is_ok());
         drop(abandoned);
         runmat_gc::gc_collect_major().expect("collect after dropping managed pending invocation");
+        assert!(
+            runmat_gc::gc_clone_value(&abandoned_target).is_err(),
+            "dropping the whole invocation must release its temporary capture"
+        );
         assert_eq!(calls.load(Ordering::SeqCst), before_drop + 1);
         ready.store(true, Ordering::SeqCst);
         let request = path_request(&session, &source);
