@@ -30,6 +30,8 @@ mod numeric_upload;
 mod provider_execution;
 mod covariance;
 pub use covariance::CovarianceWeightDomainError;
+mod deep_learning;
+pub use deep_learning::DeepLearningPool1DRequest;
 pub use provider_execution::{
     ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,
 };
@@ -3453,6 +3455,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _dims_zero_based: &'a [usize],
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("reduce_mean_nd not supported by provider")
+    }
+    fn deep_learning_global_average_pool_1d<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+        _request: DeepLearningPool1DRequest,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("deep-learning global-average-pool-1d not supported by provider")
     }
     /// Reduce moments across multiple zero-based dimensions in one device pass.
     /// Returns mean (E[x]) and mean of squares (E[x^2]).

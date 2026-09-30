@@ -6,6 +6,96 @@ use crate::builtins::deep_learning::model::parameters::ParameterRole;
 use runmat_types::ClassIdentity;
 use std::fmt;
 
+fn has_global_pool(layers: &[Value]) -> bool {
+    layers.iter().any(|layer| {
+        matches!(layer, Value::Object(object) if ForwardLayerKind::from_identity(&object.class_name)
+            == Some(ForwardLayerKind::GlobalAveragePooling1D))
+    })
+}
+
+fn classify_global_pool(
+    layers: &[Value],
+    input: &GpuTensorHandle,
+    axes: &AxisPlan,
+    function: &'static str,
+) -> BuiltinResult<Result<usize, GpuCapabilityReason>> {
+    use DeepLearningAxisLabel::{Spatial, Time};
+    if runmat_accelerate_api::handle_storage(input) != GpuTensorStorage::Real {
+        return Ok(Err(GpuCapabilityReason::InputStorage));
+    }
+    if runmat_accelerate_api::handle_precision(input).is_none()
+        || runmat_accelerate_api::handle_is_logical(input)
+        || runmat_accelerate_api::handle_integer_type(input).is_some()
+    {
+        return Ok(Err(GpuCapabilityReason::InputPrecision));
+    }
+    if input.shape() != axes.shape() {
+        return Err(deep_learning_error(
+            function,
+            "resident input shape differs from admitted axes",
+        ));
+    }
+    let mut kinds = Vec::with_capacity(layers.len());
+    for layer in layers {
+        let Value::Object(object) = layer else {
+            return Err(deep_learning_error(
+                function,
+                "network layers must be layer objects",
+            ));
+        };
+        let Some(kind) = ForwardLayerKind::from_identity(&object.class_name) else {
+            return Ok(Err(GpuCapabilityReason::Layer(object.class_name.clone())));
+        };
+        kinds.push(kind);
+    }
+    let valid = matches!(
+        kinds.as_slice(),
+        [
+            ForwardLayerKind::FeatureInput | ForwardLayerKind::SequenceInput,
+            ForwardLayerKind::GlobalAveragePooling1D
+        ]
+    ) || matches!(
+        kinds.as_slice(),
+        [ForwardLayerKind::FeatureInput | ForwardLayerKind::SequenceInput,
+         ForwardLayerKind::GlobalAveragePooling1D, output] if output.is_output()
+    );
+    if !valid {
+        let unsupported = layers.iter().find_map(|layer| match layer {
+            Value::Object(object)
+                if !matches!(
+                    ForwardLayerKind::from_identity(&object.class_name),
+                    Some(
+                        ForwardLayerKind::FeatureInput
+                            | ForwardLayerKind::SequenceInput
+                            | ForwardLayerKind::GlobalAveragePooling1D
+                    )
+                ) =>
+            {
+                Some(object.class_name.clone())
+            }
+            _ => None,
+        });
+        return Ok(Err(unsupported.map_or(
+            GpuCapabilityReason::NoSupportedTransform,
+            GpuCapabilityReason::Layer,
+        )));
+    }
+    let Some(axis) = axes
+        .layout()
+        .index(Spatial)
+        .or_else(|| axes.layout().index(Time))
+    else {
+        return Ok(Err(GpuCapabilityReason::AxisLayout));
+    };
+    if axes.shape()[axis] == 0 {
+        return Err(deep_learning_error(
+            function,
+            "cannot average an empty pool axis",
+        ));
+    }
+    Ok(Ok(axis))
+}
+
 #[derive(Debug)]
 pub(in crate::builtins::deep_learning::model) enum GpuForwardAdmission {
     Ready(GpuForwardLayout),
@@ -82,6 +172,14 @@ pub(in crate::builtins::deep_learning::model) fn admit_gpu_forward(
 ) -> BuiltinResult<GpuForwardAdmission> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| invalid_owner(function, GpuOperand::Input))?;
+    if has_global_pool(layers) {
+        return match classify_global_pool(layers, input, axes, function)? {
+            Ok(axis) => Ok(GpuForwardAdmission::Ready(GpuForwardLayout::GlobalPool {
+                axis,
+            })),
+            Err(reason) => Ok(GpuForwardAdmission::UnsupportedCapability(reason)),
+        };
+    }
     let Some(layout) = GpuForwardLayout::from_axes(axes) else {
         return Ok(GpuForwardAdmission::UnsupportedCapability(
             GpuCapabilityReason::AxisLayout,
@@ -98,10 +196,21 @@ pub(super) fn require_gpu_forward_layers(
     layers: &[Value],
     input: &GpuTensorHandle,
     layout: GpuForwardLayout,
+    axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<()> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| invalid_owner(function, GpuOperand::Input))?;
+    if let GpuForwardLayout::GlobalPool { axis } = layout {
+        return match classify_global_pool(layers, input, axes, function)? {
+            Ok(admitted) if admitted == axis => Ok(()),
+            Ok(_) => Err(deep_learning_error(
+                function,
+                "GPU pooling axis changed after admission",
+            )),
+            Err(reason) => Err(unsupported_error(function, format!("{function}: {reason}"))),
+        };
+    }
     if let Some(reason) = classify_layers(layers, input, layout, provider, function)? {
         return Err(unsupported_error(function, format!("{function}: {reason}")));
     }

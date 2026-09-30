@@ -7,6 +7,7 @@ use runmat_builtins::DeepLearningAxisLabel;
 
 mod parameters;
 mod admission;
+mod pooling;
 
 pub(super) use admission::{admit_gpu_forward, GpuCapabilityReason, GpuForwardAdmission};
 
@@ -17,6 +18,7 @@ mod tests;
 pub(super) enum GpuForwardLayout {
     BatchChannels,
     ChannelsBatch,
+    GlobalPool { axis: usize },
 }
 
 impl GpuForwardLayout {
@@ -33,6 +35,7 @@ impl GpuForwardLayout {
         match self {
             Self::BatchChannels => shape[1],
             Self::ChannelsBatch => shape[0],
+            Self::GlobalPool { .. } => unreachable!("global pooling is not a dense layout"),
         }
     }
 }
@@ -46,6 +49,9 @@ pub(super) async fn evaluate_network_gpu(
     input: &GpuTensorHandle,
     layout: GpuForwardLayout,
     output_layout: NetworkOutputLayout,
+    input_axes: &AxisPlan,
+    source_axes: &AxisPlan,
+    target_axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
@@ -61,7 +67,11 @@ pub(super) async fn evaluate_network_gpu(
         .map(|value| layer_slice(value, function))
         .transpose()?
         .unwrap_or(&[]);
-    admission::require_gpu_forward_layers(layers, input, layout, function)?;
+    admission::require_gpu_forward_layers(layers, input, layout, input_axes, function)?;
+
+    if let GpuForwardLayout::GlobalPool { axis } = layout {
+        return pooling::forward(provider, input, axis, source_axes, target_axes, function).await;
+    }
 
     // Provider numerical kernels use [B,C]. CB needs an actual resident
     // transpose; labels alone cannot change its physical interpretation.

@@ -8,9 +8,9 @@ use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
     AccelContextHandle, AccelContextKind, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
     ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
-    CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage,
-    HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions, IsMemberResult,
-    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderAdamUpdateRequest,
+    CovarianceOptions, DeepLearningPool1DRequest, FindDirection, FspecialRequest, GpuTensorHandle,
+    GpuTensorStorage, HostTensorOwned, HostTensorView, ImfilterOptions, IsMemberOptions,
+    IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest, ProviderAdamUpdateRequest,
     ProviderAdamUpdateResult, ProviderBandwidth, ProviderBlackScholesPriceRequest,
     ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
     ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
@@ -70,6 +70,8 @@ mod context;
 mod core;
 #[path = "ops/deep_learning.rs"]
 mod deep_learning;
+#[path = "ops/deep_learning/pooling.rs"]
+mod deep_learning_pooling;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
 #[path = "ops/remainder.rs"]

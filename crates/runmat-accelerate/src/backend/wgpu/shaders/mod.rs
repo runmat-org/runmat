@@ -5,6 +5,7 @@ pub mod classification;
 pub mod comms;
 pub mod conv;
 pub mod creation;
+pub mod deep_learning;
 pub mod diag;
 pub mod diff;
 pub mod elementwise;

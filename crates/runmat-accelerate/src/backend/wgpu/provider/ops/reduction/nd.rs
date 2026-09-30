@@ -528,7 +528,7 @@ impl WgpuProvider {
         })
     }
 
-    fn materialize_nd_reduction_input(
+    pub(in crate::backend::wgpu::provider) fn materialize_nd_reduction_input(
         &self,
         input: &GpuTensorHandle,
     ) -> Result<Option<GpuTensorHandle>> {

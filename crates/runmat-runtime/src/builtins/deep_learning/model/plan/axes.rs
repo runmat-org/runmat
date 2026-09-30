@@ -209,6 +209,10 @@ pub(in crate::builtins::deep_learning) struct AxisLowering {
 }
 
 impl AxisLowering {
+    pub(in crate::builtins::deep_learning) fn target_to_source(&self) -> &[usize] {
+        self.permutation.target_to_source()
+    }
+
     pub(in crate::builtins::deep_learning) fn target_layout(&self) -> &DeepLearningAxisLayout {
         &self.target
     }

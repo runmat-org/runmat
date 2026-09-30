@@ -459,6 +459,14 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn deep_learning_global_average_pool_1d<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        request: DeepLearningPool1DRequest,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.deep_learning_global_average_pool_1d_exec(a, request) })
+    }
+
     fn reduce_moments_nd<'a>(
         &'a self,
         a: &'a GpuTensorHandle,

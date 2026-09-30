@@ -349,6 +349,7 @@ pub struct WgpuPipelines {
     pub bandwidth: PipelineBundle,
     pub symmetry: PipelineBundle,
     pub reduce_nd_mean: PipelineBundle,
+    pub deep_learning_stable_pool_1d: PipelineBundle,
     pub reduce_nd_moments: PipelineBundle,
 }
 
@@ -1666,6 +1667,19 @@ impl WgpuPipelines {
             },
         );
 
+        let deep_learning_stable_pool_1d = create_pipeline(
+            access,
+            "runmat-deep-learning-pool-1d-layout",
+            "runmat-deep-learning-pool-1d-shader",
+            "runmat-deep-learning-pool-1d-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            crate::backend::wgpu::shaders::deep_learning::stable_pool_1d(precision),
+        );
+
         let reduce_nd_moments = create_pipeline(
             access,
             "runmat-reduce-nd-moments-layout",
@@ -1766,6 +1780,7 @@ impl WgpuPipelines {
             bandwidth,
             symmetry,
             reduce_nd_mean,
+            deep_learning_stable_pool_1d,
             reduce_nd_moments,
         }
     }
