@@ -64,6 +64,7 @@ pub(in crate::builtins) fn tensor_property_shape<'a>(
     let value = tensor_property_value(object, name, function)?;
     match value {
         Value::Tensor(tensor) => Ok(&tensor.shape),
+        Value::LogicalArray(array) => Ok(&array.shape),
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(handle)
                 == runmat_accelerate_api::GpuTensorStorage::Real

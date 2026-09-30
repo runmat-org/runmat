@@ -709,6 +709,39 @@ fn forward_integer_predictors_use_declared_runmat_extension_before_execution() {
 }
 
 #[test]
+fn forward_host_input_does_not_gather_unused_dlarray_metadata() {
+    let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
+    let mut input = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        vec![],
+    ))
+    .unwrap();
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let Value::Object(object) = &mut input else {
+        panic!("dlarray expected")
+    };
+    object.properties.insert(
+        "UnusedMetadata".into(),
+        Value::GpuTensor(allocation.handle.clone()),
+    );
+    let output = block_on(forward_builtin(net, input, vec![]))
+        .expect("unused resident metadata must not require a provider");
+    let Value::Object(output) = output else {
+        panic!("dlarray result expected")
+    };
+    assert!(matches!(output.properties.get("Data"), Some(Value::Tensor(data)) if data.shape == [1, 1]));
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
 fn dlnetwork_initialize_false_preserves_uninitialized_learnables() {
     let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let fc = block_on(fully_connected_layer_builtin(Value::Num(2.0), vec![])).unwrap();
@@ -808,6 +841,7 @@ fn forward_preserves_native_single_through_fully_connected_and_softmax() {
 
 #[test]
 fn forward_and_predict_read_typed_integer_storage_exactly() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let fc = block_on(fully_connected_layer_builtin(
         Value::Num(1.0),

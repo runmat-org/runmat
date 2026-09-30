@@ -100,3 +100,26 @@ fn malformed_known_layers_and_options_are_diagnosed() {
     .diagnostics
     .is_empty());
 }
+
+#[test]
+fn unknown_object_identity_does_not_imply_one_layer() {
+    let mut source = layer();
+    let ValueKindFact::Object(object) = &mut source.kind else {
+        unreachable!()
+    };
+    object.runtime_class = None;
+    let result = infer(vec![source], vec![LiteralValue::Unknown]);
+    let ValueKindFact::Object(network) = &result.outputs[0].kind else {
+        panic!("network object expected")
+    };
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(
+        network.properties["Layers"].shape,
+        ShapeFact::from(vec![None, Some(1)])
+    );
+    let ValueKindFact::Cell(layers) = &network.properties["Layers"].kind else {
+        panic!("cell fact expected")
+    };
+    assert!(!layers.elements_complete);
+    assert!(layers.elements.is_empty());
+}

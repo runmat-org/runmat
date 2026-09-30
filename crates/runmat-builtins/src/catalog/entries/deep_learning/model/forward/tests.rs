@@ -118,11 +118,38 @@ fn forward_uses_known_fully_connected_weight_geometry_without_guessing_values() 
             StorageFact::Dense,
         ),
     );
-    let inferred = infer(vec![net, numeric(NumericClass::Single)]);
+    let inferred = infer(vec![net.clone(), numeric(NumericClass::Single)]);
     assert!(inferred.diagnostics.is_empty());
     assert_eq!(
         inferred.outputs[0].shape,
         ShapeFact::from(vec![Some(3), Some(7)])
+    );
+    let ValueKindFact::Object(object) = &mut net.kind else {
+        unreachable!()
+    };
+    let ValueKindFact::Cell(layers) = &mut object.properties.get_mut("Layers").unwrap().kind else {
+        unreachable!()
+    };
+    let ValueKindFact::Object(layer) = &mut layers.elements.last_mut().unwrap().kind else {
+        unreachable!()
+    };
+    layer.runtime_class = None;
+    let inferred = infer(vec![net, numeric(NumericClass::Single)]);
+    assert_eq!(
+        inferred.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), None])
+    );
+}
+
+#[test]
+fn rank_one_dense_input_is_one_observation_not_one_observation_per_feature() {
+    let mut input = numeric(NumericClass::Single);
+    input.shape = ShapeFact::from(vec![Some(4)]);
+    let inferred = infer(vec![network(), input]);
+    assert!(inferred.diagnostics.is_empty());
+    assert_eq!(
+        inferred.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), None])
     );
 }
 

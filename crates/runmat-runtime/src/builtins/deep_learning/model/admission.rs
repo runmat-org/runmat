@@ -23,6 +23,21 @@ pub(super) fn forward_data(value: &Value) -> &Value {
     value
 }
 
+/// Prepare only the consumed numeric payload. Host values move unchanged, and
+/// unrelated dlarray metadata is never materialized by this execution path.
+pub(super) async fn prepare_input_for_host(value: Value) -> BuiltinResult<Value> {
+    match value {
+        Value::GpuTensor(handle) => crate::gather_if_needed_async(&Value::GpuTensor(handle)).await,
+        Value::Object(mut object) if object.class_name.is(super::DLARRAY_CLASS) => {
+            if let Some(data @ Value::GpuTensor(_)) = object.properties.get_mut("Data") {
+                *data = crate::gather_if_needed_async(data).await?;
+            }
+            Ok(Value::Object(object))
+        }
+        other => Ok(other),
+    }
+}
+
 pub(super) fn network_consumed_integer(network: &ObjectInstance) -> BuiltinResult<bool> {
     let layers = network
         .properties
@@ -54,6 +69,12 @@ fn forward_input_shape(value: &Value) -> BuiltinResult<&[usize]> {
             if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real =>
         {
             Ok(handle.shape())
+        }
+        Value::GpuTensor(_) if gpu_backed_dlarray_handle(value).is_some() => {
+            Err(unsupported_error(
+                "forward",
+                "forward: provider-resident forward currently requires a real dlarray input",
+            ))
         }
         Value::GpuTensor(_) => Err(deep_learning_error(
             "forward",
@@ -146,12 +167,11 @@ pub(super) async fn prepare_network_for_host(
             for name in ["Weights", "Bias"] {
                 let value = layer
                     .properties
-                    .get(name)
+                    .remove(name)
                     .expect("preflight admitted parameter");
-                if matches!(value, Value::GpuTensor(_)) {
-                    let gathered = crate::gather_if_needed_async(value).await?;
-                    layer.properties.insert(name.into(), gathered);
-                }
+                layer
+                    .properties
+                    .insert(name.into(), prepare_input_for_host(value).await?);
             }
         }
         prepared.push(Value::Object(layer));

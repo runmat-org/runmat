@@ -17,6 +17,7 @@ pub(super) async fn admit_export_call(mut args: Vec<Value>) -> BuiltinResult<Adm
             "exportONNXNetwork: expected network and filename",
         ));
     }
+    let option_args = args.split_off(2);
     let network = require_network_object(&args[0])?;
     let filename = scalar_text(&args[1], EXPORT_ONNX)?;
     if filename.is_empty() {
@@ -25,7 +26,7 @@ pub(super) async fn admit_export_call(mut args: Vec<Value>) -> BuiltinResult<Adm
             "exportONNXNetwork: filename must not be empty",
         ));
     }
-    let mut options_map = parse_name_values(args.split_off(2), EXPORT_ONNX)?;
+    let mut options_map = parse_name_values(option_args, EXPORT_ONNX)?;
     if options_map.iter().any(|(key, value)| {
         matches!(key.as_str(), "opsetversion" | "batchsize" | "verbose")
             && crate::builtins::common::validation::value_has_native_integer_class(value)

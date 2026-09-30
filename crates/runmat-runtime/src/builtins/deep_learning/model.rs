@@ -24,7 +24,7 @@ mod properties;
 
 use admission::{
     forward_data, gpu_backed_dlarray_handle, network_consumed_integer, preflight_forward_network,
-    prepare_network_for_host, require_network_object,
+    prepare_input_for_host, prepare_network_for_host, require_network_object,
 };
 use construction::{layer_slice, parse_network_options};
 use gpu::evaluate_network_gpu;
@@ -41,7 +41,7 @@ pub(in crate::builtins) use construction::{
 pub(in crate::builtins) use host::predict_deep_learning_object;
 pub(in crate::builtins) use properties::{
     feature_input_width, fully_connected_output_width, layer_name, positive_property_usize,
-    tensor_property, tensor_property_shape, tensor_property_value,
+    tensor_property, tensor_property_value,
 };
 
 pub(crate) const DLNETWORK_CLASS: runmat_types::StaticClassIdentity =
@@ -51,7 +51,11 @@ pub(crate) const SERIES_NETWORK_CLASS: runmat_types::StaticClassIdentity =
 pub(crate) const DAG_NETWORK_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::standard::DAG_NETWORK;
 
-#[runtime_builtin(name = "dlnetwork", binding_variant = "default")]
+#[runtime_builtin(
+    name = "dlnetwork",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::deep_learning::model"
+)]
 pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(deep_learning_error(
@@ -80,7 +84,11 @@ pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     )
 }
 
-#[runtime_builtin(name = "forward", binding_variant = "default")]
+#[runtime_builtin(
+    name = "forward",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::deep_learning::model"
+)]
 pub(super) async fn forward_builtin(
     network: Value,
     input: Value,
@@ -131,7 +139,7 @@ pub(super) async fn forward_builtin(
         return autodiff::annotate_dlarray_value(wrapped);
     }
     let prepared_network = prepare_network_for_host(network_object, "forward").await?;
-    let input = crate::gather_if_needed_async(&input).await?;
+    let input = prepare_input_for_host(input).await?;
     let wrap_dlarray =
         matches!(&input, Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS));
     let format = dlarray_format(&input);

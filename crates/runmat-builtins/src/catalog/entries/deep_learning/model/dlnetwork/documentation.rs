@@ -7,6 +7,19 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     ),
 };
 
+const CONSTRUCTION_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Network metadata and initialization",
+    target: BuiltinDocumentationLinkTarget::Source(
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/model/construction.rs",
+    ),
+};
+const ADMISSION_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Network admission and parameter preparation",
+    target: BuiltinDocumentationLinkTarget::Source(
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/model/admission.rs",
+    ),
+};
+
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("dlnetwork"),
@@ -19,7 +32,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Layers and initialization",
             paragraphs: &[
-                "A layer object, cell collection, or layer graph can supply the layers. The supported forward sequence uses `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`. Branching graph connections, recurrent and convolutional layers, custom layers, and general training graphs are not executed by this constructor.",
+                "A layer object, cell collection, or layer graph can supply the layers. The supported forward sequence uses `featureInputLayer`, `fullyConnectedLayer`, `reluLayer`, `eluLayer`, `softmaxLayer`, `classificationLayer`, and `regressionLayer`. Branching graph connections, recurrent, convolutional, normalization, sequence and image-input layers, custom layers, and general training graphs are not executed by this constructor.",
                 "The result stores `Layers`, `LayerNames`, `InputNames`, `OutputNames`, `Connections`, `Learnables`, `State`, and `Initialized`. Supplied fully connected weights and bias are retained. With the default `Initialize=true`, missing weights receive deterministic values based on the preceding feature width and missing bias values are zero. `Initialize=false` retains missing parameters and marks the network uninitialized; `forward` requires the parameters before execution.",
                 "The supported `OutputNames` option names the final layer of this single-output sequential network. Unknown options and a name that does not identify that final layer are rejected. InputNames is derived from the first layer, not an accepted constructor option.",
                 "A vector-valued feature input can be stored as layer metadata in RunMat mode, but this sequential forward implementation requires one feature dimension and rejects a vector width when it must execute or initialize a following fully connected layer.",
@@ -78,6 +91,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     links: &[
         SOURCE,
+        CONSTRUCTION_SOURCE,
+        ADMISSION_SOURCE,
         BuiltinDocumentationLink {
             label: "forward",
             target: BuiltinDocumentationLinkTarget::Builtin("forward"),
@@ -89,13 +104,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[SOURCE, CONSTRUCTION_SOURCE, ADMISSION_SOURCE],
         verification: &[BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,
             label: "Network construction and initialization",
             location: "crates/runmat-runtime/src/builtins/deep_learning/tests.rs",
         }],
-        notes: &["Network execution and browser/provider qualification are separate from the constructor's metadata contract."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

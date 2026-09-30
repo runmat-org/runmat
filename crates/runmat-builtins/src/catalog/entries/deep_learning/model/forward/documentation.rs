@@ -7,6 +7,19 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     ),
 };
 
+const HOST_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Host network execution",
+    target: BuiltinDocumentationLinkTarget::Source(
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/model/host.rs",
+    ),
+};
+const PROVIDER_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Provider-resident network execution",
+    target: BuiltinDocumentationLinkTarget::Source(
+        "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/deep_learning/model/gpu.rs",
+    ),
+};
+
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("forward"),
@@ -76,6 +89,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     links: &[
         SOURCE,
+        HOST_SOURCE,
+        PROVIDER_SOURCE,
         BuiltinDocumentationLink {
             label: "dlnetwork",
             target: BuiltinDocumentationLinkTarget::Builtin("dlnetwork"),
@@ -87,7 +102,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[SOURCE],
+        implementation: &[SOURCE, HOST_SOURCE, PROVIDER_SOURCE],
         verification: &[BuiltinEvidenceReference {
             kind: BuiltinEvidenceKind::UnitTest,
             label: "Host and provider network forward examples",

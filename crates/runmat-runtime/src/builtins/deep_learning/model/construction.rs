@@ -11,7 +11,24 @@ pub(in crate::builtins) fn layers_from_network_value(
     value: Value,
     function: &'static str,
 ) -> BuiltinResult<Vec<Value>> {
-    Ok(layers_from_network_ref(&value, function)?.to_vec())
+    match value {
+        Value::Object(mut object)
+            if object.class_name.is(super::LAYER_GRAPH_CLASS)
+                || is_deep_learning_network_object(&object) =>
+        {
+            match object.properties.remove("Layers") {
+                Some(layers) => layers_from_network_value(layers, function),
+                None => Ok(Vec::new()),
+            }
+        }
+        Value::Object(object) => Ok(vec![Value::Object(object)]),
+        Value::Cell(cell) => Ok(cell.data),
+        Value::OutputList(values) => Ok(values),
+        other => Err(deep_learning_error(
+            function,
+            format!("{function}: layers must be a layer object or cell collection, got {other:?}"),
+        )),
+    }
 }
 
 /// Borrow only the consumed layer list. In particular, a network's other

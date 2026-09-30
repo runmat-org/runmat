@@ -6,6 +6,7 @@ mod export;
 mod graph;
 mod layers;
 mod losses;
+mod model;
 mod sequences;
 mod training;
 
@@ -14,6 +15,7 @@ pub use self::export::*;
 pub use self::graph::*;
 pub use self::layers::*;
 pub use self::losses::*;
+pub use self::model::*;
 pub use self::sequences::*;
 pub use self::training::*;
 
@@ -23,6 +25,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(graph::ENTRIES.iter().copied());
     values.extend(layers::ENTRIES.iter().copied());
     values.extend(losses::ENTRIES.iter().copied());
+    model::extend_entries(values);
     values.extend(sequences::ENTRIES.iter().copied());
     training::extend_entries(values);
 }

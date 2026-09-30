@@ -26,6 +26,7 @@ fn layers_count(value: &ValueFact) -> Result<Option<usize>, ()> {
         ValueKindFact::Unknown => Ok(None),
         ValueKindFact::Cell(cell) if cell_layers_possible(cell) => Ok(value.shape.element_count()),
         ValueKindFact::Cell(_) => Err(()),
+        ValueKindFact::Object(object) if object.runtime_class.is_none() => Ok(None),
         ValueKindFact::Object(object)
             if [
                 standard::DL_NETWORK,
@@ -84,6 +85,7 @@ fn cell(shape: ShapeFact) -> ValueFact {
 fn stored_layers(source: Option<&ValueFact>, count: Option<usize>) -> ValueFact {
     let source = source.and_then(|source| match &source.kind {
         ValueKindFact::Cell(_) => Some(source.clone()),
+        ValueKindFact::Object(object) if object.runtime_class.is_none() => None,
         ValueKindFact::Object(object)
             if [
                 standard::DL_NETWORK,

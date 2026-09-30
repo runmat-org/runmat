@@ -4,7 +4,7 @@ use crate::{
 };
 use runmat_types::{
     standard, CallInference, CallRequest, DynamicReason, NumericClass, NumericDomain, NumericFact,
-    ObjectFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    ObjectFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -39,11 +39,8 @@ fn known_output_width(network: Option<&ValueFact>) -> Option<usize> {
         let ValueKindFact::Object(layer) = &layer.kind else {
             return None;
         };
-        if layer
-            .runtime_class
-            .as_ref()
-            .is_some_and(|class| class.is(FULLY_CONNECTED_LAYER_CLASS))
-        {
+        let class = layer.runtime_class.as_ref()?;
+        if class.is(FULLY_CONNECTED_LAYER_CLASS) {
             width = layer
                 .properties
                 .get("Weights")?
@@ -70,7 +67,11 @@ fn numeric_result(input: &ValueFact, output_width: Option<usize>) -> Option<Valu
     let rows = input
         .shape
         .known_dims()
-        .and_then(|dims| dims.first().copied().flatten());
+        .and_then(|dims| match dims.as_slice() {
+            [_] => Some(1),
+            [rows, ..] => *rows,
+            [] => Some(0),
+        });
     let shape = ShapeFact::from(vec![rows, output_width]);
     Some(ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {

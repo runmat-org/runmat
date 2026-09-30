@@ -27,7 +27,7 @@ use tape::{
 };
 pub(super) use tape::{annotate_dlarray_value, dlarray_node_id, tape_is_active, with_tape_context};
 mod value;
-pub(super) use value::{dlarray_data, dlarray_format_and_labels, host_tensor_from_value};
+pub(super) use value::{dlarray_format_and_labels, host_tensor_from_value};
 use value::{
     floating_binary_dtype, floating_tensor_from_f64, floating_tensor_values, node_dtype,
     result_metadata_owner, wrap_result, Payload,

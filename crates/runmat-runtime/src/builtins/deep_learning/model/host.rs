@@ -73,7 +73,7 @@ pub(super) fn evaluate_network(
         };
         current = match ForwardLayerKind::from_identity(&layer.class_name) {
             Some(ForwardLayerKind::FeatureInput) => {
-                let expected = feature_input_width(&layer, function)?;
+                let expected = feature_input_width(layer, function)?;
                 if current.cols != expected {
                     return Err(deep_learning_error(
                         function,
@@ -87,10 +87,10 @@ pub(super) fn evaluate_network(
                 current
             }
             Some(ForwardLayerKind::FullyConnected) => {
-                fully_connected_forward(current, &layer, function)?
+                fully_connected_forward(current, layer, function)?
             }
             Some(ForwardLayerKind::Relu) => map_tensor(current, |value| value.max(0.0), function)?,
-            Some(ForwardLayerKind::Elu) => elu_forward(current, &layer, function)?,
+            Some(ForwardLayerKind::Elu) => elu_forward(current, layer, function)?,
             Some(ForwardLayerKind::Softmax) => softmax_rows(current, function)?,
             Some(kind) if kind.is_output() => current,
             _ => {

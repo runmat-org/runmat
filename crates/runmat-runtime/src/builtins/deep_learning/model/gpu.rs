@@ -31,7 +31,7 @@ pub(super) async fn evaluate_network_gpu(
             unreachable!("validate_gpu_forward_layers accepts layer objects only");
         };
         if layer.class_name.is(super::FULLY_CONNECTED_LAYER_CLASS) {
-            current = fully_connected_forward_gpu(provider, current, &layer, function).await?;
+            current = fully_connected_forward_gpu(provider, current, layer, function).await?;
         } else if layer.class_name.is(super::RELU_LAYER_CLASS) {
             let output = provider
                 .scalar_max(&current, 0.0)
@@ -39,7 +39,7 @@ pub(super) async fn evaluate_network_gpu(
             validate_unary_forward_result(&output, &current, provider, function)?;
             current = output;
         } else if layer.class_name.is(super::ELU_LAYER_CLASS) {
-            let alpha = elu_alpha(&layer, function)?;
+            let alpha = elu_alpha(layer, function)?;
             let output = provider
                 .activation_elu(&current, alpha)
                 .await
