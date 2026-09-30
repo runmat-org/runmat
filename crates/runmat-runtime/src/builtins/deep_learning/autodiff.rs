@@ -14,7 +14,6 @@ use runmat_value::{
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 
-use super::layer_identity::ForwardLayerKind;
 use super::{deep_learning_error, model, unsupported_error};
 
 pub(super) const DLARRAY_CLASS: runmat_types::StaticClassIdentity = super::DLARRAY_CLASS;
@@ -44,7 +43,7 @@ pub(super) use array_methods::{
 };
 
 mod network;
-pub(super) use network::record_network_forward;
+pub(super) use network::{annotate_network_outputs, record_network_execution};
 
 #[cfg(test)]
 mod tests;

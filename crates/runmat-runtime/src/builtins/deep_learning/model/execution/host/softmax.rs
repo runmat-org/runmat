@@ -16,7 +16,14 @@ pub(in crate::builtins::deep_learning) enum SoftmaxError {
 }
 impl std::fmt::Display for SoftmaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
+        match self {
+            Self::Axes => f.write_str("softmax requires valid channel geometry"),
+            Self::UnsupportedPrecision => {
+                f.write_str("softmax requires single or double precision")
+            }
+            Self::GradientMismatch => f.write_str("softmax gradient differs from forward output"),
+            Self::Storage(error) => write!(f, "softmax tensor storage: {error}"),
+        }
     }
 }
 impl std::error::Error for SoftmaxError {}

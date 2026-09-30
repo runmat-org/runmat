@@ -29,16 +29,10 @@ pub(in crate::builtins::deep_learning) mod state;
 mod table_rows;
 mod topology;
 
-use admission::{
-    forward_data, gpu_backed_dlarray_handle, preflight_forward_network, prepare_input_for_host,
-    prepare_network_for_host, require_network_object,
-};
+use admission::{forward_data, gpu_backed_dlarray_handle, require_network_object};
 use construction::{layer_slice, parse_network_options};
 use gpu::evaluate_network_gpu;
-use host::{
-    dlarray_format, elu_alpha, evaluate_network, floating_tensor_from_f64, input_tensor,
-    transpose_2d,
-};
+use host::{dlarray_format, elu_alpha, floating_tensor_from_f64, transpose_2d};
 use plan::host::HostNetworkPlan;
 use properties::normalize_numeric_tensor;
 
@@ -280,46 +274,15 @@ pub(super) async fn forward_builtin(
             return Err(unsupported_error("forward", "forward: this network has no resident execution route for an explicit gpuArray input"));
         }
     }
-    // Until the owning autodiff bridge consumes HostTrace, keep the existing
-    // recorded route for its admitted subset. The host plan above still
-    // rejects late-invalid controls before this route can run effects.
-    if autodiff::tape_is_active() {
-        preflight_forward_network(network_object, &input, "forward")?;
-        let prepared_network = prepare_network_for_host(network_object, "forward").await?;
-        let input = prepare_input_for_host(input).await?;
-        let wrap_dlarray =
-            matches!(&input, Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS));
-        let format = dlarray_format(&input);
-        let traced_input = wrap_dlarray.then(|| input.clone());
-        let tensor = input_tensor(input, "forward")?;
-        if let Some(traced_input) = traced_input {
-            if let Some(value) =
-                autodiff::record_network_forward(&prepared_network, &traced_input, "forward")?
-            {
-                return Ok(value);
-            }
-        }
-        let output = evaluate_network(&prepared_network, tensor, "forward")?;
-        return if wrap_dlarray {
-            let wrapped = object(
-                "dlarray",
-                vec![
-                    ("Data", Value::Tensor(output)),
-                    ("Format", Value::String(format.clone())),
-                    ("Labels", Value::String(format)),
-                ],
-            );
-            autodiff::annotate_dlarray_value(wrapped)
-        } else {
-            Ok(Value::Tensor(output))
-        };
-    }
     let wrap_dlarray =
         matches!(&input, Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS));
     let original_format = dlarray_format(&input);
     let prepared = plan.prepare().await?;
     let host_input = prepared.prepare_input(&input).await?;
-    let result = prepared.execute(host_input, false)?;
+    let mut result = prepared.execute(host_input, autodiff::tape_is_active())?;
+    let requested_state = crate::output_count::current_output_count() == Some(2);
+    let nodes =
+        autodiff::record_network_execution(network_object, &input, &mut result, requested_state)?;
     let format = if original_format.is_empty() {
         original_format
     } else {
@@ -338,16 +301,23 @@ pub(super) async fn forward_builtin(
                 ("Labels", Value::String(format)),
             ],
         );
-        autodiff::annotate_dlarray_value(wrapped)?
+        wrapped
     } else {
         data
     };
-    if crate::output_count::current_output_count() == Some(2) {
-        Ok(Value::OutputList(vec![
-            prediction,
-            state::publish_updates(network_object, result.next_state, "forward")?,
-        ]))
+    let state = if requested_state {
+        Some(state::publish_updates(
+            network_object,
+            result.next_state,
+            "forward",
+        )?)
     } else {
-        Ok(prediction)
+        None
+    };
+    let (prediction, state) =
+        autodiff::annotate_network_outputs(network_object, prediction, state, nodes)?;
+    match state {
+        Some(state) => Ok(Value::OutputList(vec![prediction, state])),
+        None => Ok(prediction),
     }
 }

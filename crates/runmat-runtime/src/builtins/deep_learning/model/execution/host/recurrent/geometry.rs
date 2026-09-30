@@ -65,7 +65,6 @@ impl From<AxisGeometryError> for RecurrentError {
 #[derive(Clone, Debug)]
 pub(super) struct Geometry {
     pub options: RecurrentOptions,
-    pub input_shape: Vec<usize>,
     pub output_shape: Vec<usize>,
     pub output_axes: AxisPlan,
     pub input_channels: usize,
@@ -267,7 +266,6 @@ impl Geometry {
             .ok_or(RecurrentError::ShapeOverflow)?;
         Ok(Self {
             options,
-            input_shape: axes.shape().to_vec(),
             output_shape,
             output_axes,
             input_channels,

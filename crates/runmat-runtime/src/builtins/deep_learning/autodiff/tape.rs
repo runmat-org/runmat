@@ -89,6 +89,10 @@ pub(super) struct Node {
 
 pub(super) enum NodeKind {
     Leaf,
+    Network {
+        execution: Rc<super::network::NetworkTapeRecord>,
+        output: super::network::NetworkOutput,
+    },
     Add {
         lhs: Option<usize>,
         rhs: Option<usize>,
@@ -123,29 +127,9 @@ pub(super) enum NodeKind {
         lhs_value: Tensor,
         rhs_value: Tensor,
     },
-    FullyConnected {
-        input: Option<usize>,
-        weights: Option<usize>,
-        bias: Option<usize>,
-        input_value: Tensor,
-        weights_value: Tensor,
-    },
     SumAll {
         input: usize,
         input_shape: Vec<usize>,
-    },
-    Relu {
-        input: usize,
-        input_value: Tensor,
-    },
-    Elu {
-        input: usize,
-        input_value: Tensor,
-        alpha: f64,
-    },
-    Softmax {
-        input: usize,
-        output_value: Tensor,
     },
 }
 

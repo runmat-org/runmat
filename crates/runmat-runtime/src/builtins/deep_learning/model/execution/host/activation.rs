@@ -21,7 +21,14 @@ pub(in crate::builtins::deep_learning) enum ActivationError {
 
 impl std::fmt::Display for ActivationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
+        match self {
+            Self::InvalidAlpha => f.write_str("activation alpha must be finite and nonnegative"),
+            Self::UnsupportedPrecision => {
+                f.write_str("activation requires single or double precision")
+            }
+            Self::GradientMismatch => f.write_str("activation gradient differs from forward input"),
+            Self::Storage(error) => write!(f, "activation tensor storage: {error}"),
+        }
     }
 }
 impl std::error::Error for ActivationError {}
