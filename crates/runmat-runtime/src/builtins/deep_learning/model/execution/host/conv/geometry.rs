@@ -132,10 +132,15 @@ impl Geometry {
                 "positive stride/dilation and floating precision are required",
             ));
         }
-        let labels = axes.layout().labels();
+        use DeepLearningAxisLabel::{Batch, Channel, Spatial, Time};
         if !matches!(
-            labels.as_str(),
-            "CBT" | "CT" | "SCB" | "SC" | "SCBT" | "SCT"
+            axes.layout().axes(),
+            [Channel, Batch, Time]
+                | [Channel, Time]
+                | [Spatial, Channel, Batch]
+                | [Spatial, Channel]
+                | [Spatial, Channel, Batch, Time]
+                | [Spatial, Channel, Time]
         ) {
             return Err(ConvError::UnsupportedLayout);
         }

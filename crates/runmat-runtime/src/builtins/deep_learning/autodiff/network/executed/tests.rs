@@ -10,6 +10,9 @@ use runmat_builtins::DeepLearningLayerKind as K;
 
 fn layer(kind: K, fields: &[(&str, Value)]) -> Value {
     let mut layer = ObjectInstance::new(kind.class().owned());
+    layer
+        .properties
+        .insert("Name".into(), Value::String(format!("{kind:?}")));
     for (key, value) in fields {
         layer.properties.insert((*key).into(), value.clone());
     }
@@ -165,6 +168,42 @@ fn public_forward_tape_uses_every_numerical_layer_and_matches_finite_differences
                 );
             }
         }
+    }
+}
+
+#[test]
+fn feature_input_and_both_output_layers_preserve_the_public_tape() {
+    for output in [K::ClassificationOutput, K::RegressionOutput] {
+        let layers = vec![
+            layer(K::FeatureInput, &[("InputSize", Value::Num(2.0))]),
+            layer(output, &[]),
+        ];
+        let net = block_on(model::dlnetwork_builtin(vec![Value::Cell(
+            CellArray::new(layers, 2, 1).unwrap(),
+        )]))
+        .unwrap();
+        let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+        let x = annotate_dlarray_value(object(
+            "dlarray",
+            vec![
+                (
+                    "Data",
+                    values(vec![1.0, -2.0], vec![2, 1], NumericDType::F32),
+                ),
+                ("Format", Value::String("CB".into())),
+                ("Labels", Value::String("CB".into())),
+            ],
+        ))
+        .unwrap();
+        let y = block_on(forward_builtin(net, x.clone(), vec![])).unwrap();
+        assert_eq!(tensor(&y).as_f32_slice().unwrap(), &[1.0, -2.0]);
+        let loss = dlarray_sum_builtin(
+            dlarray_times_builtin(y.clone(), y).unwrap(),
+            vec![Value::String("all".into())],
+        )
+        .unwrap();
+        let gradient = block_on(dlgradient_builtin(loss, vec![x])).unwrap();
+        assert_eq!(tensor(&gradient).as_f32_slice().unwrap(), &[2.0, -4.0]);
     }
 }
 

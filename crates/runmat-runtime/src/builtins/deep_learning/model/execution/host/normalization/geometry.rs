@@ -54,10 +54,19 @@ impl Geometry {
         if !options.epsilon.is_finite() || options.epsilon <= 0.0 {
             return Err(NormalizationError::InvalidEpsilon);
         }
-        let format = axes.layout().labels();
+        use DeepLearningAxisLabel::{Batch, Channel, Spatial, Time, Unspecified};
         if !matches!(
-            format.as_str(),
-            "C" | "BC" | "CB" | "CT" | "CBT" | "SC" | "SCB" | "SCT" | "SCBT" | "CU"
+            axes.layout().axes(),
+            [Channel]
+                | [Batch, Channel]
+                | [Channel, Batch]
+                | [Channel, Time]
+                | [Channel, Batch, Time]
+                | [Spatial, Channel]
+                | [Spatial, Channel, Batch]
+                | [Spatial, Channel, Time]
+                | [Spatial, Channel, Batch, Time]
+                | [Channel, Unspecified]
         ) {
             return Err(NormalizationError::UnsupportedLayout);
         }

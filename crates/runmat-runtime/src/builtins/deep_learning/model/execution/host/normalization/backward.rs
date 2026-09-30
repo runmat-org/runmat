@@ -28,11 +28,7 @@ pub(in crate::builtins::deep_learning) fn backward(
     {
         return Err(NormalizationError::ShapeMismatch);
     }
-    if stats.shape != input.shape
-        || stats.labels != axes.layout().labels()
-        || stats.reduce != geometry.reduce
-        || stats.epsilon != options.epsilon
-    {
+    if stats.axes != *axes || stats.reduce != geometry.reduce || stats.epsilon != options.epsilon {
         return Err(NormalizationError::StatisticsMismatch);
     }
     let (dx, dgamma, dbeta) = match (

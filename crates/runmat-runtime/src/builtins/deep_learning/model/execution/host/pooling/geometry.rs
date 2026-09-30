@@ -1,7 +1,7 @@
 use runmat_builtins::DeepLearningAxisLabel;
 use runmat_value::{ComplexTensor, NumericDType, Tensor};
 
-use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
+use crate::builtins::deep_learning::model::plan::axes::{AxisGeometryError, AxisPlan};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::builtins::deep_learning) enum PoolError {
@@ -9,7 +9,7 @@ pub(in crate::builtins::deep_learning) enum PoolError {
     UnsupportedPrecision,
     EmptyPool,
     ShapeMismatch,
-    Axes(String),
+    Axes(AxisGeometryError),
     Storage(String),
 }
 
@@ -28,7 +28,8 @@ impl std::fmt::Display for PoolError {
             Self::ShapeMismatch => {
                 f.write_str("globalAveragePooling1dLayer payload/gradient shape mismatch")
             }
-            Self::Axes(message) | Self::Storage(message) => f.write_str(message),
+            Self::Axes(error) => write!(f, "pooling axis geometry: {error:?}"),
+            Self::Storage(message) => f.write_str(message),
         }
     }
 }
@@ -46,10 +47,18 @@ pub(super) struct Geometry {
 
 impl Geometry {
     pub fn new(axes: &AxisPlan) -> Result<Self, PoolError> {
-        let format = axes.layout().labels();
+        use DeepLearningAxisLabel::{Batch, Channel, Spatial, Time};
         if !matches!(
-            format.as_str(),
-            "CT" | "CBT" | "SC" | "SCB" | "SCT" | "SCBT" | "BT" | "SB" | "SBT"
+            axes.layout().axes(),
+            [Channel, Time]
+                | [Channel, Batch, Time]
+                | [Spatial, Channel]
+                | [Spatial, Channel, Batch]
+                | [Spatial, Channel, Time]
+                | [Spatial, Channel, Batch, Time]
+                | [Batch, Time]
+                | [Spatial, Batch]
+                | [Spatial, Batch, Time]
         ) {
             return Err(PoolError::UnsupportedLayout);
         }
@@ -64,14 +73,14 @@ impl Geometry {
         }
         let output = axes
             .after_global_average_pooling_1d()
-            .map_err(|error| PoolError::Axes(format!("pooling output axes: {error:?}")))?;
+            .map_err(PoolError::Axes)?;
         let mut stride = 1usize;
         let mut input_strides = Vec::with_capacity(axes.shape().len());
         for &extent in axes.shape() {
             input_strides.push(stride);
             stride = stride
                 .checked_mul(extent)
-                .ok_or_else(|| PoolError::Axes("pooling input size overflow".into()))?;
+                .ok_or(PoolError::Axes(AxisGeometryError::ShapeOverflow))?;
         }
         let pool_stride = input_strides[pool_axis];
         Ok(Self {

@@ -21,8 +21,7 @@ pub(in crate::builtins::deep_learning) enum NormalizationStatsData {
 }
 
 pub(in crate::builtins::deep_learning) struct NormalizationStats {
-    pub(super) shape: Vec<usize>,
-    pub(super) labels: String,
+    pub(super) axes: AxisPlan,
     pub(super) reduce: Vec<bool>,
     pub(super) epsilon: f64,
     pub(super) data: NormalizationStatsData,
@@ -82,8 +81,7 @@ pub(in crate::builtins::deep_learning) fn forward(
         tensor: tensor.map_err(NormalizationError::Storage)?,
         axes: axes.clone(),
         stats: NormalizationStats {
-            shape: input.shape.clone(),
-            labels: axes.layout().labels(),
+            axes: axes.clone(),
             reduce: geometry.reduce,
             epsilon: options.epsilon,
             data,
