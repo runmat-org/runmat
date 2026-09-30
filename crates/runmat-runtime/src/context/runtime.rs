@@ -120,14 +120,19 @@ impl RuntimeContext {
         );
         let state = Rc::new(RuntimeContextState::new(RuntimeContextLocalId::next()));
         crate::class_registry::register_context_state(&state);
-        Self {
+        let context = Self {
             execution,
             program_revision: None,
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
             cancellation: Rc::new(RefCell::new(cancellation)),
+        };
+        {
+            let _guard = context.enter();
+            crate::builtins::deep_learning::model::ensure_network_classes_registered();
         }
+        context
     }
 
     pub fn execution(&self) -> &Rc<dyn RuntimeExecutionServices> {

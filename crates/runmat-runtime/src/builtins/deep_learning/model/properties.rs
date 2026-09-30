@@ -154,14 +154,3 @@ pub(super) fn normalize_numeric_tensor(
 ) -> BuiltinResult<Tensor> {
     tensor::integer_tensor_to_f64(tensor).map_err(|err| deep_learning_error(function, err))
 }
-
-pub(in crate::builtins) fn layer_name(object: &ObjectInstance) -> String {
-    object
-        .properties
-        .get("Name")
-        .and_then(|value| match value {
-            Value::String(name) if !name.is_empty() => Some(name.clone()),
-            _ => None,
-        })
-        .unwrap_or_default()
-}

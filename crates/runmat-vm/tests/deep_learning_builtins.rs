@@ -4,6 +4,32 @@ mod test_helpers;
 use test_helpers::execute_source;
 
 #[test]
+fn compiled_network_learnables_writeback_updates_execution_without_a_second_authority() {
+    execute_source(
+        r#"
+        input = featureInputLayer(2, 'Name', 'input');
+        dense = fullyConnectedLayer(1, 'Name', 'dense');
+        net = dlnetwork({input, dense});
+        original = net;
+        originalPrediction = predict(original, [7 11]);
+        learnables = net.Learnables;
+        assert(strcmp(class(learnables.Layer), 'string'));
+        assert(strcmp(class(learnables.Parameter), 'string'));
+        learnables.Value{1} = dlarray([2 3]);
+        learnables.Value{2} = dlarray(5);
+        net.Learnables = learnables;
+        actual = predict(net, [7 11]);
+        assert(isequal(actual, 52));
+        assert(isequal(predict(original, [7 11]), originalPrediction));
+        net.Learnables.Value{2} = dlarray(9);
+        assert(isequal(predict(net, [7 11]), 56));
+        assert(isequal(predict(original, [7 11]), originalPrediction));
+        "#,
+    )
+    .expect("compiled dependent table property writeback updates only the owned network");
+}
+
+#[test]
 fn compiled_dlfeval_traces_public_named_callback_and_preserves_single_gradient() {
     execute_source(
         r#"

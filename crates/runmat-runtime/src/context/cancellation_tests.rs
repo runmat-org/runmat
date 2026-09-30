@@ -7,6 +7,36 @@ use super::{RuntimeContext, RuntimeServicePorts};
 use crate::execution::RuntimeExecutionService;
 
 #[test]
+fn fresh_contexts_register_network_property_protocols_without_construction() {
+    let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    assert_ne!(first.local_identity(), second.local_identity());
+    for context in [first, second] {
+        let _guard = context.enter();
+        for identity in [
+            runmat_types::standard::DL_NETWORK,
+            runmat_types::standard::SERIES_NETWORK,
+            runmat_types::standard::DAG_NETWORK,
+        ] {
+            let (learnables, owner) = crate::class_registry::lookup_property(
+                &identity.owned(),
+                &runmat_types::MemberName::from("Learnables"),
+            )
+            .expect("fresh context registers dependent Learnables dispatch");
+            assert_eq!(owner, identity.owned());
+            assert!(learnables.is_dependent);
+            assert_eq!(learnables.set_access, runmat_types::MemberAccess::Public);
+            let (layers, _) = crate::class_registry::lookup_property(
+                &identity.owned(),
+                &runmat_types::MemberName::from("Layers"),
+            )
+            .expect("fresh context registers canonical Layers access");
+            assert_eq!(layers.set_access, runmat_types::MemberAccess::Private);
+        }
+    }
+}
+
+#[test]
 fn rebinding_invocation_does_not_change_cached_context_generation() {
     let old = CancellationSource::new();
     let context =
