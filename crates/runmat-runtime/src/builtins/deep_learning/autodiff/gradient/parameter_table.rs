@@ -9,7 +9,13 @@ pub(super) fn values<'a>(
 ) -> BuiltinResult<Option<&'a CellArray>> {
     let columns = crate::builtins::table::table_variable_names_from_object(table)
         .map_err(|error| deep_learning_error(function, error.to_string()))?;
-    if columns != ["Layer", "Parameter", "Value"] {
+    // Public schema names are admitted here; their physical order is not an
+    // execution identity. The table owner preserves that order in the result.
+    if columns.len() != 3
+        || !["Layer", "Parameter", "Value"]
+            .iter()
+            .all(|name| columns.iter().any(|column| column == name))
+    {
         return Ok(None);
     }
     let variables = crate::builtins::table::table_variables_ref(table)

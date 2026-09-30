@@ -225,6 +225,70 @@ fn empty_canonical_table_retains_its_three_columns() {
 }
 
 #[test]
+fn parameter_table_column_order_does_not_change_target_admission() {
+    for names in [
+        ["Layer", "Parameter", "Value"],
+        ["Layer", "Value", "Parameter"],
+        ["Parameter", "Layer", "Value"],
+        ["Parameter", "Value", "Layer"],
+        ["Value", "Layer", "Parameter"],
+        ["Value", "Parameter", "Layer"],
+    ] {
+        let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+        let traced = annotate_tree(super::super::super::object_with_identity(
+            DLARRAY_CLASS,
+            vec![
+                (
+                    "Data",
+                    Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+                ),
+                ("Format", Value::String(String::new())),
+                ("Labels", Value::String(String::new())),
+            ],
+        ))
+        .unwrap();
+        let loss = dlarray_sum_builtin(traced.clone(), vec![Value::String("all".into())]).unwrap();
+        let columns = names
+            .iter()
+            .map(|name| match *name {
+                "Layer" => {
+                    Value::StringArray(StringArray::new(vec!["custom".into()], vec![1, 1]).unwrap())
+                }
+                "Parameter" => Value::StringArray(
+                    StringArray::new(vec!["coefficient".into()], vec![1, 1]).unwrap(),
+                ),
+                "Value" => Value::Cell(CellArray::new(vec![traced.clone()], 1, 1).unwrap()),
+                _ => unreachable!("fixed public schema fixture"),
+            })
+            .collect();
+        let target = crate::builtins::table::table_from_columns(
+            names.iter().map(|name| (*name).into()).collect(),
+            columns,
+        )
+        .unwrap();
+        let gradient = block_on(dlgradient_builtin(loss, vec![target])).unwrap();
+        let Value::Object(table) = &gradient else {
+            panic!("table gradient expected")
+        };
+        assert_eq!(
+            crate::builtins::table::table_variable_names_from_object(table).unwrap(),
+            names
+        );
+        let (layers, parameters, values) = table_columns(&gradient);
+        assert_eq!(layers, ["custom"]);
+        assert_eq!(parameters, ["coefficient"]);
+        let Value::Object(array) = &values[0] else {
+            panic!("gradient dlarray expected")
+        };
+        let Some(Value::Tensor(data)) = array.properties.get("Data") else {
+            panic!("gradient data expected")
+        };
+        assert_eq!(data.numeric_dtype(), NumericDType::F32);
+        assert_eq!(data.as_f32_slice().unwrap(), &[1.0]);
+    }
+}
+
+#[test]
 fn canonical_metadata_requires_typed_string_columns() {
     let target = crate::builtins::table::table_from_columns(
         vec!["Layer".into(), "Parameter".into(), "Value".into()],
