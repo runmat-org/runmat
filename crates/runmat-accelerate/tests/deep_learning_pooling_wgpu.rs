@@ -205,3 +205,39 @@ async fn stable_resident_global_pool_materializes_lazy_transpose_without_host_do
     transposed.release().unwrap();
     original.release().unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires an actual compatible WGPU adapter"]
+async fn stable_resident_global_pool_spans_multiple_workgroups_without_column_overlap() {
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .expect("WGPU pooling qualification requires a compatible adapter");
+    let output_count = 1025usize;
+    let values = (0..output_count)
+        .flat_map(|column| [column as f64, column as f64 + 10.0])
+        .collect::<Vec<_>>();
+    let input = provider
+        .upload(&HostTensorView {
+            data: &values,
+            shape: &[2, 5, 205],
+        })
+        .unwrap();
+    provider.reset_telemetry();
+    let output = provider
+        .deep_learning_global_average_pool_1d(
+            &input,
+            DeepLearningPool1DRequest { axis_zero_based: 0 },
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.shape(), &[1, 5, 205]);
+    assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    let actual = provider.download(&output).await.unwrap().data;
+    assert_eq!(actual.len(), output_count);
+    for (column, &value) in actual.iter().enumerate() {
+        assert_eq!(value, column as f64 + 5.0, "column {column}");
+    }
+    output.release().unwrap();
+    input.release().unwrap();
+}

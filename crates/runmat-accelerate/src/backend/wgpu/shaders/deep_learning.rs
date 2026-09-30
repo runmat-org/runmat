@@ -1,10 +1,12 @@
 //! Resident deep-learning kernels. These do not change generic reductions.
 
+pub const POOL_WORKGROUP_SIZE: u32 = 256;
+
 const STABLE_POOL_1D: &str = r#"
 struct Tensor { data: array<$SCALAR$>, };
 struct Params {
   pool_size: u32,
-  output_count: u32,
+  chunk_output_count: u32,
   inner_stride: u32,
   output_offset: u32,
 };
@@ -17,10 +19,10 @@ fn is_special(value: $SCALAR$) -> bool {
   return value != value || (value - value) != (value - value);
 }
 
-@compute @workgroup_size(256)
+@compute @workgroup_size($WG$)
 fn main(@builtin(local_invocation_id) lane: vec3<u32>, @builtin(workgroup_id) group: vec3<u32>) {
-  let local_column = group.x * 256u + lane.x;
-  if (local_column >= params.output_count - params.output_offset) { return; }
+  let local_column = group.x * $WG$u + lane.x;
+  if (local_column >= params.chunk_output_count) { return; }
   let column = params.output_offset + local_column;
   let inner = column % params.inner_stride;
   let outer = column / params.inner_stride;
@@ -64,5 +66,7 @@ pub fn stable_pool_1d(precision: super::super::types::NumericPrecision) -> Strin
         super::super::types::NumericPrecision::F32 => "f32",
         super::super::types::NumericPrecision::F64 => "f64",
     };
-    STABLE_POOL_1D.replace("$SCALAR$", scalar)
+    STABLE_POOL_1D
+        .replace("$SCALAR$", scalar)
+        .replace("$WG$", &POOL_WORKGROUP_SIZE.to_string())
 }

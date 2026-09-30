@@ -4,9 +4,41 @@ use super::*;
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Pool1DParams {
     pool_size: u32,
-    output_count: u32,
+    chunk_output_count: u32,
     inner_stride: u32,
     output_offset: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PoolDispatchChunk {
+    offset: u32,
+    output_count: u32,
+    workgroups: u32,
+}
+
+fn next_pool_chunk(
+    total: u32,
+    offset: u32,
+    max_workgroups: u32,
+) -> Result<Option<PoolDispatchChunk>> {
+    ensure!(
+        max_workgroups > 0,
+        "pool dispatch requires workgroup capacity"
+    );
+    ensure!(offset <= total, "pool dispatch offset exceeds output count");
+    if offset == total {
+        return Ok(None);
+    }
+    let lanes = crate::backend::wgpu::shaders::deep_learning::POOL_WORKGROUP_SIZE;
+    let capacity = max_workgroups.saturating_mul(lanes);
+    let output_count = (total - offset).min(capacity);
+    let workgroups = output_count.div_ceil(lanes);
+    debug_assert!(workgroups > 0 && workgroups <= max_workgroups);
+    Ok(Some(PoolDispatchChunk {
+        offset,
+        output_count,
+        workgroups,
+    }))
 }
 
 impl WgpuProvider {
@@ -154,15 +186,19 @@ impl WgpuProvider {
                 "runmat-deep-learning-pool-1d-out",
             )?;
             let pipeline = self.pipelines.deep_learning_stable_pool_1d.get(emission)?;
-            let chunk = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS;
-            for offset in (0..output_count).step_by(chunk as usize) {
+            let mut offset = 0u32;
+            while let Some(chunk) = next_pool_chunk(
+                output_count,
+                offset,
+                crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
+            )? {
                 let params = self.uniform_buffer(
                     emission,
                     &Pool1DParams {
                         pool_size,
-                        output_count,
+                        chunk_output_count: chunk.output_count,
                         inner_stride,
-                        output_offset: offset,
+                        output_offset: chunk.offset,
                     },
                     "runmat-deep-learning-pool-1d-params",
                 )?;
@@ -191,8 +227,9 @@ impl WgpuProvider {
                     pending,
                     &pipeline.pipeline,
                     &bind,
-                    (output_count - offset).min(chunk).div_ceil(256),
+                    chunk.workgroups,
                 )?;
+                offset += chunk.output_count;
             }
             Ok(output)
         })??;
@@ -205,4 +242,76 @@ fn checked_shape_count(shape: &[usize]) -> Result<usize> {
         .iter()
         .try_fold(1usize, |count, &extent| count.checked_mul(extent))
         .ok_or_else(|| anyhow!("pooling shape product overflows"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pool_dispatch_chunks_cover_each_output_once_without_overlap() {
+        let lanes = crate::backend::wgpu::shaders::deep_learning::POOL_WORKGROUP_SIZE;
+        for max_groups in [1, 2] {
+            for total in [0, 1, lanes - 1, lanes, lanes + 1, 1025] {
+                let mut visits = vec![0u8; total as usize];
+                let mut offset = 0u32;
+                while let Some(chunk) = next_pool_chunk(total, offset, max_groups).unwrap() {
+                    assert_eq!(chunk.offset, offset);
+                    assert!(chunk.workgroups <= max_groups);
+                    assert_eq!(chunk.workgroups, chunk.output_count.div_ceil(lanes));
+                    for local in 0..chunk.workgroups * lanes {
+                        // Exactly the shader's chunk-local guard.
+                        if local < chunk.output_count {
+                            visits[(chunk.offset + local) as usize] += 1;
+                        }
+                    }
+                    offset += chunk.output_count;
+                }
+                assert_eq!(offset, total);
+                assert!(visits.iter().all(|&count| count == 1));
+            }
+        }
+    }
+
+    #[test]
+    fn pool_dispatch_chunks_cover_u32_limit_without_allocating_outputs() {
+        let total = u32::MAX;
+        let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS;
+        let lanes = crate::backend::wgpu::shaders::deep_learning::POOL_WORKGROUP_SIZE;
+        let mut offset = 0u32;
+        let mut chunks = 0usize;
+        while let Some(chunk) = next_pool_chunk(total, offset, max_groups).unwrap() {
+            assert_eq!(chunk.offset, offset);
+            assert!(chunk.workgroups > 0 && chunk.workgroups <= max_groups);
+            assert_eq!(chunk.workgroups, chunk.output_count.div_ceil(lanes));
+            assert!(chunk.output_count <= total - offset);
+            offset += chunk.output_count;
+            chunks += 1;
+        }
+        assert_eq!(offset, total);
+        assert!(chunks > 1);
+    }
+
+    #[test]
+    fn chunk_local_column_indices_preserve_numerical_order_across_boundary() {
+        let total = 1025u32;
+        let lanes = crate::backend::wgpu::shaders::deep_learning::POOL_WORKGROUP_SIZE;
+        let mut values = vec![f64::NAN; total as usize];
+        let mut offset = 0u32;
+        while let Some(chunk) = next_pool_chunk(total, offset, 1).unwrap() {
+            for local in 0..chunk.workgroups * lanes {
+                if local < chunk.output_count {
+                    let column = chunk.offset + local;
+                    let sample_a = column as f64;
+                    let sample_b = column as f64 + 10.0;
+                    values[column as usize] = (sample_a + sample_b) / 2.0;
+                }
+            }
+            offset += chunk.output_count;
+        }
+        assert_eq!(offset, total);
+        for (column, value) in values.into_iter().enumerate() {
+            assert_eq!(value, column as f64 + 5.0);
+        }
+    }
 }
