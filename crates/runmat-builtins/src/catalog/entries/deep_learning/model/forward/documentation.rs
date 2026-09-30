@@ -25,7 +25,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("forward"),
     slug: Some("forward"),
     summary: "Evaluate a sequential network on numeric or formatted observations.",
-    description: "`forward(net, X)` evaluates the network's admitted layer sequence. Raw feature matrices use rows for observations and columns for channels; sequence and spatial inputs use the declared input layer's axis convention. A `dlarray` input retains its format in the output. `[Y, state] = forward(net, X)` also returns updated recurrent State without mutating `net`.",
+    description: "`forward(net, X)` evaluates the network's admitted layer sequence. Raw feature matrices use rows for observations and columns for channels; sequence and spatial inputs use the declared input layer's axis convention. For a `dlarray` input, output labels follow the layer sequence: channel transforms retain the axis order, while pooling and recurrent output modes can reduce axes. `[Y, state] = forward(net, X)` also returns updated recurrent State without mutating `net`.",
     keywords: &["forward", "dlnetwork", "deep learning", "predict", "GPU"],
     related: &["dlnetwork", "dlarray", "dlfeval", "dlgradient", "predict"],
     sections: &[
@@ -33,7 +33,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Supported execution",
             paragraphs: &[
                 "A sequence begins with an input layer and proceeds through admitted channel transforms, convolution, recurrent, normalization, pooling, and activation layers. The output shape follows the input's semantic axes and each consumed layer option. Output layers provide classification or regression metadata. Missing parameters from an `Initialize=false` network fail before execution.",
-                "Host `double` inputs return `double`; host `single` inputs return `single`. In RunMat mode, typed integer predictors produce `double` results. Consumed integer learnables are converted for the floating-point calculation; with floating predictors, results retain the predictor's `single` or `double` class. Wide integer values can round at this numerical boundary. Host logical input produces `double`. The `dlarray` wrapper retains its input format. Unsupported options, branches, custom layers, and invalid geometry are rejected before execution.",
+                "Host `double` inputs return `double`; host `single` inputs return `single`. In RunMat mode, typed integer predictors produce `double` results. Consumed integer learnables are converted for the floating-point calculation; with floating predictors, results retain the predictor's `single` or `double` class. Wide integer values can round at this numerical boundary. Host logical input produces `double`. The `dlarray` wrapper carries the executed output's semantic axis labels. Unsupported options, branches, custom layers, and invalid geometry are rejected before execution.",
                 "Inside `dlfeval`, admitted host `dlarray` inputs and learnables can participate in the differentiation tape. `[Y, state]` projects the updated canonical Layer/Parameter/Value table; the value network passed to `forward` remains unchanged.",
             ],
         },

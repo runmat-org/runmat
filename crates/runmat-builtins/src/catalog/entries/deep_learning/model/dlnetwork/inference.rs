@@ -146,7 +146,9 @@ pub(super) fn network_rows_table_fact() -> ValueFact {
     state_rows_table_fact(None)
 }
 
-pub(super) fn state_rows_table_fact(rows: Option<usize>) -> ValueFact {
+pub(in crate::catalog::entries::deep_learning::model) fn state_rows_table_fact(
+    rows: Option<usize>,
+) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,

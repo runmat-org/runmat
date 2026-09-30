@@ -87,23 +87,17 @@ pub(super) fn output_shape(
                 } else if let Some(time_axis) = axes.index(Axis::Time) {
                     if axes.index(Axis::Batch).is_some() {
                         dims.remove(time_axis);
-                        let mut labels = axes.labels().chars().collect::<Vec<_>>();
+                        let mut labels = axes.axes().to_vec();
                         labels.remove(time_axis);
-                        let Ok(reduced) = DeepLearningAxisLayout::parse(
-                            &labels.into_iter().collect::<String>(),
-                            dims.len(),
-                        ) else {
+                        let Ok(reduced) = DeepLearningAxisLayout::from_axes(&labels) else {
                             return ShapeFact::Unknown;
                         };
                         axes = reduced;
                     } else {
                         dims[time_axis] = Some(1);
-                        let mut labels = axes.labels().chars().collect::<Vec<_>>();
-                        labels[time_axis] = Axis::Unspecified.label();
-                        let Ok(reduced) = DeepLearningAxisLayout::parse(
-                            &labels.into_iter().collect::<String>(),
-                            dims.len(),
-                        ) else {
+                        let mut labels = axes.axes().to_vec();
+                        labels[time_axis] = Axis::Unspecified;
+                        let Ok(reduced) = DeepLearningAxisLayout::from_axes(&labels) else {
                             return ShapeFact::Unknown;
                         };
                         axes = reduced;

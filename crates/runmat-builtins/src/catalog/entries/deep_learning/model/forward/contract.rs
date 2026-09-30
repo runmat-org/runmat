@@ -21,7 +21,7 @@ const OUTPUT_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Numeric output, or a dlarray retaining its semantic input format; placement depends on execution route.",
+    description: "Numeric output, or a dlarray whose semantic axes follow the executed layers; placement depends on execution route.",
 };
 const OUTPUTS: [BuiltinParamDescriptor; 1] = [OUTPUT_Y];
 const OUTPUTS_WITH_STATE: [BuiltinParamDescriptor; 2] = [

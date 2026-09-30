@@ -153,18 +153,19 @@ impl DeepLearningAxisLayout {
             layout.validate_input_kind(kind)?;
             return Ok(layout);
         }
-        let default = match (kind, rank) {
-            (DeepLearningInputKind::Feature, 1) => "C",
-            (DeepLearningInputKind::Feature, 2) => "BC", // Existing raw matrix convention.
-            (DeepLearningInputKind::VectorSequence, 2) => "CT",
-            (DeepLearningInputKind::VectorSequence, 3) => "CBT",
-            (DeepLearningInputKind::Spatial1d, 2) => "SC",
-            (DeepLearningInputKind::Spatial1d, 3) => "SCB",
-            (DeepLearningInputKind::SpatialSequence1d, 3) => "SCT",
-            (DeepLearningInputKind::SpatialSequence1d, 4) => "SCBT",
+        use DeepLearningAxisLabel::{Batch, Channel, Spatial, Time};
+        let default: &[DeepLearningAxisLabel] = match (kind, rank) {
+            (DeepLearningInputKind::Feature, 1) => &[Channel],
+            (DeepLearningInputKind::Feature, 2) => &[Batch, Channel],
+            (DeepLearningInputKind::VectorSequence, 2) => &[Channel, Time],
+            (DeepLearningInputKind::VectorSequence, 3) => &[Channel, Batch, Time],
+            (DeepLearningInputKind::Spatial1d, 2) => &[Spatial, Channel],
+            (DeepLearningInputKind::Spatial1d, 3) => &[Spatial, Channel, Batch],
+            (DeepLearningInputKind::SpatialSequence1d, 3) => &[Spatial, Channel, Time],
+            (DeepLearningInputKind::SpatialSequence1d, 4) => &[Spatial, Channel, Batch, Time],
             _ => return Err(DeepLearningAxisError::NoDefault { kind, rank }),
         };
-        let layout = Self::parse(default, rank)?;
+        let layout = Self::from_axes(default)?;
         layout.validate_input_kind(kind)?;
         Ok(layout)
     }
