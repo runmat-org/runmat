@@ -1,4 +1,4 @@
-//! Layer collection, network metadata, and deterministic initialization.
+//! Layer collection and network metadata.
 use super::*;
 
 pub(crate) fn is_deep_learning_network_object(object: &ObjectInstance) -> bool {
@@ -77,13 +77,7 @@ pub(in crate::builtins) fn network_object(
 ) -> BuiltinResult<Value> {
     let names = layer_names(&layers, function)?;
     if let Some(requested) = remove_case_insensitive_option(&mut options, "OutputNames") {
-        let requested = scalar_text(&requested, function)?;
-        if names.last().map(String::as_str) != Some(requested.as_str()) {
-            return Err(deep_learning_error(
-                function,
-                format!("{function}: OutputNames must name the final layer in the supported sequential network"),
-            ));
-        }
+        validate_output_name(&names, &requested, function)?;
     }
     let layer_count = layers.len();
     let input_names = names
@@ -96,7 +90,14 @@ pub(in crate::builtins) fn network_object(
         .cloned()
         .map(|name| vec![name])
         .unwrap_or_default();
-    let initial_state = super::state::initial(&layers, function)?;
+    let requested_initialize = remove_case_insensitive_option(&mut options, "Initialize")
+        .map(|value| logical_scalar(&value, function, "Initialize"))
+        .transpose()?;
+    let initial_state = super::state::initial_with_defaults(
+        &layers,
+        requested_initialize.unwrap_or(true),
+        function,
+    )?;
     let layers_cell = CellArray::new(layers, layer_count, 1)
         .map(Value::Cell)
         .map_err(|err| deep_learning_error(function, err))?;
@@ -130,8 +131,7 @@ pub(in crate::builtins) fn network_object(
             Value::String("sequential-feedforward".into()),
         ),
     ];
-    if let Some(value) = remove_case_insensitive_option(&mut options, "Initialize") {
-        let initialize = logical_scalar(&value, function, "Initialize")?;
+    if let Some(initialize) = requested_initialize {
         properties.push(("Initialized".to_string(), Value::Bool(initialize)));
         properties.push(("Initialize".to_string(), Value::Bool(initialize)));
     }
@@ -163,6 +163,17 @@ pub(super) struct NetworkOptions {
 }
 
 impl NetworkOptions {
+    pub(super) fn preflight_layers(
+        &self,
+        layers: &[Value],
+        function: &'static str,
+    ) -> BuiltinResult<()> {
+        if let Some(requested) = &self.output_names {
+            validate_output_name(&layer_names(layers, function)?, requested, function)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn into_properties(self) -> std::collections::BTreeMap<String, Value> {
         let mut properties = std::collections::BTreeMap::new();
         if self.explicit_initialize {
@@ -173,6 +184,21 @@ impl NetworkOptions {
         }
         properties
     }
+}
+
+fn validate_output_name(
+    names: &[String],
+    requested: &Value,
+    function: &'static str,
+) -> BuiltinResult<()> {
+    let requested = scalar_text(requested, function)?;
+    if names.last().map(String::as_str) != Some(requested.as_str()) {
+        return Err(deep_learning_error(
+            function,
+            format!("{function}: OutputNames must name the final layer in the supported sequential network"),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn parse_network_options(rest: &[Value]) -> BuiltinResult<NetworkOptions> {
@@ -208,80 +234,4 @@ fn remove_case_insensitive_option(
         .find(|key| key.eq_ignore_ascii_case(name))
         .cloned()?;
     options.remove(&key)
-}
-
-pub(in crate::builtins) fn initialise_fully_connected_layers(
-    layers: &mut [Value],
-    function: &'static str,
-) -> BuiltinResult<()> {
-    let mut current_width = None;
-    for layer in layers {
-        let Value::Object(object) = layer else {
-            continue;
-        };
-        match ForwardLayerKind::from_identity(&object.class_name) {
-            Some(ForwardLayerKind::FeatureInput) => {
-                current_width = Some(feature_input_width(object, function)?);
-            }
-            Some(ForwardLayerKind::FullyConnected) => {
-                let input_width = current_width.ok_or_else(|| {
-                    deep_learning_error(
-                        function,
-                        "dlnetwork: fullyConnectedLayer requires a preceding featureInputLayer or fullyConnectedLayer",
-                    )
-                })?;
-                let output_size = positive_property_usize(object, "OutputSize", function)?;
-                if !object.properties.contains_key("Weights") {
-                    object.properties.insert(
-                        "Weights".to_string(),
-                        deterministic_weights(output_size, input_width, function)?,
-                    );
-                }
-                if !object.properties.contains_key("Bias") {
-                    object.properties.insert(
-                        "Bias".to_string(),
-                        tensor_value(vec![0.0; output_size], vec![output_size, 1], function)?,
-                    );
-                }
-                current_width = Some(output_size);
-            }
-            Some(
-                ForwardLayerKind::Relu
-                | ForwardLayerKind::Elu
-                | ForwardLayerKind::Softmax
-                | ForwardLayerKind::ClassificationOutput
-                | ForwardLayerKind::RegressionOutput,
-            ) => {}
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-fn deterministic_weights(
-    output_size: usize,
-    input_width: usize,
-    function: &'static str,
-) -> BuiltinResult<Value> {
-    let count = output_size.checked_mul(input_width).ok_or_else(|| {
-        deep_learning_error(
-            function,
-            format!("{function}: initialized weight shape exceeds addressable storage"),
-        )
-    })?;
-    let mut values = Vec::new();
-    values.try_reserve_exact(count).map_err(|_| {
-        deep_learning_error(
-            function,
-            format!("{function}: cannot allocate initialized weights"),
-        )
-    })?;
-    let scale = (input_width as f64).sqrt().max(1.0);
-    for col in 0..input_width {
-        for row in 0..output_size {
-            let signed = ((row + col + 1) % 5) as f64 - 2.0;
-            values.push(signed / (10.0 * scale));
-        }
-    }
-    tensor_value(values, vec![output_size, input_width], function)
 }

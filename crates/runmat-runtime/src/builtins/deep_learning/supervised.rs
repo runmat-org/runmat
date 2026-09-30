@@ -48,7 +48,7 @@ pub(super) async fn train_network_builtin(mut args: Vec<Value>) -> BuiltinResult
         model::SERIES_NETWORK_CLASS
     };
     let mut layers = take_training_layers(args.remove(2), "trainNetwork")?;
-    model::initialise_fully_connected_layers(&mut layers, "trainNetwork")?;
+    model::initialise_layers(&mut layers, "trainNetwork").await?;
     preflight_training_layers(&layers, "trainNetwork")?;
     let x = materialize_matrix(&args[0], host_x, "trainNetwork", "X").await?;
     let task = match host_task {
@@ -93,7 +93,7 @@ pub(super) async fn trainnet_builtin(mut args: Vec<Value>) -> BuiltinResult<Valu
             .transpose()?
     };
     let mut layers = take_training_layers(args.remove(2), "trainnet")?;
-    model::initialise_fully_connected_layers(&mut layers, "trainnet")?;
+    model::initialise_layers(&mut layers, "trainnet").await?;
     preflight_training_layers(&layers, "trainnet")?;
     let x = materialize_matrix(&args[0], host_x, "trainnet", "X").await?;
     let task = match host_task {

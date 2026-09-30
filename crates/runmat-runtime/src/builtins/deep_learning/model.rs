@@ -20,6 +20,7 @@ mod admission;
 mod construction;
 mod gpu;
 mod host;
+mod initialization;
 pub(in crate::builtins::deep_learning) mod parameters;
 mod properties;
 pub(in crate::builtins::deep_learning) mod state;
@@ -39,9 +40,10 @@ use host::{
 use properties::normalize_numeric_tensor;
 
 pub(in crate::builtins) use construction::{
-    initialise_fully_connected_layers, is_deep_learning_network_object, layers_from_network_ref,
-    layers_from_network_value, network_object,
+    is_deep_learning_network_object, layers_from_network_ref, layers_from_network_value,
+    network_object,
 };
+pub(in crate::builtins) use initialization::initialise_layers;
 pub(in crate::builtins) use parameters::{
     apply as apply_learnables, project as project_learnables, validate_matching_networks,
 };
@@ -182,6 +184,7 @@ pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     let options = parse_network_options(rest)?;
     let layers = layers_from_network_ref(layers_value, "dlnetwork")?;
     validate_forward_layers(layers, "dlnetwork")?;
+    options.preflight_layers(layers, "dlnetwork")?;
     let mut layers = layers_from_network_value(
         args.into_iter()
             .next()
@@ -189,7 +192,7 @@ pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
         "dlnetwork",
     )?;
     if options.initialize {
-        initialise_fully_connected_layers(&mut layers, "dlnetwork")?;
+        initialise_layers(&mut layers, "dlnetwork").await?;
     }
     network_object(
         DLNETWORK_CLASS,

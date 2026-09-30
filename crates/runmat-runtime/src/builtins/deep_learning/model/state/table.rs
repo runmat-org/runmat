@@ -28,11 +28,32 @@ pub(super) fn table(
     .map_err(|error| deep_learning_error(function, error.to_string()))
 }
 
+#[cfg(test)]
 pub(in crate::builtins::deep_learning::model) fn initial(
     layers: &[Value],
     function: &'static str,
 ) -> BuiltinResult<Value> {
+    initial_with_defaults(layers, false, function)
+}
+
+pub(in crate::builtins::deep_learning::model) fn initial_with_defaults(
+    layers: &[Value],
+    initialize: bool,
+    function: &'static str,
+) -> BuiltinResult<Value> {
     let keys = schema::keys(layers, function)?;
+    let mut precision = vec![None; layers.len()];
+    if initialize {
+        for row in super::super::parameters::view_layers(layers, function)? {
+            if let Some(value) = row.value {
+                if let Some(dtype @ (NumericDType::F32 | NumericDType::F64)) =
+                    super::super::parameters::floating_precision(value)
+                {
+                    precision[row.key.layer_index] = Some(dtype);
+                }
+            }
+        }
+    }
     let mut values = Vec::with_capacity(keys.len());
     for key in &keys {
         let Value::Object(layer) = &layers[key.layer_index] else {
@@ -42,7 +63,40 @@ pub(in crate::builtins::deep_learning::model) fn initial(
         if let Some(value) = value {
             schema::validate_value(value, key, function)?;
         }
-        values.push(super::super::parameters::public_value(value));
+        let empty = value.is_none_or(|value| {
+            super::super::parameters::numeric_payload_shape(value, key.role.name(), function)
+                .is_ok_and(|shape| shape.contains(&0))
+        });
+        if initialize && empty {
+            let single = precision[key.layer_index] == Some(NumericDType::F32);
+            let shape = vec![key.channels, 1];
+            let value = if single {
+                let mut values = Vec::new();
+                values.try_reserve_exact(key.channels).map_err(|_| {
+                    deep_learning_error(
+                        function,
+                        format!("{function}: cannot allocate initial recurrent State"),
+                    )
+                })?;
+                values.resize(key.channels, 0.0_f32);
+                Tensor::from_f32(values, shape)
+            } else {
+                let mut values = Vec::new();
+                values.try_reserve_exact(key.channels).map_err(|_| {
+                    deep_learning_error(
+                        function,
+                        format!("{function}: cannot allocate initial recurrent State"),
+                    )
+                })?;
+                values.resize(key.channels, 0.0_f64);
+                Tensor::new(values, shape)
+            }
+            .map(Value::Tensor)
+            .map_err(|error| deep_learning_error(function, error))?;
+            values.push(value);
+        } else {
+            values.push(super::super::parameters::public_value(value));
+        }
     }
     let state = table(&keys, values, function)?;
     validate_canonical(layers, &state, function)?;

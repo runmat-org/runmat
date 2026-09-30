@@ -1791,19 +1791,19 @@ fn dlgradient_rejects_gpu_backed_dlarray_autodiff_with_provider_gap() {
 }
 
 #[test]
-fn deferred_recurrent_network_preserves_canonical_parameters_and_state() {
+fn default_recurrent_network_initializes_canonical_parameters_and_state() {
     let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
     let lstm = block_on(lstm_layer_builtin(Value::Num(4.0), vec![])).unwrap();
     let network = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, lstm], 2, 1).unwrap(),
     )]))
-    .expect("recognized recurrent layers remain constructible before parameter initialization");
+    .expect("recognized recurrent layers initialize from known input geometry");
     let Value::Object(network) = network else {
         panic!("network expected");
     };
     assert_eq!(
         network.properties.get("Initialized"),
-        Some(&Value::Bool(false))
+        Some(&Value::Bool(true))
     );
     let learnables = super::model::project_learnables(&network, "get.Learnables").unwrap();
     assert!(

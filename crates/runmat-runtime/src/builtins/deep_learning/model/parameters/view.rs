@@ -132,6 +132,15 @@ pub(in crate::builtins::deep_learning) fn view<'a>(
         ));
     }
     let layers = layers(network, function)?;
+    view_layers(layers, function)
+}
+
+/// Inspect layer payloads before a network object exists. Construction and
+/// execution share the same parameter geometry and storage admission.
+pub(in crate::builtins::deep_learning) fn view_layers<'a>(
+    layers: &'a [Value],
+    function: &'static str,
+) -> BuiltinResult<Vec<ParameterView<'a>>> {
     validate_forward_layers(layers, function)?;
     let names = layer_names(layers, function)?;
     if names.iter().collect::<HashSet<_>>().len() != names.len() {

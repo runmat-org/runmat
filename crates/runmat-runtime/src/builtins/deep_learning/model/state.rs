@@ -13,7 +13,37 @@ pub(in crate::builtins::deep_learning) use schema::{StateKey, StateRole};
 
 pub(super) const STORAGE_PROPERTY: &str = "_State";
 
+#[cfg(test)]
 pub(super) use table::initial;
+pub(super) use table::initial_with_defaults;
+
+/// Admit initial layer state without projecting/copying its payloads.
+pub(in crate::builtins::deep_learning::model) fn admit_initial(
+    layers: &[Value],
+    function: &'static str,
+) -> BuiltinResult<()> {
+    let mut batch = None;
+    for key in schema::keys(layers, function)? {
+        let Value::Object(layer) = &layers[key.layer_index] else {
+            unreachable!("state schema admitted layer objects")
+        };
+        if let Some(value) = layer.properties.get(key.role.name()) {
+            schema::validate_value(value, &key, function)?;
+            if let Some(current) = schema::batch_size(value, function)? {
+                if batch.is_some_and(|prior| prior != current) {
+                    return Err(deep_learning_error(
+                        function,
+                        format!(
+                            "{function}: initial State rows have inconsistent batch dimensions"
+                        ),
+                    ));
+                }
+                batch = Some(current);
+            }
+        }
+    }
+    Ok(())
+}
 
 /// A typed, borrowed row from the single canonical serialized State table.
 pub(in crate::builtins::deep_learning) struct StateView<'a> {
