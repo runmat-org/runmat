@@ -1,14 +1,12 @@
 //! Table target projection; column names are structural metadata, not roles.
 use super::*;
+use crate::DeepLearningParameterTableColumn as Column;
 use runmat_types::{standard, ClassIdentity, ObjectFact, ShapeFact, StructFact};
 use std::collections::BTreeMap;
 
 // The table domain owns this physical property. Keep the spelling confined to
 // the adapter; callers reason about the projected Variables fact instead.
 const VARIABLES: &str = "__table_variables";
-const LAYER: &str = "Layer";
-const PARAMETER: &str = "Parameter";
-const VALUE: &str = "Value";
 
 pub(super) fn is_network(class: &ClassIdentity) -> bool {
     class.is(standard::DL_NETWORK)
@@ -17,11 +15,7 @@ pub(super) fn is_network(class: &ClassIdentity) -> bool {
 }
 
 fn parameter_columns(fields: &BTreeMap<String, ValueFact>, complete: bool) -> bool {
-    complete
-        && fields.len() == 3
-        && [LAYER, PARAMETER, VALUE]
-            .iter()
-            .all(|name| fields.contains_key(*name))
+    complete && Column::has_exact_columns(fields.keys().map(String::as_str))
 }
 
 fn columns(object: &ObjectFact) -> Option<&StructFact> {
@@ -37,7 +31,11 @@ fn gradient_columns(columns: &StructFact) -> StructFact {
         .fields
         .iter()
         .map(|(name, value)| {
-            let result = if parameter && matches!(name.as_str(), LAYER | PARAMETER) {
+            let result = if parameter
+                && matches!(
+                    Column::from_name(name),
+                    Some(Column::Layer | Column::Parameter)
+                ) {
                 super::retained_metadata(value)
             } else {
                 super::gradient(value)
@@ -115,13 +113,16 @@ pub(super) fn check(object: &ObjectFact, index: usize, diagnostics: &mut Vec<Inf
         return;
     };
     if parameter_columns(&columns.fields, columns.fields_complete) {
-        let known_bad = [LAYER, PARAMETER]
+        let known_bad = [Column::Layer, Column::Parameter]
             .iter()
-            .filter_map(|name| columns.fields.get(*name))
+            .filter_map(|column| columns.fields.get(column.name()))
             .any(|column| !matches!(column.kind, ValueKindFact::String | ValueKindFact::Unknown))
-            || columns.fields.get(VALUE).is_some_and(|column| {
-                !matches!(column.kind, ValueKindFact::Cell(_) | ValueKindFact::Unknown)
-            });
+            || columns
+                .fields
+                .get(Column::Value.name())
+                .is_some_and(|column| {
+                    !matches!(column.kind, ValueKindFact::Cell(_) | ValueKindFact::Unknown)
+                });
         if known_bad {
             diagnostics.push(argument_error(
                 "RM-DL-DLGRADIENT-TABLE",
@@ -129,7 +130,7 @@ pub(super) fn check(object: &ObjectFact, index: usize, diagnostics: &mut Vec<Inf
                 index,
             ));
         }
-        if let Some(value) = columns.fields.get(VALUE) {
+        if let Some(value) = columns.fields.get(Column::Value.name()) {
             super::check(value, index, diagnostics);
         }
     } else if columns.fields_complete {

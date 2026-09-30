@@ -6,6 +6,7 @@ use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequire
 mod contract;
 mod documentation;
 mod inference;
+mod parameter_table_schema;
 mod property_access;
 mod state_access;
 #[cfg(test)]
@@ -13,6 +14,7 @@ mod tests;
 
 pub use contract::{DLNETWORK_DESCRIPTOR, DLNETWORK_INVALID_INPUT};
 pub(super) use inference::state_rows_table_fact;
+pub use parameter_table_schema::DeepLearningParameterTableColumn;
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &DLNETWORK_CATALOG_ENTRY,

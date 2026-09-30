@@ -1,5 +1,6 @@
 //! Borrowed public gradient-target schema, separate from network assignment.
 use super::*;
+use runmat_builtins::DeepLearningParameterTableColumn as Column;
 
 /// Layer and Parameter are opaque string metadata, not execution roles.
 /// Applying values to a network separately admits canonical typed row keys.
@@ -11,11 +12,7 @@ pub(super) fn values<'a>(
         .map_err(|error| deep_learning_error(function, error.to_string()))?;
     // Public schema names are admitted here; their physical order is not an
     // execution identity. The table owner preserves that order in the result.
-    if columns.len() != 3
-        || !["Layer", "Parameter", "Value"]
-            .iter()
-            .all(|name| columns.iter().any(|column| column == name))
-    {
+    if !Column::has_exact_columns(columns.iter().map(String::as_str)) {
         return Ok(None);
     }
     let variables = crate::builtins::table::table_variables_ref(table)
@@ -33,9 +30,9 @@ pub(super) fn values<'a>(
             format!("{function}: {name} must be a string column in a parameter table"),
         )),
     };
-    let layers = text_column("Layer")?;
-    let parameters = text_column("Parameter")?;
-    let Some(Value::Cell(values)) = variables.fields.get("Value") else {
+    let layers = text_column(Column::Layer.name())?;
+    let parameters = text_column(Column::Parameter.name())?;
+    let Some(Value::Cell(values)) = variables.fields.get(Column::Value.name()) else {
         return Err(deep_learning_error(
             function,
             format!("{function}: parameter table Value must be a column cell array"),
