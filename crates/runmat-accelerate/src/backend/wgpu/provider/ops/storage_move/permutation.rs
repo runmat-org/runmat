@@ -3,6 +3,26 @@
 use super::*;
 
 impl WgpuProvider {
+    /// Route-owned real floating permutation demand: one physical output and
+    /// one immutable params uniform per dispatched chunk. A lazy inverse
+    /// transpose is a view and does not call this kernel.
+    pub(crate) fn real_permute_buffer_demand(&self, elements: u64) -> Option<u64> {
+        let output = elements.max(1).checked_mul(self.element_size as u64)?;
+        if elements == 0 {
+            return Some(output);
+        }
+        let capacity = u64::from(crate::backend::wgpu::config::elementwise_chunk_capacity(
+            self.workgroup_config.scalar,
+        )?);
+        output.checked_add(
+            elements
+                .div_ceil(capacity)
+                .checked_mul(
+                    std::mem::size_of::<crate::backend::wgpu::params::PermuteParams>() as u64,
+                )?,
+        )
+    }
+
     pub(in super::super) fn permute_buffer_exec(
         &self,
         entry: &BufferEntry,

@@ -293,6 +293,8 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
                     known_normalization_scratch_bytes: 0,
                     upload_bytes: 0,
                     resident_bytes: 0,
+                    new_buffer_bytes_upper_bound:
+                        runmat_accelerate_api::DeepLearningForwardBufferBound::Unavailable,
                 })
             }))
         }

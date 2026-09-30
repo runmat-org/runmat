@@ -1116,6 +1116,56 @@ impl WgpuProvider {
             len,
         )
     }
+    /// Exact upper bound on the explicitly allocated output and per-chunk
+    /// scalar uniforms. The buffer pool may reuse storage, which only lowers
+    /// new allocation demand; pending submissions can retain every chunk.
+    pub(crate) fn scalar_op_buffer_demand(&self, len: u64) -> Option<u64> {
+        let element_size = self.element_size as u64;
+        let output = len.max(1).checked_mul(element_size)?;
+        if len == 0 {
+            return Some(output);
+        }
+        let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
+            .checked_mul(u64::from(crate::backend::wgpu::config::WORKGROUP_SIZE))?;
+        let size = match self.precision {
+            NumericPrecision::F64 => {
+                std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF64>() as u64
+            }
+            NumericPrecision::F32 => {
+                std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF32>() as u64
+            }
+        };
+        let uniform = size.max(1).div_ceil(256).checked_mul(256)?;
+        output.checked_add(len.div_ceil(capacity).checked_mul(uniform)?)
+    }
+
+    pub(crate) fn binary_same_shape_buffer_demand(&self, len: u64) -> Option<u64> {
+        let output = len.max(1).checked_mul(self.element_size as u64)?;
+        if len == 0 {
+            return Some(output);
+        }
+        let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
+            .checked_mul(u64::from(crate::backend::wgpu::config::WORKGROUP_SIZE))?;
+        let uniform = (std::mem::size_of::<crate::backend::wgpu::params::LenOpParams>() as u64)
+            .max(1)
+            .div_ceil(256)
+            .checked_mul(256)?;
+        output.checked_add(len.div_ceil(capacity).checked_mul(uniform)?)
+    }
+
+    pub(crate) fn binary_broadcast_buffer_demand(&self, len: u64) -> Option<u64> {
+        let output = len.max(1).checked_mul(self.element_size as u64)?;
+        if len == 0 {
+            return Some(output);
+        }
+        let uniform = (std::mem::size_of::<crate::backend::wgpu::params::BinaryBroadcastParams>()
+            as u64)
+            .max(1)
+            .div_ceil(256)
+            .checked_mul(256)?;
+        output.checked_add(uniform)
+    }
+
     pub(crate) fn scalar_op_exec(
         &self,
         op: crate::backend::wgpu::types::ScalarOpCode,

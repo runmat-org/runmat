@@ -42,6 +42,43 @@ fn next_pool_chunk(
 }
 
 impl WgpuProvider {
+    /// Pool output and every per-chunk uniform, plus the exact physical
+    /// permutation used to present a non-identity target axis order.
+    pub(crate) fn pool_1d_buffer_demand(
+        &self,
+        input_shape: &[usize],
+        route: &DeepLearningPool1DRoute,
+    ) -> Option<u64> {
+        let pool_size = *input_shape.get(route.reduction.axis_zero_based)?;
+        if pool_size == 0 {
+            return None;
+        }
+        let output_count =
+            u64::try_from(checked_shape_count(input_shape).ok()? / pool_size).ok()?;
+        let output = output_count.max(1).checked_mul(self.element_size as u64)?;
+        let mut total = output;
+        if output_count > 0 {
+            let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
+                .checked_mul(u64::from(
+                    crate::backend::wgpu::shaders::deep_learning::POOL_WORKGROUP_SIZE,
+                ))?;
+            total = total.checked_add(
+                output_count
+                    .div_ceil(capacity)
+                    .checked_mul(std::mem::size_of::<Pool1DParams>() as u64)?,
+            )?;
+        }
+        if route
+            .target_to_source
+            .iter()
+            .enumerate()
+            .any(|(target, &source)| target != source)
+        {
+            total = total.checked_add(self.real_permute_buffer_demand(output_count)?)?;
+        }
+        Some(total)
+    }
+
     pub(crate) fn deep_learning_global_average_pool_1d_capability_exec(
         &self,
         input: &GpuTensorHandle,

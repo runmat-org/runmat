@@ -1,10 +1,39 @@
 use super::*;
 
+const K_CHUNK: usize = 8192;
+const K_CHUNK_SWITCH: usize = 65536;
+
 #[cfg(test)]
 #[path = "matmul/ownership_tests.rs"]
 mod ownership_tests;
 
 impl WgpuProvider {
+    /// Upper bound for the native real matmul buffer path, including the
+    /// possible chunked accumulation when both operands are contiguous.
+    pub(crate) fn matmul_buffer_demand(&self, m: u64, n: u64, k: u64) -> Option<u64> {
+        let len = m.checked_mul(n)?;
+        let output = len.max(1).checked_mul(self.element_size as u64)?;
+        if len == 0 {
+            return Some(output);
+        }
+        let params_size = (std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>()
+            as u64)
+            .max(1)
+            .div_ceil(256)
+            .checked_mul(256)?;
+        let ordinary = output.checked_add(params_size)?;
+        if k < K_CHUNK_SWITCH as u64 {
+            return Some(ordinary);
+        }
+        let chunks = k.div_ceil(K_CHUNK as u64);
+        let accumulation = self.binary_same_shape_buffer_demand(len)?;
+        let chunked = output
+            .checked_mul(2)?
+            .checked_add(chunks.checked_mul(params_size)?)?
+            .checked_add((chunks - 1).checked_mul(accumulation)?)?;
+        Some(ordinary.max(chunked))
+    }
+
     pub(crate) fn take_matmul_sources_exec(
         &self,
         product: &GpuTensorHandle,
@@ -837,9 +866,6 @@ impl WgpuProvider {
         let m_u32 = u32::try_from(m).map_err(|_| anyhow!("matmul: m exceeds GPU limits"))?;
         let n_u32 = u32::try_from(n).map_err(|_| anyhow!("matmul: n exceeds GPU limits"))?;
         let k_u32 = u32::try_from(k).map_err(|_| anyhow!("matmul: k exceeds GPU limits"))?;
-
-        const K_CHUNK: usize = 8192;
-        const K_CHUNK_SWITCH: usize = 65536; // only chunk for very large k to avoid regressions
 
         let can_vec4 = self.precision == NumericPrecision::F32
             && !view_a.transpose

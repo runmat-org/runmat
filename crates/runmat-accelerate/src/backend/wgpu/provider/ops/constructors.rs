@@ -1,5 +1,7 @@
 use super::*;
 
+const FILL_MAX_DISPATCH_WORKGROUPS: u64 = 65_535;
+
 #[cfg(test)]
 #[path = "constructors/typed_tests.rs"]
 mod typed_tests;
@@ -135,6 +137,24 @@ impl WgpuProvider {
         self.fill_produced_exec(shape, value, false)
     }
 
+    pub(crate) fn fill_buffer_demand(&self, elements: u64) -> Option<u64> {
+        let output = elements.max(1).checked_mul(self.element_size as u64)?;
+        if elements == 0 {
+            return Some(output);
+        }
+        let capacity =
+            FILL_MAX_DISPATCH_WORKGROUPS.checked_mul(u64::from(self.workgroup_config.scalar))?;
+        let params_size = match self.precision {
+            NumericPrecision::F64 => {
+                std::mem::size_of::<crate::backend::wgpu::params::FillParamsF64>() as u64
+            }
+            NumericPrecision::F32 => {
+                std::mem::size_of::<crate::backend::wgpu::params::FillParamsF32>() as u64
+            }
+        };
+        output.checked_add(elements.div_ceil(capacity).checked_mul(params_size)?)
+    }
+
     pub(crate) fn logical_fill_exec(
         &self,
         shape: &[usize],
@@ -168,7 +188,7 @@ impl WgpuProvider {
 
             // Dispatch in chunks to satisfy per-dimension group limits (<= 65535)
             let wg_size = self.workgroup_config.scalar;
-            let max_groups: u32 = 65535;
+            let max_groups: u32 = FILL_MAX_DISPATCH_WORKGROUPS as u32;
             let max_elems_per_dispatch = (max_groups as usize) * (wg_size as usize);
             let mut processed: usize = 0;
             while processed < total_len {

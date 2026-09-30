@@ -1,6 +1,32 @@
 use super::*;
 
 impl WgpuProvider {
+    /// Exact explicit statistics/output/uniform demand for one layer-norm
+    /// dispatch. Input/parameter view materializations are accounted for by
+    /// the whole-route caller before this kernel is invoked.
+    pub(crate) fn layer_norm_buffer_demand(
+        &self,
+        request: &DeepLearningLayerNormRequest,
+    ) -> Option<u64> {
+        let (groups, _) = geometry(request).ok()?;
+        let total = shape_count(&request.shape).ok()? as u64;
+        let output = total.max(1).checked_mul(self.element_size as u64)?;
+        if total == 0 {
+            return Some(output);
+        }
+        let statistics = self.deep_learning_layer_norm_scratch_bytes(request).ok()?;
+        let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
+            .checked_mul(u64::from(
+                crate::backend::wgpu::shaders::deep_learning_normalization::NORMALIZATION_WORKGROUP_SIZE,
+            ))?;
+        let chunks = (groups as u64)
+            .div_ceil(capacity)
+            .checked_add(total.div_ceil(capacity))?;
+        output
+            .checked_add(statistics)?
+            .checked_add(chunks.checked_mul(std::mem::size_of::<NormParams>() as u64)?)
+    }
+
     pub(crate) fn deep_learning_layer_norm_scratch_bytes(
         &self,
         request: &DeepLearningLayerNormRequest,

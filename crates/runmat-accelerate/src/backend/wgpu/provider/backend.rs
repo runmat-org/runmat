@@ -74,6 +74,8 @@ mod core;
 mod deep_learning;
 #[path = "ops/deep_learning/route.rs"]
 mod deep_learning_route;
+#[path = "ops/deep_learning/resource_bound.rs"]
+mod deep_learning_resource_bound;
 #[path = "ops/deep_learning/pooling.rs"]
 mod deep_learning_pooling;
 #[path = "ops/deep_learning/normalization/mod.rs"]

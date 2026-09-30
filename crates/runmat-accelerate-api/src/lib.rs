@@ -37,12 +37,13 @@ mod covariance;
 pub use covariance::CovarianceWeightDomainError;
 mod deep_learning;
 pub use deep_learning::{
-    DeepLearningFeedForwardCapability, DeepLearningFeedForwardStage, DeepLearningForwardCapability,
-    DeepLearningForwardGeometry, DeepLearningForwardOperation, DeepLearningForwardParameter,
-    DeepLearningForwardParameters, DeepLearningForwardResources, DeepLearningForwardRoute,
-    DeepLearningForwardRouteError, DeepLearningForwardSource, DeepLearningForwardStep,
-    DeepLearningLayerNormCapability, DeepLearningLayerNormRequest, DeepLearningPool1DCapability,
-    DeepLearningPool1DRequest, DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
+    DeepLearningFeedForwardCapability, DeepLearningFeedForwardStage,
+    DeepLearningForwardBufferBound, DeepLearningForwardCapability, DeepLearningForwardGeometry,
+    DeepLearningForwardOperation, DeepLearningForwardParameter, DeepLearningForwardParameters,
+    DeepLearningForwardResources, DeepLearningForwardRoute, DeepLearningForwardRouteError,
+    DeepLearningForwardSource, DeepLearningForwardStep, DeepLearningLayerNormCapability,
+    DeepLearningLayerNormRequest, DeepLearningPool1DCapability, DeepLearningPool1DRequest,
+    DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
 pub use provider_execution::{
     ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,

@@ -78,6 +78,18 @@ pub struct DeepLearningForwardResources {
     pub known_normalization_scratch_bytes: u64,
     pub upload_bytes: u64,
     pub resident_bytes: u64,
+    /// Checked upper bound on WGPU buffers explicitly created for this route,
+    /// including host uploads, outputs, owned temporaries, and dispatch
+    /// uniforms. Resident input allocations are reported separately above.
+    /// Driver-private memory and pipeline caches are outside this contract.
+    /// `Unavailable` must not be interpreted as zero by placement.
+    pub new_buffer_bytes_upper_bound: DeepLearningForwardBufferBound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepLearningForwardBufferBound {
+    Known(u64),
+    Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

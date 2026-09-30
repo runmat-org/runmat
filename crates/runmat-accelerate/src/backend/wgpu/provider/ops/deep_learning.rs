@@ -55,6 +55,32 @@ struct SoftmaxRowsParams {
 }
 
 impl WgpuProvider {
+    /// ELU executes a fill for Alpha, then a two-input linear fusion. Count
+    /// both outputs even though the fill handle is dropped after dispatch:
+    /// pending submissions may still retain its storage.
+    pub(crate) fn elu_buffer_demand(&self, elements: u64) -> Option<u64> {
+        let alpha = self.fill_buffer_demand(elements)?;
+        let output = elements.max(1).checked_mul(self.element_size as u64)?;
+        alpha
+            .checked_add(output)?
+            .checked_add(std::mem::size_of::<crate::backend::wgpu::params::FusionParams>() as u64)
+    }
+
+    /// Exact upper bound for explicit softmax output, error/readback buffers,
+    /// and one immutable params buffer for every submitted row chunk.
+    pub(crate) fn softmax_rows_buffer_demand(&self, elements: u64, rows: u64) -> Option<u64> {
+        let output = elements.max(1).checked_mul(self.element_size as u64)?;
+        if elements == 0 {
+            return Some(output);
+        }
+        let chunks = rows.div_ceil(u64::from(
+            crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
+        ));
+        output
+            .checked_add(2 * std::mem::size_of::<u32>() as u64)?
+            .checked_add(chunks.checked_mul(std::mem::size_of::<SoftmaxRowsParams>() as u64)?)
+    }
+
     pub(crate) fn elu_exec(&self, input: &GpuTensorHandle, alpha: f64) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(input)?;
         ensure!(
