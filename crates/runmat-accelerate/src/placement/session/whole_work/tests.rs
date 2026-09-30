@@ -284,7 +284,7 @@ fn unknown_scratch_remains_legal_when_no_matching_budget_exists() {
     routes.resources.providers[0].scratch_available_bytes = None;
     for _ in 0..2 {
         let selected = session.select_whole_work(routes.clone()).unwrap();
-        success(&session, &selected.decision.selected, 100);
+        success(&session, &selected.decision.selected, 100_000);
     }
     for _ in 0..2 {
         let selected = session.select_whole_work(routes.clone()).unwrap();
@@ -293,7 +293,7 @@ fn unknown_scratch_remains_legal_when_no_matching_budget_exists() {
             selected.decision.selected.kind,
             ExecutionCandidateKind::ProviderGraph
         );
-        success(&session, &selected.decision.selected, 10);
+        success(&session, &selected.decision.selected, 10_000);
     }
     let selected = session.select_whole_work(routes).unwrap();
     assert_eq!(selected.decision.kind, WholeWorkDecisionKind::Compared);

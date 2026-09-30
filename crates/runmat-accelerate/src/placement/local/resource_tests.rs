@@ -28,7 +28,7 @@ impl AccelProvider for Provider {
     fn device_info(&self) -> String {
         "physical-resource-fixture".into()
     }
-    fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
+    fn query_feasibility(&self, _: &ProviderFeasibilityQuery) -> ProviderFeasibility {
         ProviderFeasibility::supported(ProviderResourceEstimate {
             output_bytes: self.output,
             // Deliberately unspecified: this packet does not reinterpret the
@@ -326,7 +326,7 @@ fn overflowing_output_template_is_rejected_before_provider_planning() {
         ProviderElementType, ProviderLayout, ProviderResidency, ProviderStorage,
     };
     let capture = Rc::new(Capture::default());
-    let error = try_plan_with_outputs(
+    let error = match try_plan_with_outputs(
         &Provider {
             output: Some(1),
             capacity: 128,
@@ -342,9 +342,10 @@ fn overflowing_output_template_is_rejected_before_provider_planning() {
             shape: vec![u64::MAX, 2],
             residency: ProviderResidency::Host,
         }],
-    )
-    .err()
-    .expect("unrepresentable output cannot enter the graph");
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("unrepresentable output cannot enter the graph"),
+    };
     assert_eq!(
         error.identifier(),
         Some("RunMat:Placement:ResourceOverflow")
