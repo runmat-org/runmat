@@ -1683,6 +1683,34 @@ fn train_network_regression_reads_typed_integer_storage_exactly() {
 }
 
 #[test]
+fn supervised_classification_keeps_wide_integer_label_identities_distinct() {
+    let first = (1_u64 << 53) + 1;
+    let labels = poisoned_int_tensor(IntegerStorage::U64(vec![first, first + 1]), vec![2, 1], 0.0);
+    let options = block_on(training_options_builtin(
+        Value::String("adam".into()),
+        vec![Value::String("MaxEpochs".into()), Value::Num(1.0)],
+    ))
+    .unwrap();
+    let trained = block_on(train_network_builtin(vec![
+        Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+        labels,
+        classification_training_layers(),
+        options,
+    ]))
+    .unwrap();
+    let Value::Object(network) = trained else {
+        panic!("expected trained network object")
+    };
+    let Some(Value::StringArray(classes)) = network.properties.get("Classes") else {
+        panic!("expected classification classes")
+    };
+    assert_eq!(
+        classes.data,
+        vec![first.to_string(), (first + 1).to_string()]
+    );
+}
+
+#[test]
 fn train_network_classification_supports_string_labels() {
     let x = Value::Tensor(
         Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0], vec![4, 2]).unwrap(),
@@ -1791,6 +1819,220 @@ fn train_network_rejects_gpu_execution_environment() {
     assert!(err
         .message
         .contains("ExecutionEnvironment 'gpu' requires native GPU"));
+}
+
+#[test]
+fn supervised_host_admission_precedes_resident_predictor_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let predictor = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 1.0],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        let wrong_rows = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
+        for trainnet in [false, true] {
+            provider.reset_telemetry();
+            let args = if trainnet {
+                vec![
+                    Value::GpuTensor(predictor.clone()),
+                    wrong_rows.clone(),
+                    block_on(dlnetwork_builtin(vec![regression_training_layers()])).unwrap(),
+                    Value::String("mse".into()),
+                    adam_training_options(),
+                ]
+            } else {
+                vec![
+                    Value::GpuTensor(predictor.clone()),
+                    wrong_rows.clone(),
+                    regression_training_layers(),
+                    adam_training_options(),
+                ]
+            };
+            let error = if trainnet {
+                block_on(trainnet_builtin(args)).unwrap_err()
+            } else {
+                block_on(train_network_builtin(args)).unwrap_err()
+            };
+            assert!(error.message.contains("one row per observation"));
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        }
+
+        provider.reset_telemetry();
+        let args = vec![
+            Value::GpuTensor(predictor),
+            Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+            regression_training_layers(),
+            adam_training_options(),
+        ];
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let error = block_on(train_network_builtin(args)).unwrap_err();
+        assert!(error.message.contains("at most 2"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}
+
+#[test]
+fn supervised_rejects_mutated_elu_alpha_before_resident_predictor_download() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let predictor = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 1.0],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        let invalid_alpha = [
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+            Value::Num(f64::NAN),
+        ];
+        for alpha in invalid_alpha {
+            let Value::Cell(layers) = regression_training_layers() else {
+                panic!("expected regression layer collection")
+            };
+            let mut values = layers.data;
+            let mut elu_value = block_on(elu_layer_builtin(vec![])).unwrap();
+            let Value::Object(ref mut elu_object) = elu_value else {
+                panic!("expected ELU layer")
+            };
+            elu_object.properties.insert("Alpha".into(), alpha);
+            values.insert(2, elu_value);
+            let layers = Value::Cell(CellArray::new(values, 4, 1).unwrap());
+
+            provider.reset_telemetry();
+            let error = block_on(train_network_builtin(vec![
+                Value::GpuTensor(predictor.clone()),
+                Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+                layers,
+                adam_training_options(),
+            ]))
+            .unwrap_err();
+            assert!(error.message.contains("Alpha"), "{error:?}");
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        }
+    });
+}
+
+#[test]
+fn supervised_rejects_empty_predictor_observations() {
+    let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap());
+    let error = block_on(train_network_builtin(vec![
+        empty,
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 1]).unwrap()),
+        regression_training_layers(),
+        adam_training_options(),
+    ]))
+    .unwrap_err();
+    assert!(error.message.contains("at least one observation"));
+}
+
+#[test]
+fn supervised_host_matrix_reads_single_and_logical_storage() {
+    let single = Value::Tensor(
+        Tensor::new_with_dtype(vec![1.5, -2.0], vec![2, 1], NumericDType::F32).unwrap(),
+    );
+    let parsed = numeric_matrix_ref(&single, "trainNetwork", "X").unwrap();
+    assert_eq!((parsed.rows, parsed.cols), (2, 1));
+    assert_eq!(parsed.data, vec![1.5, -2.0]);
+
+    let logical = Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap());
+    let parsed = numeric_matrix_ref(&logical, "trainNetwork", "X").unwrap();
+    assert_eq!((parsed.rows, parsed.cols), (1, 2));
+    assert_eq!(parsed.data, vec![1.0, 0.0]);
+}
+
+#[test]
+fn supervised_training_observes_pre_cancelled_execution() {
+    let cancellation = runmat_execution::cancellation::CancellationSource::new();
+    cancellation.cancel(runmat_execution::CancellationReason::User);
+    let _guard = crate::interrupt::replace_interrupt(Some(cancellation.token()));
+    let options = block_on(training_options_builtin(
+        Value::String("adam".into()),
+        vec![Value::String("MaxEpochs".into()), Value::Num(1.0)],
+    ))
+    .unwrap();
+    let error = block_on(train_network_builtin(vec![
+        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+        regression_training_layers(),
+        options,
+    ]))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+}
+
+#[test]
+fn supervised_two_outputs_include_typed_loss_history() {
+    let options = block_on(training_options_builtin(
+        Value::String("adam".into()),
+        vec![Value::String("MaxEpochs".into()), Value::Num(2.0)],
+    ))
+    .unwrap();
+    let _guard = crate::output_count::push_output_count(Some(2));
+    let result = block_on(train_network_builtin(vec![
+        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+        regression_training_layers(),
+        options,
+    ]))
+    .unwrap();
+    let Value::OutputList(outputs) = result else {
+        panic!("expected two requested outputs")
+    };
+    assert_eq!(outputs.len(), 2);
+    assert!(matches!(outputs[0], Value::Object(_)));
+    let Value::Struct(info) = &outputs[1] else {
+        panic!("expected training information")
+    };
+    let Value::Tensor(loss_history) = &info.fields["TrainingLoss"] else {
+        panic!("expected typed loss history")
+    };
+    assert_eq!(loss_history.shape, vec![2, 1]);
+    assert_eq!(loss_history.numeric_dtype(), NumericDType::F64);
+    assert!(loss_history.materialize_f64().iter().all(|loss| loss.is_finite()));
+}
+
+#[test]
+fn supervised_training_gathers_only_consumed_nested_learnables() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let weights = provider
+            .upload(&HostTensorView {
+                data: &[0.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
+        let unrelated = provider
+            .upload(&HostTensorView {
+                data: &[7.0, 8.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let Value::Cell(mut layers) = regression_training_layers() else {
+            panic!("expected layer collection")
+        };
+        let Value::Object(fc) = &mut layers.data[1] else {
+            panic!("expected fully connected layer")
+        };
+        fc.properties
+            .insert("Weights".into(), Value::GpuTensor(weights));
+        fc.properties
+            .insert("Unrelated".into(), Value::GpuTensor(unrelated));
+        let options = block_on(training_options_builtin(
+            Value::String("adam".into()),
+            vec![Value::String("MaxEpochs".into()), Value::Num(1.0)],
+        ))
+        .unwrap();
+        provider.reset_telemetry();
+        let trained = block_on(train_network_builtin(vec![
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+            Value::Cell(layers),
+            options,
+        ]))
+        .unwrap();
+        assert!(matches!(trained, Value::Object(_)));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+    });
 }
 
 #[test]
