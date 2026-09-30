@@ -20,7 +20,7 @@ static INDEXING_CONTEXT_REGISTERED: OnceLock<()> = OnceLock::new();
 
 #[derive(Clone)]
 struct SubscriptLevel {
-    kind: String,
+    kind: crate::object::indexing::ObjectIndexKind,
     subs: Value,
 }
 

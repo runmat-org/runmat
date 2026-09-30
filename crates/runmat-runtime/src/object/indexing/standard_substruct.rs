@@ -91,11 +91,11 @@ fn standard_subscript_type(kind: ObjectIndexKind) -> &'static str {
 
 fn parse_step(kind: &Value, selector: &Value) -> Result<ObjectSubscript, RuntimeError> {
     let kind = scalar_text(kind)?;
-    match kind.as_str() {
-        "()" => Ok(ObjectSubscript::parentheses(index_values(selector)?)),
-        "{}" => Ok(ObjectSubscript::braces(index_values(selector)?)),
-        "." => Ok(ObjectSubscript::member(scalar_text(selector)?)),
-        _ => Err(invalid(format!("unsupported subscript type '{kind}'"))),
+    match ObjectIndexKind::from_protocol_name(&kind) {
+        Some(ObjectIndexKind::Paren) => Ok(ObjectSubscript::parentheses(index_values(selector)?)),
+        Some(ObjectIndexKind::Brace) => Ok(ObjectSubscript::braces(index_values(selector)?)),
+        Some(ObjectIndexKind::Member) => Ok(ObjectSubscript::member(scalar_text(selector)?)),
+        None => Err(invalid(format!("unsupported subscript type '{kind}'"))),
     }
 }
 

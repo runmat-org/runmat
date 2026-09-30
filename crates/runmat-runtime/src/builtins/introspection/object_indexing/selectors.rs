@@ -43,16 +43,13 @@ pub(super) fn parse_subscript_level(
             "substruct level is missing field 'subs'",
         )
     })?;
-    let kind = kind.trim().to_string();
-    if !matches!(
-        kind.as_str(),
-        crate::OBJECT_INDEX_PAREN | crate::OBJECT_INDEX_BRACE | crate::OBJECT_INDEX_MEMBER
-    ) {
-        return Err(num_args_error(
-            &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
-            format!("unsupported substruct type '{kind}'"),
-        ));
-    }
+    let kind = crate::object::indexing::ObjectIndexKind::from_protocol_name(kind.trim())
+        .ok_or_else(|| {
+            num_args_error(
+                &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                format!("unsupported substruct type '{}'", kind.trim()),
+            )
+        })?;
     Ok(SubscriptLevel { kind, subs })
 }
 
@@ -234,8 +231,11 @@ pub(super) fn default_num_arguments(
             "substruct must include at least one indexing level",
         ));
     };
-    if first.kind == crate::OBJECT_INDEX_BRACE {
-        return brace_selection_count(target, &first.subs);
+    match first.kind {
+        crate::object::indexing::ObjectIndexKind::Brace => {
+            brace_selection_count(target, &first.subs)
+        }
+        crate::object::indexing::ObjectIndexKind::Paren
+        | crate::object::indexing::ObjectIndexKind::Member => Ok(1),
     }
-    Ok(1)
 }

@@ -39,6 +39,16 @@ pub enum ObjectIndexKind {
 }
 
 impl ObjectIndexKind {
+    /// Decode an indexing kind at the public protocol boundary.
+    pub fn from_protocol_name(name: &str) -> Option<Self> {
+        match name {
+            OBJECT_PROTOCOL_KIND_PAREN => Some(Self::Paren),
+            OBJECT_PROTOCOL_KIND_BRACE => Some(Self::Brace),
+            OBJECT_PROTOCOL_KIND_MEMBER => Some(Self::Member),
+            _ => None,
+        }
+    }
+
     pub fn protocol_name(self) -> &'static str {
         match self {
             Self::Paren => OBJECT_PROTOCOL_KIND_PAREN,

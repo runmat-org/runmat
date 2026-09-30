@@ -10,7 +10,12 @@ pub async fn brace_assignment_cardinality(
         runmat_value::CellArray::new(subscripts, 1, subscript_count)
             .map_err(|error| num_args_error(&NUM_ARGUMENTS_ERROR_SUBSTRUCT, error))?,
     );
-    assignment_cardinality_for_level(target, crate::OBJECT_INDEX_BRACE, subscript_values).await
+    assignment_cardinality_for_level(
+        target,
+        crate::object::indexing::ObjectIndexKind::Brace,
+        subscript_values,
+    )
+    .await
 }
 
 /// Resolve the number of member-assignment destinations through the public
@@ -20,8 +25,12 @@ pub async fn member_assignment_cardinality(
     target: &Value,
     member: String,
 ) -> crate::BuiltinResult<usize> {
-    assignment_cardinality_for_level(target, crate::OBJECT_INDEX_MEMBER, Value::String(member))
-        .await
+    assignment_cardinality_for_level(
+        target,
+        crate::object::indexing::ObjectIndexKind::Member,
+        Value::String(member),
+    )
+    .await
 }
 
 pub struct PreparedObjectAssignmentCardinality {
@@ -77,12 +86,12 @@ pub async fn object_path_cardinality(
 
 pub(super) async fn assignment_cardinality_for_level(
     target: &Value,
-    kind: &str,
+    kind: crate::object::indexing::ObjectIndexKind,
     subs: Value,
 ) -> crate::BuiltinResult<usize> {
     ensure_indexing_context_classes_registered();
     let mut level = runmat_value::StructValue::new();
-    level.insert("type", Value::String(kind.to_string()));
+    level.insert("type", Value::String(kind.protocol_name().to_string()));
     level.insert("subs", subs.clone());
     let descriptor = Value::Struct(level);
     let context = indexing_context_value(IndexingContext::Assignment);
@@ -93,13 +102,10 @@ pub(super) async fn assignment_cardinality_for_level(
             return exact_output_count(&value);
         }
     }
-    if kind == crate::OBJECT_INDEX_MEMBER {
+    if kind == crate::object::indexing::ObjectIndexKind::Member {
         return crate::object::resolve::member_sequence_cardinality(target);
     }
-    let level = SubscriptLevel {
-        kind: kind.to_string(),
-        subs,
-    };
+    let level = SubscriptLevel { kind, subs };
     default_num_arguments(target, &[level], IndexingContext::Assignment)
 }
 

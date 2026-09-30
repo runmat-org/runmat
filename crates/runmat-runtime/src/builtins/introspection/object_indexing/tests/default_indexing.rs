@@ -1,4 +1,34 @@
 use super::*;
+
+#[test]
+fn indexing_kind_protocol_boundary_is_exact_and_round_trips() {
+    use crate::object::indexing::ObjectIndexKind;
+
+    for kind in [
+        ObjectIndexKind::Paren,
+        ObjectIndexKind::Brace,
+        ObjectIndexKind::Member,
+    ] {
+        assert_eq!(
+            ObjectIndexKind::from_protocol_name(kind.protocol_name()),
+            Some(kind)
+        );
+    }
+    for invalid in ["", "paren", "brace", "member", " () ", "[]"] {
+        assert_eq!(ObjectIndexKind::from_protocol_name(invalid), None);
+    }
+}
+
+#[test]
+fn cardinality_boundary_preserves_trimmed_types_and_rejects_unknown_types() {
+    use crate::object::indexing::ObjectIndexKind;
+
+    let descriptor = substruct(" {} ", cell(vec![Value::Num(1.0)]));
+    let levels = parse_subscript_levels(&descriptor).expect("trimmed cardinality type");
+    assert_eq!(levels[0].kind, ObjectIndexKind::Brace);
+    assert!(parse_subscript_levels(&substruct("brace", cell(vec![Value::Num(1.0)]))).is_err());
+}
+
 #[test]
 fn public_subsref_and_subsasgn_use_default_numeric_indexing() {
     let source =
@@ -45,8 +75,14 @@ fn typed_structure_array_carries_multiple_subscript_levels() {
     );
     let levels = parse_subscript_levels(&descriptor).expect("parse subscript levels");
     assert_eq!(levels.len(), 2);
-    assert_eq!(levels[0].kind, crate::OBJECT_INDEX_MEMBER);
-    assert_eq!(levels[1].kind, crate::OBJECT_INDEX_PAREN);
+    assert_eq!(
+        levels[0].kind,
+        crate::object::indexing::ObjectIndexKind::Member
+    );
+    assert_eq!(
+        levels[1].kind,
+        crate::object::indexing::ObjectIndexKind::Paren
+    );
 
     let legacy_cell = cell(vec![substruct(
         crate::OBJECT_INDEX_MEMBER,
