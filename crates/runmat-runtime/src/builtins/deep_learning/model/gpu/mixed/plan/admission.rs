@@ -282,7 +282,7 @@ pub(in crate::builtins::deep_learning::model::gpu::mixed) fn admit(
     {
         return Ok(Some(Err(GpuCapabilityReason::InputPrecision)));
     }
-    let Some(plan) = super::lowering::lower(network, host, target_axes, function)? else {
+    let Some(plan) = super::lower(network, host, target_axes, function)? else {
         return Ok(None);
     };
     let plan = match plan {

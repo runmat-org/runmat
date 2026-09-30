@@ -16,7 +16,9 @@ use runmat_accelerate_api::{
 use runmat_builtins::DeepLearningAxisLabel;
 use runmat_value::NumericDType;
 
-pub(super) fn admitted_source(host: &HostNetworkPlan<'_>) -> Option<DeepLearningForwardSource<'_>> {
+pub(super) fn admitted_source<'a>(
+    host: &HostNetworkPlan<'a>,
+) -> Option<DeepLearningForwardSource<'a>> {
     let element_type = match host.execution_precision() {
         NumericDType::F32 => NumericElementType::F32,
         NumericDType::F64 => NumericElementType::F64,

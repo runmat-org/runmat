@@ -1,4 +1,6 @@
-use super::{parameters, plan, AxisPlan, GpuCapabilityReason, HostNetworkPlan, ParameterRole};
+use super::{
+    parameters, physical, plan, AxisPlan, GpuCapabilityReason, HostNetworkPlan, ParameterRole,
+};
 use crate::builtins::deep_learning::{
     layers::{feature_input_layer_builtin, layer_normalization_layer_builtin, relu_layer_builtin},
     model::dlnetwork_builtin,

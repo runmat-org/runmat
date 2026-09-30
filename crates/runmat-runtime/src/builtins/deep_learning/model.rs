@@ -41,8 +41,6 @@ pub(in crate::builtins) use construction::{
     is_deep_learning_network_object, layers_from_network_ref, layers_from_network_value,
     network_object,
 };
-#[cfg(test)]
-pub(in crate::builtins) use initialization::initialise_layers;
 pub(in crate::builtins) use initialization::initialise_layers_in_runtime;
 pub(in crate::builtins) use parameters::{
     apply as apply_learnables, project as project_learnables, validate_matching_networks,
