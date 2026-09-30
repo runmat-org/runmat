@@ -1,6 +1,17 @@
 use super::*;
 
 impl WgpuProvider {
+    pub(crate) fn deep_learning_layer_norm_scratch_bytes(
+        &self,
+        request: &DeepLearningLayerNormRequest,
+    ) -> Result<u64> {
+        let (groups, _) = geometry(request)?;
+        u64::try_from(groups)?
+            .checked_mul(3)
+            .and_then(|count| count.checked_mul(self.element_size as u64))
+            .ok_or_else(|| anyhow!("normalization scratch byte count overflows"))
+    }
+
     pub(crate) fn deep_learning_layer_norm_capability_exec(
         &self,
         input: &GpuTensorHandle,
@@ -22,7 +33,7 @@ impl WgpuProvider {
         offset: Option<&GpuTensorHandle>,
         request: &DeepLearningLayerNormRequest,
     ) -> Result<DeepLearningLayerNormCapability> {
-        let (groups, group_size) = geometry(request)?;
+        geometry(request)?;
         if let Some(scale) = scale {
             ensure!(
                 scale.shape() == request.scale_shape,
@@ -35,7 +46,6 @@ impl WgpuProvider {
                 "normalization Offset descriptor shape mismatch"
             );
         }
-        let total = shape_count(&request.shape)?;
         for handle in std::iter::once(anchor).chain(scale).chain(offset) {
             let entry = self.get_entry_raw(handle)?;
             ensure!(
@@ -49,10 +59,23 @@ impl WgpuProvider {
             if entry.storage != GpuTensorStorage::Real
                 || entry.logical
                 || entry.integer_type().is_some()
-                || entry.precision != self.precision
+                || entry.element_type != anchor.physical().element_type()
             {
                 return Ok(DeepLearningLayerNormCapability::UnsupportedOperation);
             }
+        }
+        self.deep_learning_layer_norm_capability_for_type(anchor.physical().element_type(), request)
+    }
+
+    pub(crate) fn deep_learning_layer_norm_capability_for_type(
+        &self,
+        element_type: runmat_accelerate_api::NumericElementType,
+        request: &DeepLearningLayerNormRequest,
+    ) -> Result<DeepLearningLayerNormCapability> {
+        let (groups, group_size) = geometry(request)?;
+        let total = shape_count(&request.shape)?;
+        if !self.supports_native_real_element_type(element_type) {
+            return Ok(DeepLearningLayerNormCapability::UnsupportedOperation);
         }
         if self.precision == crate::backend::wgpu::types::NumericPrecision::F32
             && (!(request.epsilon as f32).is_finite() || request.epsilon as f32 == 0.0)

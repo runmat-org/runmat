@@ -43,23 +43,33 @@ impl WgpuProvider {
         if entry.storage != GpuTensorStorage::Real
             || entry.logical
             || entry.integer_type().is_some()
-            || entry.precision != self.precision
         {
             return Ok(C::UnsupportedOperation);
+        }
+        Ok(self.deep_learning_feed_forward_stage_capability_for_type(entry.element_type, stage))
+    }
+
+    pub(crate) fn deep_learning_feed_forward_stage_capability_for_type(
+        &self,
+        element_type: runmat_accelerate_api::NumericElementType,
+        stage: S,
+    ) -> C {
+        if !self.supports_native_real_element_type(element_type) {
+            return C::UnsupportedOperation;
         }
         let (extents, count) = stage_extents(stage);
         if extents[..count]
             .iter()
             .any(|extent| *extent > u32::MAX as usize)
         {
-            return Ok(C::ResourceLimit);
+            return C::ResourceLimit;
         }
         let (input_count, output_count) = match stage {
             S::Transpose2D { rows, columns }
             | S::Permute2D { rows, columns }
             | S::SoftmaxRows { rows, columns } => {
                 let Some(elements) = rows.checked_mul(columns) else {
-                    return Ok(C::ResourceLimit);
+                    return C::ResourceLimit;
                 };
                 (elements, elements)
             }
@@ -69,31 +79,31 @@ impl WgpuProvider {
                 output_channels,
             } => {
                 let Some(input) = batch.checked_mul(input_channels) else {
-                    return Ok(C::ResourceLimit);
+                    return C::ResourceLimit;
                 };
                 let Some(output) = batch.checked_mul(output_channels) else {
-                    return Ok(C::ResourceLimit);
+                    return C::ResourceLimit;
                 };
                 let Some(weights) = input_channels.checked_mul(output_channels) else {
-                    return Ok(C::ResourceLimit);
+                    return C::ResourceLimit;
                 };
                 if !self.within_binding_limit(weights) {
-                    return Ok(C::ResourceLimit);
+                    return C::ResourceLimit;
                 }
                 (input, output)
             }
             S::Relu { elements } | S::Elu { elements } => (elements, elements),
         };
         if input_count > u32::MAX as usize || output_count > u32::MAX as usize {
-            return Ok(C::ResourceLimit);
+            return C::ResourceLimit;
         }
         if !self.within_binding_limit(input_count) || !self.within_binding_limit(output_count) {
-            return Ok(C::ResourceLimit);
+            return C::ResourceLimit;
         }
-        Ok(C::Ready)
+        C::Ready
     }
 
-    fn within_binding_limit(&self, elements: usize) -> bool {
+    pub(crate) fn within_binding_limit(&self, elements: usize) -> bool {
         let limit = u64::from(self.adapter_limits.max_storage_buffer_binding_size)
             .min(self.adapter_limits.max_buffer_size);
         u64::try_from(elements)

@@ -2,6 +2,7 @@
 
 mod execution;
 mod parameters;
+mod physical;
 mod plan;
 #[cfg(test)]
 mod tests;

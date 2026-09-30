@@ -29,17 +29,28 @@ impl WgpuProvider {
         // Generic bitwise view operations support more storage classes, but
         // this route admits only the native real class whose byte geometry is
         // identical to the accelerator's arithmetic element geometry.
-        if entry.storage != GpuTensorStorage::Real
-            || entry.logical
-            || !matches!(
-                entry.element_type,
-                NumericElementType::F32 | NumericElementType::F64
-            )
-            || entry.precision != self.precision
-        {
+        if entry.storage != GpuTensorStorage::Real || entry.logical {
             return Ok(ProviderViewCapability::UnsupportedOperation);
         }
-        let outcome = match chain.analyze(anchor.view(), entry.element_type) {
+        self.provider_view_chain_capability_for_type(anchor.view(), entry.element_type, chain)
+    }
+
+    pub(crate) fn provider_view_chain_capability_for_type(
+        &self,
+        current: &runmat_accelerate_api::GpuTensorView,
+        element_type: NumericElementType,
+        chain: &ProviderViewChain,
+    ) -> Result<ProviderViewCapability> {
+        if let ProviderViewSource::Planned(view) = &chain.source {
+            ensure!(
+                view.is_logical() == current.is_logical(),
+                "planned physical view changes logical class"
+            );
+        }
+        if current.is_logical() || !self.supports_native_real_element_type(element_type) {
+            return Ok(ProviderViewCapability::UnsupportedOperation);
+        }
+        let outcome = match chain.analyze(current, element_type) {
             Ok(outcome) => outcome,
             Err(ProviderViewPlanError::SizeOverflow) => {
                 return Ok(ProviderViewCapability::ResourceLimit);
@@ -47,7 +58,7 @@ impl WgpuProvider {
             Err(error) => return Err(anyhow!("invalid physical view transition: {error:?}")),
         };
         let source_view = match &chain.source {
-            ProviderViewSource::Current => anchor.view(),
+            ProviderViewSource::Current => current,
             ProviderViewSource::Planned(view) => view,
         };
         if source_view

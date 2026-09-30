@@ -8,9 +8,9 @@ use crate::builtins::deep_learning::model::plan::{
     normalization::{Geometry, NormalizationStage},
 };
 use runmat_accelerate_api::{
-    DeepLearningFeedForwardStage as PhysicalStage, DeepLearningLayerNormCapability,
-    DeepLearningPool1DCapability, GpuTensorLayout, GpuTensorView, ProviderViewCapability,
-    ProviderViewChain, ProviderViewSource, ProviderViewStep,
+    DeepLearningFeedForwardStage as PhysicalStage, DeepLearningForwardCapability,
+    DeepLearningLayerNormCapability, DeepLearningPool1DCapability, GpuTensorLayout, GpuTensorView,
+    ProviderViewCapability, ProviderViewChain, ProviderViewSource, ProviderViewStep,
 };
 use runmat_builtins::{DeepLearningAxisLabel as Label, DeepLearningAxisLayout};
 
@@ -477,9 +477,25 @@ pub(super) fn admit(
     }
     let consumed_resident_parameters =
         parameters::consumed_resident_handles(host.parameter_views(), &stages);
-    Ok(Some(Ok(Plan {
+    let plan = Plan {
         stages,
         output_axes: physical,
         consumed_resident_parameters,
-    })))
+    };
+    let Some(route) = super::physical::from_plan(host, input, &plan, function)? else {
+        return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)));
+    };
+    match provider
+        .deep_learning_forward_route_capability(&route)
+        .map_err(|error| provider_failure(function, "physical network admission", error.into()))?
+    {
+        None | Some(DeepLearningForwardCapability::Ready(_)) => {}
+        Some(DeepLearningForwardCapability::UnsupportedOperation) => {
+            return Ok(Some(Err(GpuCapabilityReason::ProviderOperation)))
+        }
+        Some(DeepLearningForwardCapability::ResourceLimit) => {
+            return Ok(Some(Err(GpuCapabilityReason::ResourceLimit)))
+        }
+    }
+    Ok(Some(Ok(plan)))
 }

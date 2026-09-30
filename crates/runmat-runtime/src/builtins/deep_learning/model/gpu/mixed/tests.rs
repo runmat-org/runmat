@@ -7,7 +7,8 @@ use crate::builtins::deep_learning::{
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelProvider, DeepLearningFeedForwardCapability,
-    DeepLearningFeedForwardStage, DeepLearningLayerNormCapability, DeepLearningLayerNormRequest,
+    DeepLearningFeedForwardStage, DeepLearningForwardCapability, DeepLearningForwardResources,
+    DeepLearningForwardRoute, DeepLearningLayerNormCapability, DeepLearningLayerNormRequest,
     GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned,
     HostTensorView,
 };
@@ -177,6 +178,9 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
         device: u32,
         effects: AtomicUsize,
         reject_relu: AtomicBool,
+        reject_route: AtomicBool,
+        whole_route_available: AtomicBool,
+        whole_route_queries: AtomicUsize,
         affine_operands: AtomicUsize,
     }
     impl AccelProvider for LaterStageProbe {
@@ -230,6 +234,29 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
                 },
             )
         }
+        fn deep_learning_forward_route_capability(
+            &self,
+            route: &DeepLearningForwardRoute<'_>,
+        ) -> anyhow::Result<Option<DeepLearningForwardCapability>> {
+            if !self.whole_route_available.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
+            let geometry = route
+                .analyze()
+                .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+            self.whole_route_queries.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(if self.reject_route.load(Ordering::SeqCst) {
+                DeepLearningForwardCapability::UnsupportedOperation
+            } else {
+                DeepLearningForwardCapability::Ready(DeepLearningForwardResources {
+                    output_bytes: geometry.output_bytes,
+                    largest_intermediate_bytes: geometry.largest_intermediate_bytes,
+                    known_normalization_scratch_bytes: 0,
+                    upload_bytes: 0,
+                    resident_bytes: 0,
+                })
+            }))
+        }
     }
 
     let Value::Object(network) = normalization_then_relu() else {
@@ -248,6 +275,9 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
         device: owner.device_id(),
         effects: AtomicUsize::new(0),
         reject_relu: AtomicBool::new(true),
+        reject_route: AtomicBool::new(false),
+        whole_route_available: AtomicBool::new(true),
+        whole_route_queries: AtomicUsize::new(0),
         affine_operands: AtomicUsize::new(0),
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
@@ -290,6 +320,38 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
     assert_eq!(ready.stages.len(), 2);
     assert_eq!(ready.output_axes, *host.output_axes());
     assert_eq!(provider.effects.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.whole_route_queries.load(Ordering::SeqCst), 1);
+
+    provider.reject_route.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        plan::admit(
+            &network,
+            &host,
+            &allocated.handle,
+            host.output_axes(),
+            "forward"
+        )
+        .unwrap(),
+        Some(Err(GpuCapabilityReason::ProviderOperation))
+    ));
+    assert_eq!(provider.effects.load(Ordering::SeqCst), 0);
+    provider.reject_route.store(false, Ordering::SeqCst);
+    provider
+        .whole_route_available
+        .store(false, Ordering::SeqCst);
+    assert!(matches!(
+        plan::admit(
+            &network,
+            &host,
+            &allocated.handle,
+            host.output_axes(),
+            "forward"
+        )
+        .unwrap(),
+        Some(Ok(_))
+    ));
+    assert_eq!(provider.effects.load(Ordering::SeqCst), 0);
+    provider.whole_route_available.store(true, Ordering::SeqCst);
 
     use runmat_accelerate_api::{GpuHandleProvenance, NumericElementType};
     let scale = owner

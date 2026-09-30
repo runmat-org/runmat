@@ -37,9 +37,12 @@ mod covariance;
 pub use covariance::CovarianceWeightDomainError;
 mod deep_learning;
 pub use deep_learning::{
-    DeepLearningFeedForwardCapability, DeepLearningFeedForwardStage,
-    DeepLearningLayerNormCapability, DeepLearningLayerNormRequest, DeepLearningPool1DCapability,
-    DeepLearningPool1DRequest, DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
+    DeepLearningFeedForwardCapability, DeepLearningFeedForwardStage, DeepLearningForwardCapability,
+    DeepLearningForwardOperation, DeepLearningForwardParameter, DeepLearningForwardParameters,
+    DeepLearningForwardResources, DeepLearningForwardRoute, DeepLearningForwardSource,
+    DeepLearningForwardStep, DeepLearningLayerNormCapability, DeepLearningLayerNormRequest,
+    DeepLearningPool1DCapability, DeepLearningPool1DRequest, DeepLearningPool1DResultAxis,
+    DeepLearningPool1DRoute,
 };
 pub use provider_execution::{
     ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,
@@ -3535,6 +3538,18 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _stage: DeepLearningFeedForwardStage,
     ) -> anyhow::Result<DeepLearningFeedForwardCapability> {
         Ok(DeepLearningFeedForwardCapability::UnsupportedOperation)
+    }
+    /// Effect-free admission of an already-lowered complete forward route.
+    /// Unlike stage queries, this can inspect a host-origin candidate before
+    /// upload. Resident sources remain authenticated by their owning provider.
+    /// `None` means this optional whole-route query is absent; `Some` reports
+    /// the provider's actual acceptance or rejection. Callers must never treat
+    /// a present rejection as permission to execute a partial route.
+    fn deep_learning_forward_route_capability(
+        &self,
+        _route: &DeepLearningForwardRoute<'_>,
+    ) -> anyhow::Result<Option<DeepLearningForwardCapability>> {
+        Ok(None)
     }
     /// Pure admission of an exact physical view chain. The live anchor proves
     /// owner and element type; a planned source is geometry, not a lease.

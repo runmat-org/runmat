@@ -526,6 +526,14 @@ impl AccelProvider for WgpuProvider {
         self.deep_learning_feed_forward_stage_capability_exec(anchor, stage)
     }
 
+    fn deep_learning_forward_route_capability(
+        &self,
+        route: &runmat_accelerate_api::DeepLearningForwardRoute<'_>,
+    ) -> Result<Option<runmat_accelerate_api::DeepLearningForwardCapability>> {
+        self.deep_learning_forward_route_capability_exec(route)
+            .map(Some)
+    }
+
     fn provider_view_chain_capability(
         &self,
         anchor: &GpuTensorHandle,

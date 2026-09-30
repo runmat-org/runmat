@@ -1,5 +1,92 @@
 //! Typed acceleration requests for deep-learning operations.
 
+use crate::{GpuTensorHandle, GpuTensorView, NumericElementType, ProviderViewStep};
+
+#[path = "deep_learning/route.rs"]
+mod route;
+pub use route::{DeepLearningForwardGeometry, DeepLearningForwardRouteError};
+
+/// The physical input to a proposed forward route. A host source describes the
+/// bytes that preparation would upload; it does not authorize or perform that
+/// upload. A resident source retains its real allocation owner for admission.
+#[derive(Debug, Clone)]
+pub enum DeepLearningForwardSource<'a> {
+    Host {
+        element_type: NumericElementType,
+        shape: Vec<usize>,
+    },
+    Resident(&'a GpuTensorHandle),
+}
+
+/// A parameter consumed by a physical route. `view_steps` are applied before
+/// its consuming stage, using the same view-chain semantics as execution.
+#[derive(Debug, Clone)]
+pub struct DeepLearningForwardParameter<'a> {
+    pub source: DeepLearningForwardSource<'a>,
+    pub view_steps: Vec<ProviderViewStep>,
+}
+
+/// Typed binding roles for the two operations that consume learned values.
+/// Indices address `DeepLearningForwardRoute::parameters` and are checked by
+/// provider admission before any effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepLearningForwardParameters {
+    None,
+    Dense { weights: usize, bias: usize },
+    LayerNorm { scale: usize, offset: usize },
+}
+
+/// Already-lowered physical operation. Providers never parse layer names or
+/// reinterpret semantic axes. `View` is the existing physical view operation;
+/// other variants use the same request types as their individual kernels.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeepLearningForwardOperation {
+    View(ProviderViewStep),
+    FeedForward(DeepLearningFeedForwardStage),
+    Pool1D {
+        input_shape: Vec<usize>,
+        route: DeepLearningPool1DRoute,
+    },
+    LayerNorm(DeepLearningLayerNormRequest),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeepLearningForwardStep {
+    pub operation: DeepLearningForwardOperation,
+    pub parameters: DeepLearningForwardParameters,
+}
+
+/// One proposed physical route. The producer must lower admitted semantic
+/// geometry once; a provider rechecks the complete physical sequence and real
+/// resident owners without uploading, allocating, or dispatching.
+#[derive(Debug, Clone)]
+pub struct DeepLearningForwardRoute<'a> {
+    pub input: DeepLearningForwardSource<'a>,
+    pub parameters: Vec<DeepLearningForwardParameter<'a>>,
+    pub steps: Vec<DeepLearningForwardStep>,
+    pub output_view: GpuTensorView,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeepLearningForwardResources {
+    pub output_bytes: u64,
+    /// Largest physical intermediate or view materialization established by
+    /// the route. This is not a complete concurrent-memory estimate.
+    pub largest_intermediate_bytes: u64,
+    /// Known normalization work buffer demand. Other provider-private buffers
+    /// are not represented here; shared placement must not treat this as peak.
+    pub known_normalization_scratch_bytes: u64,
+    pub upload_bytes: u64,
+    pub resident_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepLearningForwardCapability {
+    Ready(DeepLearningForwardResources),
+    UnsupportedOperation,
+    ResourceLimit,
+}
+
 /// A resident global-average-pooling reduction over one physical axis.
 /// The provider retains that axis with extent one; presentation may remove
 /// it later without copying device bytes. Unlike a general mean reduction,

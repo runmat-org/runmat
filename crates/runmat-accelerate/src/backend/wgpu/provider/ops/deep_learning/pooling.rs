@@ -82,6 +82,25 @@ impl WgpuProvider {
                 && entry.integer_type() == runmat_accelerate_api::handle_integer_type(anchor),
             "deep-learning pooling anchor differs from provider-owned buffer"
         );
+        if entry.storage != GpuTensorStorage::Real
+            || entry.logical
+            || entry.integer_type().is_some()
+        {
+            return Ok(DeepLearningPool1DCapability::UnsupportedOperation);
+        }
+        self.deep_learning_global_average_pool_1d_capability_for_type(
+            entry.element_type,
+            shape,
+            route,
+        )
+    }
+
+    pub(crate) fn deep_learning_global_average_pool_1d_capability_for_type(
+        &self,
+        element_type: runmat_accelerate_api::NumericElementType,
+        shape: &[usize],
+        route: &DeepLearningPool1DRoute,
+    ) -> Result<DeepLearningPool1DCapability> {
         let axis = route.reduction.axis_zero_based;
         ensure!(axis < shape.len(), "pool axis exceeds input rank");
         let pool_size = shape[axis];
@@ -123,11 +142,7 @@ impl WgpuProvider {
             .enumerate()
             .any(|(target, &source)| target != source);
         let stride = checked_shape_count(&shape[..axis])?;
-        if entry.storage != GpuTensorStorage::Real
-            || entry.logical
-            || entry.integer_type().is_some()
-            || entry.precision != self.precision
-        {
+        if !self.supports_native_real_element_type(element_type) {
             return Ok(DeepLearningPool1DCapability::UnsupportedOperation);
         }
         if total > u32::MAX as usize

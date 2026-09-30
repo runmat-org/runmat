@@ -22,6 +22,17 @@ use crate::fusion::active_fusion;
 mod readback;
 
 impl WgpuProvider {
+    pub(crate) fn supports_native_real_element_type(
+        &self,
+        element_type: NumericElementType,
+    ) -> bool {
+        matches!(
+            (self.precision, element_type),
+            (NumericPrecision::F32, NumericElementType::F32)
+                | (NumericPrecision::F64, NumericElementType::F64)
+        )
+    }
+
     /// Operation entry only. Nested helpers borrow these same two arguments;
     /// they never acquire another read lock behind a pending scoped writer.
     pub(super) fn with_emission<T>(
