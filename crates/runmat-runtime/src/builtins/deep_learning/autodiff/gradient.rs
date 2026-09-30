@@ -29,6 +29,7 @@ pub(crate) async fn dlgradient_builtin(loss: Value, rest: Vec<Value>) -> Builtin
             "dlgradient: loss must be a traced dlarray value produced inside dlfeval",
         ));
     };
+    validate_host_tape_dlarray_data(&loss)?;
     let loss_tensor = value_for_node(loss_node)?;
     if tensor::tensor_element_len(&loss_tensor) != 1 {
         return Err(deep_learning_error(
@@ -63,6 +64,7 @@ pub(super) fn gradient_tree_for_target(
                     "dlgradient: target dlarray was not traced inside the active dlfeval",
                 ));
             };
+            validate_host_tape_dlarray_data(target)?;
             let tensor = if let Some(tensor) = gradients.get(&id).cloned() {
                 tensor
             } else {
@@ -135,6 +137,47 @@ pub(super) fn gradient_tree_for_target(
             format!("dlgradient: target must be a traced dlarray, learnables tree, or dlnetwork, got {other:?}"),
         )),
     }
+}
+
+fn validate_host_tape_dlarray_data(value: &Value) -> BuiltinResult<()> {
+    let Value::Object(object) = value else {
+        return Ok(());
+    };
+    if object.class_name == DLARRAY_CLASS {
+        match object.properties.get("Data") {
+            Some(Value::GpuTensor(_)) => {
+                return Err(unsupported_error(
+                    "dlgradient",
+                    "dlgradient: provider-resident dlarray Data requires unavailable tape kernels",
+                ));
+            }
+            Some(Value::SparseTensor(_)) => {
+                return Err(deep_learning_error(
+                    "dlgradient",
+                    "dlgradient: sparse dlarray Data are not supported by the host tape",
+                ));
+            }
+            Some(Value::Num(_) | Value::Bool(_) | Value::LogicalArray(_)) => {}
+            Some(Value::Tensor(tensor))
+                if matches!(
+                    tensor.numeric_dtype(),
+                    NumericDType::F64 | NumericDType::F32
+                ) => {}
+            Some(_) => {
+                return Err(deep_learning_error(
+                    "dlgradient",
+                    "dlgradient: dlarray Data must be real double, single, or logical host data",
+                ));
+            }
+            None => {
+                return Err(deep_learning_error(
+                    "dlgradient",
+                    "dlgradient: traced dlarray is missing Data",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn is_learnables_struct(value: &StructValue) -> bool {

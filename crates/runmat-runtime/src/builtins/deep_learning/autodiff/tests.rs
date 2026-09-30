@@ -449,3 +449,54 @@ fn gradient_nested_resident_target_rejects_without_gather() {
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
 }
+
+#[test]
+fn gradient_rejects_traced_values_mutated_to_resident_data_without_gather() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[2.0],
+                shape: &[1, 1],
+            })
+            .expect("resident Data");
+        let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+        let loss = annotate_dlarray_value(dlarray(1.0)).expect("traced loss");
+        let mut target = annotate_dlarray_value(dlarray(2.0)).expect("traced target");
+        let target_id = dlarray_node_id(&target).expect("target node");
+        let Value::Object(object) = &mut target else {
+            panic!("dlarray target")
+        };
+        object
+            .properties
+            .insert("Data".into(), Value::GpuTensor(resident.clone()));
+
+        let mut computed = HashMap::new();
+        computed.insert(target_id, Tensor::new(vec![1.0], vec![1, 1]).unwrap());
+        provider.reset_telemetry();
+        let error = super::gradient::gradient_tree_for_target(&target, &computed)
+            .expect_err("a cached gradient cannot bypass resident Data rejection");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+
+        let Value::Object(object) = &mut target else {
+            panic!("dlarray target")
+        };
+        object
+            .properties
+            .insert("Data".into(), Value::String("invalid".into()));
+        let error = super::gradient::gradient_tree_for_target(&target, &computed)
+            .expect_err("a cached gradient cannot bypass invalid Data rejection");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+
+        let mut resident_loss = loss;
+        let Value::Object(object) = &mut resident_loss else {
+            panic!("dlarray loss")
+        };
+        object
+            .properties
+            .insert("Data".into(), Value::GpuTensor(resident));
+        let error = futures::executor::block_on(dlgradient_builtin(resident_loss, vec![target]))
+            .expect_err("a traced loss cannot bypass resident Data rejection");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+    });
+}

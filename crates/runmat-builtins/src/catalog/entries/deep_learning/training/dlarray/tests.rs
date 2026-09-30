@@ -50,6 +50,18 @@ fn data_geometry_and_residency_are_carried_by_the_object_fact() {
     );
     assert_eq!(object.properties[crate::DLARRAY_DATA_PROPERTY], data);
     assert!(!object.properties_complete);
+    assert_eq!(
+        DLARRAY_CATALOG_ENTRY.placement.preparation,
+        BuiltinOperandPreparation::RuntimeOwned
+    );
+    assert_eq!(
+        DLARRAY_CATALOG_ENTRY.placement.residency,
+        BuiltinResidencyPolicy::Host
+    );
+    assert_eq!(
+        DLARRAY_CATALOG_ENTRY.placement.accelerator,
+        BuiltinAcceleratorPolicy::Forbidden
+    );
 }
 
 #[test]

@@ -19,6 +19,61 @@ fn traced_dlarray_possible(fact: &ValueFact) -> bool {
     }
 }
 
+fn known_unsupported_data(data: &ValueFact) -> bool {
+    matches!(data.residency, ResidencyFact::Device { .. })
+        || data.storage == StorageFact::Sparse
+        || match &data.kind {
+            ValueKindFact::Unknown | ValueKindFact::Logical => false,
+            ValueKindFact::Numeric(number) => {
+                !matches!(number.class, NumericClass::Double | NumericClass::Single)
+                    || number.domain != runmat_types::NumericDomain::Real
+            }
+            _ => true,
+        }
+}
+
+fn check_dlarray_data(
+    fact: &ValueFact,
+    index: usize,
+    diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
+) {
+    let ValueKindFact::Object(object) = &fact.kind else {
+        return;
+    };
+    if object.runtime_class.as_ref() != Some(&standard::DL_ARRAY.owned()) {
+        return;
+    }
+    let Some(data) = object.properties.get(crate::DLARRAY_DATA_PROPERTY) else {
+        if object.properties_complete {
+            diagnostics.push(argument_error(
+                "RM-DL-DLGRADIENT-DATA",
+                "dlarray is missing Data",
+                index,
+            ));
+        }
+        return;
+    };
+    if matches!(data.residency, ResidencyFact::Device { .. }) {
+        diagnostics.push(argument_error(
+            "RM-DL-DLGRADIENT-RESIDENCY",
+            "provider-resident dlarray Data cannot be differentiated by the host tape",
+            index,
+        ));
+    } else if data.storage == StorageFact::Sparse {
+        diagnostics.push(argument_error(
+            "RM-DL-DLGRADIENT-STORAGE",
+            "sparse dlarray Data cannot be differentiated by the host tape",
+            index,
+        ));
+    } else if known_unsupported_data(data) {
+        diagnostics.push(argument_error(
+            "RM-DL-DLGRADIENT-CLASS",
+            "dlarray Data must be real double, single, or logical host data",
+            index,
+        ));
+    }
+}
+
 fn gradient_for_target(target: &ValueFact) -> ValueFact {
     let ValueKindFact::Object(object) = &target.kind else {
         return ValueFact::unknown(DynamicReason::RuntimeValue);
@@ -26,19 +81,29 @@ fn gradient_for_target(target: &ValueFact) -> ValueFact {
     if object.runtime_class.as_ref() != Some(&standard::DL_ARRAY.owned()) {
         return ValueFact::unknown(DynamicReason::RuntimeValue);
     }
+    if object.properties_complete && !object.properties.contains_key(crate::DLARRAY_DATA_PROPERTY) {
+        return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
+    }
     let mut properties = BTreeMap::new();
     if let Some(data) = object.properties.get(crate::DLARRAY_DATA_PROPERTY) {
-        let gradient_data = if matches!(&data.kind, ValueKindFact::Logical) {
-            ValueFact::proven(
+        let gradient_data = match &data.kind {
+            _ if known_unsupported_data(data) => {
+                ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
+            }
+            ValueKindFact::Numeric(number) => ValueFact::proven(
+                ValueKindFact::Numeric(*number),
+                data.shape.clone(),
+                StorageFact::Dense,
+            ),
+            ValueKindFact::Logical => ValueFact::proven(
                 ValueKindFact::Numeric(runmat_types::NumericFact {
                     class: NumericClass::Double,
                     domain: runmat_types::NumericDomain::Real,
                 }),
                 data.shape.clone(),
                 StorageFact::Dense,
-            )
-        } else {
-            data.clone()
+            ),
+            _ => ValueFact::unknown(DynamicReason::RuntimeValue),
         };
         properties.insert(crate::DLARRAY_DATA_PROPERTY.into(), gradient_data);
     }
@@ -92,6 +157,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 0,
             ));
         }
+        check_dlarray_data(loss, 0, &mut diagnostics);
     }
     let mut outputs = Vec::with_capacity(targets);
     for (index, target) in request.arguments.iter().enumerate().skip(1) {
@@ -105,22 +171,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 index,
             ));
         }
-        if let ValueKindFact::Object(object) = &target.kind {
-            if object.runtime_class.as_ref() == Some(&standard::DL_ARRAY.owned()) {
-                if let Some(data) = object.properties.get(crate::DLARRAY_DATA_PROPERTY) {
-                    if data.numeric().is_some_and(|number| {
-                        !matches!(number.class, NumericClass::Double | NumericClass::Single)
-                            || number.domain != runmat_types::NumericDomain::Real
-                    }) {
-                        diagnostics.push(argument_error(
-                            "RM-DL-DLGRADIENT-CLASS",
-                            "dlarray targets must contain double or single differentiable Data",
-                            index,
-                        ));
-                    }
-                }
-            }
-        }
+        check_dlarray_data(target, index, &mut diagnostics);
         outputs.push(gradient_for_target(target));
     }
     finish_fixed_outputs(entry, request, outputs, diagnostics)
