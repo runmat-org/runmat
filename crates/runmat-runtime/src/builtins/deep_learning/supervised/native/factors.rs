@@ -41,7 +41,12 @@ fn options(role: ParameterRole) -> (O, O) {
     }
 }
 
-fn scalar(layer: &ObjectInstance, option: O, function: &'static str) -> BuiltinResult<f64> {
+fn scalar(
+    layer: &ObjectInstance,
+    option: O,
+    default: f64,
+    function: &'static str,
+) -> BuiltinResult<f64> {
     let mut found = None;
     for (name, value) in &layer.properties {
         if O::from_name(name) != Some(option) {
@@ -65,7 +70,7 @@ fn scalar(layer: &ObjectInstance, option: O, function: &'static str) -> BuiltinR
         }
         found = Some(decoded[0]);
     }
-    Ok(found.unwrap_or(1.0))
+    Ok(found.unwrap_or(default))
 }
 
 impl FactorPlan {
@@ -76,9 +81,14 @@ impl FactorPlan {
                 unreachable!("canonical parameter view admitted layer")
             };
             let (learning, l2) = options(row.key.role);
+            let default_l2 = if row.key.role == ParameterRole::Bias {
+                0.0
+            } else {
+                1.0
+            };
             let factors = Factors {
-                learning: scalar(layer, learning, function)?,
-                l2: scalar(layer, l2, function)?,
+                learning: scalar(layer, learning, 1.0, function)?,
+                l2: scalar(layer, l2, default_l2, function)?,
             };
             values.insert(row.key, factors);
         }
@@ -117,6 +127,8 @@ mod tests {
         let rows = parameters::view_layers(&layers, "test").unwrap();
         assert_eq!(plan.get(&rows[0].key, "test").unwrap().learning, 0.25);
         assert_eq!(plan.get(&rows[1].key, "test").unwrap().learning, 1.0);
+        assert_eq!(plan.get(&rows[0].key, "test").unwrap().l2, 1.0);
+        assert_eq!(plan.get(&rows[1].key, "test").unwrap().l2, 0.0);
         let Value::Object(layer) = &mut layers[1] else {
             panic!("dense layer expected")
         };

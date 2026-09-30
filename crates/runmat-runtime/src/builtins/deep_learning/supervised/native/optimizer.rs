@@ -50,7 +50,6 @@ impl NativeOptimizer {
         prepared_sources: &[(ParameterKey, Tensor)],
         gradients: Vec<(ParameterKey, Tensor)>,
         config: &TrainingConfig,
-        l2_regularization: f64,
         iteration: usize,
         function: &'static str,
     ) -> BuiltinResult<Vec<ParameterUpdate>> {
@@ -133,7 +132,7 @@ impl NativeOptimizer {
         let mut updates = Vec::with_capacity(admitted.len());
         for (key, value, gradient, dtype) in admitted {
             let factors = self.factors.get(&key, function)?;
-            let l2 = l2_regularization * factors.l2;
+            let l2 = config.l2_regularization * factors.l2;
             if !l2.is_finite() || l2 < 0.0 {
                 return Err(fail(function, "effective L2 factor is invalid"));
             }
@@ -304,8 +303,30 @@ mod tests {
             gradient_decay_factor: 0.9,
             squared_gradient_decay_factor: 0.999,
             epsilon: 1.0e-8,
+            l2_regularization: 0.0001,
             shuffle: ShuffleMode::Never,
+            verbose: false,
         }
+    }
+
+    #[test]
+    fn l2_regularization_adds_weight_decay_to_native_sgdm_gradient() {
+        let mut first = [0.0_f64];
+        let mut second = [];
+        let updated = step_values(
+            &[2.0_f64],
+            &[0.0_f64],
+            &mut first,
+            &mut second,
+            &config(Solver::Sgdm),
+            1.0,
+            0.5,
+            1,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(updated, vec![1.9]);
+        assert_eq!(first, [-0.1]);
     }
 
     #[test]

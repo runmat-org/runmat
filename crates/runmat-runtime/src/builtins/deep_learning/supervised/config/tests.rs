@@ -22,7 +22,6 @@ fn training_controls_have_one_typed_admission_authority() {
     );
     assert!(TrainingConfig::from_value(&valid, "trainnet").is_ok());
     for extra in [
-        ("L2Regularization", Value::Num(0.01)),
         ("ValidationData", Value::Num(1.0)),
         ("LearnRateSchedule", Value::String("piecewise".into())),
         ("GradientThreshold", Value::Num(1.0)),
@@ -35,6 +34,13 @@ fn training_controls_have_one_typed_admission_authority() {
             .unwrap();
         assert!(error.message().contains(extra.0), "{error}");
     }
+    let nonzero_l2 = options("sgdm", &[("L2Regularization", Value::Num(0.01))]);
+    assert_eq!(
+        TrainingConfig::from_value(&nonzero_l2, "trainnet")
+            .unwrap()
+            .l2_regularization,
+        0.01
+    );
 }
 
 #[test]

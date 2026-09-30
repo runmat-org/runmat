@@ -25,7 +25,7 @@ use super::{
     gradients::canonical_gradients,
     loss,
     optimizer::NativeOptimizer,
-    resources,
+    progress, resources,
 };
 use model::{
     execution::host::network::{self, HostValue},
@@ -265,7 +265,6 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
                 &original_parameters,
                 gradients,
                 &config,
-                0.0,
                 iteration,
                 function,
             )?;
@@ -278,7 +277,9 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
             epoch_loss += loss.value * indices.len() as f64;
             seen += indices.len();
         }
-        losses.push(epoch_loss / seen as f64);
+        let epoch_loss = epoch_loss / seen as f64;
+        losses.push(epoch_loss);
+        progress::epoch(epoch + 1, config.max_epochs, epoch_loss, config.verbose);
     }
     admit_training_cancellation(function)?;
     attach_training_result(

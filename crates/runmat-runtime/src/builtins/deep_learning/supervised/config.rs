@@ -59,10 +59,7 @@ impl<'a> TrainingOptionsView<'a> {
                 O::Plots | O::LearnRateSchedule => {
                     scalar_text(value, function)?.eq_ignore_ascii_case("none")
                 }
-                O::L2Regularization => {
-                    let values = numeric_values(value, function, key.canonical_name())?;
-                    values.len() == 1 && values[0] == 0.0
-                }
+                O::L2Regularization => true,
                 O::ValidationData
                 | O::ValidationFrequency
                 | O::LearnRateDropPeriod
@@ -114,7 +111,9 @@ pub(super) struct TrainingConfig {
     pub(super) gradient_decay_factor: f64,
     pub(super) squared_gradient_decay_factor: f64,
     pub(super) epsilon: f64,
+    pub(super) l2_regularization: f64,
     pub(super) shuffle: ShuffleMode,
+    pub(super) verbose: bool,
 }
 
 impl TrainingConfig {
@@ -193,10 +192,21 @@ impl TrainingConfig {
                 function,
             )?,
             epsilon: positive_option_f64(&options, O::Epsilon, 1.0e-8, function)?,
+            l2_regularization: nonnegative_option_f64(
+                &options,
+                O::L2Regularization,
+                0.0001,
+                function,
+            )?,
             shuffle: shuffle_mode(
                 &text_property(&options, O::Shuffle, "once", function)?,
                 function,
             )?,
+            verbose: options
+                .get(O::Verbose)
+                .map(|value| super::super::logical_scalar(value, function, "Verbose"))
+                .transpose()?
+                .unwrap_or(true),
         })
     }
 }
@@ -265,6 +275,28 @@ fn positive_option_f64(
                 return Err(deep_learning_error(
                     function,
                     format!("{function}: {name} must be a positive numeric scalar"),
+                ));
+            }
+            Ok(values[0])
+        }
+        None => Ok(default),
+    }
+}
+
+fn nonnegative_option_f64(
+    options: &TrainingOptionsView<'_>,
+    key: O,
+    default: f64,
+    function: &'static str,
+) -> BuiltinResult<f64> {
+    let name = key.canonical_name();
+    match options.get(key) {
+        Some(value) => {
+            let values = numeric_values(value, function, name)?;
+            if values.len() != 1 || !values[0].is_finite() || values[0] < 0.0 {
+                return Err(deep_learning_error(
+                    function,
+                    format!("{function}: {name} must be a finite nonnegative scalar"),
                 ));
             }
             Ok(values[0])

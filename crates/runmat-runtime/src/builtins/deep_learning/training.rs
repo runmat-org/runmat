@@ -52,6 +52,7 @@ pub(super) async fn training_options_builtin(
         ),
         ("Shuffle".to_string(), Value::String("once".into())),
         ("Verbose".to_string(), Value::Bool(true)),
+        ("L2Regularization".to_string(), Value::Num(0.0001)),
         ("Plots".to_string(), Value::String("none".into())),
         (
             "ExecutionEnvironment".to_string(),

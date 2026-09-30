@@ -2429,6 +2429,345 @@ fn supervised_training_gathers_only_consumed_nested_learnables() {
 }
 
 #[test]
+fn trainnet_single_precision_conv_pool_dense_step_uses_shared_kernels() {
+    let input = block_on(sequence_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+    let conv = block_on(convolution_1d_layer_builtin(
+        Value::Num(1.0),
+        Value::Num(1.0),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1, 1]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let pool = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
+    let dense = block_on(fully_connected_layer_builtin(
+        Value::Num(1.0),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let network = block_on(dlnetwork_builtin(vec![Value::Cell(
+        CellArray::new(vec![input, conv, pool, dense], 4, 1).unwrap(),
+    )]))
+    .unwrap();
+    let predictor = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![1, 2, 3]).unwrap()),
+        vec![Value::String("CBT".into())],
+    ))
+    .unwrap();
+    let target = Value::Tensor(Tensor::from_f32(vec![0.0, 0.0], vec![2, 1]).unwrap());
+    let options = block_on(training_options_builtin(
+        Value::String("sgdm".into()),
+        vec![
+            Value::String("MaxEpochs".into()),
+            Value::Num(1.0),
+            Value::String("MiniBatchSize".into()),
+            Value::Num(2.0),
+            Value::String("InitialLearnRate".into()),
+            Value::Num(0.01),
+            Value::String("Momentum".into()),
+            Value::Num(0.0),
+            Value::String("Shuffle".into()),
+            Value::String("never".into()),
+        ],
+    ))
+    .unwrap();
+    let trained = block_on(trainnet_builtin(vec![
+        predictor.clone(),
+        target,
+        network,
+        Value::String("mse".into()),
+        options,
+    ]))
+    .unwrap();
+    let Value::Object(trained_object) = &trained else {
+        panic!("expected trained dlnetwork")
+    };
+    let Some(Value::Struct(info)) = trained_object.properties.get("TrainingInfo") else {
+        panic!("expected training information")
+    };
+    let Some(Value::Tensor(history)) = info.fields.get("TrainingLoss") else {
+        panic!("expected training loss")
+    };
+    assert!((history.materialize_f64()[0] - 12.5).abs() < 1.0e-4);
+    let prediction = block_on(forward_builtin(trained, predictor, vec![])).unwrap();
+    let Value::Object(prediction) = prediction else {
+        panic!("formatted predictor should produce dlarray")
+    };
+    let Some(Value::Tensor(scores)) = prediction.properties.get("Data") else {
+        panic!("expected native-class prediction data")
+    };
+    assert_eq!(scores.shape, vec![1, 2]);
+    assert_eq!(scores.numeric_dtype(), NumericDType::F32);
+    let scores = scores.as_f32_slice().unwrap();
+    assert!(scores[0] < 3.0 && scores[0] > 0.0, "{scores:?}");
+    assert!(scores[1] < 4.0 && scores[1] > 0.0, "{scores:?}");
+}
+
+#[test]
+fn trainnet_recurrent_modes_preserve_canonical_state_across_minibatches() {
+    let predictor = block_on(dlarray_builtin(
+        Value::Tensor(Tensor::from_f32(vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6], vec![1, 2, 3]).unwrap()),
+        vec![Value::String("CBT".into())],
+    ))
+    .unwrap();
+    for bidirectional in [false, true] {
+        for sequence in [false, true] {
+            let input = block_on(sequence_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+            let mode = if sequence { "sequence" } else { "last" };
+            let recurrent_options = vec![
+                Value::String("OutputMode".into()),
+                Value::String(mode.into()),
+            ];
+            let recurrent = if bidirectional {
+                block_on(bilstm_layer_builtin(Value::Num(1.0), recurrent_options)).unwrap()
+            } else {
+                block_on(lstm_layer_builtin(Value::Num(1.0), recurrent_options)).unwrap()
+            };
+            let network = block_on(dlnetwork_builtin(vec![Value::Cell(
+                CellArray::new(vec![input, recurrent], 2, 1).unwrap(),
+            )]))
+            .unwrap();
+            let Value::Object(initial) = &network else {
+                panic!("expected dlnetwork")
+            };
+            let initial_state = initial
+                .properties
+                .get("_State")
+                .expect("canonical recurrent State")
+                .clone();
+            let channels = if bidirectional { 2 } else { 1 };
+            let target_shape = if sequence {
+                vec![2, channels, 3]
+            } else {
+                vec![2, channels]
+            };
+            let target = Value::Tensor(
+                Tensor::from_f32(vec![0.0; target_shape.iter().product()], target_shape).unwrap(),
+            );
+            let options = block_on(training_options_builtin(
+                Value::String("sgdm".into()),
+                vec![
+                    Value::String("MaxEpochs".into()),
+                    Value::Num(1.0),
+                    Value::String("MiniBatchSize".into()),
+                    Value::Num(2.0),
+                    Value::String("InitialLearnRate".into()),
+                    Value::Num(0.005),
+                    Value::String("Momentum".into()),
+                    Value::Num(0.0),
+                    Value::String("Shuffle".into()),
+                    Value::String("never".into()),
+                ],
+            ))
+            .unwrap();
+            let trained = block_on(trainnet_builtin(vec![
+                predictor.clone(),
+                target,
+                network,
+                Value::String("mse".into()),
+                options,
+            ]))
+            .unwrap();
+            let Value::Object(trained) = trained else {
+                panic!("expected trained dlnetwork")
+            };
+            assert_eq!(trained.properties.get("_State"), Some(&initial_state));
+            let Some(Value::Struct(info)) = trained.properties.get("TrainingInfo") else {
+                panic!("expected training information")
+            };
+            let Some(Value::Tensor(history)) = info.fields.get("TrainingLoss") else {
+                panic!("expected training loss history")
+            };
+            assert!(history.materialize_f64()[0].is_finite());
+        }
+    }
+}
+
+#[test]
+fn train_network_normalization_activations_softmax_matches_classification_oracle() {
+    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let normalization = block_on(layer_normalization_layer_builtin(vec![
+        Value::String("Scale".into()),
+        Value::Tensor(Tensor::from_f32(vec![1.0, 1.0], vec![2, 1]).unwrap()),
+        Value::String("Offset".into()),
+        Value::Tensor(Tensor::from_f32(vec![0.0, 0.0], vec![2, 1]).unwrap()),
+    ]))
+    .unwrap();
+    let relu = block_on(relu_layer_builtin(vec![])).unwrap();
+    let elu = block_on(elu_layer_builtin(vec![])).unwrap();
+    let dense = block_on(fully_connected_layer_builtin(
+        Value::Num(2.0),
+        vec![
+            Value::String("Weights".into()),
+            Value::Tensor(Tensor::from_f32(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+            Value::String("Bias".into()),
+            Value::Tensor(Tensor::from_f32(vec![0.0, 0.0], vec![2, 1]).unwrap()),
+        ],
+    ))
+    .unwrap();
+    let softmax = block_on(softmax_layer_builtin(vec![])).unwrap();
+    let classification = block_on(classification_layer_builtin(vec![])).unwrap();
+    let layers = Value::Cell(
+        CellArray::new(
+            vec![
+                input,
+                normalization,
+                relu,
+                elu,
+                dense,
+                softmax,
+                classification,
+            ],
+            7,
+            1,
+        )
+        .unwrap(),
+    );
+    let predictor = Value::Tensor(Tensor::from_f32(vec![3.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap());
+    let labels = Value::StringArray(
+        StringArray::new(vec!["left".into(), "right".into()], vec![2, 1]).unwrap(),
+    );
+    let options = block_on(training_options_builtin(
+        Value::String("sgdm".into()),
+        vec![
+            Value::String("MaxEpochs".into()),
+            Value::Num(1.0),
+            Value::String("MiniBatchSize".into()),
+            Value::Num(2.0),
+            Value::String("InitialLearnRate".into()),
+            Value::Num(0.01),
+            Value::String("Momentum".into()),
+            Value::Num(0.0),
+            Value::String("Shuffle".into()),
+            Value::String("never".into()),
+            Value::String("Verbose".into()),
+            Value::Bool(false),
+        ],
+    ))
+    .unwrap();
+    let trained = block_on(train_network_builtin(vec![
+        predictor, labels, layers, options,
+    ]))
+    .unwrap();
+    let Value::Object(trained) = trained else {
+        panic!("expected trained SeriesNetwork")
+    };
+    let Some(Value::Struct(info)) = trained.properties.get("TrainingInfo") else {
+        panic!("expected training information")
+    };
+    let Some(Value::Tensor(history)) = info.fields.get("TrainingLoss") else {
+        panic!("expected training loss history")
+    };
+    // With per-observation channel normalization, the two logits are close
+    // to [1, 0] and [0, 1]. The first cross-entropy is -ln(sigmoid(1)).
+    let expected = (1.0_f64 + (-1.0_f64).exp()).ln();
+    assert!((history.materialize_f64()[0] - expected).abs() < 1.0e-3);
+}
+
+#[test]
+fn supervised_verbose_controls_epoch_console_reporting() {
+    for verbose in [false, true] {
+        let options = block_on(training_options_builtin(
+            Value::String("sgdm".into()),
+            vec![
+                Value::String("MaxEpochs".into()),
+                Value::Num(1.0),
+                Value::String("MiniBatchSize".into()),
+                Value::Num(2.0),
+                Value::String("Verbose".into()),
+                Value::Bool(verbose),
+            ],
+        ))
+        .unwrap();
+        let capture = crate::console::begin_capture();
+        block_on(train_network_builtin(vec![
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
+            regression_training_layers(),
+            options,
+        ]))
+        .unwrap();
+        let console = capture.finish();
+        if verbose {
+            assert!(console.contains("Epoch 1/1: training loss "), "{console}");
+        } else {
+            assert!(console.is_empty(), "{console}");
+        }
+    }
+}
+
+#[test]
+fn supervised_l2_regularizes_weights_but_not_default_bias() {
+    let Value::Cell(mut layers) = regression_training_layers() else {
+        panic!("expected regression layers")
+    };
+    let Value::Object(dense) = &mut layers.data[1] else {
+        panic!("expected fully connected layer")
+    };
+    dense.properties.insert(
+        "Weights".into(),
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+    );
+    let options = block_on(training_options_builtin(
+        Value::String("sgdm".into()),
+        vec![
+            Value::String("MaxEpochs".into()),
+            Value::Num(1.0),
+            Value::String("MiniBatchSize".into()),
+            Value::Num(1.0),
+            Value::String("InitialLearnRate".into()),
+            Value::Num(0.1),
+            Value::String("Momentum".into()),
+            Value::Num(0.0),
+            Value::String("L2Regularization".into()),
+            Value::Num(0.5),
+            Value::String("Verbose".into()),
+            Value::Bool(false),
+        ],
+    ))
+    .unwrap();
+    let trained = block_on(train_network_builtin(vec![
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
+        Value::Cell(layers),
+        options,
+    ]))
+    .unwrap();
+    let Value::Object(network) = trained else {
+        panic!("expected trained network")
+    };
+    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+        panic!("expected canonical Layers")
+    };
+    let Value::Object(dense) = &layers.data[1] else {
+        panic!("expected trained fully connected layer")
+    };
+    let Some(Value::Tensor(weights)) = dense.properties.get("Weights") else {
+        panic!("expected trained Weights")
+    };
+    let Some(Value::Tensor(bias)) = dense.properties.get("Bias") else {
+        panic!("expected trained Bias")
+    };
+    assert!((weights.as_f64_slice().unwrap()[0] - 0.95).abs() < 1.0e-12);
+    assert_eq!(bias.as_f64_slice().unwrap()[0], 0.0);
+    let Some(Value::Struct(info)) = network.properties.get("TrainingInfo") else {
+        panic!("expected training information")
+    };
+    let Some(Value::Tensor(history)) = info.fields.get("TrainingLoss") else {
+        panic!("expected data-only loss history")
+    };
+    assert_eq!(history.as_f64_slice().unwrap(), &[0.0]);
+}
+
+#[test]
 fn combvec_matches_neural_network_column_order() {
     let out = block_on(combvec_builtin(vec![
         Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap()),

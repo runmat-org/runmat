@@ -7,6 +7,7 @@ pub(super) mod gradients;
 pub(super) mod labels;
 pub(super) mod loss;
 pub(super) mod optimizer;
+pub(super) mod progress;
 pub(super) mod resources;
 pub(super) mod target;
 pub(super) mod trainer;
