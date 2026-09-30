@@ -174,7 +174,7 @@ fn text_choice(
     }
 }
 
-fn is_callable(value: &Value) -> bool {
+pub(in crate::builtins::deep_learning) fn is_callable(value: &Value) -> bool {
     matches!(
         value,
         Value::FunctionHandle(_)

@@ -2,7 +2,7 @@ use super::*;
 use runmat_builtins::{DeepLearningLayerKind, DeepLearningLayerOption};
 use std::collections::BTreeMap;
 
-mod options;
+pub(in crate::builtins::deep_learning) mod options;
 
 pub(in crate::builtins) fn layer_object(
     class_name: runmat_types::StaticClassIdentity,

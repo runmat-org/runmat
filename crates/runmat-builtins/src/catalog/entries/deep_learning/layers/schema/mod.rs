@@ -6,6 +6,7 @@
 mod axes;
 mod identity;
 mod options;
+mod properties;
 
 pub use axes::*;
 pub use identity::DeepLearningLayerKind;
@@ -13,6 +14,7 @@ pub use options::{
     DeepLearningLayerOption, DeepLearningNormalizationAxes, LayerOptionDefault,
     LayerOptionExecution,
 };
+pub use properties::DeepLearningLayerStructuralProperty;
 
 #[cfg(test)]
 mod tests {
@@ -92,5 +94,20 @@ mod tests {
             O::Weights.execution_for(K::Convolution1D),
             LayerOptionExecution::PendingExecution
         );
+    }
+
+    #[test]
+    fn read_only_structural_properties_are_distinct_from_options() {
+        use DeepLearningLayerKind as K;
+        use DeepLearningLayerStructuralProperty as P;
+        assert!(
+            P::from_name("InputSize").is_some_and(|property| property.belongs_to(K::FeatureInput))
+        );
+        assert!(!P::from_name("InputSize")
+            .is_some_and(|property| property.belongs_to(K::FullyConnected)));
+        assert!(K::FullyConnected.option("InputSize").is_some());
+        assert!(P::from_name("NumHiddenUnits").is_some_and(|property| property.belongs_to(K::Lstm)));
+        assert!(!P::from_name("NumHiddenUnits")
+            .is_some_and(|property| property.belongs_to(K::Convolution1D)));
     }
 }
