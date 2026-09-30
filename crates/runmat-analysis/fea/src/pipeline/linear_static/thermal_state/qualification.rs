@@ -1,8 +1,11 @@
 //! Experimental, physical solid qualification of the solved-temperature transfer path.
 //!
-//! These are continuum patch solutions, not beam benchmarks or mesh-convergence evidence.
+//! The retained tetrahedron cases are continuum patches, not beam benchmarks. The
+//! `continuum` child separately verifies affine Tet4/Tet10 mesh refinement against an
+//! independent nonuniform-temperature thermoelastic solution.
 //! Temperatures come from a thermal solve; no structural answer is injected into the state.
 
+mod continuum;
 mod downstream;
 mod modal;
 mod prepared;
