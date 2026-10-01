@@ -109,62 +109,46 @@ pub(super) async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Optio
         normalization: CorrcoefNormalization::Unbiased,
         rows: args.rows,
     };
+    let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
+    let output_width = if maybe_second_handle.is_some() {
+        if elements == 1 {
+            1
+        } else {
+            2
+        }
+    } else {
+        match first_handle.shape() {
+            [] | [_] => 1,
+            [rows, columns] if *rows == 1 || *columns == 1 => 1,
+            [_, columns] => *columns,
+            _ => unreachable!("preflight rejected rank above two"),
+        }
+    };
+    let borrowed: Vec<_> = std::iter::once(first_handle)
+        .chain(maybe_second_handle)
+        .collect();
+    let protected: Vec<_> = borrowed
+        .iter()
+        .copied()
+        .chain(std::iter::once(&matrix_handle))
+        .collect();
 
     match provider.corrcoef(&matrix_handle, &options).await {
         Ok(result) => {
-            let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
             let Some(mut result) = precision
-                .align_provider(provider, result)
-                .await
-                .map_err(|error| corrcoef_provider_error(error.into()))?
+                .align_provider(
+                    provider,
+                    result,
+                    &[output_width, output_width],
+                    &protected,
+                    |reason| corrcoef_internal_error(format!("corrcoef: {reason}")),
+                    corrcoef_provider_error,
+                )
+                .await?
             else {
                 return Ok(None);
             };
-            let output_width = if maybe_second_handle.is_some() {
-                if elements == 1 {
-                    1
-                } else {
-                    2
-                }
-            } else {
-                match first_handle.shape() {
-                    [] | [_] => 1,
-                    [rows, columns] if *rows == 1 || *columns == 1 => 1,
-                    [_, columns] => *columns,
-                    _ => unreachable!("preflight rejected rank above two"),
-                }
-            };
-            let protected: Vec<_> = std::iter::once(first_handle)
-                .chain(maybe_second_handle)
-                .collect();
-            let valid = gpu_helpers::unary_gpu_output_matches_shape(
-                &result,
-                first_handle,
-                provider,
-                &[output_width, output_width],
-                gpu_helpers::UnaryGpuOutputContract {
-                    storage: GpuTensorStorage::Real,
-                    precision: Some(precision.provider_precision()),
-                    integer: None,
-                    logical: false,
-                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
-                },
-            ) && protected
-                .iter()
-                .all(|input| !result.shares_allocation_with(input));
-            if !valid {
-                let mut error =
-                    corrcoef_internal_error("corrcoef: invalid provider correlation output");
-                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                return Err(gpu_helpers::reject_gpu_output(result, error));
-            }
-            if let Err(error) = result.allocation_lease().validate_live() {
-                let error = corrcoef_provider_error(
-                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
-                );
-                return Err(gpu_helpers::reject_gpu_output(result, error));
-            }
-            gpu_helpers::propagate_output_provenance(&mut result, protected).map_err(|error| {
+            gpu_helpers::propagate_output_provenance(&mut result, borrowed).map_err(|error| {
                 corrcoef_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
                     error,
                 ))

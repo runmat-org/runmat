@@ -1,11 +1,13 @@
 //! Output precision shared by the covariance and correlation families.
 //! Options and observation weights do not promote the observation data class.
 
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderExecutionError, ProviderPrecision,
+};
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
-use crate::builtins::common::gpu_helpers;
-use crate::{build_runtime_error, BuiltinResult};
+use crate::builtins::common::gpu_helpers::{self, GpuOutputAliasPolicy, UnaryGpuOutputContract};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CovariancePrecision {
@@ -86,14 +88,57 @@ impl CovariancePrecision {
         }
     }
 
-    /// Preserve a successful provider computation and cast its output on the
-    /// same owner when the hook's physical class differs. Typed unsupported
-    /// casts admit the existing host path; execution faults do not.
+    /// Validate a provider result before letting a cast hook read it. Both the
+    /// raw result and any converted result must retain the expected geometry,
+    /// real floating class, exact owner, live allocation, and distinct storage.
+    /// Typed unsupported casts admit the existing host boundary; execution
+    /// faults and malformed results never do.
     pub(super) async fn align_provider(
         self,
         provider: &'static dyn AccelProvider,
         result: GpuTensorHandle,
-    ) -> Result<Option<GpuTensorHandle>, anyhow::Error> {
+        expected_shape: &[usize],
+        protected: &[&GpuTensorHandle],
+        invalid_output: impl Fn(&str) -> RuntimeError,
+        provider_error: impl Fn(ProviderExecutionError) -> RuntimeError,
+    ) -> BuiltinResult<Option<GpuTensorHandle>> {
+        let validate = |output: &GpuTensorHandle, precision: ProviderPrecision| {
+            protected.first().is_some_and(|first| {
+                gpu_helpers::unary_gpu_output_matches_shape(
+                    output,
+                    first,
+                    provider,
+                    expected_shape,
+                    UnaryGpuOutputContract {
+                        storage: GpuTensorStorage::Real,
+                        precision: Some(precision),
+                        integer: None,
+                        logical: false,
+                        alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
+                    },
+                )
+            }) && protected
+                .iter()
+                .all(|input| !output.shares_allocation_with(input))
+        };
+        let validate_live = |output: &GpuTensorHandle| -> BuiltinResult<()> {
+            output.allocation_lease().validate_live().map_err(|source| {
+                let mut error = provider_error(ProviderExecutionError::from_source(source));
+                error.gpu_gather_retry = GpuGatherRetry::Never;
+                gpu_helpers::reject_gpu_output(output.clone(), error)
+            })
+        };
+        validate_live(&result)?;
+        let raw_precision = runmat_accelerate_api::handle_precision(&result);
+        if !matches!(
+            raw_precision,
+            Some(ProviderPrecision::F32 | ProviderPrecision::F64)
+        ) || !validate(&result, raw_precision.expect("checked floating precision"))
+        {
+            let mut error = invalid_output("invalid raw provider result");
+            error.gpu_gather_retry = GpuGatherRetry::Never;
+            return Err(gpu_helpers::reject_gpu_output(result, error));
+        }
         if runmat_accelerate_api::handle_precision(&result) == Some(self.provider_precision()) {
             return Ok(Some(result));
         }
@@ -102,9 +147,19 @@ impl CovariancePrecision {
             Self::Double => provider.unary_double(&result).await,
         };
         match cast {
-            Ok(output) => Ok(Some(output)),
+            Ok(output) => {
+                validate_live(&output)?;
+                if !validate(&output, self.provider_precision())
+                    || output.shares_allocation_with(&result)
+                {
+                    let mut error = invalid_output("invalid converted provider result");
+                    error.gpu_gather_retry = GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(output, error));
+                }
+                Ok(Some(output))
+            }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-            Err(error) => Err(error),
+            Err(error) => Err(provider_error(ProviderExecutionError::from_source(error))),
         }
     }
 }

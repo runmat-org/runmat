@@ -63,6 +63,18 @@ pub(super) async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> 
         rows: args.rows,
         has_weight_vector: weight_handle.is_some(),
     };
+    let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
+    let columns = if maybe_second_handle.is_some() {
+        2
+    } else {
+        let (rows, columns) = value_rows_cols(&args.first)?;
+        covariance_column_count(rows, columns)
+    };
+    let borrowed: Vec<_> = protected
+        .iter()
+        .copied()
+        .chain(weight_handle.as_ref())
+        .collect();
 
     match provider
         .covariance(
@@ -74,52 +86,19 @@ pub(super) async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> 
         .await
     {
         Ok(result) => {
-            let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
             let Some(mut result) = precision
-                .align_provider(provider, result)
-                .await
-                .map_err(|error| cov_provider_error(error.into()))?
+                .align_provider(
+                    provider,
+                    result,
+                    &[columns, columns],
+                    &borrowed,
+                    |reason| cov_internal_error(format!("cov: {reason}")),
+                    cov_provider_error,
+                )
+                .await?
             else {
                 return Ok(None);
             };
-            let columns = if maybe_second_handle.is_some() {
-                2
-            } else {
-                let (rows, columns) = value_rows_cols(&args.first)?;
-                covariance_column_count(rows, columns)
-            };
-            let borrowed: Vec<_> = protected
-                .iter()
-                .copied()
-                .chain(weight_handle.as_ref())
-                .collect();
-            let valid = gpu_helpers::binary_gpu_output_matches(
-                &result,
-                first_handle,
-                maybe_second_handle.unwrap_or(first_handle),
-                provider,
-                &gpu_helpers::BinaryGpuOutputContract {
-                    shape: vec![columns, columns],
-                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                    precision: Some(precision.provider_precision()),
-                    integer: None,
-                    logical: false,
-                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
-                },
-            ) && borrowed
-                .iter()
-                .all(|input| !result.shares_allocation_with(input));
-            if !valid {
-                let mut error = cov_internal_error("cov: invalid provider covariance output");
-                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                return Err(gpu_helpers::reject_gpu_output(result, error));
-            }
-            if let Err(error) = result.allocation_lease().validate_live() {
-                let error = cov_provider_error(
-                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
-                );
-                return Err(gpu_helpers::reject_gpu_output(result, error));
-            }
             gpu_helpers::propagate_output_provenance(&mut result, borrowed).map_err(|error| {
                 cov_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
                     error,
