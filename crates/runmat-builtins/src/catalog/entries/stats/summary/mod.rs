@@ -10,6 +10,7 @@ mod encoding;
 mod fitdist;
 mod fitted_distribution_facts;
 mod fitted_distribution_model;
+mod kstest;
 mod mode;
 mod moment_statistics;
 mod normalize;
@@ -18,6 +19,7 @@ mod outlier_detection;
 mod pdf;
 mod random;
 mod statistical_means;
+mod tabulate;
 mod ttest2;
 
 pub use self::cdf::*;
@@ -27,6 +29,7 @@ pub use self::covariance_conversion::*;
 pub use self::distributions::*;
 pub use self::encoding::*;
 pub use self::fitdist::*;
+pub use self::kstest::*;
 pub use self::mode::*;
 pub use self::moment_statistics::*;
 pub use self::normalize::*;
@@ -35,6 +38,7 @@ pub use self::outlier_detection::*;
 pub use self::pdf::*;
 pub use self::random::*;
 pub use self::statistical_means::*;
+pub use self::tabulate::*;
 pub use self::ttest2::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
@@ -54,4 +58,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(random::ENTRIES.iter().copied());
     values.extend(statistical_means::ENTRIES.iter().copied());
     values.extend(ttest2::ENTRIES.iter().copied());
+    values.extend(kstest::ENTRIES.iter().copied());
+    values.extend(tabulate::ENTRIES.iter().copied());
 }
