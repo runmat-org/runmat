@@ -8,7 +8,6 @@ use runmat_accelerate_api::{
     ProviderPrecision, ThreadProviderGuard,
 };
 use std::collections::HashMap;
-use std::error::Error as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -157,7 +156,7 @@ impl AccelProvider for ComplexTraceProvider {
             let values: Vec<f64> = match payload.data {
                 HostNumericDataOwned::F32(data) => data.into_iter().map(f64::from).collect(),
                 HostNumericDataOwned::F64(data) => data,
-                _ => anyhow::bail!("floating diagonal required"),
+                _ => return Err(anyhow::anyhow!("floating diagonal required").into()),
             };
             let (real, imaginary) = values
                 .chunks_exact(2)
