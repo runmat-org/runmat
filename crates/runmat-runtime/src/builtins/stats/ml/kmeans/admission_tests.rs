@@ -190,7 +190,7 @@ fn typed_headers_preserve_order_and_skip_unrecognized_statset_payloads() {
         .unwrap();
     let mut statset = runmat_value::StructValue::new();
     statset.insert("LegacyField", Value::GpuTensor(ignored.handle.clone()));
-    let headers = admission::parse_option_headers(&[
+    let headers = admission::parse_option_headers(vec![
         Value::from("Distance"),
         Value::from("cityblock"),
         Value::from("Options"),
@@ -276,7 +276,7 @@ fn invalid_text_control_precedes_any_resident_download() {
     let resident = owner
         .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
-    let headers = admission::parse_option_headers(&[
+    let headers = admission::parse_option_headers(vec![
         Value::from("Distance"),
         Value::GpuTensor(resident.handle.clone()),
     ])
@@ -294,7 +294,7 @@ fn host_wide_start_is_checked_before_any_download() {
         )
         .unwrap(),
     );
-    let headers = admission::parse_option_headers(&[Value::from("Start"), start]).unwrap();
+    let headers = admission::parse_option_headers(vec![Value::from("Start"), start]).unwrap();
     assert!(admission::admit_option_values(headers).is_err());
     let aligned = Value::Tensor(
         Tensor::new_integer(
@@ -303,6 +303,6 @@ fn host_wide_start_is_checked_before_any_download() {
         )
         .unwrap(),
     );
-    let headers = admission::parse_option_headers(&[Value::from("Start"), aligned]).unwrap();
+    let headers = admission::parse_option_headers(vec![Value::from("Start"), aligned]).unwrap();
     assert!(admission::admit_option_values(headers).is_ok());
 }

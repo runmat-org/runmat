@@ -28,8 +28,6 @@ mod tests;
 use crate::builtins::common::random;
 #[cfg(test)]
 use admission::is_empty_option_value;
-#[cfg(test)]
-use admission::parse_option_headers;
 use admission::{BorrowedOperands, OptionHeader};
 use compute::run_kmeans;
 use geometry::{
@@ -130,7 +128,7 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
     if crate::output_count::current_output_count().is_some_and(|count| count > 4) {
         return Err(invalid("kmeans: too many output arguments; maximum is 4"));
     }
-    let headers = admission::parse_option_headers(&rest)?;
+    let headers = admission::parse_option_headers(rest)?;
     preflight_observations(&x)?;
     preflight_cluster_count(&k)?;
     ensure_kmeans_extensions(&x, &k, &headers)?;
@@ -157,6 +155,11 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
     let result = run_kmeans(&data, k, &options)?;
     let value = outputs_for_count(result, &data)?;
     restore_kmeans_value(value, output_source.as_ref(), &borrowed)
+}
+
+#[cfg(test)]
+fn parse_option_headers(args: &[Value]) -> BuiltinResult<Vec<OptionHeader>> {
+    admission::parse_option_headers(args.to_vec())
 }
 
 fn value_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {

@@ -48,38 +48,41 @@ pub(super) enum StatsetInput {
     TolFun(Value),
 }
 
-pub(super) fn parse_option_headers(args: &[Value]) -> BuiltinResult<Vec<OptionHeader>> {
+pub(super) fn parse_option_headers(args: Vec<Value>) -> BuiltinResult<Vec<OptionHeader>> {
     if !args.len().is_multiple_of(2) {
         return Err(invalid("kmeans: options must be name-value pairs"));
     }
-    args.chunks_exact(2)
-        .map(|pair| {
-            let name =
-                keyword_of(&pair[0]).ok_or_else(|| invalid("kmeans: option name must be text"))?;
-            let kind = KmeansOption::from_keyword(&name)
-                .ok_or_else(|| invalid(format!("kmeans: unsupported option '{name}'")))?;
-            let value = pair[1].clone();
-            let statset_fields = match (&kind, &value) {
-                (KmeansOption::Options, Value::Struct(value)) => Some(
-                    value
-                        .fields
-                        .iter()
-                        .filter(|(_, value)| !is_empty_option_value(value))
-                        .map(|(name, value)| StatsetHeader {
-                            kind: KmeansStatsetField::from_keyword(name),
-                            value: value.clone(),
-                        })
-                        .collect(),
-                ),
-                _ => None,
-            };
-            Ok(OptionHeader {
-                kind,
-                value,
-                statset_fields,
-            })
-        })
-        .collect()
+    let mut values = args.into_iter();
+    let mut headers = Vec::new();
+    while let Some(name_value) = values.next() {
+        let name =
+            keyword_of(&name_value).ok_or_else(|| invalid("kmeans: option name must be text"))?;
+        let kind = KmeansOption::from_keyword(&name)
+            .ok_or_else(|| invalid(format!("kmeans: unsupported option '{name}'")))?;
+        let value = values
+            .next()
+            .ok_or_else(|| invalid("kmeans: options must be name-value pairs"))?;
+        let statset_fields = match (&kind, &value) {
+            (KmeansOption::Options, Value::Struct(value)) => Some(
+                value
+                    .fields
+                    .iter()
+                    .filter(|(_, value)| !is_empty_option_value(value))
+                    .map(|(name, value)| StatsetHeader {
+                        kind: KmeansStatsetField::from_keyword(name),
+                        value: value.clone(),
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        };
+        headers.push(OptionHeader {
+            kind,
+            value,
+            statset_fields,
+        });
+    }
+    Ok(headers)
 }
 
 /// Decode each value after compatibility admission but before provider access.
