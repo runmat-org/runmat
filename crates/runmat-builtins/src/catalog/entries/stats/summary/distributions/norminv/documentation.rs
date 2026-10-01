@@ -36,8 +36,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "norminv implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions/norminv.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Distribution semantics", location: "builtins::stats::summary::distributions::tests" }],
-        notes: &["Legacy sidecar behaviors, examples, FAQs, links and execution notes retained. The source link follows the extracted identity module. The sidecar remains until export parity is checked."],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Distribution semantics", location: "crates/runmat-runtime/src/builtins/stats/summary/distributions/tests/mod.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled distribution semantics", location: "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs" },
+        ],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),

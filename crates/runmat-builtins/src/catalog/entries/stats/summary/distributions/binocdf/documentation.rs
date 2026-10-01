@@ -38,8 +38,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "binocdf implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/distributions/binocdf.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Distribution semantics", location: "builtins::stats::summary::distributions::tests" }],
-        notes: &["Legacy sidecar behaviors, examples, FAQs, links and execution notes retained. The source link follows the extracted identity module. The sidecar remains until export parity is checked."],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Distribution semantics", location: "crates/runmat-runtime/src/builtins/stats/summary/distributions/tests/mod.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Compiled distribution semantics", location: "crates/runmat-vm/tests/stats_ml.rs" },
+        ],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
