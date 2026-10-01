@@ -3,13 +3,12 @@
 use log::warn;
 use num_complex::Complex64;
 use runmat_accelerate_api::ProviderPolyfitResult;
+#[cfg(test)]
+use runmat_builtins::POLYFIT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, POLYFIT_ERROR_INTERNAL, POLYFIT_ERROR_INVALID_ARGUMENT,
+    POLYFIT_ERROR_INVALID_INPUT, POLYFIT_INTEGER_WEIGHTS_EXTENSION, POLYFIT_INTEGER_X_EXTENSION,
+    POLYFIT_INTEGER_Y_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
@@ -23,281 +22,10 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::math::poly::type_resolvers::polyfit_type;
 
 const EPS: f64 = 1.0e-12;
 const EPS_NAN: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyfit";
-
-const POLYFIT_OUTPUT_P: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Polynomial coefficient vector ordered from highest power to constant term.",
-}];
-
-const POLYFIT_OUTPUT_PS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector ordered from highest power to constant term.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Fit statistics structure with fields R, df, and normr.",
-    },
-];
-
-const POLYFIT_OUTPUT_PSMU: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "p",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial coefficient vector ordered from highest power to constant term.",
-    },
-    BuiltinParamDescriptor {
-        name: "S",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Fit statistics structure with fields R, df, and normr.",
-    },
-    BuiltinParamDescriptor {
-        name: "mu",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Centering and scaling vector [mean(x), std(x)].",
-    },
-];
-
-const POLYFIT_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample x-values as a numeric vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample y-values as a numeric vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial degree.",
-    },
-];
-
-const POLYFIT_INPUTS_WEIGHTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample x-values as a numeric vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sample y-values as a numeric vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Polynomial degree.",
-    },
-    BuiltinParamDescriptor {
-        name: "weights",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional nonnegative weight vector matching X and Y length.",
-    },
-];
-
-const POLYFIT_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "p = polyfit(X, Y, n)",
-        inputs: &POLYFIT_INPUTS,
-        outputs: &POLYFIT_OUTPUT_P,
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = polyfit(X, Y, n, weights)",
-        inputs: &POLYFIT_INPUTS_WEIGHTS,
-        outputs: &POLYFIT_OUTPUT_P,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p, S] = polyfit(X, Y, n)",
-        inputs: &POLYFIT_INPUTS,
-        outputs: &POLYFIT_OUTPUT_PS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p, S] = polyfit(X, Y, n, weights)",
-        inputs: &POLYFIT_INPUTS_WEIGHTS,
-        outputs: &POLYFIT_OUTPUT_PS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p, S, mu] = polyfit(X, Y, n)",
-        inputs: &POLYFIT_INPUTS,
-        outputs: &POLYFIT_OUTPUT_PSMU,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[p, S, mu] = polyfit(X, Y, n, weights)",
-        inputs: &POLYFIT_INPUTS_WEIGHTS,
-        outputs: &POLYFIT_OUTPUT_PSMU,
-    },
-];
-
-const POLYFIT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYFIT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:polyfit:InvalidArgument"),
-    when: "Degree/weight arguments are malformed or unsupported.",
-    message: "polyfit: invalid argument",
-};
-
-const POLYFIT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYFIT.INVALID_INPUT",
-    identifier: Some("RunMat:polyfit:InvalidInput"),
-    when: "Input vectors or values cannot be processed for polynomial fitting.",
-    message: "polyfit: invalid input",
-};
-
-const POLYFIT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POLYFIT.INTERNAL",
-    identifier: Some("RunMat:polyfit:Internal"),
-    when: "Runtime fails while constructing fit outputs or provider payloads.",
-    message: "polyfit: internal runtime failure",
-};
-
-const POLYFIT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    POLYFIT_ERROR_INVALID_ARGUMENT,
-    POLYFIT_ERROR_INVALID_INPUT,
-    POLYFIT_ERROR_INTERNAL,
-];
-
-pub const POLYFIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POLYFIT_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &POLYFIT_ERRORS,
-};
-
-const POLYFIT_INTEGER_X_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyfit-integer-x",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyfit accepts typed-integer sample locations as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyfitIntegerXExtension"),
-};
-const POLYFIT_INTEGER_Y_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyfit-integer-y",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyfit accepts typed-integer sample values as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyfitIntegerYExtension"),
-};
-const POLYFIT_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "polyfit-integer-weights",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "polyfit accepts typed-integer observation weights as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PolyfitIntegerWeightsExtension"),
-};
-pub const POLYFIT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    POLYFIT_INTEGER_X_EXTENSION,
-    POLYFIT_INTEGER_Y_EXTENSION,
-    POLYFIT_INTEGER_WEIGHTS_EXTENSION,
-];
-
-const POLYFIT_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double sample locations; RunMat admits typed integers only after exact binary64 conversion is proved.",
-    }];
-const POLYFIT_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double fitted values; RunMat admits typed integers only at its checked least-squares boundary.",
-    }];
-const POLYFIT_INTEGER_DEGREE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public degree is a nonnegative integer scalar. Native integer scalars are decoded directly to usize and never materialized through binary64.",
-    }];
-const POLYFIT_INTEGER_WEIGHTS_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "weights",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The implemented weighted overload is a RunMat extension and typed weights cross its checked binary64 least-squares boundary.",
-    }];
-pub const POLYFIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = polyfit(integer_X,Y,n,___)",
-        inputs: &POLYFIT_INTEGER_X_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer X is independently gated before provider dispatch and QR fitting.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = polyfit(X,integer_Y,n,___)",
-        inputs: &POLYFIT_INTEGER_Y_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer Y is independently gated before provider dispatch and QR fitting.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = polyfit(X,Y,integer_n,___)",
-        inputs: &POLYFIT_INTEGER_DEGREE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Degree remains exact and structural; it selects Vandermonde width but does not enter numeric fitting data.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = polyfit(X,Y,n,integer_weights)",
-        inputs: &POLYFIT_INTEGER_WEIGHTS_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer weights are independently gated before weighted least squares.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -359,15 +87,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "polyfit",
-    category = "math/poly",
-    summary = "Fit polynomials to data using least squares.",
-    keywords = "polyfit,polynomial,least-squares,gpu",
-    accel = "sink",
-    sink = true,
-    type_resolver(polyfit_type),
-    descriptor(crate::builtins::math::poly::polyfit::POLYFIT_DESCRIPTOR),
-    extensions(crate::builtins::math::poly::polyfit::POLYFIT_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::poly::polyfit::POLYFIT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
 async fn polyfit_builtin(

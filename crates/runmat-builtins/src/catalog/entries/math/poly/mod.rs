@@ -1,4 +1,5 @@
 mod polyder;
+mod polyfit;
 mod polyint;
 mod roots;
 
@@ -6,6 +7,12 @@ pub use polyder::{
     POLYDER_CATALOG_ENTRY, POLYDER_DESCRIPTOR, POLYDER_ERROR_INTERNAL,
     POLYDER_ERROR_INVALID_ARGUMENT, POLYDER_ERROR_INVALID_INPUT, POLYDER_EXTENSIONS,
     POLYDER_INTEGER_CAPABILITIES, POLYDER_INTEGER_COEFFICIENTS_EXTENSION,
+};
+pub use polyfit::{
+    POLYFIT_CATALOG_ENTRY, POLYFIT_DESCRIPTOR, POLYFIT_ERROR_INTERNAL,
+    POLYFIT_ERROR_INVALID_ARGUMENT, POLYFIT_ERROR_INVALID_INPUT, POLYFIT_EXTENSIONS,
+    POLYFIT_INTEGER_CAPABILITIES, POLYFIT_INTEGER_WEIGHTS_EXTENSION,
+    POLYFIT_INTEGER_X_EXTENSION, POLYFIT_INTEGER_Y_EXTENSION,
 };
 pub use polyint::{
     POLYINT_CATALOG_ENTRY, POLYINT_DESCRIPTOR, POLYINT_ERROR_INVALID_ARGUMENT,
@@ -18,6 +25,7 @@ pub use roots::{
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(polyder::ENTRIES.iter().copied());
+    values.extend(polyfit::ENTRIES.iter().copied());
     values.extend(polyint::ENTRIES.iter().copied());
     values.extend(roots::ENTRIES.iter().copied());
 }
