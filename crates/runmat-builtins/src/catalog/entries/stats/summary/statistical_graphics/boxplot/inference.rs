@@ -135,13 +135,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 args.get(1)
                     .is_some_and(|second| match request.literals.literal_string_at(1) {
                         Some(name) => BoxplotOptionKind::parse(&name).is_none(),
-                        None => matches!(
-                            second.kind,
+                        None => match second.kind {
                             ValueKindFact::Numeric(_)
-                                | ValueKindFact::Logical
-                                | ValueKindFact::Cell(_)
-                                | ValueKindFact::Object(_)
-                        ),
+                            | ValueKindFact::Logical
+                            | ValueKindFact::Cell(_)
+                            | ValueKindFact::Object(_) => true,
+                            ValueKindFact::String => {
+                                second.shape.element_count().is_some_and(|count| count != 1)
+                            }
+                            ValueKindFact::Character => second
+                                .shape
+                                .known_dims()
+                                .and_then(|dims| dims.first().copied().flatten())
+                                .is_some_and(|rows| rows != 1),
+                            _ => false,
+                        },
                     });
             let option_start = if second_is_group { 2 } else { 1 };
             if second_is_group && bad_group(&args[1], first) {

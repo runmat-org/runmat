@@ -151,3 +151,42 @@ fn unknown_values_and_padded_requested_outputs_remain_conservative() {
     );
     assert!(matches!(result.outputs[1].kind, ValueKindFact::Unknown));
 }
+
+#[test]
+fn known_text_group_vectors_are_not_misdiagnosed_as_unpaired_options() {
+    for (kind, shape) in [
+        (ValueKindFact::String, vec![Some(4), Some(1)]),
+        (ValueKindFact::Character, vec![Some(4), Some(3)]),
+    ] {
+        let group = ValueFact::proven(kind, ShapeFact::from(shape), StorageFact::Dense);
+        let result = call(
+            vec![real(vec![Some(4), Some(1)]), group],
+            vec![LiteralValue::Unknown, LiteralValue::Unknown],
+            1,
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.outputs[0].numeric().unwrap().class,
+            NumericClass::Double
+        );
+    }
+}
+
+#[test]
+fn unknown_scalar_text_option_name_does_not_become_a_group() {
+    let name = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    let result = call(
+        vec![
+            real(vec![Some(4), Some(1)]),
+            name,
+            real(vec![Some(1), Some(1)]),
+        ],
+        vec![LiteralValue::Unknown; 3],
+        1,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}

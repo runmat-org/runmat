@@ -59,14 +59,23 @@ pub(super) fn group_labels(
 ) -> BuiltinResult<Vec<Option<GroupLabel>>> {
     match value {
         Value::Cell(cell) => group_labels_from_cell(cell, expected_len),
-        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => (0
-            ..expected_len)
-            .map(|row| {
-                let label = crate::builtins::table::categorical_label_at(object, row)
-                    .ok_or_else(|| invalid("boxplot: invalid categorical grouping variable"))?;
-                Ok(missing_text_label(&label).then_some(GroupLabel::Text(label)))
-            })
-            .collect(),
+        Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
+            let labels =
+                crate::builtins::table::categorical_observation_labels(object).map_err(|err| {
+                    invalid_with_source("boxplot: invalid categorical grouping variable", err)
+                })?;
+            if labels.len() != expected_len {
+                return Err(invalid("boxplot: grouping variable length must match X"));
+            }
+            Ok(labels
+                .into_iter()
+                .map(|label| {
+                    label
+                        .filter(|text| missing_text_label(text))
+                        .map(GroupLabel::Text)
+                })
+                .collect())
+        }
         Value::String(text) if expected_len == 1 => Ok(vec![Some(GroupLabel::Text(text.clone()))]),
         Value::StringArray(array) if array.data.len() == expected_len => Ok(array
             .data

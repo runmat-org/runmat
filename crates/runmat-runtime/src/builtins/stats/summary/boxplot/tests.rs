@@ -39,6 +39,36 @@ fn heterogeneous_cell_group_keys_do_not_collapse_into_display_text() {
 }
 
 #[test]
+fn categorical_group_length_uses_all_codes_not_only_sample_prefix() {
+    let mut group =
+        runmat_value::ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
+    group
+        .properties
+        .insert("Codes".to_string(), tensor(vec![1.0, 2.0, 1.0], vec![3, 1]));
+    group.properties.insert(
+        "Categories".to_string(),
+        Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+    );
+    let sample = tensor(vec![1.0, 2.0], vec![2, 1]);
+    let error = admission::admit_host_visible(&sample, Some(&Value::Object(group.clone())))
+        .expect_err("categorical group with extra code rejects at admission");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+    let error = build_box_stats(
+        sample,
+        Some(Value::Object(group)),
+        &BoxplotOptions::default(),
+    )
+    .expect_err("categorical group with extra code rejects at execution");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+}
+
+#[test]
 fn multifactor_group_identity_does_not_depend_on_joined_display_text() {
     let first =
         Value::StringArray(StringArray::new(vec!["a,b".into(), "a".into()], vec![2, 1]).unwrap());

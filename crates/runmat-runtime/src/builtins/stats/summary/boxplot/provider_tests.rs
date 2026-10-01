@@ -46,6 +46,25 @@ fn sample() -> Value {
     Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap())
 }
 
+fn categorical_group(codes: Vec<f64>, with_categories: bool) -> Value {
+    let mut object =
+        runmat_value::ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
+    let len = codes.len();
+    object.properties.insert(
+        "Codes".to_string(),
+        Value::Tensor(Tensor::new(codes, vec![len, 1]).unwrap()),
+    );
+    if with_categories {
+        object.properties.insert(
+            "Categories".to_string(),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap(),
+            ),
+        );
+    }
+    Value::Object(object)
+}
+
 #[test]
 fn host_invalid_controls_and_geometry_reject_before_download() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
@@ -119,6 +138,10 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
                 .unwrap(),
             ),
         ],
+        vec![
+            Value::GpuTensor(resident.handle.clone()),
+            categorical_group(vec![1.0, 2.0, 1.0, 2.0, 1.0], true),
+        ],
     ];
     for args in calls {
         let err = block_on(boxplot_builtin(args)).expect_err("known invalid host input");
@@ -129,6 +152,37 @@ fn host_invalid_controls_and_geometry_reject_before_download() {
         assert_eq!(resident.probe.retirements(), 0);
         assert_eq!(option.probe.retirements(), 0);
     }
+}
+
+#[test]
+fn malformed_host_categorical_keeps_table_domain_cause_without_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(RejectDownloads::default()));
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let error = block_on(boxplot_builtin(vec![
+        Value::GpuTensor(resident.handle.clone()),
+        categorical_group(vec![1.0, 2.0, 1.0, 2.0], false),
+    ]))
+    .expect_err("missing categorical categories reject at admission");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    let source = error
+        .source
+        .as_ref()
+        .and_then(|source| source.downcast_ref::<RuntimeError>())
+        .expect("original table-domain categorical error remains source");
+    assert_eq!(error.span, source.span);
+    assert_eq!(error.gpu_gather_retry, source.gpu_gather_retry);
+    resident.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(resident.probe.retirements(), 0);
 }
 
 #[test]
