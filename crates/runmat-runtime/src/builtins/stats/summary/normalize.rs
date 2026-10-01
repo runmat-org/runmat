@@ -10,13 +10,15 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
 
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 mod arguments;
 mod evaluation;
+mod output;
 use arguments::{parse_args, value_to_input};
 use evaluation::evaluate;
+use output::NormalizeOutputPlan;
 
 #[derive(Clone)]
 enum NumericInput {
@@ -111,63 +113,7 @@ struct NormalizeEval {
     s: Value,
 }
 
-struct NormalizeOutputPlan {
-    single: bool,
-    gpu_source: Option<runmat_accelerate_api::GpuTensorHandle>,
-}
-
-impl NormalizeOutputPlan {
-    fn inspect(value: &Value, _rest: &[Value]) -> BuiltinResult<Self> {
-        let single = matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
-            || matches!(value, Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
-            || matches!(value, Value::GpuTensor(handle)
-                if runmat_accelerate_api::handle_integer_type(handle).is_none()
-                    && !runmat_accelerate_api::handle_is_logical(handle)
-                    && runmat_accelerate_api::handle_precision(handle)
-                        == Some(runmat_accelerate_api::ProviderPrecision::F32));
-        let gpu_source = gpu_helpers::select_resident_output_source(
-            std::iter::once(value).filter_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle.clone()),
-                _ => None,
-            }),
-            "normalize",
-        )?;
-        Ok(Self { single, gpu_source })
-    }
-
-    fn finish(self, eval: NormalizeEval) -> BuiltinResult<NormalizeEval> {
-        Ok(NormalizeEval {
-            n: self.finish_value(eval.n)?,
-            c: self.finish_value(eval.c)?,
-            s: self.finish_value(eval.s)?,
-        })
-    }
-
-    fn finish_value(&self, value: Value) -> BuiltinResult<Value> {
-        let value = if self.single {
-            value_to_single(value)?
-        } else {
-            value
-        };
-        match &self.gpu_source {
-            Some(source) => {
-                let restored =
-                    gpu_helpers::restore_class_preserving_value(source, value, "normalize")?;
-                if runmat_accelerate_api::handle_is_explicit(source)
-                    && !matches!(restored, Value::GpuTensor(_))
-                {
-                    return Err(normalize_internal(
-                        "normalize: provider cannot preserve explicit gpuArray output residency",
-                    ));
-                }
-                Ok(restored)
-            }
-            None => Ok(value),
-        }
-    }
-}
-
-fn value_to_single(value: Value) -> BuiltinResult<Value> {
+pub(super) fn value_to_single(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Num(value) => Tensor::from_f32(vec![value as f32], vec![1, 1])
             .map(Value::Tensor)
@@ -214,23 +160,10 @@ const MAX_NORMALIZE_DIM: usize = 64;
 )]
 async fn normalize_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_compatibility(&value, &rest)?;
-    let output = NormalizeOutputPlan::inspect(&value, &rest)?;
+    let output = NormalizeOutputPlan::inspect(&value)?;
     let input = value_to_input(value).await?;
     let parsed = parse_args(&input, rest).await?;
-    let eval = output.finish(evaluate(input, parsed)?)?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.n]));
-        }
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count,
-            vec![eval.n, eval.c, eval.s],
-        ));
-    }
-    Ok(eval.n)
+    output.finish(evaluate(input, parsed)?)
 }
 
 fn ensure_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()> {

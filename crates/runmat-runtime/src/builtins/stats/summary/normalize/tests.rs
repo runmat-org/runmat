@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::common::gpu_helpers;
 use futures::executor::block_on;
 use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
@@ -94,6 +95,35 @@ fn normalize_single_input_preserves_single_outputs() {
         };
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
     }
+}
+
+#[test]
+fn normalize_restores_only_requested_resident_output_forms() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        for requested in 0..=3 {
+            let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+            let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
+            let source = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .unwrap();
+            let _outputs = crate::output_count::push_output_count(Some(requested));
+            let Value::OutputList(outputs) =
+                call(Value::GpuTensor(source.clone()), Vec::new()).unwrap()
+            else {
+                panic!("normalize must return the selected output list");
+            };
+            assert_eq!(outputs.len(), requested);
+            for output in outputs {
+                let Value::GpuTensor(result) = output else {
+                    panic!("selected normalize output must retain explicit residency");
+                };
+                assert!(runmat_accelerate_api::handle_is_explicit(&result));
+                assert_eq!(result.device_id(), source.device_id());
+                assert!(!result.shares_allocation_with(&source));
+            }
+            source.allocation_lease().validate_live().unwrap();
+        }
+    });
 }
 
 #[test]
