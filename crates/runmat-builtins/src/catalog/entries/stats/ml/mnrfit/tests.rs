@@ -148,3 +148,89 @@ fn public_options_decode_once_to_typed_identities() {
     );
     assert_eq!(MnrfitOption::from_public("bogus"), None);
 }
+
+#[test]
+fn known_invalid_option_value_kinds_and_shapes_never_prove_a_fit() {
+    let cases = [
+        (
+            "Weights",
+            ValueFact::scalar(ValueKindFact::String),
+            "RM-CATALOG-MNRFIT-OPTION-VALUE",
+        ),
+        ("Weights", numeric(2, 2), "RM-CATALOG-MNRFIT-OPTION-VALUE"),
+        (
+            "IterationLimit",
+            numeric(1, 2),
+            "RM-CATALOG-MNRFIT-OPTION-VALUE",
+        ),
+        ("Options", numeric(1, 1), "RM-CATALOG-MNRFIT-OPTION-VALUE"),
+    ];
+    for (name, value, expected) in cases {
+        let mut call = request(numeric(4, 1), numeric(4, 1), 1);
+        call.arguments
+            .push(ValueFact::scalar(ValueKindFact::String));
+        call.arguments.push(value);
+        call.literals
+            .literal_args
+            .extend([LiteralValue::String(name.into()), LiteralValue::Unknown]);
+        let result = inference::infer(&call, &MNRFIT_CATALOG_ENTRY);
+        assert!(result.diagnostics.iter().any(|item| item.code == expected));
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+}
+
+#[test]
+fn scalar_character_controls_and_unknown_values_remain_admissible() {
+    let mut call = request(numeric(4, 1), numeric(4, 1), 1);
+    call.arguments.push(ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(8)]),
+        StorageFact::Dense,
+    ));
+    call.arguments.push(ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    ));
+    call.literals.literal_args.extend([
+        LiteralValue::Character("Constant".into()),
+        LiteralValue::Character("on".into()),
+    ]);
+    let result = inference::infer(&call, &MNRFIT_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty());
+
+    call.arguments[3] = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
+    call.literals.literal_args[3] = LiteralValue::Unknown;
+    let result = inference::infer(&call, &MNRFIT_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty());
+}
+
+#[test]
+fn definite_nontext_and_nonscalar_option_names_are_diagnosed() {
+    for invalid_name in [
+        numeric(1, 1),
+        ValueFact::proven(
+            ValueKindFact::String,
+            ShapeFact::from(vec![Some(1), Some(2)]),
+            StorageFact::Dense,
+        ),
+        ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        ),
+    ] {
+        let mut call = request(numeric(4, 1), numeric(4, 1), 1);
+        call.arguments.push(invalid_name);
+        call.arguments.push(numeric(1, 1));
+        call.literals
+            .literal_args
+            .extend([LiteralValue::Unknown, LiteralValue::Unknown]);
+        let result = inference::infer(&call, &MNRFIT_CATALOG_ENTRY);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-CATALOG-MNRFIT-OPTION"));
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    }
+}

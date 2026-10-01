@@ -1,4 +1,6 @@
 //! Conservative solver results; observed category counts are generally runtime values.
+mod options;
+
 use super::MnrfitOption;
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::{
@@ -89,14 +91,37 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     for index in (2..len.saturating_sub(1)).step_by(2) {
+        if request
+            .arguments
+            .get(index)
+            .is_some_and(options::definitely_invalid_name)
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-MNRFIT-OPTION",
+                "mnrfit option names must be scalar text",
+                index,
+            ));
+        }
         let Some(name) = request.literals.literal_string_at(index) else {
             continue;
         };
-        if MnrfitOption::from_public(&name).is_none() {
+        let Some(identity) = MnrfitOption::from_public(&name) else {
             diagnostics.push(argument_error(
                 "RM-CATALOG-MNRFIT-OPTION",
                 "unknown mnrfit option",
                 index,
+            ));
+            continue;
+        };
+        if request
+            .arguments
+            .get(index + 1)
+            .is_some_and(|value| options::definitely_invalid_value(identity, value))
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-MNRFIT-OPTION-VALUE",
+                "mnrfit option value has an unsupported type or shape",
+                index + 1,
             ));
         }
     }
