@@ -46,7 +46,7 @@ pub(super) async fn parse_options(
 }
 
 async fn materialize(value: Value, borrowed: &mut BorrowedOperands) -> BuiltinResult<Value> {
-    borrowed.record(&value);
+    borrowed.record_consumed(&value);
     gather(value).await
 }
 

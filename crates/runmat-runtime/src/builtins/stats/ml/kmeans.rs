@@ -128,6 +128,12 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
     if crate::output_count::current_output_count().is_some_and(|count| count > 4) {
         return Err(invalid("kmeans: too many output arguments; maximum is 4"));
     }
+    let mut borrowed = BorrowedOperands::new();
+    borrowed.protect_value(&x);
+    borrowed.protect_value(&k);
+    for value in &rest {
+        borrowed.protect_value(value);
+    }
     let headers = admission::parse_option_headers(rest)?;
     preflight_observations(&x)?;
     preflight_cluster_count(&k)?;
@@ -136,9 +142,8 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
     if !matches!(&k, Value::GpuTensor(_)) && !admission::is_empty_numeric(&k) {
         options::parse_positive_usize(&k, "k")?;
     }
-    let mut borrowed = BorrowedOperands::new();
     let output_source = value_gpu_source(&x);
-    borrowed.record(&x);
+    borrowed.record_consumed(&x);
     let x_was_integer = typed_integer(&x);
     let x = gather(x).await?;
     if x_was_integer && !admission::numeric_value_is_exact(&x) {
@@ -146,7 +151,7 @@ async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<V
             "kmeans: typed-integer observation data must be exactly representable as double",
         ));
     }
-    borrowed.record(&k);
+    borrowed.record_consumed(&k);
     let k = gather(k).await?;
     let mut options = parse_options(options, &mut borrowed).await?;
     let data = prepare_data(x, options.distance)?;
@@ -179,18 +184,20 @@ fn restore_kmeans_value(
     };
     match value {
         Value::Tensor(_) => {
-            let protected = borrowed.handles().iter().collect::<Vec<_>>();
-            restore_one_kmeans_output(value, source, &protected)
+            let protected = borrowed.protected().iter().collect::<Vec<_>>();
+            let intent = borrowed.intent_sources().iter().collect::<Vec<_>>();
+            restore_one_kmeans_output(value, source, &protected, &intent)
         }
         Value::OutputList(values) => {
             let mut restored = Vec::with_capacity(values.len());
             for value in values {
-                let mut protected = borrowed.handles().iter().collect::<Vec<_>>();
+                let mut protected = borrowed.protected().iter().collect::<Vec<_>>();
+                let intent = borrowed.intent_sources().iter().collect::<Vec<_>>();
                 protected.extend(restored.iter().filter_map(|value| match value {
                     Value::GpuTensor(handle) => Some(handle),
                     _ => None,
                 }));
-                match restore_one_kmeans_output(value, source, &protected) {
+                match restore_one_kmeans_output(value, source, &protected, &intent) {
                     Ok(value) => restored.push(value),
                     Err(error) => return Err(retire_staged_outputs(restored, error)),
                 }
@@ -214,14 +221,15 @@ fn restore_one_kmeans_output(
     value: Value,
     source: &runmat_accelerate_api::GpuTensorHandle,
     protected: &[&runmat_accelerate_api::GpuTensorHandle],
+    intent: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let restored = match value {
         Value::Tensor(tensor) => {
-            crate::builtins::common::gpu_helpers::restore_class_preserving_value_protecting(
+            crate::builtins::common::gpu_helpers::restore_class_preserving_value_with_operands(
                 source,
                 Value::Tensor(tensor),
                 NAME,
-                protected,
+                crate::builtins::common::gpu_helpers::RestoreOperandContext::new(protected, intent),
             )?
         }
         other => other,

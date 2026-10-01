@@ -311,21 +311,68 @@ pub(super) fn is_empty_option_value(value: &Value) -> bool {
     }
 }
 
-pub(super) struct BorrowedOperands(Vec<GpuTensorHandle>);
+pub(super) struct BorrowedOperands {
+    protected: Vec<GpuTensorHandle>,
+    intent_sources: Vec<GpuTensorHandle>,
+}
 
 impl BorrowedOperands {
     pub(super) fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    pub(super) fn record(&mut self, value: &Value) {
-        if let Value::GpuTensor(handle) = value {
-            self.0.push(handle.clone());
+        Self {
+            protected: Vec::new(),
+            intent_sources: Vec::new(),
         }
     }
 
-    pub(super) fn handles(&self) -> &[GpuTensorHandle] {
-        &self.0
+    pub(super) fn protect_value(&mut self, value: &Value) {
+        collect_resident_handles(value, &mut self.protected);
+    }
+
+    pub(super) fn record_consumed(&mut self, value: &Value) {
+        if let Value::GpuTensor(handle) = value {
+            self.intent_sources.push(handle.clone());
+        }
+    }
+
+    pub(super) fn protected(&self) -> &[GpuTensorHandle] {
+        &self.protected
+    }
+
+    pub(super) fn intent_sources(&self) -> &[GpuTensorHandle] {
+        &self.intent_sources
+    }
+}
+
+fn collect_resident_handles(value: &Value, into: &mut Vec<GpuTensorHandle>) {
+    match value {
+        Value::GpuTensor(handle) => into.push(handle.clone()),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .for_each(|value| collect_resident_handles(value, into)),
+        Value::Struct(value) => value
+            .fields
+            .values()
+            .for_each(|value| collect_resident_handles(value, into)),
+        Value::StructArray(value) => {
+            value.for_each_value(|value| collect_resident_handles(value, into))
+        }
+        Value::Object(value) => value
+            .properties
+            .values()
+            .for_each(|value| collect_resident_handles(value, into)),
+        Value::ObjectArray(value) => value
+            .data()
+            .iter()
+            .for_each(|value| collect_resident_handles(value, into)),
+        Value::Closure(value) => value
+            .captures
+            .iter()
+            .for_each(|value| collect_resident_handles(value, into)),
+        Value::OutputList(values) => values
+            .iter()
+            .for_each(|value| collect_resident_handles(value, into)),
+        _ => {}
     }
 }
 

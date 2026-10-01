@@ -790,7 +790,10 @@ pub fn upload_tensor_protecting_typed(
 }
 
 mod restore;
-pub use restore::{restore_class_preserving_value, restore_class_preserving_value_protecting};
+pub use restore::{
+    restore_class_preserving_value, restore_class_preserving_value_protecting,
+    restore_class_preserving_value_with_operands, RestoreOperandContext,
+};
 
 /// Upload a finite integral scalar in the native integer class of `prototype`.
 /// Returns `None` when preserving typed-integer scalar semantics would require

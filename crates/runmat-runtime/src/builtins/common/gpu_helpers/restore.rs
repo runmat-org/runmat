@@ -25,6 +25,42 @@ pub fn restore_class_preserving_value_protecting(
     builtin: &str,
     protected: &[&GpuTensorHandle],
 ) -> crate::BuiltinResult<Value> {
+    restore_class_preserving_value_with_operands(
+        source,
+        value,
+        builtin,
+        RestoreOperandContext::new(protected, protected),
+    )
+}
+
+/// Separate allocation safety from output intent. `protected` includes every
+/// borrowed allocation that the provider must not return as a new result;
+/// `intent_sources` contains only operands whose explicit device placement
+/// participates in the result contract. The source participates in both.
+#[derive(Clone, Copy)]
+pub struct RestoreOperandContext<'a> {
+    protected: &'a [&'a GpuTensorHandle],
+    intent_sources: &'a [&'a GpuTensorHandle],
+}
+
+impl<'a> RestoreOperandContext<'a> {
+    pub fn new(
+        protected: &'a [&'a GpuTensorHandle],
+        intent_sources: &'a [&'a GpuTensorHandle],
+    ) -> Self {
+        Self {
+            protected,
+            intent_sources,
+        }
+    }
+}
+
+pub fn restore_class_preserving_value_with_operands(
+    source: &GpuTensorHandle,
+    value: Value,
+    builtin: &str,
+    operands: RestoreOperandContext<'_>,
+) -> crate::BuiltinResult<Value> {
     let value = match value {
         Value::Num(number) => {
             let tensor = Tensor::new(vec![number], vec![1, 1]).map_err(|error| {
@@ -32,11 +68,11 @@ pub fn restore_class_preserving_value_protecting(
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .build()
             })?;
-            return match restore_class_preserving_value_protecting(
+            return match restore_class_preserving_value_with_operands(
                 source,
                 Value::Tensor(tensor),
                 builtin,
-                protected,
+                operands,
             )? {
                 Value::Tensor(_) => Ok(Value::Num(number)),
                 restored => Ok(restored),
@@ -48,11 +84,11 @@ pub fn restore_class_preserving_value_protecting(
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .build()
             })?;
-            return match restore_class_preserving_value_protecting(
+            return match restore_class_preserving_value_with_operands(
                 source,
                 Value::ComplexTensor(tensor),
                 builtin,
-                protected,
+                operands,
             )? {
                 Value::ComplexTensor(_) => Ok(Value::Complex(real, imag)),
                 restored => Ok(restored),
@@ -64,11 +100,11 @@ pub fn restore_class_preserving_value_protecting(
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .build()
             })?;
-            return match restore_class_preserving_value_protecting(
+            return match restore_class_preserving_value_with_operands(
                 source,
                 Value::LogicalArray(logical),
                 builtin,
-                protected,
+                operands,
             )? {
                 Value::LogicalArray(_) => Ok(Value::Bool(bit)),
                 restored => Ok(restored),
@@ -85,14 +121,15 @@ pub fn restore_class_preserving_value_protecting(
     })?;
     let _source_guard = ResidencyRestoreGuard::new(source);
     let protected = std::iter::once(source)
-        .chain(protected.iter().copied())
+        .chain(operands.protected.iter().copied())
+        .chain(operands.intent_sources.iter().copied())
         .collect::<Vec<_>>();
     let _operand_guards = protected
         .iter()
         .map(|handle| ResidencyRestoreGuard::new(handle))
         .collect::<Vec<_>>();
-    let explicit = protected
-        .iter()
+    let explicit = std::iter::once(source)
+        .chain(operands.intent_sources.iter().copied())
         .any(|handle| runmat_accelerate_api::handle_is_explicit(handle));
 
     let (

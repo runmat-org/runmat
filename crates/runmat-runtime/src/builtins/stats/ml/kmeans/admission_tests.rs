@@ -16,6 +16,7 @@ use std::sync::{
 enum UploadBehavior {
     Alias(GpuTensorHandle),
     FailSecond,
+    Unsupported,
 }
 
 struct RestoreProvider {
@@ -53,6 +54,9 @@ impl AccelProvider for RestoreProvider {
         let attempt = self.uploads.fetch_add(1, Ordering::SeqCst);
         match &*self.behavior.lock().unwrap() {
             UploadBehavior::Alias(handle) => Ok(handle.clone()),
+            UploadBehavior::Unsupported => Err(
+                runmat_accelerate_api::unsupported_provider_operation("fixture has no f64 upload"),
+            ),
             UploadBehavior::FailSecond if attempt > 0 => {
                 Err(anyhow::anyhow!("second output failed"))
             }
@@ -226,7 +230,8 @@ fn restoration_rejects_alias_to_non_x_borrowed_start() {
     let provider = RestoreProvider::new(UploadBehavior::Alias(start.handle.clone()), owner);
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let mut borrowed = BorrowedOperands::new();
-    borrowed.record(&Value::GpuTensor(start.handle.clone()));
+    borrowed.protect_value(&Value::GpuTensor(start.handle.clone()));
+    borrowed.record_consumed(&Value::GpuTensor(start.handle.clone()));
     let result = restore_kmeans_value(
         Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
         Some(&source.handle),
@@ -238,6 +243,64 @@ fn restoration_rejects_alias_to_non_x_borrowed_start() {
         .contains("aliasing a borrowed input"));
     assert_eq!(start.probe.retirements(), 0);
     assert_eq!(source.probe.retirements(), 0);
+}
+
+#[test]
+fn ignored_nested_resident_metadata_is_protected_without_inheriting_explicit_intent() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let owner = TestAllocationOwner::new();
+    let source = owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let ignored = owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let empty_stream = owner
+        .allocate_zeroed(vec![0, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let ignored_explicit = ignored
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    let provider = RestoreProvider::new(UploadBehavior::Alias(ignored_explicit.clone()), owner);
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let cell = runmat_value::CellArray::new(vec![Value::GpuTensor(ignored_explicit.clone())], 1, 1)
+        .unwrap();
+    let mut statset = runmat_value::StructValue::new();
+    statset.insert("IgnoredField", Value::Cell(cell));
+    statset.insert("Streams", Value::GpuTensor(empty_stream.handle.clone()));
+    let mut borrowed = BorrowedOperands::new();
+    borrowed.protect_value(&Value::Struct(statset));
+    let result = restore_kmeans_value(
+        Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
+        Some(&source.handle),
+        &borrowed,
+    );
+    assert!(result
+        .unwrap_err()
+        .message()
+        .contains("aliasing a borrowed input"));
+    assert_eq!(ignored.probe.retirements(), 0);
+    assert_eq!(empty_stream.probe.retirements(), 0);
+    assert_eq!(source.probe.retirements(), 0);
+
+    *provider.behavior.lock().unwrap() = UploadBehavior::Alias(empty_stream.handle.clone());
+    let empty_alias = restore_kmeans_value(
+        Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
+        Some(&source.handle),
+        &borrowed,
+    );
+    assert!(empty_alias
+        .unwrap_err()
+        .message()
+        .contains("aliasing a borrowed input"));
+    assert_eq!(empty_stream.probe.retirements(), 0);
+
+    *provider.behavior.lock().unwrap() = UploadBehavior::Unsupported;
+    let host = Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap());
+    let result = restore_kmeans_value(host.clone(), Some(&source.handle), &borrowed)
+        .expect("ignored explicit metadata cannot force output placement");
+    assert_eq!(result, host);
 }
 
 #[test]
