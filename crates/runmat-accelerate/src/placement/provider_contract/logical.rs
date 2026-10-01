@@ -102,17 +102,15 @@ pub(super) fn validate(
         );
     }
     let float = ProviderElementType::from(precision);
-    let floating = match (profile, operation) {
-        (
-            HookProfile::InProcess,
-            Operation::Cast | Operation::Binary(_) | Operation::Compare(_),
-        ) => query.inputs.iter().all(|value| {
+    let floating = match profile {
+        HookProfile::InProcess => query.inputs.iter().all(|value| {
             matches!(
                 value.element_type,
                 ProviderElementType::F32 | ProviderElementType::F64
             )
         }),
-        _ => query.inputs.iter().all(|value| value.element_type == float),
+        #[cfg(feature = "wgpu")]
+        HookProfile::Wgpu => query.inputs.iter().all(|value| value.element_type == float),
     };
     #[cfg(feature = "wgpu")]
     let integer = matches!(profile, HookProfile::Wgpu)

@@ -219,7 +219,6 @@ fn native_single_feasibility_matches_supported_in_process_hooks() {
             Operation::Compare(RelationalOperator::GreaterThanOrEqual) => {
                 block_on(provider.elem_ge(&left, &right)).unwrap()
             }
-            _ => unreachable!("only reviewed native F32 hooks"),
         };
         assert!(output.view().is_logical());
         assert_eq!(output.shape(), &[1, 3]);
