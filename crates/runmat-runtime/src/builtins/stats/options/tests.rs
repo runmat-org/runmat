@@ -45,6 +45,84 @@ fn statset_builds_custom_options() {
 }
 
 #[test]
+fn statset_character_row_option_values_normalize_to_scalar_text() {
+    let value = Value::CharArray(CharArray::new("off".chars().collect(), 1, 3).unwrap());
+    let options =
+        struct_value(block_on(statset_builtin(vec![Value::from("Display"), value])).unwrap());
+    assert!(matches!(options.fields.get("Display"), Some(Value::String(text)) if text == "off"));
+}
+
+#[test]
+fn statset_empty_single_tolerance_retains_class_and_shape() {
+    let value = Value::Tensor(Tensor::from_f32(Vec::new(), vec![1, 0]).unwrap());
+    let options =
+        struct_value(block_on(statset_builtin(vec![Value::from("TolX"), value])).unwrap());
+    let Some(Value::Tensor(tolerance)) = options.fields.get("TolX") else {
+        panic!("expected empty numeric tolerance")
+    };
+    assert_eq!(tolerance.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(tolerance.shape, vec![1, 0]);
+}
+
+#[test]
+fn statset_scalar_logical_arrays_follow_scalar_logical_option_rules() {
+    for value in [
+        Value::Bool(true),
+        Value::LogicalArray(runmat_value::LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+    ] {
+        let options = struct_value(
+            block_on(statset_builtin(vec![
+                Value::from("MaxIter"),
+                value.clone(),
+                Value::from("TolX"),
+                value.clone(),
+                Value::from("DerivStep"),
+                value.clone(),
+                Value::from("UseParallel"),
+                value,
+            ]))
+            .unwrap(),
+        );
+        assert_eq!(num_field(&options, "MaxIter"), 1.0);
+        assert_eq!(num_field(&options, "TolX"), 1.0);
+        assert_eq!(num_field(&options, "DerivStep"), 1.0);
+        assert!(matches!(
+            options.fields.get("UseParallel"),
+            Some(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
+fn statset_integer_derivstep_keeps_tensor_storage_boundary_explicit() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let scalar = struct_value(
+        block_on(statset_builtin(vec![
+            Value::from("DerivStep"),
+            Value::Int(runmat_value::IntValue::U64(7)),
+        ]))
+        .unwrap(),
+    );
+    assert!(matches!(
+        scalar.fields.get("DerivStep"),
+        Some(Value::Num(7.0))
+    ));
+    let tensor = Tensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1]).unwrap();
+    let array = struct_value(
+        block_on(statset_builtin(vec![
+            Value::from("DerivStep"),
+            Value::Tensor(tensor),
+        ]))
+        .unwrap(),
+    );
+    let Some(Value::Tensor(step)) = array.fields.get("DerivStep") else {
+        panic!("expected integer tensor")
+    };
+    assert_eq!(step.numeric_dtype(), runmat_value::NumericDType::U64);
+    assert_eq!(step.integer_storage(), Some(&IntegerStorage::U64(vec![7])));
+}
+
+#[test]
 fn statset_reads_typed_integer_tensor_options_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let max_iter = Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("MaxIter");

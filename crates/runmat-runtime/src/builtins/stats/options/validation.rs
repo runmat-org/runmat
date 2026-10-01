@@ -108,6 +108,7 @@ fn positive_numeric_value(field: &str, value: &Value) -> BuiltinResult<Value> {
     }
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => positive_scalar_value(field, value),
+        Value::LogicalArray(array) if array.data.len() == 1 => positive_scalar_value(field, value),
         Value::Tensor(tensor) => {
             if tensor::tensor_values_f64(tensor)
                 .into_iter()
@@ -144,6 +145,7 @@ pub(super) fn bool_or_on_off_value(field: &str, value: &Value) -> BuiltinResult<
     }
     match value {
         Value::Bool(flag) => Ok(Value::Bool(*flag)),
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok(Value::Bool(array.data[0] != 0)),
         Value::Num(n) if *n == 0.0 || *n == 1.0 => Ok(Value::Bool(*n != 0.0)),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             let value = tensor::tensor_value_f64(tensor, 0);
@@ -183,6 +185,7 @@ fn numeric_scalar(field: &str, value: &Value) -> BuiltinResult<f64> {
                 0.0
             }
         }
+        Value::LogicalArray(array) if array.data.len() == 1 => f64::from(array.data[0] != 0),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             tensor::tensor_value_f64(tensor, 0)
         }

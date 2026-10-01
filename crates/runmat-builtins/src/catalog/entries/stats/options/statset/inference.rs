@@ -1,5 +1,6 @@
-use super::{StatOptionField, StatOptionValueKind};
-use crate::catalog::inference::{finish_fixed, gathered_value_fact, literal_text};
+use super::option_value::{invalid_option_value, normalized_value, runtime_empty_fact};
+use super::StatOptionField;
+use crate::catalog::inference::{finish_fixed, literal_text};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     CallInference, CallRequest, CellFact, DynamicReason, InferenceDiagnostic, NumericClass,
@@ -34,18 +35,6 @@ fn empty_option_fact(field: StatOptionField) -> ValueFact {
     }
 }
 
-pub(crate) fn runtime_empty_fact(value: &ValueFact) -> Option<bool> {
-    match &value.kind {
-        ValueKindFact::Numeric(_)
-        | ValueKindFact::Logical
-        | ValueKindFact::Cell(_)
-        | ValueKindFact::String
-        | ValueKindFact::Character => value.shape.element_count().map(|count| count == 0),
-        ValueKindFact::Unknown => None,
-        _ => Some(false),
-    }
-}
-
 pub(crate) fn empty_options_fact() -> ValueFact {
     let fields = StatOptionField::ALL
         .into_iter()
@@ -65,71 +54,6 @@ fn unknown_options_fact() -> ValueFact {
         })
         .collect::<BTreeMap<_, _>>();
     ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(fields, true)))
-}
-
-fn normalized_value(field: StatOptionField, input: &ValueFact) -> ValueFact {
-    let gathered = gathered_value_fact(input);
-    if runtime_empty_fact(input) == Some(true) {
-        return gathered;
-    }
-    match field.value_kind() {
-        StatOptionValueKind::PositiveCount | StatOptionValueKind::PositiveScalar => {
-            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            }))
-        }
-        StatOptionValueKind::Boolean => ValueFact::scalar(ValueKindFact::Logical),
-        StatOptionValueKind::Display
-        | StatOptionValueKind::OnOff
-        | StatOptionValueKind::ToleranceType => ValueFact::scalar(ValueKindFact::String),
-        StatOptionValueKind::RobustWeight => match &gathered.kind {
-            ValueKindFact::Callable(_) => gathered,
-            ValueKindFact::String | ValueKindFact::Character => {
-                ValueFact::scalar(ValueKindFact::String)
-            }
-            _ => ValueFact::unknown(DynamicReason::RuntimeValue),
-        },
-        StatOptionValueKind::PositiveArray | StatOptionValueKind::Opaque => gathered,
-    }
-}
-
-fn invalid_option_value(field: StatOptionField, input: &ValueFact) -> bool {
-    if runtime_empty_fact(input) == Some(true) || matches!(input.kind, ValueKindFact::Unknown) {
-        return false;
-    }
-    if !matches!(
-        field.value_kind(),
-        StatOptionValueKind::PositiveArray | StatOptionValueKind::Opaque
-    ) && input.shape.element_count().is_some_and(|count| count > 1)
-    {
-        return true;
-    }
-    match field.value_kind() {
-        StatOptionValueKind::PositiveCount
-        | StatOptionValueKind::PositiveScalar
-        | StatOptionValueKind::PositiveArray => !matches!(
-            input.kind,
-            ValueKindFact::Numeric(_) | ValueKindFact::Logical
-        ),
-        StatOptionValueKind::Boolean => !matches!(
-            input.kind,
-            ValueKindFact::Numeric(_)
-                | ValueKindFact::Logical
-                | ValueKindFact::String
-                | ValueKindFact::Character
-        ),
-        StatOptionValueKind::Display
-        | StatOptionValueKind::OnOff
-        | StatOptionValueKind::ToleranceType => {
-            !matches!(input.kind, ValueKindFact::String | ValueKindFact::Character)
-        }
-        StatOptionValueKind::RobustWeight => !matches!(
-            input.kind,
-            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Callable(_)
-        ),
-        StatOptionValueKind::Opaque => false,
-    }
 }
 
 fn check_source_structure(input: &ValueFact, diagnostics: &mut Vec<InferenceDiagnostic>) {

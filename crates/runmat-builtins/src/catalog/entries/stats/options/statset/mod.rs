@@ -2,6 +2,7 @@ mod contract;
 mod documentation;
 pub mod fields;
 mod inference;
+mod option_value;
 #[cfg(test)]
 mod tests;
 
@@ -16,7 +17,7 @@ pub use contract::{
 pub use fields::{StatOptionField, StatOptionValueKind};
 #[cfg(test)]
 pub(crate) use inference::empty_options_fact;
-pub(crate) use inference::runtime_empty_fact;
+pub(crate) use option_value::runtime_empty_fact;
 
 pub const STATSET_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

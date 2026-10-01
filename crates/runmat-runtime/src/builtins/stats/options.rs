@@ -1,10 +1,12 @@
 //! Statistics options structure helpers (`statset` / `statget`).
 
+mod materialization;
 mod schema;
 mod validation;
 #[cfg(test)]
 mod tests;
 
+use materialization::*;
 use schema::*;
 use validation::*;
 
@@ -115,14 +117,14 @@ async fn statget_builtin(options: Value, field: Value, rest: Vec<Value>) -> Buil
         if let Some(default_data) = default_data {
             gather_if_needed_async(&default_data)
                 .await
-                .map_err(|err| statget_error(&STATGET_ERROR_INVALID_ARGUMENT, err.message()))
+                .map_err(statget_materialization_error)
         } else {
             Ok(value)
         }
     } else {
         gather_if_needed_async(&value)
             .await
-            .map_err(|err| statget_error(&STATGET_ERROR_INVALID_ARGUMENT, err.message()))
+            .map_err(statget_materialization_error)
     }
 }
 
@@ -190,7 +192,7 @@ async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
         out.push(
             gather_if_needed_async(&value)
                 .await
-                .map_err(|err| statset_error(&STATSET_ERROR_INVALID_ARGUMENT, err.message()))?,
+                .map_err(statset_materialization_error)?,
         );
     }
     Ok(out)

@@ -41,6 +41,76 @@ fn empty_call_has_twenty_known_empty_fields() {
 }
 
 #[test]
+fn unknown_emptiness_does_not_invent_normalized_scalar_class() {
+    let mut input = numeric(NumericClass::Single);
+    input.shape = ShapeFact::from(vec![Some(1), None]);
+    let result = call(
+        vec![ValueFact::scalar(ValueKindFact::String), input],
+        vec![LiteralValue::String("TolX".into()), LiteralValue::Unknown],
+        1,
+    );
+    assert_eq!(fields(&result)["TolX"].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn singleton_integer_derivstep_does_not_guess_scalar_or_tensor_carrier() {
+    let result = call(
+        vec![
+            ValueFact::scalar(ValueKindFact::String),
+            numeric(NumericClass::UInt64),
+        ],
+        vec![
+            LiteralValue::String("DerivStep".into()),
+            LiteralValue::Unknown,
+        ],
+        1,
+    );
+    assert_eq!(fields(&result)["DerivStep"].kind, ValueKindFact::Unknown);
+    assert_eq!(fields(&result)["DerivStep"].shape.element_count(), Some(1));
+}
+
+#[test]
+fn character_option_values_are_text_rows_not_numeric_scalars() {
+    for field in ["Display", "UseParallel", "RobustWgtFun"] {
+        for (shape, valid) in [
+            (vec![Some(1), Some(2)], true),
+            (vec![Some(2), Some(1)], false),
+        ] {
+            let value = ValueFact::proven(
+                ValueKindFact::Character,
+                ShapeFact::from(shape),
+                StorageFact::Dense,
+            );
+            let result = call(
+                vec![ValueFact::scalar(ValueKindFact::String), value],
+                vec![LiteralValue::String(field.into()), LiteralValue::Unknown],
+                1,
+            );
+            assert_eq!(result.diagnostics.is_empty(), valid);
+        }
+    }
+}
+
+#[test]
+fn known_complex_tolerance_is_rejected_statically() {
+    for field in ["TolX", "UseParallel"] {
+        let value = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        }));
+        let result = call(
+            vec![ValueFact::scalar(ValueKindFact::String), value],
+            vec![LiteralValue::String(field.into()), LiteralValue::Unknown],
+            1,
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "RM.STATSET.INVALID_OPTION" }));
+    }
+}
+
+#[test]
 fn known_option_roles_normalize_only_their_selected_field() {
     let result = call(
         vec![
