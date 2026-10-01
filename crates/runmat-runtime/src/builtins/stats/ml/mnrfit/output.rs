@@ -9,7 +9,7 @@ pub(super) async fn coefficients_value(
     rows: usize,
     cols: usize,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Value> {
     Tensor::new(
         copy_cooperatively(beta, "coefficient output", check, cooperation).await?,
@@ -23,7 +23,7 @@ pub(super) async fn stats_value(
     fit: &NominalFit,
     data: &PreparedData,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Value> {
     check()?;
     let mut st = StructValue::new();
@@ -76,7 +76,7 @@ async fn matrix_value(
     rows: usize,
     cols: usize,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Value> {
     Tensor::new(
         copy_cooperatively(data, "matrix output", check, cooperation).await?,
@@ -89,7 +89,7 @@ async fn matrix_value(
 async fn row_tensor(
     values: &[f64],
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Value> {
     Tensor::new(
         copy_cooperatively(values, "class-name output", check, cooperation).await?,
@@ -103,7 +103,7 @@ async fn class_names_value(
     classes: &ClassNames,
     len: usize,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Value> {
     match classes {
         ClassNames::Numeric(values) => row_tensor(values, check, cooperation).await,
@@ -113,12 +113,13 @@ async fn class_names_value(
                 invalid("mnrfit: class-name output exceeds available host resources")
             })?;
             for (index, name) in values.iter().enumerate() {
-                if index.is_multiple_of(4096) {
+                names.push(name.clone());
+                if (index + 1).is_multiple_of(4096) {
                     check()?;
                     cooperation.completed(4096).await?;
                 }
-                names.push(name.clone());
             }
+            cooperation.completed((values.len() % 4096) as u64).await?;
             StringArray::new(names, vec![1, len])
                 .map(Value::StringArray)
                 .map_err(|err| internal(format!("mnrfit: {err}")))
@@ -130,7 +131,7 @@ async fn coeffcorr_value(
     covb: &[f64],
     se: &[f64],
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Value> {
     check()?;
     let dim = se.len();

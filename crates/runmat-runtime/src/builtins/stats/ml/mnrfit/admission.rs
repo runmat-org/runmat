@@ -27,7 +27,7 @@ pub(super) enum PreparedResponse {
 pub(super) async fn prepare(
     x: &Value,
     y: Value,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<PreparedResponse> {
     let rows = preflight(x, &y)?;
     if crate::dispatcher::value_contains_gpu(&y) {
@@ -49,7 +49,7 @@ impl PreparedResponse {
 
     pub(super) async fn materialize(
         self,
-        cooperation: &mut FitCooperation<'_>,
+        cooperation: &mut FitCooperation,
     ) -> BuiltinResult<ResponseOutcomes> {
         match self {
             Self::Host { response, .. } => Ok(response),

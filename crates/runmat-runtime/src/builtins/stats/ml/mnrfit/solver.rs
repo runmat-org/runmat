@@ -22,7 +22,7 @@ pub(super) async fn fit_nominal_logit(
     max_iter: usize,
     tol_x: f64,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<NominalFit> {
     check()?;
     let cols = data.cols;
@@ -199,7 +199,7 @@ async fn row_probabilities(
     beta: &[f64],
     logits: usize,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let rows = design.len() / cols;
     let mut eta = reserved(logits, "row scores")?;
@@ -243,7 +243,7 @@ async fn log_likelihood(
     data: &PreparedData,
     beta: &[f64],
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<f64> {
     let logits = data.outcomes.len();
     let mut ll = 0.0;
@@ -299,7 +299,7 @@ async fn log_likelihood(
 async fn saturated_log_likelihood(
     data: &PreparedData,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<f64> {
     let logits = data.outcomes.len();
     let mut ll = 0.0;
@@ -332,7 +332,7 @@ async fn solve_linear(
     mut b: Vec<f64>,
     n: usize,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     for col in 0..n {
         check()?;
@@ -403,7 +403,7 @@ async fn invert_matrix(
     a: Vec<f64>,
     n: usize,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let mut out = filled_cooperatively(
         checked_elements(n, n, "covariance matrix")?,

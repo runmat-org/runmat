@@ -14,7 +14,7 @@ pub(super) async fn sort_unique<T: Default>(
     compare: impl Fn(&T, &T) -> Ordering,
     equivalent: impl Fn(&T, &T) -> bool,
     role: &str,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<T>> {
     for chunk in values.chunks_mut(RUN) {
         chunk.sort_by(&compare);

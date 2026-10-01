@@ -35,14 +35,13 @@ impl FitCancellation {
     }
 }
 
-pub(super) struct FitCooperation<'a> {
+pub(super) struct FitCooperation {
     cancellation: FitCancellation,
     budget: Option<CpuCooperationBudget>,
-    _scope: std::marker::PhantomData<&'a RuntimeContext>,
 }
 
-impl<'a> FitCooperation<'a> {
-    pub(super) fn new(runtime: Option<&'a RuntimeContext>) -> Self {
+impl FitCooperation {
+    pub(super) fn new(runtime: Option<&RuntimeContext>) -> Self {
         let cancellation = FitCancellation::new(runtime);
         let budget = runtime.map(|runtime| {
             CpuCooperationBudget::new(
@@ -57,7 +56,6 @@ impl<'a> FitCooperation<'a> {
         Self {
             cancellation,
             budget,
-            _scope: std::marker::PhantomData,
         }
     }
 
@@ -70,11 +68,10 @@ impl<'a> FitCooperation<'a> {
     }
 
     #[cfg(test)]
-    pub(super) fn with_budget(runtime: &'a RuntimeContext, budget: CpuCooperationBudget) -> Self {
+    pub(super) fn with_budget(runtime: &RuntimeContext, budget: CpuCooperationBudget) -> Self {
         Self {
             cancellation: FitCancellation::new(Some(runtime)),
             budget: Some(budget),
-            _scope: std::marker::PhantomData,
         }
     }
 

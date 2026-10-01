@@ -80,7 +80,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
-            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(B),[2 1])); assert(abs(B(1)+log(3))<1e-6); assert(abs(B(2))<1e-6); assert(abs(dev)<1e-6);" },
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(B),[2 1])); assert(strcmp(class(B),'double')); assert(abs(B(1)+log(3))<1e-6); assert(abs(B(2))<1e-6); assert(abs(dev)<1e-6);" },
         },
         BuiltinExample { id: "text", title: "Fit text response labels",
             program: "X = [0; 1; 2; 3; 4]; y = [\"low\"; \"high\"; \"low\"; \"high\"; \"high\"]; [B,dev,stats] = mnrfit(X,y,'Tolerance',1e-7); disp(stats.classNames);",

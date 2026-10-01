@@ -257,6 +257,7 @@ fn constant_grouped_odds_have_known_intercept_zero_slope_and_zero_deviance() {
         panic!("grouped fit must return a coefficient matrix");
     };
     assert_eq!(beta.shape, vec![2, 1]);
+    assert_eq!(beta.numeric_dtype(), runmat_value::NumericDType::F64);
     let coefficients = beta.materialize_f64();
     assert!((coefficients[0] + 3.0f64.ln()).abs() < 1.0e-6);
     assert!(coefficients[1].abs() < 1.0e-6);

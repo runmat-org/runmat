@@ -17,7 +17,7 @@ pub(super) async fn filled_cooperatively(
     value: f64,
     role: &str,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     let mut out = reserved(len, role)?;
     while out.len() < len {
@@ -41,7 +41,7 @@ pub(super) async fn copy_cooperatively(
     values: &[f64],
     role: &str,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     check()?;
     let mut out = reserved(values.len(), role)?;
@@ -58,7 +58,7 @@ pub(super) async fn columns(
     rows: usize,
     role: &str,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     checked_elements(count, rows, role)?;
     let mut out = Vec::new();

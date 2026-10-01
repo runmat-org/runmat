@@ -49,7 +49,7 @@ pub(super) async fn prepare_data(
     response: ResponseOutcomes,
     options: &Options,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<PreparedData> {
     check()?;
     let rows = x.rows();
@@ -69,7 +69,7 @@ pub(super) async fn prepare_data(
     } = response;
     if let Some(option_weights) = &options.weights {
         validate_option_weight_length(option_weights.len(), rows)?;
-        if invalid_weights(option_weights, check)? {
+        if invalid_weights(option_weights, check, cooperation).await? {
             return Err(invalid(
                 "mnrfit: weights must be nonnegative finite values with positive total",
             ));
@@ -77,17 +77,18 @@ pub(super) async fn prepare_data(
         for (index, (weight, option_weight)) in
             weights.iter_mut().zip(option_weights.iter()).enumerate()
         {
-            if index.is_multiple_of(4096) {
-                check()?;
-                cooperation.completed(4096).await?;
-            }
             *weight *= *option_weight;
             if !weight.is_finite() {
                 return Err(invalid(
                     "mnrfit: weighted observation count exceeds finite double range",
                 ));
             }
+            if (index + 1).is_multiple_of(4096) {
+                check()?;
+                cooperation.completed(4096).await?;
+            }
         }
+        cooperation.completed((weights.len() % 4096) as u64).await?;
     }
     let kept_rows = compact_complete_cases(
         x,
@@ -103,12 +104,12 @@ pub(super) async fn prepare_data(
     if kept_rows == 0 {
         return Err(invalid("mnrfit: no complete observations remain"));
     }
-    if invalid_weights(&weights, check)? {
+    if invalid_weights(&weights, check, cooperation).await? {
         return Err(invalid(
             "mnrfit: weights must be nonnegative finite values with positive total",
         ));
     }
-    let observations = finite_total(weights.iter().copied(), "weights", check)?;
+    let observations = finite_total(weights.iter().copied(), "weights", check, cooperation).await?;
     if observations <= 0.0 {
         return Err(invalid(
             "mnrfit: weights must be nonnegative finite values with positive total",
@@ -125,22 +126,28 @@ pub(super) async fn prepare_data(
     })
 }
 
-fn invalid_weights(weights: &[f64], check: &impl Fn() -> BuiltinResult<()>) -> BuiltinResult<bool> {
+async fn invalid_weights(
+    weights: &[f64],
+    check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation,
+) -> BuiltinResult<bool> {
     for (index, weight) in weights.iter().enumerate() {
-        if index.is_multiple_of(4096) {
-            check()?;
-        }
         if !weight.is_finite() || *weight < 0.0 {
             return Ok(true);
         }
+        if (index + 1).is_multiple_of(4096) {
+            check()?;
+            cooperation.completed(4096).await?;
+        }
     }
+    cooperation.completed((weights.len() % 4096) as u64).await?;
     Ok(false)
 }
 
 async fn predictor_values<'a>(
     x: &'a Tensor,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Cow<'a, [f64]>> {
     check()?;
     if let Some(values) = x.as_f64_slice() {
@@ -148,27 +155,33 @@ async fn predictor_values<'a>(
     }
     let mut values = reserved(x.len(), "predictor conversion")?;
     for index in 0..x.len() {
-        if index.is_multiple_of(16_384) {
+        values.push(tensor::tensor_value_f64(x, index));
+        if (index + 1).is_multiple_of(16_384) {
             check()?;
             cooperation.completed(16_384).await?;
         }
-        values.push(tensor::tensor_value_f64(x, index));
     }
+    cooperation.completed((x.len() % 16_384) as u64).await?;
     Ok(Cow::Owned(values))
 }
 
-fn finite_total(
+async fn finite_total(
     values: impl Iterator<Item = f64>,
     role: &str,
     check: &impl Fn() -> BuiltinResult<()>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<f64> {
     let mut total = 0.0;
+    let mut count = 0usize;
     for (index, value) in values.enumerate() {
-        if index.is_multiple_of(4096) {
-            check()?;
-        }
         total = checked_finite_add(total, value, role)?;
+        count += 1;
+        if (index + 1).is_multiple_of(4096) {
+            check()?;
+            cooperation.completed(4096).await?;
+        }
     }
+    cooperation.completed((count % 4096) as u64).await?;
     Ok(total)
 }
 
@@ -188,7 +201,7 @@ async fn design_matrix(
     values: &[f64],
     constant: bool,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<f64>> {
     check()?;
     let rows = x.rows();
@@ -205,12 +218,13 @@ async fn design_matrix(
     let mut out_col = 0usize;
     if constant {
         for row in 0..rows {
-            if row.is_multiple_of(16_384) {
+            design[row] = 1.0;
+            if (row + 1).is_multiple_of(16_384) {
                 check()?;
                 cooperation.completed(16_384).await?;
             }
-            design[row] = 1.0;
         }
+        cooperation.completed((rows % 16_384) as u64).await?;
         out_col = 1;
     }
     for col in 0..x_cols {
@@ -233,7 +247,7 @@ async fn compact_complete_cases(
     outcomes: &mut [Vec<f64>],
     weights: &mut Vec<f64>,
     check: &impl Fn() -> BuiltinResult<()>,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<usize> {
     check()?;
     let rows = x.rows();
@@ -241,17 +255,30 @@ async fn compact_complete_cases(
     keep.try_reserve_exact(rows)
         .map_err(|_| invalid("mnrfit: row selection exceeds available host resources"))?;
     for row in 0..rows {
-        if row.is_multiple_of(4096) {
-            check()?;
-            cooperation.completed(4096).await?;
+        let mut x_complete = true;
+        for col in 0..x.cols() {
+            x_complete &= values[row + col * rows].is_finite();
+            if (col + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
-        let x_complete = (0..x.cols()).all(|col| values[row + col * rows].is_finite());
-        let y_complete = weights[row].is_finite()
-            && weights[row] > 0.0
-            && outcomes.iter().all(|outcome| outcome[row].is_finite());
+        cooperation.completed((x.cols() % 16_384) as u64).await?;
+        let mut y_complete = weights[row].is_finite() && weights[row] > 0.0;
+        if y_complete {
+            for (index, outcome) in outcomes.iter().enumerate() {
+                y_complete &= outcome[row].is_finite();
+                if (index + 1).is_multiple_of(16_384) {
+                    cooperation.completed(16_384).await?;
+                }
+            }
+            cooperation
+                .completed((outcomes.len() % 16_384) as u64)
+                .await?;
+        }
         if x_complete && y_complete {
             keep.push(row);
         }
+        cooperation.completed(1).await?;
     }
     if keep.len() == rows {
         return Ok(rows);
@@ -261,35 +288,38 @@ async fn compact_complete_cases(
         filled_cooperatively(new_len, 0.0, "compacted design matrix", check, cooperation).await?;
     for col in 0..cols {
         for (new_row, old_row) in keep.iter().enumerate() {
-            if new_row.is_multiple_of(4096) {
+            new_design[new_row + col * keep.len()] = design[old_row + col * rows];
+            if (new_row + 1).is_multiple_of(4096) {
                 check()?;
                 cooperation.completed(4096).await?;
             }
-            new_design[new_row + col * keep.len()] = design[old_row + col * rows];
         }
+        cooperation.completed((keep.len() % 4096) as u64).await?;
     }
     for outcome in outcomes.iter_mut() {
         check()?;
         let mut compacted =
             filled_cooperatively(keep.len(), 0.0, "compacted outcomes", check, cooperation).await?;
         for (new_row, old_row) in keep.iter().enumerate() {
-            if new_row.is_multiple_of(4096) {
+            compacted[new_row] = outcome[*old_row];
+            if (new_row + 1).is_multiple_of(4096) {
                 check()?;
                 cooperation.completed(4096).await?;
             }
-            compacted[new_row] = outcome[*old_row];
         }
+        cooperation.completed((keep.len() % 4096) as u64).await?;
         *outcome = compacted;
     }
     let mut compacted_weights =
         filled_cooperatively(keep.len(), 0.0, "compacted weights", check, cooperation).await?;
     for (new_row, old_row) in keep.iter().enumerate() {
-        if new_row.is_multiple_of(4096) {
+        compacted_weights[new_row] = weights[*old_row];
+        if (new_row + 1).is_multiple_of(4096) {
             check()?;
             cooperation.completed(4096).await?;
         }
-        compacted_weights[new_row] = weights[*old_row];
     }
+    cooperation.completed((keep.len() % 4096) as u64).await?;
     *weights = compacted_weights;
     *design = new_design;
     Ok(keep.len())
@@ -298,7 +328,7 @@ async fn compact_complete_cases(
 pub(super) async fn response_outcomes(
     value: Value,
     rows: usize,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<ResponseOutcomes> {
     match value {
         Value::Tensor(tensor) if tensor.cols() >= 2 && tensor.rows() == rows => {
@@ -352,7 +382,7 @@ pub(super) async fn response_outcomes(
 
 async fn count_outcomes(
     tensor: &Tensor,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<ResponseOutcomes> {
     let rows = tensor.rows();
     let cols = tensor.cols();
@@ -418,7 +448,7 @@ async fn numeric_outcomes(
     values: Vec<f64>,
     shape: Vec<usize>,
     rows: usize,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<ResponseOutcomes> {
     if values.len() != rows || shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid(
@@ -493,7 +523,7 @@ async fn text_outcomes(
     values: Vec<String>,
     shape: Vec<usize>,
     rows: usize,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<ResponseOutcomes> {
     if values.len() != rows || shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
         return Err(invalid(
@@ -556,7 +586,7 @@ async fn text_outcomes(
 async fn cellstr_outcomes(
     cell: &CellArray,
     rows: usize,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<ResponseOutcomes> {
     let mut labels = Vec::new();
     labels
@@ -578,7 +608,7 @@ async fn cellstr_outcomes(
 
 async fn char_rows_cooperatively(
     array: &CharArray,
-    cooperation: &mut FitCooperation<'_>,
+    cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Vec<String>> {
     let mut rows = Vec::new();
     rows.try_reserve_exact(array.rows)
