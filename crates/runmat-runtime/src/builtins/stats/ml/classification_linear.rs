@@ -3,13 +3,14 @@
 use std::cmp::Ordering;
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, BuiltinExtensionDescriptor, FitclinearOption, FitclinearSolver,
+    FITCLINEAR_ERROR_INTERNAL as ERROR_FITCLINEAR_INTERNAL,
+    FITCLINEAR_ERROR_INVALID_ARGUMENT as ERROR_FITCLINEAR_INVALID_ARGUMENT,
+    FITCLINEAR_INTEGER_NUMERIC_ARGUMENT_EXTENSION as INTEGER_NUMERIC_ARGUMENT_EXTENSION,
+    FITCLINEAR_INTEGER_PREDICTOR_EXTENSION as INTEGER_PREDICTOR_EXTENSION,
+    FITCLINEAR_RESIDENT_INPUT_EXTENSION as RESIDENT_INPUT_EXTENSION,
+    PREDICT_ERROR_INTERNAL as ERROR_PREDICT_INTERNAL,
+    PREDICT_ERROR_INVALID_ARGUMENT as ERROR_PREDICT_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::IntegerClass;
@@ -28,216 +29,6 @@ const FITCLINEAR_NAME: &str = "fitclinear";
 const PREDICT_NAME: &str = "predict";
 const DEFAULT_ITERATIONS: usize = 500;
 const EPS: f64 = 1.0e-12;
-
-const INTEGER_PREDICTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitclinear-integer-predictors",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitclinear with typed-integer predictors is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitclinearIntegerPredictorExtension"),
-};
-const INTEGER_NUMERIC_ARGUMENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitclinear-integer-numeric-arguments",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitclinear with typed-integer weights or numeric controls is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitclinearIntegerNumericArgumentExtension"),
-};
-const RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fitclinear-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fitclinear host fitting from provider-resident input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FitclinearResidentInputExtension"),
-};
-pub const FITCLINEAR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    INTEGER_PREDICTOR_EXTENSION,
-    INTEGER_NUMERIC_ARGUMENT_EXTENSION,
-    RESIDENT_INPUT_EXTENSION,
-];
-
-const INTEGER_PREDICTOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer predictors must be exactly representable in binary64 before host fitting; values that would round are rejected.",
-    }];
-const INTEGER_LABEL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Y or ClassNames",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Grouping labels retain their exact integer class and identity through model storage and prediction, including above flintmax.",
-    }];
-const INTEGER_NUMERIC_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Weights or numeric option",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer statistical inputs are independently gated and must cross the binary64 boundary exactly.",
-    }];
-pub const FITCLINEAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Mdl = fitclinear(integer_X, Y, ___)",
-        inputs: &INTEGER_PREDICTOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Matrix and table predictor roles share the same exact conversion boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Mdl = fitclinear(X, integer_Y, ClassNames=integer_names)",
-        inputs: &INTEGER_LABEL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveNondoubleInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Class grouping never passes through floating point.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Mdl = fitclinear(X, Y, Weights=integer_W, numericOption=integer_value)",
-        inputs: &INTEGER_NUMERIC_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer weights and numeric controls are RunMat-only extensions and reject rather than round.",
-    },
-];
-
-const OUTPUT_MDL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Mdl",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description:
-        "ClassificationLinear object containing coefficients, class names, and fit metadata.",
-}];
-
-const OUTPUT_MDL_FITINFO: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Mdl",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "ClassificationLinear object.",
-    },
-    BuiltinParamDescriptor {
-        name: "FitInfo",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Training diagnostics for each Lambda value.",
-    },
-];
-
-const PARAM_TBL_OR_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "tblOrX",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input table or predictor matrix.",
-};
-
-const PARAM_Y_OR_RESPONSE: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "yOrResponse",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Response vector, response variable name, or table formula.",
-};
-
-const PARAM_REST: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "options",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name-value options such as Learner, Lambda, Regularization, Solver, ObservationsIn, FitBias, ClassNames, PredictorNames, ResponseName, Weights, Prior, and ScoreTransform.",
-};
-
-const FITCLINEAR_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_TBL_OR_X, PARAM_Y_OR_RESPONSE];
-const FITCLINEAR_INPUTS_FULL: [BuiltinParamDescriptor; 3] =
-    [PARAM_TBL_OR_X, PARAM_Y_OR_RESPONSE, PARAM_REST];
-
-const FITCLINEAR_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(X, Y)",
-        inputs: &FITCLINEAR_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(Tbl, ResponseVarName)",
-        inputs: &FITCLINEAR_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(Tbl, formula)",
-        inputs: &FITCLINEAR_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(Tbl, Y)",
-        inputs: &FITCLINEAR_INPUTS_X_Y,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Mdl = fitclinear(___, Name, Value)",
-        inputs: &FITCLINEAR_INPUTS_FULL,
-        outputs: &OUTPUT_MDL,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[Mdl, FitInfo] = fitclinear(___)",
-        inputs: &FITCLINEAR_INPUTS_FULL,
-        outputs: &OUTPUT_MDL_FITINFO,
-    },
-];
-
-const ERROR_FITCLINEAR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITCLINEAR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:fitclinear:InvalidArgument"),
-    when: "Inputs, binary response labels, dimensions, or name-value options are malformed or unsupported.",
-    message: "fitclinear: invalid argument",
-};
-
-const ERROR_FITCLINEAR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FITCLINEAR.INTERNAL",
-    identifier: Some("RunMat:fitclinear:Internal"),
-    when: "RunMat cannot construct the ClassificationLinear result.",
-    message: "fitclinear: internal error",
-};
-
-const ERROR_PREDICT_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PREDICT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:predict:InvalidArgument"),
-    when: "Linear-classifier prediction inputs are malformed or incompatible with the model.",
-    message: "predict: invalid argument",
-};
-
-const ERROR_PREDICT_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PREDICT.INTERNAL",
-    identifier: Some("RunMat:predict:Internal"),
-    when: "Linear-classifier prediction cannot construct its output.",
-    message: "predict: internal error",
-};
-
-const FITCLINEAR_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ERROR_FITCLINEAR_INVALID_ARGUMENT, ERROR_FITCLINEAR_INTERNAL];
-
-pub const FITCLINEAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FITCLINEAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FITCLINEAR_ERRORS,
-};
-
-fn fitclinear_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
 
 fn fitclinear_error(
     message: impl Into<String>,
@@ -370,7 +161,7 @@ struct FitOptions {
     learner: Learner,
     lambdas: Option<Vec<f64>>,
     regularization: Regularization,
-    solver: String,
+    solver: FitclinearSolver,
     observations_in: ObservationsIn,
     fit_bias: bool,
     class_names: Option<Vec<ClassLabel>>,
@@ -390,7 +181,7 @@ impl Default for FitOptions {
             learner: Learner::Svm,
             lambdas: None,
             regularization: Regularization::Ridge,
-            solver: "auto".to_string(),
+            solver: FitclinearSolver::Auto,
             observations_in: ObservationsIn::Rows,
             fit_bias: true,
             class_names: None,
@@ -436,15 +227,7 @@ struct FitResult {
 
 #[runtime_builtin(
     name = "fitclinear",
-    category = "stats/ml",
-    summary = "Fit a binary linear classification model.",
-    keywords = "fitclinear,classification linear,svm,logistic regression,machine learning,statistics",
-    type_resolver(fitclinear_type),
-    descriptor(crate::builtins::stats::ml::classification_linear::FITCLINEAR_DESCRIPTOR),
-    extensions(crate::builtins::stats::ml::classification_linear::FITCLINEAR_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::stats::ml::classification_linear::FITCLINEAR_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::classification_linear"
 )]
 pub(crate) async fn fitclinear_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -494,7 +277,9 @@ fn ensure_fitclinear_extensions(first: &Value, rest: &[Value]) -> BuiltinResult<
         let Some(name) = scalar_text(&pair[0]) else {
             continue;
         };
-        if typed_integer_value(&pair[1]) && !name.eq_ignore_ascii_case("ClassNames") {
+        if typed_integer_value(&pair[1])
+            && FitclinearOption::from_public_name(&name) != Some(FitclinearOption::ClassNames)
+        {
             enable_extension(&INTEGER_NUMERIC_ARGUMENT_EXTENSION)?;
         }
     }
@@ -538,14 +323,16 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
         let Some(name) = scalar_text(&pair[0]) else {
             continue;
         };
-        match name.to_ascii_lowercase().as_str() {
-            "responsename" if !external_y => {
+        match FitclinearOption::from_public_name(&name) {
+            Some(FitclinearOption::ResponseName) if !external_y => {
                 if let Some(value) = scalar_text(&pair[1]) {
                     response = value;
                 }
             }
-            "predictornames" => predictors = text_list(&pair[1], "PredictorNames").ok(),
-            "weights" => weight_variable = scalar_text(&pair[1]),
+            Some(FitclinearOption::PredictorNames) => {
+                predictors = text_list(&pair[1], "PredictorNames").ok()
+            }
+            Some(FitclinearOption::Weights) => weight_variable = scalar_text(&pair[1]),
             _ => {}
         }
     }
@@ -930,8 +717,8 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
         let name = scalar_text(&values[index])
             .ok_or_else(|| fitclinear_invalid("fitclinear: option name must be text"))?;
         let value = &values[index + 1];
-        match name.to_ascii_lowercase().as_str() {
-            "learner" => {
+        match FitclinearOption::from_public_name(&name) {
+            Some(FitclinearOption::Learner) => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: Learner must be text"))?;
                 options.learner = match text.to_ascii_lowercase().as_str() {
@@ -944,8 +731,10 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
                     }
                 };
             }
-            "lambda" => options.lambdas = Some(numeric_vector(value, "Lambda")?),
-            "regularization" => {
+            Some(FitclinearOption::Lambda) => {
+                options.lambdas = Some(numeric_vector(value, "Lambda")?)
+            }
+            Some(FitclinearOption::Regularization) => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: Regularization must be text"))?;
                 options.regularization = match text.to_ascii_lowercase().as_str() {
@@ -958,21 +747,17 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
                     }
                 };
             }
-            "solver" => {
+            Some(FitclinearOption::Solver) => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: Solver must be text"))?;
-                match text.to_ascii_lowercase().as_str() {
-                    "auto" | "sgd" | "asgd" | "bfgs" | "lbfgs" | "sparsa" | "dual" => {
-                        options.solver = text.to_ascii_lowercase();
-                    }
-                    other => {
-                        return Err(fitclinear_invalid(format!(
-                            "fitclinear: unsupported Solver '{other}'"
-                        )));
-                    }
-                }
+                options.solver = FitclinearSolver::from_public_name(&text).ok_or_else(|| {
+                    fitclinear_invalid(format!(
+                        "fitclinear: unsupported Solver '{}'",
+                        text.to_ascii_lowercase()
+                    ))
+                })?;
             }
-            "observationsin" => {
+            Some(FitclinearOption::ObservationsIn) => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: ObservationsIn must be text"))?;
                 options.observations_in = match text.to_ascii_lowercase().as_str() {
@@ -985,28 +770,28 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
                     }
                 };
             }
-            "fitbias" => options.fit_bias = logical_scalar(value, "FitBias")?,
-            "classnames" => {
+            Some(FitclinearOption::FitBias) => options.fit_bias = logical_scalar(value, "FitBias")?,
+            Some(FitclinearOption::ClassNames) => {
                 let labels = label_vector(value.clone(), "ClassNames")?;
                 options.class_names = Some(labels.labels);
             }
-            "predictornames" => {
+            Some(FitclinearOption::PredictorNames) => {
                 options.predictor_names = Some(text_list(value, "PredictorNames")?);
             }
-            "responsename" => {
+            Some(FitclinearOption::ResponseName) => {
                 options.response_name =
                     Some(scalar_text(value).ok_or_else(|| {
                         fitclinear_invalid("fitclinear: ResponseName must be text")
                     })?);
             }
-            "weights" => {
+            Some(FitclinearOption::Weights) => {
                 options.weights = Some(if let Some(name) = scalar_text(value) {
                     WeightSpec::Variable(name)
                 } else {
                     WeightSpec::Values(numeric_vector(value, "Weights")?)
                 });
             }
-            "prior" => {
+            Some(FitclinearOption::Prior) => {
                 if let Some(text) = scalar_text(value) {
                     match text.to_ascii_lowercase().as_str() {
                         "empirical" => options.prior = None,
@@ -1021,7 +806,7 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
                     options.prior = Some(numeric_vector(value, "Prior")?);
                 }
             }
-            "scoretransform" => {
+            Some(FitclinearOption::ScoreTransform) => {
                 let text = scalar_text(value)
                     .ok_or_else(|| fitclinear_invalid("fitclinear: ScoreTransform must be text"))?;
                 options.score_transform = Some(match text.to_ascii_lowercase().as_str() {
@@ -1034,36 +819,41 @@ fn parse_fit_options(values: &[Value], options: &mut FitOptions) -> BuiltinResul
                     }
                 });
             }
-            "iterationlimit" | "passlimit" => {
+            Some(FitclinearOption::IterationLimit | FitclinearOption::PassLimit) => {
                 options.iteration_limit = positive_integer(value, &name)?;
             }
-            "beta" => options.beta0 = Some(numeric_vector(value, "Beta")?),
-            "bias" => options.bias0 = Some(numeric_scalar(value, "Bias")?),
-            "batchlimit"
-            | "betatolerance"
-            | "deltagradienttolerance"
-            | "gradienttolerance"
-            | "numcheckconvergence"
-            | "postfitbias"
-            | "verbose" => {
+            Some(FitclinearOption::Beta) => options.beta0 = Some(numeric_vector(value, "Beta")?),
+            Some(FitclinearOption::Bias) => options.bias0 = Some(numeric_scalar(value, "Bias")?),
+            Some(
+                FitclinearOption::BatchLimit
+                | FitclinearOption::BetaTolerance
+                | FitclinearOption::DeltaGradientTolerance
+                | FitclinearOption::GradientTolerance
+                | FitclinearOption::NumCheckConvergence
+                | FitclinearOption::PostFitBias
+                | FitclinearOption::Verbose,
+            ) => {
                 // Accepted for script compatibility. The CPU solver below is deterministic
                 // batch gradient descent and records convergence diagnostics in FitInfo.
             }
-            "cost"
-            | "crossval"
-            | "cvpartition"
-            | "holdout"
-            | "kfold"
-            | "leaveout"
-            | "optimizehyperparameters"
-            | "hyperparameteroptimizationoptions" => {
+            Some(
+                FitclinearOption::Cost
+                | FitclinearOption::CrossVal
+                | FitclinearOption::CvPartition
+                | FitclinearOption::Holdout
+                | FitclinearOption::KFold
+                | FitclinearOption::Leaveout
+                | FitclinearOption::OptimizeHyperparameters
+                | FitclinearOption::HyperparameterOptimizationOptions,
+            ) => {
                 return Err(fitclinear_invalid(format!(
                     "fitclinear: option '{name}' is not supported yet"
                 )));
             }
-            other => {
+            None => {
                 return Err(fitclinear_invalid(format!(
-                    "fitclinear: unknown option '{other}'"
+                    "fitclinear: unknown option '{}'",
+                    name.to_ascii_lowercase()
                 )))
             }
         }
@@ -1138,7 +928,7 @@ fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
     );
     object.properties.insert(
         "Solver".to_string(),
-        Value::String(spec.options.solver.clone()),
+        Value::String(spec.options.solver.public_name().into()),
     );
     object.properties.insert(
         "ScoreTransform".to_string(),
@@ -1187,7 +977,10 @@ fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
         "Regularization",
         Value::String(spec.options.regularization.as_str().to_string()),
     );
-    parameters.insert("Solver", Value::String(spec.options.solver.clone()));
+    parameters.insert(
+        "Solver",
+        Value::String(spec.options.solver.public_name().into()),
+    );
     parameters.insert(
         "ObservationsIn",
         Value::String(spec.options.observations_in.as_str().to_string()),
@@ -1344,7 +1137,10 @@ fn fit_info_value(
         row_tensor(models.iter().map(|model| model.gradient_norm).collect())?,
     );
     info.insert("PassLimit", Value::Num(spec.options.iteration_limit as f64));
-    info.insert("Solver", Value::String(spec.options.solver.clone()));
+    info.insert(
+        "Solver",
+        Value::String(spec.options.solver.public_name().into()),
+    );
     info.insert(
         "Learner",
         Value::String(spec.options.learner.as_str().to_string()),
@@ -2128,44 +1924,8 @@ fn positive_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
 }
 
 fn is_name_value_option(value: &Value) -> bool {
-    scalar_text(value).is_some_and(|text| {
-        matches!(
-            text.to_ascii_lowercase().as_str(),
-            "batchlimit"
-                | "beta"
-                | "betatolerance"
-                | "bias"
-                | "classnames"
-                | "cost"
-                | "crossval"
-                | "cvpartition"
-                | "deltagradienttolerance"
-                | "fitbias"
-                | "gradienttolerance"
-                | "holdout"
-                | "hyperparameteroptimizationoptions"
-                | "iterationlimit"
-                | "kfold"
-                | "lambda"
-                | "learner"
-                | "leaveout"
-                | "numcheckconvergence"
-                | "observationsin"
-                | "optimizehyperparameters"
-                | "passlimit"
-                | "postfitbias"
-                | "predictornames"
-                | "prior"
-                | "regularization"
-                | "responsename"
-                | "scoretransform"
-                | "solver"
-                | "verbose"
-                | "weights"
-        )
-    })
+    scalar_text(value).is_some_and(|text| FitclinearOption::from_public_name(&text).is_some())
 }
-
 fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {
     if columns.is_empty() {
         return Err(fitclinear_invalid("fitclinear: no predictor columns"));
