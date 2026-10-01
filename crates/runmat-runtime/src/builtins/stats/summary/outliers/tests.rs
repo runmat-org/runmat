@@ -1,3 +1,4 @@
+use super::options::{logical_mask, numeric_vector, scalar_number, scalar_usize};
 use super::*;
 use futures::executor::block_on;
 use runmat_value::IntegerStorage;
@@ -538,9 +539,11 @@ fn previous_and_next_do_not_cross_fill_endpoints() {
         threshold_shape: vec![1, 1],
     };
     let mut prev = vec![100.0, 2.0, 3.0];
+    let prev_original = prev.clone();
     let mut filled = vec![0; 3];
     fill_slice(
         &mut prev,
+        &prev_original,
         &[0, 1, 2],
         &mask,
         &FillMethod::Previous,
@@ -549,9 +552,17 @@ fn previous_and_next_do_not_cross_fill_endpoints() {
     assert!(prev[0].is_nan());
     assert_eq!(filled, vec![0, 0, 0]);
     let mut next = vec![1.0, 2.0, 100.0];
+    let next_original = next.clone();
     let mut mask = mask;
     mask.mask = vec![0, 0, 1];
-    fill_slice(&mut next, &[0, 1, 2], &mask, &FillMethod::Next, &mut filled);
+    fill_slice(
+        &mut next,
+        &next_original,
+        &[0, 1, 2],
+        &mask,
+        &FillMethod::Next,
+        &mut filled,
+    );
     assert!(next[2].is_nan());
 }
 
@@ -598,4 +609,24 @@ fn too_many_outputs_error() {
     let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
     let err = block_on(isoutlier_builtin(value, Vec::new())).unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:outliers:TooManyOutputs"));
+}
+
+#[test]
+fn implicit_trailing_singleton_dimension_keeps_bounded_nd_geometry() {
+    let input = Tensor::new((1..=8).map(f64::from).collect(), vec![2, 2, 2]).unwrap();
+    let options = DetectionOptions {
+        dim: Some(usize::MAX),
+        forced_mask: Some((vec![0, 0, 0, 1, 0, 0, 0, 0], vec![2, 2, 2])),
+        ..DetectionOptions::default()
+    };
+    let result = detect_outliers(&input, &options, FILLOUTLIERS_NAME).unwrap();
+    assert_eq!(result.threshold_shape, vec![2, 2, 2]);
+    assert_eq!(result.mask, vec![0, 0, 0, 1, 0, 0, 0, 0]);
+    let (filled, filled_mask) =
+        fill_outlier_tensor(&input, &result, &options, &FillMethod::Constant(0.0)).unwrap();
+    assert_eq!(filled_mask, vec![0, 0, 0, 1, 0, 0, 0, 0]);
+    assert!(
+        matches!(filled, Value::Tensor(tensor) if tensor.shape == vec![2, 2, 2]
+        && tensor.materialize_f64() == vec![1.0, 2.0, 3.0, 0.0, 5.0, 6.0, 7.0, 8.0])
+    );
 }
