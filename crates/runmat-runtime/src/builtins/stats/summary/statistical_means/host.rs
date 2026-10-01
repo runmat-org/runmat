@@ -182,17 +182,19 @@ pub(super) fn reduce_rms(
     output_value(kind, output, geometry.output_shape, dtype)
 }
 
+pub(super) struct ResidualData {
+    pub(super) values: Vec<ScaledMagnitude>,
+    pub(super) shape: Vec<usize>,
+    pub(super) dtype: NumericDType,
+    pub(super) forecast_shape: Vec<usize>,
+    pub(super) actual_shape: Vec<usize>,
+}
+
 pub(super) fn residuals(
     left: HostData,
     right: HostData,
     kind: ReductionKind,
-) -> BuiltinResult<(
-    Vec<ScaledMagnitude>,
-    Vec<usize>,
-    NumericDType,
-    Vec<usize>,
-    Vec<usize>,
-)> {
+) -> BuiltinResult<ResidualData> {
     let dtype = if left.dtype == NumericDType::F32 && right.dtype == NumericDType::F32 {
         NumericDType::F32
     } else {
@@ -204,13 +206,13 @@ pub(super) fn residuals(
     for (destination, l, r) in plan.iter() {
         values[destination] = left.points[l].scaled_difference(right.points[r]);
     }
-    Ok((
+    Ok(ResidualData {
         values,
-        plan.output_shape().to_vec(),
+        shape: plan.output_shape().to_vec(),
         dtype,
-        left.shape,
-        right.shape,
-    ))
+        forecast_shape: left.shape,
+        actual_shape: right.shape,
+    })
 }
 
 enum Weights {

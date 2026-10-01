@@ -57,8 +57,13 @@ pub(crate) async fn rmse_builtin(
     };
     let forecast = data::materialize(kind, forecast).await?;
     let actual = data::materialize(kind, actual).await?;
-    let (values, shape, dtype, forecast_shape, actual_shape) =
-        host::residuals(forecast, actual, kind)?;
+    let host::ResidualData {
+        values,
+        shape,
+        dtype,
+        forecast_shape,
+        actual_shape,
+    } = host::residuals(forecast, actual, kind)?;
     if let Some(weights) = weights {
         host::weighted_rmse(
             values,
