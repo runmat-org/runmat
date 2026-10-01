@@ -478,6 +478,16 @@ enum Label {
     Text(String),
 }
 
+/// Exact class identity shared by encoding, decoding, and duplicate admission.
+/// Text is presentation data only for text labels, never a numeric dispatch key.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum LabelKey {
+    Integer(i128),
+    FloatingBits(u64),
+    Logical(bool),
+    Text(String),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OutputKind {
     Numeric(NumericDType),
@@ -1269,7 +1279,7 @@ fn nonmissing_classes(name: &str, labels: &LabelArray) -> BuiltinResult<Vec<Labe
     Ok(classes)
 }
 
-fn class_index(classes: &[Label]) -> BuiltinResult<HashMap<String, usize>> {
+fn class_index(classes: &[Label]) -> BuiltinResult<HashMap<LabelKey, usize>> {
     let mut index = HashMap::with_capacity(classes.len());
     for (idx, class) in classes.iter().enumerate() {
         if index.insert(label_key(class), idx).is_some() {
@@ -1564,15 +1574,15 @@ fn same_label(left: &Label, right: &Label) -> bool {
     }
 }
 
-fn label_key(label: &Label) -> String {
+fn label_key(label: &Label) -> LabelKey {
     match label {
         Label::Numeric(value) => numeric_key(*value),
-        Label::Logical(value) => format!("l:{}", u8::from(*value)),
-        Label::Text(value) => format!("t:{value}"),
+        Label::Logical(value) => LabelKey::Logical(*value),
+        Label::Text(value) => LabelKey::Text(value.clone()),
     }
 }
 
-fn numeric_key(value: NumericScalar) -> String {
+fn numeric_key(value: NumericScalar) -> LabelKey {
     if let Some(value) = value.into_int_value() {
         return integer_key(value);
     }
@@ -1582,29 +1592,29 @@ fn numeric_key(value: NumericScalar) -> String {
         _ => unreachable!("integer numeric scalar handled above"),
     };
     if value == 0.0 {
-        return "n:i:0".to_string();
+        return LabelKey::Integer(0);
     }
     if value.is_finite() && value.fract() == 0.0 {
         if value > 0.0 && value < 18_446_744_073_709_551_616.0 {
-            return format!("n:i:{}", value as u64);
+            return LabelKey::Integer(i128::from(value as u64));
         }
         if value < 0.0 && value >= i64::MIN as f64 {
-            return format!("n:i:{value:.0}");
+            return LabelKey::Integer(i128::from(value as i64));
         }
     }
-    format!("n:f:{:016x}", value.to_bits())
+    LabelKey::FloatingBits(value.to_bits())
 }
 
-fn integer_key(value: IntValue) -> String {
+fn integer_key(value: IntValue) -> LabelKey {
     match value {
-        IntValue::I8(value) => format!("n:i:{value}"),
-        IntValue::I16(value) => format!("n:i:{value}"),
-        IntValue::I32(value) => format!("n:i:{value}"),
-        IntValue::I64(value) => format!("n:i:{value}"),
-        IntValue::U8(value) => format!("n:i:{value}"),
-        IntValue::U16(value) => format!("n:i:{value}"),
-        IntValue::U32(value) => format!("n:i:{value}"),
-        IntValue::U64(value) => format!("n:i:{value}"),
+        IntValue::I8(value) => LabelKey::Integer(i128::from(value)),
+        IntValue::I16(value) => LabelKey::Integer(i128::from(value)),
+        IntValue::I32(value) => LabelKey::Integer(i128::from(value)),
+        IntValue::I64(value) => LabelKey::Integer(i128::from(value)),
+        IntValue::U8(value) => LabelKey::Integer(i128::from(value)),
+        IntValue::U16(value) => LabelKey::Integer(i128::from(value)),
+        IntValue::U32(value) => LabelKey::Integer(i128::from(value)),
+        IntValue::U64(value) => LabelKey::Integer(i128::from(value)),
     }
 }
 
@@ -1807,6 +1817,34 @@ mod tests {
     fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let tensor = Tensor::new_integer(storage, shape).unwrap();
         Value::Tensor(tensor)
+    }
+
+    #[test]
+    fn class_identity_is_typed_and_exact_across_numeric_and_text_labels() {
+        assert_eq!(
+            label_key(&Label::Numeric(NumericScalar::F64(-0.0))),
+            label_key(&Label::Numeric(NumericScalar::from(IntValue::U64(0))))
+        );
+        assert_eq!(
+            label_key(&Label::Numeric(NumericScalar::F64(7.0))),
+            label_key(&Label::Numeric(NumericScalar::from(IntValue::I64(7))))
+        );
+        assert_ne!(
+            label_key(&Label::Numeric(NumericScalar::from(IntValue::U64(
+                9_007_199_254_740_993,
+            )))),
+            label_key(&Label::Numeric(NumericScalar::from(IntValue::U64(
+                9_007_199_254_740_992,
+            ))))
+        );
+        assert_ne!(
+            label_key(&Label::Text("n:i:7".into())),
+            label_key(&Label::Numeric(NumericScalar::F64(7.0)))
+        );
+        assert_ne!(
+            label_key(&Label::Logical(true)),
+            label_key(&Label::Numeric(NumericScalar::F64(1.0)))
+        );
     }
 
     fn mirrorless_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
