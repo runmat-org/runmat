@@ -91,19 +91,36 @@ pub(super) async fn fit_nominal_logit(
             cooperation,
         )
         .await?;
-        let max_step = delta.iter().map(|value| value.abs()).fold(0.0, f64::max);
-        for (coef, step) in beta.iter_mut().zip(delta.iter()) {
-            *coef += *step;
+        let mut max_step = 0.0f64;
+        for (index, step) in delta.iter().enumerate() {
+            max_step = max_step.max(step.abs());
+            if (index + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
+        cooperation.completed((delta.len() % 16_384) as u64).await?;
+        for (index, (coef, step)) in beta.iter_mut().zip(delta.iter()).enumerate() {
+            *coef += *step;
+            if (index + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
+        }
+        cooperation.completed((beta.len() % 16_384) as u64).await?;
         if max_step <= tol_x.max(EPS) {
             break;
         }
     }
-    if beta.iter().any(|value| !value.is_finite()) {
-        return Err(convergence(
-            "mnrfit: solver produced non-finite coefficients",
-        ));
+    for (index, value) in beta.iter().enumerate() {
+        if !value.is_finite() {
+            return Err(convergence(
+                "mnrfit: solver produced non-finite coefficients",
+            ));
+        }
+        if (index + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
     }
+    cooperation.completed((beta.len() % 16_384) as u64).await?;
     for chunk in information.chunks_mut(16_384) {
         chunk.fill(0.0);
         cooperation.completed(chunk.len() as u64).await?;
@@ -138,24 +155,28 @@ pub(super) async fn fit_nominal_logit(
         information[idx * dim + idx] += RIDGE;
     }
     let covb = invert_matrix(information, dim, check, cooperation).await?;
-    let se = (0..dim)
-        .map(|idx| covb[idx * dim + idx].max(0.0).sqrt())
-        .collect::<Vec<_>>();
-    let t = beta
-        .iter()
-        .zip(se.iter())
-        .map(|(coef, se)| if *se > 0.0 { coef / se } else { f64::NAN })
-        .collect::<Vec<_>>();
-    let p = t
-        .iter()
-        .map(|stat| {
-            if stat.is_finite() {
-                2.0 * (1.0 - distribution_math::standard_normal_cdf(stat.abs()))
-            } else {
-                f64::NAN
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut se = reserved(dim, "standard errors")?;
+    let mut t = reserved(dim, "coefficient statistics")?;
+    let mut p = reserved(dim, "coefficient probabilities")?;
+    for idx in 0..dim {
+        let error = covb[idx * dim + idx].max(0.0).sqrt();
+        se.push(error);
+        t.push(if error > 0.0 {
+            beta[idx] / error
+        } else {
+            f64::NAN
+        });
+        let stat = t[idx];
+        p.push(if stat.is_finite() {
+            2.0 * (1.0 - distribution_math::standard_normal_cdf(stat.abs()))
+        } else {
+            f64::NAN
+        });
+        if (idx + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
+    }
+    cooperation.completed((dim % 16_384) as u64).await?;
     let loglik = log_likelihood(data, &beta, check, cooperation).await?;
     let saturated = saturated_log_likelihood(data, check, cooperation).await?;
     check()?;
@@ -199,14 +220,22 @@ async fn row_probabilities(
     let base = (-max_eta).exp();
     let mut denom = base;
     let mut exp_eta = reserved(logits, "row probabilities")?;
-    for value in eta {
+    for (index, value) in eta.into_iter().enumerate() {
         let exp = (value - max_eta).exp();
         denom += exp;
         exp_eta.push(exp);
+        if (index + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
     }
-    for value in &mut exp_eta {
+    cooperation.completed((logits % 16_384) as u64).await?;
+    for (index, value) in exp_eta.iter_mut().enumerate() {
         *value /= denom;
+        if (index + 1).is_multiple_of(16_384) {
+            cooperation.completed(16_384).await?;
+        }
     }
+    cooperation.completed((logits % 16_384) as u64).await?;
     Ok(exp_eta)
 }
 
@@ -231,16 +260,35 @@ async fn log_likelihood(
         )
         .await?;
         cooperation.completed(1).await?;
-        let mut baseline = 1.0 - probs.iter().sum::<f64>();
+        let mut probability_total = 0.0;
+        for (index, probability) in probs.iter().enumerate() {
+            probability_total += probability;
+            if (index + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
+        }
+        cooperation.completed((probs.len() % 16_384) as u64).await?;
+        let mut baseline = 1.0 - probability_total;
         baseline = baseline.max(EPS);
         for (j, prob) in probs.iter().enumerate() {
             let count = data.weights[row] * data.outcomes[j][row];
             if count > 0.0 {
                 ll += count * prob.max(EPS).ln();
             }
+            if (j + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
-        let baseline_count =
-            data.weights[row] * (1.0 - (0..logits).map(|j| data.outcomes[j][row]).sum::<f64>());
+        cooperation.completed((logits % 16_384) as u64).await?;
+        let mut outcome_total = 0.0;
+        for j in 0..logits {
+            outcome_total += data.outcomes[j][row];
+            if (j + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
+        }
+        cooperation.completed((logits % 16_384) as u64).await?;
+        let baseline_count = data.weights[row] * (1.0 - outcome_total);
         if baseline_count > 0.0 {
             ll += baseline_count * baseline.ln();
         }
@@ -259,13 +307,19 @@ async fn saturated_log_likelihood(
         check()?;
         cooperation.completed(1).await?;
         let weight = data.weights[row];
+        let mut outcome_total = 0.0;
         for j in 0..logits {
             let p = data.outcomes[j][row];
+            outcome_total += p;
             if p > 0.0 {
                 ll += weight * p * p.max(EPS).ln();
             }
+            if (j + 1).is_multiple_of(16_384) {
+                cooperation.completed(16_384).await?;
+            }
         }
-        let baseline_p = (1.0 - (0..logits).map(|j| data.outcomes[j][row]).sum::<f64>()).max(0.0);
+        cooperation.completed((logits % 16_384) as u64).await?;
+        let baseline_p = (1.0 - outcome_total).max(0.0);
         if baseline_p > 0.0 {
             ll += weight * baseline_p * baseline_p.max(EPS).ln();
         }
@@ -313,15 +367,16 @@ async fn solve_linear(
         for row in col + 1..n {
             let factor = a[row * n + col] / diag;
             a[row * n + col] = 0.0;
+            let mut completed = 0u64;
             for j in col + 1..n {
                 a[row * n + j] -= factor * a[col * n + j];
-                if (j + 1).is_multiple_of(16_384) {
-                    cooperation.completed(16_384).await?;
+                completed += 1;
+                if completed == 16_384 {
+                    cooperation.completed(completed).await?;
+                    completed = 0;
                 }
             }
-            cooperation
-                .completed(((n - col - 1) % 16_384) as u64)
-                .await?;
+            cooperation.completed(completed).await?;
             b[row] -= factor * b[col];
         }
     }
@@ -329,15 +384,16 @@ async fn solve_linear(
     for row in (0..n).rev() {
         check()?;
         let mut rhs = b[row];
+        let mut completed = 0u64;
         for col in row + 1..n {
             rhs -= a[row * n + col] * x[col];
-            if (col + 1).is_multiple_of(16_384) {
-                cooperation.completed(16_384).await?;
+            completed += 1;
+            if completed == 16_384 {
+                cooperation.completed(completed).await?;
+                completed = 0;
             }
         }
-        cooperation
-            .completed(((n - row - 1) % 16_384) as u64)
-            .await?;
+        cooperation.completed(completed).await?;
         x[row] = rhs / a[row * n + row];
     }
     Ok(x)

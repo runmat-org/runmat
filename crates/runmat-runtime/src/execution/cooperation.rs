@@ -63,13 +63,14 @@ impl CpuCooperationBudget {
         }
         self.pending_work = (total % u128::from(quantum.get())) as u64;
         let turn = self.turn.as_ref().expect("a work quantum owns a turn hook");
-        match select(turn(), self.cancellation.cancelled()).await {
-            Either::Left((result, _listener)) => result?,
+        let result = match select(turn(), self.cancellation.cancelled()).await {
+            Either::Left((result, _listener)) => result,
             Either::Right((_reason, _turn)) => return Err(ExecutionServiceError::Cancelled),
-        }
+        };
         if self.cancellation.is_cancelled() {
             return Err(ExecutionServiceError::Cancelled);
         }
+        result?;
         Ok(())
     }
 
@@ -87,6 +88,10 @@ impl CpuCooperationBudget {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "cooperation/service_tests.rs"]
+mod service_tests;
 
 #[cfg(test)]
 mod tests {

@@ -86,13 +86,7 @@ pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
 }
 
 fn check_cancellation(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<()> {
-    if let Some(runtime) = runtime.filter(|runtime| runtime.is_cancelled()) {
-        return Err(build_runtime_error("mnrfit: execution was cancelled")
-            .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
-            .with_builtin(NAME)
-            .build());
-    }
-    Ok(())
+    cooperation::FitCancellation::new(runtime).check()
 }
 
 async fn mnrfit_in_runtime(
@@ -111,13 +105,13 @@ async fn mnrfit_in_runtime(
     let prepared = prepare_values(names.into_iter().zip(values).collect())?;
     prepared.preflight_host_weights(response.rows())?;
     let x = gather_value(x).await?;
-    check_cancellation(runtime)?;
+    cooperation.check()?;
     let response = response.materialize(&mut cooperation).await?;
-    check_cancellation(runtime)?;
+    cooperation.check()?;
     let options = prepared.materialize().await?;
-    check_cancellation(runtime)?;
-    let result = fit(x, response, options, runtime, &mut cooperation).await?;
-    check_cancellation(runtime)?;
+    cooperation.check()?;
+    let result = fit(x, response, options, &mut cooperation).await?;
+    cooperation.check()?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![result.b])),
@@ -243,15 +237,15 @@ async fn fit(
     x: Value,
     response: ResponseOutcomes,
     options: Options,
-    runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut FitCooperation<'_>,
 ) -> BuiltinResult<FitResult> {
     let x = numeric_tensor("X", x)?;
     if x.rows() == 0 || x.cols() == 0 {
         return Err(invalid("mnrfit: X must be a nonempty numeric matrix"));
     }
-    check_cancellation(runtime)?;
-    let check = || check_cancellation(runtime);
+    cooperation.check()?;
+    let cancellation = cooperation.cancellation();
+    let check = || cancellation.check();
     let data = prepare_data(&x, response, &options, &check, cooperation).await?;
     cooperation.completed(1).await?;
     let fit =
