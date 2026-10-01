@@ -25,6 +25,49 @@ fn invalid_option_precedes_any_provider_download() {
 }
 
 #[test]
+fn oversized_structural_controls_fail_before_resident_gather() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(
+            vec![3, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("unregistered resident fixture");
+    let resident = || Value::GpuTensor(allocation.handle.clone());
+    let dimension = Value::Int(IntValue::U64(u64::MAX));
+    let error = block_on(quantile::quantile_builtin(
+        resident(),
+        vec![Value::Num(0.5), dimension],
+    ))
+    .expect_err("oversized dimension must fail without a provider download");
+    assert!(
+        error.message().contains("structural range") || error.message().contains("host resources"),
+        "{error}"
+    );
+
+    let count = Value::Int(IntValue::U64(u64::MAX));
+    let error = block_on(quantile::quantile_builtin(resident(), vec![count]))
+        .expect_err("oversized scalar count must fail without a provider download");
+    assert!(
+        error.message().contains("quantile count is too large"),
+        "{error}"
+    );
+
+    let rounded_boundary = Value::Num(usize::MAX as f64);
+    let error = block_on(quantile::quantile_builtin(
+        resident(),
+        vec![rounded_boundary],
+    ))
+    .expect_err("binary64 cannot identify the largest usize exactly");
+    assert!(
+        error.message().contains("count must be an integer"),
+        "{error}"
+    );
+}
+
+#[test]
 fn quantile_scalar_count_and_vecdim_have_distinct_shapes() {
     let sample =
         || Value::Tensor(Tensor::new((1..=8).map(f64::from).collect(), vec![2, 2, 2]).unwrap());

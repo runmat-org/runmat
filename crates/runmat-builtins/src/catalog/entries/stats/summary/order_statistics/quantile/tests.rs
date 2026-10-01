@@ -129,3 +129,59 @@ fn count_and_vecdim_literals_are_shape_proven_without_runtime_string_matching() 
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(result.outputs[0].shape, known(&[4, 1, 2]));
 }
+
+#[test]
+fn wide_integer_dimensions_remain_exact_without_materializing_a_huge_shape() {
+    let wide = (1_u64 << 53) + 1;
+    let result = call(
+        known(&[2, 3]),
+        ShapeFact::Scalar,
+        Some((
+            numeric(ShapeFact::Scalar),
+            LiteralValue::Integer {
+                text: wide.to_string(),
+                class: NumericClass::UInt64,
+            },
+        )),
+    );
+    if usize::BITS >= 64 {
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(
+            result.outputs[0].shape,
+            ShapeFact::Ranked {
+                rank: wide as usize
+            }
+        );
+    } else {
+        assert!(!result.diagnostics.is_empty());
+    }
+
+    let invalid = call(
+        known(&[2, 3]),
+        ShapeFact::Scalar,
+        Some((
+            numeric(ShapeFact::Scalar),
+            LiteralValue::Number(usize::MAX as f64),
+        )),
+    );
+    assert!(!invalid.diagnostics.is_empty());
+    assert_eq!(invalid.outputs[0].shape, known(&[1, 3]));
+}
+
+#[test]
+fn empty_and_duplicate_vector_dimensions_are_rejected_statically() {
+    for axes in [
+        vec![],
+        vec![LiteralValue::Number(1.0), LiteralValue::Number(1.0)],
+    ] {
+        let result = call(
+            known(&[2, 3]),
+            ShapeFact::Scalar,
+            Some((
+                numeric(ShapeFact::Ranked { rank: 2 }),
+                LiteralValue::Vector(axes),
+            )),
+        );
+        assert!(!result.diagnostics.is_empty());
+    }
+}

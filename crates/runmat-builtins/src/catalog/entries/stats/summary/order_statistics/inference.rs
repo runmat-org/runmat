@@ -90,6 +90,29 @@ fn reduced_shape(
     if axis == ReductionAxis::All {
         return ShapeFact::from(vec![Some(if count == 1 { 1 } else { count }), Some(1)]);
     }
+    // A ranked fact can carry a caller-selected rank far beyond practical
+    // host memory. Preserve that rank symbolically; known_dims() would build
+    // a Vec with one slot per dimension.
+    if let ShapeFact::Ranked { rank } = input {
+        return match axis {
+            ReductionAxis::Dimension(selected) => selected
+                .checked_add(1)
+                .map(|selected_rank| ShapeFact::Ranked {
+                    rank: (*rank).max(selected_rank),
+                })
+                .unwrap_or(ShapeFact::Unknown),
+            ReductionAxis::Dimensions(ref axes) => axes
+                .last()
+                .and_then(|selected| selected.checked_add(1))
+                .map(|selected_rank| ShapeFact::Ranked {
+                    rank: (*rank).max(selected_rank),
+                })
+                .unwrap_or(ShapeFact::Unknown),
+            ReductionAxis::Default | ReductionAxis::All | ReductionAxis::Unknown => {
+                ShapeFact::Unknown
+            }
+        };
+    }
     let Some(mut dims) = input.known_dims() else {
         return ShapeFact::Unknown;
     };
@@ -101,10 +124,12 @@ fn reduced_shape(
         let Some(&first) = axes.first() else {
             return ShapeFact::Unknown;
         };
-        dims.resize(
-            dims.len().max(axes.last().copied().unwrap_or(first) + 1),
-            Some(1),
-        );
+        let Some(rank) = axes.last().and_then(|last| last.checked_add(1)) else {
+            return ShapeFact::Unknown;
+        };
+        if rank > dims.len() {
+            return ShapeFact::Ranked { rank };
+        }
         for &axis in axes {
             dims[axis] = Some(1);
         }
@@ -119,9 +144,41 @@ fn reduced_shape(
     let Some(selected) = selected else {
         return ShapeFact::Unknown;
     };
-    dims.resize(dims.len().max(selected + 1), Some(1));
+    let Some(rank) = selected.checked_add(1) else {
+        return ShapeFact::Unknown;
+    };
+    if rank > dims.len() {
+        return ShapeFact::Ranked { rank };
+    }
     dims[selected] = Some(count);
     ShapeFact::from(dims)
+}
+
+/// Decode an authored structural dimension without routing integer source
+/// text through binary64 or an unchecked float-to-usize cast.
+fn literal_dimension(value: &LiteralValue) -> Option<Result<usize, ()>> {
+    match value {
+        LiteralValue::Integer { text, .. } => Some(
+            text.parse::<i128>()
+                .ok()
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .ok_or(()),
+        ),
+        LiteralValue::Number(_) | LiteralValue::Real { .. } => {
+            let value = LiteralContext::numeric_from_literal(value)?;
+            Some(
+                (value.is_finite()
+                    && value >= 1.0
+                    && value.fract() == 0.0
+                    && value < usize::MAX as f64)
+                    .then_some(value as usize)
+                    .ok_or(()),
+            )
+        }
+        LiteralValue::Unknown | LiteralValue::Vector(_) => None,
+        _ => Some(Err(())),
+    }
 }
 
 fn selected_axis(
@@ -192,26 +249,24 @@ fn selected_axis(
             // A runtime-computed option might select `all` and change the result shape.
             axis = ReductionAxis::Unknown;
         } else if real_numeric_or_unknown(&request.arguments[index]) {
-            match request.literals.numeric_at(index) {
-                Some(value)
-                    if value.is_finite()
-                        && value.fract() == 0.0
-                        && value >= 1.0
-                        && value <= usize::MAX as f64 =>
-                {
-                    axis = ReductionAxis::Dimension(value as usize - 1)
-                }
-                Some(value) if !value.is_finite() || value < 1.0 => diagnostics.push(diagnostic(
+            match request
+                .literals
+                .literal_args
+                .get(index)
+                .and_then(literal_dimension)
+            {
+                Some(Ok(dimension)) => axis = ReductionAxis::Dimension(dimension - 1),
+                Some(Err(())) => diagnostics.push(diagnostic(
                     "RM-CATALOG-ORDER-DIM",
                     "Dimension must be a positive integer",
                     index,
                 )),
-                _ => {
-                    if let Some(dimensions) = request.literals.numeric_vector_at(index) {
+                None => {
+                    if let Some(dimensions) = request.literals.literal_vector_at(index) {
                         let mut axes = Vec::with_capacity(dimensions.len());
                         for dimension in dimensions {
-                            match dimension {
-                                Some(dim) if dim > 0 => axes.push(dim - 1),
+                            match literal_dimension(&dimension) {
+                                Some(Ok(dim)) => axes.push(dim - 1),
                                 _ => {
                                     diagnostics.push(diagnostic(
                                         "RM-CATALOG-ORDER-DIM",
@@ -222,6 +277,13 @@ fn selected_axis(
                                     break;
                                 }
                             }
+                        }
+                        if axes.is_empty() && dimensions.is_empty() {
+                            diagnostics.push(diagnostic(
+                                "RM-CATALOG-ORDER-DIM",
+                                "vecdim cannot be empty",
+                                index,
+                            ));
                         }
                         axes.sort_unstable();
                         if axes.windows(2).any(|pair| pair[0] == pair[1]) {
@@ -280,13 +342,16 @@ pub(super) fn infer_quantile(
         .get(1)
         .and_then(|value| value.shape.element_count());
     if count == Some(1) && unit == QuantileRequestUnit::Probability {
-        if let Some(value) = request.literals.numeric_at(1) {
-            if value.is_finite()
-                && value.fract() == 0.0
-                && value > 1.0
-                && value <= usize::MAX as f64
-            {
-                count = Some(value as usize);
+        if let Some(value) = request
+            .literals
+            .literal_args
+            .get(1)
+            .and_then(literal_dimension)
+        {
+            if let Ok(value) = value {
+                if value > 1 {
+                    count = Some(value);
+                }
             }
         } else {
             // A runtime-computed scalar can mean either a probability or a count.

@@ -23,6 +23,9 @@ fn parse_axes(name: &str, value: &Value) -> BuiltinResult<ReductionAxes> {
     let Value::Tensor(array) = value else {
         return Ok(ReductionAxes::Dimensions(vec![parse_dim(name, value)? - 1]));
     };
+    if tensor::tensor_element_len(array) == 0 {
+        return Err(order_error(name, format!("{name}: vecdim cannot be empty")));
+    }
     if tensor::tensor_element_len(array) <= 1 {
         return Ok(ReductionAxes::Dimensions(vec![parse_dim(name, value)? - 1]));
     }
@@ -53,6 +56,150 @@ fn parse_axes(name: &str, value: &Value) -> BuiltinResult<ReductionAxes> {
         ));
     }
     Ok(ReductionAxes::Dimensions(axes))
+}
+
+fn input_shape_before_gather(name: &str, input: &Value) -> BuiltinResult<Vec<usize>> {
+    let (shape, count) = match input {
+        Value::Tensor(tensor) => (&tensor.shape[..], tensor.len()),
+        Value::LogicalArray(array) => (&array.shape[..], array.data.len()),
+        Value::GpuTensor(handle) => {
+            let shape = handle.shape();
+            let count = crate::builtins::common::spec::checked_reduction_elements(shape)
+                .ok_or_else(|| {
+                    order_error(
+                        name,
+                        format!("{name}: input shape exceeds structural range"),
+                    )
+                })?;
+            (shape, count)
+        }
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Ok(vec![1, 1]),
+        _ => {
+            return Err(order_error(
+                name,
+                format!("{name}: input must be real numeric data"),
+            ))
+        }
+    };
+    Ok(tensor::default_shape_for(shape, count))
+}
+
+fn planned_output_shape(
+    name: &str,
+    input_shape: &[usize],
+    axes: &ReductionAxes,
+    count: usize,
+) -> BuiltinResult<(Vec<usize>, usize)> {
+    let output_shape = match axes {
+        ReductionAxes::All => vec![count, 1],
+        ReductionAxes::Dimensions(dimensions) => {
+            let last = dimensions
+                .last()
+                .ok_or_else(|| order_error(name, format!("{name}: vecdim cannot be empty")))?;
+            let rank = last
+                .checked_add(1)
+                .ok_or_else(|| {
+                    order_error(name, format!("{name}: dimension exceeds structural range"))
+                })?
+                .max(input_shape.len());
+            let mut shape = Vec::new();
+            shape.try_reserve_exact(rank).map_err(|_| {
+                order_error(
+                    name,
+                    format!("{name}: dimension metadata exceeds host resources"),
+                )
+            })?;
+            shape.extend_from_slice(input_shape);
+            shape.resize(rank, 1);
+            for &axis in dimensions {
+                shape[axis] = 1;
+            }
+            shape[dimensions[0]] = count;
+            shape
+        }
+    };
+    let elements = crate::builtins::common::spec::checked_reduction_elements(&output_shape)
+        .ok_or_else(|| {
+            order_error(
+                name,
+                format!("{name}: output shape exceeds structural range"),
+            )
+        })?;
+    Ok((output_shape, elements))
+}
+
+fn allocate_output(name: &str, count: usize) -> BuiltinResult<Vec<f64>> {
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(count)
+        .map_err(|_| order_error(name, format!("{name}: output exceeds host resources")))?;
+    output.resize(count, 0.0);
+    Ok(output)
+}
+
+struct MultiAxisWorkspace {
+    input_shape: Vec<usize>,
+    group_shape: Vec<usize>,
+    reduced: Vec<bool>,
+    groups: Vec<Vec<OrderedValue>>,
+}
+
+fn plan_multi_axis_workspace(
+    name: &str,
+    shape: &[usize],
+    axes: &[usize],
+    rank: usize,
+) -> BuiltinResult<MultiAxisWorkspace> {
+    let mut input_shape = Vec::new();
+    input_shape.try_reserve_exact(rank).map_err(|_| {
+        order_error(
+            name,
+            format!("{name}: dimension metadata exceeds host resources"),
+        )
+    })?;
+    input_shape.extend_from_slice(shape);
+    input_shape.resize(rank, 1);
+    let mut group_shape = Vec::new();
+    group_shape.try_reserve_exact(rank).map_err(|_| {
+        order_error(
+            name,
+            format!("{name}: group shape metadata exceeds host resources"),
+        )
+    })?;
+    group_shape.extend_from_slice(&input_shape);
+    let mut reduced = Vec::new();
+    reduced.try_reserve_exact(rank).map_err(|_| {
+        order_error(
+            name,
+            format!("{name}: dimension metadata exceeds host resources"),
+        )
+    })?;
+    reduced.resize(rank, false);
+    for &axis in axes {
+        reduced[axis] = true;
+        group_shape[axis] = 1;
+    }
+    let group_count = crate::builtins::common::spec::checked_reduction_elements(&group_shape)
+        .ok_or_else(|| {
+            order_error(
+                name,
+                format!("{name}: group shape exceeds structural range"),
+            )
+        })?;
+    let mut groups = Vec::new();
+    groups.try_reserve_exact(group_count).map_err(|_| {
+        order_error(
+            name,
+            format!("{name}: group metadata exceeds host resources"),
+        )
+    })?;
+    groups.resize_with(group_count, Vec::new);
+    Ok(MultiAxisWorkspace {
+        input_shape,
+        group_shape,
+        reduced,
+        groups,
+    })
 }
 
 fn parse_probabilities(
@@ -86,7 +233,7 @@ fn parse_probabilities(
             }
         } else if let Some(value) = tensor::tensor_values_f64_cow(&tensor).first() {
             if *value > 1.0 {
-                if !value.is_finite() || value.fract() != 0.0 || *value > usize::MAX as f64 {
+                if !value.is_finite() || value.fract() != 0.0 || *value >= usize::MAX as f64 {
                     return Err(order_error(
                         name,
                         format!("{name}: quantile count must be an integer greater than one"),
@@ -141,6 +288,9 @@ pub(super) struct QuantileArgs {
     axes: ReductionAxes,
     nanflag: NanFlag,
     method: QuantileMethod,
+    output_shape: Vec<usize>,
+    output: Vec<f64>,
+    multi_axis: Option<MultiAxisWorkspace>,
 }
 
 #[derive(Clone, Copy)]
@@ -230,20 +380,35 @@ pub(super) async fn parse_quantile_args(
         }
         idx += 1;
     }
-    let input = value_to_tensor(name, input).await?;
+    let shape = input_shape_before_gather(name, &input)?;
+    let axes =
+        axes.unwrap_or_else(|| ReductionAxes::Dimensions(vec![first_non_singleton(&shape) - 1]));
+    // Validate structural controls before fetching a resident probability
+    // vector or input. A scalar count is not yet known at this stage.
+    planned_output_shape(name, &shape, &axes, 1)?;
     let p_value = gather_if_needed_async(&rest[0])
         .await
         .map_err(|err| order_error(name, format!("{name}: {err}")))?;
     let probabilities = parse_probabilities(name, p_value, unit)?;
-    let shape = tensor::default_shape_for(&input.shape, tensor::tensor_element_len(&input));
-    let axes =
-        axes.unwrap_or_else(|| ReductionAxes::Dimensions(vec![first_non_singleton(&shape) - 1]));
+    let (output_shape, output_len) =
+        planned_output_shape(name, &shape, &axes, probabilities.len())?;
+    let output = allocate_output(name, output_len)?;
+    let multi_axis = match &axes {
+        ReductionAxes::Dimensions(dimensions) if dimensions.len() > 1 && output_len > 0 => Some(
+            plan_multi_axis_workspace(name, &shape, dimensions, output_shape.len())?,
+        ),
+        _ => None,
+    };
+    let input = value_to_tensor(name, input).await?;
     Ok(QuantileArgs {
         input,
         probabilities,
         axes,
         nanflag,
         method,
+        output_shape,
+        output,
+        multi_axis,
     })
 }
 
@@ -286,22 +451,15 @@ fn quantile_from_sorted(values: &[OrderedValue], p: f64, method: QuantileMethod)
     }
 }
 
-pub(super) fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
+pub(super) fn quantile_tensor(mut args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
     let input_values = ordered_input_values(&args.input);
     let shape = tensor::default_shape_for(&args.input.shape, input_values.len());
     if matches!(args.axes, ReductionAxes::All) {
         let values = sorted_slice(input_values, args.nanflag);
-        let data = args
-            .probabilities
-            .iter()
-            .map(|p| quantile_from_sorted(&values, *p, args.method))
-            .collect::<Vec<_>>();
-        let out_shape = if args.probabilities.len() == 1 {
-            vec![1, 1]
-        } else {
-            vec![args.probabilities.len(), 1]
-        };
-        return Tensor::new(data, out_shape)
+        for (result, probability) in args.output.iter_mut().zip(&args.probabilities) {
+            *result = quantile_from_sorted(&values, *probability, args.method);
+        }
+        return Tensor::new(args.output, args.output_shape)
             .map(tensor::tensor_into_value)
             .map_err(|err| order_error(name, format!("{name}: {err}")));
     }
@@ -309,20 +467,16 @@ pub(super) fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<V
         unreachable!("all handled above")
     };
     if axes.len() > 1 {
-        return quantile_multi_axes(&args, input_values, shape, axes, name);
+        return quantile_multi_axes(args, input_values, name);
     }
     let axis = axes[0];
-    let rank = shape.len().max(axis + 1);
-    let mut padded_shape = shape.clone();
-    padded_shape.resize(rank, 1);
-    let axis_len = padded_shape[axis];
+    // Beyond-rank dimensions are implicit singletons. The preflighted output
+    // shape already carries the requested rank; no second rank-sized buffer
+    // is needed after a resident input has been gathered.
+    let axis_len = shape.get(axis).copied().unwrap_or(1);
     let p_len = args.probabilities.len();
-    let mut out_shape = padded_shape.clone();
-    out_shape[axis] = p_len;
-    let out_len = tensor::element_count(&out_shape);
-    let mut out = vec![0.0; out_len];
-    let pre: usize = padded_shape[..axis].iter().product();
-    let post: usize = padded_shape[axis + 1..].iter().product();
+    let pre: usize = shape[..axis.min(shape.len())].iter().product();
+    let post: usize = shape.get(axis + 1..).unwrap_or(&[]).iter().product();
     for prefix in 0..pre {
         for suffix in 0..post {
             let mut slice = Vec::with_capacity(axis_len);
@@ -333,35 +487,38 @@ pub(super) fn quantile_tensor(args: QuantileArgs, name: &str) -> BuiltinResult<V
             let slice = sorted_slice(slice, args.nanflag);
             for (p_idx, p) in args.probabilities.iter().enumerate() {
                 let dst = prefix + p_idx * pre + suffix * pre * p_len;
-                out[dst] = quantile_from_sorted(&slice, *p, args.method);
+                args.output[dst] = quantile_from_sorted(&slice, *p, args.method);
             }
         }
     }
-    Tensor::new(out, out_shape)
+    Tensor::new(args.output, args.output_shape)
         .map(tensor::tensor_into_value)
         .map_err(|err| order_error(name, format!("{name}: {err}")))
 }
 
 fn quantile_multi_axes(
-    args: &QuantileArgs,
+    mut args: QuantileArgs,
     input_values: Vec<OrderedValue>,
-    shape: Vec<usize>,
-    axes: &[usize],
     name: &str,
 ) -> BuiltinResult<Value> {
-    let rank = shape.len().max(axes[axes.len() - 1] + 1);
-    let mut input_shape = shape;
-    input_shape.resize(rank, 1);
-    let mut reduced = vec![false; rank];
-    let mut group_shape = input_shape.clone();
-    let mut output_shape = input_shape.clone();
-    for &axis in axes {
-        reduced[axis] = true;
-        group_shape[axis] = 1;
-        output_shape[axis] = 1;
+    if args.output.is_empty() {
+        return Tensor::new(args.output, args.output_shape)
+            .map(tensor::tensor_into_value)
+            .map_err(|err| order_error(name, format!("{name}: {err}")));
     }
-    output_shape[axes[0]] = args.probabilities.len();
-    let mut groups = vec![Vec::new(); tensor::element_count(&group_shape)];
+    let ReductionAxes::Dimensions(axes) = &args.axes else {
+        unreachable!("multi-axis call requires dimensions")
+    };
+    let MultiAxisWorkspace {
+        input_shape,
+        group_shape,
+        reduced,
+        mut groups,
+    } = args
+        .multi_axis
+        .take()
+        .expect("multi-axis workspace was preflighted");
+    let rank = input_shape.len();
     for (index, value) in input_values.into_iter().enumerate() {
         let mut remaining = index;
         let mut group_index = 0;
@@ -374,10 +531,12 @@ fn quantile_multi_axes(
             }
             group_stride *= group_shape[axis];
         }
+        groups[group_index]
+            .try_reserve(1)
+            .map_err(|_| order_error(name, format!("{name}: group data exceeds host resources")))?;
         groups[group_index].push(value);
     }
-    let mut output = vec![0.0; tensor::element_count(&output_shape)];
-    let request_stride = output_shape[..axes[0]].iter().product::<usize>();
+    let request_stride = args.output_shape[..axes[0]].iter().product::<usize>();
     for (index, values) in groups.into_iter().enumerate() {
         let sorted = sorted_slice(values, args.nanflag);
         let mut remaining = index;
@@ -387,14 +546,52 @@ fn quantile_multi_axes(
             let coordinate = remaining % group_shape[axis];
             remaining /= group_shape[axis];
             base += coordinate * stride;
-            stride *= output_shape[axis];
+            stride *= args.output_shape[axis];
         }
         for (request, probability) in args.probabilities.iter().enumerate() {
-            output[base + request * request_stride] =
+            args.output[base + request * request_stride] =
                 quantile_from_sorted(&sorted, *probability, args.method);
         }
     }
-    Tensor::new(output, output_shape)
+    Tensor::new(args.output, args.output_shape)
         .map(tensor::tensor_into_value)
         .map_err(|err| order_error(name, format!("{name}: {err}")))
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+
+    #[test]
+    fn shape_preflight_rejects_overflow_without_allocating_output() {
+        let error = planned_output_shape(
+            "quantile",
+            &[usize::MAX, 2],
+            &ReductionAxes::Dimensions(vec![1]),
+            2,
+        )
+        .expect_err("output cardinality exceeds structural range");
+        assert!(error.message().contains("structural range"), "{error}");
+
+        let error = planned_output_shape(
+            "quantile",
+            &[1, 1],
+            &ReductionAxes::Dimensions(vec![usize::MAX]),
+            1,
+        )
+        .expect_err("dimension cannot increase rank beyond usize");
+        assert!(error.message().contains("structural range"), "{error}");
+    }
+
+    #[test]
+    fn empty_vecdim_rejects_without_attempting_shape_extension() {
+        let empty = Value::Tensor(Tensor::new(vec![], vec![0, 1]).unwrap());
+        let error = parse_axes("quantile", &empty)
+            .err()
+            .expect("vecdim requires dimensions");
+        assert!(
+            error.message().contains("vecdim cannot be empty"),
+            "{error}"
+        );
+    }
 }
