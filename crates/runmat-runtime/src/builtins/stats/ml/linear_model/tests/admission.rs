@@ -15,8 +15,8 @@ fn fitlm_header_keeps_model_spec_separate_from_typed_options() {
         .unwrap();
     assert_eq!(header.option_start, 2);
     assert_eq!(header.options.len(), 1);
-    assert_eq!(header.options[0].identity, FitlmOption::Intercept);
-    assert_eq!(header.options[0].index, 2);
+    assert_eq!(header.options[0].name.identity, FitlmOption::Intercept);
+    assert_eq!(header.options[0].name.index, 2);
 
     let invalid = vec![
         tensor_value(vec![1.0, 3.0], 2, 1),
@@ -33,6 +33,43 @@ fn fitlm_header_keeps_model_spec_separate_from_typed_options() {
 fn fitlm_rejects_known_rank_before_materialization() {
     let first = Value::Tensor(Tensor::new(vec![0.0; 8], vec![2, 2, 2]).unwrap());
     assert!(preflight_matrix_rank(&first).is_err());
+}
+
+#[test]
+fn fitlm_preflights_host_option_values_and_response_shape() {
+    let first = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
+    let values = vec![
+        tensor_value(vec![1.0, 3.0, 5.0, 7.0], 4, 1),
+        Value::from("Intercept"),
+        Value::Bool(false),
+    ];
+    let prepared = HeaderInspection::inspect(&first, &values)
+        .validate(values.len())
+        .unwrap()
+        .preflight_values(&values)
+        .unwrap();
+    assert!(matches!(
+        prepared.options[0].predecoded,
+        Some(FitlmAction::Intercept(false))
+    ));
+    let invalid = vec![
+        values[0].clone(),
+        Value::from("Intercept"),
+        Value::from("bad"),
+    ];
+    assert!(HeaderInspection::inspect(&first, &invalid)
+        .validate(invalid.len())
+        .unwrap()
+        .preflight_values(&invalid)
+        .err()
+        .expect("invalid Intercept")
+        .message()
+        .contains("Intercept"));
+    let short = vec![tensor_value(vec![1.0, 3.0, 5.0], 3, 1)];
+    assert!(preflight_response_shape(&first, &short)
+        .unwrap_err()
+        .message()
+        .contains("length(y)"));
 }
 
 #[test]

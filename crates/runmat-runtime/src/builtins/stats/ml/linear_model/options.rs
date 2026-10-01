@@ -1,39 +1,57 @@
 use super::*;
 
+pub(super) enum FitlmAction {
+    Intercept(bool),
+    ResponseVar(String),
+    PredictorVars(Vec<String>),
+    VarNames(Vec<String>),
+    Exclude(ExcludeSpec),
+    Weights(WeightSpec),
+}
+
+pub(super) fn decode_fit_option(named: &NamedOption, value: &Value) -> BuiltinResult<FitlmAction> {
+    Ok(match named.identity {
+        FitlmOption::Intercept => FitlmAction::Intercept(bool_scalar(value, "Intercept")?),
+        FitlmOption::ResponseVar => FitlmAction::ResponseVar(
+            scalar_text(value).ok_or_else(|| fitlm_invalid("fitlm: ResponseVar must be text"))?,
+        ),
+        FitlmOption::PredictorVars => {
+            FitlmAction::PredictorVars(text_list(value, "PredictorVars")?)
+        }
+        FitlmOption::VarNames => FitlmAction::VarNames(text_list(value, "VarNames")?),
+        FitlmOption::Exclude => FitlmAction::Exclude(exclude_spec(value)?),
+        FitlmOption::Weights => FitlmAction::Weights(if let Some(name) = scalar_text(value) {
+            WeightSpec::Variable(name)
+        } else {
+            WeightSpec::Values(numeric_vector(value, "Weights")?)
+        }),
+        FitlmOption::RobustOpts | FitlmOption::CategoricalVars => {
+            return Err(fitlm_invalid(format!(
+                "fitlm: option '{}' is not supported yet",
+                named.spelling
+            )));
+        }
+    })
+}
+
 pub(super) fn parse_fit_name_values(
     values: &[Value],
-    names: &[NamedOption],
+    names: Vec<PreparedOption>,
     index_offset: usize,
     options: &mut FitOptions,
 ) -> BuiltinResult<()> {
     for named in names {
-        let name = named.spelling.as_str();
-        let value = &values[named.index - index_offset + 1];
-        match named.identity {
-            FitlmOption::Intercept => options.intercept = bool_scalar(value, "Intercept")?,
-            FitlmOption::ResponseVar => {
-                options.response_var = Some(
-                    scalar_text(value)
-                        .ok_or_else(|| fitlm_invalid("fitlm: ResponseVar must be text"))?,
-                );
-            }
-            FitlmOption::PredictorVars => {
-                options.predictor_vars = Some(text_list(value, "PredictorVars")?);
-            }
-            FitlmOption::VarNames => options.var_names = Some(text_list(value, "VarNames")?),
-            FitlmOption::Exclude => options.exclude = Some(exclude_spec(value)?),
-            FitlmOption::Weights => {
-                options.weights = Some(if let Some(name) = scalar_text(value) {
-                    WeightSpec::Variable(name)
-                } else {
-                    WeightSpec::Values(numeric_vector(value, "Weights")?)
-                });
-            }
-            FitlmOption::RobustOpts | FitlmOption::CategoricalVars => {
-                return Err(fitlm_invalid(format!(
-                    "fitlm: option '{name}' is not supported yet"
-                )));
-            }
+        let action = match named.predecoded {
+            Some(action) => action,
+            None => decode_fit_option(&named.name, &values[named.name.index - index_offset + 1])?,
+        };
+        match action {
+            FitlmAction::Intercept(value) => options.intercept = value,
+            FitlmAction::ResponseVar(value) => options.response_var = Some(value),
+            FitlmAction::PredictorVars(value) => options.predictor_vars = Some(value),
+            FitlmAction::VarNames(value) => options.var_names = Some(value),
+            FitlmAction::Exclude(value) => options.exclude = Some(value),
+            FitlmAction::Weights(value) => options.weights = Some(value),
         }
     }
     Ok(())

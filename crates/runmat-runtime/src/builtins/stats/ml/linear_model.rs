@@ -30,16 +30,18 @@ const EPS: f64 = 1.0e-12;
 mod training;
 use training::{evaluate_term, fit_ols};
 mod header;
-use header::{preflight_matrix_rank, FitlmArguments, HeaderInspection, NamedOption};
+use header::{
+    preflight_matrix_rank, preflight_response_shape, FitlmArguments, HeaderInspection, NamedOption,
+};
 mod admission;
 mod options;
 mod prediction;
 mod projection;
 use admission::{build_fit_spec, is_table_value};
 use options::{
-    coefficient_names, formula_rhs_tokens, formula_text, is_known_model_spec, model_terms,
-    parse_fit_name_values, parse_formula_predictors, parse_formula_terms, parse_model_spec,
-    parse_model_spec_text, parse_predict_options, ModelSpec,
+    coefficient_names, decode_fit_option, formula_rhs_tokens, formula_text, is_known_model_spec,
+    model_terms, parse_fit_name_values, parse_formula_predictors, parse_formula_terms,
+    parse_model_spec, parse_model_spec_text, parse_predict_options, FitlmAction, ModelSpec,
 };
 use prediction::predict_linear_model;
 use projection::model_object;
@@ -202,9 +204,11 @@ async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_fitlm_resident_fallback_extension(&first, &rest)?;
     preflight_matrix_rank(&first)?;
     let arguments = inspection.validate(rest.len())?;
+    preflight_response_shape(&first, &rest)?;
+    let arguments = arguments.preflight_values(&rest)?;
     let first = gather(first).await?;
     let rest = gather_all(rest, &arguments).await?;
-    let spec = build_fit_spec(first, rest, &arguments)?;
+    let spec = build_fit_spec(first, rest, arguments)?;
     let fit = fit_ols(&spec)?;
     model_object(spec, fit).map(Value::Object)
 }
