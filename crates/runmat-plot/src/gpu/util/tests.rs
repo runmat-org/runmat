@@ -1,6 +1,11 @@
 use super::*;
 use pollster::FutureExt;
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType, WgpuAccessError,
+    WgpuBufferRef,
+};
 use std::error::Error;
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[test]
@@ -56,6 +61,49 @@ fn device_access() -> WgpuDeviceAccess {
         .block_on()
         .expect("this hardware gate requires an actual WGPU device");
     WgpuDeviceAccess::new(device, queue)
+}
+
+#[test]
+#[ignore = "requires an actual native WGPU adapter"]
+fn empty_export_authenticates_device_and_live_allocation_before_success() {
+    let access = device_access();
+    let other_access = device_access();
+    let allocation = TestAllocationOwner::default()
+        .allocate_zeroed(vec![0, 0], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("empty contiguous allocation");
+    let buffer = access
+        .with_shared(|emission| {
+            Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("empty-plot-export-authentication"),
+                size: 4,
+                usage: wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }))
+        })
+        .expect("create source on exact device");
+    let export =
+        WgpuBufferRef::from_owned_buffer(buffer, allocation.handle.clone(), access.clone())
+            .expect("authenticate empty exported allocation");
+    let input = GpuInputBuffer::Exported(export);
+
+    assert!(
+        copy_readback_mapped(&access, &input, 0, |bytes| Ok(bytes.to_vec()))
+            .block_on()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        copy_readback_mapped(&other_access, &input, 0, |bytes| Ok(bytes.to_vec()))
+            .block_on()
+            .unwrap_err(),
+        PlotReadbackError::Access(WgpuAccessError::WrongDevice)
+    );
+    allocation.probe.mark_unavailable();
+    assert!(matches!(
+        copy_readback_mapped(&access, &input, 0, |bytes| Ok(bytes.to_vec())).block_on(),
+        Err(PlotReadbackError::Access(WgpuAccessError::Allocation(_)))
+    ));
+    assert_eq!(allocation.probe.retirements(), 0);
 }
 
 #[test]

@@ -185,6 +185,11 @@ async fn copy_readback_mapped<T>(
     decode: impl FnOnce(&[u8]) -> Result<T, PlotReadbackError>,
 ) -> Result<T, PlotReadbackError> {
     if byte_len == 0 {
+        // Even an empty export carries a device and allocation lease. Check
+        // both before reporting success, without creating staging work.
+        access
+            .with_shared(|emission| buffer.buffer(emission).map(|_| ()))
+            .map_err(PlotReadbackError::Access)??;
         return decode(&[]);
     }
     let staging = access
