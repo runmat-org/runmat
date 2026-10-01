@@ -49,9 +49,7 @@ fn diagnose_sample(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnos
                 "kstest sample must be a vector",
             ));
         }
-        if dims.iter().all(|extent| extent.is_some())
-            && dims.contains(&Some(0))
-        {
+        if dims.iter().all(|extent| extent.is_some()) && dims.contains(&Some(0)) {
             diagnostics.push(InferenceDiagnostic::error(
                 "EMPTY",
                 "kstest requires an observation",
