@@ -357,7 +357,7 @@ mod tests {
         let _guard = setup();
         let figure = crate::builtins::plotting::state::new_figure_handle();
         let err = block_on(addpoints_builtin(vec![
-            Value::Num(figure as f64),
+            Value::Num(f64::from(figure.as_u32())),
             vector(&[1.0]),
             vector(&[2.0]),
         ]))
