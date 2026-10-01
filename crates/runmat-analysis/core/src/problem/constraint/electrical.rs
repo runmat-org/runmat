@@ -17,6 +17,11 @@ pub struct ElectricalConstraint {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ElectricalConstraintKind {
+    /// Homogeneous tangential electric field, n × E = 0, for harmonic Maxwell.
+    /// This is neither scalar-potential grounding nor magnetic A grounding.
+    ElectricPerfectConductor {
+        target: RegionTarget,
+    },
     PrescribedPotential {
         target: RegionTarget,
         value: PrescribedValue<ElectricPotential>,
@@ -40,7 +45,8 @@ pub enum ElectricalConstraintKind {
 impl ElectricalConstraintKind {
     pub(super) fn target(&self) -> Option<&RegionTarget> {
         match self {
-            Self::PrescribedPotential { target, .. }
+            Self::ElectricPerfectConductor { target }
+            | Self::PrescribedPotential { target, .. }
             | Self::Equipotential { target }
             | Self::FloatingConductor { target }
             | Self::IntegralCurrent { target, .. }
@@ -51,7 +57,8 @@ impl ElectricalConstraintKind {
 
     pub(super) fn visit_targets_mut(&mut self, visit: &mut impl FnMut(&mut RegionTarget)) {
         match self {
-            Self::PrescribedPotential { target, .. }
+            Self::ElectricPerfectConductor { target }
+            | Self::PrescribedPotential { target, .. }
             | Self::Equipotential { target }
             | Self::FloatingConductor { target }
             | Self::IntegralCurrent { target, .. }
@@ -62,7 +69,8 @@ impl ElectricalConstraintKind {
 
     pub(super) fn visit_targets(&self, visit: &mut impl FnMut(&RegionTarget)) {
         match self {
-            Self::PrescribedPotential { target, .. }
+            Self::ElectricPerfectConductor { target }
+            | Self::PrescribedPotential { target, .. }
             | Self::Equipotential { target }
             | Self::FloatingConductor { target }
             | Self::IntegralCurrent { target, .. }

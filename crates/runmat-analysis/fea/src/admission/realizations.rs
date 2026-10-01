@@ -128,7 +128,7 @@ fn electromagnetic_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormul
     if procedure != AnalysisProcedure::HarmonicResponse {
         return Vec::new();
     }
-    let mut realizations = Vec::new();
+    let mut realizations = super::maxwell::registered_realizations();
     for topology in [
         TopologyImplementation::CanonicalSolverMeshTet4,
         TopologyImplementation::CanonicalSolverMeshTet10,

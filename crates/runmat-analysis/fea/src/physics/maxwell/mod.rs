@@ -16,15 +16,18 @@
 //! Weak-form reference: https://aurora-multiphysics.github.io/apollo/frequency_domain/ComplexMaxwell.html
 //! Basis/source reference: https://mfem.org/maxwell-notes/
 mod assembly;
+mod authored;
 mod complex;
 mod geometry;
 mod input;
 mod plan;
 mod recovery;
+pub(crate) mod resources;
 mod response;
 #[cfg(test)]
 mod tests;
 
+pub use authored::{compile_canonical_input, solve_canonical_harmonic, validate_canonical_input};
 pub use complex::{ComplexPhasor, ComplexVector3};
 pub use input::{MaxwellCurrentSample, MaxwellInput, MaxwellVolumeData};
 pub use plan::MaxwellSystemPlan;

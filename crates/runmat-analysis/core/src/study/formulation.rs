@@ -36,6 +36,7 @@ pub enum SpatialOperatorImplementation {
     ElectricalGalerkinPotentialGradient,
     ReducedEdgeGraphCurlCurl,
     MagneticGalerkinLowestOrderEdgeCurlCurl,
+    MaxwellLowestOrderEdgeCurlCurlComplexMass,
     ReducedChannelFlow,
 }
 
@@ -58,6 +59,7 @@ pub enum TemporalImplementation {
     ElectrostaticPotentialLinearSolve,
     SteadyConductionPotentialLinearSolve,
     MagnetostaticWeakCoulombSaddleSolve,
+    MaxwellComplexElectricFieldGeneralSolve,
     AcousticDomainGraphHarmonicSolve,
     AcousticCanonicalHarmonicSolve,
     CfdReducedChannelSteadyIteration,
@@ -81,6 +83,7 @@ pub enum ConstitutiveImplementation {
     ElementOwnedIsotropicPermittivity,
     ElementOwnedIsotropicElectricalConductivity,
     ElementOwnedIsotropicMagneticPermeability,
+    ElementOwnedIsotropicHarmonicElectromagneticLaws,
     ReducedAcousticMedium,
     ElementOwnedLosslessAcousticFluid,
     ReducedIncompressibleFlowClosure,
@@ -122,6 +125,7 @@ pub enum RecoveryImplementation {
     ElectricalSolverMeshFieldCurrentJoulePower,
     ReducedEdgeGraphFlux,
     MagneticSolverMeshVectorPotentialFluxFieldEnergy,
+    MaxwellSolverMeshElectricFluxFieldPower,
     CfdReducedChannelProfile,
     CoupledResampledFields,
 }
@@ -173,6 +177,7 @@ pub enum BoundaryTransferImplementation {
     GlobalCountProfile,
     ImplicitNaturalBoundaryAndGaugeAnchor,
     FullExteriorTangentialPotentialGroundWithWeakCoulombGauge,
+    FullExteriorElectricPerfectConductor,
     HeuristicInterfaceTransfer,
     UnmappedFallback,
 }

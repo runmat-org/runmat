@@ -22,11 +22,13 @@ pub use electrothermal::{
     RetainedJouleHeatTransfer, SteadyElectrothermalCompletion,
 };
 mod magnetic_static;
+mod maxwell_harmonic;
 pub use magnetic_static::{
     magnetic_native_field_definition_inventory, magnetic_native_field_definitions,
     MagneticNumericalReceipt, MagneticNumericalReceiptArtifact, MagnetostaticSolverResult,
     MagnetostaticWorkload, MAGNETIC_RECEIPT_MAX_ENCODED_BYTES,
 };
+pub use maxwell_harmonic::{MaxwellHarmonicSolverResult, MaxwellHarmonicWorkload};
 mod error;
 pub use electrical_static::{
     ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,

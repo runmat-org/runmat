@@ -40,7 +40,43 @@ its real part equals ohmic loss and its imaginary part equals
 2 omega (magnetic energy-electric energy). This complex balance and physical
 linear residual do not substitute for spatial convergence evidence.
 
-## Scope and open gates
+## Authored and retained numerical boundary
+
+Source intent names `electromagnetic { equation = harmonic_maxwell;
+reference_frequency = ... Hz }` and homogeneous `electrical.perfect_conductor`
+face constraints. PEC means n cross E=0, not a scalar-potential or magnetic-A
+ground. The compiled fresh direct singleton frequency must exactly match the
+domain frequency; omega=2 pi f. Full exterior coverage is explicit. Constant
+element-owned permeability, permittivity and positive conductivity use their SI
+values, not ordinal material blocks or temperature/frequency response proxies.
+
+The shared legacy-named MagneticVolumeCurrentDensity action supplies impressed
+volume J; boundary CurrentDensity is not reinterpreted. Explicit global vector
+constants or complex frequency tables are realized at the exact Hz value and
+frozen on canonical Keast15 samples. This is piecewise uniform authored volume
+current, not a claim of spatially varying authored-source support.
+
+MaxwellHarmonicWorkload and MaxwellHarmonicSolverResult retain original model,
+producer, formulation, sample/material/current identities and genuine E/B/H/D/J
+fields. Canonical cold import requires an authenticated expected result digest
+and original workload/mesh, and validates constitutive and energy/power summaries
+without assembling/solving again. This is not a native completed-study root.
+
+Local compilation preflight checks the selected maximum_resident_bytes before
+model validation, projection, property replication or sampled source expansion.
+Count bounds are edges<=6T, real block dimension<=12T, support candidates<=144T,
+and15 samples per tetrahedron. Shared GMRES restart/iteration sizing is used;
+profiled metadata, sparse topology/assembly, retained and cold-validation copies
+are conservatively reserved. This is requested local heap, not measured RSS,
+exact native transport or scheduler/worker admission.
+
+The authored/retained suite passes both mesh orders, source-bound cold import,
+constitutive/power checks and substitution negatives (two groups); local resource
+preflight passes three groups. Four language tests and all 123 core tests pass.
+Strict core/FEA/language library/test lint passes. These checks do not establish
+native execution, publication, restart, or production qualification.
+
+## Numerical evidence
 
 The isolated numerical suite passes six groups: transverse analytic E/B/loss
 refinement, charge-bearing longitudinal gradient refinement, complex phase/sign
@@ -60,15 +96,16 @@ representability admission rejects finite nonzero forcing whose squared norm
 vanishes, and rejects vanished displacement coefficients rather than silently
 taking a static limit. Exact zero forcing remains valid.
 
-This work is a numerical continuum implementation/verification slice,
-not authored/native/restart or production qualification. Initial uniqueness
+## Scope and open gates
+
+This work implements the numerical continuum and authored retained-result boundary,
+not native completed-study/restart or production qualification. Initial uniqueness
 admission requires positive frequency and strictly positive conductivity in every
 element. A converged residual alone cannot establish uniqueness at lossless cavity
 resonance; a genuine spectral/nonresonance authority remains mandatory for lossless
 envelopes. Affine Tet4/Tet10 geometry only; curved geometry needs governed quadrature.
 
-Remaining full-plan work includes distinct authored E/PEC intent and shared
-excitation/material/constraint compilation, replacement of reduced-graph dispatch,
+Remaining full-plan work includes replacement of reduced-graph dispatch,
 incident/ports/open boundaries, dispersive/complex material laws, lossless cavities
 and waveguides, skin-effect/interfaces/frequency references, native immutable
 task/resource/accuracy/state/publication execution, numerical restart, and release.

@@ -1,6 +1,7 @@
 use crate::{AnalysisModel, AnalysisValidationError};
 
 pub(crate) fn validate_domains(model: &AnalysisModel) -> Result<(), AnalysisValidationError> {
+    validate_maxwell_constraints(model.electromagnetic.as_ref(), &model.constraints)?;
     if let Some(domain) = &model.thermal {
         validate_reference_temperature("thermal", domain.reference_temperature)?;
     }
@@ -118,6 +119,46 @@ fn validate_fluid_domain(domain: &crate::CfdDomain) -> Result<(), AnalysisValida
     }
     Ok(())
 }
+
+fn validate_maxwell_constraints(
+    domain: Option<&crate::ElectromagneticDomain>,
+    constraints: &[crate::AnalysisConstraint],
+) -> Result<(), AnalysisValidationError> {
+    let harmonic = matches!(domain, Some(crate::ElectromagneticDomain::Harmonic { .. }));
+    for constraint in constraints {
+        let pec = matches!(constraint, crate::AnalysisConstraint::Electrical(value)
+            if matches!(value.kind, crate::ElectricalConstraintKind::ElectricPerfectConductor { .. }));
+        if pec
+            && (!harmonic
+                || constraint
+                    .target()
+                    .is_none_or(|target| target.entity_dimension != crate::EntityDimension::Face))
+        {
+            return Err(AnalysisValidationError::InvalidConstraint {
+                constraint_id: constraint.constraint_id().into(),
+                detail: "electric perfect conductor requires harmonic Maxwell and a face target"
+                    .into(),
+            });
+        }
+        if harmonic
+            && matches!(
+                constraint,
+                crate::AnalysisConstraint::Magnetic(_) | crate::AnalysisConstraint::Electrical(_)
+            )
+            && !pec
+        {
+            return Err(AnalysisValidationError::InvalidConstraint {
+                constraint_id: constraint.constraint_id().into(),
+                detail: "harmonic electric-field Maxwell cannot reinterpret scalar-potential or magnetic constraints".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "validate_domains/maxwell_tests.rs"]
+mod maxwell_tests;
 
 fn validate_reference_temperature(
     domain: &'static str,

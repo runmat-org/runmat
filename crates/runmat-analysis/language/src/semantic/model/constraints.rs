@@ -97,6 +97,9 @@ fn constraint(
                 diagnostics,
             )?,
         },
+        "electrical.perfect_conductor" => {
+            AuthoredConstraintKind::ElectricPerfectConductor { target }
+        }
         "electrical.equipotential" => AuthoredConstraintKind::ElectricalEquipotential { target },
         "electrical.floating_conductor" => {
             AuthoredConstraintKind::ElectricalFloatingConductor { target }

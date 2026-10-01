@@ -19,6 +19,7 @@ use super::authored_properties::{
 };
 
 mod error;
+mod maxwell;
 mod region;
 
 pub use error::AuthoredModelError;
@@ -132,19 +133,7 @@ impl AuthoredModel {
     pub fn validate(&self) -> Result<(), AuthoredModelError> {
         token("model module path", &self.module_path)?;
         token("model id", &self.model_id)?;
-        match &self.electromagnetic {
-            None
-            | Some(super::domains::ElectromagneticDomain::Static { .. })
-            | Some(super::domains::ElectromagneticDomain::Magnetostatic { .. }) => {}
-            Some(super::domains::ElectromagneticDomain::Harmonic { .. }) => {
-                return Err(AuthoredModelError::InvalidPhysics {
-                    kind: "electromagnetic domain",
-                    detail:
-                        "authored electromagnetic domains currently require explicit static electrical or magnetostatic intent"
-                            .into(),
-                });
-            }
-        }
+        maxwell::validate(self)?;
         for (domain, temperature) in [
             (
                 "thermal",

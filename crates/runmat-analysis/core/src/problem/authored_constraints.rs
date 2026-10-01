@@ -82,6 +82,9 @@ pub enum AuthoredConstraintKind {
         target: AuthoredConstraintTarget,
     },
     ElectricalPeriodic(AuthoredPeriodicConstraint),
+    ElectricPerfectConductor {
+        target: AuthoredConstraintTarget,
+    },
     MagneticVectorPotential {
         target: AuthoredConstraintTarget,
         value: PrescribedValue<MagneticVectorPotential>,
@@ -242,6 +245,7 @@ impl AuthoredConstraintKind {
             | Self::ElectricalFloatingConductor { target }
             | Self::ElectricalIntegralCurrent { target, .. }
             | Self::ElectricalPotentialReference { target }
+            | Self::ElectricPerfectConductor { target }
             | Self::MagneticVectorPotential { target, .. }
             | Self::MagneticVectorPotentialGround { target }
             | Self::MagneticCoulombGauge { target }
@@ -299,6 +303,7 @@ impl AuthoredConstraintKind {
             | Self::ElectricalFloatingConductor { target }
             | Self::ElectricalIntegralCurrent { target, .. }
             | Self::ElectricalPotentialReference { target }
+            | Self::ElectricPerfectConductor { target }
             | Self::MagneticVectorPotential { target, .. }
             | Self::MagneticVectorPotentialGround { target }
             | Self::MagneticCoulombGauge { target }

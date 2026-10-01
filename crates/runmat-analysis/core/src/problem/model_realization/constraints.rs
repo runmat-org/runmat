@@ -168,6 +168,12 @@ fn realize_constraint(
                 value: value.clone(),
             },
         ),
+        Authored::ElectricPerfectConductor { target } => electrical(
+            id,
+            ElectricalConstraintKind::ElectricPerfectConductor {
+                target: constraint_target(target, targets)?,
+            },
+        ),
         Authored::ElectricalEquipotential { target } => electrical(
             id,
             ElectricalConstraintKind::Equipotential {

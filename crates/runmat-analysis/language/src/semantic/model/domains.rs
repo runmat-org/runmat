@@ -2,8 +2,8 @@
 use super::{diagnostic, properties};
 use crate::{CheckedFeaDeclaration, CheckedFeaStatementKind, FeaDiagnostic, PhysicalDimension};
 use runmat_analysis_core::{
-    ElectromagneticDomain, MagnetostaticFormulation, StaticElectricalEquation, Temperature,
-    ThermalDomain, ThermoMechanicalDomain,
+    ElectromagneticDomain, Frequency, MagnetostaticFormulation, StaticElectricalEquation,
+    Temperature, ThermalDomain, ThermoMechanicalDomain,
 };
 use std::collections::BTreeSet;
 
@@ -52,13 +52,41 @@ pub(super) fn lower(
             continue;
         }
         if family == "electromagnetic" {
-            properties::validate_assignments(declaration, statements, &["equation"], diagnostics);
             let Some(value) =
                 properties::required_enum(declaration, statements, "equation", diagnostics)
             else {
                 continue;
             };
+            let assignments: &[&str] = if value == "harmonic_maxwell" {
+                &["equation", "reference_frequency"]
+            } else {
+                &["equation"]
+            };
+            properties::validate_assignments(declaration, statements, assignments, diagnostics);
             let domain = match value {
+                "harmonic_maxwell" => {
+                    let Some(hertz) = properties::required_quantity(
+                        declaration,
+                        statements,
+                        "reference_frequency",
+                        PhysicalDimension::FREQUENCY,
+                        diagnostics,
+                    ) else {
+                        continue;
+                    };
+                    if !hertz.is_finite() || hertz <= 0.0 {
+                        diagnostic(
+                            declaration,
+                            *header_span,
+                            "harmonic Maxwell reference frequency must be finite and positive",
+                            diagnostics,
+                        );
+                        continue;
+                    }
+                    ElectromagneticDomain::Harmonic {
+                        reference_frequency: Frequency::new(hertz),
+                    }
+                }
                 "electrostatics" => ElectromagneticDomain::Static {
                     equation: StaticElectricalEquation::Electrostatics,
                 },
@@ -72,7 +100,7 @@ pub(super) fn lower(
                     diagnostic(
                         declaration,
                         *header_span,
-                        "electromagnetic equation must be electrostatics, steady_conduction, or magnetostatics",
+                        "electromagnetic equation must be electrostatics, steady_conduction, magnetostatics, or harmonic_maxwell",
                         diagnostics,
                     );
                     continue;

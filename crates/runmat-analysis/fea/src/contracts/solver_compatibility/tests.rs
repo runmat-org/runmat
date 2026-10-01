@@ -84,7 +84,12 @@ fn nonstructural_identity(
 ) -> AnalysisRunIdentity {
     let realization = registered_formulations(family, procedure)
         .into_iter()
-        .next()
+        .find(|entry| {
+            family != PhysicsFamily::Electromagnetic
+                || procedure != AnalysisProcedure::HarmonicResponse
+                || entry.realization().temporals
+                    == vec![TemporalImplementation::ElectromagneticReducedEdgeGraphHarmonicSolve]
+        })
         .expect("nonstructural compatibility fixture must be registered")
         .realization()
         .clone();
@@ -97,6 +102,69 @@ fn nonstructural_identity(
     })
     .expect("nonstructural compatibility fixture must be admitted")
     .into_identity()
+}
+
+#[test]
+fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_claims() {
+    use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let identity =
+            crate::admission::admit_canonical_maxwell(&mesh, FormulationRequirement::Experimental)
+                .unwrap();
+        validate_solver_formulation_compatibility(
+            &identity,
+            SolverMethod::GeneralGmres,
+            SolverPreconditioner::None,
+        )
+        .unwrap();
+        for method in [
+            SolverMethod::AssembledPcg,
+            SolverMethod::MatrixFreePcg,
+            SolverMethod::AssembledSaddlePointGmres,
+            SolverMethod::MatrixFreeSaddlePointGmres,
+            SolverMethod::ElectromagneticEdgeCurlCurlHarmonicBlockBicgstab,
+            SolverMethod::StructuralDirectHarmonicGmres,
+            SolverMethod::DenseDirect,
+        ] {
+            assert!(validate_solver_formulation_compatibility(
+                &identity,
+                method,
+                SolverPreconditioner::None
+            )
+            .is_err());
+        }
+        for preconditioner in [
+            SolverPreconditioner::Jacobi,
+            SolverPreconditioner::Ilu0,
+            SolverPreconditioner::BlockJacobi,
+        ] {
+            assert!(validate_solver_formulation_compatibility(
+                &identity,
+                SolverMethod::GeneralGmres,
+                preconditioner
+            )
+            .is_err());
+        }
+        let magnetic = crate::admission::admit_canonical_magnetostatic(
+            &mesh,
+            FormulationRequirement::Experimental,
+        )
+        .unwrap();
+        assert!(validate_solver_formulation_compatibility(
+            &magnetic,
+            SolverMethod::GeneralGmres,
+            SolverPreconditioner::None
+        )
+        .is_err());
+    }
+    assert_eq!(SolverMethod::GeneralGmres.as_str(), "general_gmres");
+    assert!(!method_is_compatible(
+        TemporalImplementation::SteadyConductionPotentialLinearSolve,
+        SolutionSpace::Direct,
+        CouplingImplementation::Uncoupled,
+        SolverMethod::GeneralGmres
+    ));
 }
 
 #[test]

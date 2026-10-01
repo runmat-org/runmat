@@ -225,7 +225,21 @@ mod tests {
         b.electromagnetic = Some(ElectromagneticDomain::Harmonic {
             reference_frequency: crate::Frequency::new(60.0),
         });
-        assert!(b.validate().is_err());
+        b.validate().unwrap();
+        for models in [[&a, &b], [&b, &a]] {
+            assert_eq!(
+                realize(&models),
+                Err(AnalysisModelRealizationError::ConflictingDomain(
+                    "electromagnetic"
+                ))
+            );
+        }
+        for hertz in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            b.electromagnetic = Some(ElectromagneticDomain::Harmonic {
+                reference_frequency: crate::Frequency::new(hertz),
+            });
+            assert!(b.validate().is_err());
+        }
         b.electromagnetic = Some(ElectromagneticDomain::Magnetostatic {
             formulation: crate::MagnetostaticFormulation::MagneticVectorPotential,
         });

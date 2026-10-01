@@ -201,6 +201,9 @@ const fn method_is_compatible(
         TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve => {
             matches!(method, SolverMethod::AssembledSaddlePointGmres)
         }
+        TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve => {
+            matches!(method, SolverMethod::GeneralGmres)
+        }
     }
 }
 
@@ -219,6 +222,7 @@ const fn preconditioner_is_compatible(
             SolverPreconditioner::None | SolverPreconditioner::Jacobi | SolverPreconditioner::Ilu0
         ),
         SolverMethod::AssembledSaddlePointGmres
+        | SolverMethod::GeneralGmres
         | SolverMethod::MatrixFreeSaddlePointGmres
         | SolverMethod::DenseDirect
         | SolverMethod::StructuralModalTransientNewmarkDenseFactorization
