@@ -7846,12 +7846,12 @@ impl AccelProvider for InProcessProvider {
     fn reduce_sum<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
-                return self.floating_integer_sum(a, None);
+                return self.floating_integer_sum(a, None).map_err(Into::into);
             }
-            self.ordinary_numeric_sum(a, None)
+            self.ordinary_numeric_sum(a, None).map_err(Into::into)
         })
     }
 
@@ -7859,12 +7859,12 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if runmat_accelerate_api::handle_integer_type(a).is_some() {
-                return self.floating_integer_sum(a, Some(dim));
+                return self.floating_integer_sum(a, Some(dim)).map_err(Into::into);
             }
-            self.ordinary_numeric_sum(a, Some(dim))
+            self.ordinary_numeric_sum(a, Some(dim)).map_err(Into::into)
         })
     }
 

@@ -158,9 +158,7 @@ pub(super) async fn try_crossentropy_gpu(
         CrossentropyReduction::Sum => {
             let sum = match provider.reduce_sum(&result.losses).await {
                 Ok(sum) => sum,
-                Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
-                    return Ok(None)
-                }
+                Err(err) if err.is_unsupported() => return Ok(None),
                 Err(err) => return Err(provider_error(err)),
             };
             let mut sum_protected = vec![predictions, targets, &result.losses];

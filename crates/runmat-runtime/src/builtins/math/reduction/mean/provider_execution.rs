@@ -11,12 +11,15 @@ pub(super) enum MeanProviderFailure {
     Execution(Box<RuntimeError>),
 }
 
-fn mean_provider_error(source: anyhow::Error) -> MeanProviderFailure {
-    if gpu_helpers::provider_hook_is_unsupported(&source) {
+fn mean_provider_error(
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> MeanProviderFailure {
+    let source = source.into();
+    if source.is_unsupported() {
         return MeanProviderFailure::Unsupported;
     }
     let mut failure = mean_internal_error(format!("mean: provider execution failed: {source}"));
-    failure = crate::runtime_error::with_provider_execution_source(failure, source.into());
+    failure = crate::runtime_error::with_provider_execution_source(failure, source);
     failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
     MeanProviderFailure::Execution(Box::new(failure))
 }

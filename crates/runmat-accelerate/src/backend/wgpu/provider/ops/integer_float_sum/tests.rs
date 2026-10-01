@@ -4,6 +4,7 @@ use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelProvider, HostIntegerDataView, HostIntegerTensorView,
     HostLogicalTensorView, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
 };
+use std::error::Error as _;
 
 #[test]
 fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
@@ -18,7 +19,11 @@ fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
         "sum",
     )
     .unwrap_err();
-    let carrier = error.downcast_ref::<TemporaryCompletionError>().unwrap();
+    let carrier = error
+        .source()
+        .unwrap()
+        .downcast_ref::<TemporaryCompletionError>()
+        .unwrap();
     assert_eq!(
         carrier.primary.as_ref().unwrap().to_string(),
         "primary execution failed"
@@ -26,6 +31,46 @@ fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
     assert_eq!(failed.probe.retirements(), 1);
     assert!(carrier.output_cleanup.is_none());
     assert!(carrier.temporary_cleanup.physical.is_err());
+
+    let supported_fallback = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let error = finish_temporary(
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "primary unsupported route",
+        )),
+        supported_fallback.handle,
+        "sum",
+    )
+    .unwrap_err();
+    assert!(error.is_unsupported(), "completed cleanup permits fallback");
+    assert_eq!(supported_fallback.probe.retirements(), 1);
+
+    let unsupported_temporary = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    unsupported_temporary
+        .probe
+        .fail_retirement("unsupported route retirement failed");
+    let error = finish_temporary(
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "primary unsupported route",
+        )),
+        unsupported_temporary.handle,
+        "sum",
+    )
+    .unwrap_err();
+    assert!(
+        !error.is_unsupported(),
+        "failed cleanup cannot authorize fallback"
+    );
+    let carrier = error
+        .source()
+        .unwrap()
+        .downcast_ref::<TemporaryCompletionError>()
+        .unwrap();
+    assert!(carrier.primary.is_some());
+    assert_eq!(unsupported_temporary.probe.retirements(), 1);
 
     let temporary = owner
         .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
@@ -38,7 +83,11 @@ fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
         .fail_retirement("temporary retirement failed");
     output.probe.fail_retirement("output retirement failed");
     let error = finish_temporary(Ok(output.handle), temporary.handle, "sum").unwrap_err();
-    let carrier = error.downcast_ref::<TemporaryCompletionError>().unwrap();
+    let carrier = error
+        .source()
+        .unwrap()
+        .downcast_ref::<TemporaryCompletionError>()
+        .unwrap();
     assert!(carrier.primary.is_none());
     assert!(carrier.temporary_cleanup.physical.is_err());
     assert!(carrier.output_cleanup.as_ref().unwrap().physical.is_err());
@@ -203,12 +252,12 @@ fn f32_only_device_rejects_double_integer_and_logical_sums_before_dispatch() {
             shape: &[2, 1],
         })
         .unwrap();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &block_on(provider.reduce_sum(&integer)).unwrap_err()
-    ));
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &block_on(provider.reduce_sum_dim(&integer, 0)).unwrap_err()
-    ));
+    assert!(block_on(provider.reduce_sum(&integer))
+        .unwrap_err()
+        .is_unsupported());
+    assert!(block_on(provider.reduce_sum_dim(&integer, 0))
+        .unwrap_err()
+        .is_unsupported());
     integer.release().unwrap();
 
     let logical = provider
@@ -217,12 +266,12 @@ fn f32_only_device_rejects_double_integer_and_logical_sums_before_dispatch() {
             shape: &[2, 1],
         })
         .unwrap();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &block_on(provider.reduce_sum(&logical)).unwrap_err()
-    ));
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &block_on(provider.reduce_sum_dim(&logical, 0)).unwrap_err()
-    ));
+    assert!(block_on(provider.reduce_sum(&logical))
+        .unwrap_err()
+        .is_unsupported());
+    assert!(block_on(provider.reduce_sum_dim(&logical, 0))
+        .unwrap_err()
+        .is_unsupported());
     logical.release().unwrap();
 
     let single = provider
@@ -232,8 +281,8 @@ fn f32_only_device_rejects_double_integer_and_logical_sums_before_dispatch() {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &block_on(provider.reduce_sum(&single)).unwrap_err()
-    ));
+    assert!(block_on(provider.reduce_sum(&single))
+        .unwrap_err()
+        .is_unsupported());
     single.release().unwrap();
 }

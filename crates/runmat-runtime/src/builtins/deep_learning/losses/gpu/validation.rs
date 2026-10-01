@@ -1,8 +1,8 @@
 use super::*;
 use runmat_accelerate_api::{ProviderExecutionError, ProviderPrecision};
 
-pub(super) fn provider_error(error: anyhow::Error) -> crate::RuntimeError {
-    let source = ProviderExecutionError::from(error);
+pub(super) fn provider_error(error: impl Into<ProviderExecutionError>) -> crate::RuntimeError {
+    let source = error.into();
     crate::runtime_error::with_provider_execution_source(
         deep_learning_error("crossentropy", format!("crossentropy: {source}")),
         source,

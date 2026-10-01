@@ -14,8 +14,8 @@ pub(in crate::builtins::deep_learning) struct ResidentGradients {
     pub parameters: Vec<(usize, ParameterRole, GpuTensorHandle)>,
 }
 
-fn provider_result(
-    result: anyhow::Result<GpuTensorHandle>,
+fn provider_result<E: Into<runmat_accelerate_api::ProviderExecutionError>>(
+    result: std::result::Result<GpuTensorHandle, E>,
     operation: &'static str,
 ) -> BuiltinResult<GpuTensorHandle> {
     result.map_err(|error| provider_failure("dlgradient", operation, error.into()))

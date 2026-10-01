@@ -564,7 +564,7 @@ async fn sum_gpu_include(
                 )?;
                 return provider_output::publish(reduced, &handle);
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if error.is_unsupported() => {}
             Err(error) => return Err(sum_provider_error(error)),
         }
     }
@@ -582,7 +582,7 @@ async fn sum_gpu_include(
                     parsed.output,
                 )?;
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+            Err(error) if error.is_unsupported() => {
                 provider_output::retire_before_fallback(current)?;
                 return sum_gpu_fallback(&handle, parsed).await;
             }
@@ -659,7 +659,7 @@ async fn sum_gpu_with_omitnan(
                     parsed.output,
                 )?;
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+            Err(error) if error.is_unsupported() => {
                 provider_output::retire_before_fallback(current)?;
                 return sum_gpu_fallback(&handle, parsed).await;
             }
@@ -674,9 +674,12 @@ async fn sum_gpu_with_omitnan(
     provider_output::publish(current, &handle)
 }
 
-fn sum_provider_error(source: anyhow::Error) -> RuntimeError {
+fn sum_provider_error(
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> RuntimeError {
+    let source = source.into();
     let mut error = sum_internal_error(format!("sum: provider execution failed: {source}"));
-    error = crate::runtime_error::with_provider_execution_source(error, source.into());
+    error = crate::runtime_error::with_provider_execution_source(error, source);
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     error
 }
@@ -684,6 +687,10 @@ fn sum_provider_error(source: anyhow::Error) -> RuntimeError {
 #[cfg(test)]
 #[path = "sum/owning_tests.rs"]
 mod owning_tests;
+
+#[cfg(test)]
+#[path = "sum/single_cast_tests.rs"]
+mod single_cast_tests;
 
 #[allow(dead_code)]
 fn reduce_omitnan_2d(

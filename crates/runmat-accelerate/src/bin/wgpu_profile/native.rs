@@ -773,10 +773,20 @@ async fn run_reduction_case(
         vec![matrix],
         iterations,
         VALUE_TOLERANCE,
-        move |prov, handles| match kind {
-            ReductionKind::SumAll => prov.reduce_sum(&handles[0]),
-            ReductionKind::SumDim(dim) => prov.reduce_sum_dim(&handles[0], dim - 1),
-            ReductionKind::MeanDim(dim) => prov.reduce_mean_dim(&handles[0], dim - 1),
+        move |prov, handles| {
+            Box::pin(async move {
+                match kind {
+                    ReductionKind::SumAll => prov
+                        .reduce_sum(&handles[0])
+                        .await
+                        .map_err(anyhow::Error::new),
+                    ReductionKind::SumDim(dim) => prov
+                        .reduce_sum_dim(&handles[0], dim - 1)
+                        .await
+                        .map_err(anyhow::Error::new),
+                    ReductionKind::MeanDim(dim) => prov.reduce_mean_dim(&handles[0], dim - 1).await,
+                }
+            })
         },
         move |inputs| match kind {
             ReductionKind::SumAll => Matrix::from_scalar(cpu_reduce_sum_all(&inputs[0])),

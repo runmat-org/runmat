@@ -20,12 +20,16 @@ enum Failure {
     Execution(Box<RuntimeError>),
 }
 
-fn provider_failure(kind: ReductionKind, source: anyhow::Error) -> Failure {
-    if gpu_helpers::provider_hook_is_unsupported(&source) {
+fn provider_failure(
+    kind: ReductionKind,
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> Failure {
+    let source = source.into();
+    if source.is_unsupported() {
         return Failure::Unsupported;
     }
     let mut error = super::options::invalid(kind, "resident provider execution failed");
-    error = crate::runtime_error::with_provider_execution_source(error, source.into());
+    error = crate::runtime_error::with_provider_execution_source(error, source);
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     Failure::Execution(Box::new(error))
 }

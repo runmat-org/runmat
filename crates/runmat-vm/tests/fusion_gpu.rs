@@ -685,53 +685,57 @@ impl AccelProvider for TestProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let (data, shape) = self.pull(a)?;
-            if shape.len() != 2 {
-                bail!("reduce_sum_dim: only 2D supported in test provider");
-            }
-            let rows = shape[0];
-            let cols = shape[1];
-            match dim {
-                0 => {
-                    // Column-wise: sum over rows -> shape [1, cols]
-                    let mut out = vec![0.0f64; cols];
-                    for c in 0..cols {
-                        let mut acc = 0.0f64;
-                        let mut saw_nan = false;
-                        for r in 0..rows {
-                            let v = data[r + c * rows];
-                            if v.is_nan() {
-                                saw_nan = true;
-                                break;
-                            }
-                            acc += v;
-                        }
-                        out[c] = if saw_nan { f64::NAN } else { acc };
-                    }
-                    Ok(self.push(out, vec![1, cols]))
+            let result: anyhow::Result<GpuTensorHandle> = async {
+                let (data, shape) = self.pull(a)?;
+                if shape.len() != 2 {
+                    bail!("reduce_sum_dim: only 2D supported in test provider");
                 }
-                1 => {
-                    // Row-wise: sum over cols -> shape [rows, 1]
-                    let mut out = vec![0.0f64; rows];
-                    for r in 0..rows {
-                        let mut acc = 0.0f64;
-                        let mut saw_nan = false;
+                let rows = shape[0];
+                let cols = shape[1];
+                match dim {
+                    0 => {
+                        // Column-wise: sum over rows -> shape [1, cols]
+                        let mut out = vec![0.0f64; cols];
                         for c in 0..cols {
-                            let v = data[r + c * rows];
-                            if v.is_nan() {
-                                saw_nan = true;
-                                break;
+                            let mut acc = 0.0f64;
+                            let mut saw_nan = false;
+                            for r in 0..rows {
+                                let v = data[r + c * rows];
+                                if v.is_nan() {
+                                    saw_nan = true;
+                                    break;
+                                }
+                                acc += v;
                             }
-                            acc += v;
+                            out[c] = if saw_nan { f64::NAN } else { acc };
                         }
-                        out[r] = if saw_nan { f64::NAN } else { acc };
+                        Ok(self.push(out, vec![1, cols]))
                     }
-                    Ok(self.push(out, vec![rows, 1]))
+                    1 => {
+                        // Row-wise: sum over cols -> shape [rows, 1]
+                        let mut out = vec![0.0f64; rows];
+                        for r in 0..rows {
+                            let mut acc = 0.0f64;
+                            let mut saw_nan = false;
+                            for c in 0..cols {
+                                let v = data[r + c * rows];
+                                if v.is_nan() {
+                                    saw_nan = true;
+                                    break;
+                                }
+                                acc += v;
+                            }
+                            out[r] = if saw_nan { f64::NAN } else { acc };
+                        }
+                        Ok(self.push(out, vec![rows, 1]))
+                    }
+                    _ => bail!("reduce_sum_dim: only dims 0 or 1 supported in test provider"),
                 }
-                _ => bail!("reduce_sum_dim: only dims 0 or 1 supported in test provider"),
             }
+            .await;
+            result.map_err(Into::into)
         })
     }
 

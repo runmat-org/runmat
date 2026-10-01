@@ -2,7 +2,9 @@
 //! Native integer reductions remain in `integer.rs` and keep saturation.
 use super::*;
 use runmat_accelerate_api::allocation::GpuHandleReleaseError;
-use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
+use runmat_accelerate_api::{
+    GpuTensorStorage, NumericElementType, ProviderExecutionError, ProviderExecutionResult,
+};
 use std::{error::Error, fmt};
 
 #[cfg(test)]
@@ -55,10 +57,10 @@ impl fmt::Display for TemporaryCompletionError {
 
 impl Error for TemporaryCompletionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.primary
-            .as_ref()
-            .map(|error| error.as_ref() as &(dyn Error + 'static))
-            .or(Some(&self.temporary_cleanup))
+        // A failed retirement is operational even when the numerical hook
+        // returned Unsupported. Keep the primary owned in this carrier, but
+        // do not advertise its fallback marker through the source chain.
+        Some(&self.temporary_cleanup)
     }
 }
 
@@ -66,25 +68,27 @@ fn finish_temporary(
     result: Result<GpuTensorHandle>,
     temporary: GpuTensorHandle,
     stage: &'static str,
-) -> Result<GpuTensorHandle> {
+) -> ProviderExecutionResult<GpuTensorHandle> {
     let cleanup = temporary.release();
     match (result, cleanup) {
         (Ok(output), Ok(_)) => Ok(output),
-        (Err(error), Ok(_)) => Err(error),
-        (Err(primary), Err(temporary_cleanup)) => Err(TemporaryCompletionError {
-            stage,
-            primary: Some(primary),
-            temporary_cleanup,
-            output_cleanup: None,
-        }
-        .into()),
-        (Ok(output), Err(cleanup)) => Err(TemporaryCompletionError {
-            stage,
-            primary: None,
-            temporary_cleanup: cleanup,
-            output_cleanup: output.release().err(),
-        }
-        .into()),
+        (Err(error), Ok(_)) => Err(error.into()),
+        (Err(primary), Err(temporary_cleanup)) => Err(ProviderExecutionError::from_source(
+            TemporaryCompletionError {
+                stage,
+                primary: Some(primary),
+                temporary_cleanup,
+                output_cleanup: None,
+            },
+        )),
+        (Ok(output), Err(cleanup)) => Err(ProviderExecutionError::from_source(
+            TemporaryCompletionError {
+                stage,
+                primary: None,
+                temporary_cleanup: cleanup,
+                output_cleanup: output.release().err(),
+            },
+        )),
     }
 }
 
@@ -254,7 +258,7 @@ impl WgpuProvider {
     pub(crate) fn integer_floating_sum_global_exec(
         &self,
         input: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
         self.double_sum_exec(input, SumSelection::Global)
     }
 
@@ -262,14 +266,14 @@ impl WgpuProvider {
         &self,
         input: &GpuTensorHandle,
         dim: usize,
-    ) -> Result<GpuTensorHandle> {
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
         self.double_sum_exec(input, SumSelection::Dimension(dim))
     }
 
     pub(crate) fn single_double_sum_global_exec(
         &self,
         input: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
         self.double_sum_exec(input, SumSelection::Global)
     }
 
@@ -277,7 +281,7 @@ impl WgpuProvider {
         &self,
         input: &GpuTensorHandle,
         dim: usize,
-    ) -> Result<GpuTensorHandle> {
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
         self.double_sum_exec(input, SumSelection::Dimension(dim))
     }
 
@@ -285,28 +289,34 @@ impl WgpuProvider {
         &self,
         input: &GpuTensorHandle,
         selection: SumSelection,
-    ) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry_raw(input)?;
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        let entry = self
+            .get_entry_raw(input)
+            .map_err(ProviderExecutionError::from)?;
         if self.precision != NumericPrecision::F64 {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
                 "double sum requires shader-f64 support",
-            ));
+            )
+            .into());
         }
         if entry.storage != GpuTensorStorage::Real {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
                 "double sum conversion requires real storage",
-            ));
+            )
+            .into());
         }
         // Floating reductions read physical column-major order. A lazy
         // transpose must be materialized even for the global route so the
         // cast publishes truthful contiguous shape/layout metadata.
-        let contiguous = self.reshape_exec(input, input.shape())?;
+        let contiguous = self
+            .reshape_exec(input, input.shape())
+            .map_err(ProviderExecutionError::from)?;
         let materialized = !contiguous.shares_allocation_with(input);
         let converted = self.input_to_double_for_sum(&contiguous);
         let converted = if materialized {
             finish_temporary(converted, contiguous, "integer sum view materialization")?
         } else {
-            converted?
+            converted.map_err(ProviderExecutionError::from)?
         };
         let result = match selection {
             SumSelection::Global => self

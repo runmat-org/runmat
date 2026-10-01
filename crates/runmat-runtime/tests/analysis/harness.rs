@@ -109,11 +109,15 @@ impl AccelProvider for HarnessProvider {
     fn reduce_sum<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let ah = store_get(a)?;
-            let sum = ah.data.iter().sum::<f64>();
-            store_insert(vec![1], vec![sum])
+            let result: anyhow::Result<GpuTensorHandle> = async {
+                let ah = store_get(a)?;
+                let sum = ah.data.iter().sum::<f64>();
+                store_insert(vec![1], vec![sum])
+            }
+            .await;
+            result.map_err(Into::into)
         })
     }
 

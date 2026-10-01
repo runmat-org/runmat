@@ -3420,8 +3420,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn reduce_sum<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_sum not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("reduce_sum not supported by provider").into())
+        })
     }
     /// Dimensional form of [`Self::reduce_sum`] with the reduced axis kept as
     /// a singleton. Its intermediate class has the same F64 contract.
@@ -3429,8 +3431,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_sum_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("reduce_sum_dim not supported by provider").into())
+        })
     }
     /// Reduce a native integer gpuArray while preserving its exact element
     /// class. This is intentionally separate from `reduce_sum`, whose MATLAB

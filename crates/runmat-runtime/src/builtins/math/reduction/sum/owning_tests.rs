@@ -44,13 +44,14 @@ impl AccelProvider for Provider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.fail {
                 Err(anyhow::Error::new(std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
                     "sum reduction failed",
-                )))
+                ))
+                .into())
             } else {
                 futures::future::pending().await
             }
@@ -185,12 +186,13 @@ impl AccelProvider for OutputProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if runmat_accelerate_api::handle_is_logical(input) {
                 return Err(runmat_accelerate_api::unsupported_provider_operation(
                     "F32-only owner cannot accumulate logical values in double",
-                ));
+                )
+                .into());
             }
             let call = self.calls.fetch_add(1, Ordering::SeqCst);
             let mut shape = input.shape().to_vec();

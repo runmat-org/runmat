@@ -129,16 +129,17 @@ impl AccelProvider for Provider {
     fn reduce_sum<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            match self.mode {
-                Mode::ReductionFailure => anyhow::bail!("injected reduction failure"),
+            let result: anyhow::Result<GpuTensorHandle> = match self.mode {
+                Mode::ReductionFailure => Err(anyhow::anyhow!("injected reduction failure")),
                 Mode::Alias => {
                     assert_eq!(input.shape(), &[1]);
                     Ok(input.clone())
                 }
                 _ => Ok(self.tensor(vec![self.values(input).into_iter().sum()])),
-            }
+            };
+            result.map_err(Into::into)
         })
     }
     fn read_scalar(&self, input: &GpuTensorHandle, index: usize) -> anyhow::Result<f64> {
