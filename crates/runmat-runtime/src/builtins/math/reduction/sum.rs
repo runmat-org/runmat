@@ -3,10 +3,9 @@
 use std::collections::HashSet;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision, ReductionFlavor};
-use runmat_builtins::{BuiltinErrorDescriptor, SumControl, SumOutputClass as OutputTemplate};
-pub use runmat_builtins::{
-    SUM_DESCRIPTOR, SUM_ERROR_INTERNAL, SUM_ERROR_INVALID_ARGUMENT, SUM_ERROR_INVALID_INPUT,
-    SUM_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
+use runmat_builtins::{
+    BuiltinErrorDescriptor, SumControl, SumOutputClass as OutputTemplate, SUM_ERROR_INTERNAL,
+    SUM_ERROR_INVALID_ARGUMENT, SUM_ERROR_INVALID_INPUT,
 };
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 const NAME: &str = "sum";
@@ -1131,49 +1130,6 @@ pub(crate) mod tests {
 
     fn values(tensor: &Tensor) -> Vec<f64> {
         tensor.materialize_f64()
-    }
-
-    #[test]
-    fn sum_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = SUM_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"S = sum(A)"));
-        assert!(labels.contains(&"S = sum(A, dim)"));
-        assert!(labels.contains(&"S = sum(A, \"all\")"));
-        assert!(labels.contains(&"S = sum(A, missingflag)"));
-        assert!(labels.contains(&"S = sum(A, outtype)"));
-        assert!(labels.contains(&"S = sum(A, dim, missingflag)"));
-        assert!(labels.contains(&"S = sum(A, missingflag, dim)"));
-        assert!(!labels.iter().any(|label| label.contains("nanflag")));
-        assert!(!labels.iter().any(|label| label.contains("like")));
-        assert!(labels.contains(&"S = sum(A, vecdim)"));
-        let missingflag = SUM_DESCRIPTOR
-            .signatures
-            .iter()
-            .flat_map(|signature| signature.inputs)
-            .find(|input| input.name == "missingflag")
-            .expect("missingflag descriptor");
-        assert_eq!(missingflag.default, Some("\"includemissing\""));
-        assert!(missingflag.description.contains("\"omitmissing\""));
-    }
-
-    #[test]
-    fn sum_descriptor_errors_have_stable_codes() {
-        assert!(SUM_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == SUM_ERROR_INVALID_ARGUMENT.code));
-        assert!(SUM_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == SUM_ERROR_INVALID_INPUT.code));
-        assert!(SUM_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == SUM_ERROR_INTERNAL.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

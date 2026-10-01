@@ -40,6 +40,46 @@ fn call(input: ValueFact, controls: Vec<LiteralValue>, outputs: usize) -> CallIn
 }
 
 #[test]
+fn descriptor_preserves_public_forms_defaults_and_errors() {
+    let labels: Vec<&str> = SUM_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|sig| sig.label)
+        .collect();
+    for form in [
+        "S = sum(A)",
+        "S = sum(A, dim)",
+        "S = sum(A, \"all\")",
+        "S = sum(A, missingflag)",
+        "S = sum(A, outtype)",
+        "S = sum(A, dim, missingflag)",
+        "S = sum(A, missingflag, dim)",
+        "S = sum(A, vecdim)",
+    ] {
+        assert!(labels.contains(&form), "missing {form}");
+    }
+    assert!(!labels
+        .iter()
+        .any(|label| label.contains("nanflag") || label.contains("like")));
+    let missingflag = SUM_DESCRIPTOR
+        .signatures
+        .iter()
+        .flat_map(|signature| signature.inputs)
+        .find(|input| input.name == "missingflag")
+        .expect("missing-data descriptor");
+    assert_eq!(missingflag.default, Some("\"includemissing\""));
+    assert!(missingflag.description.contains("\"omitmissing\""));
+    assert_eq!(SUM_DESCRIPTOR.errors.len(), 3);
+    for code in [
+        SUM_ERROR_INVALID_ARGUMENT.code,
+        SUM_ERROR_INVALID_INPUT.code,
+        SUM_ERROR_INTERNAL.code,
+    ] {
+        assert!(SUM_DESCRIPTOR.errors.iter().any(|error| error.code == code));
+    }
+}
+
+#[test]
 fn known_floating_reduction_and_native_integer_classes_are_proven() {
     let shape = ShapeFact::from(vec![Some(3), Some(2)]);
     let reduced = call(numeric(NumericClass::Single, shape.clone()), vec![], 1);
