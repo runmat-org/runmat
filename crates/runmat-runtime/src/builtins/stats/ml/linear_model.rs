@@ -198,12 +198,8 @@ struct OlsFit {
 async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_fitlm_integer_extensions(&first, &rest)?;
     ensure_fitlm_resident_fallback_extension(&first, &rest)?;
-    let first = gather(first)
-        .await
-        .map_err(|err| fitlm_invalid(err.message))?;
-    let rest = gather_all(rest)
-        .await
-        .map_err(|err| fitlm_invalid(err.message))?;
+    let first = gather(first).await?;
+    let rest = gather_all(rest).await?;
     let spec = build_fit_spec(first, rest)?;
     let fit = fit_ols(&spec)?;
     model_object(spec, fit).map(Value::Object)
@@ -389,9 +385,7 @@ pub(crate) fn predict_linear_model_dispatch(
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))
+    gather_if_needed_async(&value).await
 }
 
 async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {

@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn structural_counts_reject_the_first_value_beyond_platform_usize() {
+    let first_out_of_range = (1u128 << usize::BITS) as f64;
+    assert!(nonnegative_integer(&Value::Num(first_out_of_range), "MaxNumSplits").is_err());
+    assert!(positive_integer(&Value::Num(first_out_of_range), "MinLeafSize").is_err());
+    assert_eq!(
+        nonnegative_integer(&Value::Num(0.0), "MaxNumSplits").unwrap(),
+        0
+    );
+    assert_eq!(
+        positive_integer(&Value::Num(1.0), "MinLeafSize").unwrap(),
+        1
+    );
+}
+
+#[test]
 fn fitctree_strict_mode_rejects_integer_numeric_extensions() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(fitctree_builtin(

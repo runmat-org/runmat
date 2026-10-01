@@ -1,6 +1,16 @@
 use super::*;
 
 #[test]
+fn iteration_limit_rejects_the_first_value_beyond_platform_usize() {
+    let first_out_of_range = (1u128 << usize::BITS) as f64;
+    assert!(positive_integer(&Value::Num(first_out_of_range), "IterationLimit").is_err());
+    assert_eq!(
+        positive_integer(&Value::Num(1.0), "IterationLimit").unwrap(),
+        1
+    );
+}
+
+#[test]
 fn scalar_option_parsers_read_all_integer_storage_variants() {
     let storages = [
         IntegerStorage::I8(vec![1]),

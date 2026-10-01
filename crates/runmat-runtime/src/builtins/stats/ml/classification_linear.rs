@@ -387,9 +387,7 @@ fn ensure_table_integer_extensions(first: &Value, rest: &[Value]) -> BuiltinResu
 }
 
 async fn gather(value: Value) -> BuiltinResult<Value> {
-    gather_if_needed_async(&value)
-        .await
-        .map_err(|err| fitclinear_invalid(format!("fitclinear: {err}")))
+    gather_if_needed_async(&value).await
 }
 
 async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {

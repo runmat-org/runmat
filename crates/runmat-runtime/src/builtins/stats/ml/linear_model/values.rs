@@ -85,7 +85,10 @@ pub(super) fn ensure_exact_fitlm_integer_tensor_boundary(
     let Some(storage) = tensor.integer_storage() else {
         return Ok(());
     };
-    for integer in storage.exact_values() {
+    for index in 0..storage.len() {
+        let integer = storage
+            .value_at(index)
+            .expect("index is within integer storage length");
         if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
             return Err(fitlm_invalid(format!(
                 "fitlm: integer {role} values must be exactly representable as double"

@@ -91,7 +91,10 @@ pub(super) fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
 
 pub(super) fn ensure_integer_tensor_exact(tensor: &Tensor, name: &str) -> BuiltinResult<()> {
     if let Some(storage) = tensor.integer_storage() {
-        for value in storage.exact_values() {
+        for index in 0..storage.len() {
+            let value = storage
+                .value_at(index)
+                .expect("index is within integer storage length");
             ensure_int_exact_f64(&value, name)?;
         }
     }
@@ -103,7 +106,10 @@ pub(super) fn ensure_integer_tensor_exact_predict(
     name: &str,
 ) -> BuiltinResult<()> {
     if let Some(storage) = tensor.integer_storage() {
-        for value in storage.exact_values() {
+        for index in 0..storage.len() {
+            let value = storage
+                .value_at(index)
+                .expect("index is within integer storage length");
             if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
                 return Err(predict_invalid(format!(
                     "predict: integer {name} must be exactly representable as double"
@@ -156,7 +162,8 @@ pub(super) fn logical_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
 
 pub(super) fn positive_integer(value: &Value, name: &str) -> BuiltinResult<usize> {
     let value = numeric_scalar(value, name)?;
-    if !value.is_finite() || value < 1.0 || value.fract() != 0.0 {
+    let upper_exclusive = (1u128 << usize::BITS) as f64;
+    if !value.is_finite() || value < 1.0 || value >= upper_exclusive || value.fract() != 0.0 {
         return Err(fitclinear_invalid(format!(
             "fitclinear: {name} must be a positive integer"
         )));
