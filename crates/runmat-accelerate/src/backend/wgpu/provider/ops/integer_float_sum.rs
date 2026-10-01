@@ -178,7 +178,7 @@ impl WgpuProvider {
             let module = crate::backend::wgpu::pipelines::create_shader_module(
                 emission,
                 "runmat-integer-sum-floating-cast-module",
-                &shader,
+                shader,
             );
             let key = recipe.key();
             let pipeline = self.get_or_create_pipeline(
