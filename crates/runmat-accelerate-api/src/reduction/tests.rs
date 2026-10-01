@@ -170,6 +170,74 @@ fn owner_contract_axes_and_classes_must_match_physical_recipe() {
 }
 
 #[test]
+fn owner_shape_accepts_ranked_identity_and_scalar_normalization() {
+    let mut identity = descriptor();
+    identity.contract.input_shape = vec![2, 3, 1];
+    identity.contract.output_shape = vec![2, 3, 1];
+    identity.contract.axes = vec![2];
+    identity.contract.identity = true;
+    identity.iteration_shape = vec![2, 3, 1];
+    identity.output_shape = vec![2, 3, 1];
+    identity.inputs[0].shape = vec![2, 3, 1];
+    identity.inputs[0].broadcast_shape = vec![2, 3, 1];
+    identity.inputs[0].strides = vec![1, 2, 6];
+    identity.inputs[0].payload_bytes = 24;
+    identity.partial.precision = ProviderPrecision::F32;
+    identity.partial.alignment = 4;
+    identity.partial.stride = 12;
+    identity.partial.count_offset = 4;
+    identity.partial.flags_offset = 8;
+    identity.geometry.reduce_elements = 1;
+    identity.geometry.slices = 6;
+    identity.geometry.chunks = 1;
+    identity.geometry.partial_elements = 6;
+    for dispatch in [
+        &mut identity.geometry.single,
+        &mut identity.geometry.pass1,
+        &mut identity.geometry.pass2,
+    ] {
+        dispatch.workgroups = [6, 1, 1];
+        dispatch.logical_groups = 6;
+    }
+    identity.work.producer_scalar_work_units = 6;
+    identity.work.output_payload_bytes = 48;
+    identity.work.output_requested_bytes = 48;
+    identity.work.partial_payload_bytes = 72;
+    identity.work.partial_requested_bytes = 72;
+    identity.work.workgroup_bytes = 96;
+    assert!(ProviderReductionRecipe::new(Digest::sha256(b"identity"), identity, sources()).is_ok());
+
+    let mut scalar = descriptor();
+    scalar.contract.input_shape = vec![1, 1, 1];
+    scalar.contract.output_shape = vec![1, 1];
+    scalar.contract.axes = vec![2];
+    scalar.iteration_shape = vec![1, 1, 1];
+    scalar.output_shape = vec![1, 1];
+    scalar.inputs[0].shape = vec![1, 1, 1];
+    scalar.inputs[0].broadcast_shape = vec![1, 1, 1];
+    scalar.inputs[0].strides = vec![1, 1, 1];
+    scalar.inputs[0].payload_bytes = 4;
+    scalar.geometry.reduce_elements = 1;
+    scalar.geometry.slices = 1;
+    scalar.geometry.chunks = 1;
+    scalar.geometry.partial_elements = 1;
+    for dispatch in [
+        &mut scalar.geometry.single,
+        &mut scalar.geometry.pass1,
+        &mut scalar.geometry.pass2,
+    ] {
+        dispatch.workgroups = [1, 1, 1];
+        dispatch.logical_groups = 1;
+    }
+    scalar.work.producer_scalar_work_units = 1;
+    scalar.work.output_payload_bytes = 8;
+    scalar.work.output_requested_bytes = 8;
+    scalar.work.partial_payload_bytes = 16;
+    scalar.work.partial_requested_bytes = 16;
+    assert!(ProviderReductionRecipe::new(Digest::sha256(b"scalar"), scalar, sources()).is_ok());
+}
+
+#[test]
 fn strategy_is_frozen_in_identity_and_exact_selected_work() {
     let r = recipe(descriptor());
     let single = ReductionSelection::new(&r, ReductionStrategy::SinglePass).unwrap();
