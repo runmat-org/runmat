@@ -44,9 +44,7 @@ fn observation_rows(
     value: Option<&ValueFact>,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) -> Option<usize> {
-    let Some(value) = value else {
-        return None;
-    };
+    let value = value?;
     if !matches!(
         value.kind,
         ValueKindFact::Numeric(NumericFact {
