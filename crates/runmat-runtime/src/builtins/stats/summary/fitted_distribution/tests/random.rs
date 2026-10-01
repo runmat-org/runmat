@@ -23,6 +23,7 @@ fn canonical_random_binding_uses_invocation_cancellation() {
 
 #[test]
 fn random_named_logical_parameter_follows_numeric_evaluator() {
+    let _rng_guard = crate::builtins::common::random::test_guard();
     let samples = block_on(random_builtin(
         Value::from("Poisson"),
         vec![Value::Bool(false), Value::Num(2.0)],
@@ -37,6 +38,7 @@ fn random_named_logical_parameter_follows_numeric_evaluator() {
 
 #[test]
 fn fitted_poisson_sampling_polls_between_draws_and_within_inverse_search() {
+    let _rng_guard = crate::builtins::common::random::test_guard();
     use std::cell::Cell;
     let fit = FittedDistribution {
         kind: DistributionKind::Poisson,

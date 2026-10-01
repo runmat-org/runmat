@@ -107,6 +107,7 @@ fn fitted_preflight_carries_typed_family_and_frequency_roles() {
 
 #[test]
 fn generic_pdf_cdf_random_name_overloads_execute() {
+    let _rng_guard = crate::builtins::common::random::test_guard();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let density = block_on(pdf_builtin(
         Value::String("Normal".into()),
