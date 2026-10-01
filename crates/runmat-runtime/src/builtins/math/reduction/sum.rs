@@ -146,12 +146,7 @@ pub(crate) async fn sum_for_invocation(
         SumInvocation::NanSum => ReductionNaN::Omit,
         SumInvocation::Sum => imposed_nan_mode.unwrap_or(parsed.nan_mode),
     };
-    if matches!(parsed.output, OutputTemplate::Native) {
-        if let Some(result) = sum_native_integer(&value, &parsed)? {
-            return Ok(result);
-        }
-    }
-    if preparation::eligible(&value) {
+    if preparation::eligible(&value, parsed.output) {
         return preparation::execute(value, parsed, input_meta, input_count).await;
     }
     let raw_result = execute_raw(value, &parsed).await?;

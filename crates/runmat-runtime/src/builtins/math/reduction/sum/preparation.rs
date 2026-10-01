@@ -1,5 +1,8 @@
 //! Sum's already-admitted data boundary; controls never become provider operands.
-use super::{apply_output_template, execute_raw, resolve_dims, InputMeta, ParsedArguments};
+use super::{
+    apply_output_template, execute_raw, resolve_dims, sum_native_integer, InputMeta,
+    ParsedArguments,
+};
 use crate::context::preparation::{
     execute_current_request, AdmittedBuiltinPreparation, AdmittedSumReduction,
     BuiltinPreparationAdmission,
@@ -14,8 +17,9 @@ use runmat_value::Value;
 #[path = "preparation/tests.rs"]
 mod tests;
 
-pub(super) fn eligible(value: &Value) -> bool {
+pub(super) fn eligible(value: &Value, output: SumOutputClass) -> bool {
     match value {
+        Value::Int(_) => output == SumOutputClass::Native,
         Value::Tensor(_) => true,
         Value::GpuTensor(handle) => {
             handle_is_logical(handle)
@@ -56,6 +60,11 @@ pub(super) async fn execute(
     .with_sum_reduction(controls)?;
     execute_current_request(request, |mut operands| async move {
         let value = operands.remove(0);
+        if parsed.output == SumOutputClass::Native {
+            if let Some(result) = sum_native_integer(&value, &parsed)? {
+                return Ok(result);
+            }
+        }
         let raw = execute_raw(value, &parsed).await?;
         apply_output_template(raw, &parsed.output, &input_meta).await
     })
@@ -63,7 +72,14 @@ pub(super) async fn execute(
 }
 
 fn controls(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<AdmittedSumReduction> {
+    let scalar_shape = [1, 1];
     let (shape, class, domain) = match value {
+        Value::Int(integer) => (
+            scalar_shape.as_slice(),
+            NumericClass::from_class_identity(&integer.numeric_dtype().class_identity())
+                .expect("all integer scalar dtypes have canonical classes"),
+            NumericDomain::Real,
+        ),
         Value::Tensor(tensor) => (
             tensor.shape.as_slice(),
             NumericClass::from_class_identity(&tensor.numeric_dtype().class_identity())
