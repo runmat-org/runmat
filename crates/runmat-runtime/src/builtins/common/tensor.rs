@@ -506,7 +506,7 @@ pub enum DimensionDecodeError {
     #[error("dimension is below the allowed minimum")]
     BelowMinimum,
     #[error("dimensions: {0}")]
-    Gather(#[source] RuntimeError),
+    Gather(#[source] Box<RuntimeError>),
 }
 
 impl DimensionDecodeError {
@@ -516,9 +516,9 @@ impl DimensionDecodeError {
         if let Self::Gather(cause) = self {
             owner.gpu_gather_retry = cause.gpu_gather_retry;
             if owner.span.is_none() {
-                owner.span = cause.span.clone();
+                owner.span = cause.span;
             }
-            owner.source = Some(Box::new(cause));
+            owner.source = Some(cause);
         }
         owner
     }
@@ -629,7 +629,7 @@ pub async fn dims_from_value_async_typed(
         Value::GpuTensor(handle) => {
             let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone()))
                 .await
-                .map_err(DimensionDecodeError::Gather)?;
+                .map_err(|cause| DimensionDecodeError::Gather(Box::new(cause)))?;
             match gathered {
                 Value::Tensor(t) => {
                     if t.is_empty() {
@@ -960,7 +960,7 @@ mod dimension_tests {
         let mut cause = crate::RuntimeError::new("provider transfer failed");
         cause.identifier = Some("RunMat:test:ProviderTransfer".into());
         cause.gpu_gather_retry = crate::GpuGatherRetry::Never;
-        let owner = DimensionDecodeError::Gather(cause)
+        let owner = DimensionDecodeError::Gather(Box::new(cause))
             .attach_cause(crate::RuntimeError::new("mean: invalid dimension"));
         assert_eq!(owner.gpu_gather_retry, crate::GpuGatherRetry::Never);
         let source = owner.source.expect("provider cause retained");
