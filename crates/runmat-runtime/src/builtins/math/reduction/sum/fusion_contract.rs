@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
-    revision: 2,
+    revision: 3,
     prepare,
 };
 fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
@@ -45,10 +45,7 @@ impl PreparedFusionReduction for Prepared {
         } else {
             NumericClass::Double
         };
-        let output_class = match parsed.output {
-            OutputTemplate::Double => raw_class, // Existing host no-op Single remains Single.
-            OutputTemplate::Native => input_class,
-        };
+        let output_class = parsed.output.resolve_numeric_class(input_class);
         let mut output_shape = if identity {
             shape.clone()
         } else {
@@ -106,11 +103,21 @@ mod tests {
         let input = single(vec![16_777_216.0, 1.0], vec![2, 1]);
         let base = receipt(&input, &[]).unwrap();
         assert_eq!(base.accumulator_class, NumericClass::Double);
-        assert_eq!(base.output_class, NumericClass::Double);
+        assert_eq!(base.output_class, NumericClass::Single);
         assert_eq!(base.axes, vec![0]);
         assert_eq!(base.output_shape, vec![1, 1]);
         assert_eq!(
             futures::executor::block_on(sum_builtin(input.clone(), vec![])).unwrap(),
+            single(vec![16_777_216.0], vec![1, 1])
+        );
+        let double = receipt(&input, &[Value::String("double".into())]).unwrap();
+        assert_eq!(double.output_class, NumericClass::Double);
+        assert_eq!(
+            futures::executor::block_on(sum_builtin(
+                input.clone(),
+                vec![Value::String("double".into())]
+            ))
+            .unwrap(),
             Value::Num(16_777_217.0)
         );
         let native = receipt(&input, &[Value::String("native".into())]).unwrap();
@@ -119,6 +126,10 @@ mod tests {
         assert!(noop.identity);
         assert_eq!(noop.output_class, NumericClass::Single);
         assert_eq!(noop.output_shape, vec![2, 1]);
+        let double_noop =
+            receipt(&input, &[Value::Num(3.0), Value::String("double".into())]).unwrap();
+        assert!(double_noop.identity);
+        assert_eq!(double_noop.output_class, NumericClass::Double);
         let nan = single(vec![f32::NAN], vec![1, 1]);
         let omitted = receipt(&nan, &[Value::String("omitnan".into())]).unwrap();
         assert_eq!(omitted.empty, FusionReductionEmpty::PositiveZero);
@@ -126,7 +137,7 @@ mod tests {
         assert_eq!(
             futures::executor::block_on(sum_builtin(nan, vec![Value::String("omitnan".into())]))
                 .unwrap(),
-            Value::Num(0.0)
+            single(vec![0.0], vec![1, 1])
         );
         let fact = value_fact(&input);
         assert!(

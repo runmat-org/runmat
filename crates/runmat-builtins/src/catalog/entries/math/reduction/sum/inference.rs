@@ -1,4 +1,6 @@
-use super::super::support::{admitted_sum_controls, inferred_sum_shape, LiteralReductionOutput};
+use super::super::support::{
+    admitted_sum_controls, inferred_sum_shape, LiteralReductionOutput, SumOutputClass,
+};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
@@ -53,14 +55,12 @@ fn infer_output(
         return ValueFact::unknown(DynamicReason::RuntimeValue);
     };
     let shape = inferred_sum_shape(&input.shape, &controls);
-    let class = match controls.output {
-        Some(LiteralReductionOutput::Native) => input_class,
-        Some(LiteralReductionOutput::Double) => NumericClass::Double,
-        None | Some(LiteralReductionOutput::Default) if input_class == NumericClass::Single => {
-            NumericClass::Single
-        }
-        None | Some(LiteralReductionOutput::Default) => NumericClass::Double,
+    let output_policy = match controls.output {
+        Some(LiteralReductionOutput::Native) => SumOutputClass::Native,
+        Some(LiteralReductionOutput::Double) => SumOutputClass::Double,
+        None | Some(LiteralReductionOutput::Default) => SumOutputClass::Default,
     };
+    let class = output_policy.resolve_numeric_class(input_class);
     let storage = if input.residency == ResidencyFact::Host {
         match shape.element_count() {
             Some(1) if class == NumericClass::Double && domain == NumericDomain::Real => {
