@@ -199,5 +199,13 @@ mod tests {
         let identifier = Reflect::get(&error, &JsValue::from_str("identifier"))
             .expect("structured cancellation identifier");
         assert_eq!(identifier.as_string().as_deref(), Some("RunMat:Cancelled"));
+        let message = Reflect::get(&error, &JsValue::from_str("message"))
+            .expect("structured cancellation message");
+        assert!(
+            message
+                .as_string()
+                .is_some_and(|text| text.contains("mnrfit: execution was cancelled")),
+            "cancellation must reach the multinomial fit, not only an earlier pipeline stage"
+        );
     }
 }
