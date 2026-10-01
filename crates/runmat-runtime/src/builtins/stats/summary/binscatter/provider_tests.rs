@@ -94,6 +94,25 @@ fn known_invalid_controls_and_geometry_preflight_without_download() {
         sample.handle.allocation_lease().validate_live().unwrap();
         assert_eq!(sample.probe.retirements(), 0);
     }
+    let table = crate::builtins::table::table_from_columns(
+        vec!["x".into(), "y".into()],
+        vec![host(), host()],
+    )
+    .unwrap();
+    let selector = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let err = block_on(binscatter_builtin(vec![
+        table,
+        Value::GpuTensor(selector.handle.clone()),
+        Value::String("absent".into()),
+    ]))
+    .expect_err("invalid host table selector before resident index download");
+    assert!(err.message().contains("not found"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    sample.handle.allocation_lease().validate_live().unwrap();
+    selector.handle.allocation_lease().validate_live().unwrap();
     let matrix = provider
         .owner
         .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)

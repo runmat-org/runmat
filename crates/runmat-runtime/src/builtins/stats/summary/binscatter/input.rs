@@ -63,10 +63,25 @@ pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<Option<ParsedI
         } else {
             return Err(invalid("binscatter: input shape overflows"));
         }
-    } else {
-        return Err(invalid(
-            "binscatter: table variable selectors must be host values",
-        ));
+    } else if let Value::Object(table) = &args[0] {
+        let names = crate::builtins::table::table_variable_names_from_object(table)
+            .map_err(|err| invalid_with_source(err.message.clone(), err))?;
+        for (selector, role) in [(&args[1], "xvar"), (&args[2], "yvar")] {
+            if let Value::GpuTensor(handle) = selector {
+                let count = handle
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+                    .ok_or_else(|| invalid("binscatter: table selector shape overflows"))?;
+                if count != 1 {
+                    return Err(invalid(format!(
+                        "binscatter: {role} must be a scalar table variable index"
+                    )));
+                }
+            } else {
+                table_variable_name(selector, &names, role)?;
+            }
+        }
     }
     Ok(None)
 }
@@ -107,10 +122,10 @@ fn table_variable_numeric_data(
     context: &str,
 ) -> BuiltinResult<Tensor> {
     let names = crate::builtins::table::table_variable_names_from_object(object)
-        .map_err(|err| invalid(err.message))?;
+        .map_err(|err| invalid_with_source(err.message.clone(), err))?;
     let name = table_variable_name(selector, &names, context)?;
-    let variables =
-        crate::builtins::table::table_variables(object).map_err(|err| invalid(err.message))?;
+    let variables = crate::builtins::table::table_variables(object)
+        .map_err(|err| invalid_with_source(err.message.clone(), err))?;
     let value = variables
         .fields
         .get(&name)
