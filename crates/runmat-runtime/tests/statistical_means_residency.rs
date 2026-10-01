@@ -77,3 +77,27 @@ fn all_four_means_preserve_supported_same_owner_float_residency() {
         assert!((values[0] - expected).abs() < 1e-12, "{name}");
     }
 }
+
+#[test]
+fn geometric_negative_domain_is_local_to_each_resident_slice() {
+    let provider = Box::leak(Box::new(InProcessProvider::new()));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = upload(provider, &[1.0, 4.0, -4.0, 9.0], &[2, 2]);
+    let Value::GpuTensor(result) = block_on(runmat_runtime::call_builtin_async(
+        "geomean",
+        &[Value::GpuTensor(input.clone())],
+    ))
+    .unwrap() else {
+        panic!("supported real geomean should remain resident");
+    };
+    assert_eq!(result.shape(), &[1, 2]);
+    assert!(!result.shares_allocation_with(&input));
+    assert!(input.allocation_lease().validate_live().is_ok());
+    let host = block_on(provider.download_numeric(&result)).unwrap();
+    let HostNumericDataOwned::F64(values) = host.data else {
+        panic!("geomean must preserve double precision");
+    };
+    assert_eq!(values.len(), 2);
+    assert!((values[0] - 2.0).abs() < 1e-12);
+    assert!(values[1].is_nan());
+}
