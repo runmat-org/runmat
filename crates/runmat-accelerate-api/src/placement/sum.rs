@@ -27,6 +27,11 @@ pub struct ProviderSumGeometry {
     /// Maximum output elements per N-D shader dispatch, from the selected
     /// workgroup geometry and the adapter's dispatch limit.
     pub nd_chunk_elements: u64,
+    /// Elements per floating conversion dispatch for this provider instance.
+    pub cast_chunk_elements: u64,
+    /// Maximum output elements admitted by one 2-D dimensional reduction
+    /// dispatch, using its fixed reduction workgroup and the adapter limit.
+    pub dimension_2_max_output_elements: u64,
     /// Input elements consumed by one global reduction dispatch.
     pub global_chunk_elements: u64,
     /// Input elements reduced to one partial result in the global kernel.

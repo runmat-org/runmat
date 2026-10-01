@@ -128,6 +128,15 @@ impl AccelProvider for WgpuProvider {
             nd_chunk_elements: crate::backend::wgpu::config::elementwise_chunk_capacity(
                 crate::backend::wgpu::config::effective_workgroup_size(),
             )?,
+            cast_chunk_elements: crate::backend::wgpu::config::elementwise_chunk_capacity(
+                self.workgroup_config.scalar,
+            )?,
+            dimension_2_max_output_elements: u64::from(
+                self.adapter_limits.max_compute_workgroups_per_dimension,
+            )
+            .checked_mul(u64::from(
+                crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
+            ))?,
             global_chunk_elements: u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
                 .checked_mul(2 * u64::from(crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE))?,
             global_group_elements: 2 * u64::from(

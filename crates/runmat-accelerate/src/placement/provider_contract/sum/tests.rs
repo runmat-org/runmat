@@ -29,6 +29,8 @@ impl AccelProvider for GeometryProvider {
             max_buffer_bytes: 1 << 20,
             max_binding_bytes: 1 << 20,
             nd_chunk_elements: 128,
+            cast_chunk_elements: 128,
+            dimension_2_max_output_elements: 512 * 65535,
             global_chunk_elements: 1024,
             global_group_elements: 1024,
         })
@@ -108,10 +110,12 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
         ProviderRejectionCode::UnknownResourceEstimate
     );
     changed = query(ProviderElementType::F32, &[2, 3], &[0]);
-    assert_eq!(
-        rejection_code(validate(&provider, true, &changed).unwrap()),
-        ProviderRejectionCode::UnknownResourceEstimate
-    );
+    changed.workload.sum.as_mut().unwrap().output = SumOutputClass::Native;
+    changed.workload.sum.as_mut().unwrap().publication_class = NumericClass::Single;
+    assert!(matches!(
+        validate(&provider, true, &changed),
+        Some(ProviderFeasibility::Supported { .. })
+    ));
     changed = query(ProviderElementType::I64, &[2, 3], &[0]);
     assert_eq!(
         rejection_code(validate(&provider, true, &changed).unwrap()),
@@ -129,6 +133,60 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
         rejection_code(validate(&provider, true, &changed).unwrap()),
         ProviderRejectionCode::UnknownResourceEstimate
     );
+}
+
+#[test]
+fn single_input_cast_and_publication_are_separate_physical_work() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F64,
+    };
+    let mut native = query(ProviderElementType::F32, &[2, 3], &[0]);
+    let route = native.workload.sum.as_mut().unwrap();
+    route.output = SumOutputClass::Native;
+    route.publication_class = NumericClass::Single;
+    let native_work = work(&provider, true, &native).unwrap();
+    assert_eq!(native_work.estimate.output_bytes, Some(12));
+    assert_eq!(native_work.estimate.dispatches, Some(3));
+    #[cfg(feature = "wgpu")]
+    {
+        assert!(native_work.input_cast && native_work.output_cast);
+        assert_eq!(native_work.queue_submissions, 3);
+        assert_eq!(native_work.allocations, 7);
+    }
+    let mut double = native.clone();
+    let route = double.workload.sum.as_mut().unwrap();
+    route.output = SumOutputClass::Double;
+    route.publication_class = NumericClass::Double;
+    let double_work = work(&provider, true, &double).unwrap();
+    assert_eq!(double_work.estimate.output_bytes, Some(24));
+    assert_eq!(double_work.estimate.dispatches, Some(2));
+    #[cfg(feature = "wgpu")]
+    assert_eq!(double_work.allocations, 5);
+    let single_only = GeometryProvider {
+        precision: ProviderPrecision::F32,
+    };
+    assert_eq!(
+        rejection_code(validate(&single_only, true, &native).unwrap()),
+        ProviderRejectionCode::UnsupportedElementType
+    );
+}
+
+#[test]
+fn two_dimensional_launch_geometry_admits_exact_adapter_boundary() {
+    let geometry = ProviderSumGeometry {
+        max_buffer_bytes: u64::MAX,
+        max_binding_bytes: u64::MAX,
+        nd_chunk_elements: 128,
+        cast_chunk_elements: 128,
+        dimension_2_max_output_elements: 1024,
+        global_chunk_elements: 1024,
+        global_group_elements: 1024,
+    };
+    assert!(floating::dimension_work(2, 1, 2048, 1024, 8192, geometry).is_ok());
+    match floating::dimension_work(2, 1, 2050, 1025, 8200, geometry) {
+        Err(reason) => assert_eq!(rejection_code(reason), ProviderRejectionCode::ResourceLimit),
+        Ok(_) => panic!("dispatch beyond the adapter limit was admitted"),
+    }
 }
 
 #[test]

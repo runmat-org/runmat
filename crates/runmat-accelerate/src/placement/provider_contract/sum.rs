@@ -8,11 +8,16 @@ use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
 #[cfg(test)]
 mod tests;
 mod global;
+mod floating;
 
 pub(crate) struct SumWork {
     pub estimate: ProviderResourceEstimate,
     #[cfg(feature = "wgpu")]
     pub kernel: SumKernelRoute,
+    #[cfg(feature = "wgpu")]
+    pub input_cast: bool,
+    #[cfg(feature = "wgpu")]
+    pub output_cast: bool,
     #[cfg(feature = "wgpu")]
     pub scalar_visits: u64,
     #[cfg(feature = "wgpu")]
@@ -178,6 +183,10 @@ fn work(
             #[cfg(feature = "wgpu")]
             kernel: SumKernelRoute::Host,
             #[cfg(feature = "wgpu")]
+            input_cast: false,
+            #[cfg(feature = "wgpu")]
+            output_cast: false,
+            #[cfg(feature = "wgpu")]
             scalar_visits: elements,
             #[cfg(feature = "wgpu")]
             queue_submissions: 0,
@@ -193,18 +202,12 @@ fn work(
             "sum.double_accumulator_requires_f64",
         ));
     }
-    // The modeled routes read contiguous host-origin real F64 storage.
-    // Casts, omission and resident views have distinct recipes and cannot
-    // borrow the dimensional/global kernel costs.
-    // Global reductions have partial passes; N-D reductions chunk dispatches;
-    // omission, conversion, publication casts and strided views add live
-    // buffers. They must not borrow this simple kernel's estimate.
+    // Host-origin allocation geometry is known. Resident views need the
+    // provider's authenticated backing shape before this physical recipe can
+    // represent them; an apparent contiguous public layout is insufficient.
     if route.missing != ReductionNaN::Include
-        || route.input_class != NumericClass::Double
         || route.accumulation_class != NumericClass::Double
-        || route.publication_class != NumericClass::Double
         || route.input_domain != NumericDomain::Real
-        || input.element_type != ProviderElementType::F64
         || input.storage != ProviderStorage::DenseReal
         || input.layout != ProviderLayout::ColumnMajorContiguous
         || input.residency != ProviderResidency::Host
@@ -215,99 +218,14 @@ fn work(
             "sum.physical_recipe_unresolved",
         ));
     }
-    if input
-        .shape
-        .iter()
-        .any(|&extent| extent > u64::from(u32::MAX))
-        || elements > u64::from(u32::MAX)
-        || output_elements > u64::from(u32::MAX)
-    {
-        return Err(reject(
-            ProviderRejectionCode::ResourceLimit,
-            "sum.dispatch_extent",
-        ));
-    }
-    let Some(geometry) = provider.sum_geometry() else {
-        return Err(reject(
-            ProviderRejectionCode::UnknownResourceEstimate,
-            "sum.kernel_geometry_unknown",
-        ));
-    };
-    if route.axes.len() == input.shape.len() && elements > 1 {
-        return global::work(input, elements, output_bytes, geometry);
-    }
-    if input.shape.len() < 2 || route.axes.len() != 1 {
-        return Err(reject(
-            ProviderRejectionCode::UnknownResourceEstimate,
-            "sum.physical_recipe_unresolved",
-        ));
-    }
-    let requested_output_bytes = output_bytes.max(8);
-    let Some(input_bytes) = input.checked_byte_len() else {
-        return Err(reject(
-            ProviderRejectionCode::InvalidShape,
-            "sum.input_bytes_overflow",
-        ));
-    };
-    if input_bytes > geometry.max_buffer_bytes
-        || input_bytes > geometry.max_binding_bytes
-        || requested_output_bytes > geometry.max_buffer_bytes
-        || requested_output_bytes > geometry.max_binding_bytes
-    {
-        return Err(reject(
-            ProviderRejectionCode::ResourceLimit,
-            "sum.buffer_or_binding_limit",
-        ));
-    }
-    let (dispatches, uniform_bytes) = if input.shape.len() == 2 {
-        (1_u32, 16_u64)
-    } else {
-        if geometry.nd_chunk_elements == 0 {
-            return Err(reject(
-                ProviderRejectionCode::UnknownResourceEstimate,
-                "sum.nd_chunk_geometry_unknown",
-            ));
-        }
-        let chunks = output_elements.div_ceil(geometry.nd_chunk_elements);
-        let dispatches = u32::try_from(chunks).map_err(|_| {
-            reject(
-                ProviderRejectionCode::ResourceLimit,
-                "sum.nd_dispatch_count",
-            )
-        })?;
-        let uniform_bytes = chunks
-            .checked_mul(16)
-            .ok_or_else(|| reject(ProviderRejectionCode::ResourceLimit, "sum.nd_uniform_bytes"))?;
-        (dispatches, uniform_bytes)
-    };
-    // The admitted host input is uploaded with this exact logical shape.
-    // The provider pool may retain a larger buffer and there may be other
-    // live allocations, so peak simultaneously live bytes remain unknown.
-    #[cfg(not(feature = "wgpu"))]
-    let _ = uniform_bytes;
-    Ok(SumWork {
-        estimate: ProviderResourceEstimate {
-            output_bytes: Some(requested_output_bytes),
-            transient_bytes: None,
-            dispatches: Some(dispatches),
-        },
-        #[cfg(feature = "wgpu")]
-        kernel: if input.shape.len() == 2 {
-            SumKernelRoute::Dimension2
-        } else {
-            SumKernelRoute::DimensionN
-        },
-        #[cfg(feature = "wgpu")]
-        scalar_visits: elements.saturating_add(output_elements),
-        #[cfg(feature = "wgpu")]
-        queue_submissions: dispatches,
-        #[cfg(feature = "wgpu")]
-        allocations: dispatches
-            .checked_add(2)
-            .ok_or_else(|| reject(ProviderRejectionCode::ResourceLimit, "sum.allocation_count"))?,
-        #[cfg(feature = "wgpu")]
-        uniform_bytes,
-    })
+    floating::work(
+        provider,
+        input,
+        route,
+        elements,
+        output_elements,
+        output_bytes,
+    )
 }
 
 fn valid_controls(input: &ProviderRepresentation, route: &ProviderSumWorkload) -> bool {

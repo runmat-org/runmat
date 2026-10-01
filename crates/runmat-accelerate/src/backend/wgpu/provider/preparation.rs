@@ -101,37 +101,79 @@ impl WgpuProvider {
         query: &ProviderFeasibilityQuery,
     ) -> Option<ProviderPreparationSnapshot> {
         let work = crate::placement::sum_physical_work(self, query)?;
-        let initialized = match work.kernel {
+        let prebuilt = match work.kernel {
             crate::placement::SumKernelRoute::Host => return None,
             crate::placement::SumKernelRoute::Global => {
-                self.pipelines.reduce_global.is_initialized()
+                Some(self.pipelines.reduce_global.is_initialized())
             }
             crate::placement::SumKernelRoute::Dimension2 => {
-                self.pipelines.reduce_dim_sum_mean.is_initialized()
+                Some(self.pipelines.reduce_dim_sum_mean.is_initialized())
             }
-            crate::placement::SumKernelRoute::DimensionN => {
-                return self
-                    .preparation_keys_snapshot("wgpu-sum-nd-v1", vec![self.nd_sum_pipeline_key()]);
-            }
+            crate::placement::SumKernelRoute::DimensionN => None,
         };
+        let mut keys = Vec::new();
+        if work.kernel == crate::placement::SumKernelRoute::DimensionN {
+            keys.push(self.nd_sum_pipeline_key());
+        }
+        if work.input_cast {
+            keys.push(
+                PipelineRecipe::floating_cast(
+                    NumericPrecision::F32,
+                    NumericPrecision::F64,
+                    self.workgroup_config.scalar,
+                )
+                .key(),
+            );
+        }
+        if work.output_cast {
+            keys.push(
+                PipelineRecipe::floating_cast(
+                    NumericPrecision::F64,
+                    NumericPrecision::F32,
+                    self.workgroup_config.scalar,
+                )
+                .key(),
+            );
+        }
+        keys.sort_unstable();
+        keys.dedup();
         let identity = Digest::sha256(
             serde_json::to_vec(&(
-                "wgpu-sum-prebuilt-v1",
+                "wgpu-sum-admitted-preparation-v2",
                 query.workload.sum.as_ref()?,
                 work.kernel,
                 self.device_id_exec(),
+                &keys,
             ))
             .ok()?,
         );
+        let cache = self.fused_pipeline_cache.try_lock().ok();
+        if !keys.is_empty() && cache.is_none() {
+            return Some(ProviderPreparationSnapshot {
+                identity,
+                state: None,
+                cold_pipelines: 0,
+                warm_pipelines: 0,
+            });
+        }
+        let dynamic_cold = u32::try_from(
+            keys.iter()
+                .filter(|key| !cache.as_ref().is_some_and(|cache| cache.contains_key(*key)))
+                .count(),
+        )
+        .ok()?;
+        let dynamic_warm = u32::try_from(keys.len()).ok()?.checked_sub(dynamic_cold)?;
+        let cold_pipelines = dynamic_cold.checked_add(u32::from(prebuilt == Some(false)))?;
+        let warm_pipelines = dynamic_warm.checked_add(u32::from(prebuilt == Some(true)))?;
         Some(ProviderPreparationSnapshot {
             identity,
-            state: Some(if initialized {
+            state: Some(if cold_pipelines == 0 {
                 CandidatePreparationState::Warm
             } else {
                 CandidatePreparationState::Cold
             }),
-            cold_pipelines: u32::from(!initialized),
-            warm_pipelines: u32::from(initialized),
+            cold_pipelines,
+            warm_pipelines,
         })
     }
 

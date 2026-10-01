@@ -3,18 +3,12 @@ use super::*;
 use runmat_accelerate_api::ProviderSumGeometry;
 
 pub(super) fn work(
-    input: &ProviderRepresentation,
+    input_bytes: u64,
     elements: u64,
     output_bytes: u64,
     geometry: ProviderSumGeometry,
 ) -> Result<SumWork, ProviderFeasibility> {
     let reject = ProviderFeasibility::rejected;
-    let Some(input_bytes) = input.checked_byte_len() else {
-        return Err(reject(
-            ProviderRejectionCode::InvalidShape,
-            "sum.global_input_bytes_overflow",
-        ));
-    };
     if input_bytes > geometry.max_buffer_bytes || input_bytes > geometry.max_binding_bytes {
         return Err(reject(
             ProviderRejectionCode::ResourceLimit,
@@ -108,6 +102,10 @@ pub(super) fn work(
         },
         #[cfg(feature = "wgpu")]
         kernel: SumKernelRoute::Global,
+        #[cfg(feature = "wgpu")]
+        input_cast: false,
+        #[cfg(feature = "wgpu")]
+        output_cast: false,
         #[cfg(feature = "wgpu")]
         scalar_visits,
         #[cfg(feature = "wgpu")]
