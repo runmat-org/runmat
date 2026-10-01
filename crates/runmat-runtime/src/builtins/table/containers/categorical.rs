@@ -3,7 +3,7 @@ use crate::builtins::table::display::trim_float;
 use runmat_value::NumericScalar;
 
 mod labels;
-pub(crate) use self::labels::{categorical_label_view, CategoricalLabelView};
+pub(crate) use self::labels::categorical_label_view;
 
 pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let source = args

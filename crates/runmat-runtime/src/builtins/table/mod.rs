@@ -21,9 +21,10 @@ mod tests;
 pub(crate) use self::binary::{finish_binary, plan_binary};
 pub(crate) use self::containers::{
     categorical_categories, categorical_compare, categorical_declared_levels,
-    categorical_extrema_to_value, categorical_from_args, categorical_labels,
-    categorical_levels_for_observations, categorical_max_evaluate, categorical_min_evaluate,
-    categorical_observation_labels, timetable_row_times, CategoricalComparison,
+    categorical_extrema_to_value, categorical_from_args, categorical_label_view,
+    categorical_labels, categorical_levels_for_observations, categorical_max_evaluate,
+    categorical_min_evaluate, categorical_observation_labels, timetable_row_times,
+    CategoricalComparison,
 };
 pub(crate) use self::display::categorical_label_at;
 pub use self::display::{table_display_text, table_summary_text};

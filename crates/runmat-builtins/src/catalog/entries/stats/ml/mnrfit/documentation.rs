@@ -21,6 +21,14 @@ const RESPONSE_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Response class and grouped-count preparation",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/data/response.rs"),
 };
+const TEXT_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Cooperative text class ordering and lookup",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/class_census/text.rs"),
+};
+const CATEGORICAL_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Borrowed categorical label decoding",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/table/containers/categorical/labels.rs"),
+};
 const PROBABILITY_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Nominal probabilities and likelihoods",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/ml/mnrfit/solver/probability.rs"),
@@ -59,6 +67,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "The default model includes a constant term. `Model` supports `nominal`, `Link` supports `logit`, and `Interactions` accepts `off`. `Weights` is a nonnegative finite observation-weight vector with positive finite total after response weights are applied; unrepresentable products or totals return an error. `IterationLimit` and `Tolerance` control convergence. `EstDisp` accepts only `off`; overdispersion estimation is not implemented.",
             "`Constant`, `MaxIter`, `TolX`, `Options`, and `Display` remain gated RunMat option extensions rather than MATLAB-compatible spellings. `Display` is accepted but does not change the solver result.",
             "`B` has one row per model term and one column per non-reference class. `[B,dev,stats]` also returns deviance and a stats struct with `beta`, `se`, `t`, `p`, `covb`, `coeffcorr`, `dfe`, `s`, `estdisp`, and `classNames`. The solver runs on CPU; automatically resident inputs are gathered, while explicit gpuArray input is a mode-gated RunMat host-fallback extension. No resident solver kernel or fusion route is claimed.",
+            "Long fits support execution cancellation. In the browser, preparation and solver work periodically yield to the event loop so cancellation requests can be processed.",
         ] },
     ],
     examples: &[
@@ -105,7 +114,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     example_exemption: None,
     faqs: &[
-        BuiltinDocumentationFaq { question: "Which response class is the reference class?", answer: "RunMat sorts numeric or logical response classes and uses the final sorted class as the reference for nominal coding." },
+        BuiltinDocumentationFaq { question: "Which response class is the reference class?", answer: "RunMat sorts numeric, logical, and text response classes and uses the final sorted class as the reference for nominal coding. Grouped-count columns retain their supplied order, with the final column as the reference." },
         BuiltinDocumentationFaq { question: "Does RunMat implement ordinal models?", answer: "No. The current implementation fits nominal multinomial logistic regression; other Model values return an error." },
         BuiltinDocumentationFaq { question: "Does RunMat estimate overdispersion?", answer: "No. EstDisp accepts only off, and stats.s is 1." },
     ],
@@ -117,6 +126,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ADMISSION_SOURCE,
         DATA_SOURCE,
         RESPONSE_SOURCE,
+        TEXT_SOURCE,
+        CATEGORICAL_SOURCE,
         PROBABILITY_SOURCE,
         LINEAR_ALGEBRA_SOURCE,
         OPTIONS_SOURCE,
@@ -125,10 +136,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ],
     media: &[],
     evidence: BuiltinDocumentationEvidence {
-        implementation: &[ENTRYPOINT_SOURCE, SOURCE, ADMISSION_SOURCE, DATA_SOURCE, RESPONSE_SOURCE, PROBABILITY_SOURCE, LINEAR_ALGEBRA_SOURCE, OPTIONS_SOURCE, OUTPUT_SOURCE, ALLOCATION_SOURCE],
+        implementation: &[ENTRYPOINT_SOURCE, SOURCE, ADMISSION_SOURCE, DATA_SOURCE, RESPONSE_SOURCE, TEXT_SOURCE, CATEGORICAL_SOURCE, PROBABILITY_SOURCE, LINEAR_ALGEBRA_SOURCE, OPTIONS_SOURCE, OUTPUT_SOURCE, ALLOCATION_SOURCE],
         verification: &[
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Multinomial fitting, class forms, and integer boundaries", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Exact numeric class identity, finite count totals, and weight boundaries", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/data/tests.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Long-prefix text ordering, Unicode copies, and cancellation", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/class_census/text.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Borrowed categorical labels and undefined codes", location: "crates/runmat-runtime/src/builtins/table/containers/categorical/labels.rs" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Browser task turns and public fit cancellation", location: "crates/runmat-wasm/src/runtime/execution/task_turn.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Provider failure and host admission", location: "crates/runmat-runtime/src/builtins/stats/ml/mnrfit/provider_tests.rs" },
             BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Integer regression semantics", location: "crates/runmat-vm/tests/integer_normal_distribution_and_regression_semantics.rs" },
         ],
