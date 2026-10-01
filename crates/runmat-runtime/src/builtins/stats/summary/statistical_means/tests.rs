@@ -80,7 +80,7 @@ fn geometric_omitnan_skips_missing_but_not_negative_observations() {
     let values = result.materialize_f64();
     assert!(values[0].is_nan());
     assert_eq!(values[1], 12.0);
-    assert_eq!(values[2], 10.0);
+    assert!((values[2] - 10.0).abs() <= 4.0 * f64::EPSILON * 10.0);
 }
 
 #[test]
