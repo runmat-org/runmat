@@ -73,7 +73,7 @@ pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
 
 pub(super) fn validate(
     profile: HookProfile,
-    precision: ProviderPrecision,
+    _precision: ProviderPrecision,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
     let operation = OPERATIONS
@@ -101,7 +101,8 @@ pub(super) fn validate(
             "logical.real_storage.required",
         );
     }
-    let float = ProviderElementType::from(precision);
+    #[cfg(feature = "wgpu")]
+    let float = ProviderElementType::from(_precision);
     let floating = match profile {
         HookProfile::InProcess => query.inputs.iter().all(|value| {
             matches!(
