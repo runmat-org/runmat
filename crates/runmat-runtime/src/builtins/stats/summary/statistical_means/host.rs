@@ -1,0 +1,249 @@
+//! Column-major N-D host reductions. Admission, class selection, and numeric
+//! kernels are separate from geometry so each public identity uses one route.
+use super::data::HostData;
+use super::numerics;
+use super::options::{invalid, Axes, MissingMode, Options, ReductionKind};
+use crate::builtins::common::broadcast::BroadcastPlan;
+use crate::BuiltinResult;
+use runmat_value::{NumericDType, Tensor, Value};
+
+#[derive(Clone)]
+struct Geometry {
+    input_shape: Vec<usize>,
+    output_shape: Vec<usize>,
+    input_strides: Vec<usize>,
+    output_strides: Vec<usize>,
+    reduced: Vec<bool>,
+    axis: Option<usize>,
+    output_len: usize,
+}
+
+impl Geometry {
+    fn new(kind: ReductionKind, shape: &[usize], axes: &Axes) -> BuiltinResult<Self> {
+        let mut input_shape = shape.to_vec();
+        input_shape.resize(2, 1);
+        let selected = match axes {
+            Axes::Default => vec![input_shape
+                .iter()
+                .position(|extent| *extent > 1)
+                .unwrap_or(0)],
+            Axes::All => (0..input_shape.len()).collect(),
+            Axes::Dims(dimensions) => dimensions.iter().map(|axis| axis - 1).collect(),
+        };
+        let rank = input_shape
+            .len()
+            .max(selected.iter().max().map_or(2, |axis| axis + 1));
+        input_shape.resize(rank, 1);
+        let mut reduced = vec![false; rank];
+        for axis in selected {
+            reduced[axis] = true;
+        }
+        let mut output_shape = input_shape.clone();
+        for (extent, selected) in output_shape.iter_mut().zip(&reduced) {
+            if *selected {
+                *extent = 1;
+            }
+        }
+        let output_len = checked_len(&output_shape)
+            .ok_or_else(|| invalid(kind, "output shape exceeds platform capacity"))?;
+        let input_strides = strides(kind, &input_shape)?;
+        let output_strides = strides(kind, &output_shape)?;
+        let axis = reduced.iter().position(|selected| *selected);
+        Ok(Self {
+            input_shape,
+            output_shape,
+            input_strides,
+            output_strides,
+            reduced,
+            axis,
+            output_len,
+        })
+    }
+
+    fn destination(&self, linear: usize) -> usize {
+        (0..self.input_shape.len())
+            .filter(|axis| !self.reduced[*axis])
+            .map(|axis| {
+                let coordinate = (linear / self.input_strides[axis]) % self.input_shape[axis];
+                coordinate * self.output_strides[axis]
+            })
+            .sum()
+    }
+
+    fn axis_coordinate(&self, linear: usize) -> usize {
+        let axis = self.axis.expect("weighted reduction has one axis");
+        (linear / self.input_strides[axis]) % self.input_shape[axis]
+    }
+}
+
+fn checked_len(shape: &[usize]) -> Option<usize> {
+    shape
+        .iter()
+        .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+}
+
+fn strides(kind: ReductionKind, shape: &[usize]) -> BuiltinResult<Vec<usize>> {
+    let mut result = vec![1usize; shape.len()];
+    for axis in 1..shape.len() {
+        result[axis] = result[axis - 1]
+            .checked_mul(shape[axis - 1])
+            .ok_or_else(|| invalid(kind, "array stride exceeds platform capacity"))?;
+    }
+    Ok(result)
+}
+
+pub(super) fn reduce(
+    kind: ReductionKind,
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+    options: &Options,
+) -> BuiltinResult<Value> {
+    let geometry = Geometry::new(kind, &shape, &options.axes)?;
+    if checked_len(&geometry.input_shape) != Some(values.len()) {
+        return Err(invalid(kind, "input storage does not match its shape"));
+    }
+    if kind == ReductionKind::Geometric && values.iter().any(|value| *value < 0.0) {
+        return Err(invalid(kind, "input values must be nonnegative"));
+    }
+    let mut buckets = vec![Vec::<f64>::new(); geometry.output_len];
+    for (linear, value) in values.into_iter().enumerate() {
+        buckets[geometry.destination(linear)].push(value);
+    }
+    let output = buckets
+        .into_iter()
+        .map(|mut values| {
+            if options.missing == MissingMode::Omit {
+                values.retain(|value| !value.is_nan());
+            }
+            match kind {
+                ReductionKind::Geometric => numerics::geometric_mean(&values),
+                ReductionKind::Harmonic => numerics::harmonic_mean(&values),
+                ReductionKind::RootMeanSquare | ReductionKind::RootMeanSquaredError => {
+                    numerics::root_mean_square(&values)
+                }
+            }
+        })
+        .collect();
+    output_value(kind, output, geometry.output_shape, dtype)
+}
+
+pub(super) fn residuals(
+    left: HostData,
+    right: HostData,
+    kind: ReductionKind,
+) -> BuiltinResult<(Vec<f64>, Vec<usize>, NumericDType, Vec<usize>, Vec<usize>)> {
+    let dtype = if left.dtype == NumericDType::F32 && right.dtype == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    };
+    let plan = BroadcastPlan::new(&left.shape, &right.shape)
+        .map_err(|source| invalid(kind, &source.to_string()))?;
+    let mut values = vec![0.0; plan.len()];
+    for (destination, l, r) in plan.iter() {
+        values[destination] = left.points[l].difference_magnitude(right.points[r]);
+    }
+    Ok((
+        values,
+        plan.output_shape().to_vec(),
+        dtype,
+        left.shape,
+        right.shape,
+    ))
+}
+
+enum Weights {
+    Scalar(f64),
+    Elements(Vec<f64>),
+    Axis(Vec<f64>),
+}
+
+pub(super) fn weighted_rmse(
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    left_shape: &[usize],
+    right_shape: &[usize],
+    dtype: NumericDType,
+    options: &Options,
+    weights: HostData,
+) -> BuiltinResult<Value> {
+    let kind = ReductionKind::RootMeanSquaredError;
+    let geometry = Geometry::new(kind, &shape, &options.axes)?;
+    if geometry
+        .reduced
+        .iter()
+        .filter(|selected| **selected)
+        .count()
+        != 1
+    {
+        return Err(invalid(
+            kind,
+            "weighted RMSE requires one operating dimension",
+        ));
+    }
+    let (weight_values, weight_shape, _) = weights.real_values(kind)?;
+    if weight_values.iter().any(|weight| *weight < 0.0) {
+        return Err(invalid(kind, "weights must be nonnegative"));
+    }
+    let weights = if weight_values.len() == 1 {
+        Weights::Scalar(weight_values[0])
+    } else if same_shape(&weight_shape, &shape)
+        || same_shape(&weight_shape, left_shape)
+        || same_shape(&weight_shape, right_shape)
+    {
+        let plan = BroadcastPlan::new(&weight_shape, &shape)
+            .map_err(|source| invalid(kind, &source.to_string()))?;
+        if !same_shape(plan.output_shape(), &shape) {
+            return Err(invalid(
+                kind,
+                "weight shape does not match the broadcast result",
+            ));
+        }
+        let mut expanded = vec![0.0; values.len()];
+        for (destination, source, _) in plan.iter() {
+            expanded[destination] = weight_values[source];
+        }
+        Weights::Elements(expanded)
+    } else if weight_values.len() == geometry.input_shape[geometry.axis.unwrap()]
+        && weight_shape.iter().filter(|extent| **extent > 1).count() == 1
+    {
+        Weights::Axis(weight_values)
+    } else {
+        return Err(invalid(
+            kind,
+            "weight shape must match an input, result, or operating axis",
+        ));
+    };
+    let mut buckets = vec![Vec::<(f64, f64)>::new(); geometry.output_len];
+    for (linear, value) in values.into_iter().enumerate() {
+        let weight = match &weights {
+            Weights::Scalar(weight) => *weight,
+            Weights::Elements(weights) => weights[linear],
+            Weights::Axis(weights) => weights[geometry.axis_coordinate(linear)],
+        };
+        buckets[geometry.destination(linear)].push((value, weight));
+    }
+    let output = buckets
+        .into_iter()
+        .map(|bucket| numerics::weighted_root_mean_square(&bucket, options.missing))
+        .collect();
+    output_value(kind, output, geometry.output_shape, dtype)
+}
+
+fn same_shape(left: &[usize], right: &[usize]) -> bool {
+    let rank = left.len().max(right.len());
+    (0..rank)
+        .all(|axis| left.get(axis).copied().unwrap_or(1) == right.get(axis).copied().unwrap_or(1))
+}
+
+fn output_value(
+    kind: ReductionKind,
+    values: Vec<f64>,
+    shape: Vec<usize>,
+    dtype: NumericDType,
+) -> BuiltinResult<Value> {
+    Tensor::new_with_dtype(values, shape, dtype)
+        .map(crate::builtins::common::tensor::tensor_into_value)
+        .map_err(|source| invalid(kind, &source))
+}

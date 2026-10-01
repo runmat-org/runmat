@@ -15,7 +15,6 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, IntValue, StringArray, Tensor, Value};
 
-use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -26,14 +25,6 @@ const PARAM_X: BuiltinParamDescriptor = BuiltinParamDescriptor {
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Input data array.",
-};
-
-const PARAM_Y: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Second input data array.",
 };
 
 const PARAM_FLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -60,22 +51,6 @@ const PARAM_OPTIONS: BuiltinParamDescriptor = BuiltinParamDescriptor {
     description: "Optional dimension and missing-value arguments.",
 };
 
-const PARAM_WEIGHT_OPTION: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "optionName",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"Weights\""),
-    description: "Name-value option name.",
-};
-
-const PARAM_WEIGHTS: BuiltinParamDescriptor = BuiltinParamDescriptor {
-    name: "W",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "Observation weights.",
-};
-
 const OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::NumericArray,
@@ -98,43 +73,6 @@ const INPUTS_X_OPTIONS: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_DIM, PARAM
 const INPUTS_X_FLAG: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_FLAG];
 const INPUTS_X_FLAG_OPTIONS: [BuiltinParamDescriptor; 4] =
     [PARAM_X, PARAM_FLAG, PARAM_DIM, PARAM_OPTIONS];
-const INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [PARAM_X, PARAM_Y];
-const INPUTS_X_Y_DIM: [BuiltinParamDescriptor; 3] = [PARAM_X, PARAM_Y, PARAM_DIM];
-const INPUTS_X_Y_OPTIONS: [BuiltinParamDescriptor; 4] =
-    [PARAM_X, PARAM_Y, PARAM_DIM, PARAM_OPTIONS];
-const INPUTS_X_Y_WEIGHTS: [BuiltinParamDescriptor; 4] =
-    [PARAM_X, PARAM_Y, PARAM_WEIGHT_OPTION, PARAM_WEIGHTS];
-const INPUTS_X_Y_DIM_WEIGHTS: [BuiltinParamDescriptor; 6] = [
-    PARAM_X,
-    PARAM_Y,
-    PARAM_DIM,
-    PARAM_OPTIONS,
-    PARAM_WEIGHT_OPTION,
-    PARAM_WEIGHTS,
-];
-
-macro_rules! reduction_signatures {
-    ($const_name:ident, $name:literal) => {
-        const $const_name: [BuiltinSignatureDescriptor; 3] = [
-            BuiltinSignatureDescriptor {
-                label: concat!("Y = ", $name, "(X)"),
-                inputs: &INPUTS_X,
-                outputs: &OUTPUT_Y,
-            },
-            BuiltinSignatureDescriptor {
-                label: concat!("Y = ", $name, "(X, dim)"),
-                inputs: &INPUTS_X_DIM,
-                outputs: &OUTPUT_Y,
-            },
-            BuiltinSignatureDescriptor {
-                label: concat!("Y = ", $name, "(X, dim, nanflag)"),
-                inputs: &INPUTS_X_OPTIONS,
-                outputs: &OUTPUT_Y,
-            },
-        ];
-    };
-}
-
 macro_rules! flagged_signatures {
     ($const_name:ident, $name:literal) => {
         const $const_name: [BuiltinSignatureDescriptor; 3] = [
@@ -157,9 +95,6 @@ macro_rules! flagged_signatures {
     };
 }
 
-reduction_signatures!(GEOMEAN_SIGNATURES, "geomean");
-reduction_signatures!(HARMMEAN_SIGNATURES, "harmmean");
-reduction_signatures!(RMS_SIGNATURES, "rms");
 flagged_signatures!(MAD_SIGNATURES, "mad");
 flagged_signatures!(SKEWNESS_SIGNATURES, "skewness");
 flagged_signatures!(KURTOSIS_SIGNATURES, "kurtosis");
@@ -304,38 +239,6 @@ macro_rules! floating_stat_integer_metadata {
 }
 
 floating_stat_integer_metadata!(
-    GEOMEAN_INTEGER_DATA_EXTENSION,
-    GEOMEAN_INTEGER_CONTROL_EXTENSION,
-    GEOMEAN_EXTENSIONS,
-    GEOMEAN_INTEGER_DATA_INPUT,
-    GEOMEAN_INTEGER_CONTROL_INPUT,
-    GEOMEAN_INTEGER_CAPABILITIES,
-    "geomean",
-    "geomean-integer-data",
-    "geomean-typed-integer-control",
-    "RunMat:compatibility:GeomeanIntegerDataExtension",
-    "RunMat:compatibility:GeomeanTypedIntegerControlExtension",
-    "The documented nonnegative data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
-    "Documented dimensions accept single or double; exact typed-integer dimensions are a mode-gated RunMat extension."
-);
-
-floating_stat_integer_metadata!(
-    HARMMEAN_INTEGER_DATA_EXTENSION,
-    HARMMEAN_INTEGER_CONTROL_EXTENSION,
-    HARMMEAN_EXTENSIONS,
-    HARMMEAN_INTEGER_DATA_INPUT,
-    HARMMEAN_INTEGER_CONTROL_INPUT,
-    HARMMEAN_INTEGER_CAPABILITIES,
-    "harmmean",
-    "harmmean-integer-data",
-    "harmmean-typed-integer-control",
-    "RunMat:compatibility:HarmmeanIntegerDataExtension",
-    "RunMat:compatibility:HarmmeanTypedIntegerControlExtension",
-    "The documented numeric data domain is single or double; RunMat mode additionally accepts all eight real integer classes.",
-    "Documented dimensions accept single or double; exact typed-integer dimensions are a mode-gated RunMat extension."
-);
-
-floating_stat_integer_metadata!(
     SKEWNESS_INTEGER_DATA_EXTENSION,
     SKEWNESS_INTEGER_CONTROL_EXTENSION,
     SKEWNESS_EXTENSIONS_BASE,
@@ -393,95 +296,6 @@ const KURTOSIS_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
     KURTOSIS_GPU_MULTI_AXIS_EXTENSION,
 ];
 
-const RMS_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rms-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rms with typed real or complex integer input data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RmsIntegerDataExtension"),
-};
-
-const RMS_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [RMS_INTEGER_DATA_EXTENSION];
-
-const RMS_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented data domain is single, double, logical, or char; RunMat mode additionally accepts real and paired complex values of all eight integer classes.",
-    }];
-
-const RMS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = rms(X, dim_or_vecdim_or_all, nanflag) with integer X",
-        inputs: &RMS_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Real or paired complex integer magnitudes enter one explicit double RMS computation/output boundary; resident compatibility is decided before gather.",
-    }];
-
-const RMSE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rmse-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description:
-        "rmse with typed real or complex integer forecast or actual data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RmseIntegerDataExtension"),
-};
-
-const RMSE_INTEGER_WEIGHTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "rmse-integer-weights",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rmse with typed-integer weights is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:RmseIntegerWeightsExtension"),
-};
-
-const RMSE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [RMSE_INTEGER_DATA_EXTENSION, RMSE_INTEGER_WEIGHTS_EXTENSION];
-
-const RMSE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "F_or_A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented forecast and actual data domains are single or double; RunMat mode additionally accepts real and paired complex values of all eight integer classes.",
-    }];
-
-const RMSE_INTEGER_WEIGHT_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "W",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented weight domain is single or double; RunMat mode additionally accepts nonnegative typed-integer weights.",
-    }];
-
-const RMSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "E = rmse(F, A, dim_or_vecdim_or_all, nanflag, Weights=W) with integer F or A",
-        inputs: &RMSE_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Exact integer components materialize once into the double residual-magnitude and RMS domain after compatibility is decided from host storage or resident metadata.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "E = rmse(F, A, ..., Weights=integer_W) with floating F and A",
-        inputs: &RMSE_INTEGER_WEIGHT_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Typed-integer weights materialize explicitly into the nonnegative double weighting domain and are independently gated from integer forecast or actual data.",
-    },
-];
-
 const TABULATE_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "tabulate-integer-data",
     mode: BuiltinExtensionMode::RunMatOnly,
@@ -522,34 +336,6 @@ const TABULATE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         overload: BuiltinIntegerOverloadKind::Multiple,
         notes: "Integer observations group and sort in exact same-class storage; the cell table preserves integer values in column one and uses double counts and percentages, while positive-gap expansion is bounded to avoid unrepresentable allocation.",
     }];
-
-const RMSE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "E = rmse(X, Y)",
-        inputs: &INPUTS_X_Y,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "E = rmse(X, Y, \"Weights\", W)",
-        inputs: &INPUTS_X_Y_WEIGHTS,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "E = rmse(X, Y, dim)",
-        inputs: &INPUTS_X_Y_DIM,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "E = rmse(X, Y, dim, nanflag)",
-        inputs: &INPUTS_X_Y_OPTIONS,
-        outputs: &OUTPUT_Y,
-    },
-    BuiltinSignatureDescriptor {
-        label: "E = rmse(X, Y, dim, nanflag, \"Weights\", W)",
-        inputs: &INPUTS_X_Y_DIM_WEIGHTS,
-        outputs: &OUTPUT_Y,
-    },
-];
 
 const TABULATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
     label: "tbl = tabulate(X)",
@@ -638,26 +424,6 @@ async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
         .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
 }
 
-async fn value_to_magnitude_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
-    let gathered = gathered(value, name).await?;
-    match gathered {
-        Value::Complex(re, im) => Tensor::new(vec![re.hypot(im)], vec![1, 1])
-            .map_err(|err| descriptive_error(name, format!("{name}: {err}"))),
-        Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let data = tensor::complex_tensor_into_values_complex64(tensor)
-                .into_iter()
-                .map(|value| value.norm())
-                .collect::<Vec<_>>();
-            let shape = tensor::default_shape_for(&shape, data.len());
-            Tensor::new(data, shape)
-                .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
-        }
-        other => tensor::value_into_tensor_for(name, other)
-            .map_err(|err| descriptive_error(name, format!("{name}: {err}"))),
-    }
-}
-
 async fn gather_rest(name: &str, rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(rest.len());
     for value in rest {
@@ -738,39 +504,6 @@ async fn parse_reduce_options(
         }
     }
     Ok(ReduceOptions { axes, nanflag })
-}
-
-async fn parse_reduce_options_with_weights(
-    name: &str,
-    rest: Vec<Value>,
-    default_nanflag: NanFlag,
-) -> BuiltinResult<(ReduceOptions, Option<Tensor>)> {
-    let rest = gather_rest(name, rest).await?;
-    let mut reduce_args = Vec::new();
-    let mut weights = None;
-    let mut idx = 0usize;
-    while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
-            if keyword == "weights" {
-                idx += 1;
-                if idx >= rest.len() {
-                    return Err(descriptive_error(
-                        name,
-                        format!("{name}: Weights option requires a value"),
-                    ));
-                }
-                let tensor = tensor::value_into_tensor_for(name, rest[idx].clone())
-                    .map_err(|err| descriptive_error(name, format!("{name}: {err}")))?;
-                weights = Some(tensor);
-                idx += 1;
-                continue;
-            }
-        }
-        reduce_args.push(rest[idx].clone());
-        idx += 1;
-    }
-    let options = parse_reduce_options(name, reduce_args, default_nanflag).await?;
-    Ok((options, weights))
 }
 
 async fn parse_flagged_options(
@@ -896,210 +629,6 @@ fn median(mut values: Vec<f64>) -> f64 {
     }
 }
 
-fn geomean_slice(values: &[f64]) -> f64 {
-    if values.iter().any(|value| value.is_nan() || *value < 0.0) {
-        return f64::NAN;
-    }
-    if values.contains(&0.0) {
-        return 0.0;
-    }
-    (values.iter().map(|value| value.ln()).sum::<f64>() / values.len() as f64).exp()
-}
-
-fn harmmean_slice(values: &[f64]) -> f64 {
-    if values.iter().any(|value| value.is_nan()) {
-        return f64::NAN;
-    }
-    if values.contains(&0.0) {
-        return 0.0;
-    }
-    values.len() as f64 / values.iter().map(|value| 1.0 / value).sum::<f64>()
-}
-
-fn rms_slice(values: &[f64]) -> f64 {
-    (values.iter().map(|value| value * value).sum::<f64>() / values.len() as f64).sqrt()
-}
-
-struct ComplexBuffer {
-    data: Vec<(f64, f64)>,
-    shape: Vec<usize>,
-}
-
-async fn value_to_complex_buffer(name: &str, value: Value) -> BuiltinResult<ComplexBuffer> {
-    let gathered = gathered(value, name).await?;
-    match gathered {
-        Value::Complex(re, im) => Ok(ComplexBuffer {
-            data: vec![(re, im)],
-            shape: vec![1, 1],
-        }),
-        Value::ComplexTensor(tensor) => {
-            let shape = tensor::default_shape_for(
-                &tensor.shape,
-                tensor::complex_tensor_element_len(&tensor),
-            );
-            Ok(ComplexBuffer {
-                data: tensor::complex_tensor_into_values_complex64(tensor)
-                    .into_iter()
-                    .map(|value| (value.re, value.im))
-                    .collect(),
-                shape,
-            })
-        }
-        other => {
-            let tensor = tensor::value_into_tensor_for(name, other)
-                .map_err(|err| descriptive_error(name, format!("{name}: {err}")))?;
-            let shape =
-                tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
-            let data = tensor::tensor_into_values_f64(tensor)
-                .into_iter()
-                .map(|value| (value, 0.0))
-                .collect();
-            Ok(ComplexBuffer { data, shape })
-        }
-    }
-}
-
-fn residual_magnitudes(
-    name: &str,
-    lhs: ComplexBuffer,
-    rhs: ComplexBuffer,
-) -> BuiltinResult<Tensor> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| descriptive_error(name, format!("{name}: {err}")))?;
-    let mut out = vec![0.0; plan.len()];
-    for (dst, lhs_idx, rhs_idx) in plan.iter() {
-        let (lhs_re, lhs_im) = lhs.data[lhs_idx];
-        let (rhs_re, rhs_im) = rhs.data[rhs_idx];
-        out[dst] = (lhs_re - rhs_re).hypot(lhs_im - rhs_im);
-    }
-    Tensor::new(out, plan.output_shape().to_vec())
-        .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
-}
-
-enum WeightSpec {
-    Scalar(f64),
-    Elementwise(Vec<f64>),
-    Axis { axis: usize, weights: Vec<f64> },
-}
-
-fn weight_spec_for(
-    name: &str,
-    weights: Tensor,
-    input_shape: &[usize],
-    axes: &[usize],
-) -> BuiltinResult<WeightSpec> {
-    let weight_len = tensor::tensor_element_len(&weights);
-    let weight_values = tensor::tensor_into_values_f64(weights);
-    if weight_values.iter().any(|value| *value < 0.0) {
-        return Err(descriptive_error(
-            name,
-            format!("{name}: weights must be nonnegative"),
-        ));
-    }
-    if weight_len == 1 {
-        return Ok(WeightSpec::Scalar(weight_values[0]));
-    }
-    if weight_len == tensor::element_count(input_shape) {
-        return Ok(WeightSpec::Elementwise(weight_values));
-    }
-    if axes.len() == 1 && weight_len == input_shape[axes[0]] {
-        return Ok(WeightSpec::Axis {
-            axis: axes[0],
-            weights: weight_values,
-        });
-    }
-    Err(descriptive_error(
-        name,
-        format!("{name}: weights must be scalar, match the input size, or match the reduction dimension"),
-    ))
-}
-
-fn weighted_rmse_tensor(
-    name: &str,
-    input: Tensor,
-    options: ReduceOptions,
-    weights: Tensor,
-) -> BuiltinResult<Value> {
-    let shape = normalize_shape(&input);
-    let axes = resolved_axes(&shape, options.axes.clone());
-    match &options.axes {
-        Axes::All => {
-            return Err(descriptive_error(
-                name,
-                format!("{name}: weights are not supported with \"all\""),
-            ));
-        }
-        Axes::Dims(dims) if dims.len() != 1 => {
-            return Err(descriptive_error(
-                name,
-                format!("{name}: weights are not supported with vector dimensions"),
-            ));
-        }
-        _ => {}
-    }
-    let rank = shape.len().max(axes.iter().copied().max().unwrap_or(0) + 1);
-    let mut padded_shape = shape;
-    padded_shape.resize(rank, 1);
-    let mut out_shape = padded_shape.clone();
-    for &axis in &axes {
-        out_shape[axis] = 1;
-    }
-    let out_len = tensor::element_count(&out_shape);
-    let in_strides = strides_for(&padded_shape);
-    let out_strides = strides_for(&out_shape);
-    let weight_spec = weight_spec_for(name, weights, &padded_shape, &axes)?;
-    let mut buckets = vec![Vec::<(f64, f64)>::new(); out_len.max(1)];
-    for (linear, value) in tensor::tensor_into_values_f64(input)
-        .into_iter()
-        .enumerate()
-    {
-        let mut dst = 0usize;
-        let mut axis_coord = 0usize;
-        for dim in 0..rank {
-            let coord = (linear / in_strides[dim]) % padded_shape[dim];
-            if axes.binary_search(&dim).is_err() {
-                dst += coord * out_strides[dim];
-            }
-            if let WeightSpec::Axis { axis, .. } = &weight_spec {
-                if dim == *axis {
-                    axis_coord = coord;
-                }
-            }
-        }
-        let weight = match &weight_spec {
-            WeightSpec::Scalar(weight) => *weight,
-            WeightSpec::Elementwise(weights) => weights[linear],
-            WeightSpec::Axis { weights, .. } => weights[axis_coord],
-        };
-        buckets[dst].push((value, weight));
-    }
-    let mut out = Vec::with_capacity(out_len);
-    for bucket in buckets {
-        let mut numerator = 0.0;
-        let mut denominator = 0.0;
-        let mut saw_nan = false;
-        for (value, weight) in bucket {
-            if value.is_nan() || weight.is_nan() {
-                if options.nanflag == NanFlag::Omit {
-                    continue;
-                }
-                saw_nan = true;
-                break;
-            }
-            numerator += weight * value * value;
-            denominator += weight;
-        }
-        out.push(if saw_nan || denominator == 0.0 {
-            f64::NAN
-        } else {
-            (numerator / denominator).sqrt()
-        });
-    }
-    Tensor::new(out, out_shape)
-        .map(tensor::tensor_into_value)
-        .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
-}
-
 fn mad_slice(values: &[f64], flag: usize) -> f64 {
     if values.iter().any(|value| value.is_nan()) {
         return f64::NAN;
@@ -1174,13 +703,6 @@ fn ensure_gpu_multi_axis_extension(
     Ok(())
 }
 
-fn rest_has_typed_integer_weights(rest: &[Value]) -> bool {
-    rest.windows(2).any(|pair| {
-        keyword_of(&pair[0]).is_some_and(|keyword| keyword == "weights")
-            && is_real_typed_integer_value(&pair[1])
-    })
-}
-
 fn ensure_mad_integer_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
     if is_real_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(&MAD_INTEGER_DATA_EXTENSION, "mad")?;
@@ -1251,21 +773,6 @@ fn kurtosis_slice(values: &[f64], flag: usize) -> f64 {
     } else {
         f64::NAN
     }
-}
-
-async fn reduce_builtin<F>(
-    name: &str,
-    value: Value,
-    rest: Vec<Value>,
-    default_nanflag: NanFlag,
-    op: F,
-) -> BuiltinResult<Value>
-where
-    F: Fn(&[f64]) -> f64,
-{
-    let input = value_to_tensor(name, value).await?;
-    let options = parse_reduce_options(name, rest, default_nanflag).await?;
-    reduce_tensor(name, input, options, op)
 }
 
 async fn flagged_reduce_builtin<F>(
@@ -1536,102 +1043,6 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
     }
 }
 
-pub mod geomean {
-    use super::*;
-    descriptive_descriptor!("geomean", GEOMEAN_SIGNATURES);
-
-    #[runtime_builtin(
-        name = "geomean",
-        category = "stats/summary",
-        summary = "Compute geometric mean.",
-        keywords = "geomean,geometric mean,statistics,summary",
-        type_resolver(super::descriptive_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::GEOMEAN_EXTENSIONS),
-        integer_capabilities(super::GEOMEAN_INTEGER_CAPABILITIES),
-        builtin_path = "crate::builtins::stats::summary::descriptive::geomean"
-    )]
-    pub(crate) async fn geomean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        super::ensure_floating_stat_integer_extensions(
-            "geomean",
-            &value,
-            &rest,
-            &GEOMEAN_INTEGER_DATA_EXTENSION,
-            &GEOMEAN_INTEGER_CONTROL_EXTENSION,
-        )?;
-        super::reduce_builtin(
-            "geomean",
-            value,
-            rest,
-            super::NanFlag::Include,
-            super::geomean_slice,
-        )
-        .await
-    }
-}
-
-pub mod harmmean {
-    use super::*;
-    descriptive_descriptor!("harmmean", HARMMEAN_SIGNATURES);
-
-    #[runtime_builtin(
-        name = "harmmean",
-        category = "stats/summary",
-        summary = "Compute harmonic mean.",
-        keywords = "harmmean,harmonic mean,statistics,summary",
-        type_resolver(super::descriptive_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::HARMMEAN_EXTENSIONS),
-        integer_capabilities(super::HARMMEAN_INTEGER_CAPABILITIES),
-        builtin_path = "crate::builtins::stats::summary::descriptive::harmmean"
-    )]
-    pub(crate) async fn harmmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        super::ensure_floating_stat_integer_extensions(
-            "harmmean",
-            &value,
-            &rest,
-            &HARMMEAN_INTEGER_DATA_EXTENSION,
-            &HARMMEAN_INTEGER_CONTROL_EXTENSION,
-        )?;
-        super::reduce_builtin(
-            "harmmean",
-            value,
-            rest,
-            super::NanFlag::Include,
-            super::harmmean_slice,
-        )
-        .await
-    }
-}
-
-pub mod rms {
-    use super::*;
-    descriptive_descriptor!("rms", RMS_SIGNATURES);
-
-    #[runtime_builtin(
-        name = "rms",
-        category = "math/reduction",
-        summary = "Compute root mean square.",
-        keywords = "rms,root mean square,statistics,signal",
-        type_resolver(super::descriptive_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::RMS_EXTENSIONS),
-        integer_capabilities(super::RMS_INTEGER_CAPABILITIES),
-        builtin_path = "crate::builtins::stats::summary::descriptive::rms"
-    )]
-    pub(crate) async fn rms_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        if super::is_typed_integer_numeric_value(&value) {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &RMS_INTEGER_DATA_EXTENSION,
-                "rms",
-            )?;
-        }
-        let input = super::value_to_magnitude_tensor("rms", value).await?;
-        let options = super::parse_reduce_options("rms", rest, super::NanFlag::Include).await?;
-        super::reduce_tensor("rms", input, options, super::rms_slice)
-    }
-}
-
 pub mod mad {
     use super::*;
     descriptive_descriptor!("mad", MAD_SIGNATURES);
@@ -1743,53 +1154,6 @@ pub mod kurtosis {
     }
 }
 
-pub mod rmse {
-    use super::*;
-    descriptive_descriptor!("rmse", RMSE_SIGNATURES);
-
-    #[runtime_builtin(
-        name = "rmse",
-        category = "stats/summary",
-        summary = "Compute root mean squared error.",
-        keywords = "rmse,root mean squared error,error,statistics",
-        type_resolver(super::descriptive_type),
-        descriptor(self::DESCRIPTOR),
-        extensions(super::RMSE_EXTENSIONS),
-        integer_capabilities(super::RMSE_INTEGER_CAPABILITIES),
-        builtin_path = "crate::builtins::stats::summary::descriptive::rmse"
-    )]
-    pub(crate) async fn rmse_builtin(
-        lhs: Value,
-        rhs: Value,
-        rest: Vec<Value>,
-    ) -> BuiltinResult<Value> {
-        if super::is_typed_integer_numeric_value(&lhs)
-            || super::is_typed_integer_numeric_value(&rhs)
-        {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &RMSE_INTEGER_DATA_EXTENSION,
-                "rmse",
-            )?;
-        }
-        if super::rest_has_typed_integer_weights(&rest) {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &RMSE_INTEGER_WEIGHTS_EXTENSION,
-                "rmse",
-            )?;
-        }
-        let lhs = super::value_to_complex_buffer("rmse", lhs).await?;
-        let rhs = super::value_to_complex_buffer("rmse", rhs).await?;
-        let input = super::residual_magnitudes("rmse", lhs, rhs)?;
-        let (options, weights) =
-            super::parse_reduce_options_with_weights("rmse", rest, super::NanFlag::Include).await?;
-        if let Some(weights) = weights {
-            super::weighted_rmse_tensor("rmse", input, options, weights)
-        } else {
-            super::reduce_tensor("rmse", input, options, super::rms_slice)
-        }
-    }
-}
-
 pub mod tabulate {
     use super::*;
     descriptive_descriptor!("tabulate", TABULATE_SIGNATURES);
@@ -1825,6 +1189,7 @@ pub mod tabulate {
 
 #[cfg(test)]
 mod tests {
+    use super::super::statistical_means::{geomean, harmmean, rms, rmse};
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;

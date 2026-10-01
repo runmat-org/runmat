@@ -1,0 +1,54 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("rmse"), slug: Some("rmse"),
+    summary: "Compute root mean squared error between forecast and actual arrays.",
+    description: "`rmse(F,A)` reduces squared magnitudes of the broadcast-compatible difference. A dimension, dimension vector, or `\"all\"` selects reduction axes. `\"Weights\",W` adds nonnegative weights for a single operating dimension.",
+    keywords: &["rmse", "root mean squared error", "forecast", "statistics"],
+    related: &["rms", "mean"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Numerical contract", paragraphs: &[
+            "Real and complex single/double forecast and actual inputs are supported. The output is real. Typed real or complex integer data and typed integer weights are separately mode-gated RunMat extensions.",
+            "Weighted RMSE computes `sqrt(sum(W.*abs(F-A).^2)/sum(W))` in each selected slice. Zero total weight and all-omitted slices produce NaN. Weights cannot accompany `\"all\"` or a dimension vector.",
+            "Missing flags `\"includenan\"`/`\"includemissing\"` and `\"omitnan\"`/`\"omitmissing\"` have paired behavior.",
+        ]},
+        BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
+            "The current implementation computes on the host after materializing resident input. Resident GPU execution and placement/performance qualification remain open.",
+        ]},
+    ],
+    examples: &[
+        BuiltinExample {
+            id: "basic-error", title: "Root mean squared error",
+            program: "predicted = [2 4 6]; actual = [1 4 8]; e = rmse(predicted, actual)",
+            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(abs(e-sqrt(5/3)) < 1e-12);" },
+        },
+        BuiltinExample {
+            id: "weighted-columns", title: "Weighted column-wise error",
+            program: "F = [2 4; 4 8]; A = [1 4; 2 6]; W = [1; 3]; e = rmse(F, A, 1, \"Weights\", W)",
+            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(max(abs(e-[sqrt(13/4) sqrt(3)])) < 1e-12);" },
+        },
+    ],
+    example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq {
+        question: "How are weights normalized?",
+        answer: "Weighted RMSE uses `sqrt(sum(W.*E.^2)/sum(W))` over each reduction slice.",
+    }],
+    links: &[
+        BuiltinDocumentationLink { label: "rms", target: BuiltinDocumentationLinkTarget::Builtin("rms") },
+        BuiltinDocumentationLink { label: "mean", target: BuiltinDocumentationLinkTarget::Builtin("mean") },
+        BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/statistical_means/rmse.rs") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[], verification: &[],
+        notes: &["Two legacy example intents retained with defined fixtures and asserted numerical oracles; FAQ and related links retained. GPU route remains unqualified."],
+    },
+    introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

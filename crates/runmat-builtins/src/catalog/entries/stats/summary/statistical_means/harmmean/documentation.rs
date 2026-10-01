@@ -1,0 +1,43 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("harmmean"), slug: Some("harmmean"),
+    summary: "Compute the harmonic mean of real observations.",
+    description: "`harmmean(X)` reduces the first non-singleton dimension. A dimension, dimension vector, or `\"all\"` selects other axes; `\"omitnan\"` ignores missing observations.",
+    keywords: &["harmmean", "harmonic mean", "statistics", "summary"],
+    related: &["geomean", "mean"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior and classes", paragraphs: &[
+            "The harmonic mean is the count of observations divided by the sum of their reciprocals. A zero observation produces zero; an empty or all-omitted slice produces NaN.",
+            "Real single and double are documented data classes. Typed integer observations are a RunMat-mode extension and return double; floating inputs retain their class.",
+        ]},
+        BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
+            "Resident acceleration remains under qualification. The current host reduction materializes resident input and does not claim a resident harmonic-mean kernel.",
+        ]},
+    ],
+    examples: &[BuiltinExample {
+        id: "all-elements", title: "Harmonic mean across all values",
+        program: "m = harmmean([1 2 4], \"all\")",
+        display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(abs(m-12/7) < 1e-12);" },
+    }],
+    example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq {
+        question: "Can I reduce over several dimensions?",
+        answer: "Yes. Pass a dimension vector such as `harmmean(X,[1 3])`.",
+    }],
+    links: &[
+        BuiltinDocumentationLink { label: "geomean", target: BuiltinDocumentationLinkTarget::Builtin("geomean") },
+        BuiltinDocumentationLink { label: "mean", target: BuiltinDocumentationLinkTarget::Builtin("mean") },
+        BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/statistical_means/harmmean.rs") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[], verification: &[],
+        notes: &["Legacy description, example, FAQ, and related links retained; the example now asserts its numerical result. GPU execution remains an open qualification obligation."],
+    },
+    introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};

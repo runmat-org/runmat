@@ -1,0 +1,43 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("rms"), slug: Some("rms"),
+    summary: "Compute the root mean square magnitude of an array.",
+    description: "`rms(X)` computes the root mean square magnitude along the first non-singleton dimension. Use `\"all\"`, a dimension, or a dimension vector for another reduction, and a missing-value flag to include or omit NaNs.",
+    keywords: &["rms", "root mean square", "reduction", "signal"],
+    related: &["rmse", "mean"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Classes and shapes", paragraphs: &[
+            "Single and double, real or complex, are supported. Logical and character inputs enter double computation. Real and complex fixed-width integer inputs are a RunMat-mode extension and return double.",
+            "The result is real. Selected dimensions become singleton dimensions. Empty slices and slices with no observations after omission return NaN.",
+        ]},
+        BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
+            "The current host implementation uses scaled accumulation to avoid overflow when finite input squares exceed floating range. Resident execution remains under qualification and currently materializes its input.",
+        ]},
+    ],
+    examples: &[BuiltinExample {
+        id: "vector-rms", title: "Root mean square of a vector",
+        program: "r = rms([1 2 4], \"all\")",
+        display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions { source: "assert(abs(r-sqrt(7)) < 1e-12);" },
+    }],
+    example_exemption: None,
+    faqs: &[BuiltinDocumentationFaq {
+        question: "Is rms the same as norm divided by sqrt(n)?",
+        answer: "For a vector without omitted values, yes: `rms(x)` equals `norm(x)/sqrt(numel(x))`.",
+    }],
+    links: &[
+        BuiltinDocumentationLink { label: "rmse", target: BuiltinDocumentationLinkTarget::Builtin("rmse") },
+        BuiltinDocumentationLink { label: "mean", target: BuiltinDocumentationLinkTarget::Builtin("mean") },
+        BuiltinDocumentationLink { label: "Source", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/statistical_means/rms.rs") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[], verification: &[],
+        notes: &["Legacy example, FAQ, and related links retained; the example now asserts its numerical result. GPU parity is not yet qualified."],
+    },
+    introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
+};
