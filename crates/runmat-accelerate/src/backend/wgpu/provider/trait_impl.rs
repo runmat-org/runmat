@@ -99,6 +99,13 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn sum_geometry(&self) -> Option<runmat_accelerate_api::ProviderSumGeometry> {
+        Some(runmat_accelerate_api::ProviderSumGeometry {
+            max_buffer_bytes: self.adapter_limits.max_buffer_size,
+            max_binding_bytes: u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+        })
+    }
+
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
         self.export_context_exec(kind)
     }

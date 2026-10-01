@@ -12,6 +12,8 @@ mod feasibility;
 mod matmul;
 pub use matmul::{MatmulScaleWork, MatmulWorkload, ProviderMatmulGeometry};
 mod representation;
+mod sum;
+pub use sum::{ProviderSumGeometry, ProviderSumWorkload};
 mod preparation;
 pub use preparation::{
     ProviderElementwiseGeometry, ProviderPreparationProgram, ProviderPreparationRoute,

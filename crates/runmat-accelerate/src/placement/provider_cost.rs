@@ -28,6 +28,7 @@ pub(crate) fn wgpu_cost_estimate(
         super::provider_contract::floating_conversion::physical_work(provider, &query.operation);
     let select_work =
         super::provider_contract::resident_select::physical_work(provider, &query.operation);
+    let sum_work = super::provider_contract::sum::physical_work(provider, &query.operation);
     let fusion_work =
         super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
     let fusion_empty = fusion_work
@@ -167,6 +168,7 @@ pub(crate) fn wgpu_cost_estimate(
         || matrix_work.is_some()
         || cast_work.is_some()
         || select_work.is_some()
+        || sum_work.is_some()
         || query.operation.workload.scalar_work_units.is_some()
     {
         None
@@ -348,6 +350,20 @@ pub(crate) fn wgpu_cost_estimate(
         .map_or(scratch_bytes, |work| work.uniform_bytes);
     let upload_bytes =
         upload_bytes.saturating_add(select_work.as_ref().map_or(0, |work| work.uniform_bytes));
+    let execution_ns = sum_work.as_ref().map_or(execution_ns, |work| {
+        work.scalar_visits.saturating_mul(3).max(8_000)
+    });
+    let allocations = sum_work
+        .as_ref()
+        .map_or(allocations, |work| work.allocations);
+    let queue_submissions = sum_work
+        .as_ref()
+        .map_or(queue_submissions, |work| work.queue_submissions);
+    let scratch_bytes = sum_work
+        .as_ref()
+        .map_or(scratch_bytes, |work| work.uniform_bytes);
+    let upload_bytes =
+        upload_bytes.saturating_add(sum_work.as_ref().map_or(0, |work| work.uniform_bytes));
     // Fence clear is in the existing command buffer, not another submission.
     // Allocation and map/progress service reuse the existing component priors;
     // they are not GPU timestamps or separately measured service latency.

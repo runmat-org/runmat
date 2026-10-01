@@ -16,6 +16,7 @@ pub(crate) mod fusion_elementwise;
 mod integer_conversion;
 mod logical;
 pub(crate) mod resident_select;
+pub(crate) mod sum;
 pub(crate) mod matmul;
 pub(crate) mod logarithm_roots;
 pub(crate) mod power;
@@ -211,6 +212,7 @@ pub(crate) fn in_process_capability_snapshot(
     let mut snapshot = dense_capability_snapshot(provider, 10, IN_PROCESS_OPERATIONS);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
+    sum::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
@@ -230,6 +232,7 @@ pub(crate) fn wgpu_capability_snapshot(
     let mut snapshot = dense_capability_snapshot(provider, 11, WGPU_OPERATIONS);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
+    sum::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
     complex_components::append(&mut snapshot);
@@ -246,6 +249,9 @@ pub(crate) fn in_process_feasibility(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
+    if let Some(result) = sum::validate(provider, false, query) {
+        return result;
+    }
     if let Some(result) = resident_select::validate(provider, false, query) {
         return result;
     }
@@ -314,6 +320,9 @@ pub(crate) fn wgpu_feasibility(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
+    if let Some(result) = sum::validate(provider, true, query) {
+        return result;
+    }
     if let Some(result) = resident_select::validate(provider, true, query) {
         return result;
     }

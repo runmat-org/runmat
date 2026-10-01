@@ -30,6 +30,9 @@ pub struct ProviderWorkload {
     /// Exact admitted matrix/epilogue route. None is unknown, not a bare GEMM.
     #[serde(default)]
     pub matmul: Option<super::MatmulWorkload>,
+    /// Resolved ordinary-sum route; absent for every other reduction.
+    #[serde(default)]
+    pub sum: Option<super::ProviderSumWorkload>,
     pub elements: Option<u64>,
     pub flops: Option<u64>,
     /// Total operation-owned scalar work prior, not a FLOP count or a timing.

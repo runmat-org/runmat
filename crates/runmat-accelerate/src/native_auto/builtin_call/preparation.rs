@@ -4,6 +4,7 @@ pub(super) enum ArgumentOperation {
     Reduction,
     AdmittedSum {
         requested_outputs: Option<u32>,
+        route: runmat_accelerate_api::ProviderSumWorkload,
     },
     Binary(BinaryOp),
     ElementwiseNary {
@@ -143,10 +144,12 @@ impl ArgumentOperation {
             }
         };
         if let Self::AdmittedSum {
-            requested_outputs, ..
+            requested_outputs,
+            route,
         } = self
         {
             workload.requested_outputs = *requested_outputs;
+            workload.sum = Some(route.clone());
         }
         Some((evaluation, family, workload))
     }

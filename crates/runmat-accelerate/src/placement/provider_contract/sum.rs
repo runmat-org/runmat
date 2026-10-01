@@ -1,0 +1,282 @@
+//! Physical feasibility of the already-admitted ordinary sum route.
+//! Incomplete kernel inventories remain unknown for automatic profitability;
+//! direct resident hooks retain their own independently admitted behavior.
+use super::*;
+use runmat_accelerate_api::ProviderSumWorkload;
+use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
+
+#[cfg(test)]
+mod tests;
+
+pub(crate) struct SumWork {
+    pub estimate: ProviderResourceEstimate,
+    #[cfg(feature = "wgpu")]
+    pub scalar_visits: u64,
+    #[cfg(feature = "wgpu")]
+    pub queue_submissions: u32,
+    #[cfg(feature = "wgpu")]
+    pub allocations: u32,
+    #[cfg(feature = "wgpu")]
+    pub uniform_bytes: u64,
+}
+
+pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
+    snapshot.operations.push(ProviderCapabilityOperation {
+        identity: ProviderOperationIdentity::new(runmat_builtins::SUM_CATALOG_ENTRY.identity.name),
+        family: ProviderOperationFamily::Reduction,
+    });
+}
+
+pub(super) fn validate(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+) -> Option<ProviderFeasibility> {
+    analyze(provider, wgpu, query).map(|result| match result {
+        Ok(work) => ProviderFeasibility::supported(work.estimate),
+        Err(rejection) => rejection,
+    })
+}
+
+#[cfg(feature = "wgpu")]
+pub(crate) fn physical_work(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> Option<SumWork> {
+    analyze(provider, true, query)?.ok()
+}
+
+fn analyze(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+) -> Option<Result<SumWork, ProviderFeasibility>> {
+    if query.operation.0 != runmat_builtins::SUM_CATALOG_ENTRY.identity.name {
+        return None;
+    }
+    Some(work(provider, wgpu, query))
+}
+
+fn work(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+) -> Result<SumWork, ProviderFeasibility> {
+    let reject = ProviderFeasibility::rejected;
+    if query.family != ProviderOperationFamily::Reduction
+        || query.inputs.len() != 1
+        || !query.outputs.is_empty()
+    {
+        return Err(reject(
+            ProviderRejectionCode::InvalidShape,
+            "sum.operand_or_family",
+        ));
+    }
+    let Some(route) = query.workload.sum.as_ref() else {
+        return Err(reject(
+            ProviderRejectionCode::UnknownResourceEstimate,
+            "sum.missing_admitted_route",
+        ));
+    };
+    let input = &query.inputs[0];
+    let Some(elements) = input.checked_element_count() else {
+        return Err(reject(
+            ProviderRejectionCode::InvalidShape,
+            "sum.shape_overflow",
+        ));
+    };
+    if query
+        .workload
+        .elements
+        .is_some_and(|declared| declared != elements)
+        || !valid_controls(input, route)
+    {
+        return Err(reject(
+            ProviderRejectionCode::InvalidShape,
+            "sum.admitted_geometry_or_class",
+        ));
+    }
+    let mut output_shape = input.shape.clone();
+    for &axis in &route.axes {
+        let Some(extent) = output_shape.get_mut(
+            usize::try_from(axis)
+                .map_err(|_| reject(ProviderRejectionCode::InvalidShape, "sum.axis_overflow"))?,
+        ) else {
+            return Err(reject(
+                ProviderRejectionCode::InvalidShape,
+                "sum.axis_out_of_bounds",
+            ));
+        };
+        *extent = 1;
+    }
+    let Some(output_elements) = output_shape
+        .iter()
+        .try_fold(1_u64, |count, extent| count.checked_mul(*extent))
+    else {
+        return Err(reject(
+            ProviderRejectionCode::InvalidShape,
+            "sum.output_overflow",
+        ));
+    };
+    let Some(output_bytes) =
+        output_elements.checked_mul(route.publication_class.byte_width() as u64)
+    else {
+        return Err(reject(
+            ProviderRejectionCode::ResourceLimit,
+            "sum.output_bytes_overflow",
+        ));
+    };
+    if !wgpu {
+        // InProcess executes the typed hook synchronously. Shape proves the
+        // retained output size, not its temporary host allocations.
+        return Ok(SumWork {
+            estimate: ProviderResourceEstimate {
+                output_bytes: Some(output_bytes),
+                transient_bytes: None,
+                dispatches: Some(0),
+            },
+            #[cfg(feature = "wgpu")]
+            scalar_visits: elements,
+            #[cfg(feature = "wgpu")]
+            queue_submissions: 0,
+            #[cfg(feature = "wgpu")]
+            allocations: 0,
+            #[cfg(feature = "wgpu")]
+            uniform_bytes: 0,
+        });
+    }
+    if provider.precision() != ProviderPrecision::F64 {
+        return Err(reject(
+            ProviderRejectionCode::UnsupportedElementType,
+            "sum.double_accumulator_requires_f64",
+        ));
+    }
+    // The complete WGPU recipe below is the existing 2-D one-axis F64 kernel:
+    // one result buffer, one 16-byte parameter buffer and one submission.
+    // Global reductions have partial passes; N-D reductions chunk dispatches;
+    // omission, conversion, publication casts and strided views add live
+    // buffers. They must not borrow this simple kernel's estimate.
+    if route.missing != ReductionNaN::Include
+        || route.input_class != NumericClass::Double
+        || route.accumulation_class != NumericClass::Double
+        || route.publication_class != NumericClass::Double
+        || route.input_domain != NumericDomain::Real
+        || input.element_type != ProviderElementType::F64
+        || input.storage != ProviderStorage::DenseReal
+        || input.layout != ProviderLayout::ColumnMajorContiguous
+        || input.residency != ProviderResidency::Host
+        || input.shape.len() != 2
+        || route.axes.len() != 1
+        || output_elements == 0
+    {
+        return Err(reject(
+            ProviderRejectionCode::UnknownResourceEstimate,
+            "sum.physical_recipe_unresolved",
+        ));
+    }
+    if input
+        .shape
+        .iter()
+        .any(|&extent| extent > u64::from(u32::MAX))
+        || elements > u64::from(u32::MAX)
+        || output_elements > u64::from(u32::MAX)
+    {
+        return Err(reject(
+            ProviderRejectionCode::ResourceLimit,
+            "sum.dispatch_extent",
+        ));
+    }
+    let Some(geometry) = provider.sum_geometry() else {
+        return Err(reject(
+            ProviderRejectionCode::UnknownResourceEstimate,
+            "sum.kernel_geometry_unknown",
+        ));
+    };
+    let requested_output_bytes = output_bytes.max(8);
+    let Some(input_bytes) = input.checked_byte_len() else {
+        return Err(reject(
+            ProviderRejectionCode::InvalidShape,
+            "sum.input_bytes_overflow",
+        ));
+    };
+    if input_bytes > geometry.max_buffer_bytes
+        || input_bytes > geometry.max_binding_bytes
+        || requested_output_bytes > geometry.max_buffer_bytes
+        || requested_output_bytes > geometry.max_binding_bytes
+    {
+        return Err(reject(
+            ProviderRejectionCode::ResourceLimit,
+            "sum.buffer_or_binding_limit",
+        ));
+    }
+    // The admitted host input is uploaded with this exact logical shape.
+    // The provider pool may retain a larger buffer and there may be other
+    // live allocations, so peak simultaneously live bytes remain unknown.
+    Ok(SumWork {
+        estimate: ProviderResourceEstimate {
+            output_bytes: Some(requested_output_bytes),
+            transient_bytes: None,
+            dispatches: Some(1),
+        },
+        #[cfg(feature = "wgpu")]
+        scalar_visits: elements.saturating_add(output_elements),
+        #[cfg(feature = "wgpu")]
+        queue_submissions: 1,
+        #[cfg(feature = "wgpu")]
+        allocations: 2,
+        #[cfg(feature = "wgpu")]
+        uniform_bytes: 16,
+    })
+}
+
+fn valid_controls(input: &ProviderRepresentation, route: &ProviderSumWorkload) -> bool {
+    if route.axes.windows(2).any(|pair| pair[0] >= pair[1])
+        || route
+            .axes
+            .iter()
+            .any(|&axis| axis >= input.shape.len() as u64)
+        || route.publication_class != route.output.resolve_numeric_class(route.input_class)
+    {
+        return false;
+    }
+    let expected_accumulation =
+        if route.output == SumOutputClass::Native && route.input_class.integer_class().is_some() {
+            route.input_class
+        } else {
+            NumericClass::Double
+        };
+    if route.accumulation_class != expected_accumulation {
+        return false;
+    }
+    match (route.input_domain, input.storage, input.element_type) {
+        (NumericDomain::Real, ProviderStorage::DenseReal, ProviderElementType::Logical) => {
+            route.input_class == NumericClass::Double
+        }
+        (NumericDomain::Real, ProviderStorage::DenseReal, element) => {
+            element == element_type(route.input_class)
+        }
+        (NumericDomain::Complex, ProviderStorage::DenseComplexInterleaved, element) => {
+            matches!(
+                (route.input_class, element),
+                (NumericClass::Single, ProviderElementType::ComplexF32)
+                    | (NumericClass::Double, ProviderElementType::ComplexF64)
+            )
+        }
+        _ => false,
+    }
+}
+
+fn element_type(class: NumericClass) -> ProviderElementType {
+    match class {
+        NumericClass::Double => ProviderElementType::F64,
+        NumericClass::Single => ProviderElementType::F32,
+        NumericClass::Int8 => ProviderElementType::I8,
+        NumericClass::UInt8 => ProviderElementType::U8,
+        NumericClass::Int16 => ProviderElementType::I16,
+        NumericClass::UInt16 => ProviderElementType::U16,
+        NumericClass::Int32 => ProviderElementType::I32,
+        NumericClass::UInt32 => ProviderElementType::U32,
+        NumericClass::Int64 => ProviderElementType::I64,
+        NumericClass::UInt64 => ProviderElementType::U64,
+    }
+}

@@ -80,6 +80,7 @@ mod tests {
                 workload: ProviderWorkload {
                     preparation_route: None,
                     matmul: None,
+                    sum: None,
                     elements: Some(4),
                     flops: Some(8),
                     scalar_work_units: None,

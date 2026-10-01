@@ -281,12 +281,20 @@ pub(crate) fn plan_local(
                                         retained_bytes: estimate.output_bytes.expect(
                                             "automatic placement admitted known physical output bytes",
                                         ).into(),
-                                        scratch_bytes: provider_cost.scratch_bytes.map_or(
+                                        scratch_bytes: if cost_query.operation.workload.sum.is_some()
+                                            && estimate.transient_bytes.is_none()
+                                        {
                                             runmat_execution::ResourceByteBound::Unavailable(
-                                                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
-                                            ),
-                                            Into::into,
-                                        ),
+                                                runmat_execution::ResourceBoundUnavailable::NoPeakMemoryBound,
+                                            )
+                                        } else {
+                                            provider_cost.scratch_bytes.map_or(
+                                                runmat_execution::ResourceByteBound::Unavailable(
+                                                    runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+                                                ),
+                                                Into::into,
+                                            )
+                                        },
                                         queue_slots: 1,
                                     },
                                     descriptor: provider_candidate.clone(),

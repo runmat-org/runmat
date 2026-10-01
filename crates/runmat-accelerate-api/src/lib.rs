@@ -1958,6 +1958,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
         None
     }
 
+    /// Read-only limits for an audited ordinary dimensional-sum route.
+    fn sum_geometry(&self) -> Option<ProviderSumGeometry> {
+        None
+    }
+
     /// Read a single scalar at linear index from a device tensor, returning it as f64.
     fn read_scalar(&self, _h: &GpuTensorHandle, _linear_index: usize) -> anyhow::Result<f64> {
         Err(unsupported_provider_operation(

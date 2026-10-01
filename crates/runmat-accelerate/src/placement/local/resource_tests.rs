@@ -228,6 +228,73 @@ fn observation_scratch_participates_in_admission_before_any_execution() {
 }
 
 #[test]
+fn admitted_sum_does_not_turn_unknown_peak_bytes_into_a_sixteen_byte_bound() {
+    use runmat_accelerate_api::ProviderSumWorkload;
+    use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
+
+    let provider = Provider {
+        output: Some(8),
+        capacity: 24,
+    };
+    let capture = Rc::new(Capture::default());
+    let runtime = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(RuntimeServicePorts::default().with_placement(capture.clone()));
+    let _ = plan_local(
+        &provider,
+        LocalPlacementRequest {
+            operation: "sum",
+            semantic_identity: None,
+            family: ProviderOperationFamily::Reduction,
+            provider_kind: ExecutionCandidateKind::ProviderOperation,
+            inputs: &[],
+            outputs: vec![],
+            workload: ProviderWorkload {
+                sum: Some(ProviderSumWorkload {
+                    axes: vec![0],
+                    missing: ReductionNaN::Include,
+                    output: SumOutputClass::Double,
+                    input_class: NumericClass::Double,
+                    input_domain: NumericDomain::Real,
+                    accumulation_class: NumericClass::Double,
+                    publication_class: NumericClass::Double,
+                }),
+                ..Default::default()
+            },
+            preparation: CandidatePreparationState::Cold,
+            preparation_program: None,
+            cpu: ExecutionCandidateDescriptor {
+                identity: "cpu.sum".into(),
+                region: None,
+                kind: ExecutionCandidateKind::SharedRuntime,
+                execution_location: CandidateExecutionLocation::Host,
+                preparation: CandidatePreparationState::Ready,
+                cost: cost(1_000_000, 0),
+                output_residency: CandidateOutputResidency::Host,
+                guards: vec![],
+            },
+            provider_fallback: cost(1, 16),
+            required_upload_bytes: Some(0),
+            required_download_bytes: 0,
+            downstream_materialization: false,
+            compare_profitability: true,
+            runtime: Some(&runtime),
+        },
+        PlacementPolicy::default(),
+    )
+    .unwrap();
+    let demand = capture.requests.borrow()[0].graph.nodes[0].candidates[1].resources;
+    assert_eq!(demand.retained_bytes, 8.into());
+    assert_eq!(
+        demand.scratch_bytes,
+        runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoPeakMemoryBound
+        )
+    );
+}
+
+#[test]
 fn explicit_unobserved_selection_does_not_price_or_start_fences() {
     let provider = Provider {
         output: Some(8),

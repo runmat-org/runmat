@@ -151,7 +151,27 @@ pub(super) fn prepare_with(
                 // Do not upload a host array only to return it unchanged.
                 return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
             }
+            let axes = controls
+                .axes
+                .iter()
+                .copied()
+                .map(u64::try_from)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| {
+                    Box::new(preparation_error(
+                        anyhow::anyhow!("admitted sum axis exceeds workload representation").into(),
+                    ))
+                })?;
             ArgumentOperation::AdmittedSum {
+                route: runmat_accelerate_api::ProviderSumWorkload {
+                    axes,
+                    missing: controls.missing,
+                    output: controls.output,
+                    input_class: controls.input_class,
+                    input_domain: controls.input_domain,
+                    accumulation_class: controls.accumulation_class,
+                    publication_class: controls.publication_class,
+                },
                 requested_outputs: request
                     .admission()
                     .requested_outputs

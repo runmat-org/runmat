@@ -1307,6 +1307,7 @@ impl NativeAutoOffload {
             _ => ExecutionCandidateKind::ProviderOperation,
         };
         let provider_fallback = provider_prior(&evaluation);
+        let sum_preparation_unknown = workload.sum.is_some();
         match plan_local(
             self.provider,
             LocalPlacementRequest {
@@ -1317,7 +1318,13 @@ impl NativeAutoOffload {
                 inputs: values,
                 outputs: Vec::new(),
                 workload,
-                preparation: CandidatePreparationState::Warm,
+                preparation: if sum_preparation_unknown {
+                    // No exact cache snapshot for the ordinary sum's kernel
+                    // inventory yet; charging Warm would assert an unseen hit.
+                    CandidatePreparationState::Cold
+                } else {
+                    CandidatePreparationState::Warm
+                },
                 preparation_program: planning.preparation_program,
                 cpu,
                 provider_fallback,

@@ -1,5 +1,6 @@
 use super::ReductionNaN;
-use runmat_types::{LiteralValue, NumericClass};
+use runmat_types::LiteralValue;
+pub use runmat_types::SumOutputClass;
 
 /// Public option identities owned by the numerical `sum` reduction.
 /// Dimension payloads remain value-dependent and are admitted by the runtime.
@@ -8,25 +9,6 @@ pub enum SumControl {
     All,
     Missing(ReductionNaN),
     Output(SumOutputClass),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SumOutputClass {
-    Default,
-    Double,
-    Native,
-}
-
-impl SumOutputClass {
-    /// Resolve the numerical output class independently of placement or axes.
-    pub fn resolve_numeric_class(self, input: NumericClass) -> NumericClass {
-        match self {
-            Self::Native => input,
-            Self::Double => NumericClass::Double,
-            Self::Default if input == NumericClass::Single => NumericClass::Single,
-            Self::Default => NumericClass::Double,
-        }
-    }
 }
 
 impl SumControl {
