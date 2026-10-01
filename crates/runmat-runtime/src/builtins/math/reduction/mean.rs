@@ -1941,7 +1941,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::MEAN_DESCRIPTOR;
     use runmat_value::{IntValue, IntegerStorage};
 
     fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1963,46 +1962,6 @@ pub(crate) mod tests {
         };
         assert_eq!(result.shape, vec![3, 1]);
         assert_eq!(values(&result), vec![5.5, 6.5, 7.5]);
-    }
-
-    #[test]
-    fn mean_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = MEAN_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"M = mean(A)"));
-        assert!(labels.contains(&"M = mean(A, dim)"));
-        assert!(labels.contains(&"M = mean(A, \"all\")"));
-        assert!(labels.contains(&"M = mean(A, missingflag)"));
-        assert!(labels.contains(&"M = mean(A, outtype)"));
-        assert!(labels.contains(&"M = mean(A, dim, missingflag)"));
-        assert!(labels.contains(&"M = mean(A, missingflag, dim)"));
-        assert!(!labels.iter().any(|label| label.contains("like")));
-        assert!(labels.contains(&"M = mean(A, vecdim)"));
-        assert!(labels.contains(&"M = mean(___, Weights=W)"));
-        assert_eq!(MEAN_INPUTS_A_OUTTYPE[1].default, Some("\"default\""));
-        assert_eq!(
-            MEAN_INPUTS_A_MISSINGFLAG[1].default,
-            Some("\"includemissing\"")
-        );
-    }
-
-    #[test]
-    fn mean_descriptor_errors_have_stable_codes() {
-        assert!(MEAN_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == MEAN_ERROR_INVALID_ARGUMENT.code));
-        assert!(MEAN_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == MEAN_ERROR_INVALID_INPUT.code));
-        assert!(MEAN_DESCRIPTOR
-            .errors
-            .iter()
-            .any(|error| error.code == MEAN_ERROR_INTERNAL.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -5,6 +5,51 @@ use runmat_types::{
     StorageFact, ValueFact, ValueKindFact,
 };
 
+#[test]
+fn mean_descriptor_signatures_cover_core_forms() {
+    let labels: Vec<&str> = MEAN_DESCRIPTOR
+        .signatures
+        .iter()
+        .map(|signature| signature.label)
+        .collect();
+    assert_eq!(
+        labels,
+        vec![
+            "M = mean(A)",
+            "M = mean(A, dim)",
+            "M = mean(A, \"all\")",
+            "M = mean(A, missingflag)",
+            "M = mean(A, outtype)",
+            "M = mean(A, dim, missingflag)",
+            "M = mean(A, missingflag, dim)",
+            "M = mean(A, vecdim)",
+            "M = mean(___, Weights=W)",
+        ]
+    );
+    assert_eq!(
+        MEAN_DESCRIPTOR.signatures[4].inputs[1].default,
+        Some("\"default\"")
+    );
+    assert_eq!(
+        MEAN_DESCRIPTOR.signatures[3].inputs[1].default,
+        Some("\"includemissing\"")
+    );
+}
+
+#[test]
+fn mean_descriptor_errors_have_stable_codes() {
+    for expected in [
+        MEAN_ERROR_INVALID_ARGUMENT,
+        MEAN_ERROR_INVALID_INPUT,
+        MEAN_ERROR_INTERNAL,
+    ] {
+        assert!(MEAN_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == expected.code));
+    }
+}
+
 fn numeric(class: NumericClass) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
