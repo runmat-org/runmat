@@ -24,4 +24,11 @@ pub struct ProviderSumWorkload {
 pub struct ProviderSumGeometry {
     pub max_buffer_bytes: u64,
     pub max_binding_bytes: u64,
+    /// Maximum output elements per N-D shader dispatch, from the selected
+    /// workgroup geometry and the adapter's dispatch limit.
+    pub nd_chunk_elements: u64,
+    /// Input elements consumed by one global reduction dispatch.
+    pub global_chunk_elements: u64,
+    /// Input elements reduced to one partial result in the global kernel.
+    pub global_group_elements: u64,
 }

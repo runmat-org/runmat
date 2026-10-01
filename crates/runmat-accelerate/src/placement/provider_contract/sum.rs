@@ -7,6 +7,7 @@ use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
 
 #[cfg(test)]
 mod tests;
+mod global;
 
 pub(crate) struct SumWork {
     pub estimate: ProviderResourceEstimate,
@@ -118,8 +119,13 @@ fn work(
             "sum.output_overflow",
         ));
     };
-    let Some(output_bytes) =
-        output_elements.checked_mul(route.publication_class.byte_width() as u64)
+    let lanes = match route.input_domain {
+        NumericDomain::Real => 1_u64,
+        NumericDomain::Complex => 2_u64,
+    };
+    let Some(output_bytes) = output_elements
+        .checked_mul(route.publication_class.byte_width() as u64)
+        .and_then(|bytes| bytes.checked_mul(lanes))
     else {
         return Err(reject(
             ProviderRejectionCode::ResourceLimit,
@@ -151,8 +157,9 @@ fn work(
             "sum.double_accumulator_requires_f64",
         ));
     }
-    // The complete WGPU recipe below is the existing 2-D one-axis F64 kernel:
-    // one result buffer, one 16-byte parameter buffer and one submission.
+    // The modeled routes read contiguous host-origin real F64 storage.
+    // Casts, omission and resident views have distinct recipes and cannot
+    // borrow the dimensional/global kernel costs.
     // Global reductions have partial passes; N-D reductions chunk dispatches;
     // omission, conversion, publication casts and strided views add live
     // buffers. They must not borrow this simple kernel's estimate.
@@ -165,8 +172,6 @@ fn work(
         || input.storage != ProviderStorage::DenseReal
         || input.layout != ProviderLayout::ColumnMajorContiguous
         || input.residency != ProviderResidency::Host
-        || input.shape.len() != 2
-        || route.axes.len() != 1
         || output_elements == 0
     {
         return Err(reject(
@@ -192,6 +197,15 @@ fn work(
             "sum.kernel_geometry_unknown",
         ));
     };
+    if route.axes.len() == input.shape.len() && elements > 1 {
+        return global::work(input, elements, output_bytes, geometry);
+    }
+    if input.shape.len() < 2 || route.axes.len() != 1 {
+        return Err(reject(
+            ProviderRejectionCode::UnknownResourceEstimate,
+            "sum.physical_recipe_unresolved",
+        ));
+    }
     let requested_output_bytes = output_bytes.max(8);
     let Some(input_bytes) = input.checked_byte_len() else {
         return Err(reject(
@@ -209,23 +223,48 @@ fn work(
             "sum.buffer_or_binding_limit",
         ));
     }
+    let (dispatches, uniform_bytes) = if input.shape.len() == 2 {
+        (1_u32, 16_u64)
+    } else {
+        if geometry.nd_chunk_elements == 0 {
+            return Err(reject(
+                ProviderRejectionCode::UnknownResourceEstimate,
+                "sum.nd_chunk_geometry_unknown",
+            ));
+        }
+        let chunks = output_elements.div_ceil(geometry.nd_chunk_elements);
+        let dispatches = u32::try_from(chunks).map_err(|_| {
+            reject(
+                ProviderRejectionCode::ResourceLimit,
+                "sum.nd_dispatch_count",
+            )
+        })?;
+        let uniform_bytes = chunks
+            .checked_mul(16)
+            .ok_or_else(|| reject(ProviderRejectionCode::ResourceLimit, "sum.nd_uniform_bytes"))?;
+        (dispatches, uniform_bytes)
+    };
     // The admitted host input is uploaded with this exact logical shape.
     // The provider pool may retain a larger buffer and there may be other
     // live allocations, so peak simultaneously live bytes remain unknown.
+    #[cfg(not(feature = "wgpu"))]
+    let _ = uniform_bytes;
     Ok(SumWork {
         estimate: ProviderResourceEstimate {
             output_bytes: Some(requested_output_bytes),
             transient_bytes: None,
-            dispatches: Some(1),
+            dispatches: Some(dispatches),
         },
         #[cfg(feature = "wgpu")]
         scalar_visits: elements.saturating_add(output_elements),
         #[cfg(feature = "wgpu")]
-        queue_submissions: 1,
+        queue_submissions: dispatches,
         #[cfg(feature = "wgpu")]
-        allocations: 2,
+        allocations: dispatches
+            .checked_add(2)
+            .ok_or_else(|| reject(ProviderRejectionCode::ResourceLimit, "sum.allocation_count"))?,
         #[cfg(feature = "wgpu")]
-        uniform_bytes: 16,
+        uniform_bytes,
     })
 }
 

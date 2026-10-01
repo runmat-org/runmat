@@ -100,9 +100,31 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn sum_geometry(&self) -> Option<runmat_accelerate_api::ProviderSumGeometry> {
+        // These diagnostic modes add copies or disable the ordinary kernels.
+        // Until they are part of the route identity, no ordinary recipe may
+        // claim their physical cost or a successful device route.
+        if [
+            "RUNMAT_PROVIDER_REDUCTION_SNAPSHOT",
+            "RUNMAT_FORCE_REDUCE_SNAPSHOT",
+            "RUNMAT_DISABLE_REDUCE_GLOBAL",
+            "RUNMAT_DISABLE_REDUCE_DIM",
+        ]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some())
+        {
+            return None;
+        }
         Some(runmat_accelerate_api::ProviderSumGeometry {
             max_buffer_bytes: self.adapter_limits.max_buffer_size,
             max_binding_bytes: u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+            nd_chunk_elements: crate::backend::wgpu::config::elementwise_chunk_capacity(
+                crate::backend::wgpu::config::effective_workgroup_size(),
+            )?,
+            global_chunk_elements: u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
+                .checked_mul(2 * u64::from(crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE))?,
+            global_group_elements: 2 * u64::from(
+                crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
+            ),
         })
     }
 

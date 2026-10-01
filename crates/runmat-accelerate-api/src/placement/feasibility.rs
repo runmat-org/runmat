@@ -31,7 +31,7 @@ pub struct ProviderWorkload {
     #[serde(default)]
     pub matmul: Option<super::MatmulWorkload>,
     /// Resolved ordinary-sum route; absent for every other reduction.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sum: Option<super::ProviderSumWorkload>,
     pub elements: Option<u64>,
     pub flops: Option<u64>,

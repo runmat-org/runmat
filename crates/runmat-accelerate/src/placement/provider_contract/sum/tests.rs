@@ -28,6 +28,9 @@ impl AccelProvider for GeometryProvider {
         Some(ProviderSumGeometry {
             max_buffer_bytes: 1 << 20,
             max_binding_bytes: 1 << 20,
+            nd_chunk_elements: 128,
+            global_chunk_elements: 1024,
+            global_group_elements: 1024,
         })
     }
 }
@@ -114,11 +117,6 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
         rejection_code(validate(&provider, true, &changed).unwrap()),
         ProviderRejectionCode::UnknownResourceEstimate
     );
-    changed = query(ProviderElementType::F64, &[2, 3, 4], &[2]);
-    assert_eq!(
-        rejection_code(validate(&provider, true, &changed).unwrap()),
-        ProviderRejectionCode::UnknownResourceEstimate
-    );
     changed = base;
     changed.inputs[0].layout = ProviderLayout::Strided;
     assert_eq!(
@@ -131,6 +129,68 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
         rejection_code(validate(&provider, true, &changed).unwrap()),
         ProviderRejectionCode::UnknownResourceEstimate
     );
+}
+
+#[test]
+fn nd_chunks_follow_selected_provider_geometry_and_reduced_axis() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F64,
+    };
+    let first = query(ProviderElementType::F64, &[3, 5, 40], &[0]);
+    let last = query(ProviderElementType::F64, &[3, 5, 40], &[2]);
+    let first_work = work(&provider, true, &first).unwrap();
+    let last_work = work(&provider, true, &last).unwrap();
+    assert_eq!(first_work.estimate.output_bytes, Some(1600));
+    assert_eq!(last_work.estimate.output_bytes, Some(120));
+    assert_eq!(first_work.estimate.dispatches, Some(2));
+    assert_eq!(last_work.estimate.dispatches, Some(1));
+    assert_eq!(first_work.estimate.transient_bytes, None);
+    assert_eq!(last_work.estimate.transient_bytes, None);
+}
+
+#[test]
+fn complex_host_output_accounts_for_both_physical_lanes() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F64,
+    };
+    for (class, element, expected_bytes) in [
+        (NumericClass::Double, ProviderElementType::ComplexF64, 48),
+        (NumericClass::Single, ProviderElementType::ComplexF32, 24),
+    ] {
+        let mut request = query(ProviderElementType::F64, &[2, 3], &[0]);
+        request.inputs[0].element_type = element;
+        request.inputs[0].storage = ProviderStorage::DenseComplexInterleaved;
+        let route = request.workload.sum.as_mut().unwrap();
+        route.input_class = class;
+        route.input_domain = NumericDomain::Complex;
+        route.output = SumOutputClass::Native;
+        route.publication_class = class;
+        assert_eq!(
+            work(&provider, false, &request)
+                .unwrap()
+                .estimate
+                .output_bytes,
+            Some(expected_bytes)
+        );
+    }
+}
+
+#[test]
+fn global_sum_counts_partial_passes_and_not_one_dimensional_dispatch() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F64,
+    };
+    let request = query(ProviderElementType::F64, &[2, 1024], &[0, 1]);
+    let work = work(&provider, true, &request).unwrap();
+    assert_eq!(work.estimate.output_bytes, Some(8));
+    assert_eq!(work.estimate.dispatches, Some(3));
+    assert_eq!(work.estimate.transient_bytes, None);
+    #[cfg(feature = "wgpu")]
+    {
+        assert_eq!(work.queue_submissions, 3);
+        assert_eq!(work.allocations, 6);
+        assert_eq!(work.uniform_bytes, 48);
+    }
 }
 
 #[test]
@@ -182,6 +242,7 @@ fn legacy_workload_roundtrips_without_inventing_sum_controls() {
     let old: ProviderWorkload =
         serde_json::from_str(r#"{"elements":4,"flops":null,"batch":null}"#).unwrap();
     assert!(old.sum.is_none());
+    assert!(!serde_json::to_string(&old).unwrap().contains("\"sum\""));
     let route = query(ProviderElementType::F64, &[2, 3], &[0]);
     let serialized = serde_json::to_string(&route).unwrap();
     assert_eq!(
