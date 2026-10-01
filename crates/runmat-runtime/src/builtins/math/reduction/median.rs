@@ -7,12 +7,8 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 #[path = "median/resident.rs"]
 mod resident;
 use runmat_builtins::{
-    infer_median_type, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, MedianControl, Type,
+    BuiltinErrorDescriptor, MedianControl, MEDIAN_ERROR_INTERNAL, MEDIAN_ERROR_INVALID_ARGUMENT,
+    MEDIAN_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -23,285 +19,6 @@ use runmat_value::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "median";
-
-use runmat_builtins::ResolveContext;
-
-fn median_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    infer_median_type(args, ctx)
-}
-
-const MEDIAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Median reduction result.",
-}];
-
-const MEDIAN_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array.",
-}];
-
-const MEDIAN_INPUTS_A_AXES: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "axes",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Dimension selector, vector of dimensions, or \"all\".",
-    },
-];
-
-const MEDIAN_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "missingflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"includemissing\""),
-        description: "Missing-value handling mode.",
-    },
-];
-
-const MEDIAN_INPUTS_A_AXES_NANFLAG: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "axes",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Dimension selector, vector of dimensions, or \"all\".",
-    },
-    BuiltinParamDescriptor {
-        name: "missingflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"includemissing\""),
-        description: "Missing-value handling mode.",
-    },
-];
-
-const MEDIAN_INPUTS_A_NANFLAG_AXES: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "missingflag",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"includemissing\""),
-        description: "Missing-value handling mode.",
-    },
-    BuiltinParamDescriptor {
-        name: "axes",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Dimension selector, vector of dimensions, or \"all\".",
-    },
-];
-
-const MEDIAN_INPUTS_A_WEIGHTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "Weights",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"Weights\""),
-        description: "Weighting-scheme name.",
-    },
-    BuiltinParamDescriptor {
-        name: "W",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Nonnegative single- or double-precision weighting scheme.",
-    },
-];
-
-const MEDIAN_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
-    BuiltinSignatureDescriptor {
-        label: "M = median(A)",
-        inputs: &MEDIAN_INPUTS_A,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(A, dim)",
-        inputs: &MEDIAN_INPUTS_A_AXES,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(A, vecdim)",
-        inputs: &MEDIAN_INPUTS_A_AXES,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(A, \"all\")",
-        inputs: &MEDIAN_INPUTS_A_AXES,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(A, [])",
-        inputs: &MEDIAN_INPUTS_A_AXES,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(A, missingflag)",
-        inputs: &MEDIAN_INPUTS_A_NANFLAG,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(A, axes, missingflag)",
-        inputs: &MEDIAN_INPUTS_A_AXES_NANFLAG,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(A, missingflag, axes)",
-        inputs: &MEDIAN_INPUTS_A_NANFLAG_AXES,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(A, missingflag, \"all\")",
-        inputs: &MEDIAN_INPUTS_A_NANFLAG_AXES,
-        outputs: &MEDIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "M = median(___, Weights=W)",
-        inputs: &MEDIAN_INPUTS_A_WEIGHTS,
-        outputs: &MEDIAN_OUTPUT,
-    },
-];
-
-const MEDIAN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEDIAN.INVALID_ARGUMENT",
-    identifier: Some("RunMat:median:InvalidArgument"),
-    when: "Dimension selectors, missing flags, or argument ordering are invalid.",
-    message: "median: invalid argument",
-};
-
-const MEDIAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEDIAN.INVALID_INPUT",
-    identifier: Some("RunMat:median:InvalidInput"),
-    when: "Input values cannot be converted to supported median reduction domains.",
-    message: "median: invalid input",
-};
-
-const MEDIAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEDIAN.INTERNAL",
-    identifier: Some("RunMat:median:Internal"),
-    when: "Median reduction fails due to tensor allocation or device fallback internals.",
-    message: "median: internal reduction failure",
-};
-
-const MEDIAN_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    MEDIAN_ERROR_INVALID_ARGUMENT,
-    MEDIAN_ERROR_INVALID_INPUT,
-    MEDIAN_ERROR_INTERNAL,
-];
-
-pub const MEDIAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MEDIAN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MEDIAN_ERRORS,
-};
-
-const INTEGER_DATA_AND_DIM_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Numeric median data explicitly accepts all eight integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim_or_vecdim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Positive integer dimension selectors are decoded exactly from typed integer or integer-valued floating storage.",
-    },
-];
-
-const WEIGHTED_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Weighted median retains the documented all-class integer data contract.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Weighted median permits one operating dimension but not vecdim or all.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "W",
-        classes: &[],
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Weights are documented and enforced as nonnegative single or double arrays; integer and logical weights are rejected.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = median(A, dim_or_vecdim, missingflag)",
-        inputs: &INTEGER_DATA_AND_DIM_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer median preserves the input class; even-cardinality midpoint conversion rounds nearest with ties away from zero, and resident integer order statistics gather then re-upload exactly.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "M = median(A, dim, missingflag, Weights=W)",
-        inputs: &WEIGHTED_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Weighted integer median selects an input-class value at cumulative 50 percent using floating weights; resident input and weights may gather, and the result is re-uploaded with its exact integer class.",
-    },
-];
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
@@ -397,13 +114,7 @@ struct MedianWeights {
 
 #[runtime_builtin(
     name = "median",
-    category = "math/reduction",
-    summary = "Median of scalars, vectors, matrices, or N-D tensors.",
-    keywords = "median,reduction,omitnan,includenan,statistics,gpu",
-    accel = "reduction",
-    type_resolver(median_type),
-    descriptor(crate::builtins::math::reduction::median::MEDIAN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::math::reduction::median::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 pub(crate) async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -783,11 +494,10 @@ async fn parse_axes(
                 "median: dimension string must not be empty",
             ));
         }
-        let lowered = trimmed.to_ascii_lowercase();
-        return match lowered.as_str() {
-            "all" => Ok(Some(MedianAxes::All)),
-            "omitnan" | "includenan" | "omitmissing" | "includemissing" => Ok(None),
-            _ => Err(median_invalid_argument(format!(
+        return match MedianControl::from_public_option(text) {
+            Some(MedianControl::All) => Ok(Some(MedianAxes::All)),
+            Some(MedianControl::Missing(_)) => Ok(None),
+            Some(MedianControl::Weights) | None => Err(median_invalid_argument(format!(
                 "median: unrecognised argument '{trimmed}'"
             ))),
         };
@@ -1443,55 +1153,6 @@ pub(crate) mod tests {
             }
         }
         assert!(logical_array_from_reduction(Tensor::new(vec![1.0], vec![1, 1]).unwrap()).is_err());
-    }
-
-    #[test]
-    fn median_type_reduces_first_dim() {
-        let out = median_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(5)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(5)])
-            }
-        );
-    }
-
-    #[test]
-    fn median_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = MEDIAN_DESCRIPTOR
-            .signatures
-            .iter()
-            .map(|sig| sig.label)
-            .collect();
-        assert!(labels.contains(&"M = median(A)"));
-        assert!(labels.contains(&"M = median(A, dim)"));
-        assert!(labels.contains(&"M = median(A, vecdim)"));
-        assert!(labels.contains(&"M = median(A, \"all\")"));
-        assert!(labels.contains(&"M = median(A, missingflag)"));
-        assert!(labels.contains(&"M = median(A, axes, missingflag)"));
-        assert!(labels.contains(&"M = median(A, missingflag, axes)"));
-        assert!(labels.contains(&"M = median(___, Weights=W)"));
-        assert_eq!(
-            MEDIAN_INPUTS_A_NANFLAG[1].default,
-            Some("\"includemissing\"")
-        );
-    }
-
-    #[test]
-    fn median_descriptor_errors_have_stable_codes() {
-        let codes: Vec<&str> = MEDIAN_DESCRIPTOR
-            .errors
-            .iter()
-            .map(|err| err.code)
-            .collect();
-        assert!(codes.contains(&"RM.MEDIAN.INVALID_ARGUMENT"));
-        assert!(codes.contains(&"RM.MEDIAN.INVALID_INPUT"));
-        assert!(codes.contains(&"RM.MEDIAN.INTERNAL"));
     }
 
     fn median_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

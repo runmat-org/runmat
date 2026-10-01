@@ -12,10 +12,11 @@ pub enum MedianControl {
 
 impl MedianControl {
     pub fn from_public_option(option: &str) -> Option<Self> {
-        if let Some(policy) = ReductionNaN::from_public_option(option) {
+        let axis_option = option.trim();
+        if let Some(policy) = ReductionNaN::from_public_option(axis_option) {
             return Some(Self::Missing(policy));
         }
-        if option.eq_ignore_ascii_case("all") {
+        if axis_option.eq_ignore_ascii_case("all") {
             return Some(Self::All);
         }
         if option.eq_ignore_ascii_case("weights") {
@@ -45,7 +46,15 @@ mod tests {
             MedianControl::from_public_option("ALL"),
             Some(MedianControl::All)
         );
-        assert_eq!(MedianControl::from_public_option(" all "), None);
+        assert_eq!(
+            MedianControl::from_public_option(" all "),
+            Some(MedianControl::All)
+        );
+        assert_eq!(
+            MedianControl::from_public_option(" omitnan "),
+            Some(MedianControl::Missing(ReductionNaN::Omit))
+        );
+        assert_eq!(MedianControl::from_public_option(" Weights "), None);
         assert_eq!(
             MedianControl::from_public_option("Weights"),
             Some(MedianControl::Weights)

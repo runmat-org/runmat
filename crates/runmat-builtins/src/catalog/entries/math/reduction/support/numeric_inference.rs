@@ -24,12 +24,9 @@ pub(crate) enum LiteralReductionOutput {
     Native,
 }
 
-/// The legacy scalar projection differs between remaining owners. `median`
-/// preserves integer and logical scalars, while `min` preserves integers.
-/// `std` and `var` reject integer data rather than silently promoting it.
+/// Scalar integer preservation differs between extrema and dispersion owners.
 #[derive(Clone, Copy)]
 pub(super) enum ScalarResultClass {
-    Preserved,
     PreserveInteger,
     FloatingOnly,
 }
@@ -78,30 +75,17 @@ pub(super) fn infer_numeric_reduction_type(
                     .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
             }),
         },
-        Type::Logical { shape } if !matches!(scalar_class, ScalarResultClass::Preserved) => {
-            Type::Tensor {
-                shape: shape.as_ref().and_then(|dims| {
-                    controls
-                        .as_ref()
-                        .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
-                }),
-            }
-        }
-        // A logical median can collapse to Bool or retain LogicalArray; the
-        // legacy Type cannot safely express both without an admitted extent.
-        Type::Logical { .. } => Type::Unknown,
+        Type::Logical { shape } => Type::Tensor {
+            shape: shape.as_ref().and_then(|dims| {
+                controls
+                    .as_ref()
+                    .and_then(|controls| inferred_shape(dims, controls.axes.clone()))
+            }),
+        },
         Type::Int
-            if matches!(
-                scalar_class,
-                ScalarResultClass::Preserved | ScalarResultClass::PreserveInteger
-            ) && controls.is_some() =>
+            if matches!(scalar_class, ScalarResultClass::PreserveInteger) && controls.is_some() =>
         {
             Type::Int
-        }
-        Type::Bool
-            if matches!(scalar_class, ScalarResultClass::Preserved) && controls.is_some() =>
-        {
-            Type::Bool
         }
         Type::Int if matches!(scalar_class, ScalarResultClass::FloatingOnly) => Type::Unknown,
         Type::Int

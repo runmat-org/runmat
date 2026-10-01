@@ -15,7 +15,7 @@ pub use dispersion_inference::{infer_std_type, infer_var_type};
 pub use dispersion_options::{DispersionControl, DispersionNormalization};
 pub(super) use mean_inference::{admitted_mean_controls, inferred_mean_shape};
 pub use mean_options::{MeanControl, MeanOutputClass};
-pub use median_inference::infer_median_type;
+pub(super) use median_inference::{admitted_median_controls, inferred_median_shape};
 pub use median_options::MedianControl;
 pub use min_inference::infer_min_type;
 pub use min_options::{MinComparisonMethod, MinControl};
