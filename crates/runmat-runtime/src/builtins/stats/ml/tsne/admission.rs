@@ -4,7 +4,7 @@ use super::{
     invalid, Algorithm, DistanceMetric, TsneCacheSizeKeyword, TsneDisplay, TsneOption,
     TsneStatsetField,
 };
-use crate::builtins::common::{random_args::keyword_of, tensor};
+use crate::builtins::common::random_args::keyword_of;
 use crate::BuiltinResult;
 use runmat_value::Value;
 

@@ -218,7 +218,7 @@ pub(super) fn finish_cdf(
     .map_err(|err| internal_for(CDF_NAME, format!("cdf: {err}")))?;
     if let Some(source) = residency.source() {
         let protected = residency.protected();
-        let provider = runmat_accelerate_api::provider_for_handle(&source).ok_or_else(|| {
+        let provider = runmat_accelerate_api::provider_for_handle(source).ok_or_else(|| {
             invalid_for(
                 CDF_NAME,
                 "cdf: no acceleration provider registered for GPU output",
