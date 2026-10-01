@@ -13,7 +13,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Normalize data by centering and scaling along a dimension.",
     description: "`normalize(A)` returns z-scores along the first nonsingleton dimension. Select another method, operating dimension, or explicit center and scale with additional arguments.",
     keywords: &["normalize", "zscore", "scale", "range", "norm", "center", "statistics"],
-    related: &["zscore", "std", "mean"],
+    related: &["std", "mean"],
     sections: &[
         BuiltinDocumentationSection { heading: "Methods and outputs", paragraphs: &[
             "Default z-score normalization subtracts the mean and divides by the sample standard deviation, omitting NaN observations when calculating the parameters and retaining their positions in `N`. The optional positive `dim` selects the operating dimension.",
@@ -53,7 +53,6 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Can normalize operate on gpuArray input?", answer: "The current implementation gathers for host calculation and restores supported outputs through the input's provider; it does not execute a resident normalization kernel." },
     ],
     links: &[
-        BuiltinDocumentationLink { label: "zscore", target: BuiltinDocumentationLinkTarget::Builtin("zscore") },
         BuiltinDocumentationLink { label: "std", target: BuiltinDocumentationLinkTarget::Builtin("std") },
         BuiltinDocumentationLink { label: "mean", target: BuiltinDocumentationLinkTarget::Builtin("mean") },
         SOURCE,
