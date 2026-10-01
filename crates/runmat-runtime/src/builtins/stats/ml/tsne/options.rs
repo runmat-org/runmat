@@ -128,7 +128,7 @@ fn apply_options_struct(options: &mut Options, value: &Value) -> BuiltinResult<(
     Ok(())
 }
 
-fn is_empty_option_value(value: &Value) -> bool {
+pub(super) fn is_empty_option_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),

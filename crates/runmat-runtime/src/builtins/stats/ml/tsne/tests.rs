@@ -309,3 +309,4 @@ async fn tsne_rejects_unsupported_fast_distance_names() {
     .unwrap_err();
     assert!(err.message.contains("unsupported Distance"));
 }
+use super::options::is_empty_option_value;

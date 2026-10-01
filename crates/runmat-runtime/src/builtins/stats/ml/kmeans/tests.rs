@@ -1,6 +1,7 @@
 use futures::executor::block_on;
-use runmat_value::{IntegerStorage, Tensor};
+use runmat_value::{IntegerStorage, StructValue, Tensor};
 
+use super::options::is_empty_option_value;
 use super::*;
 use runmat_builtins::{KmeansDistance, KmeansEmptyAction};
 fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
