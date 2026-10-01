@@ -3,7 +3,6 @@ mod lsline;
 mod refline;
 mod facts;
 
-use crate::BuiltinCatalogEntry;
 use crate::BuiltinErrorDescriptor;
 
 pub use lsline::*;
@@ -39,6 +38,3 @@ impl ReferenceLineOwner {
         }
     }
 }
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] =
-    &[&LSLINE_CATALOG_ENTRY, &REFLINE_CATALOG_ENTRY];
