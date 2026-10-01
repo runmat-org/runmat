@@ -34,9 +34,7 @@ fn diagnose_numeric_scalar(
     index: usize,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) -> Option<usize> {
-    let Some(fact) = request.arguments.get(index) else {
-        return None;
-    };
+    let fact = request.arguments.get(index)?;
     if !matches!(
         fact.kind,
         ValueKindFact::Unknown

@@ -134,7 +134,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let a = request.arguments.first().map(|value| {
         let domain = numerical_domain(value, 0, &mut errors);
         let dimensions = matrix_dimensions(&value.shape, 0, &mut errors);
-        if dimensions.iter().any(|extent| *extent == Some(0)) {
+        if dimensions.contains(&Some(0)) {
             errors.push(argument_error(
                 "RM-CATALOG-LSCOV-EMPTY",
                 "A must not be empty",
@@ -207,9 +207,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 let count = weight.shape.element_count();
                 let vector = dimensions[0] == Some(1) || dimensions[1] == Some(1);
                 let scalar_or_empty = count == Some(1) || count == Some(0);
-                if !scalar_or_empty
-                    && !((vector && count == a_rows) || dimensions == [a_rows, a_rows])
-                {
+                let valid_weight_shape = scalar_or_empty
+                    || dimensions == [a_rows, a_rows]
+                    || (vector && count == a_rows);
+                if !valid_weight_shape {
                     errors.push(argument_error(
                         "RM-CATALOG-LSCOV-WEIGHT-SHAPE",
                         "V must be a weight vector or matching square covariance",
