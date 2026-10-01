@@ -1,4 +1,5 @@
 use super::*;
+use crate::PolyfitStatField;
 use runmat_types::{
     CallRequest, DynamicReason, LiteralContext, NumericClass, NumericDomain, NumericFact,
     OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, StructFact,
