@@ -1,12 +1,13 @@
 use super::detection::{any_missing, logical_array_mask_for_rows};
-use super::numeric::{
-    first_nonsingleton_dim, is_missing_text, numeric_scalar, scalar_text, scalar_usize,
-    validate_matrix_dim,
-};
+use super::numeric::{is_missing_text, numeric_scalar, scalar_text, scalar_usize};
 use super::*;
+use runmat_builtins::FillMissingMethodKind;
 
 pub(super) mod numeric;
+mod lines;
+mod runs;
 mod text;
+use lines::FillLines;
 
 use numeric::{
     fill_linear_numeric, fill_nearest_numeric, fill_neighbor_numeric, fill_summary_numeric,
@@ -41,8 +42,11 @@ impl FillOptions {
             .ok_or_else(|| invalid_argument("fillmissing: method must be a string"))?
             .to_ascii_lowercase();
         idx += 1;
-        let method = match method_text.as_str() {
-            "constant" => {
+        let method_kind = FillMissingMethodKind::parse(&method_text).ok_or_else(|| {
+            invalid_argument(format!("fillmissing: unsupported method '{method_text}'"))
+        })?;
+        let method = match method_kind {
+            FillMissingMethodKind::Constant => {
                 let fill = args
                     .get(idx)
                     .ok_or_else(|| {
@@ -52,17 +56,12 @@ impl FillOptions {
                 idx += 1;
                 FillMethod::Constant(fill)
             }
-            "previous" => FillMethod::Previous,
-            "next" => FillMethod::Next,
-            "nearest" => FillMethod::Nearest,
-            "linear" => FillMethod::Linear,
-            "mean" => FillMethod::Mean,
-            "median" => FillMethod::Median,
-            other => {
-                return Err(invalid_argument(format!(
-                    "fillmissing: unsupported method '{other}'"
-                )))
-            }
+            FillMissingMethodKind::Previous => FillMethod::Previous,
+            FillMissingMethodKind::Next => FillMethod::Next,
+            FillMissingMethodKind::Nearest => FillMethod::Nearest,
+            FillMissingMethodKind::Linear => FillMethod::Linear,
+            FillMissingMethodKind::Mean => FillMethod::Mean,
+            FillMissingMethodKind::Median => FillMethod::Median,
         };
         let mut dim = None;
         while idx < args.len() {
@@ -89,9 +88,6 @@ impl FillOptions {
                 args[idx]
             )));
         }
-        if dim.is_some_and(|dim| dim != 1 && dim != 2) {
-            return Err(invalid_argument("fillmissing: dimension must be 1 or 2"));
-        }
         Ok(Self { method, dim })
     }
 }
@@ -102,6 +98,13 @@ pub(super) fn fill_missing_value(
 ) -> BuiltinResult<(Value, LogicalArray)> {
     match value {
         Value::Tensor(tensor) => fill_missing_tensor(tensor, options),
+        Value::LogicalArray(array) => {
+            lines::FillLines::new(&array.shape, options.dim)?;
+            let mask =
+                LogicalArray::from_host_buffer(vec![0; array.len()].into(), array.shape.clone())
+                    .map_err(internal_error)?;
+            Ok((Value::LogicalArray(array), mask))
+        }
         Value::StringArray(array) => fill_missing_string_array(array, options),
         Value::Object(object) if is_tabular_object(&object) => fill_missing_table(object, options),
         Value::Cell(cell) => fill_missing_cell(cell, options),
@@ -167,18 +170,12 @@ pub(super) fn fill_missing_tensor(
     tensor: Tensor,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
-    let rows = tensor.rows();
-    let cols = tensor.cols();
     if tensor.integer_storage().is_some() {
-        return Ok((
-            Value::Tensor(tensor),
-            LogicalArray::new(vec![0; rows * cols], vec![rows, cols]).map_err(internal_error)?,
-        ));
+        let mask = LogicalArray::new(vec![0; tensor.len()], tensor.shape.clone())
+            .map_err(internal_error)?;
+        return Ok((Value::Tensor(tensor), mask));
     }
-    let dim = options
-        .dim
-        .unwrap_or_else(|| first_nonsingleton_dim(rows, cols));
-    validate_matrix_dim(dim, "fillmissing")?;
+    let lines = FillLines::new(&tensor.shape, options.dim)?;
     let dtype = tensor.numeric_dtype();
     let shape = tensor.shape.clone();
     let mut data = tensor_utils::tensor_into_values_f64(tensor);
@@ -192,14 +189,12 @@ pub(super) fn fill_missing_tensor(
                 }
             }
         }
-        FillMethod::Mean => fill_summary_numeric(&mut data, rows, cols, dim, Summary::Mean),
-        FillMethod::Median => fill_summary_numeric(&mut data, rows, cols, dim, Summary::Median),
-        FillMethod::Previous => {
-            fill_neighbor_numeric(&mut data, rows, cols, dim, Neighbor::Previous)
-        }
-        FillMethod::Next => fill_neighbor_numeric(&mut data, rows, cols, dim, Neighbor::Next),
-        FillMethod::Nearest => fill_nearest_numeric(&mut data, rows, cols, dim),
-        FillMethod::Linear => fill_linear_numeric(&mut data, rows, cols, dim),
+        FillMethod::Mean => fill_summary_numeric(&mut data, &lines, Summary::Mean),
+        FillMethod::Median => fill_summary_numeric(&mut data, &lines, Summary::Median),
+        FillMethod::Previous => fill_neighbor_numeric(&mut data, &lines, Neighbor::Previous),
+        FillMethod::Next => fill_neighbor_numeric(&mut data, &lines, Neighbor::Next),
+        FillMethod::Nearest => fill_nearest_numeric(&mut data, &lines),
+        FillMethod::Linear => fill_linear_numeric(&mut data, &lines),
     }
     for (flag, value) in mask.iter_mut().zip(&data) {
         if value.is_nan() {
@@ -207,8 +202,8 @@ pub(super) fn fill_missing_tensor(
         }
     }
     Ok((
-        Value::Tensor(Tensor::new_with_dtype(data, shape, dtype).map_err(internal_error)?),
-        LogicalArray::new(mask, vec![rows, cols]).map_err(internal_error)?,
+        Value::Tensor(Tensor::new_with_dtype(data, shape.clone(), dtype).map_err(internal_error)?),
+        LogicalArray::new(mask, shape).map_err(internal_error)?,
     ))
 }
 
@@ -216,12 +211,7 @@ pub(super) fn fill_missing_string_array(
     array: StringArray,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
-    let rows = array.rows();
-    let cols = array.cols();
-    let dim = options
-        .dim
-        .unwrap_or_else(|| first_nonsingleton_dim(rows, cols));
-    validate_matrix_dim(dim, "fillmissing")?;
+    let lines = FillLines::new(&array.shape, options.dim)?;
     let mut data = array.data.clone();
     let mut mask: Vec<u8> = data
         .iter()
@@ -237,9 +227,9 @@ pub(super) fn fill_missing_string_array(
                 }
             }
         }
-        FillMethod::Previous => fill_neighbor_text(&mut data, rows, cols, dim, Neighbor::Previous),
-        FillMethod::Next => fill_neighbor_text(&mut data, rows, cols, dim, Neighbor::Next),
-        FillMethod::Nearest => fill_nearest_text(&mut data, rows, cols, dim),
+        FillMethod::Previous => fill_neighbor_text(&mut data, &lines, Neighbor::Previous),
+        FillMethod::Next => fill_neighbor_text(&mut data, &lines, Neighbor::Next),
+        FillMethod::Nearest => fill_nearest_text(&mut data, &lines),
         _ => {
             return Err(unsupported_type(
                 "fillmissing: string arrays support constant, previous, next, and nearest",
@@ -252,8 +242,8 @@ pub(super) fn fill_missing_string_array(
         }
     }
     Ok((
-        Value::StringArray(StringArray::new(data, array.shape).map_err(internal_error)?),
-        LogicalArray::new(mask, vec![rows, cols]).map_err(internal_error)?,
+        Value::StringArray(StringArray::new(data, array.shape.clone()).map_err(internal_error)?),
+        LogicalArray::new(mask, array.shape).map_err(internal_error)?,
     ))
 }
 

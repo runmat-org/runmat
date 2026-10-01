@@ -2,6 +2,90 @@ use super::super::entrypoints::fillmissing_builtin;
 use super::*;
 
 #[test]
+fn logical_nd_input_preserves_carrier_and_returns_shape_matched_mask() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
+    };
+    for (data, shape) in [(vec![1, 0, 1, 0], vec![2, 1, 2]), (vec![], vec![2, 0, 3])] {
+        let input = Value::LogicalArray(LogicalArray::new(data, shape.clone()).unwrap());
+        let method = Value::from("previous");
+        let request = CallRequest {
+            arguments: [&input, &method]
+                .into_iter()
+                .map(crate::value_fact::value_fact)
+                .collect(),
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("previous".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+        };
+        let inferred = runmat_builtins::infer_catalog_call(
+            &runmat_builtins::FILLMISSING_CATALOG_ENTRY,
+            &request,
+        );
+        let options = FillOptions::parse(&[method]).unwrap();
+        let (output, mask) =
+            super::super::filling::fill_missing_value(input.clone(), &options).unwrap();
+        assert_eq!(output, input);
+        assert_eq!(mask.shape, shape);
+        assert!(mask.data.iter().all(|value| *value == 0));
+        for (expected, actual) in inferred
+            .outputs
+            .iter()
+            .zip([output, Value::LogicalArray(mask)])
+        {
+            let live = crate::value_fact::value_fact(&actual);
+            assert_eq!(expected.kind, live.kind);
+            assert_eq!(expected.storage, live.storage);
+            assert!(expected.shape.is_proven_equivalent(&live.shape));
+        }
+    }
+}
+
+#[test]
+fn empty_nd_string_input_preserves_shape_and_mask_geometry() {
+    let shape = vec![2, 0, 3];
+    let input = Value::StringArray(StringArray::new(vec![], shape.clone()).unwrap());
+    let options = FillOptions::parse(&[Value::from("previous")]).unwrap();
+    let (output, mask) =
+        super::super::filling::fill_missing_value(input.clone(), &options).unwrap();
+    assert_eq!(output, input);
+    assert_eq!(mask.shape, shape);
+    assert!(mask.is_empty());
+}
+
+#[test]
+fn scalar_mask_catalog_storage_matches_live_runtime_fact() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
+    };
+    let input = Value::Num(f64::NAN);
+    let method = Value::from("constant");
+    let replacement = Value::Num(5.0);
+    let request = CallRequest {
+        arguments: [&input, &method, &replacement]
+            .into_iter()
+            .map(crate::value_fact::value_fact)
+            .collect(),
+        literals: LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::String("constant".into()),
+            LiteralValue::Number(5.0),
+        ]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+    };
+    let inferred =
+        runmat_builtins::infer_catalog_call(&runmat_builtins::FILLMISSING_CATALOG_ENTRY, &request);
+    let options = FillOptions::parse(&[method, replacement]).unwrap();
+    let (_, mask) = super::super::filling::fill_missing_value(input, &options).unwrap();
+    let live = crate::value_fact::value_fact(&Value::LogicalArray(mask));
+    assert_eq!(inferred.outputs[1].kind, live.kind);
+    assert_eq!(inferred.outputs[1].storage, live.storage);
+    assert!(inferred.outputs[1].shape.is_proven_equivalent(&live.shape));
+}
+
+#[test]
 fn fillmissing_supports_constant_previous_and_linear() {
     let value = tensor(vec![1.0, f64::NAN, 3.0], vec![3, 1]);
     let result = block_on(fillmissing_builtin(value, vec![Value::from("linear")])).unwrap();
@@ -38,6 +122,22 @@ fn fillmissing_rejects_invalid_method_before_resident_download() {
     assert_eq!(allocation.probe.retirements(), 0);
     allocation.handle.release().unwrap();
     assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn fillmissing_scalar_constant_replacement_preserves_selected_value_class() {
+    let missing = block_on(fillmissing_builtin(
+        Value::Num(f64::NAN),
+        vec![Value::from("constant"), Value::Bool(true)],
+    ))
+    .unwrap();
+    assert!(matches!(missing, Value::Bool(true)));
+    let present = block_on(fillmissing_builtin(
+        Value::Num(2.0),
+        vec![Value::from("constant"), Value::Bool(true)],
+    ))
+    .unwrap();
+    assert!(matches!(present, Value::Num(2.0)));
 }
 
 #[test]
@@ -121,6 +221,179 @@ fn fillmissing_integer_data_is_gated_and_all_classes_are_exact_noops() {
         assert!(
             matches!(&values[1], Value::LogicalArray(mask) if mask.shape == vec![2, 1] && mask.data == vec![0, 0])
         );
+    }
+}
+
+#[test]
+fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
+    let shape = vec![2, 1, 3];
+    for (method, middle) in [
+        ("previous", ["a", "b"]),
+        ("next", ["c", "d"]),
+        ("nearest", ["a", "b"]),
+    ] {
+        let input = StringArray::new(
+            vec![
+                "a".into(),
+                "b".into(),
+                MISSING_TEXT.into(),
+                MISSING_TEXT.into(),
+                "c".into(),
+                "d".into(),
+            ],
+            shape.clone(),
+        )
+        .unwrap();
+        let options = FillOptions::parse(&[Value::from(method), Value::Num(3.0)]).unwrap();
+        let (output, mask) = fill_missing_string_array(input, &options).unwrap();
+        let Value::StringArray(output) = output else {
+            panic!("expected string array")
+        };
+        assert_eq!(
+            output.data,
+            ["a", "b", middle[0], middle[1], "c", "d"].map(str::to_owned)
+        );
+        assert_eq!(output.shape, shape);
+        assert_eq!(mask.shape, shape);
+        assert_eq!(mask.data, vec![0, 0, 1, 1, 0, 0]);
+    }
+}
+
+#[test]
+fn fillmissing_nearest_uses_original_neighbors_and_previous_on_ties() {
+    let options = FillOptions::parse(&[Value::from("nearest")]).unwrap();
+    for shape in [vec![7, 1], vec![1, 7]] {
+        let input = Tensor::new(
+            vec![f64::NAN, 1.0, f64::NAN, f64::NAN, f64::NAN, 5.0, f64::NAN],
+            shape,
+        )
+        .unwrap();
+        let (output, mask) = fill_missing_tensor(input, &options).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("expected tensor")
+        };
+        assert_eq!(
+            output.materialize_f64(),
+            vec![1.0, 1.0, 1.0, 1.0, 5.0, 5.0, 5.0]
+        );
+        assert_eq!(mask.data, vec![1, 0, 1, 1, 1, 0, 1]);
+    }
+    let (output, mask) = fill_missing_tensor(
+        Tensor::new(vec![f64::NAN; 4], vec![4, 1]).unwrap(),
+        &options,
+    )
+    .unwrap();
+    let Value::Tensor(output) = output else {
+        panic!("expected tensor")
+    };
+    assert!(output.materialize_f64().iter().all(|value| value.is_nan()));
+    assert_eq!(mask.data, vec![0; 4]);
+}
+
+#[test]
+fn fillmissing_integer_noop_preserves_nd_and_empty_mask_shapes() {
+    let options = FillOptions::parse(&[Value::from("constant"), Value::Num(0.0)]).unwrap();
+    for shape in [vec![2, 1, 2], vec![1, 1, 4], vec![2, 0, 3]] {
+        let count = shape.iter().product();
+        let storage = IntegerStorage::U64(vec![u64::MAX; count]);
+        let input = Tensor::new_integer(storage.clone(), shape.clone()).unwrap();
+        let (output, mask) = fill_missing_tensor(input, &options).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("integer input must retain its tensor carrier");
+        };
+        assert_eq!(output.integer_storage(), Some(&storage));
+        assert_eq!(output.shape, shape);
+        assert_eq!(mask.shape, shape);
+        assert_eq!(mask.data, vec![0; count]);
+    }
+}
+
+#[test]
+fn fillmissing_constant_preserves_nd_values_and_mask_shape() {
+    let shape = vec![2, 1, 2];
+    let input = Tensor::new(vec![1.0, f64::NAN, f64::NAN, 4.0], shape.clone()).unwrap();
+    let options = FillOptions::parse(&[Value::from("constant"), Value::Num(7.0)]).unwrap();
+    let (output, mask) = fill_missing_tensor(input, &options).unwrap();
+    let Value::Tensor(output) = output else {
+        panic!("floating input must retain its tensor carrier");
+    };
+    assert_eq!(output.shape, shape);
+    assert_eq!(output.materialize_f64(), vec![1.0, 7.0, 7.0, 4.0]);
+    assert_eq!(mask.shape, shape);
+    assert_eq!(mask.data, vec![0, 1, 1, 0]);
+}
+
+#[test]
+fn fillmissing_numeric_methods_traverse_each_matrix_and_nd_line_independently() {
+    for (method, delta) in [
+        ("previous", 0.0),
+        ("next", 2.0),
+        ("nearest", 0.0),
+        ("linear", 1.0),
+        ("mean", 1.0),
+        ("median", 1.0),
+    ] {
+        for shape in [vec![3, 2], vec![3, 2, 2]] {
+            let groups = shape.iter().product::<usize>() / 3;
+            let mut input = Vec::new();
+            let mut expected = Vec::new();
+            let mut expected_mask = Vec::new();
+            for group in 0..groups {
+                let base = (group * 10) as f64;
+                input.extend([base, f64::NAN, base + 2.0]);
+                expected.extend([base, base + delta, base + 2.0]);
+                expected_mask.extend([0, 1, 0]);
+            }
+            let options = FillOptions::parse(&[Value::from(method)]).unwrap();
+            let (output, mask) =
+                fill_missing_tensor(Tensor::new(input, shape.clone()).unwrap(), &options).unwrap();
+            let Value::Tensor(output) = output else {
+                panic!("expected tensor")
+            };
+            assert_eq!(output.materialize_f64(), expected, "{method}, {shape:?}");
+            assert_eq!(output.shape, shape);
+            assert_eq!(mask.shape, shape);
+            assert_eq!(mask.data, expected_mask);
+        }
+        let options = FillOptions::parse(&[Value::from(method), Value::Num(3.0)]).unwrap();
+        let shape = vec![2, 2, 3];
+        let input = vec![
+            1.0,
+            10.0,
+            20.0,
+            30.0,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            3.0,
+            12.0,
+            22.0,
+            32.0,
+        ];
+        let expected = vec![
+            1.0,
+            10.0,
+            20.0,
+            30.0,
+            1.0 + delta,
+            10.0 + delta,
+            20.0 + delta,
+            30.0 + delta,
+            3.0,
+            12.0,
+            22.0,
+            32.0,
+        ];
+        let (output, mask) =
+            fill_missing_tensor(Tensor::new(input, shape.clone()).unwrap(), &options).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("expected tensor")
+        };
+        assert_eq!(output.materialize_f64(), expected, "{method}, dimension3");
+        assert_eq!(output.shape, shape);
+        assert_eq!(mask.shape, shape);
+        assert_eq!(mask.data, vec![0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0]);
     }
 }
 

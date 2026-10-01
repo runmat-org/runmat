@@ -13,8 +13,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Methods and dimensions",
             paragraphs: &[
                 r#"Numeric arrays support `"constant"`, `"previous"`, `"next"`, `"nearest"`, `"linear"`, `"mean"`, and `"median"`. Strings support constant and neighbor methods. Cells support constant replacement; tables are processed variable by variable."#,
-                r#"The first non-singleton dimension is the default. Supply 1 or 2, or `"dim", value`, to select a dimension. The second output marks only entries actually filled; an unfilled endpoint remains false."#,
-                "Complex and sparse filling is unsupported. Spline, pchip, makima, mode, moving-window, KNN, custom-function, sample-point, known-location, maximum-gap, variable-selection, and append forms are not implemented.",
+                r#"The first non-singleton dimension is the default. Numeric and string arrays support any positive dimension, supplied directly or as `"dim", value`; each column-major line is filled independently, including N-D arrays. Dimensions beyond the array rank select singleton lines. The second output preserves the input shape and marks only entries actually filled; an entry left missing remains false."#,
+                "Logical arrays are unchanged and return an all-false mask with the same shape. Complex and sparse array filling is unsupported. Spline, pchip, makima, mode, moving-window, KNN, custom-function, sample-point, known-location, maximum-gap, variable-selection, and append forms are not implemented.",
+                "Mean and median fills use the non-missing values along each selected line. A line with no available values remains missing.",
             ],
         },
         BuiltinDocumentationSection {

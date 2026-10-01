@@ -1,22 +1,11 @@
 use super::super::metadata::MISSING_TEXT;
 use super::super::numeric::is_missing_text;
+use super::lines::FillLines;
 use super::Neighbor;
 
-pub(super) fn fill_neighbor_text(
-    data: &mut [String],
-    rows: usize,
-    cols: usize,
-    dim: usize,
-    dir: Neighbor,
-) {
-    if dim == 1 {
-        for col in 0..cols {
-            fill_line_text(data, col * rows, rows, 1, dir);
-        }
-    } else {
-        for row in 0..rows {
-            fill_line_text(data, row, cols, rows, dir);
-        }
+pub(super) fn fill_neighbor_text(data: &mut [String], lines: &FillLines, dir: Neighbor) {
+    for line in lines.iter() {
+        fill_line_text(data, line.start, line.length, line.stride, dir);
     }
 }
 
@@ -57,44 +46,69 @@ pub(super) fn fill_line_text(
     }
 }
 
-pub(super) fn fill_nearest_text(data: &mut [String], rows: usize, cols: usize, dim: usize) {
-    let original = data.to_vec();
-    if dim == 1 {
-        for col in 0..cols {
-            fill_nearest_line_text(&original, data, col * rows, rows, 1);
-        }
-    } else {
-        for row in 0..rows {
-            fill_nearest_line_text(&original, data, row, cols, rows);
+pub(super) fn fill_nearest_text(data: &mut [String], lines: &FillLines) {
+    for line in lines.iter() {
+        fill_nearest_line_text(data, line.start, line.length, line.stride);
+    }
+}
+
+pub(super) fn fill_nearest_line_text(data: &mut [String], start: usize, len: usize, step: usize) {
+    let mut runs = super::runs::MissingRuns::new(len);
+    while let Some(run) = runs.next(|position| is_missing_text(&data[start + position * step])) {
+        for position in run.start..run.end {
+            data[start + position * step] = run.nearest_source(position).map_or_else(
+                || MISSING_TEXT.to_owned(),
+                |source| data[start + source * step].clone(),
+            );
         }
     }
 }
 
-pub(super) fn fill_nearest_line_text(
-    original: &[String],
-    data: &mut [String],
-    start: usize,
-    len: usize,
-    step: usize,
-) {
-    for i in 0..len {
-        let idx = start + i * step;
-        if !is_missing_text(&original[idx]) {
-            continue;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nearest_matches_original_neighbor_oracle_for_all_eight_entry_patterns() {
+        for pattern in 0..256u16 {
+            for step in [1, 2] {
+                let original: Vec<String> = (0..8)
+                    .map(|index| {
+                        if pattern & (1 << index) == 0 {
+                            format!("value-{index}")
+                        } else {
+                            MISSING_TEXT.to_ascii_uppercase()
+                        }
+                    })
+                    .collect();
+                let mut data = vec!["other-line".to_owned(); 8 * step + 1];
+                for (index, value) in original.iter().enumerate() {
+                    data[1 + index * step] = value.clone();
+                }
+                fill_nearest_line_text(&mut data, 1, 8, step);
+                for (index, value) in original.iter().enumerate() {
+                    let expected = if !is_missing_text(value) {
+                        value.clone()
+                    } else {
+                        original
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, value)| !is_missing_text(value))
+                            .min_by_key(|(source, _)| (index.abs_diff(*source), *source))
+                            .map_or_else(|| MISSING_TEXT.to_owned(), |(_, value)| value.clone())
+                    };
+                    assert_eq!(
+                        data[1 + index * step],
+                        expected,
+                        "pattern {pattern}, step {step}, index {index}"
+                    );
+                }
+                assert!(data
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index == 0 || (index - 1) % step != 0)
+                    .all(|(_, value)| value == "other-line"));
+            }
         }
-        let prev = (0..i).rev().find_map(|j| {
-            let value = &original[start + j * step];
-            (!is_missing_text(value)).then_some((i - j, value.clone()))
-        });
-        let next = ((i + 1)..len).find_map(|j| {
-            let value = &original[start + j * step];
-            (!is_missing_text(value)).then_some((j - i, value.clone()))
-        });
-        data[idx] = match (prev, next) {
-            (Some((pd, _)), Some((nd, nv))) if nd < pd => nv,
-            (Some((_, pv)), _) => pv,
-            (_, Some((_, nv))) => nv,
-            _ => MISSING_TEXT.to_string(),
-        };
     }
 }

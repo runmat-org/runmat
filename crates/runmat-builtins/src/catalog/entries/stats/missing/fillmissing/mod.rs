@@ -1,11 +1,14 @@
 mod contract;
 mod documentation;
 mod inference;
+mod method;
 #[cfg(test)]
 mod tests;
 
 use crate::*;
 use runmat_types::{CallInference, CallRequest, EffectKind, ExecutionStackRequirement};
+
+pub use method::FillMissingMethodKind;
 
 pub use contract::{
     FILLMISSING_AGGREGATE_INTEGER_DATA_EXTENSION, FILLMISSING_DESCRIPTOR, FILLMISSING_EXTENSIONS,

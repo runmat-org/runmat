@@ -1,8 +1,7 @@
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest};
 
-#[path = "../nan_reduction_support.rs"]
-mod support;
+use super::super::nan_reduction_support as support;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     support::infer(
