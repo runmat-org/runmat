@@ -2,7 +2,7 @@ use super::*;
 use runmat_value::{StringArray, StructValue, Tensor};
 
 pub(super) fn coefficients_value(beta: &[f64], rows: usize, cols: usize) -> BuiltinResult<Value> {
-    Tensor::new(beta.to_vec(), vec![rows, cols])
+    Tensor::new(copy(beta, "coefficient output")?, vec![rows, cols])
         .map(Value::Tensor)
         .map_err(|err| internal(format!("mnrfit: {err}")))
 }
@@ -28,13 +28,13 @@ pub(super) fn stats_value(fit: &NominalFit, data: &PreparedData) -> BuiltinResul
 }
 
 fn matrix_value(data: &[f64], rows: usize, cols: usize) -> BuiltinResult<Value> {
-    Tensor::new(data.to_vec(), vec![rows, cols])
+    Tensor::new(copy(data, "matrix output")?, vec![rows, cols])
         .map(Value::Tensor)
         .map_err(|err| internal(format!("mnrfit: {err}")))
 }
 
 fn row_tensor(values: &[f64]) -> BuiltinResult<Value> {
-    Tensor::new(values.to_vec(), vec![1, values.len()])
+    Tensor::new(copy(values, "class-name output")?, vec![1, values.len()])
         .map(Value::Tensor)
         .map_err(|err| internal(format!("mnrfit: {err}")))
 }
@@ -50,10 +50,8 @@ fn class_names_value(classes: &ClassNames, len: usize) -> BuiltinResult<Value> {
 
 fn coeffcorr_value(covb: &[f64], se: &[f64]) -> BuiltinResult<Value> {
     let dim = se.len();
-    let len = dim
-        .checked_mul(dim)
-        .ok_or_else(|| internal("mnrfit: coefficient correlation dimension overflow"))?;
-    let mut data = vec![0.0; len];
+    let len = checked_elements(dim, dim, "coefficient correlation")?;
+    let mut data = filled(len, 0.0, "coefficient correlation")?;
     for col in 0..dim {
         for row in 0..dim {
             let denom = se[row] * se[col];

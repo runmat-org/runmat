@@ -21,20 +21,16 @@ pub(super) fn fit_nominal_logit(
 ) -> BuiltinResult<NominalFit> {
     let cols = data.cols;
     let logits = data.outcomes.len();
-    let dim = cols
-        .checked_mul(logits)
-        .ok_or_else(|| internal("mnrfit: coefficient dimension overflow"))?;
-    let matrix_len = dim
-        .checked_mul(dim)
-        .ok_or_else(|| internal("mnrfit: information matrix dimension overflow"))?;
-    let mut beta = vec![0.0; dim];
-    let mut information = vec![0.0; matrix_len];
-    let mut gradient = vec![0.0; dim];
+    let dim = checked_elements(cols, logits, "coefficients")?;
+    let matrix_len = checked_elements(dim, dim, "information matrix")?;
+    let mut beta = filled(dim, 0.0, "coefficients")?;
+    let mut information = filled(matrix_len, 0.0, "information matrix")?;
+    let mut gradient = filled(dim, 0.0, "gradient")?;
     for _ in 0..max_iter {
         information.fill(0.0);
         gradient.fill(0.0);
         for row in 0..data.rows {
-            let probs = row_probabilities(&data.design, row, cols, &beta, logits);
+            let probs = row_probabilities(&data.design, row, cols, &beta, logits)?;
             let weight = data.weights[row];
             for j in 0..logits {
                 let residual = weight * (data.outcomes[j][row] - probs[j]);
@@ -58,7 +54,11 @@ pub(super) fn fit_nominal_logit(
         for idx in 0..dim {
             information[idx * dim + idx] += RIDGE;
         }
-        let delta = solve_linear(information.clone(), gradient.clone(), dim)?;
+        let delta = solve_linear(
+            copy(&information, "information solve copy")?,
+            copy(&gradient, "gradient solve copy")?,
+            dim,
+        )?;
         let max_step = delta.iter().map(|value| value.abs()).fold(0.0, f64::max);
         for (coef, step) in beta.iter_mut().zip(delta.iter()) {
             *coef += *step;
@@ -74,7 +74,7 @@ pub(super) fn fit_nominal_logit(
     }
     information.fill(0.0);
     for row in 0..data.rows {
-        let probs = row_probabilities(&data.design, row, cols, &beta, logits);
+        let probs = row_probabilities(&data.design, row, cols, &beta, logits)?;
         let weight = data.weights[row];
         for j in 0..logits {
             for l in 0..logits {
@@ -111,7 +111,7 @@ pub(super) fn fit_nominal_logit(
             }
         })
         .collect::<Vec<_>>();
-    let loglik = log_likelihood(data, &beta);
+    let loglik = log_likelihood(data, &beta)?;
     let saturated = saturated_log_likelihood(data);
     let dfe = (data.observations - dim as f64).max(0.0);
     Ok(NominalFit {
@@ -131,9 +131,9 @@ fn row_probabilities(
     cols: usize,
     beta: &[f64],
     logits: usize,
-) -> Vec<f64> {
+) -> BuiltinResult<Vec<f64>> {
     let rows = design.len() / cols;
-    let mut eta = Vec::with_capacity(logits);
+    let mut eta = reserved(logits, "row scores")?;
     let mut max_eta = 0.0f64;
     for j in 0..logits {
         let mut value = 0.0;
@@ -145,20 +145,23 @@ fn row_probabilities(
     }
     let base = (-max_eta).exp();
     let mut denom = base;
-    let mut exp_eta = Vec::with_capacity(logits);
+    let mut exp_eta = reserved(logits, "row probabilities")?;
     for value in eta {
         let exp = (value - max_eta).exp();
         denom += exp;
         exp_eta.push(exp);
     }
-    exp_eta.into_iter().map(|value| value / denom).collect()
+    for value in &mut exp_eta {
+        *value /= denom;
+    }
+    Ok(exp_eta)
 }
 
-fn log_likelihood(data: &PreparedData, beta: &[f64]) -> f64 {
+fn log_likelihood(data: &PreparedData, beta: &[f64]) -> BuiltinResult<f64> {
     let logits = data.outcomes.len();
     let mut ll = 0.0;
     for row in 0..data.rows {
-        let probs = row_probabilities(&data.design, row, data.cols, beta, logits);
+        let probs = row_probabilities(&data.design, row, data.cols, beta, logits)?;
         let mut baseline = 1.0 - probs.iter().sum::<f64>();
         baseline = baseline.max(EPS);
         for (j, prob) in probs.iter().enumerate() {
@@ -173,7 +176,7 @@ fn log_likelihood(data: &PreparedData, beta: &[f64]) -> f64 {
             ll += baseline_count * baseline.ln();
         }
     }
-    ll
+    Ok(ll)
 }
 
 fn saturated_log_likelihood(data: &PreparedData) -> f64 {
@@ -227,7 +230,7 @@ fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> BuiltinResult<Vec
             b[row] -= factor * b[col];
         }
     }
-    let mut x = vec![0.0; n];
+    let mut x = filled(n, 0.0, "solver result")?;
     for row in (0..n).rev() {
         let mut rhs = b[row];
         for col in row + 1..n {
@@ -239,11 +242,15 @@ fn solve_linear(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> BuiltinResult<Vec
 }
 
 fn invert_matrix(a: Vec<f64>, n: usize) -> BuiltinResult<Vec<f64>> {
-    let mut out = vec![0.0; n * n];
+    let mut out = filled(
+        checked_elements(n, n, "covariance matrix")?,
+        0.0,
+        "covariance matrix",
+    )?;
     for col in 0..n {
-        let mut rhs = vec![0.0; n];
+        let mut rhs = filled(n, 0.0, "covariance solve")?;
         rhs[col] = 1.0;
-        let solved = solve_linear(a.clone(), rhs, n)?;
+        let solved = solve_linear(copy(&a, "covariance solve copy")?, rhs, n)?;
         for row in 0..n {
             out[row + col * n] = solved[row];
         }

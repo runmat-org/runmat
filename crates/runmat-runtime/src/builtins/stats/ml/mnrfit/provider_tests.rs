@@ -168,6 +168,7 @@ async fn mnrfit_rejects_host_visible_x_and_y_before_other_operand_download() {
     }
     for invalid_y in [
         Value::Tensor(Tensor::new(vec![-1.0, 1.0, 1.0, 1.0], vec![2, 2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0e308, 1.0e308, 0.0, 0.0], vec![2, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap()),
         Value::StringArray(
             StringArray::new(vec!["".into(), "class-b".into()], vec![2, 1]).unwrap(),

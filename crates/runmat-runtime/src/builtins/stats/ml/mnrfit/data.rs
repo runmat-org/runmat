@@ -1,7 +1,6 @@
 use super::*;
 use crate::builtins::common::tensor;
 use runmat_value::{CellArray, Tensor};
-use std::cmp::Ordering;
 
 #[derive(Clone, Debug)]
 pub(super) struct PreparedData {
@@ -60,8 +59,21 @@ pub(super) fn prepare_data(
                 "mnrfit: Weights vector length must match the number of rows in X",
             ));
         }
+        if option_weights
+            .iter()
+            .any(|weight| !weight.is_finite() || *weight < 0.0)
+        {
+            return Err(invalid(
+                "mnrfit: weights must be nonnegative finite values with positive total",
+            ));
+        }
         for (weight, option_weight) in weights.iter_mut().zip(option_weights.iter()) {
             *weight *= *option_weight;
+            if !weight.is_finite() {
+                return Err(invalid(
+                    "mnrfit: weighted observation count exceeds finite double range",
+                ));
+            }
         }
     }
     let kept_rows = compact_complete_cases(x, cols, &mut design, &mut outcomes, &mut weights)?;
@@ -71,13 +83,17 @@ pub(super) fn prepare_data(
     if weights
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
-        || weights.iter().sum::<f64>() <= 0.0
     {
         return Err(invalid(
             "mnrfit: weights must be nonnegative finite values with positive total",
         ));
     }
-    let observations = weights.iter().sum::<f64>();
+    let observations = finite_total(weights.iter().copied(), "weights")?;
+    if observations <= 0.0 {
+        return Err(invalid(
+            "mnrfit: weights must be nonnegative finite values with positive total",
+        ));
+    }
     Ok(PreparedData {
         design,
         rows: kept_rows,
@@ -87,6 +103,21 @@ pub(super) fn prepare_data(
         classes,
         observations,
     })
+}
+
+fn finite_total(values: impl Iterator<Item = f64>, role: &str) -> BuiltinResult<f64> {
+    values.try_fold(0.0, |total, value| checked_finite_add(total, value, role))
+}
+
+fn checked_finite_add(total: f64, value: f64, role: &str) -> BuiltinResult<f64> {
+    let next = total + value;
+    if next.is_finite() {
+        Ok(next)
+    } else {
+        Err(invalid(format!(
+            "mnrfit: {role} total exceeds finite double range"
+        )))
+    }
 }
 
 fn design_matrix(x: &Tensor, constant: bool) -> BuiltinResult<Vec<f64>> {
@@ -99,10 +130,8 @@ fn design_matrix(x: &Tensor, constant: bool) -> BuiltinResult<Vec<f64>> {
     } else {
         x_cols
     };
-    let len = rows
-        .checked_mul(cols)
-        .ok_or_else(|| internal("mnrfit: design matrix dimension overflow"))?;
-    let mut design = vec![0.0; len];
+    let len = checked_elements(rows, cols, "design matrix")?;
+    let mut design = filled(len, 0.0, "design matrix")?;
     let mut out_col = 0usize;
     if constant {
         for row in 0..rows {
@@ -128,32 +157,40 @@ fn compact_complete_cases(
 ) -> BuiltinResult<usize> {
     let rows = x.rows();
     let values = tensor::tensor_values_f64_cow(x);
-    let keep = (0..rows)
-        .filter(|row| {
-            let x_complete = (0..x.cols()).all(|col| values[*row + col * rows].is_finite());
-            let y_complete = weights[*row].is_finite()
-                && weights[*row] > 0.0
-                && outcomes.iter().all(|outcome| outcome[*row].is_finite());
-            x_complete && y_complete
-        })
-        .collect::<Vec<_>>();
+    let mut keep = Vec::new();
+    keep.try_reserve_exact(rows)
+        .map_err(|_| invalid("mnrfit: row selection exceeds available host resources"))?;
+    for row in 0..rows {
+        let x_complete = (0..x.cols()).all(|col| values[row + col * rows].is_finite());
+        let y_complete = weights[row].is_finite()
+            && weights[row] > 0.0
+            && outcomes.iter().all(|outcome| outcome[row].is_finite());
+        if x_complete && y_complete {
+            keep.push(row);
+        }
+    }
     if keep.len() == rows {
         return Ok(rows);
     }
-    let new_len = keep
-        .len()
-        .checked_mul(cols)
-        .ok_or_else(|| internal("mnrfit: design matrix dimension overflow"))?;
-    let mut new_design = vec![0.0; new_len];
+    let new_len = checked_elements(keep.len(), cols, "compacted design matrix")?;
+    let mut new_design = filled(new_len, 0.0, "compacted design matrix")?;
     for col in 0..cols {
         for (new_row, old_row) in keep.iter().enumerate() {
             new_design[new_row + col * keep.len()] = design[old_row + col * rows];
         }
     }
     for outcome in outcomes.iter_mut() {
-        *outcome = keep.iter().map(|old_row| outcome[*old_row]).collect();
+        let mut compacted = filled(keep.len(), 0.0, "compacted outcomes")?;
+        for (new_row, old_row) in keep.iter().enumerate() {
+            compacted[new_row] = outcome[*old_row];
+        }
+        *outcome = compacted;
     }
-    *weights = keep.iter().map(|old_row| weights[*old_row]).collect();
+    let mut compacted_weights = filled(keep.len(), 0.0, "compacted weights")?;
+    for (new_row, old_row) in keep.iter().enumerate() {
+        compacted_weights[new_row] = weights[*old_row];
+    }
+    *weights = compacted_weights;
     *design = new_design;
     Ok(keep.len())
 }
@@ -200,39 +237,38 @@ fn count_outcomes(tensor: &Tensor) -> BuiltinResult<ResponseOutcomes> {
     let cols = tensor.cols();
     let data = tensor::tensor_values_f64(tensor);
     let logits = cols - 1;
-    let mut outcomes = vec![vec![0.0; rows]; logits];
-    let mut weights = Vec::with_capacity(rows);
+    let mut outcomes = columns(logits, rows, "grouped outcomes")?;
+    let mut weights = filled(rows, 0.0, "grouped weights")?;
     let mut observations = 0.0;
     for row in 0..rows {
+        if (0..cols).any(|col| data[row + col * rows].is_nan()) {
+            continue;
+        }
         let mut total = 0.0;
-        let mut missing = false;
         for col in 0..cols {
             let count = data[row + col * rows];
-            if count.is_nan() {
-                missing = true;
-                break;
-            }
             if !count.is_finite() || count < 0.0 {
                 return Err(invalid(
                     "mnrfit: grouped counts must be nonnegative finite values",
                 ));
             }
-            total += count;
+            total = checked_finite_add(total, count, "grouped count")?;
         }
-        if missing || total <= 0.0 {
-            weights.push(0.0);
-        } else {
+        if total > 0.0 {
             for (col, outcome) in outcomes.iter_mut().enumerate().take(logits) {
                 outcome[row] = data[row + col * rows] / total;
             }
-            weights.push(total);
-            observations += total;
+            weights[row] = total;
+            observations = checked_finite_add(observations, total, "grouped count")?;
         }
     }
     if observations <= 0.0 {
         return Err(invalid("mnrfit: grouped counts must contain observations"));
     }
-    let classes = (1..=cols).map(|idx| idx as f64).collect::<Vec<_>>();
+    let mut classes = filled(cols, 0.0, "grouped class labels")?;
+    for (index, class) in classes.iter_mut().enumerate() {
+        *class = (index + 1) as f64;
+    }
     Ok(ResponseOutcomes {
         outcomes,
         classes: ClassNames::Numeric(classes),
@@ -250,19 +286,19 @@ fn numeric_outcomes(
             "mnrfit: categorical Y must be a vector with one response per row of X",
         ));
     }
-    let mut classes = values
-        .iter()
-        .copied()
-        .filter(|value| value.is_finite())
-        .collect::<Vec<_>>();
-    classes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-    classes.dedup_by(|a, b| (*a - *b).abs() <= EPS);
+    let mut classes = Vec::new();
+    classes
+        .try_reserve_exact(values.len())
+        .map_err(|_| invalid("mnrfit: class census exceeds available host resources"))?;
+    classes.extend(values.iter().copied().filter(|value| value.is_finite()));
+    classes.sort_by(f64::total_cmp);
+    classes.dedup_by(|a, b| *a == *b);
     if classes.len() < 2 {
         return Err(invalid("mnrfit: Y must contain at least two classes"));
     }
     let logits = classes.len() - 1;
-    let mut outcomes = vec![vec![0.0; rows]; logits];
-    let mut weights = vec![1.0; rows];
+    let mut outcomes = columns(logits, rows, "categorical outcomes")?;
+    let mut weights = filled(rows, 1.0, "categorical weights")?;
     for (row, value) in values.iter().enumerate() {
         if value.is_nan() {
             weights[row] = 0.0;
@@ -273,7 +309,7 @@ fn numeric_outcomes(
         }
         let class_idx = classes
             .iter()
-            .position(|class| (*class - *value).abs() <= EPS)
+            .position(|class| *class == *value)
             .ok_or_else(|| internal("mnrfit: failed to map response class"))?;
         if class_idx < logits {
             outcomes[class_idx][row] = 1.0;
@@ -314,7 +350,7 @@ fn text_outcomes(
         return Err(invalid("mnrfit: Y must contain at least two classes"));
     }
     let logits = classes.len() - 1;
-    let mut outcomes = vec![vec![0.0; rows]; logits];
+    let mut outcomes = columns(logits, rows, "text outcomes")?;
     for (row, value) in values.iter().enumerate() {
         let class_idx = classes
             .iter()
@@ -327,7 +363,7 @@ fn text_outcomes(
     Ok(ResponseOutcomes {
         outcomes,
         classes: ClassNames::Text(classes),
-        weights: vec![1.0; rows],
+        weights: filled(rows, 1.0, "text weights")?,
     })
 }
 
@@ -341,3 +377,7 @@ fn cellstr_outcomes(cell: &CellArray, rows: usize) -> BuiltinResult<ResponseOutc
         .collect::<BuiltinResult<Vec<_>>>()?;
     text_outcomes(labels, cell.shape.clone(), rows)
 }
+
+#[cfg(test)]
+#[path = "data/tests.rs"]
+mod tests;

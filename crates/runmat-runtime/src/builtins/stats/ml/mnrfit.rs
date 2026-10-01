@@ -1,12 +1,14 @@
 //! Multinomial logistic regression compatibility helper.
 
 mod admission;
+mod allocation;
 mod data;
 mod numeric;
 mod options;
 mod output;
 mod solver;
 
+use allocation::*;
 use data::*;
 use numeric::*;
 use options::{prepare_values, OptionName, Options};
