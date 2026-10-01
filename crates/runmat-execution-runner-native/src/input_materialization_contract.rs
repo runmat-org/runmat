@@ -58,6 +58,7 @@ impl InputMaterializationRequest {
 pub(crate) struct SignalMaterializationRequest {
     authored: runmat_analysis_core::PhysicalSignal,
     admitted: runmat_analysis_execution::AdmittedSignalGenerator,
+    topology_binding: Option<runmat_analysis_execution::SignalTopologyBinding>,
     descriptor: ProgramExecutionDescriptor,
     chunks: Vec<runmat_analysis_execution::GeneratorChunk>,
     input_references: Vec<ValueRef>,
@@ -70,6 +71,7 @@ impl SignalMaterializationRequest {
         Ok(Self {
             authored: prepared.authored.clone(),
             admitted: prepared.admitted.clone(),
+            topology_binding: prepared.topology_binding.clone(),
             descriptor: prepared.program.descriptor.clone(),
             chunks: prepared
                 .program
@@ -86,6 +88,7 @@ impl SignalMaterializationRequest {
         let prepared = PreparedSignalMaterialization {
             authored: self.authored.clone(),
             admitted: self.admitted.clone(),
+            topology_binding: self.topology_binding.clone(),
             program: prepared_program(&self.descriptor, &self.chunks, &self.input_references),
             input_objects: Vec::new(),
             input_admissions: self.input_admissions.clone(),

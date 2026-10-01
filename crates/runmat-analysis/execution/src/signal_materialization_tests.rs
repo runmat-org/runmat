@@ -227,6 +227,116 @@ fn scalar_chunks_compose_into_one_canonical_realization() {
 }
 
 #[test]
+fn topology_expectation_authenticates_mesh_and_reopened_realization_rows() {
+    use runmat_analysis_core::{BodyForceDensity, FieldLocation, Temperature};
+    use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        for thermal in [false, true] {
+            let width = if thermal { 1 } else { 3 };
+            let PhysicalSignal::Force(template) = signal(
+                SignalShape::TopologyField {
+                    topology_id: Digest::from_bytes(*mesh.canonical_digest.bytes()).to_string(),
+                    location: FieldLocation::Node,
+                    component_count: width,
+                },
+                SignalPrecision::Real64,
+            ) else {
+                unreachable!()
+            };
+            let authored = if thermal {
+                PhysicalSignal::Temperature(Signal::<Temperature> {
+                    signal_id: template.signal_id,
+                    shape: template.shape,
+                    frame: template.frame,
+                    representation: match template.representation {
+                        SignalRepresentation::Generator(generator) => {
+                            SignalRepresentation::Generator(generator)
+                        }
+                        _ => unreachable!(),
+                    },
+                    precision: template.precision,
+                    evidence: template.evidence,
+                    provenance: template.provenance,
+                })
+            } else {
+                PhysicalSignal::BodyForceDensity(Signal::<BodyForceDensity> {
+                    signal_id: template.signal_id,
+                    shape: template.shape,
+                    frame: template.frame,
+                    representation: match template.representation {
+                        SignalRepresentation::Generator(generator) => {
+                            SignalRepresentation::Generator(generator)
+                        }
+                        _ => unreachable!(),
+                    },
+                    precision: template.precision,
+                    evidence: template.evidence,
+                    provenance: template.provenance,
+                })
+            };
+            let admitted = admitted();
+            let binding = crate::SignalTopologyBinding::derive(&authored, &mesh)
+                .unwrap()
+                .unwrap();
+            let expected = crate::SignalMaterializationExpectation {
+                authored: authored.clone(),
+                admitted: admitted.clone(),
+                topology_binding: Some(binding.clone()),
+            };
+            expected.validate_for_mesh(&mesh).unwrap();
+            let mut missing = expected.clone();
+            missing.topology_binding = None;
+            assert!(missing.validate().is_err());
+            let foreign = canonical_tetrahedron_solver_mesh(if order == ElementOrder::Tet4 {
+                ElementOrder::Tet10
+            } else {
+                ElementOrder::Tet4
+            });
+            assert!(expected.validate_for_mesh(&foreign).is_err());
+            let planned = plan_signal_generator_chunks(
+                &authored,
+                &admitted,
+                Some(binding.entity_count()),
+                RESULT_ENVELOPE_BYTES + 5 * binding.scalar_component_count().unwrap() * 16,
+                |_| panic!("no artifact argument expected"),
+            )
+            .unwrap();
+            assert_eq!(planned.chunks.len(), 1);
+            let shape = vec![5, binding.entity_count() as u64, width as u64];
+            let outputs = [output(
+                &planned.chunks[0],
+                dense_f64(
+                    shape,
+                    &vec![2.0; 5 * binding.scalar_component_count().unwrap()],
+                ),
+            )];
+            let realized = canonicalize_signal_generator_outputs(
+                &authored,
+                &admitted,
+                Some(binding.entity_count()),
+                &[],
+                &planned.chunks,
+                &outputs,
+            )
+            .unwrap();
+            let reopened = CanonicalSignalRealization::from_canonical_bytes(
+                &realized.canonical_bytes().unwrap(),
+            )
+            .unwrap();
+            let reopened_expected: crate::SignalMaterializationExpectation =
+                serde_json::from_slice(&serde_json::to_vec(&expected).unwrap()).unwrap();
+            reopened_expected.validate_for_mesh(&mesh).unwrap();
+            reopened_expected.validate_realization(&reopened).unwrap();
+            materialize_signal_for_solver(&authored, &admitted, &reopened).unwrap();
+            let mut wrong = reopened;
+            wrong.topology_entity_count = Some(binding.entity_count() as u64 + 1);
+            assert!(reopened_expected.validate_realization(&wrong).is_err());
+        }
+    }
+}
+
+#[test]
 fn matrix_output_is_reordered_from_column_major_to_sample_major() {
     let mut signal = signal(SignalShape::Vector3, SignalPrecision::Real64);
     let PhysicalSignal::Force(value) = &mut signal else {

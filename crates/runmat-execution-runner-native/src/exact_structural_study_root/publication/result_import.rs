@@ -190,10 +190,16 @@ pub fn import_exact_structural_study_result(
         }
         match prepared {
             runmat_analysis_execution::InputMaterializationExpectation::Signal(prepared) => {
+                prepared
+                    .validate_for_mesh(&mesh.artifact)
+                    .map_err(protocol)?;
                 let realization =
                     runmat_analysis_fea::execution::CanonicalSignalRealization::from_canonical_bytes(
                         &objects.payload(),
                     )
+                    .map_err(protocol)?;
+                prepared
+                    .validate_realization(&realization)
                     .map_err(protocol)?;
                 let signal = runmat_analysis_execution::materialize_signal_for_solver(
                     &prepared.authored,

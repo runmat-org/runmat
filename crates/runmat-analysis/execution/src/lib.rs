@@ -48,6 +48,8 @@ mod serial;
 mod signal_input;
 mod signal_materialization;
 mod signal_program;
+mod signal_topology;
+pub use signal_topology::SignalTopologyBinding;
 mod spectral_materialization;
 mod state_publication;
 mod state_transition;

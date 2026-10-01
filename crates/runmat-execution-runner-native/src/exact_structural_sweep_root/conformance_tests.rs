@@ -1226,6 +1226,7 @@ async fn generated_box_workload(
         plan.chunks,
         vec![immutable_object],
         plan.input_admissions,
+        None,
     )
     .unwrap();
     (workload, prepared)

@@ -37,9 +37,19 @@ pub fn build_thermal_study_product(
         materials: input.materials,
         mesh: input.mesh,
     })?;
-    let workload = plan_thermal_study(&compiled, input.planning)?;
+    plan_thermal_study_product(compiled, input.mesh, input.planning)
+}
+
+/// Derive the complete thermal product after immutable generated inputs have been sealed.
+pub fn plan_thermal_study_product(
+    compiled: CompiledAnalysisStudy,
+    mesh: &SolverMeshArtifact,
+    planning: ThermalStudyPlanningPolicy,
+) -> Result<ThermalStudyProduct, ThermalStudyProductError> {
+    compiled.validate_against(mesh)?;
+    let workload = plan_thermal_study(&compiled, planning)?;
     crate::planning::resource::ThermalObservationResourceFacts::derive(
-        input.mesh,
+        mesh,
         &compiled.model.sequence.steps[0],
     )
     .map_err(|error| ThermalStudyPlanningError::Observation(error.to_string()))?;

@@ -274,6 +274,7 @@ fn prepare_compiled_materializations(
                 plan.chunks,
                 Vec::new(),
                 plan.input_admissions,
+                None,
             )?)
         })
         .collect()

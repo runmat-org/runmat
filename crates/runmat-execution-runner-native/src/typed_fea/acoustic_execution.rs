@@ -7,7 +7,7 @@ use crate::{
 };
 use runmat_analysis_execution::{AcousticStudyPreparation, AnalysisOutputPolicy};
 use runmat_analysis_fea::{
-    study::{build_acoustic_study_product, plan_acoustic_study, AcousticStudyProductInput},
+    study::{compile_analysis_study, plan_acoustic_study_product, AnalysisStudyCompilationInput},
     FeaProgressPhase, FeaProgressStatus,
 };
 use runmat_execution::{
@@ -110,13 +110,12 @@ pub(super) async fn execute(
         None,
         None,
     );
-    let mut product = build_acoustic_study_product(AcousticStudyProductInput {
+    let mut compiled = compile_analysis_study(AnalysisStudyCompilationInput {
         study: &prepared.study,
         geometry: &geometry.output.document,
         regions: &geometry.output.regions,
         materials: &prepared.materials,
         mesh: &geometry.meshing.artifact,
-        planning: prepared.planning,
     })
     .map_err(|e| e.to_string())?;
     let materialized = crate::input_materialization::execute_locally(
@@ -125,13 +124,15 @@ pub(super) async fn execute(
         &store,
         &prepared.artifact_access,
         workers,
+        &geometry.meshing.artifact,
     )
     .await
     .map_err(|e| e.to_string())?;
-    crate::input_materialization::apply_to_model(&mut product.compiled.model, materialized)
+    crate::input_materialization::apply_to_model(&mut compiled.model, materialized)
         .map_err(|e| e.to_string())?;
-    product.plan =
-        plan_acoustic_study(&product.compiled, prepared.planning).map_err(|e| e.to_string())?;
+    let product =
+        plan_acoustic_study_product(compiled, &geometry.meshing.artifact, prepared.planning)
+            .map_err(|e| e.to_string())?;
     emit_local_progress(
         &observers,
         "fea.typed_study",

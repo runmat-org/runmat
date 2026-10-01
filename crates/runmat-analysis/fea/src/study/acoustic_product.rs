@@ -44,8 +44,18 @@ pub fn build_acoustic_study_product(
         materials: input.materials,
         mesh: input.mesh,
     })?;
+    plan_acoustic_study_product(compiled, input.mesh, input.planning)
+}
+
+/// Derive the complete acoustic product after immutable generated inputs have been sealed.
+pub fn plan_acoustic_study_product(
+    compiled: CompiledAnalysisStudy,
+    mesh: &SolverMeshArtifact,
+    planning: AcousticStudyPlanningPolicy,
+) -> Result<AcousticStudyProduct, AcousticStudyProductError> {
+    compiled.validate_against(mesh)?;
     validate_canonical_acoustic_materials(&compiled)?;
-    let plan = plan_acoustic_study(&compiled, input.planning)?;
+    let plan = plan_acoustic_study(&compiled, planning)?;
     Ok(AcousticStudyProduct { compiled, plan })
 }
 

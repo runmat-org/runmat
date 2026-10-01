@@ -35,7 +35,7 @@ pub(super) async fn execute(
 ) -> NativeExecutionResult<BTreeMap<runmat_execution::Digest, RemoteInputMaterializationOutcome>> {
     let mut unique = BTreeMap::new();
     for prepared in materializations {
-        prepared.validate().map_err(protocol)?;
+        crate::input_materialization::validate_materialization_mesh(&prepared, None)?;
         for object in prepared.input_objects() {
             pool.register_value_object(object.reference.clone(), object.bytes.clone())?;
         }
@@ -157,7 +157,8 @@ pub(super) async fn execute(
                 .iter()
                 .map(|chunk| chunk.plan.clone())
                 .collect::<Vec<_>>();
-            let (input, kind, identity, bytes) = materialize_input(&prepared, &chunks, &outputs)?;
+            let (input, kind, identity, bytes) =
+                materialize_input(&prepared, &chunks, &outputs, None)?;
             let objects = prepare_analysis_objects(
                 kind,
                 identity,

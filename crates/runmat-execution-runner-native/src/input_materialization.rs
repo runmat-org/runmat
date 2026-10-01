@@ -46,9 +46,13 @@ pub(crate) async fn execute_locally(
     source: &impl CacheImport,
     artifact_access: &ArtifactAccess,
     workers: u32,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
 ) -> NativeExecutionResult<Vec<CompletedInputMaterialization>> {
     if materializations.is_empty() {
         return Ok(Vec::new());
+    }
+    for prepared in materializations {
+        validate_materialization_mesh(prepared, Some(mesh))?;
     }
     config.max_workers = workers.max(1);
     config
@@ -180,7 +184,8 @@ pub(crate) async fn execute_locally(
             .iter()
             .map(|chunk| chunk.plan.clone())
             .collect::<Vec<_>>();
-        let (input, kind, identity, bytes) = materialize_input(prepared, &chunks, &outputs)?;
+        let (input, kind, identity, bytes) =
+            materialize_input(prepared, &chunks, &outputs, Some(mesh))?;
         let objects = runmat_analysis_execution::prepare_analysis_objects(
             kind,
             identity,
@@ -208,27 +213,53 @@ pub(crate) async fn execute_locally(
     Ok(completed)
 }
 
+pub(crate) fn validate_materialization_mesh(
+    prepared: &PreparedInputMaterialization,
+    mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
+) -> NativeExecutionResult<()> {
+    prepared.validate().map_err(protocol)?;
+    if let PreparedInputMaterialization::Signal(signal) = prepared {
+        if signal.topology_binding.is_some() {
+            let mesh = mesh.ok_or_else(|| {
+                protocol("topology signal preprocessing requires the authoritative solver mesh")
+            })?;
+            signal.validate_for_mesh(mesh).map_err(protocol)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn materialize_input(
     prepared: &PreparedInputMaterialization,
     chunks: &[GeneratorChunk],
     outputs: &[GeneratorChunkOutput],
+    mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
 ) -> NativeExecutionResult<(
     CompletedInput,
     AnalysisNumericalObjectKind,
     runmat_execution::Digest,
     Vec<u8>,
 )> {
+    validate_materialization_mesh(prepared, mesh)?;
     match prepared {
         PreparedInputMaterialization::Signal(prepared) => {
             let realization = canonicalize_signal_generator_outputs(
                 &prepared.authored,
                 &prepared.admitted,
-                None,
+                prepared
+                    .topology_binding
+                    .as_ref()
+                    .map(|binding| binding.entity_count()),
                 &prepared.input_admissions,
                 chunks,
                 outputs,
             )
             .map_err(protocol)?;
+            prepared
+                .expectation()
+                .map_err(protocol)?
+                .validate_realization(&realization)
+                .map_err(protocol)?;
             let signal =
                 materialize_signal_for_solver(&prepared.authored, &prepared.admitted, &realization)
                     .map_err(protocol)?;

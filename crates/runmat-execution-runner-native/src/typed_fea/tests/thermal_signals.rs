@@ -182,9 +182,12 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
         let foreign = prepared.iter().find(|other| other != &input).unwrap();
         let mut wrong = outputs.clone();
         wrong[0].chunk_identity = foreign.program().chunks[0].plan.identity;
-        assert!(crate::input_materialization::materialize_input(input, &chunks, &wrong).is_err());
+        assert!(
+            crate::input_materialization::materialize_input(input, &chunks, &wrong, None).is_err()
+        );
         let (value, kind, identity, bytes) =
-            crate::input_materialization::materialize_input(input, &chunks, &outputs).unwrap();
+            crate::input_materialization::materialize_input(input, &chunks, &outputs, None)
+                .unwrap();
         assert_eq!(kind, AnalysisNumericalObjectKind::Signal);
         let objects = prepare_analysis_objects(
             kind,

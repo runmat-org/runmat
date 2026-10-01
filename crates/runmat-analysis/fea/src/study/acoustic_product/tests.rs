@@ -41,6 +41,16 @@ fn authored_tetrahedron_compiles_plans_and_executes_for_supported_orders() {
         })
         .unwrap();
 
+        assert_eq!(
+            plan_acoustic_study_product(
+                product.compiled.clone(),
+                &fixture.mesh,
+                AcousticStudyPlanningPolicy::experimental(),
+            )
+            .unwrap(),
+            product,
+        );
+
         product.compiled.validate_against(&fixture.mesh).unwrap();
         assert_eq!(product.plan.frequency_plan().frequencies_hz(), &[0.2]);
         for (ordinal, frequency) in product.plan.frequencies().iter().enumerate() {
@@ -104,6 +114,51 @@ fn authored_tetrahedron_compiles_plans_and_executes_for_supported_orders() {
                 state
             );
         }
+    }
+}
+
+#[test]
+fn post_sealing_product_retains_material_and_mesh_admission() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut fixture = authored_tetrahedron(order);
+        fixture
+            .materials
+            .values_mut()
+            .next()
+            .unwrap()
+            .acoustic
+            .as_mut()
+            .unwrap()
+            .damping_ratio = 0.01;
+        let compiled = compile_analysis_study(AnalysisStudyCompilationInput {
+            study: &fixture.study,
+            geometry: &fixture.geometry,
+            regions: &fixture.regions,
+            materials: &fixture.materials,
+            mesh: &fixture.mesh,
+        })
+        .unwrap();
+        assert!(matches!(
+            plan_acoustic_study_product(
+                compiled.clone(),
+                &fixture.mesh,
+                AcousticStudyPlanningPolicy::experimental()
+            ),
+            Err(AcousticStudyProductError::UnsupportedMaterial),
+        ));
+        let foreign = authored_tetrahedron(if order == ElementOrder::Tet4 {
+            ElementOrder::Tet10
+        } else {
+            ElementOrder::Tet4
+        });
+        assert!(matches!(
+            plan_acoustic_study_product(
+                compiled,
+                &foreign.mesh,
+                AcousticStudyPlanningPolicy::experimental()
+            ),
+            Err(AcousticStudyProductError::Compilation(_)),
+        ));
     }
 }
 

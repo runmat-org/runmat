@@ -178,6 +178,7 @@ impl SignalFixture {
             chunks.chunks,
             Vec::new(),
             chunks.input_admissions,
+            None,
         )
         .unwrap();
         Self {

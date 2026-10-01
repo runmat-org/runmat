@@ -66,6 +66,7 @@ pub(super) async fn prepare_input_materializations(
             plan.chunks,
             Vec::new(),
             plan.input_admissions,
+            None,
         )
         .map_err(|error| error.to_string())?;
         prepared.push(PreparedInputMaterialization::Signal(Box::new(

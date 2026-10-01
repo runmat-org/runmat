@@ -1,6 +1,8 @@
 //! Local composition of the same portable whole-study root used by remote execution.
 
-use runmat_analysis_fea::study::StructuralStudyProductInput;
+use runmat_analysis_fea::study::{
+    compile_analysis_study, plan_structural_study, AnalysisStudyCompilationInput,
+};
 use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 
@@ -93,32 +95,25 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
         None,
         None,
     );
-    let product =
-        runmat_analysis_fea::study::build_structural_study_product(StructuralStudyProductInput {
-            study: &decoded.study,
-            geometry: &output.document,
-            regions: &output.regions,
-            materials: &decoded.materials,
-            mesh: &meshing.artifact,
-            planning: decoded.planning,
-        })
-        .map_err(protocol)?;
+    let mut compiled = compile_analysis_study(AnalysisStudyCompilationInput {
+        study: &decoded.study,
+        geometry: &output.document,
+        regions: &output.regions,
+        materials: &decoded.materials,
+        mesh: &meshing.artifact,
+    })
+    .map_err(protocol)?;
     let completed_inputs = crate::input_materialization::execute_locally(
         analysis_config.clone(),
         &decoded.input_materializations,
         &composition_store,
         &decoded.artifact_access,
         workers,
+        &meshing.artifact,
     )
     .await?;
-    let mut compiled = product.compiled;
-    let mut workloads = product.workloads;
-    let mut resolved_model = workloads.authored_model().map_err(protocol)?.clone();
-    crate::input_materialization::apply_to_model(&mut resolved_model, completed_inputs)?;
-    workloads
-        .replace_model(resolved_model.clone())
-        .map_err(protocol)?;
-    compiled.model = resolved_model;
+    crate::input_materialization::apply_to_model(&mut compiled.model, completed_inputs)?;
+    let workloads = plan_structural_study(&compiled, decoded.planning).map_err(protocol)?;
     emit_local_progress(
         &observers,
         OPERATION,

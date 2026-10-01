@@ -97,6 +97,7 @@ pub struct PreparedGeneratorChunk {
 pub struct PreparedSignalMaterialization {
     pub authored: runmat_analysis_core::PhysicalSignal,
     pub admitted: AdmittedSignalGenerator,
+    pub topology_binding: Option<crate::SignalTopologyBinding>,
     pub program: PreparedGeneratorProgram,
     pub input_objects: Vec<ProgramExecutionObject>,
     pub input_admissions: Vec<SignalInputAdmission>,
@@ -107,10 +108,12 @@ pub struct PreparedSignalMaterialization {
 pub struct SignalMaterializationExpectation {
     pub authored: runmat_analysis_core::PhysicalSignal,
     pub admitted: AdmittedSignalGenerator,
+    pub topology_binding: Option<crate::SignalTopologyBinding>,
 }
 
 impl SignalMaterializationExpectation {
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
+        validate_topology_binding(&self.authored, self.topology_binding.as_ref())?;
         self.admitted.program_revision.validate()?;
         let generator = self.authored.generator().ok_or_else(|| {
             AnalysisBridgeError::Invalid(
@@ -136,10 +139,44 @@ impl SignalMaterializationExpectation {
         }
         Ok(())
     }
+
+    pub fn validate_for_mesh(
+        &self,
+        mesh: &runmat_meshing_core::SolverMeshArtifact,
+    ) -> AnalysisBridgeResult<()> {
+        self.validate()?;
+        if let Some(binding) = &self.topology_binding {
+            binding.validate_for(&self.authored, mesh)?;
+        }
+        Ok(())
+    }
+
+    pub fn validate_realization(
+        &self,
+        realization: &runmat_analysis_fea::execution::CanonicalSignalRealization,
+    ) -> AnalysisBridgeResult<()> {
+        self.validate()?;
+        let count = self
+            .topology_binding
+            .as_ref()
+            .map(|binding| {
+                u64::try_from(binding.entity_count()).map_err(|_| {
+                    AnalysisBridgeError::Invalid("signal entity count exceeds u64".into())
+                })
+            })
+            .transpose()?;
+        if realization.topology_entity_count != count {
+            return Err(AnalysisBridgeError::Identity(
+                "signal realization rows differ from the prepared mesh binding",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl PreparedSignalMaterialization {
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
+        validate_topology_binding(&self.authored, self.topology_binding.as_ref())?;
         self.program.descriptor.validate_for_portable_host()?;
         validate_signal_generator_chunks(
             &self.authored,
@@ -153,6 +190,17 @@ impl PreparedSignalMaterialization {
         )?;
         validate_prepared_generator_program(&self.admitted, &self.program)?;
         self.validate_input_admissions()?;
+        Ok(())
+    }
+
+    pub fn validate_for_mesh(
+        &self,
+        mesh: &runmat_meshing_core::SolverMeshArtifact,
+    ) -> AnalysisBridgeResult<()> {
+        self.validate()?;
+        if let Some(binding) = &self.topology_binding {
+            binding.validate_for(&self.authored, mesh)?;
+        }
         Ok(())
     }
 
@@ -210,7 +258,28 @@ impl PreparedSignalMaterialization {
         Ok(SignalMaterializationExpectation {
             authored: self.authored.clone(),
             admitted: self.admitted.clone(),
+            topology_binding: self.topology_binding.clone(),
         })
+    }
+}
+
+fn validate_topology_binding(
+    authored: &runmat_analysis_core::PhysicalSignal,
+    binding: Option<&crate::SignalTopologyBinding>,
+) -> AnalysisBridgeResult<()> {
+    match (authored.shape(), binding) {
+        (runmat_analysis_core::SignalShape::TopologyField { .. }, Some(binding)) => {
+            binding.validate_shape(authored)
+        }
+        (runmat_analysis_core::SignalShape::TopologyField { .. }, None) => {
+            Err(AnalysisBridgeError::Invalid(
+                "topology signal materialization requires an authoritative mesh binding".into(),
+            ))
+        }
+        (_, Some(_)) => Err(AnalysisBridgeError::Invalid(
+            "non-topology signal materialization carries a mesh binding".into(),
+        )),
+        (_, None) => Ok(()),
     }
 }
 
@@ -453,7 +522,13 @@ pub fn prepare_signal_materialization(
     chunks: Vec<GeneratorChunk>,
     mut input_objects: Vec<ProgramExecutionObject>,
     mut input_admissions: Vec<SignalInputAdmission>,
+    mesh: Option<&runmat_meshing_core::SolverMeshArtifact>,
 ) -> AnalysisBridgeResult<PreparedSignalMaterialization> {
+    let topology_binding = match mesh {
+        Some(mesh) => crate::SignalTopologyBinding::derive(&authored, mesh)?,
+        None => None,
+    };
+    validate_topology_binding(&authored, topology_binding.as_ref())?;
     input_objects.sort_by_key(|object| object.reference.logical_digest);
     input_admissions.sort_by(|left, right| {
         (&left.artifact_id, left.logical_digest).cmp(&(&right.artifact_id, right.logical_digest))
@@ -462,6 +537,7 @@ pub fn prepare_signal_materialization(
     let prepared = PreparedSignalMaterialization {
         authored,
         admitted,
+        topology_binding,
         program,
         input_objects,
         input_admissions,

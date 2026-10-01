@@ -16,8 +16,8 @@ pub use acoustic_planning::{
     AcousticStudyPlanningPolicy, PlannedAcousticFrequency,
 };
 pub use acoustic_product::{
-    build_acoustic_study_product, AcousticStudyProduct, AcousticStudyProductError,
-    AcousticStudyProductInput,
+    build_acoustic_study_product, plan_acoustic_study_product, AcousticStudyProduct,
+    AcousticStudyProductError, AcousticStudyProductInput,
 };
 pub use compilation::{
     compile_analysis_study, AnalysisStudyCompilationError, AnalysisStudyCompilationInput,
@@ -47,6 +47,6 @@ pub use thermal_planning::{
     ThermalStudyPlanningError, ThermalStudyPlanningPolicy,
 };
 pub use thermal_product::{
-    build_thermal_study_product, ThermalStudyProduct, ThermalStudyProductError,
-    ThermalStudyProductInput,
+    build_thermal_study_product, plan_thermal_study_product, ThermalStudyProduct,
+    ThermalStudyProductError, ThermalStudyProductInput,
 };
