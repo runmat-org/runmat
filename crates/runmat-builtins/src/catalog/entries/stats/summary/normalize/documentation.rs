@@ -64,7 +64,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
             label: "Normalization methods, exactness, precision, dimension, and provider restoration",
             location: "crates/runmat-runtime/src/builtins/stats/summary/normalize/tests.rs" }],
-        notes: &["This is a host-materialization path with class-preserving output restoration where the input owner supports it; neither the legacy fusion annotation nor provider residency implies a resident normalization kernel."],
+        notes: &["Normalization computes on the host and restores the output class and provider placement where supported by the input owner. It does not use a resident normalization kernel."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
