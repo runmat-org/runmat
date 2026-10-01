@@ -155,21 +155,27 @@ fn expected_cost(counts: Counts, cost: &[[f64; 2]; 2]) -> f64 {
     // already visited, and a later tiny mass can still contribute through
     // the scaled product even when adding it cannot change the running mass.
     components.sort_by(|left, right| right.1.total_cmp(&left.1));
-    let mut mass = 0.0_f64;
+    // The public total can be finite even when summing the same components
+    // in descending order overflows. Keep the running mass in units of its
+    // largest component, while using the original count in each adjustment
+    // so a tiny count is not lost by the scaled-mass rounding.
+    let mass_scale = components[0].1;
+    let mut scaled_mass = 0.0_f64;
     let mut mean = 0.0_f64;
     for (value, count) in components {
         if count == 0.0 {
             continue;
         }
-        let next_mass = mass + count;
+        let next_scaled_mass = scaled_mass + count / mass_scale;
         let difference = value - mean;
-        let adjustment = numerics::product_ratio(difference.abs(), count, next_mass, 1.0);
+        let adjustment =
+            numerics::product_ratio(difference.abs(), count, mass_scale, next_scaled_mass);
         mean = if difference.is_sign_negative() {
             mean - adjustment
         } else {
             mean + adjustment
         };
-        mass = next_mass;
+        scaled_mass = next_scaled_mass;
     }
     mean
 }

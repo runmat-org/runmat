@@ -79,6 +79,21 @@ fn expected_cost_keeps_finite_extreme_weighted_means() {
     let expected = 1.0e308 * f64::from_bits(1) + 1.0e-308;
     let result = core::criterion_value(mixed, Criterion::ExpectedCost, &mixed_cost);
     assert!((result / expected - 1.0).abs() < 1.0e-14);
+
+    // These four positive masses have a finite public total, but adding the
+    // largest three first overflows binary64. Their exact proportions are
+    // approximately 3/4 TN, 1/8 FP, 1/8 TP and a negligible FN. Independent
+    // cost arithmetic gives 2*(3/4) + 8*(1/8) = 2.5.
+    let reordered_overflow = Counts {
+        tp: 2.2471164185778941e307,
+        fp: 2.2471164185778941e307,
+        tn: 1.3482698511467367e308,
+        fn_: 9.9792015476736e291,
+    };
+    assert!(reordered_overflow.total().is_finite());
+    let costs = [[2.0, 8.0], [0.0, 0.0]];
+    let result = core::criterion_value(reordered_overflow, Criterion::ExpectedCost, &costs);
+    assert!((result - 2.5).abs() < 1.0e-14, "{result}");
 }
 
 #[test]
