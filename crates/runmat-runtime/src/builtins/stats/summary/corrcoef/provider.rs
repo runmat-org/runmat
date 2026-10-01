@@ -113,15 +113,10 @@ pub(super) async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Optio
     match provider.corrcoef(&matrix_handle, &options).await {
         Ok(result) => {
             let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
-            let Some(mut result) =
-                precision
-                    .align_provider(provider, result)
-                    .await
-                    .map_err(|error| {
-                        corrcoef_provider_error(
-                            runmat_accelerate_api::ProviderExecutionError::from_source(error),
-                        )
-                    })?
+            let Some(mut result) = precision
+                .align_provider(provider, result)
+                .await
+                .map_err(|error| corrcoef_provider_error(error.into()))?
             else {
                 return Ok(None);
             };

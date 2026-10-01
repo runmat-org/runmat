@@ -75,15 +75,10 @@ pub(super) async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> 
     {
         Ok(result) => {
             let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
-            let Some(mut result) =
-                precision
-                    .align_provider(provider, result)
-                    .await
-                    .map_err(|error| {
-                        cov_provider_error(
-                            runmat_accelerate_api::ProviderExecutionError::from_source(error),
-                        )
-                    })?
+            let Some(mut result) = precision
+                .align_provider(provider, result)
+                .await
+                .map_err(|error| cov_provider_error(error.into()))?
             else {
                 return Ok(None);
             };
@@ -201,7 +196,7 @@ async fn materialize_gpu_weight_vector(
             Ok(Some(handle.clone()))
         }
         other => {
-            let weights = value_to_weight_vector(other.clone(), expected_rows).await?;
+            let weights = super::host::value_to_weight_vector(other.clone(), expected_rows).await?;
             let shape = vec![expected_rows, 1];
             let weights = match provider.precision() {
                 runmat_accelerate_api::ProviderPrecision::F32 => Tensor::from_f32(

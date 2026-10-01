@@ -3,7 +3,7 @@ use crate::builtins::common::test_support;
 use futures::executor::block_on;
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;
-use runmat_builtins::CORRCOEF_DESCRIPTOR;
+use runmat_builtins::{BuiltinOutputMode, CORRCOEF_DESCRIPTOR};
 use runmat_value::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Value,
 };
@@ -446,6 +446,39 @@ fn corrcoef_resident_integer_gate_precedes_provider_dispatch() {
             Some("RunMat:compatibility:CorrcoefIntegerDataExtension")
         );
         drop(handle);
+    });
+}
+
+#[test]
+fn resident_complex_observations_preserve_host_complex_correlation() {
+    test_support::with_test_provider(|provider| {
+        let input = ComplexTensor::new(
+            vec![
+                (1.0, 0.0),
+                (2.0, 0.0),
+                (3.0, 0.0),
+                (0.0, 1.0),
+                (0.0, 2.0),
+                (0.0, 3.0),
+            ],
+            vec![3, 2],
+        )
+        .unwrap();
+        let handle = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+        let Value::ComplexTensor(result) = block_on(corrcoef_builtin(
+            Value::GpuTensor(handle.clone()),
+            Vec::new(),
+        ))
+        .expect("admitted complex materialization") else {
+            panic!("complex correlation must retain its output class");
+        };
+        assert_eq!(result.shape, vec![2, 2]);
+        let values = result.materialize_f64();
+        assert_eq!(values[0], (1.0, 0.0));
+        assert_eq!(values[3], (1.0, 0.0));
+        assert!(values[1].0.abs() < 1e-12 && (values[1].1 + 1.0).abs() < 1e-12);
+        assert!(values[2].0.abs() < 1e-12 && (values[2].1 - 1.0).abs() < 1e-12);
+        assert!(handle.allocation_lease().validate_live().is_ok());
     });
 }
 

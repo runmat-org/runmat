@@ -67,7 +67,6 @@ fn cov_descriptor_signatures_cover_core_forms() {
     assert!(labels.contains(&"C = cov(X, Y, w, opt)"));
 }
 
-#[cfg(feature = "wgpu")]
 fn cov_builtin_sync(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     block_on(super::cov_builtin(value, rest))
 }

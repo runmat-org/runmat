@@ -21,7 +21,9 @@ pub(super) async fn corrcoef_host(
 
 async fn value_to_numeric_input_gather(value: Value) -> BuiltinResult<NumericInput> {
     let gathered = match value {
-        Value::GpuTensor(handle) => Value::Tensor(gpu_helpers::gather_tensor_async(&handle).await?),
+        Value::GpuTensor(handle) => {
+            gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?
+        }
         other => other,
     };
     match gathered {

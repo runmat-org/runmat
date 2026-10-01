@@ -42,7 +42,10 @@ async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
     }
 }
 
-async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinResult<Vec<f64>> {
+pub(super) async fn value_to_weight_vector(
+    value: Value,
+    expected_rows: usize,
+) -> BuiltinResult<Vec<f64>> {
     let tensor = match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await?,
         Value::LogicalArray(logical) => {
