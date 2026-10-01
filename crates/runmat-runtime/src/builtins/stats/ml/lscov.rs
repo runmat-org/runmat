@@ -84,8 +84,13 @@ async fn lscov_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Va
     if crate::output_count::current_output_count().is_some_and(|count| count > 4) {
         return Err(invalid("lscov: too many output arguments"));
     }
-    let header = parse_header(rest)?;
-    preflight_geometry(&a, &b, &header, crate::output_count::current_output_count())?;
+    let mut header = parse_header(rest)?;
+    preflight_geometry(
+        &a,
+        &b,
+        &mut header,
+        crate::output_count::current_output_count(),
+    )?;
     let a = gather_numeric_matrix(a).await?;
     let b = gather_numeric_matrix(b).await?;
     let parsed = finish_header(header, matrix_rows(&a)).await?;

@@ -148,7 +148,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     } else if b_dims[0] == a_rows && a_rows.is_some() {
         b_dims[1]
     } else {
-        if a_rows.is_some() && b_dims[0].is_some() && b_count.is_some() && b_count != a_rows {
+        if a_rows.is_some()
+            && b_dims[0].is_some()
+            && b_count.is_some()
+            && !(known_vector && b_count == a_rows)
+        {
             errors.push(argument_error(
                 "RM-CATALOG-LSCOV-ROWS",
                 "B must have one row per observation",

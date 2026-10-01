@@ -39,7 +39,7 @@ fn visible_shape(value: &Value) -> BuiltinResult<VisibleShape> {
 pub(super) fn preflight_geometry(
     a: &Value,
     b: &Value,
-    header: &LscovArguments,
+    header: &mut LscovArguments,
     outputs: Option<usize>,
 ) -> BuiltinResult<()> {
     let a = visible_shape(a)?;
@@ -70,7 +70,7 @@ pub(super) fn preflight_geometry(
         ensure_work_budget(a.columns)?;
         ensure_output_budget(a.columns, response_columns, outputs.unwrap_or(1))?;
     }
-    if let Some(weight) = &header.weighting {
+    if let Some(WeightingInput::Pending(weight)) = &header.weighting {
         if !matches!(
             weight,
             Value::Tensor(_)
@@ -80,6 +80,10 @@ pub(super) fn preflight_geometry(
                 | Value::Int(_)
                 | Value::Bool(_)
         ) {
+            return Err(invalid("lscov: V must be real numeric or logical"));
+        }
+        if matches!(weight, Value::GpuTensor(handle) if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real)
+        {
             return Err(invalid("lscov: V must be real numeric or logical"));
         }
         let weight = visible_shape(weight)?;
@@ -96,6 +100,16 @@ pub(super) fn preflight_geometry(
             if !vector {
                 ensure_budget(a.rows, a.rows, "covariance matrix")?;
             }
+        }
+    }
+    if !matches!(
+        header.weighting.as_ref(),
+        Some(WeightingInput::Pending(Value::GpuTensor(_)))
+    ) {
+        if let Some(WeightingInput::Pending(weight)) = header.weighting.take() {
+            header.weighting = Some(WeightingInput::Prepared(parse_weighting_host(
+                weight, a.rows,
+            )?));
         }
     }
     Ok(())
@@ -117,8 +131,13 @@ pub(super) async fn gather_numeric_matrix(value: Value) -> BuiltinResult<Numeric
 }
 
 pub(super) struct LscovArguments {
-    weighting: Option<Value>,
+    weighting: Option<WeightingInput>,
     algorithm: Algorithm,
+}
+
+pub(super) enum WeightingInput {
+    Prepared(Weighting),
+    Pending(Value),
 }
 
 pub(super) fn parse_header(rest: Vec<Value>) -> BuiltinResult<LscovArguments> {
@@ -140,7 +159,7 @@ pub(super) fn parse_header(rest: Vec<Value>) -> BuiltinResult<LscovArguments> {
         (None, Some(_)) => unreachable!("second argument requires a first"),
     };
     Ok(LscovArguments {
-        weighting,
+        weighting: weighting.map(WeightingInput::Pending),
         algorithm,
     })
 }
@@ -150,7 +169,8 @@ pub(super) async fn finish_header(
     rows: usize,
 ) -> BuiltinResult<ParsedArgs> {
     let weighting = match header.weighting {
-        Some(value) => parse_weighting(value, rows).await?,
+        Some(WeightingInput::Prepared(value)) => value,
+        Some(WeightingInput::Pending(value)) => parse_weighting(value, rows).await?,
         None => Weighting::Identity,
     };
     Ok(ParsedArgs {
@@ -166,7 +186,11 @@ pub(super) fn parse_algorithm(keyword: &str) -> BuiltinResult<Algorithm> {
 
 pub(super) async fn parse_weighting(value: Value, rows: usize) -> BuiltinResult<Weighting> {
     let gathered = gather_if_needed_async(&value).await?;
-    let tensor = tensor::value_into_tensor_for(NAME, gathered)
+    parse_weighting_host(gathered, rows)
+}
+
+fn parse_weighting_host(value: Value, rows: usize) -> BuiltinResult<Weighting> {
+    let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|err| invalid(format!("lscov: {err}")))?;
     if tensor::tensor_element_len(&tensor) == 0 {
         return Ok(Weighting::Identity);

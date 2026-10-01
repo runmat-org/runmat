@@ -76,3 +76,32 @@ fn impossible_response_geometry_precedes_resident_design_download() {
     assert!(error.message().contains("observation"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn invalid_host_weights_precede_resident_design_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let a = Tensor::new(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], vec![3, 2]).unwrap();
+    let a = crate::builtins::common::gpu_helpers::upload_tensor(provider, &a).unwrap();
+    let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
+    let invalid_weights = tensor(vec![0.0, 0.0, 0.0], 3, 1);
+    let error = block_on(lscov_builtin(Value::GpuTensor(a), b, vec![invalid_weights]))
+        .expect_err("all-zero weights");
+    assert!(error.message().contains("positive"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn nonvector_response_with_matching_count_rejects_wrong_rows_before_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = CountingProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let a = Tensor::new(vec![1.0, 1.0, 1.0, 1.0], vec![4, 1]).unwrap();
+    let a = crate::builtins::common::gpu_helpers::upload_tensor(provider, &a).unwrap();
+    let b = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
+    let error = block_on(lscov_builtin(Value::GpuTensor(a), b, Vec::new()))
+        .expect_err("nonvector row mismatch");
+    assert!(error.message().contains("observation"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+}

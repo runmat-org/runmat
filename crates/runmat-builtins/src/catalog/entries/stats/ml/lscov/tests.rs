@@ -115,3 +115,23 @@ fn rank_one_response_uses_tensor_row_vector_geometry() {
         ShapeFact::from(vec![Some(2), Some(1)])
     );
 }
+
+#[test]
+fn nonvector_response_with_matching_element_count_still_rejects_wrong_rows() {
+    let inferred = inference::infer(
+        &request(
+            numeric(4, 1, NumericDomain::Real),
+            numeric(2, 2, NumericDomain::Real),
+            1,
+        ),
+        &LSCOV_CATALOG_ENTRY,
+    );
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|item| item.code == "RM-CATALOG-LSCOV-ROWS"));
+    assert!(!matches!(
+        inferred.outputs[0].kind,
+        ValueKindFact::Numeric(_)
+    ));
+}
