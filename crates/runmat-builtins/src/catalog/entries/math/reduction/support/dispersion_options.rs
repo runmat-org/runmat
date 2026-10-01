@@ -1,5 +1,5 @@
 use super::ReductionNaN;
-use runmat_types::LiteralValue;
+use runmat_types::{LiteralContext, LiteralValue};
 
 /// Sample versus population normalization shared by standard deviation and
 /// variance. Their value admission and public errors remain owner-specific.
@@ -23,6 +23,7 @@ impl DispersionNormalization {
 
 /// Literal projection of the owners' value-level normalization admission.
 /// `Unmatched` may still be an axis; `Invalid` must not prove output facts.
+#[derive(Debug, PartialEq, Eq)]
 pub(super) enum NormalizationLiteral {
     Value,
     Placeholder,
@@ -30,33 +31,47 @@ pub(super) enum NormalizationLiteral {
     Invalid,
 }
 
+#[derive(Clone, Copy)]
+enum NormalizationGrammar {
+    AxisFallback,
+    RequiredNormalization,
+}
+
 pub(super) fn std_normalization_literal(literal: &LiteralValue) -> NormalizationLiteral {
-    normalization_literal(literal, false)
+    normalization_literal(literal, NormalizationGrammar::AxisFallback)
 }
 
 pub(super) fn var_normalization_literal(literal: &LiteralValue) -> NormalizationLiteral {
-    normalization_literal(literal, true)
+    normalization_literal(literal, NormalizationGrammar::RequiredNormalization)
 }
 
-fn normalization_literal(literal: &LiteralValue, strict: bool) -> NormalizationLiteral {
+fn normalization_literal(
+    literal: &LiteralValue,
+    grammar: NormalizationGrammar,
+) -> NormalizationLiteral {
     match literal {
         LiteralValue::Empty => NormalizationLiteral::Placeholder,
         LiteralValue::Vector(values) if values.is_empty() => NormalizationLiteral::Placeholder,
         LiteralValue::Vector(values) if values.len() == 1 => {
-            normalization_literal(&values[0], strict)
+            normalization_literal(&values[0], grammar)
         }
-        LiteralValue::Vector(_) if strict => NormalizationLiteral::Invalid,
+        LiteralValue::Vector(_)
+            if matches!(grammar, NormalizationGrammar::RequiredNormalization) =>
+        {
+            NormalizationLiteral::Invalid
+        }
         LiteralValue::Bool(_) => NormalizationLiteral::Value,
-        LiteralValue::Number(value) => floating_normalization(*value, strict),
-        LiteralValue::Real { text, .. } => text
-            .parse::<f64>()
-            .map(|value| floating_normalization(value, strict))
+        LiteralValue::Number(value) => floating_normalization(*value, grammar),
+        LiteralValue::Real { .. } => LiteralContext::numeric_from_literal(literal)
+            .map(|value| floating_normalization(value, grammar))
             .unwrap_or(NormalizationLiteral::Invalid),
         LiteralValue::Integer { text, .. } => {
             let value = text.parse::<u128>().ok();
             match value {
                 Some(0 | 1) => NormalizationLiteral::Value,
-                _ if strict => NormalizationLiteral::Invalid,
+                _ if matches!(grammar, NormalizationGrammar::RequiredNormalization) => {
+                    NormalizationLiteral::Invalid
+                }
                 _ => NormalizationLiteral::Unmatched,
             }
         }
@@ -64,13 +79,15 @@ fn normalization_literal(literal: &LiteralValue, strict: bool) -> NormalizationL
     }
 }
 
-fn floating_normalization(value: f64, strict: bool) -> NormalizationLiteral {
+fn floating_normalization(value: f64, grammar: NormalizationGrammar) -> NormalizationLiteral {
     if !value.is_finite() {
         return NormalizationLiteral::Invalid;
     }
     match DispersionNormalization::from_finite_flag(value) {
         Some(_) => NormalizationLiteral::Value,
-        None if strict => NormalizationLiteral::Invalid,
+        None if matches!(grammar, NormalizationGrammar::RequiredNormalization) => {
+            NormalizationLiteral::Invalid
+        }
         None => NormalizationLiteral::Unmatched,
     }
 }
@@ -121,8 +138,11 @@ fn text_literal(literal: &LiteralValue) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DispersionControl, ReductionNaN};
-    use runmat_types::LiteralValue;
+    use super::{
+        std_normalization_literal, var_normalization_literal, DispersionControl,
+        NormalizationLiteral, ReductionNaN,
+    };
+    use runmat_types::{LiteralValue, NumericClass};
 
     #[test]
     fn owner_spellings_map_to_shared_typed_controls() {
@@ -136,5 +156,33 @@ mod tests {
             Some(DispersionControl::Missing(ReductionNaN::Omit))
         );
         assert_eq!(DispersionControl::from_std_public_option("native"), None);
+    }
+
+    #[test]
+    fn normalization_respects_physical_single_literal_and_owner_grammar() {
+        let single = LiteralValue::Real {
+            text: "1.00000001".into(),
+            class: NumericClass::Single,
+        };
+        let double = LiteralValue::Real {
+            text: "1.00000001".into(),
+            class: NumericClass::Double,
+        };
+        assert_eq!(
+            std_normalization_literal(&single),
+            NormalizationLiteral::Value
+        );
+        assert_eq!(
+            var_normalization_literal(&single),
+            NormalizationLiteral::Value
+        );
+        assert_eq!(
+            std_normalization_literal(&double),
+            NormalizationLiteral::Unmatched
+        );
+        assert_eq!(
+            var_normalization_literal(&double),
+            NormalizationLiteral::Invalid
+        );
     }
 }
