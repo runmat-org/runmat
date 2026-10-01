@@ -6,9 +6,8 @@ use crate::{
     BuiltinCatalogEntry,
 };
 use runmat_types::{
-    rules::shape::broadcast_shape, standard, CallInference, CallRequest, DynamicReason,
-    NumericClass, NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact,
-    ValueKindFact,
+    broadcast_shape, standard, CallInference, CallRequest, DynamicReason, NumericClass,
+    NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
