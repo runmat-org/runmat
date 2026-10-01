@@ -1,5 +1,5 @@
 use futures::executor::block_on;
-use runmat_value::{CellArray, CharArray, IntegerStorage};
+use runmat_value::{CellArray, CharArray, IntegerStorage, Tensor};
 
 use super::*;
 
