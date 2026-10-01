@@ -1938,10 +1938,10 @@ async fn ensure_device(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use runmat_builtins::MEAN_DESCRIPTOR;
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_builtins::MEAN_DESCRIPTOR;
     use runmat_value::{IntValue, IntegerStorage};
 
     fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
