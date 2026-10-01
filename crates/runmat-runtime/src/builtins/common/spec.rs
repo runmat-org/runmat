@@ -176,12 +176,7 @@ pub enum ResidencyPolicy {
     GatherImmediately,
 }
 
-/// How reductions should treat NaN values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub enum ReductionNaN {
-    Include,
-    Omit,
-}
+pub use runmat_builtins::ReductionNaN;
 
 /// Shape requirements for fused kernels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

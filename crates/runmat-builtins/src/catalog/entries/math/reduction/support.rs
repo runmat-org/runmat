@@ -1,3 +1,6 @@
+mod missing_policy;
+pub use missing_policy::ReductionNaN;
+
 macro_rules! define_logical_reduction_entry {
     (
         entry: $entry:ident,

@@ -243,7 +243,7 @@ pub(super) fn fillmissing_aggregate_contains_integer(value: &Value) -> BuiltinRe
 pub(super) async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_output_arity("nanmean", 1)?;
     ensure_nan_integer_extension(&NANMEAN_INTEGER_EXTENSION, "nanmean", &value, &rest)?;
-    mean::mean_builtin(value, rest_with_omitnan(rest)).await
+    mean::mean_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
 #[runtime_builtin(

@@ -15,6 +15,24 @@ fn nanmean_alias_uses_omitnan() {
 }
 
 #[test]
+fn nanmean_alias_imposes_omission_without_synthetic_argument() {
+    let input = tensor(vec![1.0, f64::NAN, 3.0], vec![1, 3]);
+    let result = block_on(nanmean_builtin(
+        input.clone(),
+        vec![Value::from("all"), Value::from("includenan")],
+    ))
+    .expect("legacy alias retains its omission policy");
+    assert!(matches!(result, Value::Num(value) if (value - 2.0).abs() < 1e-12));
+
+    let ordinary = block_on(crate::builtins::math::reduction::mean::mean_builtin(
+        input,
+        vec![Value::from("all"), Value::from("includenan")],
+    ))
+    .expect("ordinary mean honors the explicit inclusion policy");
+    assert!(matches!(ordinary, Value::Num(value) if value.is_nan()));
+}
+
+#[test]
 fn legacy_nan_reductions_gate_typed_integer_data_by_compatibility_mode() {
     type LegacyNanCase = (
         fn(Value, Vec<Value>) -> BuiltinResult<Value>,

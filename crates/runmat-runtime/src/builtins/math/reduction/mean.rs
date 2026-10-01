@@ -664,6 +664,14 @@ enum MeanAxes {
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
 pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    mean_with_nan_policy(value, rest, None).await
+}
+
+pub(crate) async fn mean_with_nan_policy(
+    value: Value,
+    rest: Vec<Value>,
+    imposed_nan_mode: Option<ReductionNaN>,
+) -> crate::BuiltinResult<Value> {
     // Normalise argument order defensively:
     // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
     // argument exists in 'rest', swap them so we interpret calls like
@@ -677,7 +685,13 @@ pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::Built
     }
 
     let input_meta = InputMeta::from_value(&value);
-    let parsed = parse_arguments(&rest).await?;
+    let mut parsed = parse_arguments(&rest).await?;
+    // Legacy NaN aliases impose omission after parsing the owning reduction's
+    // public controls. This retains their previous behavior even if a caller
+    // also supplied an explicit inclusion flag, without fabricating an option.
+    if let Some(mode) = imposed_nan_mode {
+        parsed.nan_mode = mode;
+    }
     if matches!(parsed.output, OutputTemplate::Native) {
         if let Value::GpuTensor(handle) = &value {
             if runmat_accelerate_api::handle_integer_type(handle).is_some() {
@@ -790,6 +804,11 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     while idx < args.len() {
         let arg = &args[idx];
         if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
+            if let Some(mode) = ReductionNaN::from_public_option(text) {
+                nan_mode = mode;
+                idx += 1;
+                continue;
+            }
             match text.as_str() {
                 "weights" => {
                     if weights.is_some() {
@@ -802,16 +821,6 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                         .ok_or_else(|| mean_invalid_argument("mean: Weights requires a value"))?;
                     weights = Some(parse_weights(value).await?);
                     idx += 2;
-                    continue;
-                }
-                "omitnan" | "omitmissing" => {
-                    nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includenan" | "includemissing" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
                     continue;
                 }
                 "all" => {
@@ -829,6 +838,11 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
             }
         }
         if let Some(keyword) = keyword_of(arg) {
+            if let Some(mode) = ReductionNaN::from_public_option(&keyword) {
+                nan_mode = mode;
+                idx += 1;
+                continue;
+            }
             match keyword.as_str() {
                 "weights" => {
                     if weights.is_some() {
@@ -841,16 +855,6 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                         .ok_or_else(|| mean_invalid_argument("mean: Weights requires a value"))?;
                     weights = Some(parse_weights(value).await?);
                     idx += 2;
-                    continue;
-                }
-                "omitnan" | "omitmissing" => {
-                    nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includenan" | "includemissing" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
                     continue;
                 }
                 "all" => {
