@@ -67,9 +67,11 @@ fn integer_values_exact_in_f64(value: &Value) -> bool {
     match value {
         Value::Int(integer) => crate::builtins::common::validation::integer_is_exact_f64(integer),
         Value::Tensor(tensor) => tensor.integer_storage().is_none_or(|storage| {
-            storage
-                .exact_values()
-                .all(|integer| crate::builtins::common::validation::integer_is_exact_f64(&integer))
+            (0..storage.len()).all(|index| {
+                storage.value_at(index).is_some_and(|integer| {
+                    crate::builtins::common::validation::integer_is_exact_f64(&integer)
+                })
+            })
         }),
         _ => true,
     }
