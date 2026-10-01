@@ -1,5 +1,5 @@
 //! Metadata admission before any resident input is downloaded.
-use super::{invalid_argument, parse_type};
+use super::{invalid_argument, parse_type, string_matches};
 use crate::BuiltinResult;
 use runmat_builtins::DiscriminantType;
 use runmat_value::Value;
@@ -36,8 +36,70 @@ pub(super) fn admit(
             ));
         }
     }
-    rest.first()
-        .map_or(Ok(DiscriminantType::Linear), parse_type)
+    let discriminant = rest
+        .first()
+        .map_or(Ok(DiscriminantType::Linear), parse_type)?;
+    if let Some(prior) = rest.get(1) {
+        preflight_prior(prior)?;
+    }
+    Ok(discriminant)
+}
+
+fn preflight_prior(value: &Value) -> BuiltinResult<()> {
+    if string_matches(value, "empirical") {
+        return Ok(());
+    }
+    match value {
+        Value::Struct(structure) => {
+            let group = structure
+                .fields
+                .get("group")
+                .or_else(|| structure.fields.get("Group"))
+                .ok_or_else(|| {
+                    invalid_argument("classify: prior struct must contain group field")
+                })?;
+            let probability = structure
+                .fields
+                .get("prob")
+                .or_else(|| structure.fields.get("Prob"))
+                .ok_or_else(|| {
+                    invalid_argument("classify: prior struct must contain prob field")
+                })?;
+            if group_count(group)?.is_none() {
+                return Err(invalid_argument("classify: prior.group must be numeric, logical, string, character, or cellstr labels"));
+            }
+            preflight_numeric_vector(probability, "prior.prob")
+        }
+        other => preflight_numeric_vector(other, "prior"),
+    }
+}
+
+fn preflight_numeric_vector(value: &Value, role: &str) -> BuiltinResult<()> {
+    let shape = match value {
+        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::GpuTensor(handle) => {
+            if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
+                return Err(invalid_argument(format!(
+                    "classify: {role} must be a numeric vector"
+                )));
+            }
+            handle.shape()
+        }
+        Value::Num(_) | Value::Int(_) => return Ok(()),
+        _ => {
+            return Err(invalid_argument(format!(
+                "classify: {role} must be a numeric vector"
+            )))
+        }
+    };
+    if shape.iter().filter(|dimension| **dimension > 1).count() > 1 {
+        return Err(invalid_argument(format!(
+            "classify: {role} must be a vector"
+        )));
+    }
+    Ok(())
 }
 
 fn predictor_geometry(value: &Value, role: &str) -> BuiltinResult<Option<(usize, usize)>> {
@@ -85,7 +147,14 @@ fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
         }
         Value::LogicalArray(array) => Some(array.data.len()),
         Value::StringArray(array) => Some(array.data.len()),
-        Value::Cell(array) => Some(array.data.len()),
+        Value::Cell(array) => {
+            if array.data.iter().any(crate::dispatcher::value_contains_gpu) {
+                return Err(invalid_argument(
+                    "classify: group cell entries must be text",
+                ));
+            }
+            Some(array.data.len())
+        }
         Value::CharArray(array) => Some(array.rows),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
