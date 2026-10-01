@@ -308,8 +308,11 @@ fn numeric_outcomes(
             return Err(invalid("mnrfit: Y classes must be finite or NaN"));
         }
         let class_idx = classes
-            .iter()
-            .position(|class| *class == *value)
+            .binary_search_by(|class| {
+                class
+                    .partial_cmp(value)
+                    .expect("numeric response classes were filtered to finite values")
+            })
             .ok_or_else(|| internal("mnrfit: failed to map response class"))?;
         if class_idx < logits {
             outcomes[class_idx][row] = 1.0;
@@ -353,8 +356,7 @@ fn text_outcomes(
     let mut outcomes = columns(logits, rows, "text outcomes")?;
     for (row, value) in values.iter().enumerate() {
         let class_idx = classes
-            .iter()
-            .position(|class| class == value)
+            .binary_search(value)
             .ok_or_else(|| internal("mnrfit: failed to map response class"))?;
         if class_idx < logits {
             outcomes[class_idx][row] = 1.0;

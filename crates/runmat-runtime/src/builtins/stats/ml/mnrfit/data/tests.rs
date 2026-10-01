@@ -10,6 +10,11 @@ fn adjacent_finite_numeric_labels_remain_distinct_classes() {
     };
     assert_eq!(classes, vec![1.0, next]);
     assert_eq!(response.outcomes, vec![vec![1.0, 0.0, 1.0, 0.0]]);
+
+    let signed_zero = numeric_outcomes(vec![-0.0, 0.0, 1.0], vec![3, 1], 3)
+        .expect("signed zeros denote the same numeric class");
+    assert_eq!(signed_zero.classes.len(), 2);
+    assert_eq!(signed_zero.outcomes, vec![vec![1.0, 1.0, 0.0]]);
 }
 
 #[test]
