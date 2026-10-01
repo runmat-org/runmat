@@ -2,11 +2,13 @@
 //!
 //! Prepared tasks remain owned here: callers execute their immutable requests and return the
 //! associated scheduler response/accounting pair. Failed imports never advance the lifecycle.
+use crate::static_em_study::{
+    validate_accounting, StaticEmStudyPhase, StaticEmStudySource, StaticEmStudyTail,
+};
 use std::collections::BTreeSet;
 
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
-    planning::resource::FeaResourcePlan,
     study::{
         plan_electrical_study, CompiledAnalysisStudy, ElectricalStudyPlanningPolicy,
         ElectricalStudyProduct,
@@ -18,23 +20,19 @@ use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    complete_result_publication_resource_usage, extend_resource_usage, import_accuracy,
-    import_electrical_static_result, import_published_result, import_semantic_state_completion,
-    prepare_accuracy, prepare_electrical_static_task, prepare_result_publication,
-    prepare_semantic_state_publication, AccuracyPreparation, AnalysisBridgeError,
+    import_electrical_static_result, prepare_electrical_static_task, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     AnalysisOutputPolicy, ElectricalStaticTaskPreparation, ImportedAccuracy,
     ImportedElectricalStaticResult, ImportedPublishedResult, ImportedSemanticState,
     PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedAccuracy,
     PreparedElectricalStaticTask, PreparedResourceUsage, PreparedResultPublication,
-    PreparedSemanticStatePublication, ResultPublicationPreparation,
-    SemanticStatePublicationPreparation,
+    PreparedSemanticStatePublication,
 };
 
 mod completion;
 mod root;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 pub use completion::{
     import_electrical_study_completion, ElectricalStudyResultClosure, ElectricalStudyResultPhase,
 };
@@ -89,16 +87,8 @@ pub struct ElectricalStudyCoordinator {
     definition_digest: Digest,
     phase: ElectricalStudyPhase,
     solve_task: Option<PreparedElectricalStaticTask>,
-    accuracy_task: Option<PreparedAccuracy>,
-    state_task: Option<PreparedSemanticStatePublication>,
-    publication_task: Option<PreparedResultPublication>,
     result: Option<ImportedElectricalStaticResult>,
-    accuracy: Option<ImportedAccuracy>,
-    states: Vec<ImportedSemanticState>,
-    usage: Option<PreparedResourceUsage>,
-    baseline: Option<PreparedResourceUsage>,
-    terminal: Option<PreparedResourceUsage>,
-    publication: Option<ImportedPublishedResult>,
+    tail: Option<StaticEmStudyTail>,
 }
 
 impl ElectricalStudyCoordinator {
@@ -126,16 +116,8 @@ impl ElectricalStudyCoordinator {
             definition_digest,
             phase: ElectricalStudyPhase::ReadyForSolve,
             solve_task: None,
-            accuracy_task: None,
-            state_task: None,
-            publication_task: None,
             result: None,
-            accuracy: None,
-            states: Vec::new(),
-            usage: None,
-            baseline: None,
-            terminal: None,
-            publication: None,
+            tail: None,
         })
     }
 
@@ -194,226 +176,148 @@ impl ElectricalStudyCoordinator {
             self.preparation.output_policy.chunk_bytes(),
             self.preparation.output_policy.inventory_limits(),
         )?;
+        let workload = self.preparation.workload();
+        self.tail = Some(StaticEmStudyTail::new(StaticEmStudySource {
+            host: task.host.clone(),
+            result: result.objects.clone(),
+            profiles: result.source_profiles.clone(),
+            receipt: result.numerical_receipt_objects.clone(),
+            context_inputs: task.inputs.iter().filter(|input| matches!(input.manifest.kind,
+                runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ElectricalStaticWorkload
+                | runmat_analysis_fea::execution::AnalysisNumericalObjectKind::Mesh))
+                .cloned().chain(std::iter::once(result.objects.clone())).collect(),
+            accuracy_kind: AccuracySourceKind::ElectricalStatic,
+            state_kind: SemanticStatePublicationSource::StaticElectricalNativeFields,
+            topology: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
+            sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
+            step: self.preparation.selected_step().clone(),
+            formulation_requirement: workload.formulation_requirement,
+            observations: None,
+            program_revision: self.preparation.program_revision.clone(),
+            output_policy: self.preparation.output_policy,
+        }, usage));
         self.result = Some(result);
-        self.usage = Some(usage);
         self.closures.push(closure);
         self.phase = ElectricalStudyPhase::ReadyForAccuracy;
         Ok(())
     }
 
     pub fn prepare_accuracy(&mut self) -> AnalysisBridgeResult<&PreparedAccuracy> {
-        self.require(ElectricalStudyPhase::ReadyForAccuracy)?;
-        let result = self.result.as_ref().expect("completed solve");
-        let workload = self.preparation.workload();
-        let task =
-            prepare_accuracy(AccuracyPreparation {
-                solve_host: self.solve_task.as_ref().expect("completed solve").host.clone(),
-                source_kind: AccuracySourceKind::ElectricalStatic,
-                source_numerical_receipt: result.numerical_receipt_objects.clone(),
-                source_observations: None,
-                source_context_inputs: self
-                    .solve_task
-                    .as_ref()
-                    .expect("completed solve")
-                    .inputs
-                    .iter()
-                    .filter(|input| {
-                        matches!(input.manifest.kind,
-                    runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ElectricalStaticWorkload
-                    | runmat_analysis_fea::execution::AnalysisNumericalObjectKind::Mesh)
-                    })
-                    .cloned()
-                    .chain(std::iter::once(result.objects.clone()))
-                    .collect(),
-                sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
-                step: self.preparation.selected_step().clone(),
-                formulation_requirement: workload.formulation_requirement,
-                program_revision: self.preparation.program_revision.clone(),
-                chunk_bytes: self.preparation.output_policy.chunk_bytes(),
-                inventory_limits: self.preparation.output_policy.inventory_limits(),
-            })?;
-        self.accuracy_task = Some(task);
-        self.phase = ElectricalStudyPhase::AwaitingAccuracy;
-        Ok(self.accuracy_task.as_ref().expect("just prepared"))
+        self.tail
+            .as_mut()
+            .ok_or_else(|| invalid("electrical solve has not completed"))?
+            .prepare_accuracy()
     }
-
     pub fn complete_accuracy(
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
         accounting: AttemptResourceAccounting,
     ) -> AnalysisBridgeResult<()> {
-        self.require(ElectricalStudyPhase::AwaitingAccuracy)?;
-        let task = self.accuracy_task.as_ref().expect("awaited accuracy");
-        validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let closure = ElectricalStudyResultClosure::new(
-            ElectricalStudyResultPhase::Accuracy,
-            &task.host,
-            &response,
-            &accounting,
-        );
-        let accuracy = import_accuracy(
-            source,
-            response,
-            task,
-            self.preparation.output_policy.inventory_limits(),
-        )?;
-        let usage = self.extend_usage(&task.resource_plan, accounting)?;
-        self.accuracy = Some(accuracy);
+        let phase = ElectricalStudyResultPhase::Accuracy;
+        let tail = self
+            .tail
+            .as_mut()
+            .ok_or_else(|| invalid("electrical solve has not completed"))?;
+        let task = tail
+            .accuracy_task
+            .as_ref()
+            .ok_or_else(|| invalid("electrical phase has not been prepared"))?;
+        let closure = ElectricalStudyResultClosure::new(phase, &task.host, &response, &accounting);
+        tail.complete_accuracy(source, response, accounting)?;
         self.closures.push(closure);
-        self.usage = Some(usage);
-        self.advance_state();
         Ok(())
     }
-
-    /// Publish the exact complete static state declared by the standalone electrical step.
     pub fn prepare_next_state(
         &mut self,
     ) -> AnalysisBridgeResult<&PreparedSemanticStatePublication> {
-        let ordinal = self.states.len();
-        self.require(ElectricalStudyPhase::ReadyForState { ordinal })?;
-        let result = self.result.as_ref().expect("completed solve");
-        let declaration = self.preparation.selected_step().state_outputs[ordinal].clone();
-        let task = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
-            source_host: self
-                .solve_task
-                .as_ref()
-                .expect("completed solve")
-                .host
-                .clone(),
-            source_result: result.objects.clone(),
-            source_profiles: result.source_profiles.clone(),
-            source: SemanticStatePublicationSource::StaticElectricalNativeFields,
-            declaration,
-            topology_digest: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
-            program_revision: self.preparation.program_revision.clone(),
-            chunk_bytes: self.preparation.output_policy.chunk_bytes(),
-            inventory_limits: self.preparation.output_policy.inventory_limits(),
-        })?;
-        self.state_task = Some(task);
-        self.phase = ElectricalStudyPhase::AwaitingState { ordinal };
-        Ok(self.state_task.as_ref().expect("just prepared"))
+        self.tail
+            .as_mut()
+            .ok_or_else(|| invalid("electrical solve has not completed"))?
+            .prepare_next_state()
     }
-
     pub fn complete_next_state(
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
         accounting: AttemptResourceAccounting,
     ) -> AnalysisBridgeResult<()> {
-        self.require(ElectricalStudyPhase::AwaitingState {
-            ordinal: self.states.len(),
-        })?;
-        let task = self.state_task.as_ref().expect("awaited state");
-        validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let closure = ElectricalStudyResultClosure::new(
-            ElectricalStudyResultPhase::State {
-                ordinal: self.states.len(),
-            },
-            &task.host,
-            &response,
-            &accounting,
-        );
-        let state = import_semantic_state_completion(
-            source,
-            response,
-            task,
-            self.preparation.output_policy.inventory_limits(),
-        )?;
-        let usage = self.extend_usage(&task.resource_plan, accounting)?;
-        self.states.push(state);
+        let phase = ElectricalStudyResultPhase::State {
+            ordinal: self.states().len(),
+        };
+        let tail = self
+            .tail
+            .as_mut()
+            .ok_or_else(|| invalid("electrical solve has not completed"))?;
+        let task = tail
+            .state_task
+            .as_ref()
+            .ok_or_else(|| invalid("electrical phase has not been prepared"))?;
+        let closure = ElectricalStudyResultClosure::new(phase, &task.host, &response, &accounting);
+        tail.complete_next_state(source, response, accounting)?;
         self.closures.push(closure);
-        self.usage = Some(usage);
-        self.state_task = None;
-        self.advance_state();
         Ok(())
     }
-
-    /// Freeze the immutable solve/accuracy/all-states baseline named by the receipt.
-    pub fn freeze_baseline(&mut self) -> AnalysisBridgeResult<&PreparedResourceUsage> {
-        self.require(ElectricalStudyPhase::ReadyForBaseline)?;
-        self.baseline = self.usage.clone();
-        self.phase = ElectricalStudyPhase::ReadyForPublication;
-        Ok(self.baseline.as_ref().expect("completed usage"))
-    }
-
     pub fn prepare_publication(&mut self) -> AnalysisBridgeResult<&PreparedResultPublication> {
-        self.require(ElectricalStudyPhase::ReadyForPublication)?;
-        let task = prepare_result_publication(ResultPublicationPreparation {
-            accuracy_host: self
-                .accuracy_task
-                .as_ref()
-                .expect("completed accuracy task")
-                .host
-                .clone(),
-            source_accuracy: self
-                .accuracy
-                .as_ref()
-                .expect("completed accuracy")
-                .objects
-                .clone(),
-            source_resource_usage: self
-                .baseline
-                .as_ref()
-                .expect("frozen baseline")
-                .objects
-                .clone(),
-            source_observations: None,
-            program_revision: self.preparation.program_revision.clone(),
-            chunk_bytes: self.preparation.output_policy.chunk_bytes(),
-            inventory_limits: self.preparation.output_policy.inventory_limits(),
-        })?;
-        self.publication_task = Some(task);
-        self.phase = ElectricalStudyPhase::AwaitingPublication;
-        Ok(self.publication_task.as_ref().expect("just prepared"))
+        self.tail
+            .as_mut()
+            .ok_or_else(|| invalid("electrical solve has not completed"))?
+            .prepare_publication()
     }
-
-    /// Commit receipt and terminal accounting atomically; neither is visible on failure.
     pub fn complete_publication(
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
         accounting: AttemptResourceAccounting,
     ) -> AnalysisBridgeResult<()> {
-        self.require(ElectricalStudyPhase::AwaitingPublication)?;
-        let task = self.publication_task.as_ref().expect("awaited publication");
-        validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let closure = ElectricalStudyResultClosure::new(
-            ElectricalStudyResultPhase::Publication,
-            &task.host,
-            &response,
-            &accounting,
-        );
-        let publication = import_published_result(
-            source,
-            response,
-            task,
-            self.preparation.output_policy.inventory_limits(),
-        )?;
-        let terminal = complete_result_publication_resource_usage(
-            task,
-            &publication,
-            self.baseline.as_ref().expect("frozen baseline"),
-            &PlannedResourceUsageAttempt {
-                plan: task.resource_plan.clone(),
-                accounting,
-            },
-            self.preparation.output_policy,
-        )?;
-        self.publication = Some(publication);
+        let phase = ElectricalStudyResultPhase::Publication;
+        let tail = self
+            .tail
+            .as_mut()
+            .ok_or_else(|| invalid("electrical solve has not completed"))?;
+        let task = tail
+            .publication_task
+            .as_ref()
+            .ok_or_else(|| invalid("electrical phase has not been prepared"))?;
+        let closure = ElectricalStudyResultClosure::new(phase, &task.host, &response, &accounting);
+        tail.complete_publication(source, response, accounting)?;
         self.closures.push(closure);
-        self.terminal = Some(terminal);
-        self.phase = ElectricalStudyPhase::Complete;
         Ok(())
+    }
+    pub fn freeze_baseline(&mut self) -> AnalysisBridgeResult<&PreparedResourceUsage> {
+        self.tail
+            .as_mut()
+            .ok_or_else(|| invalid("electrical solve has not completed"))?
+            .freeze_baseline()
     }
 
     pub fn phase(&self) -> ElectricalStudyPhase {
-        self.phase
+        self.tail
+            .as_ref()
+            .map_or(self.phase, |tail| match tail.phase {
+                StaticEmStudyPhase::ReadyForAccuracy => ElectricalStudyPhase::ReadyForAccuracy,
+                StaticEmStudyPhase::AwaitingAccuracy => ElectricalStudyPhase::AwaitingAccuracy,
+                StaticEmStudyPhase::ReadyForState { ordinal } => {
+                    ElectricalStudyPhase::ReadyForState { ordinal }
+                }
+                StaticEmStudyPhase::AwaitingState { ordinal } => {
+                    ElectricalStudyPhase::AwaitingState { ordinal }
+                }
+                StaticEmStudyPhase::ReadyForBaseline => ElectricalStudyPhase::ReadyForBaseline,
+                StaticEmStudyPhase::ReadyForPublication => {
+                    ElectricalStudyPhase::ReadyForPublication
+                }
+                StaticEmStudyPhase::AwaitingPublication => {
+                    ElectricalStudyPhase::AwaitingPublication
+                }
+                StaticEmStudyPhase::Complete => ElectricalStudyPhase::Complete,
+            })
     }
 
     pub fn into_completed(self) -> AnalysisBridgeResult<CompletedElectricalStudy> {
         self.require(ElectricalStudyPhase::Complete)?;
         let workload = self.preparation.workload().clone();
+        let tail = self.tail.expect("completed shared terminal lifecycle");
         Ok(CompletedElectricalStudy {
             replay: completion::ElectricalStudyReplayContext {
                 policy: self.preparation.policy,
@@ -428,15 +332,15 @@ impl ElectricalStudyCoordinator {
             compiled: self.preparation.product.compiled,
             workload,
             result: self.result.expect("completed solve"),
-            accuracy: self.accuracy.expect("completed accuracy"),
-            states: self.states,
-            baseline_usage: self.baseline.expect("frozen baseline"),
-            terminal_usage: self.terminal.expect("completed terminal accounting"),
-            publication: self.publication.expect("completed publication"),
+            accuracy: tail.accuracy.expect("completed accuracy"),
+            states: tail.states,
+            baseline_usage: tail.baseline.expect("frozen baseline"),
+            terminal_usage: tail.terminal.expect("completed terminal accounting"),
+            publication: tail.publication.expect("completed publication"),
         })
     }
     pub fn is_complete(&self) -> bool {
-        self.phase == ElectricalStudyPhase::Complete
+        self.phase() == ElectricalStudyPhase::Complete
     }
     pub fn policy(&self) -> ElectricalStudyPlanningPolicy {
         self.preparation.policy
@@ -451,96 +355,35 @@ impl ElectricalStudyCoordinator {
         self.result.as_ref()
     }
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
-        self.accuracy.as_ref()
+        self.tail.as_ref().and_then(|tail| tail.accuracy.as_ref())
     }
     pub fn states(&self) -> &[ImportedSemanticState] {
-        &self.states
+        self.tail
+            .as_ref()
+            .map_or(&[], |tail| tail.states.as_slice())
     }
     pub fn baseline_usage(&self) -> Option<&PreparedResourceUsage> {
-        self.baseline.as_ref()
+        self.tail.as_ref().and_then(|tail| tail.baseline.as_ref())
     }
     pub fn terminal_usage(&self) -> Option<&PreparedResourceUsage> {
-        self.terminal.as_ref()
+        self.tail.as_ref().and_then(|tail| tail.terminal.as_ref())
     }
     pub fn publication(&self) -> Option<&ImportedPublishedResult> {
-        self.publication.as_ref()
+        self.tail
+            .as_ref()
+            .and_then(|tail| tail.publication.as_ref())
     }
 
     fn require(&self, expected: ElectricalStudyPhase) -> AnalysisBridgeResult<()> {
-        if self.phase != expected {
+        if self.phase() != expected {
             return Err(invalid(format!(
                 "electrical study phase {:?} does not permit {:?}",
-                self.phase, expected
+                self.phase(),
+                expected
             )));
         }
         Ok(())
     }
-
-    fn advance_state(&mut self) {
-        self.phase = if self.states.len() < self.preparation.selected_step().state_outputs.len() {
-            ElectricalStudyPhase::ReadyForState {
-                ordinal: self.states.len(),
-            }
-        } else {
-            ElectricalStudyPhase::ReadyForBaseline
-        };
-    }
-
-    fn extend_usage(
-        &self,
-        plan: &FeaResourcePlan,
-        accounting: AttemptResourceAccounting,
-    ) -> AnalysisBridgeResult<PreparedResourceUsage> {
-        let wall_millis = accounting.resources.usage.wall_millis;
-        let graph = PlannedResourceUsageGraph::new(
-            vec![PlannedResourceUsageAttempt {
-                plan: plan.clone(),
-                accounting,
-            }],
-            wall_millis,
-        )?;
-        extend_resource_usage(
-            self.usage.as_ref().expect("completed solve usage"),
-            &graph,
-            &self.preparation.artifact_access,
-            self.preparation.output_policy,
-        )
-    }
-}
-
-fn validate_accounting(
-    host: &AnalysisHostWorkload,
-    plan: &FeaResourcePlan,
-    response: &ProgramExecutionResponse,
-    accounting: &AttemptResourceAccounting,
-) -> AnalysisBridgeResult<()> {
-    accounting
-        .validate()
-        .map_err(|error| invalid(error.to_string()))?;
-    let ProgramExecutionResponse::ExternalizedSuccess { result_objects, .. } = response else {
-        return Err(invalid(
-            "electrical study requires externalized phase completion",
-        ));
-    };
-    let bytes = result_objects
-        .iter()
-        .try_fold(0_u64, |sum, object| sum.checked_add(object.encoded_length))
-        .ok_or_else(|| invalid("electrical phase output byte count overflow"))?;
-    if bytes != accounting.resources.artifact_bytes
-        || !runmat_analysis_fea::planning::resource::allocation_matches_plan(
-            &accounting.resources.allocation,
-            &plan.request,
-        )
-        || !host
-            .workload
-            .generic_capabilities()?
-            .is_subset(&accounting.resources.allocation.required_capabilities)
-    {
-        return Err(AnalysisBridgeError::Identity(
-            "electrical phase accounting differs from its admitted request and output closure",
-        ));
-    }
-    Ok(())
 }
 
 fn invalid(message: impl Into<String>) -> AnalysisBridgeError {

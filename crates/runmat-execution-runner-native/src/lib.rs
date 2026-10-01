@@ -4,7 +4,9 @@ mod accelerator_placement;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
 mod analysis_electrical;
+mod analysis_magnetic;
 pub use analysis_electrical::source::electrical_study_completion_from_source;
+pub use analysis_magnetic::source::magnetic_study_completion_from_source;
 mod analysis_buckling;
 mod analysis_frequency;
 mod analysis_frequency_observations;
@@ -223,11 +225,13 @@ pub use test_workload::{execute_host_program_request, execute_host_program_reque
 pub use typed_fea::{
     checked_fea_artifact_access, materialize_checked_fea_study_geometry, prepare_checked_fea_study,
     MaterializedFeaGeometry, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
-    PreparedAuthoredThermalStudy, PreparedFeaStudy, PreparedFeaStudyRoot,
+    PreparedAuthoredMagneticStudy, PreparedAuthoredThermalStudy, PreparedFeaStudy,
+    PreparedFeaStudyRoot,
 };
 pub use typed_fea::{
     execute_checked_fea_locally, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy,
-    CompletedAuthoredThermalStudy, CompletedFeaStudyResult, CompletedLocalFeaCase,
-    LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver, LocalFeaProgressObserver,
+    CompletedAuthoredMagneticStudy, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,
+    CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,
+    LocalFeaProgressObserver,
 };
 pub use worker::run_worker_stdio;

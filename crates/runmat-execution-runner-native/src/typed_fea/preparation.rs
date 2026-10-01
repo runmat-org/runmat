@@ -11,14 +11,17 @@ use super::LocalFeaExecutionOptions;
 mod acoustic;
 mod admission;
 mod electrical;
+mod magnetic;
 mod thermal;
 pub use acoustic::PreparedAuthoredAcousticStudy;
 pub use electrical::PreparedAuthoredElectricalStudy;
+pub use magnetic::PreparedAuthoredMagneticStudy;
 pub use thermal::PreparedAuthoredThermalStudy;
 
 pub enum PreparedFeaStudyRoot {
     Acoustic(PreparedAuthoredAcousticStudy),
     Electrical(PreparedAuthoredElectricalStudy),
+    Magnetic(PreparedAuthoredMagneticStudy),
     Structural(crate::PreparedStructuralStudyRoot),
     Thermal(PreparedAuthoredThermalStudy),
 }
@@ -37,17 +40,22 @@ pub async fn prepare_study(
     authority: &str,
     options: &LocalFeaExecutionOptions,
 ) -> Result<PreparedFeaStudy, String> {
-    let family = admission::select_family(&resolved.study.sequence)?;
-    if family == admission::PreparedFamily::Acoustic
-        && (options.backend != runmat_analysis_fea::ComputeBackend::Cpu
-            || !options.accelerators.is_empty())
-    {
-        return Err("authored acoustic execution has no admitted accelerator envelope".into());
-    }
     let realized: RealizedStudy = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
         .map_err(|error| error.to_string())?;
+    let family =
+        admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?;
+    if matches!(
+        family,
+        admission::PreparedFamily::Acoustic | admission::PreparedFamily::Magnetic
+    ) && (options.backend != runmat_analysis_fea::ComputeBackend::Cpu
+        || !options.accelerators.is_empty())
+    {
+        return Err(
+            "authored acoustic/magnetic execution has no admitted accelerator envelope".into(),
+        );
+    }
     let revision = program_revision(source)?;
     let access = checked_fea_artifact_access(authority);
     let geometry_source = super::geometry::prepare_geometry_source(
@@ -122,6 +130,28 @@ pub async fn prepare_study(
         .frozen_project()
         .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
     let root = match family {
+        admission::PreparedFamily::Magnetic => {
+            if !input_materializations.is_empty() {
+                return Err(
+                    "authored magnetic execution does not support source materializations".into(),
+                );
+            }
+            PreparedFeaStudyRoot::Magnetic(PreparedAuthoredMagneticStudy {
+                geometry_meshing,
+                authored_study_digest,
+                frozen_project_digest,
+                study: realized.clone(),
+                materials: resolved.material_catalog,
+                program_revision: revision.clone(),
+                artifact_access: access,
+                input_materializations,
+                planning: runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
+                    formulation_requirement: resolved.study.formulation_requirement,
+                },
+                local_execution,
+                analysis_accelerator_requests: options.accelerators.clone(),
+            })
+        }
         admission::PreparedFamily::Electrical => {
             if options.backend != runmat_analysis_fea::ComputeBackend::Cpu
                 || !options.accelerators.is_empty()

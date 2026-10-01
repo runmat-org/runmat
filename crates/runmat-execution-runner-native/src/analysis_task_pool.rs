@@ -53,6 +53,20 @@ pub(crate) fn configure_local_analysis(
         )));
 }
 
+/// Configure an explicit authored per-worker envelope, not a fallback task request.
+/// Existing placement policies may supply task hints while retaining independently
+/// configured worker capacity; they must not implicitly resize their pools.
+pub(crate) fn configure_local_analysis_envelope(
+    config: &mut NativeExecutionConfig,
+    envelope: &ResourceRequest,
+) {
+    config.worker_cpu_millicores = envelope.cpu_millicores;
+    config.worker_memory_bytes = envelope.memory_bytes;
+    // Native workers require a nonempty scratch inventory even for tasks reserving none.
+    config.worker_scratch_bytes = envelope.scratch_bytes.max(1);
+    configure_local_analysis(config, envelope);
+}
+
 /// Placement-neutral pool used by FEA task-graph coordinators.
 ///
 /// Physics coordinators prepare exact programs, dependencies, and resource requests. This boundary

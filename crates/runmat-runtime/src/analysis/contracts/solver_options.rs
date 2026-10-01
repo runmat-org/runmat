@@ -4,7 +4,7 @@ use super::*;
 impl AnalysisSolverOptions {
     pub(in crate::analysis) fn clear_solver_mesh_artifact_path(&mut self) {
         match self {
-            Self::ElectricalStatic(_) => {}
+            Self::ElectricalStatic(_) | Self::Magnetostatic(_) => {}
             Self::StructuralLinear(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralFrequency(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralModes(options) => options.solver_mesh_artifact_path = None,
@@ -39,9 +39,9 @@ impl AnalysisSolverOptions {
         use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
 
         match (step.family, step.procedure, step.solution_space) {
-            (Electromagnetic, Static, SolutionSpace::Direct) => Ok(Self::ElectricalStatic(
-                super::AnalysisElectricalRunOptions::default(),
-            )),
+            (Electromagnetic, Static, SolutionSpace::Direct) => Err(
+                "static electromagnetic execution requires explicit equation-bound solver options".into(),
+            ),
             (Structural, Static, SolutionSpace::Direct)
             | (
                 Coupled(CoupledPhysicsFamily::Thermomechanical),
@@ -137,6 +137,12 @@ impl AnalysisSolverOptions {
     }
 
     pub fn supports(&self, step: &ProcedureStep) -> bool {
+        if matches!(self, Self::ElectricalStatic(_) | Self::Magnetostatic(_)) {
+            return step.family == PhysicsFamily::Electromagnetic
+                && step.procedure == AnalysisProcedure::Static
+                && step.solution_space == SolutionSpace::Direct
+                && step.independent_domain == runmat_analysis_core::IndependentDomain::Static;
+        }
         Self::defaults_for(step)
             .map(|expected| std::mem::discriminant(&expected) == std::mem::discriminant(self))
             .unwrap_or(false)

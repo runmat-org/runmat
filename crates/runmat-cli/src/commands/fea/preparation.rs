@@ -27,6 +27,7 @@ pub(super) fn require_remote_root(
     match root {
         runmat_execution_runner_native::PreparedFeaStudyRoot::Structural(root) => Ok(root),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Electrical(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone electrical authored roots are not implemented for remote submission"),
+        runmat_execution_runner_native::PreparedFeaStudyRoot::Magnetic(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone magnetic authored roots are not implemented for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Acoustic(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone acoustic authored roots are not implemented for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Thermal(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone thermal authored roots are not implemented for remote submission"),
     }

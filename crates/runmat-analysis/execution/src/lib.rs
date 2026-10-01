@@ -72,6 +72,13 @@ mod electrical_static_plan;
 mod electrical_static_result;
 mod electrical_static_task;
 mod electrical_study;
+mod magnetic_study;
+mod static_em_study;
+pub use magnetic_study::{
+    import_magnetic_study_completion, import_magnetic_study_root, prepare_magnetic_study_root,
+    CompletedMagneticStudy, MagneticStudyCoordinator, MagneticStudyPhase, MagneticStudyPreparation,
+    MagneticStudyResultClosure, MagneticStudyResultPhase, PreparedMagneticStudyRoot,
+};
 mod magnetic_field_recovery;
 mod magnetic_state_profiles;
 mod magnetostatic_plan;

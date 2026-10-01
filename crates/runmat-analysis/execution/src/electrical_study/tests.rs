@@ -22,7 +22,7 @@ use runmat_meshing_core::{
 
 mod import;
 
-pub(super) fn preparation() -> ElectricalStudyPreparation {
+pub(crate) fn preparation() -> ElectricalStudyPreparation {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.excitations.clear();
@@ -172,7 +172,10 @@ fn electrical_failed_response_never_advances_or_installs_usage() {
         .is_err());
     assert_eq!(study.phase(), ElectricalStudyPhase::AwaitingSolve);
     assert!(study.result().is_none());
-    assert!(study.usage.is_none());
+    // Failed solve admission must not install the shared accuracy/state/accounting authority.
+    assert!(study.tail.is_none());
+    assert!(study.baseline_usage().is_none());
+    assert!(study.terminal_usage().is_none());
     assert!(study.closures.is_empty());
 }
 

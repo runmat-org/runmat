@@ -1,18 +1,23 @@
 use runmat_analysis_core::{
-    AnalysisProcedure, AnalysisSequence, PhysicsFamily, RestartPolicy, SolutionSpace,
+    AnalysisProcedure, AnalysisSequence, ElectromagneticDomain, PhysicsFamily, RestartPolicy,
+    SolutionSpace,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PreparedFamily {
     Acoustic,
     Electrical,
+    Magnetic,
     Structural,
     Thermal,
 }
 
 /// Family dispatch only. Exact material/source/mesh/numerical admission stays with
 /// the existing compiled study product and canonical worker, not this pre-mesh gate.
-pub(super) fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamily, String> {
+pub(super) fn select_family(
+    sequence: &AnalysisSequence,
+    electromagnetic: Option<&ElectromagneticDomain>,
+) -> Result<PreparedFamily, String> {
     if sequence
         .steps
         .iter()
@@ -33,7 +38,11 @@ pub(super) fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamil
         && sequence.transitions.is_empty()
         && sequence.branches.is_empty()
     {
-        return Ok(PreparedFamily::Electrical);
+        return match electromagnetic {
+            Some(ElectromagneticDomain::Static { .. }) => Ok(PreparedFamily::Electrical),
+            Some(ElectromagneticDomain::Magnetostatic { .. }) => Ok(PreparedFamily::Magnetic),
+            Some(ElectromagneticDomain::Harmonic { .. }) | None => Err(unsupported()),
+        };
     }
     if step.family == PhysicsFamily::Acoustic
         && step.procedure == AnalysisProcedure::HarmonicResponse
@@ -65,13 +74,59 @@ pub(super) fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamil
 }
 
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, static electrical, or acoustic harmonic step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, equation-selected static electrical/magnetic, or acoustic harmonic step".into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_analysis_core::ProcedureStep;
+
+    fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamily, String> {
+        super::select_family(
+            sequence,
+            Some(&ElectromagneticDomain::Static {
+                equation: runmat_analysis_core::StaticElectricalEquation::Electrostatics,
+            }),
+        )
+    }
+
+    #[test]
+    fn static_em_dispatch_requires_exact_authored_equation() {
+        let sequence = AnalysisSequence::from_steps(
+            "field",
+            vec![ProcedureStep::electromagnetic_static("field")],
+        );
+        assert!(super::select_family(&sequence, None).is_err());
+        assert!(super::select_family(
+            &sequence,
+            Some(&ElectromagneticDomain::Harmonic {
+                reference_frequency: runmat_analysis_core::Frequency::new(1.0),
+            })
+        )
+        .is_err());
+        assert_eq!(
+            super::select_family(
+                &sequence,
+                Some(&ElectromagneticDomain::Magnetostatic {
+                    formulation:
+                        runmat_analysis_core::MagnetostaticFormulation::MagneticVectorPotential,
+                })
+            )
+            .unwrap(),
+            PreparedFamily::Magnetic
+        );
+        for equation in [
+            runmat_analysis_core::StaticElectricalEquation::Electrostatics,
+            runmat_analysis_core::StaticElectricalEquation::SteadyConduction,
+        ] {
+            assert_eq!(
+                super::select_family(&sequence, Some(&ElectromagneticDomain::Static { equation }))
+                    .unwrap(),
+                PreparedFamily::Electrical
+            );
+        }
+    }
 
     #[test]
     fn static_electrical_family_selection_keeps_restart_and_mixed_sequences_closed() {

@@ -2,10 +2,11 @@
 
 ## Decision and ownership
 
-Stage 7 remains open. This is a physical **experimental numerical/model-compilation
-baseline**, with experimental formulation identity and portable retained results,
-not production admission, authored native execution, restart, or release
-qualification. The old reduced harmonic pipeline explicitly rejects magnetic intent;
+Stage 7 remains open. This is a physical **experimental magnetostatic envelope**,
+with authored CAD/native execution, governed retained fields and observations,
+and authenticated cold completion reopening. It is not production admission,
+numerical restart, measured resource or release qualification.
+The old reduced harmonic pipeline explicitly rejects magnetic intent;
 its graph tests are not evidence for this formulation. Its eventual replacement by
 physical Maxwell remains required.
 
@@ -63,7 +64,9 @@ curl-curl, element-owned permeability, weak-Coulomb saddle solve, A/B/H/energy
 recovery, oriented canonical Tet4/Tet10 topology, volume projection and explicit
 full-exterior grounding. Production and spliced scalar/reduced-graph identities
 remain rejected. Generic static selection does not guess an equation. The legacy
-solver compatibility table does not advertise this new magnetic workload.
+solver compatibility table admits only assembled saddle-point GMRES with no
+preconditioner for this magnetic workload; electrical CG/PCG and harmonic
+procedures cannot substitute for it.
 
 `MagnetostaticWorkload` uses the shared canonical codec and identity foundations.
 The retained result binds original workload, producer, exact formulation, mesh,
@@ -77,7 +80,7 @@ an independently authenticated expected byte digest: source binding alone cannot
 authenticate arbitrary producer field values or certify their spatial accuracy.
 Round-trip tests drop live solver values before reopening both geometry orders,
 both current signs and zero current; these are contract-level cold consumers,
-not producer-exit native process or numerical-restart evidence.
+not by themselves producer-exit native process or numerical-restart evidence.
 
 Before projected topology, selected properties or numerical assembly are allocated,
 checked count-only preflight reserves additive numerical requested-heap allowances
@@ -86,8 +89,8 @@ assignment/source metadata, contribution discovery and CSR, GMRES basis/Hessenbe
 vectors and retained samples. Bounds use E≤6T, D≤6T+N and Q=15T. Overflow,
 unrepresentable u32 iteration counts and ceilings one byte below the reservation
 are rejected. This is not measured RSS or a generic scheduler resource plan;
-borrowed inputs, encoded result payloads and field/state publication still need
-their governed lifecycle reservations and independent residency evidence.
+The governed native path additionally derives exact task-specific scheduler and
+encoded-output reservations. Independent measured residency evidence remains open.
 
 ## Independent continuum evidence
 
@@ -126,14 +129,52 @@ Vacuum permeability uses the measured
 [NIST CODATA 2022 value](https://www.physics.nist.gov/cuu/pdf/wallet_2022.pdf),
 not the historical exact 4π×10⁻⁷ SI convention.
 
+## Authored native whole-study evidence
+
+The exact equation selects magnetic preparation independently of static electrical
+and harmonic domains. A fresh independent direct step executes real CAD meshing,
+an admitted native magnetic solve, retained field publication, sampled observation
+partitions/reduction, shared accuracy evaluation, every declared semantic state,
+baseline accounting and terminal publication accounting. Electrical and magnetic
+adapters share the terminal lifecycle owner without sharing scientific identities.
+An explicit authored per-worker envelope governs placement; fallback task hints do
+not silently resize independently configured pools.
+
+The authored unit-box test uses vacuum permeability, J=(0,0,1) A/m², 0.5 m target
+size, full exterior grounding and a full-volume weak Coulomb gauge. Both affine
+Tet4 and Tet10 runs complete with relative physical and gauge residuals at most
+1e-10 and energy/work error at most 1e-9. Against the independent series above,
+both report relative energy error approximately 0.11259 and volume-weighted B
+relative L² error approximately 0.33548. These are coarse execution witnesses,
+not a refinement study or production spatial-accuracy claim. Tet10 still uses the
+same lowest-order edge approximation.
+
+The test copies the exact completion catalog into an independent filesystem store,
+drops the original session/source/executing pools, and reopens the durable root.
+The reopened completion equals the original complete DTO, including retained
+fields, observations, states, accuracy and accounting. Replay authenticates
+immutable responses; it performs no numerical solve. Missing/extra/foreign
+observation catalogs and substituted source, sampling or authored accuracy
+requirements are rejected, including newly rehashed substitutes.
+
+Reproduce the native witness from this repository:
+
+```sh
+cargo test --locked -p runmat-execution-runner-native --features occt-native \
+  --test analysis_process_conformance -- --magnetic-authored-only
+```
+
+The default OCCT process conformance suite includes this witness. Focused
+`--magnetic-only` remains the smaller numerical/task regression.
+
 ## Remaining implementation and gates
 
-Complete checked transient/retained-memory and encoded-payload scheduler envelopes,
-planned sparse support/GMRES execution, numerical receipts and magnetic semantic-state/
-field publication. Carry the actual authored CAD/native process through
-full/partial reads, source-bound cold reopening and numerical restart, then apply
-independent accuracy and release evidence. The model numerical entry validates allowed
-typed state declarations but does not fulfill their governed publication lifecycle.
+Complete mandatory spatial accuracy, weighted volume observations, measured resource
+qualification and real numerical restart/replacement evidence, then apply release
+gates. An algebraic accuracy report is not discretization evidence; missing mandatory
+spatial criteria remain Indeterminate and block production. Cold artifact reopening
+is not numerical restart. The standalone authored path rejects unsupported restart,
+dependent/mixed sequences and production requests.
 Extend boundary/topology/material/source envelopes with their own physical evidence;
 ports/periodicity, nonlinear magnetic laws, permanent magnetization and force recovery
 are not borrowed from this witness. Replace legacy Maxwell proxies at the physical

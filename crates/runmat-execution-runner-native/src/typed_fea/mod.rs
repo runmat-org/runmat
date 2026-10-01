@@ -9,6 +9,7 @@ mod callable;
 mod electrical_execution;
 mod geometry;
 mod input;
+mod magnetic_execution;
 mod preparation;
 mod thermal_execution;
 
@@ -26,9 +27,11 @@ mod spatial_signals;
 pub use acoustic_execution::CompletedAuthoredAcousticStudy;
 pub use electrical_execution::CompletedAuthoredElectricalStudy;
 pub use geometry::MaterializedFeaGeometry;
+pub use magnetic_execution::CompletedAuthoredMagneticStudy;
 pub use preparation::{
     checked_fea_artifact_access, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
-    PreparedAuthoredThermalStudy, PreparedFeaStudy, PreparedFeaStudyRoot,
+    PreparedAuthoredMagneticStudy, PreparedAuthoredThermalStudy, PreparedFeaStudy,
+    PreparedFeaStudyRoot,
 };
 pub use thermal_execution::CompletedAuthoredThermalStudy;
 
@@ -123,6 +126,7 @@ pub struct CompletedLocalFeaCase {
 pub enum CompletedFeaStudyResult {
     Acoustic(Box<CompletedAuthoredAcousticStudy>),
     Electrical(Box<CompletedAuthoredElectricalStudy>),
+    Magnetic(Box<CompletedAuthoredMagneticStudy>),
     Structural(Box<StructuralStudyResult>),
     Thermal(Box<CompletedAuthoredThermalStudy>),
 }
@@ -132,6 +136,7 @@ impl CompletedFeaStudyResult {
         match self {
             Self::Acoustic(result) => &result.mesh,
             Self::Electrical(result) => &result.mesh,
+            Self::Magnetic(result) => &result.mesh,
             Self::Structural(result) => result.mesh(),
             Self::Thermal(result) => &result.mesh,
         }
@@ -281,6 +286,42 @@ async fn execute_case(
             .data;
             (
                 CompletedFeaStudyResult::Electrical(Box::new(result)),
+                publication,
+            )
+        }
+        PreparedFeaStudyRoot::Magnetic(root) => {
+            let result = magnetic_execution::execute(root, workers, options).await?;
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            let publication_options = runmat_runtime::analysis::AnalysisMagneticRunOptions {
+                deterministic_mode: true,
+                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
+                quality_policy: runmat_runtime::analysis::QualityPolicy::Strict,
+                residual_target: result.completion.workload.relative_residual_target,
+            };
+            let identity =
+                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
+                    "typed-local:{}:{}",
+                    digest.to_string().trim_start_matches("sha256:"),
+                    result.completion.root.logical_digest,
+                ))?;
+            let publication = runmat_runtime::analysis::publish_magnetic_study_result(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &publication_options,
+                digest,
+                runmat_runtime::operations::OperationContext::new(None, None),
+                identity,
+            )
+            .map_err(|e| e.message)?
+            .data;
+            (
+                CompletedFeaStudyResult::Magnetic(Box::new(result)),
                 publication,
             )
         }

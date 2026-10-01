@@ -60,6 +60,9 @@ use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind
 
 #[path = "analysis_process_conformance/magnetic.rs"]
 mod magnetic;
+#[cfg(feature = "occt-native")]
+#[path = "analysis_process_conformance/magnetic_authored.rs"]
+mod magnetic_authored;
 #[path = "analysis_process_conformance/modal_transient.rs"]
 mod modal_transient;
 #[path = "analysis_process_conformance/publication_chain.rs"]
@@ -76,7 +79,31 @@ use publication_chain::{success_response, PublicationChainDriver};
 
 fn main() {
     let mode = std::env::args_os().nth(1);
-    if mode.as_deref() == Some(std::ffi::OsStr::new("--child")) {
+    if mode.as_deref()
+        == Some(std::ffi::OsStr::new(
+            runmat_process_host::HiddenMode::MeshingWorker.marker(),
+        ))
+    {
+        let root = std::env::var_os(runmat_execution_runner_native::NATIVE_OBJECT_STORE_ROOT_ENV)
+            .expect("meshing worker object-store root");
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(runmat_execution_runner_native::run_meshing_worker_stdio(
+                Arc::new(runmat_execution_runner_native::native_meshing_kernel_dispatcher()),
+                std::path::Path::new(&root),
+                runmat_execution_runner_native::NativeMeshingHostLimits::default(),
+            ))
+            .unwrap();
+        return;
+    }
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--child"))
+        || mode.as_deref()
+            == Some(std::ffi::OsStr::new(
+                runmat_process_host::HiddenMode::ExecutionWorker.marker(),
+            ))
+    {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -105,6 +132,13 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--magnetic-authored-only") {
+        #[cfg(feature = "occt-native")]
+        magnetic_authored::run().await;
+        #[cfg(not(feature = "occt-native"))]
+        panic!("magnetic authored conformance requires occt-native");
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--magnetic-only") {
         magnetic::run().await;
         return;
@@ -113,6 +147,8 @@ async fn parent() {
         signal::run().await;
         return;
     }
+    #[cfg(feature = "occt-native")]
+    magnetic_authored::run().await;
     magnetic::run().await;
     let directory = tempfile::tempdir().unwrap();
     let (host, program, input_objects, resource_plan) =

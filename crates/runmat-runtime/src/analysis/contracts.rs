@@ -2115,6 +2115,7 @@ impl Default for AnalysisTrendsQuery {
 #[serde(tag = "solver", content = "options", rename_all = "snake_case")]
 pub enum AnalysisSolverOptions {
     ElectricalStatic(super::AnalysisElectricalRunOptions),
+    Magnetostatic(super::AnalysisMagneticRunOptions),
     StructuralLinear(AnalysisRunOptions),
     StructuralFrequency(AnalysisStructuralFrequencyRunOptions),
     StructuralModes(AnalysisModalRunOptions),
@@ -3072,10 +3073,7 @@ mod tests {
         let mut electromagnetic_static =
             ProcedureStep::electromagnetic_harmonic("electromagnetic_static");
         electromagnetic_static.procedure = AnalysisProcedure::Static;
-        assert!(matches!(
-            AnalysisSolverOptions::defaults_for(&electromagnetic_static),
-            Ok(AnalysisSolverOptions::ElectricalStatic(_))
-        ));
+        assert!(AnalysisSolverOptions::defaults_for(&electromagnetic_static).is_err());
 
         let electrothermal = ProcedureStep::coupled(
             "electrothermal",

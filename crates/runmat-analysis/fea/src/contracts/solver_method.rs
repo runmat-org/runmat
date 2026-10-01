@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum SolverMethod {
     DenseDirect,
     AssembledPcg,
+    AssembledSaddlePointGmres,
     MatrixFreePcg,
     MatrixFreeSaddlePointGmres,
     MatrixFreeSubspaceIteration,
@@ -30,6 +31,7 @@ impl SolverMethod {
         match self {
             Self::DenseDirect => "dense_direct",
             Self::AssembledPcg => "assembled_pcg",
+            Self::AssembledSaddlePointGmres => "assembled_saddle_point_gmres",
             Self::MatrixFreePcg => "matrix_free_pcg",
             Self::MatrixFreeSaddlePointGmres => "matrix_free_saddle_point_gmres",
             Self::MatrixFreeSubspaceIteration => "matrix_free_subspace_iteration",
