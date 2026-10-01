@@ -72,7 +72,7 @@ impl PreparedFusionReduction for Prepared {
             // Vecdim is one public call: the host implementation keeps Double
             // scratch values between axes and applies the output template
             // only after its final stage. Nested calls publish separately.
-            let final_output_class = (index + 1 == dimensions.len()).then(|| match parsed.output {
+            let final_output_class = (index + 1 == dimensions.len()).then_some(match parsed.output {
                 OutputTemplate::Double => NumericClass::Double,
                 OutputTemplate::Default | OutputTemplate::Native => input_class,
             });

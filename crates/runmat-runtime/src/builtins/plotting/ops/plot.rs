@@ -447,7 +447,7 @@ fn map_plot_internal(err: RuntimeError) -> RuntimeError {
         return err;
     }
     crate::builtins::plotting::state::with_render_cause(
-        plot_error_with_detail(&PLOT_ERROR_INTERNAL, err.message().to_string()),
+        plot_error_with_detail(&PLOT_ERROR_INTERNAL, err.message()),
         err,
     )
 }

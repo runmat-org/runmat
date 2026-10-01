@@ -102,8 +102,8 @@ async fn optimizable_variable_builtin(
     // A known host range must not be masked by a failing download of an
     // unrelated deferred option. Scalar text needs a deferred Type before its
     // categorical meaning can be established.
-    let admitted_range = if !matches!(&range, Value::GpuTensor(_))
-        && !(host_options.type_deferred && matches!(&range, Value::String(_) | Value::CharArray(_)))
+    let admitted_range = if !(matches!(&range, Value::GpuTensor(_))
+        || host_options.type_deferred && matches!(&range, Value::String(_) | Value::CharArray(_)))
     {
         let parsed = OptimizableRange::parse(range.clone(), host_options.var_type)?;
         if !host_options.type_deferred {
