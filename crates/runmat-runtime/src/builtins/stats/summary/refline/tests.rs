@@ -5,9 +5,14 @@ use crate::builtins::plotting::scatter::scatter_builtin;
 use crate::builtins::plotting::state::{encode_axes_handle, PlotTestLockGuard};
 use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
 use crate::builtins::plotting::{
-    clear_figure, clone_figure, configure_subplot, current_figure_handle, reset_hold_state_for_run,
+    clear_figure, clone_figure, configure_subplot, current_axes_state, current_figure_handle,
+    reset_hold_state_for_run,
 };
 use futures::executor::block_on;
+use runmat_builtins::{
+    REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION, REFLINE_INTEGER_COEFFICIENT_EXTENSION,
+    REFLINE_LOGICAL_COEFFICIENT_EXTENSION,
+};
 use runmat_value::{IntegerStorage, Tensor};
 
 fn setup() -> PlotTestLockGuard {

@@ -201,7 +201,7 @@ mod reference_geometry_tests {
 
     #[test]
     fn adjacent_high_and_subnormal_quartiles_keep_their_finite_slope() {
-        let high = 1.0e308;
+        let high: f64 = 1.0e308;
         let adjacent = f64::from_bits(high.to_bits() + 1);
         let high_slope = quartile_slope(high, adjacent, 1.0, 2.0).unwrap();
         assert!(high_slope.is_finite() && high_slope > 0.0);
