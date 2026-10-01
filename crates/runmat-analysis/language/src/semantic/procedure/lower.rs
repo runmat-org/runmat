@@ -85,6 +85,9 @@ pub fn lower_study(
             continue;
         };
         step.excitation_case_selection = selection;
+        if !super::accuracy::apply(declaration, statements, &mut step, diagnostics) {
+            continue;
+        }
         if let Some(retained) = values::retained_name(statements) {
             if step.state_outputs.len() == 1 {
                 step.state_outputs[0].state_id = StateId(retained);

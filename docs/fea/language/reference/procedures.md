@@ -4,6 +4,29 @@ An `analysis <name>` block owns exactly one procedure block. A dependent analysi
 `analysis <name> after analysis.<producer>`. Required fields vary by procedure; the checker does
 not invent domains or state inputs.
 
+## Algebraic accuracy
+
+An optional analysis-level block authors the existing typed relative algebraic
+criterion, independently of physics family:
+
+```fea
+analysis potential {
+    electromagnetic static {}
+    accuracy { algebraic_relative_tolerance = 1e-11 }
+}
+```
+
+The tolerance must be a finite dimensionless constant strictly between zero and
+one. The block accepts exactly this one assignment; duplicate blocks, duplicate
+or unknown settings, nested settings and dimensional values are rejected.
+Omission preserves the procedure's baseline accuracy plan. Explicit authoring
+changes only its relative algebraic criteria, preserving evidence requirements,
+mandatory status, other criteria and resource budgets. It does not certify
+field error, spatial convergence or production maturity. Execution must honor
+the resulting typed accuracy contract; a small residual alone is not a continuum
+error bound. Authoring tests verify preservation across structural, thermal,
+acoustic and electrical procedures, and reject malformed or ambiguous settings.
+
 ## Structural procedures
 
 | Procedure block | Required authored data |

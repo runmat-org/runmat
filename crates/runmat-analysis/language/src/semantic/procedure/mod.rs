@@ -1,3 +1,4 @@
+mod accuracy;
 mod header;
 mod initial_conditions;
 mod load_cases;
