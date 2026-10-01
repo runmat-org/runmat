@@ -3,12 +3,16 @@ use super::*;
 
 trait FloatingMaximum: Copy + PartialOrd {
     fn is_nan(self) -> bool;
+    fn is_sign_negative(self) -> bool;
     fn positive_zero() -> Self;
 }
 
 impl FloatingMaximum for f32 {
     fn is_nan(self) -> bool {
         self.is_nan()
+    }
+    fn is_sign_negative(self) -> bool {
+        self.is_sign_negative()
     }
     fn positive_zero() -> Self {
         0.0
@@ -18,6 +22,9 @@ impl FloatingMaximum for f32 {
 impl FloatingMaximum for f64 {
     fn is_nan(self) -> bool {
         self.is_nan()
+    }
+    fn is_sign_negative(self) -> bool {
+        self.is_sign_negative()
     }
     fn positive_zero() -> Self {
         0.0
@@ -34,7 +41,11 @@ fn maximum<T: FloatingMaximum>(left: T, right: T) -> T {
     } else if right > left {
         right
     } else if left == T::positive_zero() {
-        T::positive_zero()
+        if left.is_sign_negative() && right.is_sign_negative() {
+            left
+        } else {
+            T::positive_zero()
+        }
     } else {
         left
     }
@@ -227,6 +238,13 @@ mod tests {
             &block_on(provider.elem_max(&own, &integer)).unwrap_err()
         ));
         assert!(own.allocation_lease().validate_live().is_ok());
+    }
+
+    #[test]
+    fn maximum_preserves_negative_zero_when_both_operands_are_negative_zero() {
+        assert_eq!(maximum(-0.0_f32, -0.0_f32).to_bits(), (-0.0_f32).to_bits());
+        assert_eq!(maximum(-0.0_f64, -0.0_f64).to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(maximum(-0.0_f32, 0.0_f32).to_bits(), 0.0_f32.to_bits());
     }
 
     #[test]
