@@ -1,12 +1,15 @@
 //! Typed ordered option admission before any provider materialization.
 
 use super::{
-    gather, invalid, Algorithm, DistanceMetric, TsneCacheSizeKeyword, TsneDisplay, TsneOption,
+    invalid, Algorithm, DistanceMetric, TsneCacheSizeKeyword, TsneDisplay, TsneOption,
     TsneStatsetField,
 };
 use crate::builtins::common::{random_args::keyword_of, tensor};
 use crate::BuiltinResult;
 use runmat_value::Value;
+
+mod materialize;
+pub(super) use materialize::materialize_options;
 
 pub(super) type OptionHeader = (TsneOption, Value);
 
@@ -287,67 +290,4 @@ fn resident_empty_numeric(value: &Value) -> bool {
     matches!(value, Value::GpuTensor(handle)
         if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
             && handle.shape().contains(&0))
-}
-
-pub(super) async fn materialize_options(
-    options: Vec<AdmittedOption>,
-) -> BuiltinResult<Vec<AdmittedOption>> {
-    let mut materialized = Vec::with_capacity(options.len());
-    for option in options {
-        let option = match option {
-            AdmittedOption::CacheSizeNumeric(value) => {
-                AdmittedOption::CacheSizeNumeric(gather(value).await?)
-            }
-            AdmittedOption::Exaggeration(value) => {
-                AdmittedOption::Exaggeration(gather(value).await?)
-            }
-            AdmittedOption::NumDimensions(value) => {
-                AdmittedOption::NumDimensions(gather(value).await?)
-            }
-            AdmittedOption::NumPcaComponents(value) => {
-                AdmittedOption::NumPcaComponents(gather(value).await?)
-            }
-            AdmittedOption::Perplexity(value) => AdmittedOption::Perplexity(gather(value).await?),
-            AdmittedOption::Standardize(value) => AdmittedOption::Standardize(gather(value).await?),
-            AdmittedOption::InitialY(value) => AdmittedOption::InitialY(gather(value).await?),
-            AdmittedOption::LearnRate(value) => AdmittedOption::LearnRate(gather(value).await?),
-            AdmittedOption::NumPrint(value) => AdmittedOption::NumPrint(gather(value).await?),
-            AdmittedOption::Theta(value) => AdmittedOption::Theta(gather(value).await?),
-            AdmittedOption::Verbose(value) => AdmittedOption::Verbose(gather(value).await?),
-            AdmittedOption::Options(fields) => {
-                let mut values = Vec::with_capacity(fields.len());
-                for field in fields {
-                    values.push(match field {
-                        AdmittedStatsetField::MaxIter(value) => {
-                            AdmittedStatsetField::MaxIter(gather(value).await?)
-                        }
-                        AdmittedStatsetField::TolFun(value) => {
-                            AdmittedStatsetField::TolFun(gather(value).await?)
-                        }
-                        AdmittedStatsetField::EmptyOutputFcnResident(value) => {
-                            let value = gather(value).await?;
-                            if !super::options::is_empty_numeric(&value) {
-                                return Err(invalid("tsne: Options.OutputFcn must be empty"));
-                            }
-                            AdmittedStatsetField::EmptyOutputFcn
-                        }
-                        other => other,
-                    });
-                }
-                AdmittedOption::Options(values)
-            }
-            AdmittedOption::OptionsEmptyResident(value) => {
-                let value = gather(value).await?;
-                if !super::options::is_empty_numeric(&value) {
-                    return Err(invalid(
-                        "tsne: Options must be an empty numeric array or struct",
-                    ));
-                }
-                AdmittedOption::Options(Vec::new())
-            }
-            other => other,
-        };
-        materialized.push(option);
-    }
-    Ok(materialized)
 }
