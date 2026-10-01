@@ -120,6 +120,24 @@ fn line_endpoints(spec: ReflineLineSpec) -> (f64, f64) {
     )
 }
 
+fn finite_or_padded_span(min: f64, max: f64) -> Option<(f64, f64)> {
+    if !min.is_finite() || !max.is_finite() {
+        return None;
+    }
+    if min < max {
+        return Some((min, max));
+    }
+    if min == max {
+        let pad = min.abs().max(1.0) * 0.5;
+        return Some((min - pad, max + pad));
+    }
+    None
+}
+
+fn valid_span((min, max): (f64, f64)) -> bool {
+    min.is_finite() && max.is_finite() && min < max
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,22 +170,4 @@ mod tests {
         assert!((endpoints.0 / f64::MAX - 1.0).abs() < 1.0e-12);
         assert!((endpoints.1 / -f64::MAX - 1.0).abs() < 1.0e-12);
     }
-}
-
-fn finite_or_padded_span(min: f64, max: f64) -> Option<(f64, f64)> {
-    if !min.is_finite() || !max.is_finite() {
-        return None;
-    }
-    if min < max {
-        return Some((min, max));
-    }
-    if min == max {
-        let pad = min.abs().max(1.0) * 0.5;
-        return Some((min - pad, max + pad));
-    }
-    None
-}
-
-fn valid_span((min, max): (f64, f64)) -> bool {
-    min.is_finite() && max.is_finite() && min < max
 }
