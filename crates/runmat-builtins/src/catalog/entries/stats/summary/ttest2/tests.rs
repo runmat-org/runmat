@@ -96,6 +96,56 @@ fn malformed_control_or_nonreal_sample_does_not_prove_outputs() {
 }
 
 #[test]
+fn known_wrong_control_carriers_do_not_publish_proven_facts() {
+    let data = vec![numeric(&[3, 1]), numeric(&[4, 1])];
+    let mut alpha_args = data.clone();
+    alpha_args.extend([
+        ValueFact::scalar(ValueKindFact::Character),
+        ValueFact::scalar(ValueKindFact::Character),
+    ]);
+    let alpha = infer(
+        alpha_args,
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Character("Alpha".into()),
+            LiteralValue::Character("bad".into()),
+        ],
+        1,
+    );
+    assert!(!alpha.diagnostics.is_empty());
+    assert_eq!(alpha.outputs[0].kind, ValueKindFact::Unknown);
+
+    let mut tail_args = data;
+    tail_args.extend([
+        ValueFact::scalar(ValueKindFact::Character),
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+    ]);
+    let tail = infer(
+        tail_args,
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Character("Tail".into()),
+            LiteralValue::Unknown,
+        ],
+        1,
+    );
+    assert!(!tail.diagnostics.is_empty());
+    assert_eq!(tail.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
+fn incompatible_known_non_test_axes_are_diagnosed() {
+    let result = infer(vec![numeric(&[3, 2]), numeric(&[4, 3])], vec![], 1);
+    assert!(!result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+}
+
+#[test]
 fn source_option_tokens_decode_to_canonical_semantics() {
     assert_eq!(
         Ttest2OptionName::from_public("vArTyPe"),

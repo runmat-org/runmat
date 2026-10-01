@@ -17,6 +17,28 @@ fn text(value: &LiteralValue) -> Option<&str> {
     }
 }
 
+fn known_nontext(value: Option<&ValueFact>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            &value.kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical
+        )
+    })
+}
+
+fn known_nonnumeric(value: Option<&ValueFact>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            &value.kind,
+            ValueKindFact::Character
+                | ValueKindFact::String
+                | ValueKindFact::Cell(_)
+                | ValueKindFact::Struct(_)
+                | ValueKindFact::Object(_)
+        )
+    })
+}
+
 fn double(shape: ShapeFact) -> ValueFact {
     let storage = if shape.element_count() == Some(1) {
         StorageFact::Scalar
@@ -52,7 +74,8 @@ fn selected_dim(
             return None;
         };
         let Some(name) = text(name) else {
-            if !matches!(name, LiteralValue::Unknown) {
+            if !matches!(name, LiteralValue::Unknown) || known_nontext(request.arguments.get(index))
+            {
                 diagnostics.push(InferenceDiagnostic::error(
                     "OPTION",
                     "ttest2 option name must be text",
@@ -74,6 +97,14 @@ fn selected_dim(
                     return None;
                 };
                 let Some(number) = LiteralContext::numeric_from_literal(value) else {
+                    if !matches!(value, LiteralValue::Unknown)
+                        || known_nonnumeric(request.arguments.get(index + 1))
+                    {
+                        diagnostics.push(InferenceDiagnostic::error(
+                            "DIMENSION",
+                            "ttest2 Dim must be numeric",
+                        ));
+                    }
                     return None;
                 };
                 let Ok(dim) = runmat_types::decode_shape_dimension(number) else {
@@ -101,6 +132,13 @@ fn selected_dim(
                                 "ttest2 Alpha must be in (0,1)",
                             ));
                         }
+                    } else if !matches!(value, LiteralValue::Unknown)
+                        || known_nonnumeric(request.arguments.get(index + 1))
+                    {
+                        diagnostics.push(InferenceDiagnostic::error(
+                            "ALPHA",
+                            "ttest2 Alpha must be numeric",
+                        ));
                     }
                 }
             }
@@ -120,7 +158,9 @@ fn selected_dim(
                             "unsupported ttest2 option value",
                         ));
                     }
-                } else if !matches!(value, LiteralValue::Unknown) {
+                } else if !matches!(value, LiteralValue::Unknown)
+                    || known_nontext(request.arguments.get(index + 1))
+                {
                     diagnostics.push(InferenceDiagnostic::error(
                         "OPTION",
                         "ttest2 option value must be text",
@@ -132,7 +172,11 @@ fn selected_dim(
     selected
 }
 
-fn output_shapes(request: &CallRequest, dim: Option<Option<usize>>) -> (ShapeFact, ShapeFact) {
+fn output_shapes(
+    request: &CallRequest,
+    dim: Option<Option<usize>>,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) -> (ShapeFact, ShapeFact) {
     let (Some(x), Some(y), Some(dim)) = (request.arguments.first(), request.arguments.get(1), dim)
     else {
         return (ShapeFact::Unknown, ShapeFact::Unknown);
@@ -163,6 +207,10 @@ fn output_shapes(request: &CallRequest, dim: Option<Option<usize>>) -> (ShapeFac
         .enumerate()
         .any(|(axis, (x, y))| axis != dim && x != y)
     {
+        diagnostics.push(InferenceDiagnostic::error(
+            "SHAPE",
+            "ttest2 sample dimensions must agree outside the test dimension",
+        ));
         return (ShapeFact::Unknown, ShapeFact::Unknown);
     }
     xs[dim] = Some(1);
@@ -206,7 +254,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     } else {
         None
     };
-    let (result_shape, ci_shape) = output_shapes(request, dim);
+    let (result_shape, ci_shape) = output_shapes(request, dim, &mut diagnostics);
     let mut h = ValueFact::proven(
         ValueKindFact::Logical,
         result_shape.clone(),
