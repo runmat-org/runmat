@@ -105,10 +105,10 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
     let base = query(ProviderElementType::F64, &[2, 3], &[0]);
     let mut changed = base.clone();
     changed.workload.sum.as_mut().unwrap().missing = ReductionNaN::Omit;
-    assert_eq!(
-        rejection_code(validate(&provider, true, &changed).unwrap()),
-        ProviderRejectionCode::UnknownResourceEstimate
-    );
+    assert!(matches!(
+        validate(&provider, true, &changed),
+        Some(ProviderFeasibility::Supported { .. })
+    ));
     changed = query(ProviderElementType::F32, &[2, 3], &[0]);
     changed.workload.sum.as_mut().unwrap().output = SumOutputClass::Native;
     changed.workload.sum.as_mut().unwrap().publication_class = NumericClass::Single;
@@ -132,6 +132,45 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
     assert_eq!(
         rejection_code(validate(&provider, true, &changed).unwrap()),
         ProviderRejectionCode::UnknownResourceEstimate
+    );
+}
+
+#[test]
+fn omission_counts_map_warmup_and_each_dimensional_reduction() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F64,
+    };
+    let mut one = query(ProviderElementType::F64, &[2, 3], &[0]);
+    one.workload.sum.as_mut().unwrap().missing = ReductionNaN::Omit;
+    let one_work = work(&provider, true, &one).unwrap();
+    assert_eq!(one_work.estimate.output_bytes, Some(24));
+    assert_eq!(one_work.estimate.dispatches, Some(2));
+    assert_eq!(one_work.estimate.transient_bytes, None);
+    #[cfg(feature = "wgpu")]
+    {
+        assert!(one_work.nan_map);
+        assert_eq!(one_work.queue_submissions, 3);
+        assert_eq!(one_work.allocations, 5);
+    }
+    let mut all = query(ProviderElementType::F64, &[2, 3], &[0, 1]);
+    all.workload.sum.as_mut().unwrap().missing = ReductionNaN::Omit;
+    let all_work = work(&provider, true, &all).unwrap();
+    assert_eq!(all_work.estimate.output_bytes, Some(8));
+    assert_eq!(all_work.estimate.dispatches, Some(3));
+    #[cfg(feature = "wgpu")]
+    {
+        assert_eq!(all_work.queue_submissions, 4);
+        assert_eq!(all_work.allocations, 7);
+    }
+    let mut single = query(ProviderElementType::F32, &[2, 3], &[0]);
+    let route = single.workload.sum.as_mut().unwrap();
+    route.missing = ReductionNaN::Omit;
+    route.output = SumOutputClass::Native;
+    route.publication_class = NumericClass::Single;
+    assert_eq!(
+        rejection_code(validate(&provider, true, &single).unwrap()),
+        ProviderRejectionCode::UnknownResourceEstimate,
+        "Single omission requires its own real widening/map recipe"
     );
 }
 

@@ -161,6 +161,8 @@ pub(super) fn dimension_work(
         #[cfg(feature = "wgpu")]
         output_cast: false,
         #[cfg(feature = "wgpu")]
+        nan_map: false,
+        #[cfg(feature = "wgpu")]
         scalar_visits: elements.checked_add(output_elements).ok_or_else(|| {
             reject(
                 ProviderRejectionCode::ResourceLimit,

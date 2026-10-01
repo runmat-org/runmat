@@ -125,6 +125,17 @@ impl WgpuProvider {
                 .key(),
             );
         }
+        if work.nan_map {
+            keys.push(
+                PipelineRecipe::fusion(
+                    crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F64,
+                    1,
+                    FusionPipelineLayout::Single,
+                    self.workgroup_config.scalar,
+                )
+                .key(),
+            );
+        }
         if work.output_cast {
             keys.push(
                 PipelineRecipe::floating_cast(

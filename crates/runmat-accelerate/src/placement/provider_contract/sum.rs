@@ -9,6 +9,7 @@ use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumOutputClass};
 mod tests;
 mod global;
 mod floating;
+mod omit;
 
 pub(crate) struct SumWork {
     pub estimate: ProviderResourceEstimate,
@@ -18,6 +19,8 @@ pub(crate) struct SumWork {
     pub input_cast: bool,
     #[cfg(feature = "wgpu")]
     pub output_cast: bool,
+    #[cfg(feature = "wgpu")]
+    pub nan_map: bool,
     #[cfg(feature = "wgpu")]
     pub scalar_visits: u64,
     #[cfg(feature = "wgpu")]
@@ -187,6 +190,8 @@ fn work(
             #[cfg(feature = "wgpu")]
             output_cast: false,
             #[cfg(feature = "wgpu")]
+            nan_map: false,
+            #[cfg(feature = "wgpu")]
             scalar_visits: elements,
             #[cfg(feature = "wgpu")]
             queue_submissions: 0,
@@ -205,8 +210,7 @@ fn work(
     // Host-origin allocation geometry is known. Resident views need the
     // provider's authenticated backing shape before this physical recipe can
     // represent them; an apparent contiguous public layout is insufficient.
-    if route.missing != ReductionNaN::Include
-        || route.accumulation_class != NumericClass::Double
+    if route.accumulation_class != NumericClass::Double
         || route.input_domain != NumericDomain::Real
         || input.storage != ProviderStorage::DenseReal
         || input.layout != ProviderLayout::ColumnMajorContiguous
@@ -218,14 +222,24 @@ fn work(
             "sum.physical_recipe_unresolved",
         ));
     }
-    floating::work(
-        provider,
-        input,
-        route,
-        elements,
-        output_elements,
-        output_bytes,
-    )
+    match route.missing {
+        ReductionNaN::Include => floating::work(
+            provider,
+            input,
+            route,
+            elements,
+            output_elements,
+            output_bytes,
+        ),
+        ReductionNaN::Omit => omit::work(
+            provider,
+            input,
+            route,
+            elements,
+            output_elements,
+            output_bytes,
+        ),
+    }
 }
 
 fn valid_controls(input: &ProviderRepresentation, route: &ProviderSumWorkload) -> bool {

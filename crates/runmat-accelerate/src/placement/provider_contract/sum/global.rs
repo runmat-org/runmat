@@ -109,6 +109,8 @@ pub(super) fn work(
         #[cfg(feature = "wgpu")]
         output_cast: false,
         #[cfg(feature = "wgpu")]
+        nan_map: false,
+        #[cfg(feature = "wgpu")]
         scalar_visits,
         #[cfg(feature = "wgpu")]
         queue_submissions: dispatches,
