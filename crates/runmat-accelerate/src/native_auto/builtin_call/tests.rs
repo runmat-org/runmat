@@ -54,9 +54,6 @@ impl AccelProvider for FeasibilityRejectingProvider {
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         Box::pin(async { panic!("rejected candidate must not download") })
     }
-    fn free(&self, _: &runmat_accelerate_api::GpuTensorHandle) -> Result<()> {
-        Ok(())
-    }
     fn device_info(&self) -> String {
         "feasibility-rejecting-provider".into()
     }
