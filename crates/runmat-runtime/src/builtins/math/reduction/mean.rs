@@ -1660,6 +1660,20 @@ fn mean_complex_tensor_all(
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<ComplexTensor> {
     let values = tensor.materialize_f64();
+    if is_scalar_shape(&tensor.shape) {
+        let (real, imaginary) = values.first().copied().unwrap_or((f64::NAN, f64::NAN));
+        let value = if nan_mode == ReductionNaN::Omit && (real.is_nan() || imaginary.is_nan()) {
+            (f64::NAN, f64::NAN)
+        } else {
+            (real, imaginary)
+        };
+        return ComplexTensor::from_f64_values_with_dtype(
+            vec![value],
+            canonical_scalar_shape(),
+            tensor.numeric_dtype(),
+        )
+        .map_err(mean_internal_error);
+    }
     let mut real = 0.0;
     let mut imaginary = 0.0;
     let mut count = 0usize;
@@ -2692,6 +2706,28 @@ pub(crate) mod tests {
                 assert!((im + 3.0).abs() < 1e-12);
             }
             other => panic!("expected complex result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_complex_singleton_all_keeps_include_pair_and_omit_pair_nan() {
+        for dtype in [NumericDType::F32, NumericDType::F64] {
+            let tensor =
+                ComplexTensor::from_f64_values_with_dtype(vec![(f64::NAN, 4.0)], vec![1, 1], dtype)
+                    .unwrap();
+            let included = mean_complex_tensor_all(&tensor, ReductionNaN::Include).unwrap();
+            assert_eq!(included.numeric_dtype(), dtype);
+            assert_eq!(included.shape, vec![1, 1]);
+            let (real, imaginary) = included.materialize_f64()[0];
+            assert!(real.is_nan());
+            assert_eq!(imaginary, 4.0);
+
+            let omitted = mean_complex_tensor_all(&tensor, ReductionNaN::Omit).unwrap();
+            assert_eq!(omitted.numeric_dtype(), dtype);
+            assert_eq!(omitted.shape, vec![1, 1]);
+            let (real, imaginary) = omitted.materialize_f64()[0];
+            assert!(real.is_nan() && imaginary.is_nan());
         }
     }
 

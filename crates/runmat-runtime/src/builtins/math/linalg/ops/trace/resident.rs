@@ -104,8 +104,16 @@ pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
         value => value,
     };
-    gpu_helpers::restore_class_preserving_value(&handle, host, NAME)
-        .map_err(|error| trace_error_with_message(format!("trace: {error}"), &TRACE_ERROR_INTERNAL))
+    gpu_helpers::restore_class_preserving_value(&handle, host, NAME).map_err(trace_restore_failure)
+}
+
+pub(super) fn trace_restore_failure(source: RuntimeError) -> RuntimeError {
+    let mut error = trace_error_with_message(format!("trace: {source}"), &TRACE_ERROR_INTERNAL);
+    error.span = source.span;
+    error.context = source.context.clone().with_builtin(NAME);
+    error.gpu_gather_retry = source.gpu_gather_retry;
+    error.source = Some(Box::new(source));
+    error
 }
 
 fn trace_provider_failure(

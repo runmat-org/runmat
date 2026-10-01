@@ -8,8 +8,45 @@ use runmat_accelerate_api::{
     ProviderPrecision, ThreadProviderGuard,
 };
 use std::collections::HashMap;
+use std::error::Error as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+
+#[test]
+fn trace_restore_failure_keeps_retry_span_context_and_typed_cause() {
+    let source = build_runtime_error("provider upload failed")
+        .with_identifier("RunMat:gpu:UploadFailed")
+        .with_builtin("gpu upload")
+        .with_task_id("task-7")
+        .with_phase("restore")
+        .with_span((11usize, 4usize).into())
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .with_source(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "device transfer failed",
+        ))
+        .build();
+    let error = super::resident::trace_restore_failure(source);
+    assert_eq!(error.identifier(), TRACE_ERROR_INTERNAL.identifier);
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert_eq!(
+        error.span.map(|span| (span.offset(), span.len())),
+        Some((11, 4))
+    );
+    assert_eq!(error.context.builtin.as_deref(), Some("trace"));
+    assert_eq!(error.context.task_id.as_deref(), Some("task-7"));
+    assert_eq!(error.context.phase.as_deref(), Some("restore"));
+    let mut cause: &(dyn std::error::Error + 'static) = &error;
+    while !cause.is::<std::io::Error>() {
+        cause = cause.source().expect("restore source chain retained");
+    }
+    assert_eq!(
+        cause
+            .downcast_ref::<std::io::Error>()
+            .map(std::io::Error::kind),
+        Some(std::io::ErrorKind::BrokenPipe)
+    );
+}
 
 struct ComplexTraceProvider {
     owner: TestAllocationOwner,
