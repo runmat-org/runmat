@@ -226,17 +226,23 @@ fn add_cast(
         .estimate
         .dispatches
         .and_then(|old| old.checked_add(chunks));
-    let Some(dispatches) = work.estimate.dispatches else {
+    if work.estimate.dispatches.is_none() {
         return Err(reject(
             ProviderRejectionCode::ResourceLimit,
             "sum.composite_dispatch_count",
         ));
-    };
+    }
     #[cfg(not(feature = "wgpu"))]
-    let _ = (dispatches, stage);
+    let _ = stage;
     #[cfg(feature = "wgpu")]
     {
-        work.queue_submissions = dispatches;
+        // A composite stage may already include a queue submission that did
+        // not dispatch work (the fused NaN-map pipeline warmup). Add only this
+        // cast's chunks; assigning total dispatches would erase that cost.
+        work.queue_submissions = work
+            .queue_submissions
+            .checked_add(chunks)
+            .ok_or_else(|| reject(ProviderRejectionCode::ResourceLimit, "sum.cast_queue"))?;
         work.allocations = work
             .allocations
             .checked_add(chunks)
