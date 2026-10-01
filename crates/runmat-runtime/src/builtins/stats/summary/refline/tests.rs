@@ -10,8 +10,8 @@ use crate::builtins::plotting::{
 };
 use futures::executor::block_on;
 use runmat_builtins::{
-    REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION, REFLINE_INTEGER_COEFFICIENT_EXTENSION,
-    REFLINE_LOGICAL_COEFFICIENT_EXTENSION,
+    REFLINE_ERROR_INVALID_ARGUMENT, REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION,
+    REFLINE_INTEGER_COEFFICIENT_EXTENSION, REFLINE_LOGICAL_COEFFICIENT_EXTENSION,
 };
 use runmat_value::{IntegerStorage, Tensor};
 
@@ -329,9 +329,12 @@ fn refline_least_squares_reads_gpu_scatter_source_data() {
     });
     let mut scatter = Some(scatter);
     append_active_plot(NAME, PlotRenderOptions::default(), move |figure, axes| {
-        let scatter = scatter
-            .take()
-            .ok_or_else(|| internal_error("refline: test scatter already inserted"))?;
+        let scatter = scatter.take().ok_or_else(|| {
+            crate::build_runtime_error("refline: test scatter already inserted")
+                .with_builtin("refline")
+                .with_identifier(runmat_builtins::REFLINE_ERROR_INTERNAL.identifier.unwrap())
+                .build()
+        })?;
         figure.add_scatter_plot_on_axes(scatter, axes);
         Ok(())
     })
