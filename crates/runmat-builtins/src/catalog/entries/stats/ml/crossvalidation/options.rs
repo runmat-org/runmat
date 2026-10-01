@@ -83,6 +83,21 @@ impl CvPartitionMethod {
         }
     }
 
+    /// Decode the object's Type property, whose spelling differs from the
+    /// constructor token for custom partitions.
+    pub fn from_property_name(value: &str) -> Option<Self> {
+        let name = normalized(value);
+        [
+            Self::KFold,
+            Self::Holdout,
+            Self::Leaveout,
+            Self::Resubstitution,
+            Self::Custom,
+        ]
+        .into_iter()
+        .find(|method| method.property_name() == name)
+    }
+
     pub fn property_name(self) -> &'static str {
         match self {
             Self::KFold => "kfold",
@@ -183,6 +198,19 @@ mod tests {
             Some(CvPartitionMethod::Leaveout)
         );
         assert_eq!(CvPartitionMethod::parse("leavemout"), None);
+        assert_eq!(CvPartitionMethod::parse("custom"), None);
+        for method in [
+            CvPartitionMethod::KFold,
+            CvPartitionMethod::Holdout,
+            CvPartitionMethod::Leaveout,
+            CvPartitionMethod::Resubstitution,
+            CvPartitionMethod::Custom,
+        ] {
+            assert_eq!(
+                CvPartitionMethod::from_property_name(method.property_name()),
+                Some(method)
+            );
+        }
     }
 
     #[test]
