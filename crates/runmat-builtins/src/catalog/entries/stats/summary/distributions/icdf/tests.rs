@@ -47,3 +47,35 @@ fn named_family_alias_and_parameter_count_are_validated() {
         .iter()
         .any(|diagnostic| diagnostic.code == "ARITY"));
 }
+
+#[test]
+fn fitted_object_output_class_follows_probability_not_opaque_parameters() {
+    let mut request =
+        super::super::test_support::request(super::super::policy::DistributionKind::GenericInv);
+    request.arguments[0] = ValueFact::scalar(ValueKindFact::Object(ObjectFact {
+        class: None,
+        runtime_class: Some(runmat_types::ClassIdentity::new("ProbabilityDistribution").unwrap()),
+        properties: std::collections::BTreeMap::new(),
+        properties_complete: false,
+        handle_semantics: Some(false),
+    }));
+    request.arguments.truncate(2);
+    request.literals.literal_args.truncate(2);
+    let single = infer(&request, &ICDF_CATALOG_ENTRY);
+    assert!(single.diagnostics.is_empty(), "{:?}", single.diagnostics);
+    assert_eq!(
+        single.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
+
+    request.arguments[1] = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let double = infer(&request, &ICDF_CATALOG_ENTRY);
+    assert!(double.diagnostics.is_empty(), "{:?}", double.diagnostics);
+    assert_eq!(
+        double.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+}

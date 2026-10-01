@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn distribution_context_preserves_provider_failure_identity_and_retry_policy() {
+    let original = build_runtime_error("gpu download failed")
+        .with_identifier("RunMat:gpu:DownloadFailed")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build();
+    let annotated = with_distribution_context("normcdf", original);
+    assert_eq!(annotated.identifier(), Some("RunMat:gpu:DownloadFailed"));
+    assert_eq!(annotated.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    assert_eq!(annotated.context.builtin.as_deref(), Some("normcdf"));
+}
+
+#[test]
 fn distribution_broadcast_indexing_appends_trailing_singletons() {
     let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
     assert_eq!(

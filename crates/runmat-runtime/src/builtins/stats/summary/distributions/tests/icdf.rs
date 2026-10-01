@@ -272,6 +272,57 @@ fn icdf_gates_nonfloating_extensions_and_preserves_single() {
 }
 
 #[test]
+fn icdf_final_carrier_preserves_single_across_named_families() {
+    let cases: [(&str, Vec<Value>); 12] = [
+        ("Normal", vec![]),
+        ("Student t", vec![Value::Num(5.0)]),
+        ("Weibull", vec![Value::Num(2.0), Value::Num(3.0)]),
+        ("Chi-square", vec![Value::Num(2.0)]),
+        ("Binomial", vec![Value::Num(10.0), Value::Num(0.5)]),
+        ("Gamma", vec![Value::Num(2.0), Value::Num(3.0)]),
+        ("Exponential", vec![Value::Num(4.0)]),
+        ("Poisson", vec![Value::Num(3.0)]),
+        ("Uniform", vec![Value::Num(1.0), Value::Num(2.0)]),
+        ("Lognormal", vec![]),
+        ("Beta", vec![Value::Num(2.0), Value::Num(2.0)]),
+        ("F", vec![Value::Num(5.0), Value::Num(10.0)]),
+    ];
+    for (family, parameters) in cases {
+        let output = block_on(icdf::icdf_builtin(
+            Value::from(family),
+            Value::Tensor(Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap()),
+            parameters,
+        ))
+        .unwrap_or_else(|error| panic!("{family}: {error}"));
+        let Value::Tensor(tensor) = output else {
+            panic!("{family}: expected single tensor final carrier");
+        };
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32, "{family}");
+    }
+}
+
+#[test]
+fn icdf_exact_wide_integer_parameters_cross_binary64_boundary_without_rounding() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let exact = block_on(icdf::icdf_builtin(
+        Value::from("Normal"),
+        Value::Num(0.5),
+        vec![Value::Int(runmat_value::IntValue::U64(1_u64 << 54))],
+    ))
+    .expect("2^54 is exactly representable in binary64");
+    assert!(matches!(exact, Value::Num(value) if value == (1_u64 << 54) as f64));
+    let inexact = block_on(icdf::icdf_builtin(
+        Value::from("Normal"),
+        Value::Num(0.5),
+        vec![Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1))],
+    ))
+    .expect_err("2^53+1 cannot cross binary64 exactly");
+    assert!(inexact
+        .message()
+        .contains("exactly representable as double"));
+}
+
+#[test]
 fn icdf_fitted_object_form_uses_the_same_integer_admission_boundary() {
     let pd = block_on(crate::builtins::stats::summary::fitdist::fitdist_builtin(
         Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap().into(),
@@ -294,12 +345,20 @@ fn icdf_fitted_object_form_uses_the_same_integer_admission_boundary() {
     }
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let error = block_on(icdf::icdf_builtin(
-        pd,
+        pd.clone(),
         Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
         Vec::new(),
     ))
     .expect_err("fitted-object wide p must reject exactly");
     assert!(error.message().contains("exactly representable as double"));
+
+    let single = block_on(icdf::icdf_builtin(
+        pd,
+        Value::Tensor(Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap()),
+        Vec::new(),
+    ))
+    .expect("fitted object with single probability");
+    assert!(matches!(single, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32));
 }
 
 #[test]

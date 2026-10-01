@@ -11,7 +11,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "`x` and `nu` support scalar expansion and matching array shapes.",
-            "Typed-integer `x` and `nu` values from all eight classes are mode-gated RunMat extensions and must lie within the exact-integer binary64 range.",
+            "Typed-integer `x` and `nu` values from all eight classes are mode-gated RunMat extensions and must be exactly representable as binary64 values.",
             "Single-precision inputs produce single-precision output; otherwise output is double precision.",
             "`nu` must be positive; invalid parameters produce `NaN` outputs.",
             "Negative `x` values return zero for the lower tail and one for the upper tail.",

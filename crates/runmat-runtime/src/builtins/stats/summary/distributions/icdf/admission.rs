@@ -76,7 +76,7 @@ impl IcdfAdmission {
         };
         let restored =
             gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(tensor), "icdf")
-                .map_err(|error| super::normal_error("icdf", format!("icdf: {error}")))?;
+                .map_err(|error| super::with_distribution_context("icdf", error))?;
         if runmat_accelerate_api::handle_is_explicit(&source)
             && !matches!(restored, Value::GpuTensor(_))
         {
@@ -93,51 +93,42 @@ pub(super) async fn gather_input(value: Value) -> BuiltinResult<Value> {
     let Value::GpuTensor(handle) = &value else {
         return Ok(value);
     };
-    let owner = gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| super::normal_error("icdf", "icdf: resident input owner is unavailable"))?;
+    let owner = gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
+        build_runtime_error("icdf: resident input owner is unavailable")
+            .with_identifier("RunMat:gpu:ProviderOwnershipMismatch")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .with_builtin("icdf")
+            .build()
+    })?;
     gpu_helpers::download_value_preserving_residency_async(owner, handle)
         .await
-        .map_err(|error| super::normal_error("icdf", format!("icdf: {error}")))
+        .map_err(|error| super::with_distribution_context("icdf", error))
 }
 
 pub(super) fn ensure_exact_integer_boundary(value: &Value, label: &str) -> BuiltinResult<()> {
     let tensor = match value {
         Value::Int(integer) => {
-            let exact = match integer {
-                runmat_value::IntValue::I8(value) => i128::from(*value),
-                runmat_value::IntValue::I16(value) => i128::from(*value),
-                runmat_value::IntValue::I32(value) => i128::from(*value),
-                runmat_value::IntValue::I64(value) => i128::from(*value),
-                runmat_value::IntValue::U8(value) => i128::from(*value),
-                runmat_value::IntValue::U16(value) => i128::from(*value),
-                runmat_value::IntValue::U32(value) => i128::from(*value),
-                runmat_value::IntValue::U64(value) => i128::from(*value),
-            };
-            return ensure_exact_i128(exact, label);
+            return ensure_exact_integer(
+                crate::builtins::common::validation::integer_is_exact_f64(integer),
+                label,
+            );
         }
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => tensor,
         _ => return Ok(()),
     };
     for index in 0..tensor.len() {
-        let exact = match tensor.numeric_value_at(index) {
-            Some(NumericScalar::I8(value)) => i128::from(value),
-            Some(NumericScalar::I16(value)) => i128::from(value),
-            Some(NumericScalar::I32(value)) => i128::from(value),
-            Some(NumericScalar::I64(value)) => i128::from(value),
-            Some(NumericScalar::U8(value)) => i128::from(value),
-            Some(NumericScalar::U16(value)) => i128::from(value),
-            Some(NumericScalar::U32(value)) => i128::from(value),
-            Some(NumericScalar::U64(value)) => i128::from(value),
-            _ => continue,
-        };
-        ensure_exact_i128(exact, label)?;
+        if let Some(exact) = tensor
+            .numeric_value_at(index)
+            .and_then(super::integer_numeric_scalar_is_exact_f64)
+        {
+            ensure_exact_integer(exact, label)?;
+        }
     }
     Ok(())
 }
 
-fn ensure_exact_i128(exact: i128, label: &str) -> BuiltinResult<()> {
-    const MAX_EXACT: i128 = 1_i128 << 53;
-    if !(-MAX_EXACT..=MAX_EXACT).contains(&exact) {
+fn ensure_exact_integer(exact: bool, label: &str) -> BuiltinResult<()> {
+    if !exact {
         return Err(super::normal_error(
             "icdf",
             format!("icdf: integer {label} values must be exactly representable as double"),

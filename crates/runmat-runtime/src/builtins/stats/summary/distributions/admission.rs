@@ -7,6 +7,31 @@ pub(super) fn normal_error(name: &str, message: impl Into<String>) -> RuntimeErr
         .build()
 }
 
+pub(super) fn with_distribution_context(name: &str, mut error: RuntimeError) -> RuntimeError {
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(name);
+    }
+    error
+}
+
+pub(super) fn integer_numeric_scalar_is_exact_f64(value: NumericScalar) -> Option<bool> {
+    use runmat_value::IntValue;
+    let integer = match value {
+        NumericScalar::I8(value) => IntValue::I8(value),
+        NumericScalar::I16(value) => IntValue::I16(value),
+        NumericScalar::I32(value) => IntValue::I32(value),
+        NumericScalar::I64(value) => IntValue::I64(value),
+        NumericScalar::U8(value) => IntValue::U8(value),
+        NumericScalar::U16(value) => IntValue::U16(value),
+        NumericScalar::U32(value) => IntValue::U32(value),
+        NumericScalar::U64(value) => IntValue::U64(value),
+        _ => return None,
+    };
+    Some(crate::builtins::common::validation::integer_is_exact_f64(
+        &integer,
+    ))
+}
+
 pub(super) fn is_typed_integer_value(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
@@ -55,20 +80,12 @@ pub(super) fn ensure_exact_integer_boundary(
     if tensor.integer_storage().is_none() {
         return Ok(());
     }
-    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
     for index in 0..tensor.len() {
-        let exact = match tensor.numeric_value_at(index) {
-            Some(NumericScalar::I8(value)) => i128::from(value),
-            Some(NumericScalar::I16(value)) => i128::from(value),
-            Some(NumericScalar::I32(value)) => i128::from(value),
-            Some(NumericScalar::I64(value)) => i128::from(value),
-            Some(NumericScalar::U8(value)) => i128::from(value),
-            Some(NumericScalar::U16(value)) => i128::from(value),
-            Some(NumericScalar::U32(value)) => i128::from(value),
-            Some(NumericScalar::U64(value)) => i128::from(value),
-            _ => continue,
-        };
-        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+        if tensor
+            .numeric_value_at(index)
+            .and_then(integer_numeric_scalar_is_exact_f64)
+            == Some(false)
+        {
             return Err(normal_error(
                 name,
                 format!("{name}: integer {role} values must be exactly representable as double"),
@@ -85,7 +102,7 @@ pub(super) async fn normal_value_to_tensor(
 ) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
-        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+        .map_err(|error| with_distribution_context(name, error))?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
     ensure_exact_integer_boundary(name, &tensor, role)?;
@@ -150,7 +167,7 @@ impl NormalOutputPlan {
         };
         let restored =
             gpu_helpers::restore_class_preserving_value(&source, Value::Tensor(tensor), name)
-                .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+                .map_err(|error| with_distribution_context(name, error))?;
         if runmat_accelerate_api::handle_is_explicit(&source)
             && !matches!(restored, Value::GpuTensor(_))
         {
@@ -171,7 +188,7 @@ impl NormalOutputPlan {
 pub(super) async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
-        .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
+        .map_err(|error| with_distribution_context(name, error))?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| normal_error(name, format!("{name}: {err}")))?;
     tensor::integer_tensor_to_f64(tensor)

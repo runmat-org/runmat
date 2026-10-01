@@ -128,6 +128,13 @@ fn binocdf_preserves_single_output_and_rejects_inexact_wide_integers() {
     ))
     .unwrap_err();
     assert!(error.message().contains("exactly representable as double"));
+
+    let exact = block_on(binocdf::binocdf_builtin(
+        mirrorless_int_tensor(IntegerStorage::U64(vec![1_u64 << 54]), vec![1, 1]),
+        vec![Value::Num(2.0), Value::Num(0.5)],
+    ))
+    .expect("2^54 is exactly representable as double");
+    assert!(matches!(exact, Value::Num(value) if value == 1.0));
 }
 
 #[test]
