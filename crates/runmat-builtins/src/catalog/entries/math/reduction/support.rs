@@ -1,4 +1,9 @@
+mod mean_inference;
+mod mean_options;
 mod missing_policy;
+
+pub use mean_inference::infer_mean_type;
+pub use mean_options::{MeanControl, MeanOutputClass};
 pub use missing_policy::ReductionNaN;
 
 macro_rules! define_logical_reduction_entry {

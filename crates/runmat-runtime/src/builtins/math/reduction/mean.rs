@@ -2,12 +2,12 @@
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
+    infer_mean_type, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
     BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, Type,
+    BuiltinSignatureDescriptor, MeanControl, MeanOutputClass as OutputTemplate, Type,
 };
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar,
@@ -18,14 +18,13 @@ const NAME: &str = "mean";
 use runmat_builtins::ResolveContext;
 
 fn mean_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    reduce_numeric_type(args, ctx)
+    infer_mean_type(args, ctx)
 }
 
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -36,7 +35,6 @@ use crate::builtins::common::{
     shape::{canonical_scalar_shape, is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
-use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::dispatcher;
 
 const MEAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -438,13 +436,6 @@ struct ParsedArguments {
 }
 
 #[derive(Clone)]
-enum OutputTemplate {
-    Default,
-    Double,
-    Native,
-}
-
-#[derive(Clone)]
 struct MeanWeights {
     storage: MeanWeightStorage,
     shape: Vec<usize>,
@@ -798,19 +789,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut output = OutputTemplate::Default;
     let mut output_set = false;
     let mut weights = None;
-    let tokens = tokens_from_values(args);
-
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            if let Some(mode) = ReductionNaN::from_public_option(text) {
-                nan_mode = mode;
-                idx += 1;
-                continue;
-            }
-            match text.as_str() {
-                "weights" => {
+        if let Some(text) = keyword_of(arg) {
+            match MeanControl::from_public_option(&text) {
+                Some(MeanControl::Weights) => {
                     if weights.is_some() {
                         return Err(mean_invalid_argument(
                             "mean: Weights may be specified only once",
@@ -823,7 +807,12 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 2;
                     continue;
                 }
-                "all" => {
+                Some(MeanControl::Missing(mode)) => {
+                    nan_mode = mode;
+                    idx += 1;
+                    continue;
+                }
+                Some(MeanControl::All) => {
                     if axes_set && !matches!(axes, MeanAxes::Default) {
                         return Err(mean_invalid_argument(
                             "mean: 'all' cannot be combined with an explicit dimension",
@@ -834,105 +823,40 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 1;
                     continue;
                 }
-                _ => {}
-            }
-        }
-        if let Some(keyword) = keyword_of(arg) {
-            if let Some(mode) = ReductionNaN::from_public_option(&keyword) {
-                nan_mode = mode;
-                idx += 1;
-                continue;
-            }
-            match keyword.as_str() {
-                "weights" => {
-                    if weights.is_some() {
-                        return Err(mean_invalid_argument(
-                            "mean: Weights may be specified only once",
-                        ));
-                    }
-                    let value = args
-                        .get(idx + 1)
-                        .ok_or_else(|| mean_invalid_argument("mean: Weights requires a value"))?;
-                    weights = Some(parse_weights(value).await?);
-                    idx += 2;
-                    continue;
-                }
-                "all" => {
-                    if axes_set && !matches!(axes, MeanAxes::Default) {
-                        return Err(mean_invalid_argument(
-                            "mean: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                    axes = MeanAxes::All;
-                    axes_set = true;
-                    idx += 1;
-                    continue;
-                }
-                "default" => {
+                Some(MeanControl::Output(class)) => {
                     if output_set {
                         return Err(mean_invalid_argument(
                             "mean: multiple output class specifications provided",
                         ));
                     }
-                    output = OutputTemplate::Default;
+                    output = class;
                     output_set = true;
                     idx += 1;
                     continue;
                 }
-                "double" => {
-                    if output_set {
-                        return Err(mean_invalid_argument(
-                            "mean: multiple output class specifications provided",
-                        ));
-                    }
-                    output = OutputTemplate::Double;
-                    output_set = true;
-                    idx += 1;
-                    continue;
+                None if text.trim().is_empty() => {
+                    return Err(mean_invalid_argument(
+                        "mean: dimension string must not be empty",
+                    ));
                 }
-                "native" => {
-                    if output_set {
-                        return Err(mean_invalid_argument(
-                            "mean: multiple output class specifications provided",
-                        ));
-                    }
-                    output = OutputTemplate::Native;
-                    output_set = true;
-                    idx += 1;
-                    continue;
+                None => {
+                    return Err(mean_invalid_argument(format!(
+                        "mean: unrecognised argument {arg:?}"
+                    )));
                 }
-                _ => {}
             }
         }
 
-        if !axes_set || matches!(axes, MeanAxes::Default) {
-            if let Some(selection) = parse_axes(arg).await? {
-                if matches!(selection, MeanAxes::All)
-                    && axes_set
-                    && !matches!(axes, MeanAxes::Default)
-                {
-                    return Err(mean_invalid_argument(
-                        "mean: 'all' cannot be combined with an explicit dimension",
-                    ));
-                }
-                axes = selection;
-                axes_set = true;
-                idx += 1;
-                continue;
-            }
-        }
-
-        if axes_set && !matches!(axes, MeanAxes::Default) {
-            if let Some(selection) = parse_axes(arg).await? {
-                if matches!(selection, MeanAxes::All) {
-                    return Err(mean_invalid_argument(
-                        "mean: 'all' cannot be combined with an explicit dimension",
-                    ));
-                }
+        if let Some(selection) = parse_axes(arg).await? {
+            if axes_set && !matches!(axes, MeanAxes::Default) {
                 return Err(mean_invalid_argument(
                     "mean: multiple dimension specifications provided",
                 ));
             }
+            axes = selection;
+            axes_set = true;
+            idx += 1;
+            continue;
         }
 
         return Err(mean_invalid_argument(format!(
@@ -999,19 +923,6 @@ async fn parse_weights(value: &Value) -> BuiltinResult<MeanWeights> {
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
-    if let Some(text) = value_as_str(value) {
-        let lowered = text.trim().to_ascii_lowercase();
-        return match lowered.as_str() {
-            "all" => Ok(Some(MeanAxes::All)),
-            "omitnan" | "includenan" | "omitmissing" | "includemissing" | "double" | "native"
-            | "default" | "weights" => Ok(None),
-            "" => Err(mean_invalid_argument(
-                "mean: dimension string must not be empty",
-            )),
-            _ => Ok(None),
-        };
-    }
-
     let scalar_hint = match value {
         Value::Num(_) | Value::Int(_) => true,
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
@@ -1060,15 +971,6 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         }
     }
     Ok(Some(MeanAxes::Vec(dims)))
-}
-
-fn value_as_str(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        _ => None,
-    }
 }
 
 fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
@@ -2515,6 +2417,53 @@ pub(crate) mod tests {
         )
         .expect("omitted weighted mean");
         assert!(matches!(omitted, Value::Num(value) if (value - 2.5).abs() < 1e-12));
+    }
+
+    #[test]
+    fn mean_typed_controls_preserve_ordered_admission_and_diagnostics() {
+        let input = Value::Tensor(Tensor::new(vec![1.0, f64::NAN, 3.0], vec![1, 3]).unwrap());
+        let result = mean_builtin(
+            input.clone(),
+            vec![Value::from(" all "), Value::from("OMITMISSING")],
+        )
+        .expect("trimmed all and case-insensitive missing control");
+        assert!(matches!(result, Value::Num(value) if (value - 2.0).abs() < 1e-12));
+
+        let conflicting_output = mean_builtin(
+            input.clone(),
+            vec![Value::from("native"), Value::from("double")],
+        )
+        .expect_err("duplicate output class");
+        assert_eq!(
+            conflicting_output.identifier(),
+            MEAN_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(conflicting_output
+            .message()
+            .contains("multiple output class specifications"));
+
+        let conflicting_axes = mean_builtin(
+            input.clone(),
+            vec![Value::Int(IntValue::I32(2)), Value::from("all")],
+        )
+        .expect_err("dimension and all conflict");
+        assert_eq!(
+            conflicting_axes.identifier(),
+            MEAN_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(conflicting_axes
+            .message()
+            .contains("'all' cannot be combined"));
+
+        let empty_option =
+            mean_builtin(input, vec![Value::from(" ")]).expect_err("empty dimension text");
+        assert_eq!(
+            empty_option.identifier(),
+            MEAN_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(empty_option
+            .message()
+            .contains("dimension string must not be empty"));
     }
 
     #[test]

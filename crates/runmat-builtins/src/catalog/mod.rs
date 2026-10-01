@@ -38,7 +38,6 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
-pub use self::entries::math::reduction::support::ReductionNaN;
 pub use self::entries::*;
 pub use alias::*;
 pub use callable::*;
