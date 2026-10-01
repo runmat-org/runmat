@@ -1165,6 +1165,7 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
+    use crate::builtins::plotting::state;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
@@ -1550,25 +1551,14 @@ mod tests {
         assert!(error.marker.is_none());
     }
 
-    #[test]
-    fn errorbar_rejects_complex_and_excess_outputs_before_mutation() {
-        let _guard = lock_plot_registry();
-        ensure_plot_test_env();
-        reset_hold_state_for_run();
-        let _ = clear_figure(None);
+    fn assert_invalid_errorbar_calls_preserve_state(assert_unchanged: impl Fn()) {
         let error = errorbar_builtin(vec![Value::Complex(1.0, 1.0), Value::Num(0.2)])
             .expect_err("complex data");
         assert_eq!(
             error.identifier(),
             ERRORBAR_ERROR_INVALID_ARGUMENT.identifier
         );
-        assert_eq!(
-            clone_figure(current_figure_handle())
-                .unwrap()
-                .plots()
-                .count(),
-            0
-        );
+        assert_unchanged();
 
         let _outputs = crate::output_count::push_output_count(Some(2));
         let error =
@@ -1577,13 +1567,40 @@ mod tests {
             error.identifier(),
             ERRORBAR_ERROR_INVALID_ARGUMENT.identifier
         );
-        assert_eq!(
-            clone_figure(current_figure_handle())
-                .unwrap()
-                .plots()
-                .count(),
-            0
-        );
+        assert_unchanged();
+    }
+
+    #[test]
+    fn errorbar_rejects_complex_and_excess_outputs_without_creating_a_figure() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        state::reset_plot_state();
+        assert!(state::figure_handles().is_empty());
+        assert!(state::current_figure_handle_if_exists().is_none());
+        assert_invalid_errorbar_calls_preserve_state(|| {
+            assert!(state::figure_handles().is_empty());
+            assert!(state::current_figure_handle_if_exists().is_none());
+        });
+    }
+
+    #[test]
+    fn errorbar_rejects_complex_and_excess_outputs_without_mutating_an_existing_figure() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        state::reset_plot_state();
+        errorbar_builtin(vec![Value::Num(1.0), Value::Num(0.2)])
+            .expect("a valid errorbar creates the sentinel plot");
+        let handle = current_figure_handle();
+        let handles = state::figure_handles();
+        let revision = state::current_figure_revision(handle);
+        assert_eq!(clone_figure(handle).unwrap().plots().count(), 1);
+        assert!(revision.is_some());
+        assert_invalid_errorbar_calls_preserve_state(|| {
+            assert_eq!(state::figure_handles(), handles);
+            assert_eq!(state::current_figure_handle_if_exists(), Some(handle));
+            assert_eq!(state::current_figure_revision(handle), revision);
+            assert_eq!(clone_figure(handle).unwrap().plots().count(), 1);
+        });
     }
 
     #[test]
