@@ -336,6 +336,14 @@ enum NormParse {
     builtin_path = "crate::builtins::math::reduction::var"
 )]
 pub(crate) async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    var_with_nan_policy(value, rest, None).await
+}
+
+pub(crate) async fn var_with_nan_policy(
+    value: Value,
+    rest: Vec<Value>,
+    imposed_nan_mode: Option<ReductionNaN>,
+) -> crate::BuiltinResult<Value> {
     reject_integer_data_input(&value)?;
     if rest.iter().any(is_real_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -343,7 +351,10 @@ pub(crate) async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::Builti
             NAME,
         )?;
     }
-    let parsed = parse_arguments(&rest).await?;
+    let mut parsed = parse_arguments(&rest).await?;
+    if let Some(mode) = imposed_nan_mode {
+        parsed.nan_mode = mode;
+    }
     match value {
         Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(var_complex_unsupported_default()),

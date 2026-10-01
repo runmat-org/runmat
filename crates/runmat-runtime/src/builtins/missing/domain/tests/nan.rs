@@ -33,6 +33,56 @@ fn nanmean_alias_imposes_omission_without_synthetic_argument() {
 }
 
 #[test]
+fn nan_aliases_impose_typed_omission_after_owner_controls() {
+    type Invoke = fn(Value, Vec<Value>) -> BuiltinResult<Value>;
+    let cases: [(&str, Invoke, f64); 5] = [
+        (
+            "nansum",
+            |value, rest| block_on(nansum_builtin(value, rest)),
+            4.0,
+        ),
+        (
+            "nanmedian",
+            |value, rest| block_on(nanmedian_builtin(value, rest)),
+            2.0,
+        ),
+        (
+            "nanstd",
+            |value, rest| block_on(nanstd_builtin(value, rest)),
+            2.0_f64.sqrt(),
+        ),
+        (
+            "nanvar",
+            |value, rest| block_on(nanvar_builtin(value, rest)),
+            2.0,
+        ),
+        (
+            "nanmin",
+            |value, rest| block_on(nanmin_builtin(value, rest)),
+            1.0,
+        ),
+    ];
+    for (name, invoke, expected) in cases {
+        let result = invoke(
+            tensor(vec![1.0, f64::NAN, 3.0], vec![1, 3]),
+            vec![Value::from("all"), Value::from("includenan")],
+        )
+        .unwrap_or_else(|error| panic!("{name} should admit owner controls: {error}"));
+        let actual = match result {
+            Value::Num(value) => value,
+            Value::Tensor(ref value) if value.host_buffer().len() == 1 => {
+                value.materialize_f64()[0]
+            }
+            other => panic!("{name} returned non-scalar {other:?}"),
+        };
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "{name}: {actual} != {expected}"
+        );
+    }
+}
+
+#[test]
 fn legacy_nan_reductions_gate_typed_integer_data_by_compatibility_mode() {
     type LegacyNanCase = (
         fn(Value, Vec<Value>) -> BuiltinResult<Value>,

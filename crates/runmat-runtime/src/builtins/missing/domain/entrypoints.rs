@@ -2,7 +2,7 @@ use super::detection::{any_missing, ismissing_value, missing_string_array, parse
 use super::filling::{fill_missing_value, FillOptions};
 use super::moving::{moving_mad, MovingOptions};
 use super::numeric::{
-    is_empty_numeric_placeholder, is_numeric_data_like, pairwise_nan_min, scalar_text, scalar_usize,
+    is_empty_numeric_placeholder, is_numeric_data_like, pairwise_nan_min, scalar_usize,
 };
 use super::removal::{remove_missing_value, RemoveOptions};
 use super::standardize::{indicator_set, numeric_tensor, standardize_missing_value};
@@ -254,7 +254,7 @@ pub(super) async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinRe
 pub(super) async fn nansum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_output_arity("nansum", 1)?;
     ensure_nan_integer_extension(&NANSUM_INTEGER_EXTENSION, "nansum", &value, &rest)?;
-    sum::sum_builtin(value, rest_with_omitnan(rest)).await
+    sum::sum_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
 #[runtime_builtin(
@@ -276,7 +276,7 @@ pub(super) async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
             return pairwise_nan_min(value, first.clone());
         }
     }
-    min::min_builtin(value, nanmin_rest_with_omitnan(rest)).await
+    min::min_reduction_with_nan_policy(value, rest, runmat_builtins::ReductionNaN::Omit).await
 }
 
 #[runtime_builtin(
@@ -287,7 +287,7 @@ pub(super) async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
 pub(super) async fn nanmedian_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_output_arity("nanmedian", 1)?;
     ensure_nan_integer_extension(&NANMEDIAN_INTEGER_EXTENSION, "nanmedian", &value, &rest)?;
-    median::median_builtin(value, rest_with_omitnan(rest)).await
+    median::median_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
 #[runtime_builtin(
@@ -298,7 +298,7 @@ pub(super) async fn nanmedian_builtin(value: Value, rest: Vec<Value>) -> Builtin
 pub(super) async fn nanstd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_output_arity("nanstd", 1)?;
     ensure_nan_integer_control_extension(&NANSTD_INTEGER_EXTENSION, "nanstd", &value, &rest)?;
-    std_reduction::std_builtin(value, rest_with_omitnan(rest)).await
+    std_reduction::std_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
 #[runtime_builtin(
@@ -309,7 +309,7 @@ pub(super) async fn nanstd_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
 pub(super) async fn nanvar_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     ensure_output_arity("nanvar", 1)?;
     ensure_nan_integer_control_extension(&NANVAR_INTEGER_EXTENSION, "nanvar", &value, &rest)?;
-    var::var_builtin(value, rest_with_omitnan(rest)).await
+    var::var_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
 #[runtime_builtin(
@@ -395,29 +395,4 @@ pub(super) fn ensure_nan_integer_control_extension(
         crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
     }
     Ok(())
-}
-
-pub(super) fn rest_with_omitnan(mut rest: Vec<Value>) -> Vec<Value> {
-    let insert_at = rest
-        .iter()
-        .position(|arg| scalar_text(arg).is_some_and(|text| text.eq_ignore_ascii_case("like")))
-        .unwrap_or(rest.len());
-    rest.insert(insert_at, Value::from("omitnan"));
-    rest
-}
-
-pub(super) fn nanmin_rest_with_omitnan(mut rest: Vec<Value>) -> Vec<Value> {
-    if rest
-        .first()
-        .is_none_or(|first| !is_empty_numeric_placeholder(first))
-    {
-        rest.insert(
-            0,
-            Value::Tensor(
-                Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty placeholder shape"),
-            ),
-        );
-    }
-    rest.push(Value::from("omitnan"));
-    rest
 }

@@ -508,6 +508,39 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
         super::extrema_provider::ExtremaDemand::ValuesOnly
     };
     let eval = evaluate_for_demand(value, &rest, demand).await?;
+    min_output_from_eval(eval)
+}
+
+/// Apply the owning reduction grammar with an alias-imposed missing-data policy.
+/// The alias can select reduction without constructing a placeholder argument.
+pub(crate) async fn min_reduction_with_nan_policy(
+    value: Value,
+    rest: Vec<Value>,
+    imposed_nan_mode: ReductionNaN,
+) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(min_invalid_input(
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
+    let controls = if rest.first().is_some_and(is_empty_placeholder) {
+        &rest[1..]
+    } else {
+        &rest[..]
+    };
+    let mut parsed = ReductionArgs::default();
+    parse_reduction_options(&mut parsed, controls).await?;
+    parsed.nan_mode = imposed_nan_mode;
+    let demand = if crate::output_count::current_output_count().unwrap_or(1) > 1 {
+        super::extrema_provider::ExtremaDemand::ValuesAndIndices
+    } else {
+        super::extrema_provider::ExtremaDemand::ValuesOnly
+    };
+    let eval = reduction_min(value, parsed, demand).await?;
+    min_output_from_eval(eval)
+}
+
+fn min_output_from_eval(eval: super::extrema_provider::ExtremaResult) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));

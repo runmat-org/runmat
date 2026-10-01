@@ -407,6 +407,14 @@ struct MedianWeights {
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 pub(crate) async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    median_with_nan_policy(value, rest, None).await
+}
+
+pub(crate) async fn median_with_nan_policy(
+    value: Value,
+    rest: Vec<Value>,
+    imposed_nan_mode: Option<ReductionNaN>,
+) -> crate::BuiltinResult<Value> {
     let protected = rest
         .iter()
         .filter_map(|value| match value {
@@ -425,7 +433,10 @@ pub(crate) async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::Bui
                 _ => None,
             },
         ));
-    let parsed = parse_arguments(&rest, &mut admission).await?;
+    let mut parsed = parse_arguments(&rest, &mut admission).await?;
+    if let Some(mode) = imposed_nan_mode {
+        parsed.nan_mode = mode;
+    }
     admission.before_effect()?;
     drop(admission);
     match value {
