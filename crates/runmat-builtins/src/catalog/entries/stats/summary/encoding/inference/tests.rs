@@ -1,9 +1,9 @@
 use super::common::*;
 use super::*;
 use runmat_types::{
-    CallRequest, CellFact, DimensionFact, DynamicReason, LiteralContext, LiteralValue,
-    NumericClass, NumericDomain, NumericFact, OutputSelection as RequestedOutputs,
-    RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallRequest, CellFact, DynamicReason, LiteralContext, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, OutputSelection as RequestedOutputs, RequestedOutputCount,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
