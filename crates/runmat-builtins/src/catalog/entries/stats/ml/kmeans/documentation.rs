@@ -29,7 +29,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Classes and residency",
             paragraphs: &[
                 "Typed-integer observation data, cluster counts, numeric starts, iteration controls, and numeric parallel toggles are role-specific RunMat extensions. Structural controls decode exactly; numerical solver inputs must be exactly representable at the binary64 boundary.",
-                "The current clustering implementation runs on CPU. Automatic residency may gather through its owning provider. A documented explicit floating gpuArray call returns numeric outputs to the same owner or fails instead of silently returning host values. There is no kmeans device kernel or fusion path.",
+                "The clustering solver runs on CPU. Resident observations and consumed resident numeric controls are gathered through their owning providers. When `X` is resident, RunMat attempts to restore numeric outputs to the owner of `X`; automatic placement may fall back to host output if that provider cannot restore them. For resident `X`, explicit device intent on `X` or a consumed resident numeric control requires resident outputs or an error. With host `X`, outputs remain on the host. Ignored statset fields and empty statset metadata do not request device output residency. There is no `kmeans` device kernel or fusion path.",
             ],
         },
     ],
