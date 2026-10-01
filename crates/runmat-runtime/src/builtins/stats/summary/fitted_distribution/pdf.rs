@@ -67,7 +67,7 @@ pub(super) async fn evaluate_pdf(
         }
         let precision = cdf_output_precision(&[&input]);
         let gpu_source = first_gpu_source(&[&input]);
-        let fit = distribution_from_value(&distribution)?;
+        let fit = distribution_from_value_for(FittedOperation::Density, &distribution)?;
         let x = value_to_tensor(PDF_NAME, input).await?;
         let shape = x.shape.clone();
         let data = tensor::tensor_into_values_f64(x)

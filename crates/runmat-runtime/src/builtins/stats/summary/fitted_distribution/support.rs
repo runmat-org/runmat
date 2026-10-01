@@ -1,5 +1,40 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) enum FittedOperation {
+    Density,
+    Cumulative,
+    Inverse,
+    Sampling,
+}
+
+impl FittedOperation {
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Density => PDF_NAME,
+            Self::Cumulative => CDF_NAME,
+            Self::Inverse => "icdf",
+            Self::Sampling => RANDOM_NAME,
+        }
+    }
+}
+
+pub(super) fn check_fitted_cancellation(
+    runtime: Option<&crate::context::RuntimeContext>,
+    operation: FittedOperation,
+) -> BuiltinResult<()> {
+    if let Some(runtime) = runtime.filter(|runtime| runtime.is_cancelled()) {
+        let name = operation.name();
+        return Err(
+            build_runtime_error(format!("{name}: execution was cancelled"))
+                .with_identifier(format!("{}:Cancelled", runtime.error_namespace()))
+                .with_builtin(name)
+                .build(),
+        );
+    }
+    Ok(())
+}
+
 pub(super) async fn parse_shape_args(rest: &[Value]) -> BuiltinResult<Vec<usize>> {
     if rest.is_empty() {
         return Ok(vec![1, 1]);
@@ -8,11 +43,13 @@ pub(super) async fn parse_shape_args(rest: &[Value]) -> BuiltinResult<Vec<usize>
     for arg in rest {
         match extract_dims(arg, RANDOM_NAME).await {
             Ok(Some(values)) => dims.extend(values),
-            Ok(None) => return Err(invalid("random: invalid size argument")),
-            Err(err) => return Err(invalid(err)),
+            Ok(None) => return Err(invalid_for(RANDOM_NAME, "random: invalid size argument")),
+            Err(err) => return Err(invalid_for(RANDOM_NAME, err)),
         }
     }
-    Ok(normalize_dims(dims))
+    let shape = normalize_dims(dims);
+    checked_output_len(&shape)?;
+    Ok(shape)
 }
 
 pub(super) fn normalize_dims(dims: Vec<usize>) -> Vec<usize> {
@@ -25,12 +62,17 @@ pub(super) fn normalize_dims(dims: Vec<usize>) -> Vec<usize> {
     }
 }
 
+pub(super) fn checked_output_len(shape: &[usize]) -> BuiltinResult<usize> {
+    crate::builtins::common::spec::checked_reduction_elements(shape)
+        .ok_or_else(|| invalid_for(RANDOM_NAME, "random: output shape exceeds structural range"))
+}
+
 pub(super) fn finish_for(
     builtin: &'static str,
     shape: Vec<usize>,
     data: Vec<f64>,
 ) -> BuiltinResult<Value> {
-    if shape.iter().copied().product::<usize>() == 1 {
+    if crate::builtins::common::spec::checked_reduction_elements(&shape) == Some(1) {
         return Ok(Value::Num(data.first().copied().unwrap_or(0.0)));
     }
     Tensor::new(data, shape)
@@ -42,24 +84,32 @@ pub(super) fn two(values: &[f64]) -> [f64; 2] {
     [values[0], values[1]]
 }
 
-pub(super) fn invert_positive(p: f64, initial_hi: f64, cdf: impl Fn(f64) -> f64) -> f64 {
+pub(super) fn invert_positive(
+    p: f64,
+    initial_hi: f64,
+    cdf: impl Fn(f64) -> f64,
+    poll: impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<f64> {
+    poll()?;
     if p == 0.0 {
-        return 0.0;
+        return Ok(0.0);
     }
     if p == 1.0 {
-        return f64::INFINITY;
+        return Ok(f64::INFINITY);
     }
     let mut lo = 0.0;
     let mut hi = initial_hi.max(1.0);
     let mut iter = 0;
     while cdf(hi) < p {
+        poll()?;
         hi *= 2.0;
         iter += 1;
         if !hi.is_finite() || iter > 2048 {
-            return f64::INFINITY;
+            return Ok(f64::INFINITY);
         }
     }
     for _ in 0..160 {
+        poll()?;
         let mid = 0.5 * (lo + hi);
         if cdf(mid) >= p {
             hi = mid;
@@ -67,7 +117,7 @@ pub(super) fn invert_positive(p: f64, initial_hi: f64, cdf: impl Fn(f64) -> f64)
             lo = mid;
         }
     }
-    0.5 * (lo + hi)
+    Ok(0.5 * (lo + hi))
 }
 
 pub(super) fn digamma(mut x: f64) -> f64 {

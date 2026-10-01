@@ -10,7 +10,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Forms and output", paragraphs: &[
             "`random(pd)` returns one double scalar. Explicit scalar dimensions or a size vector specify the output shape. Named Normal, Exponential, Lognormal, Gamma, Weibull, and Poisson forms take their scalar family parameters before optional size arguments.",
-            "Named family parameters and size controls are single or double in the MATLAB-compatible subset. Typed-integer parameters and sizes are independently gated RunMat extensions. Parameters require exact binary64 representation; sizes are structural and decoded without floating conversion.",
+            "Named family parameters and size controls are single or double in the documented MATLAB-compatible subset. The current RunMat evaluator also accepts logical named parameters as 0 or 1; logical size controls are not accepted. Typed-integer parameters and sizes are independently gated RunMat extensions. Parameters require exact binary64 representation; sizes are structural and decoded without floating conversion.",
             "The host RNG generates double samples. Host parameters produce host output. Resident named parameters select their exact owning provider for checked double-output restoration; size controls do not select residency. Explicit resident intent fails if restoration cannot preserve it.",
         ] },
         BuiltinDocumentationSection { heading: "Current scope", paragraphs: &[

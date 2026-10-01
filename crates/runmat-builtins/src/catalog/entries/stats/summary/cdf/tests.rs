@@ -53,3 +53,33 @@ fn cdf_named_upper_broadcasts_and_rejects_incompatible_geometry() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-DISTRIBUTION-SHAPE"));
 }
+
+#[test]
+fn cdf_unknown_text_control_does_not_become_a_numeric_parameter() {
+    let scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Real,
+    }));
+    let request = CallRequest {
+        arguments: vec![
+            ValueFact::scalar(ValueKindFact::String),
+            scalar.clone(),
+            scalar,
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        literals: LiteralContext::new(vec![
+            LiteralValue::String("Poisson".into()),
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+        ]),
+        outputs: OutputSelection::default(),
+    };
+    let inference = infer(&request, &CDF_CATALOG_ENTRY);
+    assert!(
+        inference.diagnostics.is_empty(),
+        "{:?}",
+        inference.diagnostics
+    );
+    assert_eq!(inference.outputs[0].shape, ShapeFact::Unknown);
+}

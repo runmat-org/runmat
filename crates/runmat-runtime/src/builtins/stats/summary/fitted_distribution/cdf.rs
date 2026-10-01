@@ -53,7 +53,7 @@ pub(super) async fn evaluate_cdf(
         ensure_cdf_extensions(&input, &[])?;
         let precision = cdf_output_precision(&[&input]);
         let gpu_source = first_gpu_source(&[&input]);
-        let fit = distribution_from_value(&distribution)?;
+        let fit = distribution_from_value_for(FittedOperation::Cumulative, &distribution)?;
         let x = cdf_value_to_tensor(input).await?;
         ensure_exact_cdf_integer_boundary(&x, "x")?;
         let shape = x.shape.clone();
@@ -151,7 +151,7 @@ pub(super) fn first_gpu_source(inputs: &[&Value]) -> Option<GpuTensorHandle> {
 pub(super) async fn cdf_value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
-        .map_err(|err| invalid_for(CDF_NAME, format!("cdf: {err}")))?;
+        .map_err(|err| with_fitted_context(CDF_NAME, err))?;
     tensor::value_into_tensor_for(CDF_NAME, gathered)
         .map_err(|_| invalid_for(CDF_NAME, "cdf: expected numeric input"))
 }
@@ -213,20 +213,12 @@ pub(super) fn ensure_exact_cdf_integer_boundary(tensor: &Tensor, name: &str) -> 
     if tensor.integer_storage().is_none() {
         return Ok(());
     }
-    const MAX_EXACT_INTEGER: i128 = 1_i128 << 53;
-    for index in 0..tensor.len() {
-        let exact = match tensor.numeric_value_at(index) {
-            Some(NumericScalar::I8(value)) => i128::from(value),
-            Some(NumericScalar::I16(value)) => i128::from(value),
-            Some(NumericScalar::I32(value)) => i128::from(value),
-            Some(NumericScalar::I64(value)) => i128::from(value),
-            Some(NumericScalar::U8(value)) => i128::from(value),
-            Some(NumericScalar::U16(value)) => i128::from(value),
-            Some(NumericScalar::U32(value)) => i128::from(value),
-            Some(NumericScalar::U64(value)) => i128::from(value),
-            _ => continue,
-        };
-        if !(-MAX_EXACT_INTEGER..=MAX_EXACT_INTEGER).contains(&exact) {
+    for integer in tensor
+        .integer_storage()
+        .expect("integer storage checked above")
+        .exact_values()
+    {
+        if !crate::builtins::common::validation::integer_is_exact_f64(&integer) {
             return Err(invalid_for(
                 CDF_NAME,
                 format!("cdf: integer {name} values must be exactly representable as double"),

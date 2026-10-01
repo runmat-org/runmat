@@ -13,7 +13,7 @@ fn fitdist_normal_fits_and_evaluates_object_methods() {
         object.properties.get("DistributionName"),
         Some(&Value::String("Normal".into()))
     );
-    let values = numeric_vector_property(&object, "ParameterValues").unwrap();
+    let values = numeric_vector_property(FITDIST_NAME, &object, "ParameterValues").unwrap();
     assert!((values[0] - 2.0).abs() < 1.0e-12);
     assert!((values[1] - (2.0_f64 / 3.0).sqrt()).abs() < 1.0e-12);
 
@@ -39,6 +39,23 @@ fn fitdist_normal_fits_and_evaluates_object_methods() {
 }
 
 #[test]
+fn fitdist_logical_observations_and_frequency_retain_existing_numeric_admission() {
+    let data =
+        Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 1, 1], vec![3, 1]).unwrap());
+    let frequency =
+        Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap());
+    let pd = block_on(fitdist_builtin(
+        data,
+        Value::from("Normal"),
+        vec![Value::from("Frequency"), frequency],
+    ))
+    .expect("logical observations and counts are numeric 0/1 at the fitting boundary");
+    let object = object(pd);
+    let values = numeric_vector_property(FITDIST_NAME, &object, "ParameterValues").unwrap();
+    assert!((values[0] - 0.5).abs() < 1.0e-12);
+}
+
+#[test]
 fn fitdist_accepts_typed_integer_sample_and_eval_points() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let pd = block_on(fitdist_builtin(
@@ -48,7 +65,7 @@ fn fitdist_accepts_typed_integer_sample_and_eval_points() {
     ))
     .unwrap();
     let object = object(pd.clone());
-    let values = numeric_vector_property(&object, "ParameterValues").unwrap();
+    let values = numeric_vector_property(FITDIST_NAME, &object, "ParameterValues").unwrap();
     assert!((values[0] - 2.0).abs() < 1.0e-12);
 
     let density = block_on(pdf_builtin(
@@ -266,7 +283,7 @@ fn fitdist_reads_typed_integer_storage_exactly() {
     ))
     .unwrap();
     let object = object(pd.clone());
-    let values = numeric_vector_property(&object, "ParameterValues").unwrap();
+    let values = numeric_vector_property(FITDIST_NAME, &object, "ParameterValues").unwrap();
     assert!((values[0] - (13.0 / 6.0)).abs() < 1.0e-12);
 
     let mut typed_object = object;
@@ -275,7 +292,7 @@ fn fitdist_reads_typed_integer_storage_exactly() {
         poisoned_int_tensor(IntegerStorage::U16(vec![7]), vec![1, 1]),
     );
     assert_eq!(
-        numeric_vector_property(&typed_object, "ParameterValues").unwrap(),
+        numeric_vector_property(FITDIST_NAME, &typed_object, "ParameterValues").unwrap(),
         vec![7.0]
     );
 }
@@ -290,7 +307,7 @@ fn fitdist_sample_length_uses_typed_integer_storage_not_mirror() {
     ))
     .unwrap();
     let object = object(pd);
-    let values = numeric_vector_property(&object, "ParameterValues").unwrap();
+    let values = numeric_vector_property(FITDIST_NAME, &object, "ParameterValues").unwrap();
     assert!((values[0] - 2.0).abs() < 1.0e-12);
 }
 
@@ -307,7 +324,7 @@ fn fitdist_frequency_and_range_validation() {
         ))
         .unwrap(),
     );
-    let values = numeric_vector_property(&pd, "ParameterValues").unwrap();
+    let values = numeric_vector_property(FITDIST_NAME, &pd, "ParameterValues").unwrap();
     assert!((values[0] - 1.75).abs() < 1.0e-12);
 
     let err = block_on(fitdist_builtin(

@@ -12,6 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Named Normal, Exponential, Lognormal, Gamma, Weibull, and Poisson families are supported. Named parameters and evaluation points may be scalar or mutually broadcast-compatible numeric arrays.",
             "Continuous families return density values. Poisson returns probability mass at nonnegative integer support points and zero outside the support.",
             "Typed-integer evaluation points and typed-integer named parameters are independently gated RunMat extensions. Wide integers must cross the binary64 probability boundary exactly.",
+            "Logical evaluation points and named parameters are evaluated numerically as 0 or 1 in the current RunMat implementation.",
             "Any single numeric evaluation point or named parameter selects single output; otherwise the result is double.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[

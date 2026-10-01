@@ -54,22 +54,33 @@ pub(super) fn string_row(values: Vec<String>) -> BuiltinResult<StringArray> {
         .map_err(|err| internal(format!("fitdist: {err}")))
 }
 
-pub(super) fn distribution_from_value(value: &Value) -> BuiltinResult<FittedDistribution> {
+pub(super) fn distribution_from_value_for(
+    operation: FittedOperation,
+    value: &Value,
+) -> BuiltinResult<FittedDistribution> {
+    let builtin = operation.name();
     let Value::Object(object) = value else {
-        return Err(invalid("fitdist: expected ProbabilityDistribution object"));
+        return Err(invalid_for(
+            builtin,
+            format!("{builtin}: expected ProbabilityDistribution object"),
+        ));
     };
     if !object.is_class(runmat_types::standard::PROBABILITY_DISTRIBUTION) {
-        return Err(invalid(format!(
-            "fitdist: expected ProbabilityDistribution object, got {}",
-            object.class_name
-        )));
+        return Err(invalid_for(
+            builtin,
+            format!(
+                "{builtin}: expected ProbabilityDistribution object, got {}",
+                object.class_name
+            ),
+        ));
     }
-    let dist_name = string_property(object, "DistributionName")?;
-    let kind = parse_distribution_keyword(&dist_name)?;
-    let parameters = numeric_vector_property(object, "ParameterValues")?;
+    let dist_name = string_property(builtin, object, "DistributionName")?;
+    let kind = parse_distribution_keyword_for(builtin, &dist_name)?;
+    let parameters = numeric_vector_property(builtin, object, "ParameterValues")?;
     if parameters.len() != kind.parameter_names().len() {
-        return Err(invalid(
-            "fitdist: ProbabilityDistribution object has malformed ParameterValues",
+        return Err(invalid_for(
+            builtin,
+            format!("{builtin}: ProbabilityDistribution object has malformed ParameterValues"),
         ));
     }
     let nlogl = numeric_scalar_property(object, "NLogL").unwrap_or(f64::NAN);
@@ -82,26 +93,33 @@ pub(super) fn distribution_from_value(value: &Value) -> BuiltinResult<FittedDist
     })
 }
 
-pub(super) fn string_property(object: &ObjectInstance, name: &str) -> BuiltinResult<String> {
+pub(super) fn string_property(
+    builtin: &'static str,
+    object: &ObjectInstance,
+    name: &str,
+) -> BuiltinResult<String> {
     match object.properties.get(name) {
         Some(Value::String(value)) => Ok(value.clone()),
         Some(Value::CharArray(chars)) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        _ => Err(invalid(format!(
-            "fitdist: ProbabilityDistribution object is missing {name}"
-        ))),
+        _ => Err(invalid_for(
+            builtin,
+            format!("{builtin}: ProbabilityDistribution object is missing {name}"),
+        )),
     }
 }
 
 pub(super) fn numeric_vector_property(
+    builtin: &'static str,
     object: &ObjectInstance,
     name: &str,
 ) -> BuiltinResult<Vec<f64>> {
     match object.properties.get(name) {
         Some(Value::Tensor(tensor)) => Ok(tensor::tensor_values_f64(tensor)),
         Some(Value::Num(value)) => Ok(vec![*value]),
-        _ => Err(invalid(format!(
-            "fitdist: ProbabilityDistribution object is missing {name}"
-        ))),
+        _ => Err(invalid_for(
+            builtin,
+            format!("{builtin}: ProbabilityDistribution object is missing {name}"),
+        )),
     }
 }
 
@@ -127,10 +145,6 @@ pub(super) fn parse_distribution_name_for(
         )
     })?;
     parse_distribution_keyword_for(builtin, &keyword)
-}
-
-pub(super) fn parse_distribution_keyword(keyword: &str) -> BuiltinResult<DistributionKind> {
-    parse_distribution_keyword_for(FITDIST_NAME, keyword)
 }
 
 pub(super) fn parse_distribution_keyword_for(

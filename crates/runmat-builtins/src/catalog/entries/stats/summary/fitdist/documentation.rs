@@ -5,14 +5,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("fitdist"),
     slug: Some("fitdist"),
     summary: "Fit a probability distribution object to sample data.",
-    description: "`fitdist(x,distname)` estimates distribution parameters from a numeric vector and returns a `ProbabilityDistribution` value object accepted by `pdf`, `cdf`, `icdf`, and `random`.",
+    description: "`fitdist(x,distname)` estimates distribution parameters from a numeric or logical vector and returns a `ProbabilityDistribution` value object accepted by `pdf`, `cdf`, `icdf`, and `random`.",
     keywords: &["fitdist", "probability distribution", "normal", "exponential", "lognormal", "gamma", "weibull", "poisson", "statistics"],
     related: &["pdf", "cdf", "icdf", "random"],
     sections: &[
         BuiltinDocumentationSection { heading: "Families and data", paragraphs: &[
             "Supported fitted families are Normal, Exponential, Lognormal, Gamma, Weibull, and Poisson. The short names norm, exp, logn, gam, wbl, and poiss are accepted.",
-            "Observations must form a numeric vector. NaN observations are omitted; infinite observations are rejected. Exponential data must be nonnegative, Lognormal, Gamma, and Weibull data positive, and Poisson data nonnegative integers.",
-            "`fitdist(x,distname,\"Frequency\",w)` applies one finite nonnegative integer-valued count per observation. Zero-frequency observations do not contribute to the fit.",
+            "Observations must form a real numeric or logical vector. Logical values are evaluated as 0 or 1. NaN observations are omitted; infinite observations are rejected. Exponential data must be nonnegative, Lognormal, Gamma, and Weibull data positive, and Poisson data nonnegative integers.",
+            "`fitdist(x,distname,\"Frequency\",w)` applies one finite nonnegative integer-valued count per observation. Logical Frequency values are evaluated as 0 or 1. Zero-frequency observations do not contribute to the fit.",
         ] },
         BuiltinDocumentationSection { heading: "Object and execution", paragraphs: &[
             "The value object exposes DistributionName, DistName, ParameterNames, ParameterValues, NumParameters, NumObservations, NLogL, IsTruncated, and applicable scalar parameter properties such as mu, sigma, lambda, a, or b.",

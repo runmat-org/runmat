@@ -37,3 +37,17 @@ fn pdf_broadcasts_parameters_preserves_single_and_restores_residency() {
         assert_eq!(gathered.shape, vec![2, 1]);
     });
 }
+
+#[test]
+fn pdf_logical_points_and_named_parameters_follow_numeric_evaluator() {
+    let density = block_on(pdf_builtin(
+        Value::from("Normal"),
+        Value::Bool(false),
+        vec![Value::Bool(false), Value::Bool(true)],
+    ))
+    .expect("logical values are evaluated as zero and one");
+    let Value::Num(density) = density else {
+        panic!("expected scalar density");
+    };
+    assert!((density - distribution_math::standard_normal_pdf(0.0)).abs() < 1.0e-12);
+}

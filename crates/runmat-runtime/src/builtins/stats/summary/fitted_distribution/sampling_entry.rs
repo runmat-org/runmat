@@ -3,20 +3,24 @@ use super::*;
 pub(super) async fn sample_distribution(
     distribution: Value,
     rest: Vec<Value>,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
+    check_fitted_cancellation(runtime, FittedOperation::Sampling)?;
     admission::random(&distribution, &rest)?;
     ensure_random_extensions(&distribution, &rest).await?;
     let gpu_source = random_gpu_source(&distribution, &rest)?;
     let (fit, shape) = if matches!(distribution, Value::Object(_)) {
         (
-            distribution_from_value(&distribution)?,
+            distribution_from_value_for(FittedOperation::Sampling, &distribution)?,
             parse_shape_args(&rest).await?,
         )
     } else {
         parse_named_random_args(distribution, rest).await?
     };
-    let len = tensor::element_count(&shape);
-    let data = random_samples(&fit, len)?;
+    let len = checked_output_len(&shape)?;
+    let data = random_samples(&fit, len, || {
+        check_fitted_cancellation(runtime, FittedOperation::Sampling)
+    })?;
     finish_random(shape, data, gpu_source)
 }
 

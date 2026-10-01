@@ -204,9 +204,12 @@ pub(super) fn icdf_scalar(
         }
         DistributionKind::Gamma => {
             let [shape, scale] = two(&fit.parameters);
-            invert_positive(p, shape * scale, |x| {
-                distribution_math::regularized_gamma_p(shape, x / scale)
-            })
+            return invert_positive(
+                p,
+                shape * scale,
+                |x| distribution_math::regularized_gamma_p(shape, x / scale),
+                poll,
+            );
         }
         DistributionKind::Weibull => {
             let [scale, shape] = two(&fit.parameters);

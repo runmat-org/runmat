@@ -75,6 +75,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             if !matches!(
                 parameter.kind,
                 ValueKindFact::Unknown
+                    | ValueKindFact::Logical
                     | ValueKindFact::Numeric(NumericFact {
                         domain: NumericDomain::Real,
                         ..
@@ -83,7 +84,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-RANDOM-PARAMETER",
-                    "named parameters must be real numeric scalars",
+                    "named parameters must be real numeric or logical scalars",
                     index,
                 ));
             }
@@ -170,29 +171,29 @@ fn infer_size(
         };
         for value in values {
             let extent = match value {
-                LiteralValue::Number(number) => Some(*number),
-                LiteralValue::Integer { text, .. } | LiteralValue::Real { text, .. } => {
-                    text.parse::<f64>().ok()
+                LiteralValue::Integer { text, .. } => text.parse::<usize>().ok(),
+                LiteralValue::Number(_) | LiteralValue::Real { .. } => {
+                    runmat_types::LiteralContext::numeric_from_literal(value)
+                        .filter(|extent| {
+                            extent.is_finite()
+                                && *extent >= 0.0
+                                && extent.fract() == 0.0
+                                && *extent < usize::MAX as f64
+                        })
+                        .map(|extent| extent as usize)
                 }
                 LiteralValue::Unknown => return ShapeFact::Unknown,
                 _ => None,
             };
             let Some(extent) = extent else {
-                return ShapeFact::Unknown;
-            };
-            if !extent.is_finite()
-                || extent < 0.0
-                || extent.fract() != 0.0
-                || extent >= usize::MAX as f64
-            {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-RANDOM-SIZE",
                     "size extents must be finite nonnegative integers",
                     index,
                 ));
                 return ShapeFact::Unknown;
-            }
-            dimensions.push(Some(extent as usize));
+            };
+            dimensions.push(Some(extent));
         }
     }
     if dimensions.is_empty() {
@@ -200,6 +201,20 @@ fn infer_size(
     }
     if dimensions.len() == 1 {
         dimensions.push(dimensions[0]);
+    }
+    let extent_values = dimensions.iter().copied().flatten().collect::<Vec<_>>();
+    if !extent_values.contains(&0)
+        && extent_values
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            .is_none()
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-RANDOM-SIZE",
+            "output shape exceeds structural range",
+            start,
+        ));
+        return ShapeFact::Unknown;
     }
     ShapeFact::from(dimensions)
 }

@@ -20,29 +20,19 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     if let Some(data) = arguments.first() {
-        match &data.kind {
-            ValueKindFact::Numeric(fact)
-                if fact.domain == NumericDomain::Real && data.storage != StorageFact::Sparse => {}
-            ValueKindFact::Unknown => {}
-            _ => diagnostics.push(argument_error(
+        if !real_or_logical(data) {
+            diagnostics.push(argument_error(
                 "RM-CATALOG-FITDIST-CLASS",
-                "observations must be a real numeric vector",
+                "observations must be a real numeric or logical vector",
                 0,
-            )),
+            ));
         }
-        if let ShapeFact::Shaped { dims } = &data.shape {
-            if dims
-                .iter()
-                .filter(|dim| matches!(dim, DimensionFact::Known(size) if *size > 1))
-                .count()
-                > 1
-            {
-                diagnostics.push(argument_error(
-                    "RM-CATALOG-FITDIST-SHAPE",
-                    "observations must be a vector",
-                    0,
-                ));
-            }
+        if known_nonvector(&data.shape) {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-FITDIST-SHAPE",
+                "observations must be a vector",
+                0,
+            ));
         }
     }
     if let Some(family) = arguments.get(1) {
@@ -68,6 +58,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
+    let mut frequency_seen = false;
     for index in (2..arguments.len()).step_by(2) {
         if !matches!(
             arguments[index].kind,
@@ -86,17 +77,28 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     "only Frequency is supported",
                     index,
                 ));
+            } else if frequency_seen {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FITDIST-OPTION",
+                    "Frequency may be specified only once",
+                    index,
+                ));
+            } else {
+                frequency_seen = true;
             }
         }
         if let Some(weight) = arguments.get(index + 1) {
-            if !matches!(
-                weight.kind,
-                ValueKindFact::Unknown | ValueKindFact::Numeric(_)
-            ) || weight.storage == StorageFact::Sparse
-            {
+            if !real_or_logical(weight) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FITDIST-FREQUENCY",
-                    "Frequency must be a dense numeric vector",
+                    "Frequency must be a dense real numeric or logical vector",
+                    index + 1,
+                ));
+            }
+            if known_nonvector(&weight.shape) {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FITDIST-FREQUENCY",
+                    "Frequency must be a vector",
                     index + 1,
                 ));
             }
@@ -128,4 +130,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         StorageFact::Opaque,
     );
     finish_fixed(entry, request, output, diagnostics)
+}
+
+fn real_or_logical(value: &ValueFact) -> bool {
+    value.storage != StorageFact::Sparse
+        && matches!(
+            value.kind,
+            ValueKindFact::Unknown
+                | ValueKindFact::Logical
+                | ValueKindFact::Numeric(runmat_types::NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                })
+        )
+}
+
+fn known_nonvector(shape: &ShapeFact) -> bool {
+    matches!(shape, ShapeFact::Shaped { dims } if dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(size) if *size > 1)).count() > 1)
 }

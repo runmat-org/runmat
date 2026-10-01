@@ -1,4 +1,26 @@
 use super::*;
+use std::cell::Cell;
+
+#[test]
+fn fitted_gamma_inverse_polls_during_search() {
+    let polls = Cell::new(0);
+    let error = invert_positive(
+        0.7,
+        2.0,
+        |value| value / (1.0 + value),
+        || {
+            polls.set(polls.get() + 1);
+            if polls.get() > 3 {
+                Err(invalid("cancelled by fixture"))
+            } else {
+                Ok(())
+            }
+        },
+    )
+    .unwrap_err();
+    assert!(polls.get() > 3);
+    assert_eq!(error.message(), "cancelled by fixture");
+}
 
 #[test]
 fn malformed_calls_fail_at_host_visible_admission() {
@@ -26,6 +48,33 @@ fn malformed_calls_fail_at_host_visible_admission() {
     )
     .is_err());
     assert!(admission::random(&Value::String("Gamma".into()), &[Value::Num(2.0)],).is_err());
+}
+
+#[test]
+fn malformed_fitted_object_errors_use_the_invoked_public_operation() {
+    let malformed = Value::Object(ObjectInstance::new(
+        runmat_types::standard::PROBABILITY_DISTRIBUTION.to_string(),
+    ));
+    let pdf = admission::evaluation(
+        PDF_NAME,
+        &malformed,
+        &Value::Num(0.0),
+        &[],
+        admission::EvaluationKind::Density,
+    )
+    .unwrap_err();
+    assert_eq!(pdf.identifier(), Some("RunMat:pdf:InvalidArgument"));
+    let cdf = admission::evaluation(
+        CDF_NAME,
+        &malformed,
+        &Value::Num(0.0),
+        &[],
+        admission::EvaluationKind::Cumulative,
+    )
+    .unwrap_err();
+    assert_eq!(cdf.identifier(), Some("RunMat:cdf:InvalidArgument"));
+    let random = admission::random(&malformed, &[]).unwrap_err();
+    assert_eq!(random.identifier(), Some("RunMat:random:InvalidArgument"));
 }
 
 #[test]

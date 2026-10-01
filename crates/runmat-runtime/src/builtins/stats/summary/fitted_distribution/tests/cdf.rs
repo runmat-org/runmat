@@ -132,6 +132,20 @@ fn cdf_rejects_inexact_wide_integers() {
     ))
     .unwrap_err();
     assert!(error.message().contains("exactly representable as double"));
+    for storage in [
+        IntegerStorage::U64(vec![1_u64 << 54]),
+        IntegerStorage::I64(vec![i64::MIN]),
+    ] {
+        let exact = block_on(cdf_builtin(
+            Value::String("Normal".into()),
+            mirrorless_int_tensor(storage, vec![1, 1]),
+            vec![Value::Num(0.0), Value::Num(1.0)],
+        ));
+        assert!(
+            exact.is_ok(),
+            "wide but exactly representable integer must pass"
+        );
+    }
 }
 
 #[test]

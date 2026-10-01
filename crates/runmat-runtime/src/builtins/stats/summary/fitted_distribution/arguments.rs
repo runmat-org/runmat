@@ -174,7 +174,7 @@ pub(super) fn ensure_fitdist_resident_fallback_extension(
 pub(super) async fn fitdist_value_to_tensor(value: Value, role: &str) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
-        .map_err(|err| invalid(format!("fitdist: {err}")))?;
+        .map_err(|err| with_fitted_context(FITDIST_NAME, err))?;
     let tensor = tensor::value_into_tensor_for(FITDIST_NAME, gathered)
         .map_err(|_| invalid("fitdist: expected numeric input"))?;
     ensure_exact_fitdist_integer_boundary(&tensor, role)?;
@@ -205,7 +205,7 @@ pub(super) fn ensure_exact_fitdist_integer_boundary(
 pub(super) async fn value_to_tensor(name: &'static str, value: Value) -> BuiltinResult<Tensor> {
     let gathered = gather_if_needed_async(&value)
         .await
-        .map_err(|err| invalid_for(name, format!("{name}: {err}")))?;
+        .map_err(|err| with_fitted_context(name, err))?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|_| invalid_for(name, format!("{name}: expected numeric input")))?;
     tensor::integer_tensor_to_f64(tensor).map_err(|err| invalid_for(name, format!("{name}: {err}")))

@@ -36,13 +36,18 @@ pub(super) fn infer(
     let mut numeric_end = arguments.len();
     if form == EvaluationForm::Cumulative && arguments.len() > 2 {
         let last = arguments.len() - 1;
-        if request
-            .literals
-            .literal_string_at(last)
-            .as_deref()
-            .is_some_and(|text| text.eq_ignore_ascii_case("upper"))
-        {
-            numeric_end -= 1;
+        match request.literals.literal_string_at(last) {
+            Some(text) if text.eq_ignore_ascii_case("upper") => numeric_end -= 1,
+            None if matches!(
+                arguments[last].kind,
+                ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+            ) =>
+            {
+                // A nonliteral trailing text value may be the `upper` control.
+                // Its runtime contents, not its scalar shape, select the form.
+                return finish_fixed(entry, request, output, diagnostics);
+            }
+            _ => {}
         }
     }
     let fitted = match &arguments[0].kind {

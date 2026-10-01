@@ -39,7 +39,7 @@ use runmat_builtins::{
     PDF_INTEGER_PARAMETER_EXTENSION, PDF_INTEGER_X_EXTENSION, RANDOM_INTEGER_PARAMETER_EXTENSION,
     RANDOM_INTEGER_SIZE_EXTENSION,
 };
-use runmat_value::{NumericDType, NumericScalar, ObjectInstance, StringArray, Tensor, Value};
+use runmat_value::{NumericDType, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::broadcast;
 use crate::builtins::common::random;
@@ -108,6 +108,13 @@ fn invalid(message: impl Into<String>) -> RuntimeError {
 
 fn invalid_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     error_for(builtin, FittedErrorKind::InvalidArgument, message)
+}
+
+fn with_fitted_context(builtin: &'static str, mut error: RuntimeError) -> RuntimeError {
+    if error.context.builtin.is_none() {
+        error.context = error.context.with_builtin(builtin);
+    }
+    error
 }
 
 fn numerical(message: impl Into<String>) -> RuntimeError {

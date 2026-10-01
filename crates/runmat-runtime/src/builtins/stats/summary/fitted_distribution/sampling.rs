@@ -1,7 +1,12 @@
 use super::*;
 
-pub(super) fn random_samples(fit: &FittedDistribution, len: usize) -> BuiltinResult<Vec<f64>> {
-    match fit.kind {
+pub(super) fn random_samples(
+    fit: &FittedDistribution,
+    len: usize,
+    poll: impl Fn() -> BuiltinResult<()>,
+) -> BuiltinResult<Vec<f64>> {
+    poll()?;
+    let samples = match fit.kind {
         DistributionKind::Normal => {
             let [mu, sigma] = two(&fit.parameters);
             random::generate_normal_scaled(mu, sigma, len, RANDOM_NAME)
@@ -26,8 +31,10 @@ pub(super) fn random_samples(fit: &FittedDistribution, len: usize) -> BuiltinRes
             let uniforms = random::generate_uniform(len, RANDOM_NAME)?;
             uniforms
                 .into_iter()
-                .map(|u| distribution_math::poisson_inverse(u, fit.parameters[0], || Ok(())))
+                .map(|u| distribution_math::poisson_inverse(u, fit.parameters[0], &poll))
                 .collect()
         }
-    }
+    }?;
+    poll()?;
+    Ok(samples)
 }

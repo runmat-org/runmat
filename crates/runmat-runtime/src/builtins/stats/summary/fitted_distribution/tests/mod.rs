@@ -1,3 +1,4 @@
+use super::super::random::random_builtin_registered;
 use super::super::{
     cdf::cdf_builtin, fitdist::fitdist_builtin, pdf::pdf_builtin, random::random_builtin,
 };

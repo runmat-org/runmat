@@ -79,3 +79,109 @@ fn fitdist_proves_typed_fitted_value_and_validates_family_and_frequency() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-FITDIST-FREQUENCY"));
 }
+
+#[test]
+fn fitdist_logical_data_and_frequency_follow_runtime_admission() {
+    let logical = ValueFact::proven(
+        ValueKindFact::Logical,
+        ShapeFact::from(vec![Some(3), Some(1)]),
+        StorageFact::Dense,
+    );
+    let request = request(
+        vec![
+            logical.clone(),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            logical,
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Character("Normal".into()),
+            LiteralValue::Character("Frequency".into()),
+            LiteralValue::Unknown,
+        ],
+    );
+    assert!(infer(&request, &FITDIST_CATALOG_ENTRY)
+        .diagnostics
+        .is_empty());
+}
+
+#[test]
+fn fitdist_rejects_duplicate_or_nonvector_or_complex_frequency() {
+    let data = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(4), Some(1)]),
+        StorageFact::Dense,
+    );
+    let name = ValueFact::scalar(ValueKindFact::String);
+    let vector = data.clone();
+    let duplicate = request(
+        vec![
+            data.clone(),
+            name.clone(),
+            name.clone(),
+            vector.clone(),
+            name.clone(),
+            vector,
+        ],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Character("Normal".into()),
+            LiteralValue::Character("Frequency".into()),
+            LiteralValue::Unknown,
+            LiteralValue::Character("Frequency".into()),
+            LiteralValue::Unknown,
+        ],
+    );
+    assert!(infer(&duplicate, &FITDIST_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FITDIST-OPTION"));
+
+    let matrix = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(2)]),
+        StorageFact::Dense,
+    );
+    let nonvector = request(
+        vec![data.clone(), name.clone(), name.clone(), matrix],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Character("Normal".into()),
+            LiteralValue::Character("Frequency".into()),
+            LiteralValue::Unknown,
+        ],
+    );
+    assert!(infer(&nonvector, &FITDIST_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FITDIST-FREQUENCY"));
+
+    let complex = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(4), Some(1)]),
+        StorageFact::Dense,
+    );
+    let complex_frequency = request(
+        vec![data, name.clone(), name, complex],
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Character("Normal".into()),
+            LiteralValue::Character("Frequency".into()),
+            LiteralValue::Unknown,
+        ],
+    );
+    assert!(infer(&complex_frequency, &FITDIST_CATALOG_ENTRY)
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-CATALOG-FITDIST-FREQUENCY"));
+}

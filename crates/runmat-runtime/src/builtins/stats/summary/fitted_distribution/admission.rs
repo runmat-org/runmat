@@ -8,6 +8,15 @@ pub(super) enum EvaluationKind {
     Cumulative,
 }
 
+impl EvaluationKind {
+    const fn operation(self) -> FittedOperation {
+        match self {
+            Self::Density => FittedOperation::Density,
+            Self::Cumulative => FittedOperation::Cumulative,
+        }
+    }
+}
+
 pub(super) fn evaluation(
     builtin: &'static str,
     distribution: &Value,
@@ -23,7 +32,7 @@ pub(super) fn evaluation(
                 format!("{builtin}: fitted-object form accepts one evaluation input"),
             ));
         }
-        distribution_from_value(distribution)?;
+        distribution_from_value_for(kind.operation(), distribution)?;
     } else {
         let family = parse_distribution_name_for(builtin, distribution)?;
         let count = parameters.len();
@@ -108,7 +117,7 @@ pub(super) fn fit(data: &Value, distribution: &Value, options: &[Value]) -> Buil
 
 pub(super) fn random(distribution: &Value, rest: &[Value]) -> BuiltinResult<()> {
     if matches!(distribution, Value::Object(_)) {
-        distribution_from_value(distribution)?;
+        distribution_from_value_for(FittedOperation::Sampling, distribution)?;
         for size in rest {
             if !is_vector_shape(numeric_shape(RANDOM_NAME, size)?) {
                 return Err(invalid_for(
