@@ -1,5 +1,5 @@
 //! Sound public output facts for empirical statistics and their graphics sink.
-use super::options::{EcdfBounds, EcdfFunction, EcdfOptionName};
+use super::options::{EcdfBounds, EcdfFunction, EcdfOptionName, EmpiricalBuiltin};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, DynamicReason, EffectKind,
@@ -43,7 +43,11 @@ fn unknown() -> ValueFact {
     ValueFact::unknown(DynamicReason::RuntimeValue)
 }
 
-fn known_bad_data(value: &ValueFact, diagnostics: &mut Vec<InferenceDiagnostic>) -> bool {
+fn known_bad_data(
+    builtin: EmpiricalBuiltin,
+    value: &ValueFact,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) -> bool {
     let bad_kind = !matches!(
         value.kind,
         ValueKindFact::Numeric(NumericFact {
@@ -59,9 +63,11 @@ fn known_bad_data(value: &ValueFact, diagnostics: &mut Vec<InferenceDiagnostic>)
         ));
     }
     let bad_shape = match &value.shape {
-        ShapeFact::Shaped { dims } if dims.len() >= 2 => {
-            matches!((&dims[0], &dims[1]), (runmat_types::DimensionFact::Known(rows), runmat_types::DimensionFact::Known(cols)) if *rows > 1 && *cols > 1)
-        }
+        ShapeFact::Shaped { dims } if dims.len() >= 2 => matches!((&dims[0], &dims[1]), (runmat_types::DimensionFact::Known(rows), runmat_types::DimensionFact::Known(cols)) if *rows > 1 && *cols > 1)
+            || builtin == EmpiricalBuiltin::Cdfplot
+                && dims.iter().skip(2).any(
+                    |dim| matches!(dim, runmat_types::DimensionFact::Known(extent) if *extent > 1),
+                ),
         _ => false,
     };
     if bad_shape {
@@ -222,7 +228,7 @@ pub(super) fn ecdf(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallIn
         diagnostics.push(error("ARITY", "ecdf requires sample data"));
     }
     if let Some(value) = request.arguments.get(sample_index) {
-        known_bad_data(value, &mut diagnostics);
+        known_bad_data(EmpiricalBuiltin::Ecdf, value, &mut diagnostics);
     }
     validate_ecdf_options(request, sample_index, &mut diagnostics);
     let bad = !diagnostics.is_empty();
@@ -273,7 +279,7 @@ pub(super) fn cdfplot(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Cal
     }
     let sample = request.arguments.last();
     if let Some(sample) = sample {
-        known_bad_data(sample, &mut diagnostics);
+        known_bad_data(EmpiricalBuiltin::Cdfplot, sample, &mut diagnostics);
     }
     let bad = !diagnostics.is_empty();
     let scalar = if bad {

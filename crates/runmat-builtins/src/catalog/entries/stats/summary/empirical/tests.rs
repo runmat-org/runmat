@@ -140,15 +140,17 @@ fn cdfplot_proves_host_handle_and_five_stat_fields() {
 
 #[test]
 fn cdfplot_known_matrix_is_diagnosed_without_claiming_a_handle() {
-    let result = inference::cdfplot(
-        &CallRequest {
-            arguments: vec![sample(&[2, 2])],
-            literals: LiteralContext::new(vec![LiteralValue::Unknown]),
-            outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
-        },
-        &CDFPLOT_CATALOG_ENTRY,
-    );
-    assert!(!result.diagnostics.is_empty());
-    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
-    assert!(matches!(result.outputs[1].kind, ValueKindFact::Unknown));
+    for shape in [&[2, 2][..], &[1, 1, 4][..]] {
+        let result = inference::cdfplot(
+            &CallRequest {
+                arguments: vec![sample(shape)],
+                literals: LiteralContext::new(vec![LiteralValue::Unknown]),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+            },
+            &CDFPLOT_CATALOG_ENTRY,
+        );
+        assert!(!result.diagnostics.is_empty(), "shape {shape:?}");
+        assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+        assert!(matches!(result.outputs[1].kind, ValueKindFact::Unknown));
+    }
 }
