@@ -9,6 +9,12 @@ pub(super) fn least_squares_coefficients(
     y: &[f64],
     owner: ReferenceLineOwner,
 ) -> BuiltinResult<Option<(f64, f64)>> {
+    if x.len() != y.len() {
+        return Err(owner.internal(format!(
+            "{}: plotted x and y sources have different lengths",
+            owner.name()
+        )));
+    }
     let mut count = 0usize;
     let mut x_scale = 0.0_f64;
     let mut y_scale = 0.0_f64;
@@ -46,7 +52,7 @@ pub(super) fn least_squares_coefficients(
         covariance += delta_x * (y - mean_y);
     }
     let slope = if m2_x > 0.0 {
-        (covariance / m2_x) * y_scale / x_scale
+        signed_product_ratio(covariance, y_scale, m2_x, x_scale)
     } else {
         0.0
     };
@@ -58,6 +64,22 @@ pub(super) fn least_squares_coefficients(
         )));
     }
     Ok(Some((slope, intercept)))
+}
+
+/// The centered covariance may be signed. Decompose each finite factor so
+/// an overflowing intermediate product does not obscure a finite slope.
+fn signed_product_ratio(a: f64, b: f64, c: f64, d: f64) -> f64 {
+    if a == 0.0 || b == 0.0 {
+        return 0.0;
+    }
+    let (a_fraction, a_exponent) = libm::frexp(a);
+    let (b_fraction, b_exponent) = libm::frexp(b);
+    let (c_fraction, c_exponent) = libm::frexp(c);
+    let (d_fraction, d_exponent) = libm::frexp(d);
+    libm::ldexp(
+        (a_fraction * b_fraction) / (c_fraction * d_fraction),
+        a_exponent + b_exponent - c_exponent - d_exponent,
+    )
 }
 
 #[cfg(test)]
@@ -88,5 +110,25 @@ mod tests {
         .unwrap();
         assert!((slope / 1.0e100 - 1.0).abs() < 1.0e-12);
         assert!(intercept.abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn finite_slope_survives_overflowing_intermediate_product() {
+        let (slope, intercept) = least_squares_coefficients(
+            &[4.0e307, 5.0e307, 6.0e307],
+            &[0.0, 3.0e307, 6.0e307],
+            ReferenceLineOwner::Lsline,
+        )
+        .unwrap()
+        .unwrap();
+        assert!((slope - 3.0).abs() < 1.0e-12);
+        assert!((intercept / -1.2e308 - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn mismatched_plot_coordinates_are_not_silently_truncated() {
+        let error = least_squares_coefficients(&[1.0, 2.0], &[1.0], ReferenceLineOwner::Lsline)
+            .expect_err("partial XY sources are invalid");
+        assert!(error.message().contains("different lengths"));
     }
 }
