@@ -24,7 +24,7 @@ const NAME: &str = "boxplot";
 mod admission;
 mod appearance;
 mod plan;
-use appearance::{BoxStyle, MedianStyle, NotchStyle};
+use appearance::{BoxStyle, LabelOrientation, MedianStyle, NotchStyle};
 use plan::BoxplotOptionPlan;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,6 +61,8 @@ struct BoxplotOptions {
     median_style: MedianStyle,
     median_style_explicit: bool,
     notch_style: NotchStyle,
+    label_orientation: LabelOrientation,
+    label_orientation_explicit: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +117,8 @@ impl Default for BoxplotOptions {
             median_style: MedianStyle::Line,
             median_style_explicit: false,
             notch_style: NotchStyle::Off,
+            label_orientation: LabelOrientation::Horizontal,
+            label_orientation_explicit: false,
         }
     }
 }

@@ -20,6 +20,29 @@ pub(super) enum NotchStyle {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum LabelOrientation {
+    Inline,
+    Horizontal,
+}
+
+impl LabelOrientation {
+    pub(super) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "inline" => Some(Self::Inline),
+            "horizontal" => Some(Self::Horizontal),
+            _ => None,
+        }
+    }
+
+    pub(super) fn angle(self, plot_orientation: super::Orientation) -> f64 {
+        match (self, plot_orientation) {
+            (Self::Inline, super::Orientation::Vertical) => 90.0,
+            _ => 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SegmentKind {
     Box,
     Median,

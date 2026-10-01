@@ -591,6 +591,7 @@ fn plot_style_controls_defaults_but_later_explicit_appearance_wins() {
         BoxplotOptions::parse(vec![Value::from("PlotStyle"), Value::from("compact")]).unwrap();
     assert_eq!(compact.box_style, BoxStyle::Filled);
     assert_eq!(compact.median_style, MedianStyle::Target);
+    assert_eq!(compact.label_orientation, LabelOrientation::Inline);
     assert_eq!(
         NotchStyle::On.effective(compact.compact),
         NotchStyle::Marker
@@ -623,4 +624,35 @@ fn plot_style_controls_defaults_but_later_explicit_appearance_wins() {
     .unwrap();
     assert_eq!(reversed.box_style, BoxStyle::Outline);
     assert_eq!(reversed.median_style, MedianStyle::Line);
+}
+
+#[test]
+fn label_orientation_changes_axes_rotation_without_changing_horizontal_labels() {
+    let _guard = crate::builtins::plotting::lock_plot_test_context();
+    let options =
+        BoxplotOptions::parse(vec![Value::from("LabelOrientation"), Value::from("inline")])
+            .unwrap();
+    let boxes = build_box_stats(tensor(vec![1.0, 2.0, 3.0], vec![3, 1]), None, &options).unwrap();
+    crate::builtins::plotting::reset_plot_state();
+    render_boxplot(&boxes, &options).unwrap();
+    let figure = clone_figure(current_figure_handle()).unwrap();
+    assert_eq!(
+        figure.axes_metadata(0).unwrap().x_tick_label_rotation,
+        Some(90.0)
+    );
+
+    let horizontal = BoxplotOptions::parse(vec![
+        Value::from("LabelOrientation"),
+        Value::from("inline"),
+        Value::from("Orientation"),
+        Value::from("horizontal"),
+    ])
+    .unwrap();
+    crate::builtins::plotting::reset_plot_state();
+    render_boxplot(&boxes, &horizontal).unwrap();
+    let figure = clone_figure(current_figure_handle()).unwrap();
+    assert_eq!(
+        figure.axes_metadata(0).unwrap().y_tick_label_rotation,
+        Some(0.0)
+    );
 }

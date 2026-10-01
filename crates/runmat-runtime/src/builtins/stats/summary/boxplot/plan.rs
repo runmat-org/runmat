@@ -28,6 +28,7 @@ enum DecodedOption {
     BoxStyle(BoxStyle),
     MedianStyle(MedianStyle),
     Notch(NotchStyle),
+    LabelOrientation(LabelOrientation),
     Jitter(f64),
     DataLim(Option<(f64, f64)>),
     ExtremeMode(ExtremeMode),
@@ -145,6 +146,9 @@ impl DecodedOption {
                     if !options.median_style_explicit {
                         options.median_style = MedianStyle::Target;
                     }
+                    if !options.label_orientation_explicit {
+                        options.label_orientation = LabelOrientation::Inline;
+                    }
                     options.widths = vec![0.25];
                     options.outlier_marker = Some(MarkerStyle::Circle);
                     options.outlier_color = None;
@@ -156,6 +160,9 @@ impl DecodedOption {
                     }
                     if !options.median_style_explicit {
                         options.median_style = MedianStyle::Line;
+                    }
+                    if !options.label_orientation_explicit {
+                        options.label_orientation = LabelOrientation::Horizontal;
                     }
                     if options.outlier_marker == Some(MarkerStyle::Circle) {
                         options.outlier_marker = Some(MarkerStyle::Plus);
@@ -173,6 +180,10 @@ impl DecodedOption {
                 options.median_style_explicit = true;
             }
             Self::Notch(value) => options.notch_style = value,
+            Self::LabelOrientation(value) => {
+                options.label_orientation = value;
+                options.label_orientation_explicit = true;
+            }
             Self::Jitter(value) => options.jitter = value,
             Self::DataLim(value) => options.data_lim = value,
             Self::ExtremeMode(value) => options.extreme_mode = value,

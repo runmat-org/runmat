@@ -26,9 +26,15 @@ pub(super) fn render_boxplot(
         match options.orientation {
             Orientation::Vertical => {
                 figure.set_axes_tick_labels(axes, Some(labels.clone()), None);
+                figure.set_axes_tick_label_rotations(
+                    axes,
+                    Some(options.label_orientation.angle(options.orientation)),
+                    None,
+                );
             }
             Orientation::Horizontal => {
                 figure.set_axes_tick_labels(axes, None, Some(labels.clone()));
+                figure.set_axes_tick_label_rotations(axes, None, Some(0.0));
             }
         }
         figure.set_axes_limits(axes, limits.0, limits.1);

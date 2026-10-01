@@ -122,12 +122,9 @@ pub(super) fn decode_option(kind: BoxplotOptionKind, value: Value) -> BuiltinRes
         }
         LabelOrientation => {
             let text = text_scalar(&value, "LabelOrientation")?;
-            if text != "inline" && text != "horizontal" {
-                return Err(invalid(
-                    "boxplot: LabelOrientation must be 'inline' or 'horizontal'",
-                ));
-            }
-            DecodedOption::Validated(kind)
+            DecodedOption::LabelOrientation(super::LabelOrientation::parse(&text).ok_or_else(
+                || invalid("boxplot: LabelOrientation must be 'inline' or 'horizontal'"),
+            )?)
         }
         LabelVerbosity => {
             let text = text_scalar(&value, "LabelVerbosity")?;
