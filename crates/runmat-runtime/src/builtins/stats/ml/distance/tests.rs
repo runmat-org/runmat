@@ -591,3 +591,56 @@ fn count_and_logical_parsers_read_all_integer_storage_variants() {
         assert!(parse_logical_scalar(&value, "IncludeTies").unwrap());
     }
 }
+
+#[test]
+fn knn_preflights_options_and_geometry_before_provider_access() {
+    let x = tensor(vec![0.0, 1.0, 2.0], 3, 1);
+    let y = tensor(vec![0.5], 1, 1);
+    let bad_option = block_on(knnsearch_builtin(
+        x.clone(),
+        y.clone(),
+        vec![Value::from("not-an-option"), Value::Num(1.0)],
+    ))
+    .unwrap_err();
+    assert!(bad_option.message().contains("unsupported option"));
+
+    let bad_metric_control = block_on(knnsearch_builtin(
+        x.clone(),
+        y.clone(),
+        vec![
+            Value::from("Distance"),
+            Value::from("euclidean"),
+            Value::from("P"),
+            Value::Num(2.0),
+        ],
+    ))
+    .unwrap_err();
+    assert!(bad_metric_control.message().contains("must match"));
+
+    let bad_k = block_on(knnsearch_builtin(
+        x.clone(),
+        y.clone(),
+        vec![Value::from("K"), Value::Num(4.0)],
+    ))
+    .unwrap_err();
+    assert!(bad_k.message().contains("K must be <="));
+
+    let bad_columns = block_on(knnsearch_builtin(
+        x,
+        tensor(vec![1.0, 2.0], 1, 2),
+        Vec::new(),
+    ))
+    .unwrap_err();
+    assert!(bad_columns.message().contains("same number of columns"));
+}
+
+#[test]
+fn knn_preserves_legacy_near_integer_floating_count() {
+    let output = block_on(knnsearch_builtin(
+        tensor(vec![0.0, 2.0], 2, 1),
+        tensor(vec![0.5], 1, 1),
+        vec![Value::from("K"), Value::Num(1.0 + 5.0e-13)],
+    ))
+    .expect("legacy floating-count tolerance");
+    assert_eq!(tensor_out(output).shape, vec![1, 1]);
+}

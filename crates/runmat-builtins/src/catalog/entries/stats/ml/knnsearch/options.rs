@@ -51,6 +51,19 @@ impl KnnSearchMethod {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KnnCacheSizeKeyword {
+    Maximal,
+}
+
+impl KnnCacheSizeKeyword {
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        keyword
+            .eq_ignore_ascii_case("maximal")
+            .then_some(Self::Maximal)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct KnnMetric {
     pub kind: DistanceMetricKind,
     pub fast_alias: bool,

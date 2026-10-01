@@ -114,11 +114,12 @@ fn observations(
         ValueKindFact::Numeric(NumericFact {
             domain: NumericDomain::Real,
             ..
-        }) | ValueKindFact::Unknown
+        }) | ValueKindFact::Logical
+            | ValueKindFact::Unknown
     ) {
         diagnostics.push(argument_error(
             "RM-CATALOG-KNNSEARCH-CLASS",
-            "observations must be real numeric arrays",
+            "observations must be real numeric or logical arrays",
             index,
         ));
     }
@@ -260,7 +261,7 @@ fn positive_count(value: &LiteralValue) -> Option<usize> {
         LiteralValue::Number(value)
             if value.is_finite()
                 && *value >= 1.0
-                && value.fract() == 0.0
+                && value.fract().abs() <= 1.0e-12
                 && *value < usize::MAX as f64 =>
         {
             Some(*value as usize)

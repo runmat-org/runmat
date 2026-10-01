@@ -1,7 +1,8 @@
 //! Typed admission of distance metrics and public name-value controls.
 
 use runmat_builtins::{
-    DistanceMetricKind, DistanceSelectionKind, KnnMetric, KnnOption, KnnSearchMethod,
+    DistanceMetricKind, DistanceSelectionKind, KnnCacheSizeKeyword, KnnMetric, KnnOption,
+    KnnSearchMethod,
 };
 use runmat_value::{Tensor, Value};
 
@@ -42,6 +43,15 @@ pub(super) async fn parse_metric(
     } else {
         args[1..].to_vec()
     };
+    parse_metric_kind(name, x, kind, rest).await
+}
+
+pub(super) async fn parse_metric_kind(
+    name: &'static str,
+    x: &Tensor,
+    kind: DistanceMetricKind,
+    rest: Vec<Value>,
+) -> BuiltinResult<DistanceMetric> {
     match kind {
         DistanceMetricKind::Euclidean => {
             ensure_no_metric_parameter(name, &rest, kind.canonical_name())
@@ -277,18 +287,23 @@ pub(super) fn parse_positive_integer(
     Ok(raw as usize)
 }
 
-pub(super) async fn parse_knnsearch_options(
-    args: Vec<Value>,
-) -> BuiltinResult<(Vec<Value>, KnnOptions)> {
+pub(super) struct ParsedKnnSearch {
+    pub metric: KnnMetric,
+    pub metric_parameter: Option<Value>,
+    pub numeric_cache_sizes: Vec<Value>,
+    pub options: KnnOptions,
+}
+
+pub(super) fn parse_knnsearch_options(args: &[Value]) -> BuiltinResult<ParsedKnnSearch> {
     let mut k = 1usize;
     let mut include_ties = false;
     let mut sort_indices = true;
-    let mut metric_name: Option<Value> = None;
     let mut metric = KnnMetric {
         kind: DistanceMetricKind::Euclidean,
         fast_alias: false,
     };
-    let mut metric_parameter: Option<Value> = None;
+    let mut metric_parameter: Option<(KnnOption, Value)> = None;
+    let mut numeric_cache_sizes = Vec::new();
     let mut ns_method: Option<KnnSearchMethod> = None;
     let mut idx = 0usize;
     while idx < args.len() {
@@ -325,7 +340,6 @@ pub(super) async fn parse_knnsearch_options(
                         format!("knnsearch: unsupported distance metric '{distance}'"),
                     )
                 })?;
-                metric_name = Some(Value::from(metric.kind.canonical_name()));
             }
             KnnOption::P | KnnOption::Cov | KnnOption::Scale => {
                 if metric_parameter.is_some() {
@@ -334,7 +348,7 @@ pub(super) async fn parse_knnsearch_options(
                         "knnsearch: only one distance parameter may be specified",
                     ));
                 }
-                metric_parameter = Some(value);
+                metric_parameter = Some((option, value));
             }
             KnnOption::NsMethod => {
                 let method = keyword_of(&value).ok_or_else(|| {
@@ -348,14 +362,13 @@ pub(super) async fn parse_knnsearch_options(
                 })?);
             }
             KnnOption::CacheSize => {
-                if keyword_of(&value).as_deref() != Some("maximal") {
-                    let raw = scalar_parameter(KNNSEARCH_NAME, &value, "CacheSize").await?;
-                    if !raw.is_finite() || raw <= 0.0 {
-                        return Err(distance_error(
-                            KNNSEARCH_NAME,
-                            "knnsearch: CacheSize must be positive",
-                        ));
-                    }
+                if keyword_of(&value)
+                    .as_deref()
+                    .and_then(KnnCacheSizeKeyword::from_keyword)
+                    .is_none()
+                {
+                    preflight_numeric_cache_size(&value)?;
+                    numeric_cache_sizes.push(value);
                 }
             }
             KnnOption::BucketSize => {
@@ -371,19 +384,76 @@ pub(super) async fn parse_knnsearch_options(
         ));
     }
     let _ = sort_indices;
-    let mut metric_args = Vec::new();
-    if let Some(metric) = metric_name {
-        metric_args.push(metric);
-        if let Some(parameter) = metric_parameter {
-            metric_args.push(parameter);
+    let metric_parameter = match metric_parameter {
+        Some((kind, value)) if metric_parameter_matches(metric.kind, kind) => Some(value),
+        Some(_) => {
+            return Err(distance_error(
+                KNNSEARCH_NAME,
+                "knnsearch: P, Cov, or Scale must match the selected Distance metric",
+            ));
         }
-    } else if metric_parameter.is_some() {
+        None => None,
+    };
+    Ok(ParsedKnnSearch {
+        metric,
+        metric_parameter,
+        numeric_cache_sizes,
+        options: KnnOptions { k, include_ties },
+    })
+}
+
+fn metric_parameter_matches(metric: DistanceMetricKind, option: KnnOption) -> bool {
+    matches!(
+        (metric, option),
+        (DistanceMetricKind::Minkowski, KnnOption::P)
+            | (DistanceMetricKind::Seuclidean, KnnOption::Scale)
+            | (DistanceMetricKind::Mahalanobis, KnnOption::Cov)
+    )
+}
+
+fn preflight_numeric_cache_size(value: &Value) -> BuiltinResult<()> {
+    let number = match value {
+        Value::Num(number) => Some(*number),
+        Value::Int(integer) => Some(integer.to_f64()),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            Some(tensor::tensor_value_f64(tensor, 0))
+        }
+        Value::GpuTensor(handle)
+            if handle
+                .shape()
+                .iter()
+                .try_fold(1usize, |product, extent| product.checked_mul(*extent))
+                == Some(1) =>
+        {
+            None
+        }
+        _ => {
+            return Err(distance_error(
+                KNNSEARCH_NAME,
+                "knnsearch: CacheSize must be a positive numeric scalar",
+            ));
+        }
+    };
+    if number.is_some_and(|number| !number.is_finite() || number <= 0.0) {
         return Err(distance_error(
             KNNSEARCH_NAME,
-            "knnsearch: P, Cov, or Scale requires a Distance option",
+            "knnsearch: CacheSize must be positive",
         ));
     }
-    Ok((metric_args, KnnOptions { k, include_ties }))
+    Ok(())
+}
+
+pub(super) async fn validate_numeric_cache_sizes(values: Vec<Value>) -> BuiltinResult<()> {
+    for value in values {
+        let raw = scalar_parameter(KNNSEARCH_NAME, &value, "CacheSize").await?;
+        if !raw.is_finite() || raw <= 0.0 {
+            return Err(distance_error(
+                KNNSEARCH_NAME,
+                "knnsearch: CacheSize must be positive",
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn parse_logical_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {

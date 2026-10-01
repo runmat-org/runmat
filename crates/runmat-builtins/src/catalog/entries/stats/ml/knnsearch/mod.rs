@@ -8,6 +8,6 @@ mod tests;
 
 pub use contract::*;
 pub use entry::KNNSEARCH_CATALOG_ENTRY;
-pub use options::{KnnMetric, KnnOption, KnnSearchMethod};
+pub use options::{KnnCacheSizeKeyword, KnnMetric, KnnOption, KnnSearchMethod};
 
 pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&KNNSEARCH_CATALOG_ENTRY];

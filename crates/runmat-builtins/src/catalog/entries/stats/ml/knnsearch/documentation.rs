@@ -10,7 +10,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["pdist2", "pdist"],
     sections: &[
         BuiltinDocumentationSection { heading: "Inputs and results", paragraphs: &[
-            "`X` and `Y` must be real numeric vectors or two-dimensional matrices with the same number of columns. The default search is exhaustive with `K=1` and Euclidean distance.",
+            "`X` and `Y` may be real numeric or logical vectors or two-dimensional matrices with the same number of columns. Logical data is converted to numeric distances. The default search is exhaustive with `K=1` and Euclidean distance.",
             "`[Idx,D] = knnsearch(...)` returns indices first and distances second. Without `IncludeTies`, both outputs are `size(Y,1)` by `K` double matrices.",
             "Named distance metrics are `euclidean`, `squaredeuclidean`, `cityblock`, `chebychev`, `minkowski`, `seuclidean`, `mahalanobis`, `cosine`, `correlation`, `hamming`, `jaccard`, and `spearman`. The fast Euclidean aliases are accepted and evaluated with the same exact Euclidean implementations. Custom distance functions are not supported.",
             "`P`, `Scale`, and `Cov` provide parameters for Minkowski, standardized Euclidean, and Mahalanobis distance respectively.",
@@ -18,7 +18,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ]},
         BuiltinDocumentationSection { heading: "Options, classes, and execution", paragraphs: &[
             "`NSMethod`, `BucketSize`, `CacheSize`, and `SortIndices` are parsed for compatibility. `NSMethod`,`kdtree` is admitted only for Euclidean, cityblock, Chebychev, and Minkowski distances. RunMat currently evaluates nearest neighbors exhaustively and returns sorted neighbors; it does not build a kd-tree.",
-            "Typed-integer X, Y, K, BucketSize, metric parameters, and logical controls are independently gated RunMat extensions. Structural counts decode exactly; numerical distance roles must be exactly representable at the binary64 boundary.",
+            "Typed-integer X, Y, K, BucketSize, metric parameters, and logical controls are independently gated RunMat extensions. Native integer structural counts decode exactly; legacy floating counts within 1e-12 above an integer are accepted and truncated. Numerical distance roles must be exactly representable at the binary64 boundary.",
             "Supported floating resident input gathers through its owning provider for CPU nearest-neighbor search, then restores numeric or tied-cell outputs to that provider. Explicit residency must not silently become host residency. There is no nearest-neighbor GPU kernel or fused path.",
             "For MATLAB-compatible explicit `gpuArray` calls, use `NSMethod`,`exhaustive`, default `IncludeTies` and `SortIndices`, and no fast-distance alias. Other explicit GPU forms require RunMat mode. Automatic residency remains transparent.",
         ]},

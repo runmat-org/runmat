@@ -129,3 +129,28 @@ fn resident_source_cannot_claim_a_proven_host_output() {
     let result = inference::infer(&request, &KNNSEARCH_CATALOG_ENTRY);
     assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
 }
+
+#[test]
+fn floating_count_inference_matches_legacy_runtime_tolerance() {
+    let result = infer(vec![name("K"), number(1.0 + 5.0e-13)], 1);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![Some(3), Some(1)])
+    );
+    assert!(!infer(vec![name("K"), number(1.0 + 5.0e-10)], 1)
+        .diagnostics
+        .is_empty());
+}
+
+#[test]
+fn logical_observation_fact_matches_runtime_admission() {
+    let mut request = CallRequest {
+        arguments: vec![data(3, 1), data(2, 1)],
+        literals: LiteralContext::default(),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    request.arguments[0].kind = ValueKindFact::Logical;
+    let result = inference::infer(&request, &KNNSEARCH_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+}
