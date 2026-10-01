@@ -39,7 +39,7 @@ pub use self::tsne::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(confusionmat::ENTRIES.iter().copied());
-    values.extend(crossvalidation::ENTRIES.iter().copied());
+    crossvalidation::extend_entries(values);
     values.extend(fitclinear::ENTRIES.iter().copied());
     values.extend(fitctree::ENTRIES.iter().copied());
     values.extend(fitlm::ENTRIES.iter().copied());

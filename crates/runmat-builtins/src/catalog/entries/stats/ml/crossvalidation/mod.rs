@@ -12,9 +12,7 @@ pub use options::{
     PartitionCountGrammar,
 };
 
-pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
-    &CROSSVALIND_CATALOG_ENTRY,
-    &CVPARTITION_CATALOG_ENTRY,
-    &TEST_CATALOG_ENTRY,
-    &TRAINING_CATALOG_ENTRY,
-];
+pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(crossvalind::ENTRIES.iter().copied());
+    values.extend(cvpartition::ENTRIES.iter().copied());
+}
