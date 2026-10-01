@@ -12,13 +12,6 @@ pub(super) fn admit(
 ) -> BuiltinResult<DiscriminantType> {
     let sample_geometry = predictor_geometry(sample, "sample")?;
     let training_geometry = predictor_geometry(training, "training")?;
-    if sample_geometry.is_some_and(|(_, columns)| columns == 0)
-        || training_geometry.is_some_and(|(rows, _)| rows == 0)
-    {
-        return Err(invalid_argument(
-            "classify: sample and training must be nonempty numeric matrices",
-        ));
-    }
     if let (Some((_, sample_columns)), Some((_, training_columns))) =
         (sample_geometry, training_geometry)
     {
@@ -27,6 +20,13 @@ pub(super) fn admit(
                 "classify: sample and training must have the same number of columns",
             ));
         }
+    }
+    if sample_geometry.is_some_and(|(_, columns)| columns == 0)
+        || training_geometry.is_some_and(|(rows, _)| rows == 0)
+    {
+        return Err(invalid_argument(
+            "classify: sample and training must be nonempty numeric matrices",
+        ));
     }
     if let (Some((training_rows, _)), Some(group_count)) = (training_geometry, group_count(group)?)
     {
