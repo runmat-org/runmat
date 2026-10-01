@@ -1,4 +1,3 @@
-use super::super::tabulation::label_for_value;
 use super::*;
 
 #[test]

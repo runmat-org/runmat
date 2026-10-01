@@ -1336,16 +1336,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn mode_type_resolver_reduces_first_dim() {
-        let ty = Type::Tensor {
-            shape: Some(vec![Some(3), Some(4)]),
+    fn mode_catalog_inference_reduces_first_dim() {
+        use runmat_types::{
+            CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
+            OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact,
+            ValueKindFact,
         };
-        let out = mode_type_resolver(&[ty], &ResolveContext::new(Vec::new()));
+        let request = CallRequest {
+            arguments: vec![ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                }),
+                ShapeFact::from(vec![Some(3), Some(4)]),
+                StorageFact::Dense,
+            )],
+            literals: LiteralContext::new(vec![LiteralValue::Unknown]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let out =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::MODE_CATALOG_ENTRY, &request);
+        assert!(out.diagnostics.is_empty());
+        assert_eq!(out.outputs.len(), 1);
         assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(4)])
-            }
+            out.outputs[0].shape,
+            ShapeFact::from(vec![Some(1), Some(4)])
         );
     }
 
