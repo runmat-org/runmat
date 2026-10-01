@@ -22,6 +22,33 @@ use super::semantic_bindings::{self, SemanticBinding};
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::{FusionCallOrigin, PrimitiveOp, ValueId};
 
+#[path = "semantics/constant_identity.rs"]
+mod constant_identity;
+
+fn source_constants(plan: &FusionGroupPlan) -> Result<Vec<(ValueId, Digest)>> {
+    let mut constants = plan
+        .const_values
+        .iter()
+        .map(|(&id, value)| {
+            constant_identity::exact_constant_digest(value).map(|digest| (id, digest))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    constants.sort_unstable_by_key(|(id, _)| *id);
+    Ok(constants)
+}
+
+fn source_slot_constants(plan: &FusionGroupPlan) -> Result<Vec<(usize, Digest)>> {
+    let mut constants = plan
+        .constants
+        .iter()
+        .map(|(&slot, value)| {
+            constant_identity::exact_constant_digest(value).map(|digest| (slot, digest))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    constants.sort_unstable_by_key(|(slot, _)| *slot);
+    Ok(constants)
+}
+
 /// Ordered source topology after the canonical binding capture. Public names
 /// never become a second execution identity after this boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -76,7 +103,8 @@ fn source_operations(
 pub(crate) struct ResolvedProgram {
     source_operations: Vec<SourceOperationIdentity>,
     source_input_ids: Vec<ValueId>,
-    source_constant_ids: Vec<ValueId>,
+    source_constants: Vec<(ValueId, Digest)>,
+    source_slot_constants: Vec<(usize, Digest)>,
     source_root: Option<ValueId>,
     facts: HashMap<ValueId, ValueFact>,
     source_inputs: Vec<ValueFact>,
@@ -175,8 +203,8 @@ impl ResolvedProgram {
             ));
         }
         let source_operations = source_operations(plan, snapshots)?;
-        let mut source_constant_ids = plan.const_values.keys().copied().collect::<Vec<_>>();
-        source_constant_ids.sort_unstable();
+        let source_constants = source_constants(plan)?;
+        let source_slot_constants = source_slot_constants(plan)?;
         let source_inputs: Vec<_> = inputs.iter().map(|value| value_fact(value)).collect();
         let effective_input = |mut fact: ValueFact| {
             if precision_policy.permits_double_to_single()
@@ -279,7 +307,8 @@ impl ResolvedProgram {
         Ok(Self {
             source_operations,
             source_input_ids: plan.inputs.clone(),
-            source_constant_ids,
+            source_constants,
+            source_slot_constants,
             source_root: plan.output,
             facts,
             binding_contracts,
@@ -368,7 +397,8 @@ impl ResolvedProgram {
             runmat_builtins::BUILTIN_CATALOG_SCHEMA_VERSION,
             &self.source_operations,
             &self.source_input_ids,
-            &self.source_constant_ids,
+            &self.source_constants,
+            &self.source_slot_constants,
             self.source_root,
             declarations,
             facts,
@@ -391,11 +421,14 @@ impl ResolvedProgram {
                 "fusion source topology differs from admitted program"
             ));
         }
-        let mut constants = plan.const_values.keys().copied().collect::<Vec<_>>();
-        constants.sort_unstable();
-        if constants != self.source_constant_ids {
+        if source_constants(plan)? != self.source_constants {
             return Err(anyhow!(
                 "fusion source constants differ from admitted program"
+            ));
+        }
+        if source_slot_constants(plan)? != self.source_slot_constants {
+            return Err(anyhow!(
+                "fusion source slot constants differ from admitted program"
             ));
         }
         Ok(())

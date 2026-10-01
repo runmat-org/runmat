@@ -140,6 +140,49 @@ fn equal_facts_do_not_merge_distinct_primitive_or_operand_topology() {
 }
 
 #[test]
+fn source_constants_retain_signed_zero_values_and_nan_payloads() {
+    let with_constant = |value: Value| {
+        let mut source = plan(
+            vec![FusionOp::Primitive {
+                op: PrimitiveOp::Add,
+                inputs: vec![0, 2],
+                output: Some(3),
+            }],
+            3,
+        );
+        source.inputs = vec![0];
+        source.stack_pattern = vec![0];
+        source.const_values.insert(2, value);
+        source
+    };
+    let positive = with_constant(Value::Num(0.0));
+    let negative = with_constant(Value::Num(-0.0));
+    let one = with_constant(Value::Num(1.0));
+    let two = with_constant(Value::Num(2.0));
+    let input = [Value::Num(4.0)];
+    let positive_facts = resolve(&positive, &input).unwrap();
+    assert_ne!(
+        positive_facts.cache_identity().unwrap(),
+        resolve(&negative, &input)
+            .unwrap()
+            .cache_identity()
+            .unwrap()
+    );
+    assert_ne!(
+        resolve(&one, &input).unwrap().cache_identity().unwrap(),
+        resolve(&two, &input).unwrap().cache_identity().unwrap()
+    );
+    assert!(positive_facts.require_source_plan(&negative).is_err());
+
+    let nan_a = with_constant(Value::Num(f64::from_bits(0x7ff8_0000_0000_0001)));
+    let nan_b = with_constant(Value::Num(f64::from_bits(0x7ff8_0000_0000_0002)));
+    assert_ne!(
+        resolve(&nan_a, &input).unwrap().cache_identity().unwrap(),
+        resolve(&nan_b, &input).unwrap().cache_identity().unwrap()
+    );
+}
+
+#[test]
 fn real_inputs_do_not_fabricate_power_domain_evidence() {
     let plan = plan(
         vec![FusionOp::Primitive {
