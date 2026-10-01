@@ -216,7 +216,10 @@ fn ensure_exact_tsne_integer_value(value: &Value, role: &str) -> BuiltinResult<(
         Value::Int(integer) => exact(integer),
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
-                for integer in storage.exact_values() {
+                for index in 0..storage.len() {
+                    let integer = storage
+                        .value_at(index)
+                        .expect("integer storage index is within its length");
                     exact(&integer)?;
                 }
             }

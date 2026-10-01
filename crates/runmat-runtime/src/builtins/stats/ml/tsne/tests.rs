@@ -292,6 +292,10 @@ fn tsne_rejects_lossy_integer_floating_boundaries() {
     let error = ensure_exact_tsne_integer_value(&wide, "observation data")
         .expect_err("lossy integer must reject");
     assert!(error.message().contains("exactly representable"));
+
+    let exact_wide = poisoned_int_tensor(IntegerStorage::U64(vec![1_u64 << 54]), vec![1, 1]);
+    ensure_exact_tsne_integer_value(&exact_wide, "observation data")
+        .expect("aligned wide integer remains exactly representable");
 }
 
 #[tokio::test]
