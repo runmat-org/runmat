@@ -13,22 +13,27 @@ pub(in super::super) fn dummyvar(
     if request.arguments.len() != 1 {
         diagnostics.push(error("ARITY", "dummyvar requires one grouping argument"));
     }
-    let rows = request
-        .arguments
-        .first()
-        .and_then(|value| match (&value.kind, &value.shape) {
-            (ValueKindFact::Numeric(_) | ValueKindFact::Logical, ShapeFact::Shaped { dims })
-                if dims.len() >= 2 =>
+    let rows = request.arguments.first().and_then(|value| {
+        let ShapeFact::Shaped { dims } = &value.shape else {
+            return None;
+        };
+        match &value.kind {
+            // Only a nonscalar numeric matrix is split into separate column
+            // grouping variables. Every other numeric or logical array is
+            // flattened into one grouping variable by the runtime.
+            ValueKindFact::Numeric(_)
+                if dims.len() == 2
+                    && matches!(dims[0], DimensionFact::Known(n) if n > 1)
+                    && matches!(dims[1], DimensionFact::Known(n) if n > 1) =>
             {
-                // Cell shape describes the container, not its grouping rows.
-                if dims.first() == Some(&DimensionFact::Known(1)) {
-                    dims.get(1).cloned()
-                } else {
-                    dims.first().cloned()
-                }
+                dims.first().cloned()
+            }
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical => {
+                value.shape.element_count().map(DimensionFact::Known)
             }
             _ => None,
-        });
+        }
+    });
     let shape = ShapeFact::Shaped {
         dims: vec![
             rows.unwrap_or(DimensionFact::Unknown),

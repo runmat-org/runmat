@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn encoding_error_identifiers_follow_typed_owner_descriptors() {
+    for (owner, invalid_id, internal_id) in [
+        (
+            EncodingBuiltin::Dummyvar,
+            "RunMat:dummyvar:InvalidArgument",
+            "RunMat:dummyvar:Internal",
+        ),
+        (
+            EncodingBuiltin::OnehotEncode,
+            "RunMat:onehotencode:InvalidArgument",
+            "RunMat:onehotencode:Internal",
+        ),
+        (
+            EncodingBuiltin::OnehotDecode,
+            "RunMat:onehotdecode:InvalidArgument",
+            "RunMat:onehotdecode:Internal",
+        ),
+    ] {
+        assert_eq!(
+            invalid(owner, "invalid").identifier.as_deref(),
+            Some(invalid_id)
+        );
+        assert_eq!(
+            internal(owner, "internal").identifier.as_deref(),
+            Some(internal_id)
+        );
+    }
+}
+
+#[test]
 fn class_identity_is_typed_and_exact_across_numeric_and_text_labels() {
     assert_eq!(
         label_key(&Label::Numeric(NumericScalar::F64(-0.0))),
@@ -65,12 +95,12 @@ fn categorical_classes_preserve_unused_categories() {
 #[test]
 fn onehot_feature_dimension_parses_integer_bounds_exactly() {
     assert_eq!(
-        positive_dim("onehotencode", &Value::Int(IntValue::U16(2))).unwrap(),
+        positive_dim(EncodingBuiltin::OnehotEncode, &Value::Int(IntValue::U16(2))).unwrap(),
         2
     );
     assert_eq!(
         positive_dim(
-            "onehotencode",
+            EncodingBuiltin::OnehotEncode,
             &mirrorless_int_tensor(IntegerStorage::U64(vec![2]), vec![1, 1])
         )
         .unwrap(),
@@ -84,7 +114,7 @@ fn onehot_feature_dimension_parses_integer_bounds_exactly() {
         Value::Num(usize::MAX as f64 + 1.0),
         mirrorless_int_tensor(IntegerStorage::U64(vec![0]), vec![1, 1]),
     ] {
-        assert!(positive_dim("onehotencode", &value).is_err());
+        assert!(positive_dim(EncodingBuiltin::OnehotEncode, &value).is_err());
     }
 }
 

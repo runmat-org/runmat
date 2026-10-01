@@ -157,3 +157,27 @@ fn invalid_known_output_type_remains_dynamic() {
     assert!(!result.diagnostics.is_empty());
     assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
 }
+
+#[test]
+fn dummyvar_nd_numeric_and_logical_facts_use_flattened_row_count() {
+    for (kind, dims, rows) in [
+        (
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            vec![Some(2), Some(2), Some(2)],
+            8,
+        ),
+        (ValueKindFact::Logical, vec![Some(1), Some(1), Some(3)], 3),
+    ] {
+        let input = ValueFact::proven(kind, ShapeFact::from(dims), StorageFact::Dense);
+        let call = request(vec![input], vec![LiteralValue::Unknown]);
+        let result = dummyvar(&call, &super::super::DUMMYVAR_CATALOG_ENTRY);
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(
+            result.outputs[0].shape,
+            ShapeFact::from(vec![Some(rows), None])
+        );
+    }
+}

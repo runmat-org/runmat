@@ -1,7 +1,7 @@
 //! Label construction, exact class identity, and class-order validation.
 use super::*;
 
-pub(super) fn labels_from_value(name: &str, value: Value) -> BuiltinResult<LabelArray> {
+pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinResult<LabelArray> {
     match value {
         Value::Num(value) => Ok(LabelArray {
             labels: vec![numeric_label(NumericScalar::F64(value))],
@@ -60,7 +60,7 @@ pub(super) fn labels_from_value(name: &str, value: Value) -> BuiltinResult<Label
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data.len());
             for item in cell.data {
-                labels.push(text_label(scalar_text(&item, name, name)?));
+                labels.push(text_label(scalar_text(&item, name, name.name())?));
             }
             Ok(LabelArray {
                 labels,
@@ -117,14 +117,17 @@ pub(super) fn dummyvar_groups(value: Value) -> BuiltinResult<Vec<LabelArray>> {
             if cell.rows == 1 && cell.cols > 1 && cell.data.iter().any(is_grouping_container) {
                 let mut groups = Vec::with_capacity(cell.cols);
                 for value in cell.data {
-                    groups.push(labels_from_value("dummyvar", value)?);
+                    groups.push(labels_from_value(EncodingBuiltin::Dummyvar, value)?);
                 }
                 Ok(groups)
             } else {
-                Ok(vec![labels_from_value("dummyvar", Value::Cell(cell))?])
+                Ok(vec![labels_from_value(
+                    EncodingBuiltin::Dummyvar,
+                    Value::Cell(cell),
+                )?])
             }
         }
-        other => Ok(vec![labels_from_value("dummyvar", other)?]),
+        other => Ok(vec![labels_from_value(EncodingBuiltin::Dummyvar, other)?]),
     }
 }
 
@@ -146,7 +149,7 @@ pub(super) fn numeric_dummyvar_classes(
         };
         let Some(value) = positive_numeric_usize(*value) else {
             return Err(invalid(
-                "dummyvar",
+                EncodingBuiltin::Dummyvar,
                 "dummyvar: numeric groups must contain positive integer levels or NaN",
             ));
         };
@@ -154,7 +157,10 @@ pub(super) fn numeric_dummyvar_classes(
     }
     let row_count = rows.max(1);
     if max_level > MAX_ONEHOT_CELLS / row_count {
-        return Err(invalid("dummyvar", "dummyvar: output is too large"));
+        return Err(invalid(
+            EncodingBuiltin::Dummyvar,
+            "dummyvar: output is too large",
+        ));
     }
     Ok((1..=max_level)
         .map(|value| Label::Numeric(NumericScalar::F64(value as f64)))
@@ -195,7 +201,10 @@ pub(super) fn classes_for_labels(labels: &LabelArray) -> Vec<Label> {
     }
 }
 
-pub(super) fn nonmissing_classes(name: &str, labels: &LabelArray) -> BuiltinResult<Vec<Label>> {
+pub(super) fn nonmissing_classes(
+    name: EncodingBuiltin,
+    labels: &LabelArray,
+) -> BuiltinResult<Vec<Label>> {
     if labels.labels.iter().any(Option::is_none) {
         return Err(invalid(
             name,
@@ -395,7 +404,11 @@ pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
     rows
 }
 
-pub(super) fn scalar_text(value: &Value, builtin: &str, context: &str) -> BuiltinResult<String> {
+pub(super) fn scalar_text(
+    value: &Value,
+    builtin: EncodingBuiltin,
+    context: &str,
+) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(chars) => Ok(chars.data.iter().collect()),

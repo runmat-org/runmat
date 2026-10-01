@@ -7,18 +7,29 @@ pub(super) fn onehot_numeric_output(
     dtype: NumericDType,
 ) -> BuiltinResult<Value> {
     let mut output =
-        Tensor::from_numeric_storage(NumericStorage::zeros(dtype, values.len()), shape)
-            .map_err(|err| internal("onehotencode", format!("onehotencode: {err}")))?;
+        Tensor::from_numeric_storage(NumericStorage::zeros(dtype, values.len()), shape).map_err(
+            |err| {
+                internal(
+                    EncodingBuiltin::OnehotEncode,
+                    format!("onehotencode: {err}"),
+                )
+            },
+        )?;
     for (index, value) in values.into_iter().enumerate() {
         output
             .set_numeric_assignment_at(index, NumericScalar::F64(value))
-            .map_err(|err| internal("onehotencode", format!("onehotencode: {err}")))?;
+            .map_err(|err| {
+                internal(
+                    EncodingBuiltin::OnehotEncode,
+                    format!("onehotencode: {err}"),
+                )
+            })?;
     }
     Ok(Value::Tensor(output))
 }
 
 pub(super) fn labels_to_value(
-    name: &str,
+    name: EncodingBuiltin,
     labels: &[Label],
     shape: Vec<usize>,
     output: OutputKind,

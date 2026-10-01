@@ -4,6 +4,22 @@ const SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
     label: "Encoding runtime implementation",
     target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/encoding.rs"),
 };
+const LABELS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Encoding labels and exact class identity",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/encoding/labels.rs"),
+};
+const CONTROLS_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Encoding option admission",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/encoding/controls.rs"),
+};
+const GEOMETRY_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Encoding array geometry",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/encoding/geometry.rs"),
+};
+const OUTPUT_SOURCE: BuiltinDocumentationLink = BuiltinDocumentationLink {
+    label: "Encoding typed output publication",
+    target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/encoding/output.rs"),
+};
 
 pub(super) const DUMMYVAR: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
@@ -41,7 +57,7 @@ pub(super) const DUMMYVAR: BuiltinDocumentation = BuiltinDocumentation {
         SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Numeric, missing, typed-integer and compatibility admission tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding.rs" }], notes: &["Host-only double output; GPU input is a compatibility-gated gather boundary."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, LABELS_SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Numeric, missing, typed-integer and compatibility admission tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/dummyvar.rs" }], notes: &["Host-only double output; GPU input is a compatibility-gated gather boundary."] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 
@@ -81,7 +97,7 @@ pub(super) const ONEHOTENCODE: BuiltinDocumentation = BuiltinDocumentation {
         SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Class order, output type, exact integer labels, missing and extension tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding.rs" }], notes: &["Automatic GPU input is gathered; no provider-resident encoder is claimed."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, CONTROLS_SOURCE, LABELS_SOURCE, GEOMETRY_SOURCE, OUTPUT_SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Class order, output type, exact integer labels, missing and extension tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/encode.rs" }], notes: &["Automatic GPU input is gathered; no provider-resident encoder is claimed."] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 
@@ -120,6 +136,6 @@ pub(super) const ONEHOTDECODE: BuiltinDocumentation = BuiltinDocumentation {
         SOURCE,
     ],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "First-max, exact integer classes, categorical order and compatibility tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding.rs" }], notes: &["Decoding is a host materialization boundary, not a GPU kernel or fusion path."] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE, CONTROLS_SOURCE, LABELS_SOURCE, GEOMETRY_SOURCE, OUTPUT_SOURCE], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "First-max, exact integer classes, categorical order and compatibility tests", location: "crates/runmat-runtime/src/builtins/stats/summary/encoding/tests/decode.rs" }], notes: &["Decoding is a host materialization boundary, not a GPU kernel or fusion path."] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };

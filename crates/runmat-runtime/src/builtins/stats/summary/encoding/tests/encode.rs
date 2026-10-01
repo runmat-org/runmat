@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn known_later_invalid_option_precedes_deferred_control_transfer() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let deferred_output_type = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle,
+    );
+    let error = block_on(onehotencode_builtin(
+        tensor(vec![1.0, 2.0], vec![2, 1]),
+        Value::Num(2.0),
+        vec![
+            deferred_output_type,
+            Value::from("NotAnEncodingOption"),
+            Value::from("double"),
+        ],
+    ))
+    .expect_err("known invalid option must precede earlier deferred control gather");
+    assert!(error.message.contains("unsupported option"), "{error}");
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:onehotencode:InvalidArgument")
+    );
+}
+
+#[test]
 fn onehotencode_host_invalid_controls_precede_resident_input_access() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let resident = Value::GpuTensor(

@@ -155,6 +155,47 @@ pub const ONEHOTDECODE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDesc
     when: "Internal allocation or conversion fails.",
     message: "onehotdecode: internal error",
 };
+
+/// The owning public identity for shared encoding diagnostics. Public names
+/// are presentation only; descriptor selection is exhaustive and typed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EncodingBuiltin {
+    Dummyvar,
+    OnehotEncode,
+    OnehotDecode,
+}
+
+impl EncodingBuiltin {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Dummyvar => "dummyvar",
+            Self::OnehotEncode => "onehotencode",
+            Self::OnehotDecode => "onehotdecode",
+        }
+    }
+
+    pub const fn invalid(self) -> &'static BuiltinErrorDescriptor {
+        match self {
+            Self::Dummyvar => &DUMMYVAR_ERROR_INVALID,
+            Self::OnehotEncode => &ONEHOTENCODE_ERROR_INVALID,
+            Self::OnehotDecode => &ONEHOTDECODE_ERROR_INVALID,
+        }
+    }
+
+    pub const fn internal(self) -> &'static BuiltinErrorDescriptor {
+        match self {
+            Self::Dummyvar => &DUMMYVAR_ERROR_INTERNAL,
+            Self::OnehotEncode => &ONEHOTENCODE_ERROR_INTERNAL,
+            Self::OnehotDecode => &ONEHOTDECODE_ERROR_INTERNAL,
+        }
+    }
+}
+
+impl std::fmt::Display for EncodingBuiltin {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
 const DUMMY_ERRORS: [BuiltinErrorDescriptor; 2] = [DUMMYVAR_ERROR_INVALID, DUMMYVAR_ERROR_INTERNAL];
 const ENCODE_ERRORS: [BuiltinErrorDescriptor; 2] =
     [ONEHOTENCODE_ERROR_INVALID, ONEHOTENCODE_ERROR_INTERNAL];

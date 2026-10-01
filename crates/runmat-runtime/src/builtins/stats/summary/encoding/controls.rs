@@ -8,7 +8,7 @@ enum TextControl {
 }
 
 impl TextControl {
-    fn admit(name: &'static str, value: Value, context: &'static str) -> Self {
+    fn admit(name: EncodingBuiltin, value: Value, context: &'static str) -> Self {
         if crate::value_contains_gpu(&value) {
             Self::Deferred(value)
         } else {
@@ -25,7 +25,11 @@ impl TextControl {
         )
     }
 
-    async fn resolve(self, name: &'static str, context: &'static str) -> BuiltinResult<OutputKind> {
+    async fn resolve(
+        self,
+        name: EncodingBuiltin,
+        context: &'static str,
+    ) -> BuiltinResult<OutputKind> {
         match self {
             Self::Ready(result) => result,
             Self::Deferred(value) => {
@@ -46,7 +50,7 @@ impl ClassControl {
         if crate::value_contains_gpu(&value) {
             Self::Deferred(value)
         } else {
-            Self::Ready(labels_from_value("onehotencode", value))
+            Self::Ready(labels_from_value(EncodingBuiltin::OnehotEncode, value))
         }
     }
 
@@ -54,8 +58,8 @@ impl ClassControl {
         match self {
             Self::Ready(result) => result,
             Self::Deferred(value) => {
-                let value = gather("onehotencode", value).await?;
-                labels_from_value("onehotencode", value)
+                let value = gather(EncodingBuiltin::OnehotEncode, value).await?;
+                labels_from_value(EncodingBuiltin::OnehotEncode, value)
             }
         }
     }
@@ -76,10 +80,10 @@ enum EncodingFlavor {
 }
 
 impl EncodingFlavor {
-    const fn name(self) -> &'static str {
+    const fn name(self) -> EncodingBuiltin {
         match self {
-            Self::Encode => "onehotencode",
-            Self::Decode => "onehotdecode",
+            Self::Encode => EncodingBuiltin::OnehotEncode,
+            Self::Decode => EncodingBuiltin::OnehotDecode,
         }
     }
 
@@ -166,7 +170,7 @@ impl AdmittedControls {
     }
 
     /// Compatibility gates precede all provider access for known controls.
-    pub(super) fn preflight_known_extensions(&self) -> BuiltinResult<()> {
+    pub(super) fn preflight_known_extensions(mut self) -> BuiltinResult<Self> {
         if self
             .steps
             .iter()
@@ -174,7 +178,7 @@ impl AdmittedControls {
         {
             crate::compatibility::ensure_builtin_extension_enabled(
                 self.flavor.output_alias_extension(),
-                self.flavor.name(),
+                self.flavor.name().name(),
             )?;
         }
         if self.flavor == EncodingFlavor::Decode
@@ -187,10 +191,24 @@ impl AdmittedControls {
         {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &ONEHOTDECODE_LOGICAL_CELL_OUTPUT_EXTENSION,
-                self.flavor.name(),
+                self.flavor.name().name(),
             )?;
         }
-        Ok(())
+        // Host-visible invalid controls are admitted before resolving any
+        // deferred control. Keep the successful typed steps for the ordered
+        // execution pass, including repeated options whose last value wins.
+        let mut admitted = Vec::with_capacity(self.steps.len());
+        for step in self.steps {
+            match step {
+                Step::Positional(TextControl::Ready(Err(error)))
+                | Step::NamedOutput(TextControl::Ready(Err(error)))
+                | Step::InvalidName(error) => return Err(error),
+                Step::Classes(ClassControl::Ready(Err(error))) => return Err(error),
+                step => admitted.push(step),
+            }
+        }
+        self.steps = admitted;
+        Ok(self)
     }
 
     async fn resolve_steps(self) -> BuiltinResult<(Option<LabelArray>, Option<OutputKind>)> {
@@ -221,7 +239,7 @@ impl AdmittedControls {
                         Some(EncodingOptionName::OutputType) => {
                             crate::compatibility::ensure_builtin_extension_enabled(
                                 flavor.output_alias_extension(),
-                                name,
+                                name.name(),
                             )?;
                             let selected = TextControl::admit(name, option_value, "OutputType")
                                 .resolve(name, "OutputType")
@@ -253,7 +271,7 @@ impl AdmittedControls {
         {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &ONEHOTDECODE_LOGICAL_CELL_OUTPUT_EXTENSION,
-                flavor.name(),
+                flavor.name().name(),
             )?;
         }
         Ok(())

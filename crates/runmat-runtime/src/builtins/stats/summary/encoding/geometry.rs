@@ -49,7 +49,7 @@ pub(super) fn encoded_values(value: Value) -> BuiltinResult<EncodedArray> {
                 Some(1) => 1.0,
                 _ => {
                     return Err(invalid(
-                        "onehotdecode",
+                        EncodingBuiltin::OnehotDecode,
                         "onehotdecode: encoded integer values must be zero or one",
                     ))
                 }
@@ -64,7 +64,7 @@ pub(super) fn encoded_values(value: Value) -> BuiltinResult<EncodedArray> {
             shape: vec![1, 1],
         }),
         other => Err(invalid(
-            "onehotdecode",
+            EncodingBuiltin::OnehotDecode,
             format!("onehotdecode: encoded data must be numeric or logical, got {other:?}"),
         )),
     }
@@ -76,7 +76,7 @@ pub(super) fn validate_encoded_range(values: &[f64]) -> BuiltinResult<()> {
         .any(|value| !value.is_nan() && !(0.0..=1.0).contains(value))
     {
         return Err(invalid(
-            "onehotdecode",
+            EncodingBuiltin::OnehotDecode,
             "onehotdecode: encoded values must be probabilities between 0 and 1",
         ));
     }
@@ -84,7 +84,7 @@ pub(super) fn validate_encoded_range(values: &[f64]) -> BuiltinResult<()> {
 }
 
 pub(super) fn onehot_encoded_shape(
-    name: &str,
+    name: EncodingBuiltin,
     input_shape: &[usize],
     feature_dim: usize,
     classes: usize,

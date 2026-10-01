@@ -219,3 +219,17 @@ fn dummyvar_rejects_huge_numeric_level_before_allocating_classes() {
     let err = block_on(dummyvar_builtin(tensor(vec![1_000_000_000.0], vec![1, 1]))).unwrap_err();
     assert!(err.message.contains("output is too large"));
 }
+
+#[test]
+fn dummyvar_nd_arrays_flatten_one_grouping_variable() {
+    for (values, shape, expected_shape) in [
+        (vec![1.0; 8], vec![2, 2, 2], vec![8, 1]),
+        (vec![1.0, 2.0, 1.0], vec![1, 1, 3], vec![3, 2]),
+    ] {
+        let Value::Tensor(output) = block_on(dummyvar_builtin(tensor(values, shape))).unwrap()
+        else {
+            panic!("dummyvar must return a double matrix");
+        };
+        assert_eq!(output.shape, expected_shape);
+    }
+}

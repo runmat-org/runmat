@@ -4,11 +4,11 @@ use runmat_value::{NumericDType, NumericScalar, NumericStorage};
 use std::{cmp::Ordering, collections::HashMap};
 
 use runmat_builtins::{
-    EncodingOptionName, EncodingOutputKind as OutputKind, DUMMYVAR_GPU_GROUP_EXTENSION,
-    DUMMYVAR_INTEGER_GROUP_EXTENSION, ONEHOTDECODE_BROAD_ENCODED_EXTENSION,
-    ONEHOTDECODE_EXPLICIT_GPU_EXTENSION, ONEHOTDECODE_LOGICAL_CELL_OUTPUT_EXTENSION,
-    ONEHOTDECODE_OUTPUT_TYPE_ALIAS_EXTENSION, ONEHOTENCODE_EXPLICIT_GPU_EXTENSION,
-    ONEHOTENCODE_OUTPUT_TYPE_ALIAS_EXTENSION,
+    EncodingBuiltin, EncodingOptionName, EncodingOutputKind as OutputKind,
+    DUMMYVAR_GPU_GROUP_EXTENSION, DUMMYVAR_INTEGER_GROUP_EXTENSION,
+    ONEHOTDECODE_BROAD_ENCODED_EXTENSION, ONEHOTDECODE_EXPLICIT_GPU_EXTENSION,
+    ONEHOTDECODE_LOGICAL_CELL_OUTPUT_EXTENSION, ONEHOTDECODE_OUTPUT_TYPE_ALIAS_EXTENSION,
+    ONEHOTENCODE_EXPLICIT_GPU_EXTENSION, ONEHOTENCODE_OUTPUT_TYPE_ALIAS_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::NumericClass;
@@ -38,29 +38,19 @@ mod labels;
 mod output;
 use self::{geometry::*, labels::*, output::*};
 
-fn error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(name).build()
-}
-
-fn invalid(name: &str, message: impl Into<String>) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(name);
-    // The catalog descriptor owns the public identifier. The encoding
-    // descriptors declare invalid-argument first and internal-error second.
-    let identifier = runmat_builtins::builtin_descriptor_by_name(name)
-        .and_then(|descriptor| descriptor.errors.first())
-        .and_then(|error| error.identifier)
-        .unwrap_or("RunMat:encoding:InvalidArgument");
-    builder = builder.with_identifier(identifier);
+fn invalid(owner: EncodingBuiltin, message: impl Into<String>) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(owner.name());
+    if let Some(identifier) = owner.invalid().identifier {
+        builder = builder.with_identifier(identifier);
+    }
     builder.build()
 }
 
-fn internal(name: &str, message: impl Into<String>) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(name);
-    let identifier = runmat_builtins::builtin_descriptor_by_name(name)
-        .and_then(|descriptor| descriptor.errors.get(1))
-        .and_then(|error| error.identifier)
-        .unwrap_or("RunMat:encoding:Internal");
-    builder = builder.with_identifier(identifier);
+fn internal(owner: EncodingBuiltin, message: impl Into<String>) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(owner.name());
+    if let Some(identifier) = owner.internal().identifier {
+        builder = builder.with_identifier(identifier);
+    }
     builder.build()
 }
 
@@ -108,16 +98,16 @@ async fn dummyvar_builtin(group: Value) -> BuiltinResult<Value> {
     if value_contains_typed_integer(&group) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DUMMYVAR_INTEGER_GROUP_EXTENSION,
-            "dummyvar",
+            EncodingBuiltin::Dummyvar.name(),
         )?;
     }
     if crate::value_contains_gpu(&group) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DUMMYVAR_GPU_GROUP_EXTENSION,
-            "dummyvar",
+            EncodingBuiltin::Dummyvar.name(),
         )?;
     }
-    let group = gather("dummyvar", group).await?;
+    let group = gather(EncodingBuiltin::Dummyvar, group).await?;
     validate_dummyvar_integer_levels(&group)?;
     dummyvar_compute(group)
 }
@@ -137,7 +127,7 @@ fn validate_dummyvar_integer_levels(value: &Value) -> BuiltinResult<()> {
                 for index in 0..storage.len() {
                     let value = storage.value_at(index).ok_or_else(|| {
                         internal(
-                            "dummyvar",
+                            EncodingBuiltin::Dummyvar,
                             "dummyvar: invalid typed-integer grouping storage",
                         )
                     })?;
@@ -168,13 +158,16 @@ fn validate_dummyvar_integer_level(value: &IntValue) -> BuiltinResult<()> {
         IntValue::U64(value) if *value > 0 => u128::from(*value),
         _ => {
             return Err(invalid(
-                "dummyvar",
+                EncodingBuiltin::Dummyvar,
                 "dummyvar: numeric groups must contain positive integer levels or NaN",
             ))
         }
     };
     if level > MAX_ONEHOT_CELLS as u128 {
-        return Err(invalid("dummyvar", "dummyvar: output is too large"));
+        return Err(invalid(
+            EncodingBuiltin::Dummyvar,
+            "dummyvar: output is too large",
+        ));
     }
     Ok(())
 }
@@ -189,40 +182,43 @@ async fn onehotencode_builtin(
     feature_dim: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let controls = AdmittedControls::encode(rest);
-    controls.preflight_known_extensions()?;
+    let controls = AdmittedControls::encode(rest).preflight_known_extensions()?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&input)
         || crate::builtins::common::validation::value_contains_explicit_gpu(&feature_dim)
         || controls.contains_explicit_gpu()
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ONEHOTENCODE_EXPLICIT_GPU_EXTENSION,
-            "onehotencode",
+            EncodingBuiltin::OnehotEncode.name(),
         )?;
     }
     let host_dim = if crate::value_contains_gpu(&feature_dim) {
         None
     } else {
-        Some(positive_dim("onehotencode", &feature_dim)?)
+        Some(positive_dim(EncodingBuiltin::OnehotEncode, &feature_dim)?)
     };
     let admitted_labels = if crate::value_contains_gpu(&input) {
         Admitted::Deferred(input)
     } else {
-        Admitted::Ready(labels_from_value("onehotencode", input)?)
+        Admitted::Ready(labels_from_value(EncodingBuiltin::OnehotEncode, input)?)
     };
     if let (Admitted::Ready(labels), Some(dim)) = (&admitted_labels, host_dim) {
-        onehot_encoded_shape("onehotencode", &labels.shape, dim, 1)?;
+        onehot_encoded_shape(EncodingBuiltin::OnehotEncode, &labels.shape, dim, 1)?;
     }
     let options = controls.resolve_encode().await?;
     let feature_dim = match host_dim {
         Some(dim) => dim,
-        None => positive_dim("onehotencode", &gather("onehotencode", feature_dim).await?)?,
+        None => positive_dim(
+            EncodingBuiltin::OnehotEncode,
+            &gather(EncodingBuiltin::OnehotEncode, feature_dim).await?,
+        )?,
     };
     let labels = match admitted_labels {
         Admitted::Ready(labels) => labels,
-        Admitted::Deferred(input) => {
-            labels_from_value("onehotencode", gather("onehotencode", input).await?)?
-        }
+        Admitted::Deferred(input) => labels_from_value(
+            EncodingBuiltin::OnehotEncode,
+            gather(EncodingBuiltin::OnehotEncode, input).await?,
+        )?,
     };
     onehotencode_compute(labels, feature_dim, options)
 }
@@ -238,12 +234,11 @@ async fn onehotdecode_builtin(
     feature_dim: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let controls = AdmittedControls::decode(rest);
-    controls.preflight_known_extensions()?;
+    let controls = AdmittedControls::decode(rest).preflight_known_extensions()?;
     if encoded_value_needs_runmat_extension(&encoded) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ONEHOTDECODE_BROAD_ENCODED_EXTENSION,
-            "onehotdecode",
+            EncodingBuiltin::OnehotDecode.name(),
         )?;
     }
     if crate::builtins::common::validation::value_contains_explicit_gpu(&encoded)
@@ -253,13 +248,13 @@ async fn onehotdecode_builtin(
     {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ONEHOTDECODE_EXPLICIT_GPU_EXTENSION,
-            "onehotdecode",
+            EncodingBuiltin::OnehotDecode.name(),
         )?;
     }
     let host_dim = if crate::value_contains_gpu(&feature_dim) {
         None
     } else {
-        Some(positive_dim("onehotdecode", &feature_dim)?)
+        Some(positive_dim(EncodingBuiltin::OnehotDecode, &feature_dim)?)
     };
     let admitted_encoded = if crate::value_contains_gpu(&encoded) {
         Admitted::Deferred(encoded)
@@ -271,24 +266,27 @@ async fn onehotdecode_builtin(
     let admitted_classes = if crate::value_contains_gpu(&classes) {
         Admitted::Deferred(classes)
     } else {
-        let labels = labels_from_value("onehotdecode", classes)?;
-        Admitted::Ready(nonmissing_classes("onehotdecode", &labels)?)
+        let labels = labels_from_value(EncodingBuiltin::OnehotDecode, classes)?;
+        Admitted::Ready(nonmissing_classes(EncodingBuiltin::OnehotDecode, &labels)?)
     };
     if matches!(&admitted_classes, Admitted::Ready(classes) if classes.is_empty()) {
         return Err(invalid(
-            "onehotdecode",
+            EncodingBuiltin::OnehotDecode,
             "onehotdecode: classes cannot be empty",
         ));
     }
     let options = controls.resolve_decode().await?;
     let feature_dim = match host_dim {
         Some(dim) => dim,
-        None => positive_dim("onehotdecode", &gather("onehotdecode", feature_dim).await?)?,
+        None => positive_dim(
+            EncodingBuiltin::OnehotDecode,
+            &gather(EncodingBuiltin::OnehotDecode, feature_dim).await?,
+        )?,
     };
     let encoded = match admitted_encoded {
         Admitted::Ready(encoded) => encoded,
         Admitted::Deferred(value) => {
-            let encoded = encoded_values(gather("onehotdecode", value).await?)?;
+            let encoded = encoded_values(gather(EncodingBuiltin::OnehotDecode, value).await?)?;
             validate_encoded_range(&encoded.data)?;
             encoded
         }
@@ -296,13 +294,16 @@ async fn onehotdecode_builtin(
     let classes = match admitted_classes {
         Admitted::Ready(classes) => classes,
         Admitted::Deferred(value) => {
-            let labels = labels_from_value("onehotdecode", gather("onehotdecode", value).await?)?;
-            nonmissing_classes("onehotdecode", &labels)?
+            let labels = labels_from_value(
+                EncodingBuiltin::OnehotDecode,
+                gather(EncodingBuiltin::OnehotDecode, value).await?,
+            )?;
+            nonmissing_classes(EncodingBuiltin::OnehotDecode, &labels)?
         }
     };
     if classes.is_empty() {
         return Err(invalid(
-            "onehotdecode",
+            EncodingBuiltin::OnehotDecode,
             "onehotdecode: classes cannot be empty",
         ));
     }
@@ -317,7 +318,7 @@ fn encoded_value_needs_runmat_extension(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some() || runmat_accelerate_api::handle_is_logical(handle))
 }
 
-async fn gather(name: &str, value: Value) -> BuiltinResult<Value> {
+async fn gather(name: EncodingBuiltin, value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await.map_err(|cause| {
         let mut owner = invalid(name, format!("{name}: {cause}"));
         owner.gpu_gather_retry = cause.gpu_gather_retry;
@@ -335,21 +336,27 @@ fn dummyvar_compute(group: Value) -> BuiltinResult<Value> {
     for group in groups {
         if group.labels.len() != rows {
             return Err(invalid(
-                "dummyvar",
+                EncodingBuiltin::Dummyvar,
                 "dummyvar: all grouping variables must have the same number of rows",
             ));
         }
         let classes = classes_for_dummyvar(&group, rows)?;
-        total_cols = total_cols
-            .checked_add(classes.len())
-            .ok_or_else(|| invalid("dummyvar", "dummyvar: too many dummy variables"))?;
+        total_cols = total_cols.checked_add(classes.len()).ok_or_else(|| {
+            invalid(
+                EncodingBuiltin::Dummyvar,
+                "dummyvar: too many dummy variables",
+            )
+        })?;
         specs.push((group, classes));
     }
     let cell_count = rows
         .checked_mul(total_cols)
-        .ok_or_else(|| invalid("dummyvar", "dummyvar: output is too large"))?;
+        .ok_or_else(|| invalid(EncodingBuiltin::Dummyvar, "dummyvar: output is too large"))?;
     if cell_count > MAX_ONEHOT_CELLS {
-        return Err(invalid("dummyvar", "dummyvar: output is too large"));
+        return Err(invalid(
+            EncodingBuiltin::Dummyvar,
+            "dummyvar: output is too large",
+        ));
     }
     let mut data = vec![0.0; cell_count];
     let mut col_offset = 0usize;
@@ -373,7 +380,7 @@ fn dummyvar_compute(group: Value) -> BuiltinResult<Value> {
     }
     Tensor::new(data, vec![rows, total_cols])
         .map(Value::Tensor)
-        .map_err(|err| internal("dummyvar", format!("dummyvar: {err}")))
+        .map_err(|err| internal(EncodingBuiltin::Dummyvar, format!("dummyvar: {err}")))
 }
 
 #[derive(Default)]
@@ -390,29 +397,37 @@ fn onehotencode_compute(
     let classes = if let Some(class_names) = options.classes {
         if !label_kinds_compatible(labels.kind, class_names.kind) {
             return Err(invalid(
-                "onehotencode",
+                EncodingBuiltin::OnehotEncode,
                 "onehotencode: ClassNames must match input label type",
             ));
         }
-        nonmissing_classes("onehotencode", &class_names)?
+        nonmissing_classes(EncodingBuiltin::OnehotEncode, &class_names)?
     } else if labels.kind == LabelKind::Categorical {
         classes_for_labels(&labels)
     } else {
         return Err(invalid(
-            "onehotencode",
+            EncodingBuiltin::OnehotEncode,
             "onehotencode: ClassNames is required for noncategorical input",
         ));
     };
     if classes.is_empty() {
         return Err(invalid(
-            "onehotencode",
+            EncodingBuiltin::OnehotEncode,
             "onehotencode: class names cannot be empty",
         ));
     }
-    let shape = onehot_encoded_shape("onehotencode", &labels.shape, feature_dim, classes.len())?;
+    let shape = onehot_encoded_shape(
+        EncodingBuiltin::OnehotEncode,
+        &labels.shape,
+        feature_dim,
+        classes.len(),
+    )?;
     let cell_count = element_count(&shape)?;
     if cell_count > MAX_ONEHOT_CELLS {
-        return Err(invalid("onehotencode", "onehotencode: output is too large"));
+        return Err(invalid(
+            EncodingBuiltin::OnehotEncode,
+            "onehotencode: output is too large",
+        ));
     }
     let mut values = vec![0.0; cell_count];
     let mut has_nan_vector = false;
@@ -465,7 +480,7 @@ fn onehotencode_compute(
         OutputKind::Logical => {
             if has_nan_vector {
                 return Err(invalid(
-                    "onehotencode",
+                    EncodingBuiltin::OnehotEncode,
                     "onehotencode: logical output cannot represent missing or excluded labels",
                 ));
             }
@@ -477,19 +492,24 @@ fn onehotencode_compute(
                 shape,
             )
             .map(Value::LogicalArray)
-            .map_err(|err| internal("onehotencode", format!("onehotencode: {err}")))
+            .map_err(|err| {
+                internal(
+                    EncodingBuiltin::OnehotEncode,
+                    format!("onehotencode: {err}"),
+                )
+            })
         }
         OutputKind::Numeric(dtype) => {
             if has_nan_vector && !matches!(dtype, NumericClass::Double | NumericClass::Single) {
                 return Err(invalid(
-                    "onehotencode",
+                    EncodingBuiltin::OnehotEncode,
                     "onehotencode: integer output cannot represent missing or excluded labels",
                 ));
             }
             onehot_numeric_output(values, shape, dtype.into())
         }
         _ => Err(invalid(
-            "onehotencode",
+            EncodingBuiltin::OnehotEncode,
             "onehotencode: OutputType must be a numeric or logical type",
         )),
     }
@@ -509,13 +529,13 @@ fn onehotdecode_compute(
     let feature_axis = feature_dim - 1;
     if feature_axis >= shape.len() {
         return Err(invalid(
-            "onehotdecode",
+            EncodingBuiltin::OnehotDecode,
             "onehotdecode: featureDim exceeds encoded data dimensions",
         ));
     }
     if shape[feature_axis] != classes.len() {
         return Err(invalid(
-            "onehotdecode",
+            EncodingBuiltin::OnehotDecode,
             "onehotdecode: classes length must match the feature dimension",
         ));
     }
@@ -543,7 +563,7 @@ fn onehotdecode_compute(
         decoded.push(classes[best_idx].clone());
     }
     labels_to_value(
-        "onehotdecode",
+        EncodingBuiltin::OnehotDecode,
         &decoded,
         out_shape,
         options.output.unwrap_or(OutputKind::Categorical),
@@ -551,7 +571,7 @@ fn onehotdecode_compute(
     )
 }
 
-fn parse_output_kind(name: &str, text: &str) -> BuiltinResult<OutputKind> {
+fn parse_output_kind(name: EncodingBuiltin, text: &str) -> BuiltinResult<OutputKind> {
     OutputKind::from_public(text).ok_or_else(|| {
         invalid(
             name,
@@ -560,7 +580,7 @@ fn parse_output_kind(name: &str, text: &str) -> BuiltinResult<OutputKind> {
     })
 }
 
-fn positive_dim(name: &str, value: &Value) -> BuiltinResult<usize> {
+fn positive_dim(name: EncodingBuiltin, value: &Value) -> BuiltinResult<usize> {
     if let Value::Int(value) = value {
         return value.try_to_usize().filter(|dim| *dim >= 1).ok_or_else(|| {
             invalid(
