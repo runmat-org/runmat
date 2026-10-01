@@ -138,6 +138,19 @@ fn conversion_omit_nan_nd_and_view_do_not_borrow_simple_kernel_cost() {
 }
 
 #[test]
+fn unspecified_logical_physical_storage_never_borrows_f64_upload_cost() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F64,
+    };
+    let mut request = query(ProviderElementType::F64, &[2, 3], &[0]);
+    request.inputs[0].element_type = ProviderElementType::Logical;
+    assert_eq!(
+        rejection_code(validate(&provider, true, &request).unwrap()),
+        ProviderRejectionCode::UnknownResourceEstimate
+    );
+}
+
+#[test]
 fn integer_to_double_uses_word_storage_and_its_own_cast_geometry() {
     let provider = GeometryProvider {
         precision: ProviderPrecision::F64,

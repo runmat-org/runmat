@@ -218,6 +218,9 @@ fn work(
     if route.accumulation_class != NumericClass::Double
         || route.input_domain != NumericDomain::Real
         || input.storage != ProviderStorage::DenseReal
+        // A logical public element does not specify this adapter's physical
+        // word width. Do not price its host upload as one byte per element.
+        || input.element_type == ProviderElementType::Logical
         || input.layout != ProviderLayout::ColumnMajorContiguous
         || input.residency != ProviderResidency::Host
         || output_elements == 0
