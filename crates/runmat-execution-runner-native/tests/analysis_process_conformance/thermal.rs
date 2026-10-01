@@ -165,6 +165,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         let output_policy =
             AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap();
         let mut study = ThermalStudyCoordinator::new(ThermalStudyPreparation {
+            field_source: None,
             scope,
             product: ThermalStudyProduct { compiled, workload },
             mesh,
@@ -207,6 +208,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
 
         // Import must reject a foreign admission plan even when the response is genuine.
         let mut foreign = runmat_analysis_execution::PreparedThermalTask {
+            output_policy: prepared.output_policy,
             host: prepared.host.clone(),
             program: prepared.program.clone(),
             inputs: prepared.inputs.clone(),

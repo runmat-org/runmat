@@ -1,8 +1,8 @@
 //! Portable task construction for standalone host thermal solves.
 use crate::{
-    prepare_analysis_objects, prepare_analysis_program, prepare_thermal_inputs,
-    AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisOutputPolicy, AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
+    prepare_analysis_objects, prepare_analysis_program, AnalysisBridgeResult,
+    AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisOutputPolicy,
+    AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 use runmat_analysis_fea::execution::{
@@ -21,6 +21,7 @@ pub struct ThermalTaskPreparation {
     pub program_revision: ProgramRevision,
     pub artifact_access: ArtifactAccess,
     pub workload: ThermalWorkload,
+    pub field_source: Option<runmat_analysis_fea::execution::RetainedJouleHeatSource>,
     pub mesh: SolverMeshArtifact,
     pub output_policy: AnalysisOutputPolicy,
     pub required_capabilities: BTreeSet<AnalysisCapabilityRequirement>,
@@ -31,15 +32,20 @@ pub struct PreparedThermalTask {
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,
+    pub output_policy: AnalysisOutputPolicy,
 }
 
 pub fn prepare_thermal_task(
     preparation: ThermalTaskPreparation,
 ) -> AnalysisBridgeResult<PreparedThermalTask> {
-    let prepared = prepare_thermal_inputs(
+    if let Some(source) = &preparation.field_source {
+        source.validate_for(&preparation.workload, &preparation.mesh)?;
+    }
+    let prepared = crate::thermal_plan::prepare_thermal_inputs_with_source(
         &preparation.workload,
         &preparation.mesh,
         preparation.output_policy,
+        preparation.field_source.as_ref(),
     )?;
     let resource_plan = prepared.resource_plan;
     let mut inputs = prepared.inputs;
@@ -104,5 +110,6 @@ pub fn prepare_thermal_task(
         program,
         inputs,
         resource_plan,
+        output_policy: preparation.output_policy,
     })
 }

@@ -120,6 +120,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
     let digest = Digest::sha256("native-thermal-study-test");
     let limits = NativeAnalysisHostLimits::default();
     ThermalStudyPreparation {
+        field_source: None,
         scope: runmat_analysis_execution::ThermalStudyScope::Standalone,
         product: ThermalStudyProduct { compiled, workload },
         mesh,

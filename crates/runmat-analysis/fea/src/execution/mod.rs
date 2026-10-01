@@ -18,7 +18,7 @@ mod buckling_workload;
 mod electrical_static;
 mod electrothermal;
 pub use electrothermal::{
-    bind_retained_joule_heat, execute_steady_electrothermal_from_retained,
+    bind_retained_joule_heat, execute_steady_electrothermal_from_retained, RetainedJouleHeatSource,
     RetainedJouleHeatTransfer, SteadyElectrothermalCompletion,
 };
 mod magnetic_static;

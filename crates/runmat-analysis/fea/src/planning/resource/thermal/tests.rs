@@ -43,6 +43,7 @@ fn fixture(
     let bytes =
         (workload.canonical_bytes().unwrap().len() + mesh.canonical_encode().unwrap().len()) as u64;
     let facts = PreparedThermalResourceFacts {
+        field_source: None,
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(bytes),
             transport_closure_bytes: ByteCount(bytes + 65536),
@@ -150,5 +151,66 @@ fn thermal_plan_is_source_bound_host_only_and_accounts_for_outputs() {
             bounded.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
             assert!(build_resource_plan(bounded).is_ok());
         }
+    }
+}
+
+#[test]
+fn retained_source_fact_is_additive_identity_bound_and_exactly_ceiling_admitted() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let (workload, mesh, facts) = fixture(order, 3);
+        let baseline = build_thermal_resource_plan(&workload, &mesh, 1024, facts.clone()).unwrap();
+        let mut retained = facts.clone();
+        retained.field_source = Some(ThermalFieldSourceResourceFacts {
+            identity: Digest::sha256("original-retained-source"),
+            encoded_payload_bytes: ByteCount(64),
+            validation_workspace_bytes: ByteCount(16384),
+        });
+        retained.inputs.encoded_payload_bytes.0 += 64;
+        retained.inputs.transport_closure_bytes.0 += 64;
+        retained.inputs.decoded_resident_bytes_admission_budget.0 += 4096;
+        let plan = build_thermal_resource_plan(&workload, &mesh, 1024, retained.clone()).unwrap();
+        assert_ne!(baseline.identity, plan.identity);
+        assert_eq!(
+            plan.breakdown.workspace_bytes.0,
+            baseline.breakdown.workspace_bytes.0 + 16384
+        );
+        assert_eq!(
+            plan.request.memory_bytes,
+            baseline.request.memory_bytes + 16384 + 4096 + 64
+        );
+        assert_eq!(
+            FeaResourcePlan::from_canonical_bytes(&plan.canonical_bytes().unwrap()).unwrap(),
+            plan
+        );
+        let mut below = plan.input.clone();
+        below.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes - 1;
+        assert!(build_resource_plan(below).is_err());
+        let mut exact = plan.input.clone();
+        exact.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
+        assert!(build_resource_plan(exact).is_ok());
+        let mut changed = retained.clone();
+        changed
+            .field_source
+            .as_mut()
+            .unwrap()
+            .validation_workspace_bytes
+            .0 += 1;
+        let grown = build_thermal_resource_plan(&workload, &mesh, 1024, changed).unwrap();
+        assert_eq!(grown.request.memory_bytes, plan.request.memory_bytes + 1);
+        assert_ne!(grown.identity, plan.identity);
+        for invalid_field in 0..4 {
+            let mut bad = retained.clone();
+            let source = bad.field_source.as_mut().unwrap();
+            match invalid_field {
+                0 => source.identity = Digest::sha256([]),
+                1 => source.encoded_payload_bytes = ByteCount(0),
+                2 => source.validation_workspace_bytes = ByteCount(0),
+                _ => source.validation_workspace_bytes = ByteCount(u64::MAX),
+            }
+            assert!(build_thermal_resource_plan(&workload, &mesh, 1024, bad).is_err());
+        }
+        let mut absent = retained;
+        absent.field_source = None;
+        assert!(build_thermal_resource_plan(&workload, &mesh, 1024, absent).is_err());
     }
 }

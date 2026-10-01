@@ -147,7 +147,8 @@ pub use acoustic_harmonic_task::{
     prepare_acoustic_harmonic_task, AcousticHarmonicTaskPreparation, PreparedAcousticHarmonicTask,
 };
 pub use thermal_plan::{
-    prepare_thermal_inputs, rederive_thermal_resource_plan, PreparedThermalInputs,
+    prepare_thermal_inputs, rederive_thermal_resource_plan, validate_thermal_task_source,
+    PreparedThermalInputs,
 };
 mod structural_state_profiles;
 mod thermal_completion;

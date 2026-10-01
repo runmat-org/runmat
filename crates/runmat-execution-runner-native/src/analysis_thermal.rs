@@ -39,20 +39,41 @@ impl ThermalStudyExecutionPolicy {
 }
 
 pub async fn execute_thermal_study_locally(
-    mut config: NativeExecutionConfig,
+    config: NativeExecutionConfig,
     preparation: ThermalStudyPreparation,
     policy: ThermalStudyExecutionPolicy,
 ) -> NativeExecutionResult<CompletedThermalStudy> {
+    execute_thermal_study_locally_with_source(config, preparation, policy)
+        .await
+        .map(|executed| executed.completed)
+}
+
+/// Completed scientific artifacts and a read-only lease on their declared immutable closure.
+/// The source retains session storage, not the producing worker pool. Persist the published
+/// closure separately before dropping it when results must survive beyond this process.
+#[derive(Clone)]
+pub struct CompletedThermalStudyWithSource {
+    pub completed: CompletedThermalStudy,
+    pub source: crate::NativeProgramObjectSource,
+}
+
+/// Execute the same admitted lifecycle while retaining its cache-backed output descendants.
+/// This does not add a solver call, reconstruct lost fields, or qualify numerical restart.
+pub async fn execute_thermal_study_locally_with_source(
+    mut config: NativeExecutionConfig,
+    preparation: ThermalStudyPreparation,
+    policy: ThermalStudyExecutionPolicy,
+) -> NativeExecutionResult<CompletedThermalStudyWithSource> {
     policy.validate()?;
     configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
-    execute_with_pool(
-        &mut LocalAnalysisTaskPool::new(session),
-        preparation,
-        policy,
-    )
-    .await
-    .map(|executed| executed.completed)
+    let mut pool = LocalAnalysisTaskPool::new(session);
+    let executed = execute_with_pool(&mut pool, preparation, policy).await?;
+    let source = pool.object_source();
+    Ok(CompletedThermalStudyWithSource {
+        completed: executed.completed,
+        source,
+    })
 }
 
 pub async fn execute_thermal_study_remotely(

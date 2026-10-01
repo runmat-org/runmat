@@ -1,6 +1,8 @@
 use super::super::{tests::preparation, ThermalStudyCoordinator, ThermalStudyPhase};
 use super::*;
 
+mod retained;
+
 fn roundtrip(wire: &PreparationWire) -> PreparationWire {
     let bytes = encode_contract(PREFIX, "thermal-preparation-test", wire, LIMITS).unwrap();
     decode_contract(PREFIX, "thermal-preparation-test", &bytes, LIMITS).unwrap()

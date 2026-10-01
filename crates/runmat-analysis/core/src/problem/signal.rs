@@ -501,21 +501,8 @@ pub struct SignalApproximationEvidence {
     pub sample_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignalProvenance {
-    Authored,
-    Imported { source_digest: String },
-    Generated(GeneratorProvenance),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GeneratorProvenance {
-    pub project_revision: String,
-    pub callable_id: String,
-    pub frozen_input_digest: String,
-}
+mod provenance;
+pub use provenance::{GeneratorProvenance, SignalProvenance};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

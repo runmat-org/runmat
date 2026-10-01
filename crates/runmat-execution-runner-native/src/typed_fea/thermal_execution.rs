@@ -188,6 +188,7 @@ pub(super) async fn execute(
     let executed = Box::pin(crate::analysis_thermal::execute_with_pool(
         &mut pool,
         ThermalStudyPreparation {
+            field_source: None,
             scope: ThermalStudyScope::Standalone,
             product,
             mesh: geometry.meshing.artifact.clone(),

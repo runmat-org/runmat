@@ -23,7 +23,7 @@ impl ThermalStudyPreparation {
             backend: self.product.workload.backend,
             formulation_requirement: self.product.workload.formulation_requirement,
         };
-        match self.scope {
+        let intent = match self.scope {
             ThermalStudyScope::Standalone => plan_thermal_study(&self.product.compiled, policy),
             ThermalStudyScope::SelectedStep => plan_thermal_step(
                 &self.product.compiled,
@@ -31,7 +31,17 @@ impl ThermalStudyPreparation {
                 policy,
             ),
         }
-        .map_err(|error| invalid(error.to_string()))
+        .map_err(|error| invalid(error.to_string()))?;
+        let Some(source) = &self.field_source else {
+            return Ok(intent);
+        };
+        if self.scope != ThermalStudyScope::SelectedStep || source.thermal_intent() != &intent {
+            return Err(invalid(
+                "retained thermal source requires the exact authored selected-step intent",
+            ));
+        }
+        let bound = source.bind(&self.mesh)?;
+        Ok(bound)
     }
 
     /// Only used after exact selected-workload validation by the coordinator constructor.

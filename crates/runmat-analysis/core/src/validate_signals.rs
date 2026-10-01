@@ -225,6 +225,16 @@ fn validate_provenance(provenance: &SignalProvenance) -> Result<(), String> {
     match provenance {
         SignalProvenance::Authored => Ok(()),
         SignalProvenance::Imported { source_digest } if !source_digest.trim().is_empty() => Ok(()),
+        SignalProvenance::Retained { source_digest }
+            if source_digest.strip_prefix("sha256:").is_some_and(|encoded| {
+                encoded.len() == 64
+                    && encoded.bytes().all(|byte| {
+                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+                    })
+            }) =>
+        {
+            Ok(())
+        }
         SignalProvenance::Generated(generator)
             if !generator.project_revision.trim().is_empty()
                 && !generator.callable_id.trim().is_empty()
@@ -235,12 +245,18 @@ fn validate_provenance(provenance: &SignalProvenance) -> Result<(), String> {
         SignalProvenance::Imported { .. } => {
             Err("imported signal provenance requires a source digest".to_string())
         }
+        SignalProvenance::Retained { .. } => {
+            Err("retained signal provenance requires a canonical source digest".to_string())
+        }
         SignalProvenance::Generated(_) => Err(
             "generator provenance requires project revision, callable identity, and frozen-input digest"
                 .to_string(),
         ),
     }
 }
+
+#[cfg(test)]
+mod retained_provenance_tests;
 
 fn validate_value<Q: FiniteQuantity>(value: &SignalValue<Q>) -> Result<Vec<usize>, String> {
     match value {

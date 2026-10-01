@@ -6,7 +6,7 @@ use super::{
 use runmat_analysis_execution::{
     execute_thermal_solver_result_objects, prepare_analysis_objects,
     rederive_thermal_resource_plan, thermal_receipt_from_prepared_result,
-    thermal_state_publication_profiles,
+    thermal_state_publication_profiles, validate_thermal_task_source,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, ExecutionPlanIdentity, NumericalPlanIdentity, SequenceIdentity,
@@ -23,7 +23,7 @@ pub(super) fn execute(
     let workload_input = unique_input(&invocation, AnalysisNumericalObjectKind::ThermalWorkload)?;
     let mesh_input = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
     let resource_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
-    if invocation.inputs.len() != 3
+    if !matches!(invocation.inputs.len(), 3 | 4)
         || invocation.host.workload.outputs
             != vec![
                 AnalysisNumericalObjectKind::SolverResult,
@@ -90,6 +90,9 @@ pub(super) fn execute(
             "thermal task execution identity differs from numerical intent and resource plan",
         ));
     }
+    // Metadata-only resource rederivation above must precede derived source
+    // validation/rebinding. This verifies retained electrical loss, never solves it.
+    validate_thermal_task_source(&workload, &mesh, invocation.inputs)?;
     let policy = invocation.output_policy;
     let result = execute_thermal_solver_result_objects(
         &workload,

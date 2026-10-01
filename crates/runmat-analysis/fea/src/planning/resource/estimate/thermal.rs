@@ -31,6 +31,22 @@ pub(super) fn build_thermal_plan(
         &demand.receipt_output,
         &demand.state_profiles_output,
     ];
+    let field_validation = match &demand.field_source {
+        Some(source)
+            if source.identity != Digest::sha256([])
+                && source.encoded_payload_bytes.0 > 0
+                && source.validation_workspace_bytes.0 > 0
+                && source.encoded_payload_bytes <= demand.inputs.encoded_payload_bytes =>
+        {
+            source.validation_workspace_bytes
+        }
+        Some(_) => {
+            return Err(ResourcePlanningError::Invalid(
+                "thermal field-source resource closure is invalid".into(),
+            ))
+        }
+        None => ByteCount(0),
+    };
     // Imported chunk buffers coexist with decoded numerical inputs during execution.
     let retained_transport = ByteCount(add(
         demand.inputs.transport_closure_bytes.0,
@@ -42,7 +58,11 @@ pub(super) fn build_thermal_plan(
     let mut accounting = HostPhaseAccounting::host_only(
         demand.topology_digest,
         &demand.inputs,
-        demand.numerical_reservation_bytes,
+        ByteCount(add(
+            demand.numerical_reservation_bytes.0,
+            field_validation.0,
+            "thermal numerical and source-validation workspace",
+        )?),
         retained_transport,
         &outputs,
     );

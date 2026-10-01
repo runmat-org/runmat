@@ -140,6 +140,7 @@ pub(crate) async fn execute_with_pool(
     let executed = Box::pin(crate::analysis_thermal::execute_with_pool(
         pool,
         ThermalStudyPreparation {
+            field_source: None,
             scope: ThermalStudyScope::SelectedStep,
             product: ThermalStudyProduct {
                 compiled,

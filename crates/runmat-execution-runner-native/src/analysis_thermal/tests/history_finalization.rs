@@ -107,6 +107,7 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
     let chunk_bytes = setup.output_policy.chunk_bytes();
     let output_policy = setup.output_policy;
     let solve = prepare_thermal_task(ThermalTaskPreparation {
+        field_source: None,
         authored_study_digest: Digest::sha256("thermal-native-history-finalization"),
         frozen_project_digest: None,
         program_revision: revision.clone(),

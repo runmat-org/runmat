@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, AnalysisObjectManifest, ThermalWorkload,
-        ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
+        AnalysisNumericalObjectKind, AnalysisObjectManifest, RetainedJouleHeatSource,
+        ThermalWorkload, ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_MANIFEST_VALUE_SCHEMA,
     },
     study::{CompiledAnalysisStudy, ThermalStudyProduct},
 };
@@ -30,7 +30,7 @@ use super::{
 };
 use crate::{
     import_analysis_objects, prepare_analysis_objects, AnalysisBridgeError, AnalysisBridgeResult,
-    AnalysisCapabilityRequirement, AnalysisOutputPolicy,
+    AnalysisCapabilityRequirement, AnalysisOutputPolicy, PreparedAnalysisObjects,
 };
 
 const PREFIX: &[u8] = b"runmat-thermal-study-completion\0";
@@ -42,6 +42,7 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    field_source: Option<FieldSourceWire>,
     scope: ThermalStudyScope,
     compiled: CompiledAnalysisStudy,
     workload: ThermalWorkload,
@@ -55,10 +56,21 @@ struct PreparationWire {
     max_total_bytes: u64,
 }
 
+/// Only immutable object authority belongs in the completion metadata. Numerical arrays remain
+/// in the separately chunked source object, covered by the trusted root and descendant catalog.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FieldSourceWire {
+    root: ValueRef,
+    identity: Digest,
+    payload_digest: Digest,
+}
+
 impl PreparationWire {
     fn new(preparation: ThermalStudyPreparation) -> Self {
         let limits = preparation.output_policy.inventory_limits();
         Self {
+            field_source: None,
             scope: preparation.scope,
             compiled: preparation.product.compiled,
             workload: preparation.product.workload,
@@ -73,10 +85,28 @@ impl PreparationWire {
         }
     }
 
+    #[cfg(test)]
     fn into_preparation(
         self,
         access: ArtifactAccess,
     ) -> AnalysisBridgeResult<ThermalStudyPreparation> {
+        self.into_preparation_with_source(access, None)
+    }
+
+    fn into_preparation_with_source(
+        self,
+        access: ArtifactAccess,
+        field_source: Option<RetainedJouleHeatSource>,
+    ) -> AnalysisBridgeResult<ThermalStudyPreparation> {
+        match (&self.field_source, &field_source) {
+            (None, None) => {}
+            (Some(binding), Some(source)) if binding.identity == source.identity()? => {}
+            _ => {
+                return Err(invalid(
+                    "thermal completion source binding is missing or substituted",
+                ))
+            }
+        }
         let output_policy = AnalysisOutputPolicy::new(
             self.chunk_bytes,
             ObjectInventoryLimits {
@@ -89,6 +119,7 @@ impl PreparationWire {
             return Err(invalid("noncanonical thermal output chunk size"));
         }
         Ok(ThermalStudyPreparation {
+            field_source,
             scope: self.scope,
             product: ThermalStudyProduct {
                 compiled: self.compiled,
@@ -127,11 +158,23 @@ pub fn prepare_thermal_study_root(
     let preparation = completed.preparation();
     let access = preparation.artifact_access.clone();
     let policy = preparation.output_policy;
-    let descendants = descendant_catalog(completed, &access)?;
+    let field_objects = prepare_field_source(&preparation)?;
+    let descendants = descendant_catalog(completed, &access, field_objects.as_ref())?;
     check_inventory(&descendants.objects, &access, policy.inventory_limits())?;
+    let mut preparation_wire = PreparationWire::new(preparation);
+    preparation_wire.field_source = field_objects
+        .as_ref()
+        .map(|objects| -> AnalysisBridgeResult<FieldSourceWire> {
+            Ok(FieldSourceWire {
+                root: objects.root_reference(&access, ValueRefKind::ResultObject)?,
+                identity: objects.manifest.logical_identity,
+                payload_digest: objects.manifest.payload_digest,
+            })
+        })
+        .transpose()?;
     let wire = CompletionWire {
-        schema_version: 2,
-        preparation: PreparationWire::new(preparation),
+        schema_version: 3,
+        preparation: preparation_wire,
         closures: completed.result_closures().to_vec(),
         descendants,
     };
@@ -151,6 +194,9 @@ pub fn prepare_thermal_study_root(
     check_inventory(&inventory, &access, policy.inventory_limits())?;
     let catalog = PublishedObjectCatalog::new(vec![root.clone()], inventory)?;
     let mut new_objects = objects.objects;
+    if let Some(field_objects) = field_objects {
+        new_objects.extend(field_objects.objects);
+    }
     new_objects.extend(completed.baseline_usage.objects.objects.iter().cloned());
     new_objects.extend(completed.terminal_usage.objects.objects.iter().cloned());
     let mut by_digest = BTreeMap::new();
@@ -201,7 +247,7 @@ pub fn import_thermal_study_root(
     }
     let wire: CompletionWire =
         decode_contract(PREFIX, "thermal-study-completion", &payload, LIMITS)?;
-    if wire.schema_version != 2 {
+    if wire.schema_version != 3 {
         return Err(invalid("unsupported thermal completion schema"));
     }
     if wire.preparation.max_objects > limits.max_objects
@@ -220,10 +266,35 @@ pub fn import_thermal_study_root(
     for reference in &wire.descendants.objects {
         read(source, reference, limits)?;
     }
+    let field_source = match &wire.preparation.field_source {
+        None => None,
+        Some(binding) => {
+            if !wire.descendants.roots.contains(&binding.root) {
+                return Err(invalid("thermal source root is missing from descendants"));
+            }
+            let source_objects = import_analysis_objects(
+                source,
+                &binding.root,
+                AnalysisNumericalObjectKind::FieldSourceBinding,
+                binding.identity,
+                binding.payload_digest,
+                access,
+                limits,
+            )?;
+            let decoded = RetainedJouleHeatSource::from_canonical_bytes(&source_objects.payload())?;
+            if decoded.identity()? != binding.identity {
+                return Err(invalid("thermal field source identity differs"));
+            }
+            Some(decoded)
+        }
+    };
     let expected_descendants = wire.descendants;
-    let preparation = wire.preparation.into_preparation(access.clone())?;
+    let preparation = wire
+        .preparation
+        .into_preparation_with_source(access.clone(), field_source)?;
     let completed = import_thermal_study_completion(source, preparation, wire.closures)?;
-    if descendant_catalog(&completed, access)? != expected_descendants {
+    let field_objects = prepare_field_source(&completed.preparation())?;
+    if descendant_catalog(&completed, access, field_objects.as_ref())? != expected_descendants {
         return Err(invalid(
             "thermal completion has missing, substituted or unrelated descendants",
         ));
@@ -234,9 +305,14 @@ pub fn import_thermal_study_root(
 fn descendant_catalog(
     completed: &CompletedThermalStudy,
     access: &ArtifactAccess,
+    field_source: Option<&PreparedAnalysisObjects>,
 ) -> AnalysisBridgeResult<PublishedObjectCatalog> {
     let mut roots = Vec::new();
     let mut objects = Vec::new();
+    if let Some(field_source) = field_source {
+        roots.push(field_source.root_reference(access, ValueRefKind::ResultObject)?);
+        objects.extend(field_source.unique_references(access, ValueRefKind::ResultObject)?);
+    }
     for closure in completed.result_closures() {
         let ProgramExecutionResponse::ExternalizedSuccess {
             outputs,
@@ -271,6 +347,26 @@ fn descendant_catalog(
         unique(roots)?,
         unique(objects)?,
     )?)
+}
+
+fn prepare_field_source(
+    preparation: &ThermalStudyPreparation,
+) -> AnalysisBridgeResult<Option<PreparedAnalysisObjects>> {
+    preparation
+        .field_source
+        .as_ref()
+        .map(|source| {
+            source.validate_for(&preparation.product.workload, &preparation.mesh)?;
+            prepare_analysis_objects(
+                AnalysisNumericalObjectKind::FieldSourceBinding,
+                source.identity()?,
+                &source.canonical_bytes()?,
+                preparation.output_policy.chunk_bytes(),
+                ObjectNamespace::ResultValue,
+                preparation.output_policy.inventory_limits(),
+            )
+        })
+        .transpose()
 }
 
 fn unique(references: Vec<ValueRef>) -> AnalysisBridgeResult<Vec<ValueRef>> {

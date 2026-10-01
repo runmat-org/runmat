@@ -3,6 +3,8 @@ use crate::physics::electrical::tests::{mesh, model, prescribe};
 use runmat_analysis_core::*;
 use runmat_meshing_core::ElementOrder;
 
+mod source;
+
 fn electrical_workload(voltage: f64, gauge: f64) -> ElectricalStaticWorkload {
     let mut model = model(StaticElectricalEquation::SteadyConduction);
     prescribe(

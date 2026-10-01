@@ -129,8 +129,8 @@ pub use contract::{
     StructuralRandomResponseAssemblyResourceDemand, StructuralRandomResponseIntervalResourceDemand,
     StructuralTransientBlockResourceDemand, StructuralTransientFieldRecoveryResourceDemand,
     StructuralTransientResultAssemblyResourceDemand, StructuralTransientScopeResourceDemand,
-    ThermalSolveResourceDemand, TopologyResourceFacts, WorkerResourcePolicy,
-    RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
+    ThermalFieldSourceResourceFacts, ThermalSolveResourceDemand, TopologyResourceFacts,
+    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 pub use estimate::build_resource_plan;
 pub use frequency::{

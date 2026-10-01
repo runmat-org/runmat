@@ -9,6 +9,7 @@ mod tests;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedThermalResourceFacts {
+    pub field_source: Option<ThermalFieldSourceResourceFacts>,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
@@ -48,6 +49,16 @@ pub fn build_thermal_resource_plan(
         .len()
         .checked_add(mesh.canonical_encode().map_err(|e| invalid(&e))?.len())
         .ok_or(ResourcePlanningError::Overflow("thermal input bytes"))?;
+    let source_bytes = prepared
+        .field_source
+        .as_ref()
+        .map_or(0, |source| source.encoded_payload_bytes.0);
+    let payload_bytes =
+        (payload_bytes as u64)
+            .checked_add(source_bytes)
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal field-source input bytes",
+            ))?;
     let profile_metadata = workload
         .state_publication_profiles_encoding_profile(Digest::from_bytes(
             *mesh.canonical_digest.bytes(),
@@ -58,7 +69,7 @@ pub fn build_thermal_resource_plan(
         profile_metadata.encoded_bytes_upper_bound,
         "thermal state publication profiles",
     )?;
-    if prepared.inputs.encoded_payload_bytes.0 != payload_bytes as u64
+    if prepared.inputs.encoded_payload_bytes.0 != payload_bytes
         || prepared.result_output.encoded_payload_bytes_upper_bound.0
             < transport.payload_bytes_upper_bound
         || prepared.result_output.transport_closure_bytes_upper_bound.0
@@ -88,6 +99,7 @@ pub fn build_thermal_resource_plan(
                     .map_err(|e| invalid(&e))?
                     .sample_count() as u64,
             ),
+            field_source: prepared.field_source,
             inputs: prepared.inputs,
             result_output: prepared.result_output,
             receipt_output: prepared.receipt_output,

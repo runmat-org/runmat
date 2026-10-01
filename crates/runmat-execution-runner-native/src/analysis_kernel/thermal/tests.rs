@@ -1,4 +1,5 @@
 use super::*;
+mod electrothermal;
 mod initial_fields;
 mod profile_rejection;
 mod publication_admission;
@@ -53,6 +54,7 @@ fn task(order: ElementOrder, chunk: usize) -> (ThermalWorkload, PreparedThermalT
     };
     let digest = Digest::sha256("thermal-native-test");
     let prepared = prepare_thermal_task(ThermalTaskPreparation {
+        field_source: None,
         authored_study_digest: digest,
         frozen_project_digest: None,
         program_revision: revision(),

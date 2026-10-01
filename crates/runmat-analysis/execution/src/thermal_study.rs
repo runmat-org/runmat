@@ -38,7 +38,7 @@ pub use completion::{
 pub use root::{import_thermal_study_root, prepare_thermal_study_root, PreparedThermalStudyRoot};
 pub use scope::ThermalStudyScope;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 pub use observations::{CompletedThermalObservations, ThermalObservationTask};
 
 /// Owned terminal artifacts for the declared scope, not necessarily the whole authored study.
@@ -60,6 +60,7 @@ pub struct CompletedThermalStudy {
 
 pub struct ThermalStudyPreparation {
     pub scope: ThermalStudyScope,
+    pub field_source: Option<runmat_analysis_fea::execution::RetainedJouleHeatSource>,
     pub product: ThermalStudyProduct,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
@@ -146,6 +147,7 @@ impl ThermalStudyCoordinator {
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedThermalTask> {
         self.require(ThermalStudyPhase::ReadyForSolve)?;
         let task = prepare_thermal_task(ThermalTaskPreparation {
+            field_source: self.preparation.field_source.clone(),
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),
@@ -450,6 +452,7 @@ impl ThermalStudyCoordinator {
         self.require(ThermalStudyPhase::Complete)?;
         Ok(CompletedThermalStudy {
             replay: completion::ThermalStudyReplayContext {
+                field_source: self.preparation.field_source,
                 scope: self.preparation.scope,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,

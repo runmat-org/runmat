@@ -122,7 +122,8 @@ pub use analysis_sequence::{
     StructuralSequenceExecutionPolicy,
 };
 pub use analysis_thermal::{
-    execute_thermal_study_locally, execute_thermal_study_remotely, ThermalStudyExecutionPolicy,
+    execute_thermal_study_locally, execute_thermal_study_locally_with_source,
+    execute_thermal_study_remotely, CompletedThermalStudyWithSource, ThermalStudyExecutionPolicy,
 };
 pub use analysis_thermal_prestress::{
     execute_thermal_prestress_study_locally_with_source, execute_thermal_prestress_study_remotely,

@@ -17,6 +17,8 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 mod transfer;
 pub use transfer::RetainedJouleHeatTransfer;
+mod source;
+pub use source::RetainedJouleHeatSource;
 #[cfg(test)]
 mod tests;
 

@@ -61,7 +61,7 @@ pub use prepared::{
     PreparedPhaseResourceFacts, PreparedStructuralModalResourceFacts,
 };
 pub use random_response_demand::StructuralRandomResponseIntervalResourceDemand;
-pub use thermal_demand::ThermalSolveResourceDemand;
+pub use thermal_demand::{ThermalFieldSourceResourceFacts, ThermalSolveResourceDemand};
 pub use transient_block_demand::StructuralTransientBlockResourceDemand;
 pub use transient_recovery_demand::StructuralTransientFieldRecoveryResourceDemand;
 pub use transient_scope_demand::StructuralTransientScopeResourceDemand;
@@ -73,7 +73,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 52;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 53;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]

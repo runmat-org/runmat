@@ -155,7 +155,7 @@ impl RetainedJouleHeatTransfer {
                 derivative_max_absolute_error: None,
                 sample_count: 1,
             },
-            provenance: SignalProvenance::Imported {
+            provenance: SignalProvenance::Retained {
                 source_digest: self.digest()?.to_string(),
             },
         }))

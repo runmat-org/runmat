@@ -170,6 +170,7 @@ fn base(order: ElementOrder, scope: &str, revision: ProgramRevision) -> ThermalS
     .unwrap();
     let limits = NativeAnalysisHostLimits::default();
     ThermalStudyPreparation {
+        field_source: None,
         scope: ThermalStudyScope::Standalone,
         product: ThermalStudyProduct { compiled, workload },
         mesh,

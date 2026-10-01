@@ -16,6 +16,11 @@ use runmat_execution::Digest;
 use runmat_execution_artifact::ObjectNamespace;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
+mod source;
+pub use source::validate_thermal_task_source;
+#[cfg(test)]
+mod tests;
+
 pub struct PreparedThermalInputs {
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,
@@ -28,36 +33,11 @@ pub fn rederive_thermal_resource_plan(
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
-    let count = |kind| {
-        inputs
-            .iter()
-            .filter(|input| input.manifest.kind == kind)
-            .count()
-    };
-    if inputs.len() != 3
-        || count(AnalysisNumericalObjectKind::ThermalWorkload) != 1
-        || count(AnalysisNumericalObjectKind::Mesh) != 1
-        || count(AnalysisNumericalObjectKind::ResourcePlan) != 1
-    {
-        return Err(AnalysisBridgeError::Invalid(
-            "thermal execution requires exactly workload, mesh and resource-plan inputs".into(),
-        ));
-    }
-    let workload_identity = workload.identity()?.digest();
-    if !inputs.iter().any(|input| {
-        input.manifest.kind == AnalysisNumericalObjectKind::ThermalWorkload
-            && input.manifest.logical_identity == workload_identity
-    }) || !inputs.iter().any(|input| {
-        input.manifest.kind == AnalysisNumericalObjectKind::Mesh
-            && input.manifest.logical_identity == Digest::from_bytes(*mesh.canonical_digest.bytes())
-    }) {
-        return Err(AnalysisBridgeError::Identity(
-            "thermal resource inputs differ from decoded workload or mesh",
-        ));
-    }
+    let field_source = source::decode(workload, mesh, inputs, true)?;
     let (result_output, receipt_output, state_profiles_output) =
         projected_thermal_outputs(workload, mesh, policy)?;
     let facts = PreparedThermalResourceFacts {
+        field_source: source::facts(field_source.as_ref(), mesh, inputs)?,
         inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
         result_output,
         receipt_output,
@@ -79,6 +59,22 @@ pub fn prepare_thermal_inputs(
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<PreparedThermalInputs> {
+    prepare_thermal_inputs_with_source(workload, mesh, policy, None)
+}
+
+pub(crate) fn prepare_thermal_inputs_with_source(
+    workload: &ThermalWorkload,
+    mesh: &SolverMeshArtifact,
+    policy: AnalysisOutputPolicy,
+    field_source: Option<&runmat_analysis_fea::execution::RetainedJouleHeatSource>,
+) -> AnalysisBridgeResult<PreparedThermalInputs> {
+    if field_source.is_none()
+        && runmat_analysis_fea::execution::RetainedJouleHeatSource::requires_binding(workload)
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "thermal retained field requires its original source binding".into(),
+        ));
+    }
     let (result_output, receipt_output, state_profiles_output) =
         projected_thermal_outputs(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
@@ -100,8 +96,20 @@ pub fn prepare_thermal_inputs(
         ObjectNamespace::InputValue,
         policy.inventory_limits(),
     )?;
-    let inputs = vec![workload_objects, mesh_objects];
+    let mut inputs = vec![workload_objects, mesh_objects];
+    if let Some(source) = field_source {
+        let payload = source.canonical_bytes()?;
+        inputs.push(prepare_analysis_objects(
+            AnalysisNumericalObjectKind::FieldSourceBinding,
+            source.identity()?,
+            &payload,
+            policy.chunk_bytes(),
+            ObjectNamespace::InputValue,
+            policy.inventory_limits(),
+        )?);
+    }
     let facts = PreparedThermalResourceFacts {
+        field_source: source::facts(field_source, mesh, &inputs)?,
         inputs: prepared_input_resource_facts(&inputs)?,
         result_output,
         receipt_output,

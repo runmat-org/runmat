@@ -58,6 +58,8 @@ use runmat_execution_transport_native::frame::FrameLimits;
 use runmat_execution_transport_native::overlay::{PinnedQuicEndpoint, QuicOverlayListener};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
+#[path = "analysis_process_conformance/electrothermal.rs"]
+mod electrothermal;
 #[path = "analysis_process_conformance/magnetic.rs"]
 mod magnetic;
 #[cfg(feature = "occt-native")]
@@ -132,6 +134,10 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--electrothermal-only") {
+        electrothermal::run().await;
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--magnetic-authored-only") {
         #[cfg(feature = "occt-native")]
         magnetic_authored::run().await;
