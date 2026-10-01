@@ -27,7 +27,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "RunMat renders an indexed image surface with a colorbar. MATLAB's interactive chart UI affordances are not modeled.",
         ] },
         BuiltinDocumentationSection { heading: "Numerical classes and residency", paragraphs: &[
-            "Real X/Y vectors, bin counts and explicit axis limits accept all eight built-in integer classes. Integer data and explicit limits retain their native class and exact chart-state values; bin membership is computed exactly across the uint64 range before floating bin-edge display.",
+            "Real X/Y vectors, bin counts and explicit axis limits accept all eight built-in integer classes. Integer data and explicit limits retain their native class and exact chart-state values. Bin membership remains exact across the uint64 range when an axis has integer data and either integer explicit limits or no explicit limits; floating limits use a binary64 projection. Bin edges are displayed as floating-point values.",
             "Resident GPU-array input is a RunMat-only gather extension. MATLAB-compatible mode rejects resident input before provider access; the returned chart handle and rendering state are host-resident, not a claim of GPU binning.",
         ] },
     ],

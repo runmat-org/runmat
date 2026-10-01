@@ -43,7 +43,7 @@ impl AccelProvider for RejectDownloads {
 }
 
 #[test]
-fn unpolled_and_cancelled_gather_keep_caller_lease_live() {
+fn unpolled_and_abandoned_gather_keep_caller_lease_live() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(RejectDownloads::default()));
     provider.pending.store(true, Ordering::SeqCst);
