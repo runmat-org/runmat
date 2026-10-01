@@ -10,29 +10,38 @@ pub(in crate::builtins::stats::ml) fn unit_direction(
         return None;
     }
     let mut values = if center {
-        // Dividing each term first keeps the mean finite when the sum would
-        // overflow. Work in the original scale when possible so a small but
-        // representable spread around a large offset is not discarded.
-        let mean = row
+        // Difference from a reference before scaling. Dividing subnormals
+        // by row length first can underflow and invent a nonconstant row.
+        let reference = row[0];
+        let differences = row
             .iter()
-            .map(|value| value / row.len() as f64)
-            .sum::<f64>();
-        row.iter().map(|value| value - mean).collect::<Vec<_>>()
+            .map(|value| value - reference)
+            .collect::<Vec<_>>();
+        if differences.iter().all(|value| value.is_finite()) {
+            differences
+        } else {
+            // Opposite finite extremes can overflow their difference even
+            // though the unit direction itself remains representable.
+            let scale = row.iter().fold(0.0_f64, |max, value| max.max(value.abs()));
+            row.iter()
+                .map(|value| value / scale - reference / scale)
+                .collect()
+        }
     } else {
         row.to_vec()
     };
-    if values.iter().any(|value| !value.is_finite()) {
-        // The centered difference itself may exceed f64 although the unit
-        // direction remains representable. Center after scaling in that case.
-        let scale = row.iter().fold(0.0_f64, |max, value| max.max(value.abs()));
-        if scale == 0.0 {
-            return None;
-        }
-        values = row.iter().map(|value| value / scale).collect();
-        let mean = values
-            .iter()
-            .map(|value| value / values.len() as f64)
-            .sum::<f64>();
+    let scale = values
+        .iter()
+        .fold(0.0_f64, |max, value| max.max(value.abs()));
+    if scale == 0.0 {
+        return None;
+    }
+    for value in &mut values {
+        *value /= scale;
+    }
+    if center {
+        let count = values.len() as f64;
+        let mean = values.iter().map(|value| value / count).sum::<f64>();
         for value in &mut values {
             *value -= mean;
         }
@@ -80,5 +89,19 @@ mod tests {
         assert!(direction[0] < 0.0 && direction[2] > 0.0);
         assert_eq!(unit_direction(&[4.0, 4.0], true), None);
         assert_eq!(unit_direction(&[0.0, 0.0], false), None);
+    }
+
+    #[test]
+    fn subnormal_and_ulp_spreads_are_not_lost_or_invented() {
+        let least = f64::from_bits(1);
+        assert_eq!(unit_direction(&[least, least], true), None);
+        let adjacent = unit_direction(&[least, f64::from_bits(2)], true).unwrap();
+        assert!((adjacent[0] + 1.0 / 2.0_f64.sqrt()).abs() < 1.0e-14);
+        assert!((adjacent[1] - 1.0 / 2.0_f64.sqrt()).abs() < 1.0e-14);
+        let large = 1.0e200_f64;
+        let next = f64::from_bits(large.to_bits() + 1);
+        let spread = unit_direction(&[large, next], true).unwrap();
+        assert!((spread[0] + 1.0 / 2.0_f64.sqrt()).abs() < 1.0e-14);
+        assert!((spread[1] - 1.0 / 2.0_f64.sqrt()).abs() < 1.0e-14);
     }
 }
