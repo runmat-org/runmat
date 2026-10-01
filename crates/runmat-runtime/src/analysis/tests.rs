@@ -51,13 +51,12 @@ use runmat_analysis_fea::{
     fea_transient_velocity_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
     SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
     FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
-    FEA_FIELD_CFD_RESIDUAL_MOMENTUM, FEA_FIELD_CFD_REYNOLDS_NUMBER, FEA_FIELD_CFD_VELOCITY,
-    FEA_FIELD_CFD_VORTICITY, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE,
-    FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY,
-    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_WALL_SHEAR_STRESS,
+    FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY, FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD,
+    FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL, FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
+    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
     FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
@@ -202,7 +201,7 @@ fn fixed_constraint(
 }
 
 fn sample_cfd_constraints(
-    inlet_velocity_m_per_s: f64,
+    inlet_velocity_m_per_s: [f64; 3],
 ) -> Vec<runmat_analysis_core::AnalysisConstraint> {
     let fluid = |id: &str, kind| {
         runmat_analysis_core::AnalysisConstraint::Fluid(runmat_analysis_core::FluidConstraint {
@@ -216,7 +215,7 @@ fn sample_cfd_constraints(
             runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
                 target: runmat_analysis_core::RegionTarget::boundary("fluid_inlet"),
                 value: runmat_analysis_core::PrescribedValue::Constant(
-                    runmat_analysis_core::Velocity::new(inlet_velocity_m_per_s),
+                    inlet_velocity_m_per_s.map(runmat_analysis_core::Velocity::new),
                 ),
             },
         ),
@@ -267,6 +266,7 @@ fn sample_model() -> AnalysisModel {
         units: UnitSystem::Meter,
         frame: CoordinateFrame::Global,
         materials: vec![MaterialModel {
+            fluid: None,
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
             provenance: runmat_analysis_core::MaterialProvenance::Authored,
@@ -388,6 +388,7 @@ fn sample_solid_model() -> AnalysisModel {
 fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     let mut model = sample_model();
     model.materials.push(MaterialModel {
+        fluid: None,
         material_id: "mat_polymer".to_string(),
         name: "Polymer".to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
@@ -5856,6 +5857,7 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         reference_temperature: Temperature::new(293.15),
     });
     model.materials.push(MaterialModel {
+        fluid: None,
         material_id: "mat_poly_high_k".to_string(),
         name: "High K Composite".to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,
@@ -6649,27 +6651,22 @@ fn analysis_run_transient_exposes_beam_rotational_snapshots() {
 }
 
 #[test]
-fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
+fn analysis_run_cfd_rejects_vector_boundaries_without_fabricated_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.boundaries.clear();
-    model.constraints = sample_cfd_constraints(4.25);
-    model
-        .constraints
-        .retain(|constraint| constraint.constraint_id() != "bc_cfd_wall_lower");
-    if let Some(runmat_analysis_core::AnalysisConstraint::Fluid(wall)) = model
-        .constraints
-        .iter_mut()
-        .find(|constraint| constraint.constraint_id() == "bc_cfd_wall_upper")
-    {
-        wall.kind = runmat_analysis_core::FluidConstraintKind::SlipWall {
-            target: runmat_analysis_core::RegionTarget::boundary("fluid_wall_upper"),
-        };
-    }
+    model.constraints = sample_cfd_constraints([4.25, 0.0, 0.0]);
     model.cfd = Some(sample_cfd_domain());
-
-    let envelope = analysis_run_cfd_with_options_op(
+    let runmat_analysis_core::AnalysisConstraint::Fluid(inlet) = &model.constraints[0] else {
+        panic!("explicit vector inlet fixture");
+    };
+    assert!(matches!(&inlet.kind,
+        runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+            value: runmat_analysis_core::PrescribedValue::Constant(velocity), ..
+        } if velocity.map(|component| component.meters_per_second) == [4.25, 0.0, 0.0]
+    ));
+    let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
@@ -6685,155 +6682,32 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
         },
         OperationContext::new(None, None),
     )
-    .expect("cfd run should return envelope");
-
-    assert_eq!(envelope.operation, "fea.run_cfd");
-    assert_eq!(envelope.op_version, "fea.run_cfd/v1");
-    assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::CfdVelocityPressureFiniteVolume
-    );
-    assert_eq!(
-        envelope.data.provenance.solver_method,
-        SolverMethod::CfdVelocityPressureFiniteVolume
-    );
-    assert!(envelope.data.transient_results.is_none());
-    let velocity = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_VELOCITY)
-        .expect("cfd velocity field should be present");
-    let pressure = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_PRESSURE)
-        .expect("cfd pressure field should be present");
-    let vorticity = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_VORTICITY)
-        .expect("cfd vorticity field should be present");
-    let wall_shear = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_WALL_SHEAR_STRESS)
-        .expect("cfd wall-shear field should be present");
-    assert_eq!(velocity.shape.len(), 2);
-    assert_eq!(velocity.shape[1], 3);
-    assert_eq!(pressure.shape, vec![velocity.shape[0]]);
-    assert_eq!(vorticity.shape, velocity.shape);
-    assert_eq!(wall_shear.shape, vec![1, 3]);
-    assert_ne!(wall_shear.shape[0], velocity.shape[0]);
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW"
-            && diag.message.contains("inlet_velocity=4.25")
-            && diag.message.contains("reynolds_number=")
-            && diag.message.contains("solve_family=steady_state")
-            && diag.message.contains("topology_basis=implicit_channel")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_RESIDUAL"
-            && diag.message.contains("max_momentum_residual=")
-            && diag.message.contains("max_continuity_residual=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_ASSEMBLY"
-            && diag
-                .message
-                .contains("basis=finite_volume_velocity_pressure")
-            && diag.message.contains("topology_basis=implicit_channel")
-            && diag
-                .message
-                .contains("topology_geometry_source=implicit_channel")
-            && diag.message.contains("domain_length_m=")
-            && diag.message.contains("face_area_m2=")
-            && diag.message.contains("control_volume_volume_m3=")
-            && diag.message.contains("nominal_mass_flow_rate_kg_per_s=")
-            && diag.message.contains("courant_number=")
-            && diag.message.contains("mass_balance_residual=")
-            && diag.message.contains("pressure_drop_pa=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_BOUNDARY_CONDITIONS"
-            && diag.message.contains("boundary_source=authored")
-            && diag.message.contains("authored_boundary_count=3")
-            && diag.message.contains("inlet_boundary_count=1")
-            && diag.message.contains("outlet_boundary_count=1")
-            && diag.message.contains("wall_boundary_count=1")
-            && diag.message.contains("no_slip_wall_boundary_count=0")
-            && diag.message.contains("slip_wall_boundary_count=1")
-            && diag.message.contains("boundary_coverage_ratio=1")
-            && diag.message.contains("nominal_inlet_velocity_m_per_s=4.25")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_PRESSURE_CORRECTION"
-            && diag.message.contains("iteration_count=")
-            && diag.message.contains("max_linear_iters=64")
-            && diag.message.contains("tolerance=0.00000001")
-            && diag.message.contains("pressure_correction_residual_ratio=")
-            && diag.message.contains("velocity_correction_residual_ratio=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_TRANSIENT_EVOLUTION"
-            && diag.message.contains("solve_family=steady_state")
-            && diag.message.contains("transient_scale_variation=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_KNOWN_ANSWER"
-            && diag.message.contains("pressure_drop_balance_ratio=")
-            && diag.message.contains("mass_flux_uniformity_ratio=")
-            && diag.message.contains("pressure_monotonic_cell_fraction=")
-            && diag.message.contains("known_answer_coverage_ratio=")
-    }));
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("cfd results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("CFD descriptor should be present")
-    };
-    for field_id in [
-        FEA_FIELD_CFD_VELOCITY,
-        FEA_FIELD_CFD_VORTICITY,
-        FEA_FIELD_CFD_WALL_SHEAR_STRESS,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
-    }
-    for field_id in [
-        FEA_FIELD_CFD_PRESSURE,
-        FEA_FIELD_CFD_RESIDUAL_MOMENTUM,
-        FEA_FIELD_CFD_RESIDUAL_CONTINUITY,
-        FEA_FIELD_CFD_REYNOLDS_NUMBER,
-    ] {
-        let descriptor = descriptor(field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
+    .expect_err("reduced channel execution cannot publish an exact vector CFD solution");
+    assert_eq!(err.operation, "fea.run_cfd");
+    assert_eq!(err.op_version, "fea.run_cfd/v1");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS");
+    assert!(err
+        .message
+        .contains("canonical finite-volume execution is required"));
 }
 
 #[test]
-fn analysis_run_cfd_projects_the_canonical_solver_mesh_into_flow_topology() {
+fn analysis_run_cfd_mesh_counts_do_not_qualify_a_reduced_vector_solve() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cfd-solver-mesh");
+    // Independently verify the actual source artifact's topology. Aggregate source counts
+    // are not evidence that a conservative pressure-velocity operator was assembled.
+    let mesh = SolverMeshArtifact::canonical_decode(&fs::read(&mesh_path).unwrap()).unwrap();
+    let source = CfdDomainTopology::from_solver_mesh(&mesh);
+    assert_eq!(source.control_volume_count, 1);
+    assert_eq!(source.control_volume_boundary_face_count, 4);
+    assert_eq!(source.control_volume_internal_face_count, 0);
     let mut model = sample_model();
     model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
     model.boundaries.clear();
-    model.constraints = sample_cfd_constraints(4.25);
+    model.constraints = sample_cfd_constraints([4.25, 0.0, 0.0]);
     model.cfd = Some(sample_cfd_domain());
-
-    let envelope = analysis_run_cfd_with_options_op(
+    let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
@@ -6843,34 +6717,11 @@ fn analysis_run_cfd_projects_the_canonical_solver_mesh_into_flow_topology() {
         },
         OperationContext::new(None, None),
     )
-    .expect("CFD should consume the canonical solver mesh");
-
-    assert!(envelope.data.run.field(FEA_FIELD_CFD_VELOCITY).is_some());
-    let render_topology = envelope
-        .data
-        .render_topology
-        .as_ref()
-        .expect("mesh-backed CFD should expose render topology");
-    assert_eq!(render_topology.meshes[0].vertices.len(), 4);
-    assert_eq!(render_topology.meshes[0].triangles.len(), 4);
-    assert!(envelope.data.run.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "FEA_CFD_FLOW"
-            && diagnostic.message.contains("topology_basis=solver_mesh")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "FEA_CFD_ASSEMBLY"
-            && diagnostic
-                .message
-                .contains("topology_geometry_source=solver_mesh")
-            && diagnostic.message.contains("control_volume_count=1")
-            && diagnostic
-                .message
-                .contains("control_volume_boundary_face_count=4")
-            && diagnostic
-                .message
-                .contains("control_volume_connectivity_coverage_ratio=1")
-    }));
-
+    .expect_err("having a mesh must not turn reduced channel physics into canonical CFD");
+    assert_eq!(err.error_code, "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS");
+    assert!(err
+        .message
+        .contains("canonical finite-volume execution is required"));
     let _ = fs::remove_dir_all(mesh_root);
 }
 
@@ -6901,7 +6752,7 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
             kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
                 target: runmat_analysis_core::RegionTarget::boundary("fluid_inlet"),
                 value: runmat_analysis_core::PrescribedValue::Constant(
-                    runmat_analysis_core::Velocity::new(4.25),
+                    [4.25, -1.0, 0.0].map(runmat_analysis_core::Velocity::new),
                 ),
             },
         },

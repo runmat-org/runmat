@@ -21,6 +21,11 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(512 * 1024 * 1024, 8_000_00
 
 #[derive(Serialize)]
 struct SemanticContract<'a> {
+    #[serde(
+        serialize_with = "serialize_solids",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    cells: &'a BTreeMap<StableDigest, CompiledElementMaterial>,
     geometry_id: &'a str,
     geometry_revision: u32,
     mesh_digest: Option<StableDigest>,
@@ -79,6 +84,11 @@ struct LaminatePlySemantic<'a> {
 
 #[derive(Serialize)]
 struct AuditContract<'a> {
+    #[serde(
+        serialize_with = "serialize_values",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    cells: &'a BTreeMap<StableDigest, CompiledElementMaterial>,
     semantic_digest: Digest,
     #[serde(serialize_with = "serialize_values")]
     solids: &'a BTreeMap<StableDigest, CompiledElementMaterial>,
@@ -99,6 +109,11 @@ pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
         "solid",
     )?;
     validate_entry_keys(
+        compiled.cell_entries(),
+        |entry| entry.element_identity,
+        "cell",
+    )?;
+    validate_entry_keys(
         compiled.beam_entries(),
         |entry| entry.element_identity,
         "beam",
@@ -111,6 +126,7 @@ pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
     let mut element_identities = compiled
         .solid_entries()
         .keys()
+        .chain(compiled.cell_entries().keys())
         .chain(compiled.beam_entries().keys())
         .chain(compiled.shell_entries().keys())
         .copied()
@@ -138,6 +154,7 @@ pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
             explicit_topology_digest: compiled.identity.explicit_topology_digest,
         },
         compiled.solid_entries(),
+        compiled.cell_entries(),
         compiled.beam_entries(),
         compiled.shell_entries(),
     )?;
@@ -147,6 +164,7 @@ pub(super) fn validate(compiled: &CompiledPropertyMap) -> Result<(), String> {
     if audit_digest(
         semantic,
         compiled.solid_entries(),
+        compiled.cell_entries(),
         compiled.beam_entries(),
         compiled.shell_entries(),
         compiled.audit(),
@@ -174,6 +192,7 @@ fn validate_entry_keys<T>(
 pub(super) fn semantic_digest(
     source: &CompiledPropertySource,
     solid_materials: &BTreeMap<StableDigest, CompiledElementMaterial>,
+    cell_materials: &BTreeMap<StableDigest, CompiledElementMaterial>,
     beam_properties: &BTreeMap<StableDigest, CompiledBeamProperty>,
     shell_properties: &BTreeMap<StableDigest, CompiledShellProperty>,
 ) -> Result<Digest, String> {
@@ -186,6 +205,7 @@ pub(super) fn semantic_digest(
             mesh_digest: source.mesh_digest,
             explicit_topology_digest: source.explicit_topology_digest,
             solids: solid_materials,
+            cells: cell_materials,
             beams: beam_properties,
             shells: shell_properties,
         },
@@ -198,6 +218,7 @@ pub(super) fn semantic_digest(
 pub(super) fn audit_digest(
     semantic_digest: Digest,
     solid_materials: &BTreeMap<StableDigest, CompiledElementMaterial>,
+    cell_materials: &BTreeMap<StableDigest, CompiledElementMaterial>,
     beam_properties: &BTreeMap<StableDigest, CompiledBeamProperty>,
     shell_properties: &BTreeMap<StableDigest, CompiledShellProperty>,
     audit: &[CompiledPropertyAudit],
@@ -208,6 +229,7 @@ pub(super) fn audit_digest(
         &AuditContract {
             semantic_digest,
             solids: solid_materials,
+            cells: cell_materials,
             beams: beam_properties,
             shells: shell_properties,
             assignments: audit,

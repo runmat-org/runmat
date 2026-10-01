@@ -60,6 +60,7 @@ pub(crate) fn assert_legacy_identity(compiled: &CompiledPropertyMap) {
         explicit_topology_digest: compiled.identity.explicit_topology_digest,
     };
     let borrowed = SemanticContract {
+        cells: compiled.cell_entries(),
         geometry_id: &source.geometry_id,
         geometry_revision: source.geometry_revision,
         mesh_digest: source.mesh_digest,
@@ -94,6 +95,7 @@ pub(crate) fn assert_legacy_identity(compiled: &CompiledPropertyMap) {
         "assignments": compiled.audit(),
     });
     let borrowed = AuditContract {
+        cells: compiled.cell_entries(),
         semantic_digest: compiled.identity.semantic_digest,
         solids: compiled.solid_entries(),
         beams: compiled.beam_entries(),

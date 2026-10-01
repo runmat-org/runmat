@@ -13,6 +13,7 @@ fn valid_model() -> AnalysisModel {
         units: UnitSystem::Meter,
         frame: CoordinateFrame::Global,
         materials: vec![MaterialModel {
+            fluid: None,
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
             provenance: MaterialProvenance::Authored,

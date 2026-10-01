@@ -19,9 +19,7 @@ use runmat_analysis_core::{
     TranslationDofValue, Velocity,
 };
 #[cfg(test)]
-use runmat_analysis_core::{
-    ElectricPotential, Position, ReferencePoint, Temperature, Traction,
-};
+use runmat_analysis_core::{ElectricPotential, Position, ReferencePoint, Temperature, Traction};
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind, UnitSystem};
 
 #[derive(Debug, Clone)]
@@ -664,6 +662,7 @@ fn isotropic_material(
     modulus_temp_coeff_per_k: f64,
 ) -> MaterialModel {
     MaterialModel {
+        fluid: None,
         material_id: material_id.to_string(),
         name: name.to_string(),
         provenance: runmat_analysis_core::MaterialProvenance::Authored,

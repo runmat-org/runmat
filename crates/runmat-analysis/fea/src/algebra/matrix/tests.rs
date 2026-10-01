@@ -169,3 +169,29 @@ fn assembler_reports_invalid_admission_without_panicking() {
         Err(RealSparseMatrixError::ShapeMismatch)
     );
 }
+
+#[test]
+fn fluid_provenance_roundtrips_without_changing_numerical_identity() {
+    let original = RealSparseMatrix::diagonal(
+        vec![2.0, 3.0],
+        OperatorRole::EffectiveTangent,
+        MatrixProperties::GENERAL,
+    )
+    .unwrap();
+    let fluid = original.clone().with_contribution(ContributionProvenance {
+        domain: ContributionDomain::Fluid,
+        contribution_id: ContributionId("cell-momentum".into()),
+    });
+    let wire = serde_json::to_value(&fluid).unwrap();
+    assert_eq!(wire["contributions"][0]["domain"], "fluid");
+    let restored: RealSparseMatrix = serde_json::from_value(wire).unwrap();
+    assert_eq!(restored, fluid);
+    assert_ne!(
+        original.values_identity().unwrap(),
+        fluid.values_identity().unwrap()
+    );
+    assert_eq!(
+        original.numerical_identity().unwrap(),
+        fluid.numerical_identity().unwrap()
+    );
+}

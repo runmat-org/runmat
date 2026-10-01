@@ -111,30 +111,38 @@ fn thermal_boundary(
     }
 }
 
+enum FluidFixtureConstraint {
+    Velocity([f64; 3]),
+    PressureGauge(f64),
+    NoSlipWall,
+}
+
 fn fluid_constraint(
     id: impl Into<String>,
     region: impl Into<String>,
-    kind: &str,
-    value: f64,
+    condition: FluidFixtureConstraint,
 ) -> runmat_analysis_core::AnalysisConstraint {
     let target = runmat_analysis_core::RegionTarget::authored(region);
-    let kind = match kind {
-        "inlet" => runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
-            target,
-            value: runmat_analysis_core::PrescribedValue::Constant(
-                runmat_analysis_core::Velocity::new(value),
-            ),
-        },
-        "outlet" => runmat_analysis_core::FluidConstraintKind::PressureReference {
-            target,
-            value: runmat_analysis_core::PrescribedValue::Constant(
-                runmat_analysis_core::Pressure::new(value),
-            ),
-        },
-        "no_slip" => runmat_analysis_core::FluidConstraintKind::NoSlipWall { target },
-        "slip" => runmat_analysis_core::FluidConstraintKind::SlipWall { target },
-        "symmetry" => runmat_analysis_core::FluidConstraintKind::Symmetry { target },
-        _ => panic!("unsupported test fluid constraint"),
+    let kind = match condition {
+        FluidFixtureConstraint::Velocity(components) => {
+            runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+                target,
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    components.map(runmat_analysis_core::Velocity::new),
+                ),
+            }
+        }
+        FluidFixtureConstraint::PressureGauge(value) => {
+            runmat_analysis_core::FluidConstraintKind::PressureReference {
+                target,
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    runmat_analysis_core::Pressure::new(value),
+                ),
+            }
+        }
+        FluidFixtureConstraint::NoSlipWall => {
+            runmat_analysis_core::FluidConstraintKind::NoSlipWall { target }
+        }
     };
     runmat_analysis_core::AnalysisConstraint::Fluid(runmat_analysis_core::FluidConstraint {
         constraint_id: id.into(),
@@ -1156,32 +1164,28 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
 
 fn authored_cfd_boundaries_for_fixture(
     spec_id: &str,
-    inlet_velocity_m_per_s: f64,
+    inlet_velocity_m_per_s: [f64; 3],
 ) -> Vec<runmat_analysis_core::AnalysisConstraint> {
     vec![
         fluid_constraint(
             format!("bc_cfd_inlet_{spec_id}"),
             "fluid_inlet",
-            "inlet",
-            inlet_velocity_m_per_s,
+            FluidFixtureConstraint::Velocity(inlet_velocity_m_per_s),
         ),
         fluid_constraint(
             format!("bc_cfd_outlet_{spec_id}"),
             "fluid_outlet",
-            "outlet",
-            0.0,
+            FluidFixtureConstraint::PressureGauge(0.0),
         ),
         fluid_constraint(
             format!("bc_cfd_wall_upper_{spec_id}"),
             "fluid_wall_upper",
-            "no_slip",
-            0.0,
+            FluidFixtureConstraint::NoSlipWall,
         ),
         fluid_constraint(
             format!("bc_cfd_wall_lower_{spec_id}"),
             "fluid_wall_lower",
-            "no_slip",
-            0.0,
+            FluidFixtureConstraint::NoSlipWall,
         ),
     ]
 }
@@ -1200,6 +1204,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         }
         if model.materials.is_empty() {
             model.materials.push(runmat_analysis_core::MaterialModel {
+                fluid: None,
                 material_id: "mat_acoustic_air".to_string(),
                 name: "Acoustic Air".to_string(),
                 provenance: runmat_analysis_core::MaterialProvenance::Authored,
@@ -1365,7 +1370,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.electro_thermal = None;
         model.interfaces.clear();
         model.boundaries.clear();
-        model.constraints = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
+        model.constraints = authored_cfd_boundaries_for_fixture(spec_id, [5.0, 0.0, 0.0]);
         model.cfd = Some(fixture_cfd_domain(
             model,
             &format!("cfd_velocity_{spec_id}"),
@@ -1383,7 +1388,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         model.electro_thermal = None;
         model.interfaces.clear();
         model.boundaries.clear();
-        model.constraints = authored_cfd_boundaries_for_fixture(spec_id, 5.0);
+        model.constraints = authored_cfd_boundaries_for_fixture(spec_id, [5.0, 0.0, 0.0]);
         model.cfd = Some(fixture_cfd_domain(
             model,
             &format!("cfd_velocity_{spec_id}"),
@@ -1406,11 +1411,10 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             vec![fluid_constraint(
                 format!("bc_cfd_inlet_only_{spec_id}"),
                 "inlet",
-                "inlet",
-                5.0,
+                FluidFixtureConstraint::Velocity([5.0, -1.0, 0.0]),
             )]
         } else {
-            authored_cfd_boundaries_for_fixture(spec_id, 5.0)
+            authored_cfd_boundaries_for_fixture(spec_id, [5.0, 0.0, 0.0])
         };
         model.cfd = Some(fixture_cfd_domain(
             model,
@@ -1578,6 +1582,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         if model.materials.len() < 3 {
             let base = model.materials.first().cloned().unwrap_or_else(|| {
                 runmat_analysis_core::MaterialModel {
+                    fluid: None,
                     material_id: "mat_default".to_string(),
                     name: "Default".to_string(),
                     provenance: runmat_analysis_core::MaterialProvenance::Authored,

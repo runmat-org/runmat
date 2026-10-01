@@ -15,6 +15,12 @@ use super::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PropertyCompilationError {
+    #[error(
+        "combined Cell and Solid volume material roles are outside the admitted property envelope"
+    )]
+    UnsupportedMixedVolumeRoles,
+    #[error("Cell volume ownership cannot satisfy solid constitutive capability requirements")]
+    CellVolumeForSolidPhysics,
     #[error("compiled property map received an invalid solver mesh: {0}")]
     InvalidMesh(String),
     #[error("model geometry revision {model_revision} does not match mesh geometry revision {mesh_revision}")]
@@ -85,7 +91,19 @@ pub fn compile_solid_property_map(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
 ) -> Result<CompiledPropertyMap, PropertyCompilationError> {
-    compile_property_map(model, Some(mesh))
+    let compiled = compile_property_map(model, Some(mesh))?;
+    // A generic Cell map must not silently satisfy the explicitly Solid API.
+    for element in &mesh.topology.volume_elements {
+        if compiled.solid_material(element.stable_identity).is_none() {
+            return Err(PropertyCompilationError::InvalidCoverage {
+                role: "solid",
+                element_id: element.element_id.to_string(),
+                region_id: element.region_id.source_topology_id.clone(),
+                assignment_count: 0,
+            });
+        }
+    }
+    Ok(compiled)
 }
 
 /// Compile the shared property map and prove that every solid owner is usable by structural
@@ -115,6 +133,9 @@ impl CompiledPropertyMap {
     /// Validate the constitutive view needed by structural solid operators without selecting
     /// owners again. Study identity checks use this on already-compiled property maps.
     pub fn validate_structural_solid_capabilities(&self) -> Result<(), PropertyCompilationError> {
+        if self.cell_materials().len() != 0 {
+            return Err(PropertyCompilationError::CellVolumeForSolidPhysics);
+        }
         for entry in self.solid_materials() {
             require_capabilities(
                 "structural solid",
@@ -131,6 +152,9 @@ impl CompiledPropertyMap {
 
     /// Validate an already-compiled map without reselecting material owners.
     pub fn validate_thermal_solid_capabilities(&self) -> Result<(), PropertyCompilationError> {
+        if self.cell_materials().len() != 0 {
+            return Err(PropertyCompilationError::CellVolumeForSolidPhysics);
+        }
         for entry in self.solid_materials() {
             require_capabilities(
                 "thermal solid",
@@ -187,7 +211,27 @@ pub(super) fn visit<'a>(
         }
     }
     if let Some(mesh) = mesh {
-        visit_solids(model, mesh, materials, visitor)?;
+        let cell_role = model
+            .sequence
+            .steps
+            .iter()
+            .any(|step| step.family == runmat_analysis_core::PhysicsFamily::Fluid)
+            || model
+                .material_assignments
+                .iter()
+                .any(|assignment| matches!(assignment.target, PropertyRegionTarget::Cell(_)));
+        if cell_role {
+            if model
+                .material_assignments
+                .iter()
+                .any(|assignment| matches!(assignment.target, PropertyRegionTarget::Solid(_)))
+            {
+                return Err(PropertyCompilationError::UnsupportedMixedVolumeRoles);
+            }
+            visit_cells(model, mesh, materials, visitor)?;
+        } else {
+            visit_solids(model, mesh, materials, visitor)?;
+        }
     }
     visit_explicit(model, materials, explicit, visitor)
 }
@@ -223,6 +267,39 @@ fn visit_solids<'a>(
     }
     reject_unmatched("solid", &assignments, &matched)?;
     Ok(())
+}
+
+/// Cell ownership is explicit authored finite-volume intent, not an alias for Solid.
+fn visit_cells<'a>(
+    model: &'a AnalysisModel,
+    mesh: &'a SolverMeshArtifact,
+    materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
+    visitor: &mut impl FnMut(SelectedProperty<'a>) -> Result<(), PropertyCompilationError>,
+) -> Result<(), PropertyCompilationError> {
+    let assignments = assignments_for(model, materials, |target| {
+        matches!(target, PropertyRegionTarget::Cell(_))
+    })?;
+    let mut matched = BTreeSet::new();
+    for element in &mesh.topology.volume_elements {
+        let matching = assignments
+            .iter()
+            .filter(|(_, assignment, _)| solid_scope_matches(assignment.target.scope(), element));
+        let (assignment_index, assignment, material) = require_one(
+            "cell",
+            || element.element_id.to_string(),
+            &element.region_id.source_topology_id,
+            matching,
+        )?;
+        matched.insert(*assignment_index);
+        visitor(SelectedProperty::Cell {
+            element_id: element.element_id,
+            identity: element.stable_identity,
+            material,
+            assignment_index: *assignment_index,
+            assignment,
+        })?;
+    }
+    reject_unmatched("cell", &assignments, &matched)
 }
 
 fn visit_explicit<'a>(

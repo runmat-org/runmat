@@ -95,7 +95,7 @@ fn quantity(
     canonical_scalar(value)
 }
 
-fn assignment<'a>(
+pub(super) fn assignment<'a>(
     statements: &'a [CheckedFeaStatement],
     name: &str,
 ) -> Option<&'a CheckedExpression> {

@@ -5,6 +5,7 @@ mod acoustic_product;
 mod compilation;
 mod electrical_planning;
 mod electrical_product;
+mod fluid_material;
 mod identity;
 mod magnetic_planning;
 mod magnetic_product;
@@ -34,6 +35,7 @@ pub use electrical_product::{
     build_electrical_study_product, ElectricalStudyProduct, ElectricalStudyProductError,
     ElectricalStudyProductInput,
 };
+pub use fluid_material::{derive_canonical_fluid_material, FluidMaterialCompilationError};
 pub use identity::{
     structural_study_source_digest, StructuralStudyMaterialBinding,
     StructuralStudySourceIdentityError,

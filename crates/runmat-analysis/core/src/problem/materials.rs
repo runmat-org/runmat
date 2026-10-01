@@ -4,6 +4,34 @@ use thiserror::Error;
 
 use super::quantity::{RayleighMassCoefficient, RayleighStiffnessCoefficient};
 
+/// A closed, constant-coefficient fluid law. Density is owned by the shared
+/// material, not repeated inside the law or inferred from an acoustic capability.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MaterialFluidModel {
+    IncompressibleNewtonian {
+        dynamic_viscosity: crate::DynamicViscosity,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IncompressibleNewtonianMaterial {
+    pub density: crate::MassDensity,
+    pub dynamic_viscosity: crate::DynamicViscosity,
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum FluidMaterialError {
+    #[error(transparent)]
+    Missing(#[from] MissingMaterialCapability),
+    #[error("material `{material_id}` requires finite positive Newtonian {property}")]
+    Invalid {
+        material_id: String,
+        property: &'static str,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConductivityFrequencyPoint {
@@ -115,6 +143,8 @@ pub struct MaterialModel {
     #[serde(default)]
     pub acoustic: Option<MaterialAcousticModel>,
     #[serde(default)]
+    pub fluid: Option<MaterialFluidModel>,
+    #[serde(default)]
     pub electrical: Option<MaterialElectricalModel>,
     #[serde(default)]
     pub plastic: Option<MaterialPlasticModel>,
@@ -129,6 +159,7 @@ pub struct SolverMaterialModel<'a> {
     pub damping: Option<MechanicalDampingModel>,
     pub thermal: &'a Option<MaterialThermalModel>,
     pub acoustic: &'a Option<MaterialAcousticModel>,
+    pub fluid: &'a Option<MaterialFluidModel>,
     pub electrical: &'a Option<MaterialElectricalModel>,
     pub plastic: &'a Option<MaterialPlasticModel>,
 }
@@ -225,6 +256,7 @@ pub enum MaterialCapability {
     MechanicalDamping,
     Thermal,
     Acoustic,
+    IncompressibleNewtonianFluid,
     Electrical,
     Plasticity,
 }
@@ -245,6 +277,7 @@ impl MaterialModel {
             damping: self.damping,
             thermal: &self.thermal,
             acoustic: &self.acoustic,
+            fluid: &self.fluid,
             electrical: &self.electrical,
             plastic: &self.plastic,
         }
@@ -261,6 +294,9 @@ impl MaterialModel {
             MaterialCapability::MechanicalDamping => self.damping.is_some(),
             MaterialCapability::Thermal => self.thermal.is_some(),
             MaterialCapability::Acoustic => self.acoustic.is_some(),
+            MaterialCapability::IncompressibleNewtonianFluid => {
+                self.require_incompressible_newtonian().is_ok()
+            }
             MaterialCapability::Electrical => self.electrical.is_some(),
             MaterialCapability::Plasticity => self.plastic.is_some(),
         }
@@ -319,6 +355,32 @@ impl MaterialModel {
             .ok_or_else(|| self.missing(MaterialCapability::Acoustic))
     }
 
+    /// Typed physical coefficients from their sole shared material authorities.
+    /// This checks positivity even when called before whole-model validation.
+    pub fn require_incompressible_newtonian(
+        &self,
+    ) -> Result<IncompressibleNewtonianMaterial, FluidMaterialError> {
+        let MaterialFluidModel::IncompressibleNewtonian { dynamic_viscosity } = self
+            .fluid
+            .ok_or_else(|| self.missing(MaterialCapability::IncompressibleNewtonianFluid))?;
+        let density = self.require_mass_density()?;
+        for (property, value) in [
+            ("density", density),
+            ("dynamic viscosity", dynamic_viscosity.pascal_seconds),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(FluidMaterialError::Invalid {
+                    material_id: self.material_id.clone(),
+                    property,
+                });
+            }
+        }
+        Ok(IncompressibleNewtonianMaterial {
+            density: crate::MassDensity::new(density),
+            dynamic_viscosity,
+        })
+    }
+
     pub fn require_electrical(
         &self,
     ) -> Result<&MaterialElectricalModel, MissingMaterialCapability> {
@@ -347,6 +409,7 @@ mod tests {
 
     fn density_only_material() -> MaterialModel {
         MaterialModel {
+            fluid: None,
             material_id: "fluid".into(),
             name: "Fluid".into(),
             provenance: MaterialProvenance::Authored,
@@ -383,5 +446,68 @@ mod tests {
             MechanicalDampingModel::Undamped
         );
         assert!(!material.has_capability(MaterialCapability::MechanicalDamping));
+    }
+
+    #[test]
+    fn newtonian_fluid_uses_single_density_and_typed_positive_viscosity() {
+        let mut material = density_only_material();
+        assert!(material.require_incompressible_newtonian().is_err());
+        material.fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
+            dynamic_viscosity: crate::DynamicViscosity::new(0.001),
+        });
+        let coefficients = material.require_incompressible_newtonian().unwrap();
+        assert_eq!(coefficients.density, crate::MassDensity::new(997.0));
+        assert_eq!(
+            coefficients.dynamic_viscosity,
+            crate::DynamicViscosity::new(0.001)
+        );
+        assert!(material.has_capability(MaterialCapability::IncompressibleNewtonianFluid));
+        let wire = serde_json::to_value(&material).unwrap();
+        assert_eq!(wire["fluid"]["kind"], "incompressible_newtonian");
+        assert!(wire["fluid"].get("density").is_none());
+        assert_eq!(
+            serde_json::from_value::<MaterialModel>(wire).unwrap(),
+            material
+        );
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut invalid = material.clone();
+            invalid.mass_density_kg_per_m3 = Some(bad);
+            assert!(invalid.require_incompressible_newtonian().is_err());
+            assert!(crate::validate_material_definitions(&[invalid]).is_err());
+            let mut invalid = material.clone();
+            invalid.fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
+                dynamic_viscosity: crate::DynamicViscosity::new(bad),
+            });
+            assert!(invalid.require_incompressible_newtonian().is_err());
+            assert!(crate::validate_material_definitions(&[invalid]).is_err());
+        }
+        material.mass_density_kg_per_m3 = None;
+        assert!(material.require_incompressible_newtonian().is_err());
+        assert!(crate::validate_material_definitions(&[material]).is_err());
+    }
+
+    #[test]
+    fn newtonian_law_is_closed_and_identity_significant() {
+        let mut material = density_only_material();
+        let missing = serde_json::to_vec(&material.solver_identity_contract()).unwrap();
+        material.fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
+            dynamic_viscosity: crate::DynamicViscosity::new(0.001),
+        });
+        let first = serde_json::to_vec(&material.solver_identity_contract()).unwrap();
+        assert_ne!(first, missing);
+        material.fluid = Some(MaterialFluidModel::IncompressibleNewtonian {
+            dynamic_viscosity: crate::DynamicViscosity::new(0.002),
+        });
+        assert_ne!(
+            first,
+            serde_json::to_vec(&material.solver_identity_contract()).unwrap()
+        );
+        for wire in [
+            r#"{"kind":"incompressible_newtonian"}"#,
+            r#"{"kind":"turbulent","dynamic_viscosity":{"pascal_seconds":0.001}}"#,
+            r#"{"kind":"incompressible_newtonian","dynamic_viscosity":{"pascal_seconds":0.001},"density":1000}"#,
+        ] {
+            assert!(serde_json::from_str::<MaterialFluidModel>(wire).is_err());
+        }
     }
 }

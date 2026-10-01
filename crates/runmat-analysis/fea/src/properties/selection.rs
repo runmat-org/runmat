@@ -17,6 +17,13 @@ use super::{
 
 #[derive(Clone, Copy)]
 pub(super) enum SelectedProperty<'a> {
+    Cell {
+        element_id: u64,
+        identity: StableDigest,
+        material: &'a MaterialModel,
+        assignment_index: usize,
+        assignment: &'a MaterialAssignment,
+    },
     Solid {
         element_id: u64,
         identity: StableDigest,
@@ -56,13 +63,20 @@ pub(super) enum SelectedProperty<'a> {
 impl Serialize for SelectedProperty<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let fields = match self {
-            Self::Solid { .. } => 4,
+            Self::Solid { .. } | Self::Cell { .. } => 4,
             Self::Beam { .. } => 6,
             _ => 7,
         };
         let mut record = serializer.serialize_struct("SelectedProperty", fields)?;
         match *self {
             Self::Solid {
+                element_id,
+                identity,
+                material,
+                assignment_index,
+                assignment,
+            }
+            | Self::Cell {
                 element_id,
                 identity,
                 material,
@@ -221,6 +235,7 @@ impl Serialize for PlyIds<'_> {
 
 #[derive(Default)]
 pub(super) struct OwnedProperties {
+    pub cells: BTreeMap<StableDigest, CompiledElementMaterial>,
     pub solids: BTreeMap<StableDigest, CompiledElementMaterial>,
     pub beams: BTreeMap<StableDigest, CompiledBeamProperty>,
     pub shells: BTreeMap<StableDigest, CompiledShellProperty>,
@@ -232,6 +247,7 @@ impl SelectedProperty<'_> {
         self,
         output: &mut OwnedProperties,
     ) -> Result<(), PropertyCompilationError> {
+        let is_cell = matches!(self, Self::Cell { .. });
         match self {
             Self::Solid {
                 element_id,
@@ -239,8 +255,20 @@ impl SelectedProperty<'_> {
                 material,
                 assignment_index,
                 assignment,
+            }
+            | Self::Cell {
+                element_id,
+                identity,
+                material,
+                assignment_index,
+                assignment,
             } => {
-                output.solids.insert(
+                let owners = if is_cell {
+                    &mut output.cells
+                } else {
+                    &mut output.solids
+                };
+                owners.insert(
                     identity,
                     CompiledElementMaterial {
                         element_id,

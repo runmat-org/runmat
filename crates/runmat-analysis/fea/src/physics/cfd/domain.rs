@@ -4,6 +4,9 @@ use runmat_analysis_core::{
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
+#[cfg(test)]
+mod tests;
+
 pub fn reynolds_number_for_velocity(
     domain: &runmat_analysis_core::CfdDomain,
     inlet_velocity_m_per_s: f64,
@@ -34,6 +37,15 @@ pub fn realize_velocity_schedule(
     procedure: AnalysisProcedure,
     step_count: usize,
 ) -> Result<CfdVelocitySchedule, String> {
+    validate_authored_boundary_conditions(model)?;
+    if model.excitations.iter().any(|action| {
+        matches!(
+            action,
+            ExcitationAction::InletVelocity(_) | ExcitationAction::WallMotion(_)
+        )
+    }) {
+        return Err("reduced CFD cannot realize directional, framed, per-region velocity excitations; canonical finite-volume execution is required".to_string());
+    }
     let matching_steps = model
         .sequence
         .steps
@@ -46,10 +58,6 @@ pub fn realize_velocity_schedule(
             matching_steps.len()
         ));
     };
-    let has_inlet_excitation = model
-        .excitations
-        .iter()
-        .any(|action| matches!(action, ExcitationAction::InletVelocity(_)));
     let (sample_points, nominal_time_step_s) = if procedure == AnalysisProcedure::TransientResponse
     {
         let grid = crate::excitation::ProcedureTimeGrid::from_sample_count(step, step_count)?;
@@ -65,52 +73,10 @@ pub fn realize_velocity_schedule(
         (vec![crate::excitation::ExcitationSamplePoint::Static], 0.0)
     };
     let sample_count = sample_points.len();
-    let mut velocities = Vec::with_capacity(sample_count);
-    for sample in sample_points {
-        let realized = crate::excitation::realize_step_excitations(model, step, sample)
-            .map_err(|error| format!("CFD inlet excitation realization failed: {error}"))?;
-        let velocity = realized
-            .iter()
-            .filter_map(|excitation| match &excitation.kind {
-                crate::excitation::RealizedExcitationKind::InletVelocity(value) => Some(value),
-                _ => None,
-            })
-            .map(|value| {
-                if value.imaginary.iter().any(|component| *component != 0.0) {
-                    return Err(
-                        "CFD inlet velocity must be real in steady and transient solves"
-                            .to_string(),
-                    );
-                }
-                Ok(value
-                    .real
-                    .iter()
-                    .map(|component| component * component)
-                    .sum::<f64>()
-                    .sqrt())
-            })
-            .collect::<Result<Vec<_>, String>>()?
-            .into_iter()
-            .fold(0.0_f64, f64::max);
-        velocities.push(velocity);
-    }
-    if !has_inlet_excitation {
-        let constrained = CfdBoundarySummary::from_model(model, 2).nominal_inlet_velocity_m_per_s;
-        velocities.fill(constrained);
-    }
-    let nominal_velocity_m_per_s = velocities.iter().copied().fold(0.0_f64, f64::max);
-    let profile_scales = if nominal_velocity_m_per_s > f64::EPSILON {
-        velocities
-            .into_iter()
-            .map(|velocity| velocity / nominal_velocity_m_per_s)
-            .collect()
-    } else {
-        vec![1.0; sample_count]
-    };
     Ok(CfdVelocitySchedule {
-        nominal_velocity_m_per_s,
-        profile_scales,
-        has_inlet_excitation,
+        nominal_velocity_m_per_s: 0.0,
+        profile_scales: vec![1.0; sample_count],
+        has_inlet_excitation: false,
         nominal_time_step_s,
     })
 }
@@ -265,8 +231,6 @@ impl CfdBoundarySummary {
     }
 
     pub fn from_model(model: &AnalysisModel, node_count: usize) -> Self {
-        let mut inlet_velocity_sum = 0.0_f64;
-        let mut outlet_pressure_sum = 0.0_f64;
         let mut summary = Self {
             inlet_boundary_count: 0,
             outlet_boundary_count: 0,
@@ -285,22 +249,11 @@ impl CfdBoundarySummary {
                 continue;
             };
             match &constraint.kind {
-                FluidConstraintKind::PrescribedVelocity { value, .. } => {
-                    let Some(velocity) = value.study_constant(&model.signals) else {
-                        continue;
-                    };
-                    summary.inlet_boundary_count += 1;
-                    summary.authored_boundary_count += 1;
-                    inlet_velocity_sum += velocity.meters_per_second;
-                }
-                FluidConstraintKind::PressureReference { value, .. } => {
-                    let Some(pressure) = value.study_constant(&model.signals) else {
-                        continue;
-                    };
-                    summary.outlet_boundary_count += 1;
-                    summary.authored_boundary_count += 1;
-                    outlet_pressure_sum += pressure.pascals;
-                }
+                // This legacy aggregate has no vector/frame/region authority. The
+                // reduced entry point rejects these conditions before constructing it.
+                FluidConstraintKind::PrescribedVelocity { .. }
+                | FluidConstraintKind::MovingWall { .. }
+                | FluidConstraintKind::PressureReference { .. } => {}
                 FluidConstraintKind::NoSlipWall { .. } => {
                     summary.no_slip_wall_boundary_count += 1;
                     summary.authored_boundary_count += 1;
@@ -321,14 +274,6 @@ impl CfdBoundarySummary {
             return Self::implicit_channel(node_count);
         }
 
-        if summary.inlet_boundary_count > 0 {
-            summary.nominal_inlet_velocity_m_per_s =
-                inlet_velocity_sum / summary.inlet_boundary_count as f64;
-        }
-        if summary.outlet_boundary_count > 0 {
-            summary.outlet_pressure_pa = outlet_pressure_sum / summary.outlet_boundary_count as f64;
-        }
-
         let wall_like_count = summary.no_slip_wall_boundary_count
             + summary.slip_wall_boundary_count
             + summary.symmetry_boundary_count;
@@ -345,63 +290,36 @@ impl CfdBoundarySummary {
     }
 }
 
+/// Admission for the retired reduced channel adapter, not canonical vector CFD.
 pub fn validate_authored_boundary_conditions(model: &AnalysisModel) -> Result<(), String> {
-    let mut inlet_boundary_count = 0usize;
-    let mut outlet_boundary_count = 0usize;
-    let mut wall_like_boundary_count = 0usize;
-    let mut authored_boundary_count = 0usize;
-
+    if model.boundaries.iter().any(|boundary| {
+        matches!(
+            boundary.operator,
+            runmat_analysis_core::BoundaryOperator::FluidOutletPressure { .. }
+        )
+    }) {
+        return Err("reduced CFD cannot realize exact physical outlet pressure boundaries; canonical finite-volume execution is required".to_string());
+    }
     for constraint in &model.constraints {
         let AnalysisConstraint::Fluid(constraint) = constraint else {
             continue;
         };
         match &constraint.kind {
-            FluidConstraintKind::PrescribedVelocity { value, .. } => {
-                authored_boundary_count += 1;
-                inlet_boundary_count += 1;
-                let valid = value
-                    .study_constant(&model.signals)
-                    .is_some_and(|velocity| {
-                        velocity.is_finite() && velocity.meters_per_second >= 0.0
-                    });
-                if !valid {
-                    return Err(format!(
-                        "cfd inlet boundary {} requires finite non-negative velocity_m_per_s",
-                        constraint.constraint_id
-                    ));
-                }
-            }
-            FluidConstraintKind::PressureReference { value, .. } => {
-                authored_boundary_count += 1;
-                outlet_boundary_count += 1;
-                if !value
-                    .study_constant(&model.signals)
-                    .is_some_and(|pressure| pressure.is_finite())
-                {
-                    return Err(format!(
-                        "cfd outlet boundary {} requires finite pressure_pa",
-                        constraint.constraint_id
-                    ));
-                }
-            }
-            FluidConstraintKind::NoSlipWall { .. }
-            | FluidConstraintKind::SlipWall { .. }
-            | FluidConstraintKind::Symmetry { .. } => {
-                authored_boundary_count += 1;
-                wall_like_boundary_count += 1;
-            }
-            _ => {}
+            FluidConstraintKind::PrescribedVelocity { .. }
+            | FluidConstraintKind::MovingWall { .. } => return Err(format!(
+                "reduced CFD cannot realize vector velocity constraint {}; canonical finite-volume execution is required",
+                constraint.constraint_id,
+            )),
+            FluidConstraintKind::PressureReference { .. } => return Err(format!(
+                "reduced CFD cannot realize pressure gauge {}; a pressure reference is not a physical outlet",
+                constraint.constraint_id,
+            )),
+            _ => return Err(format!(
+                "reduced CFD cannot realize exact fluid boundary constraint {}; canonical finite-volume execution is required",
+                constraint.constraint_id,
+            )),
         }
     }
 
-    if authored_boundary_count == 0 {
-        return Ok(());
-    }
-    if inlet_boundary_count == 0 || outlet_boundary_count == 0 || wall_like_boundary_count == 0 {
-        return Err(format!(
-            "authored cfd boundaries require at least one inlet, outlet, and wall/symmetry boundary; got inlet={} outlet={} wall_like={}",
-            inlet_boundary_count, outlet_boundary_count, wall_like_boundary_count,
-        ));
-    }
     Ok(())
 }

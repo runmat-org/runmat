@@ -44,6 +44,7 @@ pub enum ContributionDomain {
     Thermal,
     Electromagnetic,
     Acoustic,
+    Fluid,
     Constraint,
     TimeIntegration,
 }

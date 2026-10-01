@@ -392,7 +392,9 @@ fn semantic_identity_is_independent_of_assignment_order_but_audit_is_not() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let mut model = matching_model(&mesh);
     let mut unused_role = model.material_assignments[0].clone();
-    unused_role.target = runmat_analysis_core::PropertyRegionTarget::all_cells();
+    // Cell now has actual volume ownership and cannot be an inert unused role.
+    // Beam remains disjoint when there is no explicit beam topology.
+    unused_role.target = runmat_analysis_core::PropertyRegionTarget::all_beams();
     model.material_assignments.push(unused_role);
 
     let first = compile_solid_property_map(&model, &mesh).expect("compiled properties");
@@ -408,6 +410,35 @@ fn semantic_identity_is_independent_of_assignment_order_but_audit_is_not() {
         second.solid_materials().collect::<Vec<_>>()
     );
     assert_ne!(first.audit_digest, second.audit_digest);
+}
+
+#[test]
+fn mixed_solid_cell_volume_intent_is_rejected_not_ignored() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let mut model = matching_model(&mesh);
+    let mut cell = model.material_assignments[0].clone();
+    cell.target = runmat_analysis_core::PropertyRegionTarget::all_cells();
+    model.material_assignments.push(cell);
+    assert!(matches!(
+        compile_property_map(&model, Some(&mesh)),
+        Err(PropertyCompilationError::UnsupportedMixedVolumeRoles)
+    ));
+}
+
+#[test]
+fn cell_ownership_cannot_satisfy_solid_constitutive_compilation() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let mut model = matching_model(&mesh);
+    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_cells();
+    let cells = compile_property_map(&model, Some(&mesh)).unwrap();
+    assert!(matches!(
+        cells.validate_structural_solid_capabilities(),
+        Err(PropertyCompilationError::CellVolumeForSolidPhysics)
+    ));
+    assert!(matches!(
+        cells.validate_thermal_solid_capabilities(),
+        Err(PropertyCompilationError::CellVolumeForSolidPhysics)
+    ));
 }
 
 fn matching_model(

@@ -103,6 +103,8 @@ pub struct CompiledShellProperty {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "CompiledPropertyMapData")]
 pub struct CompiledPropertyMap {
+    #[serde(with = "ordered_map_serde", skip_serializing_if = "BTreeMap::is_empty")]
+    cell_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
     pub identity: CompiledPropertyMapIdentity,
     pub audit_digest: Digest,
     #[serde(with = "ordered_map_serde")]
@@ -117,6 +119,8 @@ pub struct CompiledPropertyMap {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CompiledPropertyMapData {
+    #[serde(default, with = "ordered_map_serde")]
+    cell_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
     identity: CompiledPropertyMapIdentity,
     audit_digest: Digest,
     #[serde(with = "ordered_map_serde")]
@@ -168,6 +172,7 @@ impl CompiledPropertyMap {
     pub(crate) fn new(
         source: CompiledPropertySource,
         solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
+        cell_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
         beam_properties: BTreeMap<StableDigest, CompiledBeamProperty>,
         shell_properties: BTreeMap<StableDigest, CompiledShellProperty>,
         audit: Vec<CompiledPropertyAudit>,
@@ -175,12 +180,14 @@ impl CompiledPropertyMap {
         let semantic_digest = super::identity::semantic_digest(
             &source,
             &solid_materials,
+            &cell_materials,
             &beam_properties,
             &shell_properties,
         )?;
         let audit_digest = super::identity::audit_digest(
             semantic_digest,
             &solid_materials,
+            &cell_materials,
             &beam_properties,
             &shell_properties,
             &audit,
@@ -195,6 +202,7 @@ impl CompiledPropertyMap {
             },
             audit_digest,
             solid_materials,
+            cell_materials,
             beam_properties,
             shell_properties,
             audit,
@@ -216,6 +224,18 @@ impl CompiledPropertyMap {
 
     pub fn solid_materials(&self) -> impl ExactSizeIterator<Item = &CompiledElementMaterial> + '_ {
         self.solid_materials.values()
+    }
+
+    pub fn cell_material(&self, identity: StableDigest) -> Option<&CompiledElementMaterial> {
+        self.cell_materials.get(&identity)
+    }
+
+    pub fn cell_materials(&self) -> impl ExactSizeIterator<Item = &CompiledElementMaterial> + '_ {
+        self.cell_materials.values()
+    }
+
+    pub(super) fn cell_entries(&self) -> &BTreeMap<StableDigest, CompiledElementMaterial> {
+        &self.cell_materials
     }
 
     pub fn beam_property(&self, element_identity: StableDigest) -> Option<&CompiledBeamProperty> {
@@ -259,6 +279,7 @@ impl TryFrom<CompiledPropertyMapData> for CompiledPropertyMap {
             identity: data.identity,
             audit_digest: data.audit_digest,
             solid_materials: data.solid_materials,
+            cell_materials: data.cell_materials,
             beam_properties: data.beam_properties,
             shell_properties: data.shell_properties,
             audit: data.audit,

@@ -1,0 +1,375 @@
+use super::{
+    super::{
+        element::{dot, subtract},
+        AnalysisProjection,
+    },
+    geometry::{self, FACE_CORNERS, RELATIVE_TOLERANCE},
+    FiniteVolumeBoundarySource, FiniteVolumeCell, FiniteVolumeFace, FiniteVolumeIncidence,
+    FiniteVolumeProjectionError as Error, FiniteVolumeProjectionPolicy as Policy,
+    FiniteVolumeReservation, FiniteVolumeTopology,
+};
+use runmat_execution::Digest;
+use runmat_meshing_core::{BoundaryFaceRole, StableDigest};
+use sha2::{Digest as _, Sha256};
+use std::collections::BTreeMap;
+
+pub(super) fn reserve(
+    source: &AnalysisProjection,
+    policy: Policy,
+) -> Result<FiniteVolumeReservation, Error> {
+    reserve_regions(
+        source.elements.len(),
+        source.boundary_faces.len(),
+        source.elements.iter().map(|e| &e.region_id),
+        policy,
+    )
+}
+
+pub(super) fn reserve_mesh(
+    source: &runmat_meshing_core::SolverMeshArtifact,
+    policy: Policy,
+) -> Result<FiniteVolumeReservation, Error> {
+    reserve_regions(
+        source.topology.volume_elements.len(),
+        source.topology.boundary_faces.len(),
+        source.topology.volume_elements.iter().map(|e| &e.region_id),
+        policy,
+    )
+}
+
+fn reserve_regions<'a>(
+    cells: usize,
+    boundaries: usize,
+    regions: impl Iterator<Item = &'a runmat_meshing_core::PersistentEntityId>,
+    policy: Policy,
+) -> Result<FiniteVolumeReservation, Error> {
+    let (incidences, mut bytes, base_operations) = checked_counts(cells, boundaries)?;
+    if cells == 0 {
+        return Err(Error::Invalid("empty cell inventory"));
+    }
+    for (count, maximum, name) in [
+        (cells, policy.max_cells, "cells"),
+        (incidences, policy.max_face_incidences, "face incidences"),
+        (boundaries, policy.max_boundary_faces, "boundary faces"),
+    ] {
+        if count > maximum {
+            return Err(Error::Limit(name));
+        }
+    }
+    // Two ordered maps, face output, cells/incidences, sorting and closure sums.
+    // 1024 B/incidence exceeds key/value + B-tree node overhead; 512 B/cell
+    // covers fixed records and sort/index/sum arrays. Region allocations are additional.
+    let mut region_visits = 0usize;
+    let mut region_bytes = 0usize;
+    for region in regions {
+        region_bytes = region_bytes
+            .checked_add(region.source_topology_id.len())
+            .ok_or(Error::Overflow)?;
+        bytes = bytes
+            .checked_add(region.source_topology_id.len())
+            .and_then(|v| {
+                region
+                    .assembly_path
+                    .len()
+                    .checked_mul(std::mem::size_of::<String>())
+                    .and_then(|w| v.checked_add(w))
+            })
+            .ok_or(Error::Overflow)?;
+        for component in &region.assembly_path {
+            region_visits = region_visits.checked_add(1).ok_or(Error::Overflow)?;
+            if region_visits > policy.max_traversal_operations {
+                return Err(Error::Limit("traversal operations"));
+            }
+            bytes = bytes.checked_add(component.len()).ok_or(Error::Overflow)?;
+            region_bytes = region_bytes
+                .checked_add(component.len())
+                .ok_or(Error::Overflow)?;
+        }
+        if bytes > policy.max_scratch_bytes {
+            return Err(Error::Limit("scratch bytes"));
+        }
+    }
+    let operations = base_operations
+        .checked_add(region_visits)
+        .and_then(|v| v.checked_add(region_bytes))
+        .ok_or(Error::Overflow)?;
+    if bytes > policy.max_scratch_bytes {
+        return Err(Error::Limit("scratch bytes"));
+    }
+    if operations > policy.max_traversal_operations {
+        return Err(Error::Limit("traversal operations"));
+    }
+    Ok(FiniteVolumeReservation {
+        cell_count: cells,
+        face_incidence_count: incidences,
+        boundary_face_count: boundaries,
+        scratch_bytes: bytes,
+        traversal_operations: operations,
+    })
+}
+
+pub(super) fn checked_counts(
+    cells: usize,
+    boundaries: usize,
+) -> Result<(usize, usize, usize), Error> {
+    let incidences = cells.checked_mul(4).ok_or(Error::Overflow)?;
+    let bytes = incidences
+        .checked_mul(1024)
+        .and_then(|v| cells.checked_mul(512).and_then(|w| v.checked_add(w)))
+        .and_then(|v| boundaries.checked_mul(512).and_then(|w| v.checked_add(w)))
+        .ok_or(Error::Overflow)?;
+    let total = incidences
+        .checked_add(boundaries)
+        .and_then(|v| v.checked_add(cells))
+        .ok_or(Error::Overflow)?;
+    let levels = usize::BITS as usize - total.leading_zeros() as usize + 1;
+    let operations = total
+        .checked_mul(levels)
+        .and_then(|v| v.checked_mul(128))
+        .ok_or(Error::Overflow)?;
+    Ok((incidences, bytes, operations))
+}
+
+pub(super) fn derive(
+    source: &AnalysisProjection,
+    policy: Policy,
+) -> Result<FiniteVolumeTopology, Error> {
+    let reservation = reserve(source, policy)?;
+    let mut order = (0..source.elements.len()).collect::<Vec<_>>();
+    order.sort_by_key(|&i| source.elements[i].stable_identity);
+    if order
+        .windows(2)
+        .any(|w| source.elements[w[0]].stable_identity == source.elements[w[1]].stable_identity)
+        || order
+            .iter()
+            .any(|&i| source.elements[i].stable_identity == StableDigest::ZERO)
+    {
+        return Err(Error::Invalid("duplicate or absent element identity"));
+    }
+    let mut cells = Vec::with_capacity(order.len());
+    let mut faces = BTreeMap::<[StableDigest; 3], FiniteVolumeFace>::new();
+    for (cell_index, &source_index) in order.iter().enumerate() {
+        let element = &source.elements[source_index];
+        let geometry::CellGeometry {
+            points,
+            identities,
+            volume,
+            centroid,
+        } = geometry::corners(source, source_index)?;
+        cells.push(FiniteVolumeCell {
+            element_identity: element.stable_identity,
+            element_id: element.element_id,
+            source_element_index: source_index,
+            geometry_order: element.order,
+            region: element.region_id.clone(),
+            volume_m3: volume,
+            centroid_m: centroid,
+            faces: [FiniteVolumeIncidence {
+                face_index: usize::MAX,
+                sign: 0,
+            }; 4],
+        });
+        for local in FACE_CORNERS {
+            let mut key = local.map(|i| identities[i]);
+            key.sort();
+            let (face_centroid, area, magnitude) =
+                geometry::face_geometry(local.map(|i| points[i]), centroid)?;
+            if let Some(face) = faces.get_mut(&key) {
+                if face.neighbor.is_some() {
+                    return Err(Error::Invalid("nonmanifold face"));
+                }
+                if geometry::length(std::array::from_fn(|i| {
+                    face.owner_area_vector_m2[i] + area[i]
+                })) > RELATIVE_TOLERANCE * magnitude
+                {
+                    return Err(Error::Invalid("shared face has nonopposite incidence"));
+                }
+                if geometry::length(subtract(face.centroid_m, face_centroid))
+                    > RELATIVE_TOLERANCE * magnitude.sqrt()
+                {
+                    return Err(Error::Invalid("shared face coordinates disagree"));
+                }
+                face.neighbor = Some(cell_index);
+            } else {
+                faces.insert(
+                    key,
+                    FiniteVolumeFace {
+                        corner_identities: key,
+                        centroid_m: face_centroid,
+                        owner_area_vector_m2: area,
+                        area_m2: magnitude,
+                        owner: cell_index,
+                        neighbor: None,
+                        boundary_source: None,
+                    },
+                );
+            }
+        }
+    }
+    for (boundary_index, boundary) in source.boundary_faces.iter().enumerate() {
+        geometry::validate_boundary_nodes(source, &boundary.node_indices)?;
+        let key = geometry::key(source, &boundary.node_indices)?;
+        let face = faces
+            .get_mut(&key)
+            .ok_or(Error::Invalid("boundary without volume face"))?;
+        if face.boundary_source.is_some() {
+            return Err(Error::Invalid("duplicate boundary face"));
+        }
+        let exterior = face.neighbor.is_none();
+        let role_is_exterior = matches!(
+            boundary.role,
+            BoundaryFaceRole::Exterior
+                | BoundaryFaceRole::ContactPrimary
+                | BoundaryFaceRole::ContactSecondary
+        );
+        if role_is_exterior != exterior {
+            return Err(Error::Invalid("boundary role/incidence mismatch"));
+        }
+        let expected = if exterior { 1 } else { 2 };
+        if boundary.adjacent_element_indices.len() != expected
+            || !boundary
+                .adjacent_element_indices
+                .contains(&cells[face.owner].source_element_index)
+            || face.neighbor.is_some_and(|n| {
+                !boundary
+                    .adjacent_element_indices
+                    .contains(&cells[n].source_element_index)
+            })
+        {
+            return Err(Error::Invalid("boundary original adjacency mismatch"));
+        }
+        if boundary.centroid_m.iter().any(|v| !v.is_finite())
+            || !geometry::close_scalar(boundary.area_m2, face.area_m2, face.area_m2)
+            || geometry::length(subtract(boundary.centroid_m, face.centroid_m))
+                > RELATIVE_TOLERANCE * face.area_m2.sqrt()
+        {
+            return Err(Error::Invalid("boundary geometry mismatch"));
+        }
+        // Interfaces may have their own canonical orientation; exterior must be outward.
+        let normal_difference = if exterior {
+            subtract(boundary.oriented_area_vector_m2, face.owner_area_vector_m2)
+        } else {
+            let sign = if dot(boundary.oriented_area_vector_m2, face.owner_area_vector_m2) >= 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
+            subtract(
+                boundary.oriented_area_vector_m2,
+                face.owner_area_vector_m2.map(|v| sign * v),
+            )
+        };
+        if normal_difference.iter().any(|v| !v.is_finite())
+            || geometry::length(normal_difference) > RELATIVE_TOLERANCE * face.area_m2
+        {
+            return Err(Error::Invalid("boundary area-vector mismatch"));
+        }
+        face.boundary_source = Some(FiniteVolumeBoundarySource {
+            projection_boundary_index: boundary_index,
+            face_id: boundary.face_id,
+            face_identity: boundary.stable_identity,
+        });
+    }
+    let faces = faces.into_values().collect::<Vec<_>>();
+    let mut counts = vec![0usize; cells.len()];
+    let mut area_sums = vec![[0.0; 3]; cells.len()];
+    let mut area_scales = vec![0.0; cells.len()];
+    let mut volumes = vec![0.0; cells.len()];
+    for (face_index, face) in faces.iter().enumerate() {
+        let delta = subtract(
+            face.neighbor
+                .map(|n| cells[n].centroid_m)
+                .unwrap_or(face.centroid_m),
+            cells[face.owner].centroid_m,
+        );
+        let conductance_geometry = dot(face.owner_area_vector_m2, delta);
+        if !conductance_geometry.is_finite() || conductance_geometry <= 0.0 {
+            return Err(Error::Invalid(
+                "nonpositive owner-neighbor geometric conductance",
+            ));
+        }
+        if face.neighbor.is_none() && face.boundary_source.is_none() {
+            return Err(Error::Invalid("missing original exterior boundary"));
+        }
+        for (cell, sign) in std::iter::once((face.owner, 1i8)).chain(face.neighbor.map(|n| (n, -1)))
+        {
+            let slot = cells[cell]
+                .faces
+                .get_mut(counts[cell])
+                .ok_or(Error::Invalid("cell face count"))?;
+            *slot = FiniteVolumeIncidence { face_index, sign };
+            counts[cell] += 1;
+            let area = face.owner_area_vector_m2.map(|v| v * f64::from(sign));
+            for (sum, value) in area_sums[cell].iter_mut().zip(area) {
+                *sum += value;
+            }
+            area_scales[cell] += face.area_m2;
+            // Translation invariant divergence theorem relative to this cell centroid.
+            volumes[cell] += dot(subtract(face.centroid_m, cells[cell].centroid_m), area) / 3.0;
+        }
+    }
+    for (i, cell) in cells.iter().enumerate() {
+        if counts[i] != 4
+            || geometry::length(area_sums[i]) > RELATIVE_TOLERANCE * area_scales[i]
+            || !geometry::close_scalar(volumes[i], cell.volume_m3, cell.volume_m3)
+        {
+            return Err(Error::Invalid("cell closure or conservative volume"));
+        }
+    }
+    let geometry_digest = identity(source, &cells, &faces);
+    Ok(FiniteVolumeTopology {
+        mesh_digest: source.mesh_digest,
+        projection_digest: source.projection_digest,
+        geometry_digest,
+        policy,
+        reservation,
+        cells,
+        faces,
+    })
+}
+
+fn identity(
+    source: &AnalysisProjection,
+    cells: &[FiniteVolumeCell],
+    faces: &[FiniteVolumeFace],
+) -> Digest {
+    let mut hash = Sha256::new();
+    hash.update(b"runmat-finite-volume-source-bound-geometry/v1\0");
+    hash.update(source.mesh_digest.bytes());
+    hash.update(source.projection_digest.bytes());
+    hash.update((cells.len() as u64).to_le_bytes());
+    hash.update((faces.len() as u64).to_le_bytes());
+    for cell in cells {
+        hash.update(cell.element_identity.bytes());
+        for value in [cell.volume_m3].into_iter().chain(cell.centroid_m) {
+            hash.update(value.to_bits().to_le_bytes());
+        }
+    }
+    for face in faces {
+        for corner in face.corner_identities {
+            hash.update(corner.bytes());
+        }
+        hash.update(cells[face.owner].element_identity.bytes());
+        hash.update(
+            face.neighbor
+                .map(|n| cells[n].element_identity)
+                .unwrap_or(StableDigest::ZERO)
+                .bytes(),
+        );
+        hash.update(
+            face.boundary_source
+                .map(|b| b.face_identity)
+                .unwrap_or(StableDigest::ZERO)
+                .bytes(),
+        );
+        for value in face
+            .centroid_m
+            .into_iter()
+            .chain(face.owner_area_vector_m2)
+            .chain([face.area_m2])
+        {
+            hash.update(value.to_bits().to_le_bytes());
+        }
+    }
+    Digest::from_bytes(hash.finalize().into())
+}

@@ -363,7 +363,7 @@ model multiphysics {
     constraint inlet {
         fluid.velocity {
             target = geometry.part.region.wall
-            value = 3 m/s
+            value = [3 m/s, 0 m/s, 0 m/s]
         }
     }
 }

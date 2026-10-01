@@ -13,6 +13,9 @@ use crate::{
 
 use super::{targets::TargetResolver, AnalysisModelRealizationError};
 
+#[cfg(test)]
+mod fluid_tests;
+
 pub(super) fn extend_constraints(
     target: &mut Vec<AnalysisConstraint>,
     source: &[AuthoredConstraint],

@@ -5,6 +5,7 @@ mod contract;
 mod derive;
 mod edge_space;
 mod element;
+mod finite_volume;
 mod flow;
 mod identity;
 mod point_location;
@@ -19,6 +20,11 @@ pub use contract::{
     ProjectedNode, VolumePointLocation, VolumeQuadraturePoint,
 };
 pub use edge_space::{EdgeElementMoments, EdgeQuadraturePoint, OrientedEdge, TetrahedralEdgeSpace};
+pub use finite_volume::{
+    FiniteVolumeBoundarySource, FiniteVolumeCell, FiniteVolumeFace, FiniteVolumeIncidence,
+    FiniteVolumeProjectionError, FiniteVolumeProjectionPolicy, FiniteVolumeReservation,
+    FiniteVolumeTopology,
+};
 pub use flow::FlowTopologyProjection;
 
 #[cfg(test)]

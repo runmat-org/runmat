@@ -159,6 +159,7 @@ pub(super) fn lower(
         }
     };
     Some(MaterialModel {
+        fluid: None,
         material_id: declaration.key.name.clone(),
         name: candidate.name.clone(),
         provenance: MaterialProvenance::ImportedCad(ImportedCadMaterialProvenance {

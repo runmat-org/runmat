@@ -92,7 +92,9 @@ impl<'a> PreparedProperties<'a> {
             &mut |selected| {
                 entry_count = entry_count.checked_add(1).ok_or_else(overflow)?;
                 let entry_bytes = match selected {
-                    SelectedProperty::Solid { .. } => map_entry_bytes::<CompiledElementMaterial>()?,
+                    SelectedProperty::Solid { .. } | SelectedProperty::Cell { .. } => {
+                        map_entry_bytes::<CompiledElementMaterial>()?
+                    }
                     SelectedProperty::Beam { .. } => map_entry_bytes::<CompiledBeamProperty>()?,
                     SelectedProperty::Shell { .. } => map_entry_bytes::<CompiledShellProperty>()?,
                     SelectedProperty::Laminate { section, .. } => add(
@@ -169,6 +171,7 @@ impl<'a> PreparedProperties<'a> {
                     .map(|prepared| prepared.topology_digest()),
             },
             output.solids,
+            output.cells,
             output.beams,
             output.shells,
             output.audit,

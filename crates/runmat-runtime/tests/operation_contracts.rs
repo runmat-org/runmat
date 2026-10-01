@@ -9,34 +9,6 @@ use runmat_analysis_core::{
     SignalValue, TabulatedSignal, TabulatedSignalDomain, Velocity,
 };
 
-fn fluid_constraint(
-    id: &str,
-    region: &str,
-    kind: &str,
-    value: f64,
-) -> runmat_analysis_core::AnalysisConstraint {
-    let target = runmat_analysis_core::RegionTarget::authored(region);
-    let kind = match kind {
-        "inlet" => runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
-            target,
-            value: runmat_analysis_core::PrescribedValue::Constant(
-                runmat_analysis_core::Velocity::new(value),
-            ),
-        },
-        "outlet" => runmat_analysis_core::FluidConstraintKind::PressureReference {
-            target,
-            value: runmat_analysis_core::PrescribedValue::Constant(
-                runmat_analysis_core::Pressure::new(value),
-            ),
-        },
-        _ => runmat_analysis_core::FluidConstraintKind::SlipWall { target },
-    };
-    runmat_analysis_core::AnalysisConstraint::Fluid(runmat_analysis_core::FluidConstraint {
-        constraint_id: id.to_string(),
-        kind,
-    })
-}
-
 fn exact_signal_evidence(sample_count: usize) -> SignalApproximationEvidence {
     SignalApproximationEvidence {
         max_absolute_error: Some(0.0),
@@ -151,14 +123,13 @@ use runmat_analysis_fea::{
     fea_nonlinear_load_factor_field_id, fea_nonlinear_residual_norm_field_id,
     fea_transient_residual_norm_field_id, ComputeBackend, ExecutionBackend, SolverMethod,
     FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_CFD_PRESSURE, FEA_FIELD_CFD_VELOCITY, FEA_FIELD_CFD_VORTICITY,
-    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
-    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS,
-    FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
-    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
-    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_MODAL_EIGENVALUE,
+    FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
+    FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
+    FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{EntityKind, GeometryAsset, UnitSystem};
 use runmat_meshing_core::{
@@ -1377,7 +1348,7 @@ fn analysis_run_acoustic_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
+fn analysis_run_cfd_rejects_vector_boundaries_in_the_reduced_executor() {
     let mut model = contract_linear_static_model();
     model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(
         "cfd_steady".to_string(),
@@ -1388,11 +1359,17 @@ fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
     });
     model.boundaries.clear();
-    model.constraints = vec![
-        fluid_constraint("bc_cfd_inlet", "fluid_inlet", "inlet", 4.25),
-        fluid_constraint("bc_cfd_outlet", "fluid_outlet", "outlet", 0.0),
-        fluid_constraint("bc_cfd_wall", "fluid_wall", "slip", 0.0),
-    ];
+    // Explicit signed components are authored by this fixture, never inferred from speed.
+    let velocity = [-4.25, 1.0, -2.0].map(Velocity::new);
+    model.constraints = vec![runmat_analysis_core::AnalysisConstraint::Fluid(
+        runmat_analysis_core::FluidConstraint {
+            constraint_id: "bc_cfd_inlet".into(),
+            kind: runmat_analysis_core::FluidConstraintKind::PrescribedVelocity {
+                target: RegionTarget::authored("fluid_inlet"),
+                value: runmat_analysis_core::PrescribedValue::Constant(velocity),
+            },
+        },
+    )];
 
     let envelope = analysis_run_cfd_with_options_op(
         &model,
@@ -1401,40 +1378,20 @@ fn analysis_run_cfd_contract_shapes_cell_and_boundary_fields() {
         Default::default(),
         OperationContext::new(Some("trace-contract-cfd-1".to_string()), None),
     )
-    .expect("cfd run should return envelope");
+    .expect_err("the reduced executor cannot erase vector boundary authority");
     assert_eq!(envelope.operation, "fea.run_cfd");
     assert_eq!(envelope.op_version, "fea.run_cfd/v1");
     assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::CfdVelocityPressureFiniteVolume
+        envelope.error_code,
+        "RM.FEA.RUN_CFD.INVALID_BOUNDARY_CONDITIONS"
     );
-
-    let velocity = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_VELOCITY)
-        .expect("cfd velocity field should be present");
-    let pressure = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_PRESSURE)
-        .expect("cfd pressure field should be present");
-    let vorticity = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_VORTICITY)
-        .expect("cfd vorticity field should be present");
-    let wall_shear = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CFD_WALL_SHEAR_STRESS)
-        .expect("cfd wall shear field should be present");
-    assert_eq!(velocity.shape.len(), 2);
-    assert_eq!(velocity.shape[1], 3);
-    assert_eq!(pressure.shape, vec![velocity.shape[0]]);
-    assert_eq!(vorticity.shape, velocity.shape);
-    assert_eq!(wall_shear.shape, vec![1, 3]);
-    assert_ne!(wall_shear.shape[0], velocity.shape[0]);
+    assert!(!envelope.retryable);
+    assert!(envelope.message.contains("canonical finite-volume"));
+    let wire = serde_json::to_value(&envelope).unwrap();
+    assert!(
+        wire.get("data").is_none(),
+        "rejection must not publish proxy fields"
+    );
 }
 
 #[test]

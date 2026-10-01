@@ -1,5 +1,6 @@
 //! Experimental incompressible finite-volume formulation and shared fluid-domain behavior.
 
+pub mod canonical;
 mod diagnostics;
 mod domain;
 mod interface;

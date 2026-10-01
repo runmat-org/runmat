@@ -7,8 +7,8 @@ outlet flux law.
 
 | Kind | Required fields | Meaning |
 | --- | --- | --- |
-| `fluid.velocity` | `target`, scalar `value` in m/s | Prescribe the formulation's scalar velocity boundary value |
-| `fluid.moving_wall` | `target`, scalar `value` in m/s | Prescribe the formulation's scalar wall-speed value |
+| `fluid.velocity` | `target`, three-component `value` in m/s or vector velocity signal | Prescribe the full velocity vector |
+| `fluid.moving_wall` | `target`, three-component `value` in m/s or vector velocity signal | Prescribe the full wall-velocity vector |
 | `fluid.no_slip_wall` | `target` | Match velocity to a stationary wall |
 | `fluid.slip_wall` | `target` | Prevent normal flow while permitting tangential slip |
 | `fluid.symmetry` | `target` | Apply a symmetry-plane condition |
@@ -43,9 +43,26 @@ constraint pressure_datum {
 
 ## How do I prescribe an inlet velocity profile?
 
-The current `fluid.velocity` constraint accepts one scalar value; it does not accept a vector,
-frame, direction, or spatial profile. For a directed uniform inlet, use a scalar velocity signal and
-an `inlet_velocity` excitation:
+`fluid.velocity` and `fluid.moving_wall` require exactly three signed velocity components.
+Inline components are explicitly global coordinates, for example:
+
+```fea
+constraint inlet {
+    fluid.velocity {
+        target = geometry.channel.region.inlet
+        value = [-1.5 m/s, 0 m/s, 0 m/s]
+    }
+}
+```
+
+`value = signal.<name>` instead retains a declared three-component velocity signal, including
+its frame and constant/table representation. It is not converted to a speed, maximum magnitude,
+or guessed axis. The formulation must explicitly support realizing that signal at the boundary;
+unsupported frames or histories are rejected. Scalar constants and scalar signals are not vector
+constraint inputs. The reduced channel adapter cannot realize these exact vector constraints and
+rejects them; this shared input contract alone does not qualify a numerical flow solver.
+
+For a scalar speed with an explicitly declared direction, the shared excitation form is:
 
 ```fea
 signal inlet_speed : velocity over constant {
@@ -66,9 +83,12 @@ load_case operating { include excitation.uniform_inlet }
 
 `direction` is a dimensionless global vector. The signal carries m/s and may instead be defined over
 time when a transient procedure consumes it. Use `mass_flow` when the total flow is known but its
-spatial profile is not. The scalar `fluid.velocity` form remains available to formulations that
-define what that scalar component means; it must not be documented or read as a three-component
-Cartesian vector.
+spatial profile is not, when the selected formulation supports conservative realization.
+The runtime velocity-constraint constructors likewise require a cell vector of three typed
+`fea.Velocity` values (global components), or a framed three-component `fea.VelocitySignal`
+also retained in the model signal inventory. They do not reinterpret one scalar velocity value
+as a vector. A pressure reference remains a gauge, not a physical outlet boundary; physical
+outlet pressure uses the existing `fluid.outlet_pressure` boundary operator.
 
 ## How do I prescribe only the normal inlet speed?
 

@@ -30,6 +30,7 @@ pub fn solve_reduced_finite_volume(
     options: &ReducedCfdSolveOptions,
     solver_mesh: Option<&SolverMeshArtifact>,
 ) -> Result<FeaRunResult, String> {
+    domain::validate_authored_boundary_conditions(model)?;
     let topology = CfdDomainTopology::from_model(model, solver_mesh);
     let node_count = topology.node_count;
     let sample_count = if identity.procedure() == AnalysisProcedure::TransientResponse {

@@ -154,10 +154,11 @@ pub use problem::material_assignment::{
     PropertyRegionTarget,
 };
 pub use problem::materials::{
-    ConductivityFrequencyPoint, ImportedCadEnvironmentCondition, ImportedCadMaterialAssociation,
-    ImportedCadMaterialAssociationTarget, ImportedCadMaterialProperty,
-    ImportedCadMaterialPropertyKind, ImportedCadMaterialProvenance, MaterialAcousticModel,
-    MaterialCapability, MaterialElasticityModel, MaterialElectricalModel, MaterialMechanicalModel,
+    ConductivityFrequencyPoint, FluidMaterialError, ImportedCadEnvironmentCondition,
+    ImportedCadMaterialAssociation, ImportedCadMaterialAssociationTarget,
+    ImportedCadMaterialProperty, ImportedCadMaterialPropertyKind, ImportedCadMaterialProvenance,
+    IncompressibleNewtonianMaterial, MaterialAcousticModel, MaterialCapability,
+    MaterialElasticityModel, MaterialElectricalModel, MaterialFluidModel, MaterialMechanicalModel,
     MaterialModel, MaterialOrthotropicLaminaModel, MaterialPlasticModel, MaterialProvenance,
     MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability, SolverMaterialModel,
 };

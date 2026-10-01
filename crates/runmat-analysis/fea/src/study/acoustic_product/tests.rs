@@ -327,6 +327,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
     let materials = BTreeMap::from([(
         material_ref,
         MaterialModel {
+            fluid: None,
             material_id: "fluid".into(),
             name: "Test fluid".into(),
             provenance: MaterialProvenance::Authored,

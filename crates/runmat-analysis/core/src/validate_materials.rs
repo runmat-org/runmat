@@ -91,6 +91,7 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
         && material.damping.is_none()
         && material.thermal.is_none()
         && material.acoustic.is_none()
+        && material.fluid.is_none()
         && material.electrical.is_none()
         && material.plastic.is_none()
     {
@@ -101,6 +102,11 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     }
     if let Some(density) = material.mass_density_kg_per_m3 {
         require_positive(material, "mass density", density)?;
+    }
+    if material.fluid.is_some() {
+        material
+            .require_incompressible_newtonian()
+            .map_err(|error| invalid_material(material, error.to_string()))?;
     }
     if let Some(crate::MaterialElasticityModel::IsotropicLinear(mechanical)) = &material.elasticity
     {
@@ -459,6 +465,7 @@ mod tests {
 
     fn material() -> MaterialModel {
         MaterialModel {
+            fluid: None,
             material_id: "steel".to_string(),
             name: "Steel".to_string(),
             provenance: crate::MaterialProvenance::Authored,

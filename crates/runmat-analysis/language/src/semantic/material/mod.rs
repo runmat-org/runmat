@@ -8,7 +8,7 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_material_definitions, MaterialAcousticModel, MaterialElasticityModel,
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialElectricalModel, MaterialFluidModel, MaterialMechanicalModel, MaterialModel,
     MaterialOrthotropicLaminaModel, MaterialPlasticModel, MaterialThermalModel,
     MechanicalDampingModel, RayleighMassCoefficient, RayleighStiffnessCoefficient,
 };
@@ -53,6 +53,19 @@ fn lower_material(
     validate_authored_shape(declaration, diagnostics);
     let name = values::string_assignment(&declaration.statements, "name")
         .unwrap_or_else(|| declaration.key.name.clone());
+    let fluid = values::block(&declaration.statements, "fluid").and_then(|statements| {
+        let law = values::assignment(statements, "law");
+        if !matches!(law.map(|value| &value.kind), Some(crate::CheckedExpressionKind::Enum(name)) if name == "incompressible_newtonian") {
+            error(declaration, "fluid law must be explicitly `incompressible_newtonian`", diagnostics);
+            return None;
+        }
+        Some(MaterialFluidModel::IncompressibleNewtonian {
+            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(values::required_quantity(
+                declaration, statements, "dynamic_viscosity",
+                PhysicalDimension::new([-1, 1, -1, 0, 0, 0, 0, 0]), diagnostics,
+            )?),
+        })
+    });
     let mass_density_kg_per_m3 = values::optional_quantity(
         declaration,
         &declaration.statements,
@@ -282,6 +295,7 @@ fn lower_material(
         damping,
         thermal,
         acoustic,
+        fluid,
         electrical,
         plastic,
     }
@@ -320,6 +334,7 @@ fn validate_authored_shape(
             ],
         ),
         ("acoustic", &["speed_of_sound", "damping_ratio"]),
+        ("fluid", &["law", "dynamic_viscosity"]),
         (
             "electrical",
             &[

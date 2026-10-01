@@ -105,11 +105,11 @@ pub enum AuthoredConstraintKind {
     AcousticPhaseShiftedPeriodic(AuthoredPhaseShiftedPeriodicConstraint),
     FluidVelocity {
         target: AuthoredConstraintTarget,
-        value: PrescribedValue<Velocity>,
+        value: PrescribedValue<[Velocity; 3]>,
     },
     FluidMovingWall {
         target: AuthoredConstraintTarget,
-        velocity: PrescribedValue<Velocity>,
+        velocity: PrescribedValue<[Velocity; 3]>,
     },
     FluidNoSlipWall {
         target: AuthoredConstraintTarget,
@@ -383,7 +383,7 @@ impl AuthoredConstraintKind {
             | Self::FluidMovingWall {
                 velocity: PrescribedValue::Constant(value),
                 ..
-            } => value.meters_per_second.is_finite(),
+            } => value.iter().all(|component| component.is_finite()),
             Self::StructuralNormalDisplacement {
                 value: PrescribedValue::Constant(value),
                 ..

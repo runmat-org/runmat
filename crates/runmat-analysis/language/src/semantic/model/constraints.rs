@@ -14,7 +14,7 @@ mod motion;
 mod relational;
 mod values;
 
-use values::prescribed_value;
+use values::{prescribed_value, prescribed_vector};
 
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
@@ -140,7 +140,7 @@ fn constraint(
         },
         "fluid.velocity" => AuthoredConstraintKind::FluidVelocity {
             target,
-            value: prescribed_value(
+            value: prescribed_vector(
                 declaration,
                 body,
                 "value",
@@ -152,7 +152,7 @@ fn constraint(
         },
         "fluid.moving_wall" => AuthoredConstraintKind::FluidMovingWall {
             target,
-            velocity: prescribed_value(
+            velocity: prescribed_vector(
                 declaration,
                 body,
                 "value",

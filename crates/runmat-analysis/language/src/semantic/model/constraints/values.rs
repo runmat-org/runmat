@@ -4,8 +4,8 @@ use crate::{
     CheckedFeaStatementKind, FeaDiagnostic, FeaType, PhysicalDimension,
 };
 use runmat_analysis_core::{
-    CoordinateFrame, PhysicalQuantityKind, PhysicalSignal, PrescribedValue, SignalId, SignalShape,
-    StructuralTranslationDof,
+    CoordinateFrame, PhysicalQuantityKind, PhysicalSignal, PrescribedQuantity, PrescribedValue,
+    SignalId, StructuralTranslationDof,
 };
 
 pub(super) fn optional_assignment<'a>(
@@ -62,7 +62,7 @@ pub(super) fn quantity(
     })
 }
 
-pub(super) fn prescribed_value<Q>(
+pub(super) fn prescribed_value<Q: PrescribedQuantity>(
     declaration: &CheckedFeaDeclaration,
     body: &[CheckedFeaStatement],
     name: &str,
@@ -71,7 +71,56 @@ pub(super) fn prescribed_value<Q>(
     constant: impl FnOnce(f64) -> Q,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<PrescribedValue<Q>> {
-    let (dimension, quantity_kind) = expected;
+    prescribed_source(
+        declaration,
+        body,
+        name,
+        expected.1,
+        signals,
+        |value, diagnostics| {
+            quantity(declaration, value, name, expected.0, diagnostics).map(constant)
+        },
+        diagnostics,
+    )
+}
+
+/// Inline components use the global frame. A referenced vector signal retains its
+/// original frame and representation; no scalar speed or guessed direction is accepted.
+pub(super) fn prescribed_vector<Q>(
+    declaration: &CheckedFeaDeclaration,
+    body: &[CheckedFeaStatement],
+    name: &str,
+    expected: (PhysicalDimension, PhysicalQuantityKind),
+    signals: &[PhysicalSignal],
+    constant: impl Fn(f64) -> Q,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<PrescribedValue<[Q; 3]>>
+where
+    [Q; 3]: PrescribedQuantity,
+{
+    prescribed_source(
+        declaration,
+        body,
+        name,
+        expected.1,
+        signals,
+        |_, diagnostics| {
+            required_vector(declaration, body, name, expected.0, diagnostics)
+                .map(|values| values.map(constant))
+        },
+        diagnostics,
+    )
+}
+
+fn prescribed_source<Q: PrescribedQuantity>(
+    declaration: &CheckedFeaDeclaration,
+    body: &[CheckedFeaStatement],
+    name: &str,
+    quantity_kind: PhysicalQuantityKind,
+    signals: &[PhysicalSignal],
+    constant: impl FnOnce(&CheckedExpression, &mut Vec<FeaDiagnostic>) -> Option<Q>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<PrescribedValue<Q>> {
     let value = required_assignment(declaration, body, name, diagnostics)?;
     if let CheckedExpressionKind::Reference(path) = &value.kind {
         let [namespace, signal_name] = path.as_slice() else {
@@ -98,22 +147,24 @@ pub(super) fn prescribed_value<Q>(
         if !signals.iter().any(|signal| {
             signal.signal_id() == &id
                 && signal.quantity() == quantity_kind
-                && signal.shape() == &SignalShape::Scalar
+                && signal.shape() == &Q::SHAPE
         }) {
             invalid(
                 declaration,
                 value,
                 name,
-                "a declared scalar signal with the required physical quantity",
+                if Q::SHAPE == runmat_analysis_core::SignalShape::Scalar {
+                    "a declared scalar signal with the required physical quantity"
+                } else {
+                    "a declared vector signal with the required physical quantity and shape"
+                },
                 diagnostics,
             );
             return None;
         }
         return Some(PrescribedValue::Signal(id));
     }
-    quantity(declaration, value, name, dimension, diagnostics)
-        .map(constant)
-        .map(PrescribedValue::Constant)
+    constant(value, diagnostics).map(PrescribedValue::Constant)
 }
 
 pub(super) fn optional_vector(

@@ -19,11 +19,11 @@ pub struct FluidConstraint {
 pub enum FluidConstraintKind {
     PrescribedVelocity {
         target: RegionTarget,
-        value: PrescribedValue<Velocity>,
+        value: PrescribedValue<[Velocity; 3]>,
     },
     MovingWall {
         target: RegionTarget,
-        velocity: PrescribedValue<Velocity>,
+        velocity: PrescribedValue<[Velocity; 3]>,
     },
     NoSlipWall {
         target: RegionTarget,
@@ -35,6 +35,7 @@ pub enum FluidConstraintKind {
         target: RegionTarget,
     },
     Periodic(PeriodicConstraint),
+    /// Gauge only; does not supply a physical outlet traction condition.
     PressureReference {
         target: RegionTarget,
         value: PrescribedValue<Pressure>,
