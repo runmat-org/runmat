@@ -1163,6 +1163,8 @@ thread_local! {
 #[doc(hidden)]
 pub struct PlotTestLockGuard {
     _guard: std::sync::MutexGuard<'static, ()>,
+    #[cfg(test)]
+    _global_state: crate::builtins::common::test_support::GlobalStateTestGuard,
     disable_previous: Option<std::ffi::OsString>,
     host_previous: Option<std::ffi::OsString>,
 }
@@ -1196,6 +1198,10 @@ impl PlotTestLockGuard {
 
 #[doc(hidden)]
 pub fn lock_plot_test_registry() -> PlotTestLockGuard {
+    // Plot fixtures may also use RNG or acceleration fixtures. Acquire their
+    // shared outer guard first so both nesting orders have one lock order.
+    #[cfg(test)]
+    let global_state = crate::builtins::common::test_support::global_state_test_guard();
     let guard = TEST_PLOT_REGISTRY_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
@@ -1205,6 +1211,8 @@ pub fn lock_plot_test_registry() -> PlotTestLockGuard {
     set_plot_test_env_vars();
     PlotTestLockGuard {
         _guard: guard,
+        #[cfg(test)]
+        _global_state: global_state,
         disable_previous,
         host_previous,
     }
