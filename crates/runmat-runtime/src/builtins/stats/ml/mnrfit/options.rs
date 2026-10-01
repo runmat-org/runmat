@@ -1,0 +1,81 @@
+//! Name-value identity admission for multinomial fitting.
+
+use super::{invalid, scalar_text};
+use crate::BuiltinResult;
+use runmat_value::Value;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum OptionName {
+    Model,
+    Link,
+    Constant,
+    Interactions,
+    Weights,
+    IterationLimit,
+    MaxIter,
+    Tolerance,
+    TolX,
+    Options,
+    Display,
+    EstDisp,
+}
+
+impl OptionName {
+    fn from_public(text: &str) -> Option<Self> {
+        Some(match text.to_ascii_lowercase().as_str() {
+            "model" => Self::Model,
+            "link" => Self::Link,
+            "constant" => Self::Constant,
+            "interactions" => Self::Interactions,
+            "weights" => Self::Weights,
+            "iterationlimit" => Self::IterationLimit,
+            "maxiter" => Self::MaxIter,
+            "tolerance" => Self::Tolerance,
+            "tolx" => Self::TolX,
+            "options" => Self::Options,
+            "display" => Self::Display,
+            "estdisp" => Self::EstDisp,
+            _ => return None,
+        })
+    }
+}
+
+pub(super) struct OptionSlot {
+    spelling: Option<String>,
+    identity: Option<OptionName>,
+}
+
+pub(super) fn inspect(values: &[Value]) -> Vec<OptionSlot> {
+    values
+        .chunks_exact(2)
+        .map(|pair| {
+            let spelling = scalar_text(&pair[0]);
+            let identity = spelling.as_deref().and_then(OptionName::from_public);
+            OptionSlot { spelling, identity }
+        })
+        .collect()
+}
+
+pub(super) fn identities(slots: &[OptionSlot]) -> impl Iterator<Item = Option<OptionName>> + '_ {
+    slots.iter().map(|slot| slot.identity)
+}
+
+pub(super) fn validate(values: &[Value], slots: Vec<OptionSlot>) -> BuiltinResult<Vec<OptionName>> {
+    if !values.len().is_multiple_of(2) {
+        return Err(invalid("mnrfit: name-value options must be paired"));
+    }
+    slots
+        .into_iter()
+        .map(|slot| {
+            let spelling = slot
+                .spelling
+                .ok_or_else(|| invalid("mnrfit: option name must be text"))?;
+            slot.identity.ok_or_else(|| {
+                invalid(format!(
+                    "mnrfit: unknown option '{}'",
+                    spelling.to_ascii_lowercase()
+                ))
+            })
+        })
+        .collect()
+}

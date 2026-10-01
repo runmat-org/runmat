@@ -1,5 +1,9 @@
 //! Multinomial logistic regression compatibility helper.
 
+mod options;
+
+use options::OptionName;
+
 use runmat_value::{IntValue, NumericScalar};
 use std::cmp::Ordering;
 
@@ -339,11 +343,14 @@ struct FitResult {
     builtin_path = "crate::builtins::stats::ml::mnrfit"
 )]
 pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_extensions(&x, &y, &rest)?;
+    let inspected = options::inspect(&rest);
+    ensure_extensions(&x, &y, &rest, &inspected)?;
+    let names = options::validate(&rest, inspected)?;
     let x = gather_value(x).await?;
     let y = gather_value(y).await?;
-    let rest = gather_values(rest).await?;
-    let options = parse_options(rest)?;
+    let values = rest.into_iter().skip(1).step_by(2).collect();
+    let values = gather_values(values).await?;
+    let options = parse_options(names.into_iter().zip(values).collect())?;
     let result = fit(x, y, options)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::OutputList(Vec::new())),
@@ -356,7 +363,12 @@ pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
     }
 }
 
-fn ensure_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_extensions(
+    x: &Value,
+    y: &Value,
+    rest: &[Value],
+    inspected: &[options::OptionSlot],
+) -> BuiltinResult<()> {
     if is_typed_integer(x) {
         crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_X_EXTENSION, NAME)?;
     }
@@ -366,25 +378,30 @@ fn ensure_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> 
     if is_logical(x) {
         crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_X_EXTENSION, NAME)?;
     }
-    for pair in rest.chunks_exact(2) {
-        let Some(name) = scalar_text(&pair[0]).map(|name| name.to_ascii_lowercase()) else {
-            continue;
-        };
+    for (name, pair) in options::identities(inspected).zip(rest.chunks_exact(2)) {
+        let Some(name) = name else { continue };
         let value = &pair[1];
-        match name.as_str() {
-            "iterationlimit" => ensure_integer_option(value, &INTEGER_CONTROL_EXTENSION)?,
-            "weights" | "tolerance" => ensure_integer_option(value, &INTEGER_PARAMETER_EXTENSION)?,
-            "maxiter" | "tolx" | "options" | "constant" | "display" => {
+        match name {
+            OptionName::IterationLimit => ensure_integer_option(value, &INTEGER_CONTROL_EXTENSION)?,
+            OptionName::Weights | OptionName::Tolerance => {
+                ensure_integer_option(value, &INTEGER_PARAMETER_EXTENSION)?
+            }
+            OptionName::MaxIter
+            | OptionName::TolX
+            | OptionName::Options
+            | OptionName::Constant
+            | OptionName::Display => {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &LEGACY_OPTIONS_EXTENSION,
                     NAME,
                 )?;
-                if name == "maxiter" {
-                    ensure_integer_option(value, &INTEGER_CONTROL_EXTENSION)?;
-                } else if name == "tolx" {
-                    ensure_integer_option(value, &INTEGER_PARAMETER_EXTENSION)?;
-                } else if name == "options" {
-                    ensure_nested_option_integers(value)?;
+                match name {
+                    OptionName::MaxIter => {
+                        ensure_integer_option(value, &INTEGER_CONTROL_EXTENSION)?
+                    }
+                    OptionName::TolX => ensure_integer_option(value, &INTEGER_PARAMETER_EXTENSION)?,
+                    OptionName::Options => ensure_nested_option_integers(value)?,
+                    _ => {}
                 }
             }
             _ => {}
@@ -971,18 +988,11 @@ fn cellstr_outcomes(cell: &CellArray, rows: usize) -> BuiltinResult<ResponseOutc
     text_outcomes(labels, cell.shape.clone(), rows)
 }
 
-fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
-    if !values.len().is_multiple_of(2) {
-        return Err(invalid("mnrfit: name-value options must be paired"));
-    }
+fn parse_options(values: Vec<(OptionName, Value)>) -> BuiltinResult<Options> {
     let mut options = Options::default();
-    let mut index = 0usize;
-    while index < values.len() {
-        let name = scalar_text(&values[index])
-            .ok_or_else(|| invalid("mnrfit: option name must be text"))?;
-        let value = &values[index + 1];
-        match name.to_ascii_lowercase().as_str() {
-            "model" => {
+    for (name, value) in &values {
+        match name {
+            OptionName::Model => {
                 let model = scalar_text(value)
                     .ok_or_else(|| invalid("mnrfit: Model option must be text"))?;
                 match model.to_ascii_lowercase().as_str() {
@@ -994,7 +1004,7 @@ fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
                     }
                 }
             }
-            "link" => {
+            OptionName::Link => {
                 let link = scalar_text(value)
                     .ok_or_else(|| invalid("mnrfit: Link option must be text"))?;
                 match link.to_ascii_lowercase().as_str() {
@@ -1006,7 +1016,7 @@ fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
                     }
                 }
             }
-            "constant" => {
+            OptionName::Constant => {
                 options.constant = match text_or_logical(value, "Constant")? {
                     BoolOrText::Bool(flag) => flag,
                     BoolOrText::Text(text) => match text.to_ascii_lowercase().as_str() {
@@ -1020,7 +1030,7 @@ fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
                     },
                 };
             }
-            "interactions" => {
+            OptionName::Interactions => {
                 let text = scalar_text(value)
                     .ok_or_else(|| invalid("mnrfit: Interactions option must be text"))?;
                 if !text.eq_ignore_ascii_case("off") {
@@ -1029,17 +1039,21 @@ fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
                     ));
                 }
             }
-            "weights" => options.weights = Some(numeric_vector(value.clone(), "Weights")?),
-            "maxiter" | "iterationlimit" => {
+            OptionName::Weights => {
+                options.weights = Some(numeric_vector(value.clone(), "Weights")?)
+            }
+            OptionName::MaxIter | OptionName::IterationLimit => {
                 options.max_iter = positive_integer(value, "IterationLimit")?
             }
-            "tolx" | "tolerance" => options.tol_x = positive_scalar(value, "Tolerance")?,
-            "options" => apply_statset_options(value, &mut options)?,
-            "display" => {
+            OptionName::TolX | OptionName::Tolerance => {
+                options.tol_x = positive_scalar(value, "Tolerance")?
+            }
+            OptionName::Options => apply_statset_options(value, &mut options)?,
+            OptionName::Display => {
                 let _ = scalar_text(value)
                     .ok_or_else(|| invalid("mnrfit: Display option must be text"))?;
             }
-            "estdisp" => {
+            OptionName::EstDisp => {
                 let text = scalar_text(value)
                     .ok_or_else(|| invalid("mnrfit: EstDisp option must be text"))?;
                 if !text.eq_ignore_ascii_case("off") {
@@ -1048,9 +1062,7 @@ fn parse_options(values: Vec<Value>) -> BuiltinResult<Options> {
                     ));
                 }
             }
-            other => return Err(invalid(format!("mnrfit: unknown option '{other}'"))),
         }
-        index += 2;
     }
     if options.max_iter == 0 {
         return Err(invalid("mnrfit: IterationLimit must be positive"));
@@ -1390,6 +1402,48 @@ mod tests {
         };
         assert!(stats.fields.contains_key("se"));
         assert!(stats.fields.contains_key("covb"));
+    }
+
+    #[test]
+    fn mnrfit_admits_option_identity_before_resident_download() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x).unwrap();
+            let y = tensor_value(vec![1.0, 1.0, 2.0, 2.0], 4, 1);
+            let err = block_on(mnrfit_builtin(
+                Value::GpuTensor(handle.clone()),
+                y.clone(),
+                vec![Value::from("UnknownOption"), Value::Num(1.0)],
+            ))
+            .expect_err("unknown option must fail before downloading X");
+            assert!(err.message().contains("unknown option 'unknownoption'"));
+
+            let err = block_on(mnrfit_builtin(
+                Value::GpuTensor(handle),
+                y,
+                vec![Value::from("Weights"), Value::Num(1.0), Value::from("TolX")],
+            ))
+            .expect_err("odd name-value tail must fail before downloading X");
+            assert!(err.message().contains("name-value options must be paired"));
+        });
+    }
+
+    #[test]
+    fn mnrfit_inspection_keeps_option_positions_for_compatibility_gates() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let err = block_on(mnrfit_builtin(
+            tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
+            tensor_value(vec![1.0, 1.0, 2.0, 2.0], 4, 1),
+            vec![
+                Value::from("UnknownOption"),
+                Value::Num(1.0),
+                Value::from("MaxIter"),
+                Value::Num(10.0),
+            ],
+        ))
+        .expect_err("later legacy option retains its original compatibility gate");
+        assert_eq!(err.identifier(), LEGACY_OPTIONS_EXTENSION.error_identifier);
     }
 
     #[test]
