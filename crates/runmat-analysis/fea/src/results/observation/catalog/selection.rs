@@ -12,6 +12,7 @@ mod tests;
 /// selects exactly one authored source sample. This is not a partition or CPU coordinate.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObservationSelectionCoordinate {
+    SampledRecovery,
     StructuralRecovery,
     ThermalSample { ordinal: usize },
 }
@@ -29,6 +30,19 @@ impl ObservationFieldCatalog {
         plan.validate_identity().map_err(invalid)?;
         let selected = self.canonical_selected_fields(plan, coordinate)?;
         match (&self.source, coordinate) {
+            (
+                ObservationFieldCatalogSource::SampledRecovery {
+                    recovery_request,
+                    manifest,
+                    sampling,
+                },
+                ObservationSelectionCoordinate::SampledRecovery,
+            ) => ObservationFieldSelection::sampled_recovery(
+                recovery_request,
+                manifest,
+                sampling,
+                selected,
+            ),
             (
                 ObservationFieldCatalogSource::Structural {
                     recovery_request,
@@ -63,6 +77,9 @@ impl ObservationFieldCatalog {
         selection: &ObservationFieldSelection,
     ) -> AnalysisExecutionResult<()> {
         let coordinate = match selection.source() {
+            ObservationFieldSource::SampledRecovery { .. } => {
+                ObservationSelectionCoordinate::SampledRecovery
+            }
             ObservationFieldSource::StructuralRecovery { .. } => {
                 ObservationSelectionCoordinate::StructuralRecovery
             }
@@ -94,6 +111,10 @@ impl ObservationFieldCatalog {
         coordinate: ObservationSelectionCoordinate,
     ) -> AnalysisExecutionResult<Vec<RecoveredFieldIdentity>> {
         let entries: &[_] = match (&self.source, coordinate) {
+            (
+                ObservationFieldCatalogSource::SampledRecovery { manifest, .. },
+                ObservationSelectionCoordinate::SampledRecovery,
+            ) => &manifest.fields,
             (
                 ObservationFieldCatalogSource::Structural { manifest, .. },
                 ObservationSelectionCoordinate::StructuralRecovery,

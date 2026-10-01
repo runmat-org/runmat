@@ -1,8 +1,16 @@
 use super::*;
+mod magnetic;
 
 pub(super) fn execute_field_recovery(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+    if invocation
+        .inputs
+        .iter()
+        .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::MagnetostaticWorkload)
+    {
+        return magnetic::execute(invocation);
+    }
     if invocation.inputs.iter().any(|input| {
         input.manifest.kind == AnalysisNumericalObjectKind::StructuralFrequencyWorkload
     }) {
@@ -113,7 +121,7 @@ pub(super) fn execute_field_recovery(
     recovered_field_output(&artifact)
 }
 
-fn recovered_field_output(
+pub(super) fn recovered_field_output(
     artifact: &RecoveredFieldArtifact,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
     let manifest = artifact

@@ -47,6 +47,8 @@ pub fn validate_canonical_input<'a>(
         .iter()
         .find(|step| step.step_id.as_str() == step_id)
         .ok_or_else(|| MagnetostaticError::InvalidInput("magnetic step not found".into()))?;
+    crate::results::observation::validate_sampled_requests(step)
+        .map_err(|error| MagnetostaticError::Unsupported(error.to_string()))?;
     if step.family != PhysicsFamily::Electromagnetic
         || step.procedure != AnalysisProcedure::Static
         || step.solution_space != SolutionSpace::Direct
@@ -58,7 +60,6 @@ pub fn validate_canonical_input<'a>(
             output.kind != StateKind::ElectromagneticStatic
                 || output.completeness != StateCompleteness::Complete
         })
-        || !step.observations.is_empty()
         || !step.activations.is_empty()
         || model.sequence.steps.len() != 1
         || !model.sequence.dependencies.is_empty()

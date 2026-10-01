@@ -32,6 +32,18 @@ pub(crate) fn require_canonical_ceiling(
     mesh: &SolverMeshArtifact,
     maximum: u64,
 ) -> Result<MagneticNumericalReservation, MagnetostaticError> {
+    let (nodes, elements, faces, projection, metadata, selected) =
+        canonical_validation_facts(model, mesh)?;
+    require_fits(
+        from_counts(nodes, elements, faces, projection, metadata, selected)?,
+        maximum,
+    )
+}
+
+fn canonical_validation_facts(
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+) -> Result<(u64, u64, u64, u64, u64, u64), MagnetostaticError> {
     let projection = AnalysisProjection::derivation_resident_bytes_estimate(mesh)
         .map_err(|error| resource(error.to_string()))?;
     let metadata = profile_serialized(model, LIMITS)
@@ -56,15 +68,77 @@ pub(crate) fn require_canonical_ceiling(
                 .materialization_resident_bytes_estimate,
         );
     }
-    let reservation = from_counts(
+    Ok((
         count(mesh.topology.nodes.len())?,
         count(mesh.topology.volume_elements.len())?,
         count(mesh.topology.boundary_faces.len())?,
         projection,
         metadata,
         add(material, assignment)?,
-    )?;
-    require_fits(reservation, maximum)
+    ))
+}
+
+/// Source-bound validation only: exact raw topology/provenance, support maps and
+/// replicated selected properties. No matrix, Krylov storage or retained response.
+pub(crate) fn canonical_validation_workspace(
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+) -> Result<u64, MagnetostaticError> {
+    let (nodes, elements, faces, projection, metadata, selected) =
+        canonical_validation_facts(model, mesh)?;
+    let (support, properties) = validation_components(nodes, elements, faces, metadata, selected)?;
+    // validate_for_mesh independently regenerates the sampled topology. Four
+    // slots cover vector growth and concurrent owned/validated record lists;
+    // uniqueness trees are already included in support. Canonical identity
+    // materialization is charged separately by the retained-copy phase's
+    // authenticated full source codec profile.
+    use crate::results::field::{SampledOrientedEdge, VolumeFieldIntegrationSample};
+    let sampling = sum(&[
+        mul(
+            mul(nodes, 4)?,
+            std::mem::size_of::<runmat_meshing_core::StableDigest>() as u64,
+        )?,
+        mul(
+            mul(elements, 4)?,
+            std::mem::size_of::<(
+                runmat_meshing_core::StableDigest,
+                [runmat_meshing_core::StableDigest; 4],
+            )>() as u64,
+        )?,
+        mul(
+            mul(mul(elements, 6)?, 4)?,
+            std::mem::size_of::<SampledOrientedEdge>() as u64,
+        )?,
+        mul(
+            mul(mul(elements, 15)?, 4)?,
+            std::mem::size_of::<VolumeFieldIntegrationSample>() as u64,
+        )?,
+    ])?;
+    sum(&[support, mul(projection, 3)?, properties, sampling])
+}
+
+fn validation_components(
+    nodes: u64,
+    elements: u64,
+    boundary_faces: u64,
+    model_metadata_bytes: u64,
+    selected_metadata_bytes: u64,
+) -> Result<(u64, u64), MagnetostaticError> {
+    let edges = mul(elements, 6)?;
+    let support = sum(&[
+        16_384,
+        mul(nodes, 2048)?,
+        mul(edges, 2048)?,
+        mul(elements, 8192)?,
+        mul(boundary_faces, 2048)?,
+    ])?;
+    // Four overlapping owned/audit/identity representations per selected volume.
+    let properties = sum(&[
+        mul(model_metadata_bytes, 4)?,
+        mul(mul(elements, selected_metadata_bytes)?, 4)?,
+        mul(elements, 1024)?,
+    ])?;
+    Ok((support, properties))
 }
 
 fn from_counts(
@@ -92,20 +166,15 @@ fn from_counts(
     // face owners/adjacency/exterior sets/queues; boundary vertex links and
     // neighbor sets; free-edge/gauge-row maps. Partial BTree nodes, headers and
     // vector growth receive deliberately loose per-reference allowances.
-    let support = sum(&[
-        16_384,
-        mul(nodes, 2048)?,
-        mul(edges, 2048)?,
-        mul(elements, 8192)?,
-        mul(boundary_faces, 2048)?,
-    ])?;
     // Shared selected-property owned payload plus identity/audit materialization,
     // source realization metadata and simultaneous input/assembled volume arrays.
-    let properties = sum(&[
-        mul(model_metadata_bytes, 4)?,
-        mul(mul(elements, selected_metadata_bytes)?, 4)?,
-        mul(elements, 1024)?,
-    ])?;
+    let (support, properties) = validation_components(
+        nodes,
+        elements,
+        boundary_faces,
+        model_metadata_bytes,
+        selected_metadata_bytes,
+    )?;
 
     // Element contribution slots, not observed nonzeros: physical K has at most
     // 36 per tetrahedron; saddle has 36 + 2*24. No gauge-gauge entries. BTree
@@ -272,5 +341,27 @@ mod tests {
                     > grown.total_bytes
             );
         }
+    }
+
+    #[test]
+    fn magnetic_retained_validation_amplifies_selected_metadata_per_volume_and_checks_overflow() {
+        use crate::physics::{electrical::tests::mesh, magnetic::test_support::authored_model};
+        use runmat_meshing_core::ElementOrder;
+        let base = authored_model(0.0);
+        let mut large = base.clone();
+        large.materials[0]
+            .name
+            .push_str(&"long magnetic material metadata ".repeat(2048));
+        let one = mesh(ElementOrder::Tet4, 1);
+        let eight = mesh(ElementOrder::Tet4, 2);
+        let small_growth = canonical_validation_workspace(&large, &one).unwrap()
+            - canonical_validation_workspace(&base, &one).unwrap();
+        let large_growth = canonical_validation_workspace(&large, &eight).unwrap()
+            - canonical_validation_workspace(&base, &eight).unwrap();
+        assert!(small_growth > 0);
+        assert!(large_growth > 4 * small_growth);
+        assert!(validation_components(u64::MAX, 1, 1, 1, 1).is_err());
+        assert!(validation_components(1, u64::MAX, 1, 1, 1).is_err());
+        assert!(validation_components(1, 1, 1, 1, u64::MAX).is_err());
     }
 }

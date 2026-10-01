@@ -10,6 +10,7 @@ use runmat_meshing_core::ElementOrder;
 
 mod accuracy;
 mod fixture;
+mod observations;
 mod publication;
 mod reference;
 

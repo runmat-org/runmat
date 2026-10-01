@@ -155,7 +155,8 @@ pub fn prepare_observation_history_finalization_task(
                     }
                     frequency.canonical_bytes()?
                 }
-                AdmittedObservationWorkload::Thermal(_) => {
+                AdmittedObservationWorkload::Thermal(_)
+                | AdmittedObservationWorkload::Magnetostatic(_) => {
                     return Err(invalid("structural history cannot use a thermal workload"));
                 }
             };
@@ -212,6 +213,11 @@ pub fn prepare_observation_history_finalization_task(
         }
     };
     let context = match &decoded_workload {
+        AdmittedObservationWorkload::Magnetostatic(_) => {
+            return Err(invalid(
+                "magnetic static history finalization is not admitted",
+            ));
+        }
         AdmittedObservationWorkload::Thermal(workload) => {
             ObservationHistorySourceContext::Thermal {
                 workload,

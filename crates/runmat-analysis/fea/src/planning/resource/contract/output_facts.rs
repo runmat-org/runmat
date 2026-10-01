@@ -8,6 +8,9 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (Self::MagneticFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
+                Some(&demand.output)
+            }
             (Self::Magnetostatic(demand), AnalysisNumericalObjectKind::SolverResult) => {
                 Some(&demand.result_output)
             }

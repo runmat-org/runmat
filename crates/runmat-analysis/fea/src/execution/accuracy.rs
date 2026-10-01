@@ -44,6 +44,17 @@ impl ObservationPublicationCatalog {
         }
         match (kind, self.source().source()) {
             (
+                AccuracySourceKind::Magnetostatic,
+                crate::results::observation::ObservationFieldCatalogSource::SampledRecovery {
+                    recovery_request,
+                    ..
+                },
+            ) if recovery_request.producer == producer
+                && recovery_request.source.solver_result() == Some(result) =>
+            {
+                Ok(())
+            }
+            (
                 AccuracySourceKind::Thermal,
                 crate::results::observation::ObservationFieldCatalogSource::Thermal { manifest },
             ) if manifest.producer == producer && manifest.identity() == result => Ok(()),

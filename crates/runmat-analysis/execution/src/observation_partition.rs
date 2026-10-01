@@ -154,7 +154,24 @@ pub fn prepare_observation_fanout(
                 )
             })?;
         for partition in &plan.partitions {
-            let required_indices = if matches!(
+            let sampled = match &preparation.source {
+                crate::ObservationPublishedSource::SampledRecovery { sampling, .. } => {
+                    Some(sampling)
+                }
+                _ => None,
+            };
+            let required_indices = if let Some(sampling) = sampled {
+                let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+                    "sampled observation mesh absent",
+                ))?;
+                runmat_analysis_fea::results::observation::sampled_observation_partition_source_indices(
+                    &admitted.request.plan,
+                    &plan,
+                    partition,
+                    sampling,
+                    mesh,
+                )
+            } else if matches!(
                 &admitted.workload,
                 super::observation_source::AdmittedObservationWorkload::Thermal(_)
             ) {

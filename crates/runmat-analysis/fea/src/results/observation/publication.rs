@@ -177,6 +177,51 @@ impl ObservationPublicationCatalog {
         self.validate_authored_step(step)?;
         match (self.source.source(), context) {
             (
+                ObservationFieldCatalogSource::SampledRecovery {
+                    recovery_request,
+                    manifest,
+                    sampling,
+                },
+                ObservationHistorySourceContext::Magnetostatic { workload, mesh },
+            ) => {
+                let native = crate::execution::magnetic_native_field_definitions(recovery_request)?;
+                if sampling.rule()
+                    != crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen
+                    || !manifest
+                        .fields
+                        .iter()
+                        .map(|entry| &entry.definition)
+                        .eq(native.iter())
+                {
+                    return Err(invalid(
+                        "magnetic publication native definition inventory or sampling rule differs",
+                    ));
+                }
+                let producer = workload.producer_identity()?;
+                if recovery_request.producer != self.producer
+                    || producer != self.producer
+                    || step.step_id != workload.step_id
+                    || !workload
+                        .model
+                        .sequence
+                        .steps
+                        .iter()
+                        .any(|authored| authored == step)
+                {
+                    return Err(invalid(
+                        "sampled magnetic publication producer or original authored step differs",
+                    ));
+                }
+                self.source
+                    .validate_sampled_plan(&self.plan, step, producer, mesh)?;
+                for entry in &self.entries {
+                    if let ObservationPublicationEntry::Sample(value) = entry {
+                        self.source
+                            .validate_sampled_selection(&value.request.selection)?;
+                    }
+                }
+            }
+            (
                 ObservationFieldCatalogSource::Thermal { manifest },
                 ObservationHistorySourceContext::Thermal { workload, mesh },
             ) => {
@@ -263,6 +308,12 @@ impl ObservationPublicationCatalog {
                     )?;
                     match (self.source.source(), value.request.selection.source()) {
                         (
+                            ObservationFieldCatalogSource::SampledRecovery { .. },
+                            ObservationFieldSource::SampledRecovery { .. },
+                        ) => self
+                            .source
+                            .validate_sampled_selection(&value.request.selection)?,
+                        (
                             ObservationFieldCatalogSource::Structural { .. },
                             ObservationFieldSource::StructuralRecovery { .. },
                         ) => {
@@ -345,6 +396,9 @@ impl ObservationPublicationCatalog {
                         .find(|item| item.spec.observation_id == value.history.observation_id)
                         .ok_or_else(|| invalid("history observation absent"))?;
                     let source_fields = match self.source.source() {
+                        ObservationFieldCatalogSource::SampledRecovery { .. } => {
+                            return Err(invalid("sampled native histories are not admitted"));
+                        }
                         ObservationFieldCatalogSource::Structural { manifest, .. } => {
                             manifest.fields.iter().collect::<Vec<_>>()
                         }

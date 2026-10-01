@@ -25,6 +25,7 @@ pub use publication::{
 };
 mod resolve;
 mod sampled;
+pub(crate) use sampled::validate_sampled_requests;
 mod source;
 pub use sampled::{
     evaluate_sampled_observation_partition, evaluate_sampled_observations,

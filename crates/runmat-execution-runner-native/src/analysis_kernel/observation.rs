@@ -1,4 +1,5 @@
 use super::*;
+mod sampled;
 
 pub(super) fn execute_observation_history_checkpoint(
     invocation: AnalysisKernelInvocation<'_>,
@@ -131,9 +132,14 @@ pub(super) fn execute_observation_partition(
     )?;
     let thermal_workload =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::ThermalWorkload)?;
+    let magnetic_workload = optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::MagnetostaticWorkload,
+    )?;
     if usize::from(linear_workload.is_some())
         + usize::from(frequency_workload.is_some())
         + usize::from(thermal_workload.is_some())
+        + usize::from(magnetic_workload.is_some())
         != 1
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -200,7 +206,18 @@ pub(super) fn execute_observation_partition(
         })
         .transpose()?;
     let mut thermal_projection = None;
-    let (model, backend) = if let Some(workload_objects) = thermal_workload {
+    let mut sampled_topology = None;
+    let (model, backend) = if let Some(workload_objects) = magnetic_workload {
+        let (model, sampling) = sampled::admit_source(
+            workload_objects,
+            &catalog,
+            &source_request,
+            &partition_plan,
+            mesh.as_ref(),
+        )?;
+        sampled_topology = Some(sampling);
+        (model, runmat_analysis_fea::ComputeBackend::Cpu)
+    } else if let Some(workload_objects) = thermal_workload {
         let workload = runmat_analysis_fea::execution::ThermalWorkload::from_canonical_bytes(
             &workload_objects.payload(),
         )?;
@@ -259,6 +276,12 @@ pub(super) fn execute_observation_partition(
             ))
         }
     };
+    if sampled_topology.is_some() && (accelerator.is_some() || request.event_attribution.is_some())
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "sampled static observations require serial final evaluation",
+        ));
+    }
     let input_facts = prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?;
     let expected_resource_plan =
         build_observation_partition_resource_plan(ObservationPartitionResourcePlanning {
@@ -289,6 +312,19 @@ pub(super) fn execute_observation_partition(
         ));
     }
     let contribution = match resource_plan.request.accelerators.as_slice() {
+        [] if sampled_topology.is_some() => {
+            runmat_analysis_fea::results::observation::evaluate_sampled_observation_partition(
+                &source_request.plan,
+                &partition_plan,
+                partition,
+                sampled_topology
+                    .as_ref()
+                    .ok_or(AnalysisBridgeError::Identity("sampled topology absent"))?,
+                mesh.as_ref()
+                    .ok_or(AnalysisBridgeError::Identity("sampled mesh absent"))?,
+                &fields,
+            )
+        }
         [] if thermal_projection.is_some() => {
             runmat_analysis_fea::results::observation::evaluate_solid_observation_partition(
                 &source_request.plan,

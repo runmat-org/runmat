@@ -44,6 +44,11 @@ pub enum ObservationPublishedSource {
         recovery_request: FieldRecoveryRequest,
         fields: ImportedRecoveredFields,
     },
+    SampledRecovery {
+        recovery_request: FieldRecoveryRequest,
+        fields: ImportedRecoveredFields,
+        sampling: runmat_analysis_fea::results::field::SampledVolumeFieldTopology,
+    },
     Thermal {
         manifest: ThermalSolverResultManifest,
         output: AnalysisOutputRoot,
@@ -55,18 +60,22 @@ pub enum ObservationPublishedSource {
 impl ObservationPublishedSource {
     pub(crate) fn output(&self) -> &AnalysisOutputRoot {
         match self {
-            Self::Structural { fields, .. } => &fields.output,
+            Self::Structural { fields, .. } | Self::SampledRecovery { fields, .. } => {
+                &fields.output
+            }
             Self::Thermal { output, .. } => output,
         }
     }
     pub(crate) fn access<'a>(&'a self, host: &'a AnalysisHostWorkload) -> &'a ArtifactAccess {
         match self {
-            Self::Structural { .. } => &host.artifact_access,
+            Self::Structural { .. } | Self::SampledRecovery { .. } => &host.artifact_access,
             Self::Thermal { access, .. } => access,
         }
     }
 }
 
+#[path = "observation_sampled.rs"]
+mod sampled;
 #[path = "observation_thermal.rs"]
 mod thermal;
 
@@ -95,15 +104,20 @@ pub(crate) fn admit_observation(
             recovery_request,
             fields,
         } => admit_structural(preparation, recovery_request, fields),
+        ObservationPublishedSource::SampledRecovery {
+            recovery_request,
+            fields,
+            sampling,
+        } => sampled::admit_sampled(preparation, recovery_request, fields, sampling),
         ObservationPublishedSource::Thermal { .. } => thermal::admit_thermal(preparation),
     }
 }
 
-fn admit_structural(
+fn admit_recovery_source(
     preparation: &ObservationPreparation,
     source_request: &FieldRecoveryRequest,
     source_fields: &ImportedRecoveredFields,
-) -> AnalysisBridgeResult<AdmittedObservation> {
+) -> AnalysisBridgeResult<(AdmittedObservationWorkload, Option<SolverMeshArtifact>)> {
     preparation.source_host.validate()?;
     source_request.validate()?;
     if preparation.source_host.workload.kind != AnalysisWorkKind::RecoverField
@@ -170,6 +184,7 @@ fn admit_structural(
     let workload = preparation.source_workload.decode()?;
     match (&workload, source_request.source) {
         (AdmittedObservationWorkload::Linear(_), FieldRecoverySource::SolverResult(_))
+        | (AdmittedObservationWorkload::Magnetostatic(_), FieldRecoverySource::SolverResult(_))
         | (
             AdmittedObservationWorkload::Frequency(_),
             FieldRecoverySource::StructuralFrequencyEntry(_),
@@ -188,6 +203,15 @@ fn admit_structural(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })
         .transpose()?;
+    Ok((workload, mesh))
+}
+
+fn admit_structural(
+    preparation: &ObservationPreparation,
+    source_request: &FieldRecoveryRequest,
+    source_fields: &ImportedRecoveredFields,
+) -> AnalysisBridgeResult<AdmittedObservation> {
+    let (workload, mesh) = admit_recovery_source(preparation, source_request, source_fields)?;
     let topology = StructuralRecoveredFieldTopology::derive(workload.model(), mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if source_request.topology

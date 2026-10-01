@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, FieldLocation, ObservationQuantity, ObservationValueShape,
     RecoveryPolicy,
@@ -7,6 +5,7 @@ use runmat_analysis_core::{
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
+use std::ops::Deref;
 use thiserror::Error;
 
 use super::entity::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain};
@@ -393,6 +392,7 @@ pub struct RecoveredFieldArtifact {
 }
 
 mod entry;
+mod profile;
 pub use entry::RecoveredFieldArtifactEntry;
 
 /// Lightweight semantic catalog for a recovered-field artifact.

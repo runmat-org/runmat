@@ -152,6 +152,23 @@ impl ObservationPublicationCatalog {
                 .map_err(invalid)?;
             for partition in &plan.partitions {
                 let indices = match context {
+                    ObservationHistorySourceContext::Magnetostatic { mesh, .. } => {
+                        let ObservationFieldCatalogSource::SampledRecovery { sampling, .. } =
+                            self.source.source()
+                        else {
+                            return Err(invalid(
+                                "magnetic execution context requires original sampled catalog",
+                            ));
+                        };
+                        sampled_observation_partition_source_indices(
+                            &source.plan,
+                            &plan,
+                            partition,
+                            sampling,
+                            mesh,
+                        )
+                        .map_err(invalid)?
+                    }
                     ObservationHistorySourceContext::Structural {
                         source: workload,
                         mesh,
@@ -248,6 +265,9 @@ impl ObservationPublicationCatalog {
                         .zip(&history.checkpoint.partition_evidence)
                     {
                         let coordinate = match self.source.source() {
+                            ObservationFieldCatalogSource::SampledRecovery { .. } => {
+                                return Err(invalid("sampled native histories are not admitted"));
+                            }
                             ObservationFieldCatalogSource::Structural { .. } => {
                                 ObservationSelectionCoordinate::StructuralRecovery
                             }

@@ -18,6 +18,8 @@ pub use receipt::{
 };
 mod publication;
 mod result;
+pub use fields::magnetic_native_field_definition_inventory;
+pub use fields::magnetic_native_field_definitions;
 pub use result::MagnetostaticSolverResult;
 #[cfg(test)]
 mod tests;
@@ -76,6 +78,23 @@ impl MagnetostaticWorkload {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<AnalysisRunIdentity> {
         self.validate()?;
+        // Resolve authored native selections before any numerical assembly/solve.
+        // Admission must not defer an invalid quantity or selector until publication.
+        if !self.model.sequence.steps[0].observations.is_empty() {
+            let sampling = crate::results::field::SampledVolumeFieldTopology::derive(
+                mesh,
+                crate::results::field::VolumeFieldSamplingRule::TetrahedronKeastFifteen,
+            )
+            .map_err(invalid)?;
+            crate::results::observation::resolve_sampled_observation_plan(
+                &self.model.sequence.steps[0],
+                &sampling,
+                mesh,
+                &magnetic_native_field_definition_inventory()?,
+                crate::results::observation::ObservationLimits::default(),
+            )
+            .map_err(invalid)?;
+        }
         crate::admission::admit_canonical_magnetostatic(mesh, self.formulation_requirement)
             .map_err(invalid)
     }

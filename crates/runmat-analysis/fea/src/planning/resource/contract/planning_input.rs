@@ -10,6 +10,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::AcousticHarmonic(demand) => demand.topology_digest,
             FeaResourceDemand::ElectricalStatic(demand) => demand.topology_digest,
             FeaResourceDemand::Magnetostatic(demand) => demand.topology_digest,
+            FeaResourceDemand::MagneticFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::SemanticStatePublication(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralLinearPipeline(demand) => demand.operator.topology_digest,
             FeaResourceDemand::StructuralModalExtraction(demand) => demand.operator.topology_digest,
@@ -49,6 +50,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn observations(&self) -> Option<&ObservationResourceFacts> {
         match &self.demand {
+            FeaResourceDemand::MagneticFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
@@ -96,6 +98,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn partitioning(&self) -> &PartitioningPolicy {
         match &self.demand {
+            FeaResourceDemand::MagneticFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::AccuracyEvaluation(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ResultPublication(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ThermalSolve(_) => &PartitioningPolicy::Monolithic,
@@ -146,6 +149,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn structural_operator(&self) -> Option<&StructuralOperatorResourceDemand> {
         match &self.demand {
+            FeaResourceDemand::MagneticFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
@@ -181,6 +185,7 @@ impl FeaResourcePlanningInput {
 
     pub fn structural_operator_mut(&mut self) -> Option<&mut StructuralOperatorResourceDemand> {
         match &mut self.demand {
+            FeaResourceDemand::MagneticFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,

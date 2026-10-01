@@ -38,7 +38,8 @@ use validation::{
     validate_numeric_representation, validate_resolved_spatial_reduction, validate_supported_spec,
 };
 pub(crate) use verification::{
-    verify_authored_observations, verify_observation_plan, verify_structural_observation_plan,
+    verify_authored_observations, verify_observation_plan, verify_sampled_observation_plan,
+    verify_structural_observation_plan,
 };
 
 pub fn resolve_observation_plan(

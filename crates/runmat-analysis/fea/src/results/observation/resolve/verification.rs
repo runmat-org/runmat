@@ -52,6 +52,19 @@ pub(crate) fn verify_observation_plan(
     verify_for_topology(step, &topology, None, None, fields, plan)
 }
 
+pub(crate) fn verify_sampled_observation_plan(
+    step: &ProcedureStep,
+    sampling: &crate::results::field::SampledVolumeFieldTopology,
+    mesh: &SolverMeshArtifact,
+    fields: &[RecoveredFieldDefinition],
+    plan: &ResolvedObservationPlan,
+) -> Result<(), ObservationError> {
+    super::super::sampled::validate_sampled_requests(step)?;
+    verify_authored_observations(step, plan)?;
+    let topology = ObservationTopology::from_sampled(sampling, mesh)?;
+    verify_for_topology(step, &topology, None, None, fields, plan)
+}
+
 pub(crate) fn verify_structural_observation_plan(
     step: &ProcedureStep,
     model: &AnalysisModel,

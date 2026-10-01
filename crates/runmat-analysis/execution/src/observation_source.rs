@@ -1,8 +1,8 @@
 use runmat_analysis_core::AnalysisModel;
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, StructuralFrequencyWorkload, StructuralLinearWorkload,
-        ThermalWorkload,
+        AnalysisNumericalObjectKind, MagnetostaticWorkload, StructuralFrequencyWorkload,
+        StructuralLinearWorkload, ThermalWorkload,
     },
     results::observation::ObservationExecutionPolicy,
     ComputeBackend,
@@ -19,6 +19,7 @@ pub enum ObservationWorkloadSource {
     Linear(PreparedAnalysisObjects),
     Frequency(PreparedAnalysisObjects),
     Thermal(PreparedAnalysisObjects),
+    Magnetostatic(PreparedAnalysisObjects),
 }
 
 impl ObservationWorkloadSource {
@@ -27,12 +28,16 @@ impl ObservationWorkloadSource {
             Self::Linear(_) => AnalysisNumericalObjectKind::SolverInvocation,
             Self::Frequency(_) => AnalysisNumericalObjectKind::StructuralFrequencyWorkload,
             Self::Thermal(_) => AnalysisNumericalObjectKind::ThermalWorkload,
+            Self::Magnetostatic(_) => AnalysisNumericalObjectKind::MagnetostaticWorkload,
         }
     }
 
     pub(crate) fn objects(&self) -> &PreparedAnalysisObjects {
         match self {
-            Self::Linear(objects) | Self::Frequency(objects) | Self::Thermal(objects) => objects,
+            Self::Linear(objects)
+            | Self::Frequency(objects)
+            | Self::Thermal(objects)
+            | Self::Magnetostatic(objects) => objects,
         }
     }
 
@@ -53,6 +58,9 @@ impl ObservationWorkloadSource {
             Self::Thermal(_) => Ok(AdmittedObservationWorkload::Thermal(
                 ThermalWorkload::from_canonical_bytes(&objects.payload())?,
             )),
+            Self::Magnetostatic(_) => Ok(AdmittedObservationWorkload::Magnetostatic(
+                MagnetostaticWorkload::from_canonical_bytes(&objects.payload())?,
+            )),
         }
     }
 }
@@ -61,6 +69,7 @@ pub(crate) enum AdmittedObservationWorkload {
     Linear(StructuralLinearWorkload),
     Frequency(StructuralFrequencyWorkload),
     Thermal(ThermalWorkload),
+    Magnetostatic(MagnetostaticWorkload),
 }
 
 impl AdmittedObservationWorkload {
@@ -69,6 +78,7 @@ impl AdmittedObservationWorkload {
             Self::Linear(workload) => &workload.model,
             Self::Frequency(workload) => workload.model(),
             Self::Thermal(workload) => &workload.model,
+            Self::Magnetostatic(workload) => &workload.model,
         }
     }
 
@@ -77,6 +87,7 @@ impl AdmittedObservationWorkload {
             Self::Linear(workload) => workload.backend,
             Self::Frequency(workload) => workload.backend(),
             Self::Thermal(workload) => workload.backend,
+            Self::Magnetostatic(_) => ComputeBackend::Cpu,
         }
     }
 
@@ -86,7 +97,7 @@ impl AdmittedObservationWorkload {
             Self::Frequency(workload) => workload.observation_execution(),
             // ThermalWorkload has no authored partition override. Use the shared immutable
             // serial policy, also reconstructed by workers; never accept an unbound caller hint.
-            Self::Thermal(_) => ObservationExecutionPolicy::serial(),
+            Self::Thermal(_) | Self::Magnetostatic(_) => ObservationExecutionPolicy::serial(),
         }
     }
 }

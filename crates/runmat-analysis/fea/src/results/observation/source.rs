@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::execution::{
     AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity,
-    FieldRecoveryRequest, FieldRecoveryRequestIdentity, FieldRecoverySource, SolverResultIdentity,
-    StepIdentity, ThermalNumericalIntentIdentity, ThermalSolverResultManifest, ThermalWorkload,
+    FieldRecoveryRequest, FieldRecoveryRequestIdentity, FieldRecoverySource, FieldTopologyIdentity,
+    SolverResultIdentity, StepIdentity, ThermalNumericalIntentIdentity,
+    ThermalSolverResultManifest, ThermalWorkload,
 };
 use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 use crate::results::field::{
@@ -25,6 +26,12 @@ mod tests;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum ObservationFieldSource {
+    SampledRecovery {
+        recovery_request: FieldRecoveryRequestIdentity,
+        artifact: RecoveredFieldArtifactIdentity,
+        numerical_source: FieldRecoverySource,
+        topology: FieldTopologyIdentity,
+    },
     StructuralRecovery {
         recovery_request: FieldRecoveryRequestIdentity,
         artifact: RecoveredFieldArtifactIdentity,
@@ -44,6 +51,9 @@ pub enum ObservationFieldSource {
 impl ObservationFieldSource {
     pub const fn solver_result(self) -> Option<SolverResultIdentity> {
         match self {
+            Self::SampledRecovery {
+                numerical_source, ..
+            } => numerical_source.solver_result(),
             Self::StructuralRecovery {
                 numerical_source, ..
             } => numerical_source.solver_result(),
@@ -53,6 +63,7 @@ impl ObservationFieldSource {
 
     pub fn observation_topology_digest(self) -> Digest {
         match self {
+            Self::SampledRecovery { topology, .. } => topology.discretization_digest(),
             Self::StructuralRecovery { topology, .. } => topology.discretization_digest(),
             Self::ThermalResult {
                 projection_digest, ..
@@ -60,6 +71,9 @@ impl ObservationFieldSource {
         }
     }
 }
+
+mod sampled;
+pub(crate) use sampled::validate_sampled_authority;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -302,6 +316,18 @@ impl ObservationFieldSelection {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        if let ObservationFieldSource::SampledRecovery {
+            topology,
+            numerical_source,
+            ..
+        } = self.source
+        {
+            if !matches!(topology, FieldTopologyIdentity::SampledVolumeMesh { .. })
+                || numerical_source.solver_result().is_none()
+            {
+                return Err(invalid("sampled selection requires genuine sampled topology and original solver result"));
+            }
+        }
         if self.schema_version != 1
             || self.fields.is_empty()
             || self.identity != self.derive_identity()?

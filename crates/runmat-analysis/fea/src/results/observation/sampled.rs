@@ -28,14 +28,7 @@ fn validate_spec(spec: &runmat_analysis_core::ObservationSpec) -> Result<(), Obs
     Ok(())
 }
 
-pub fn resolve_sampled_observation_plan(
-    step: &ProcedureStep,
-    sampling: &SampledVolumeFieldTopology,
-    mesh: &SolverMeshArtifact,
-    fields: &[RecoveredFieldDefinition],
-    limits: ObservationLimits,
-) -> Result<ResolvedObservationPlan, ObservationError> {
-    super::resolve::validate_request_counts(step, limits)?;
+pub(crate) fn validate_sampled_requests(step: &ProcedureStep) -> Result<(), ObservationError> {
     for request in &step.observations {
         match request {
             ObservationRequest::Field(spec) | ObservationRequest::Reduction(spec) => {
@@ -48,6 +41,18 @@ pub fn resolve_sampled_observation_plan(
             }
         }
     }
+    Ok(())
+}
+
+pub fn resolve_sampled_observation_plan(
+    step: &ProcedureStep,
+    sampling: &SampledVolumeFieldTopology,
+    mesh: &SolverMeshArtifact,
+    fields: &[RecoveredFieldDefinition],
+    limits: ObservationLimits,
+) -> Result<ResolvedObservationPlan, ObservationError> {
+    super::resolve::validate_request_counts(step, limits)?;
+    validate_sampled_requests(step)?;
     let topology = ObservationTopology::from_sampled(sampling, mesh)?;
     super::resolve::resolve_observation_plan_for_topology(
         step, &topology, None, None, fields, limits,

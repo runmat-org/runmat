@@ -221,5 +221,121 @@ pub(in crate::execution) fn native_magnetic_field_definition(
     .map_err(invalid)
 }
 
+/// Exact native definition inventory without constructing any numerical arrays.
+pub fn magnetic_native_field_definitions(
+    request: &FieldRecoveryRequest,
+) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
+    request.validate()?;
+    if !matches!(
+        request.topology,
+        crate::execution::FieldTopologyIdentity::SampledVolumeMesh { .. }
+    ) {
+        return Err(invalid(
+            "magnetic native fields require original sampled-volume topology",
+        ));
+    }
+    let definitions = magnetic_native_field_definition_inventory()?;
+    if request.plan.requirements.len() != definitions.len() {
+        return Err(invalid(
+            "magnetic native inventory must contain all four original fields",
+        ));
+    }
+    let samples = request.plan.requirements[1].cost.output_entity_count;
+    let edge_upper = (samples / 15)
+        .checked_mul(6)
+        .ok_or_else(|| invalid("magnetic topology count overflow"))?;
+    if samples == 0
+        || !samples.is_multiple_of(15)
+        || request.plan.requirements[2..]
+            .iter()
+            .any(|r| r.cost.output_entity_count != samples)
+        || request.plan.requirements[0].cost.output_entity_count > edge_upper
+    {
+        return Err(invalid(
+            "magnetic field inventory is not one complete fifteen-point tetrahedral sampling space",
+        ));
+    }
+    request
+        .plan
+        .requirements
+        .iter()
+        .zip(definitions)
+        .map(|(requirement, definition)| {
+            let quantity = definition.quantity();
+            let location = definition.location();
+            let domain = definition.entity_domain();
+            let components = quantity
+                .canonical_value_shape()
+                .component_count()
+                .ok_or_else(|| invalid("magnetic component count"))?
+                as u64;
+            if requirement.quantity != quantity
+                || requirement.source_location != location
+                || requirement.output_location != location
+                || requirement.entity_domain != domain
+                || requirement.recovery != RecoveryPolicy::Native
+                || requirement.value_shape != quantity.canonical_value_shape()
+                || requirement.cost.source_entity_count != requirement.cost.output_entity_count
+                || requirement.cost.topology_incidence_count != 0
+                || requirement.cost.arithmetic_operation_count
+                    != requirement
+                        .cost
+                        .output_entity_count
+                        .checked_mul(components)
+                        .ok_or_else(|| invalid("magnetic field size overflow"))?
+            {
+                return Err(invalid(
+                    "magnetic native field inventory differs from canonical shape",
+                ));
+            }
+            Ok(definition)
+        })
+        .collect()
+}
+
+/// Native physical definitions independent of any solved result or source identity.
+pub fn magnetic_native_field_definition_inventory(
+) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
+    [
+        (
+            ObservationQuantity::MagneticEdgeCirculation,
+            "magnetic.edge_circulation",
+            FieldLocation::Edge,
+            RecoveredFieldEntityDomain::OrientedEdges,
+        ),
+        (
+            ObservationQuantity::MagneticVectorPotential,
+            "magnetic.vector_potential",
+            FieldLocation::IntegrationPoint,
+            RecoveredFieldEntityDomain::VolumeIntegrationPoints,
+        ),
+        (
+            ObservationQuantity::MagneticFluxDensity,
+            "magnetic.flux_density",
+            FieldLocation::IntegrationPoint,
+            RecoveredFieldEntityDomain::VolumeIntegrationPoints,
+        ),
+        (
+            ObservationQuantity::MagneticFieldIntensity,
+            "magnetic.field_intensity",
+            FieldLocation::IntegrationPoint,
+            RecoveredFieldEntityDomain::VolumeIntegrationPoints,
+        ),
+    ]
+    .into_iter()
+    .map(|(quantity, id, location, domain)| {
+        RecoveredFieldDefinition::new(
+            id,
+            quantity,
+            location,
+            domain,
+            quantity.canonical_value_shape(),
+            RecoveredFieldNumericRepresentation::Real,
+        )
+        .map_err(invalid)
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests;

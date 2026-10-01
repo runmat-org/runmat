@@ -72,6 +72,7 @@ mod electrical_static_plan;
 mod electrical_static_result;
 mod electrical_static_task;
 mod electrical_study;
+mod magnetic_field_recovery;
 mod magnetic_state_profiles;
 mod magnetostatic_plan;
 mod magnetostatic_result;
@@ -92,6 +93,12 @@ pub use electrical_study::{
     prepare_electrical_study_root, CompletedElectricalStudy, ElectricalStudyCoordinator,
     ElectricalStudyPhase, ElectricalStudyPreparation, ElectricalStudyResultClosure,
     ElectricalStudyResultPhase, PreparedElectricalStudyRoot,
+};
+pub use magnetic_field_recovery::{
+    build_magnetic_recovery_metadata_resource_plan,
+    build_prepared_magnetic_field_recovery_resource_plan, decode_magnetic_recovery_source,
+    import_magnetic_recovered_fields, prepare_magnetic_field_recovery,
+    MagneticFieldRecoveryPreparation, PreparedMagneticFieldRecovery,
 };
 pub use magnetic_state_profiles::magnetic_state_publication_profiles;
 pub use magnetostatic_plan::{

@@ -2,6 +2,7 @@ mod accuracy;
 mod acoustic;
 mod common;
 mod electrical_static;
+mod magnetic_recovery;
 pub(super) mod magnetic_static;
 mod result_publication;
 mod state_publication;
@@ -52,6 +53,10 @@ pub fn build_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
+        (
+            FeaResourcePhase::MagneticFieldRecovery(request),
+            FeaResourceDemand::MagneticFieldRecovery(demand),
+        ) if *request == demand.request => magnetic_recovery::build(input.clone(), demand),
         (FeaResourcePhase::Magnetostatic(workload), FeaResourceDemand::Magnetostatic(demand))
             if *workload == demand.workload =>
         {

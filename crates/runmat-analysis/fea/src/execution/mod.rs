@@ -18,6 +18,7 @@ mod buckling_workload;
 mod electrical_static;
 mod magnetic_static;
 pub use magnetic_static::{
+    magnetic_native_field_definition_inventory, magnetic_native_field_definitions,
     MagneticNumericalReceipt, MagneticNumericalReceiptArtifact, MagnetostaticSolverResult,
     MagnetostaticWorkload, MAGNETIC_RECEIPT_MAX_ENCODED_BYTES,
 };
