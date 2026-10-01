@@ -56,7 +56,10 @@ pub(in super::super) async fn response_outcomes(
         Value::Cell(cell) => cellstr_outcomes(&cell, rows, cooperation).await,
         Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             let source = crate::builtins::table::categorical_label_view(&object)?;
-            let mut labels = reserved(source.len(), "categorical response labels")?;
+            let mut labels = Vec::<String>::new();
+            labels.try_reserve_exact(source.len()).map_err(|_| {
+                invalid("mnrfit: categorical response labels exceed available host resources")
+            })?;
             for index in 0..source.len() {
                 let label = source.label_at(index)?;
                 labels.push(class_census::clone_text(label, cooperation).await?);

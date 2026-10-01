@@ -53,7 +53,7 @@ pub(in super::super) async fn sort_unique_text(
         std::mem::swap(&mut values, &mut scratch);
         width = width.saturating_mul(2);
     }
-    let mut unique = Vec::new();
+    let mut unique = Vec::<String>::new();
     unique
         .try_reserve_exact(values.len())
         .map_err(|_| invalid("mnrfit: text class census exceeds available host resources"))?;
