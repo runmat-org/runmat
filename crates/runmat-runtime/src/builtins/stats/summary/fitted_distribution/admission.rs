@@ -90,7 +90,12 @@ pub(super) fn fit(data: &Value, distribution: &Value, options: &[Value]) -> Buil
             Some(FittedFitOption::Frequency) => {
                 return Err(invalid("fitdist: Frequency may be specified only once"))
             }
-            Some(_) => {
+            Some(FittedFitOption::Censoring) => {
+                return Err(invalid(
+                    "fitdist: Censoring is not supported for fitted distributions yet",
+                ))
+            }
+            Some(FittedFitOption::Options | FittedFitOption::By) => {
                 return Err(invalid(format!(
                     "fitdist: option '{name}' is not supported yet"
                 )))
