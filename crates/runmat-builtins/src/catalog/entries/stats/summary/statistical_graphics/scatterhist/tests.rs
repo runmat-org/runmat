@@ -115,3 +115,47 @@ fn dynamic_option_name_keeps_output_conservative() {
     );
     assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
 }
+
+#[test]
+fn character_row_option_name_is_text_not_a_string_array() {
+    let name = ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(5)]),
+        StorageFact::Dense,
+    );
+    let literals = vec![
+        LiteralValue::Unknown,
+        LiteralValue::Unknown,
+        LiteralValue::String("NBins".into()),
+        LiteralValue::Number(2.0),
+    ];
+    let result = infer(
+        vec![real(3, 1), real(3, 1), name.clone(), real(1, 1)],
+        literals,
+        1,
+    );
+    assert!(result.diagnostics.is_empty());
+    let dynamic = infer(
+        vec![real(3, 1), real(3, 1), name, real(1, 1)],
+        vec![LiteralValue::Unknown; 4],
+        1,
+    );
+    assert!(dynamic.diagnostics.is_empty());
+    assert!(matches!(dynamic.outputs[0].kind, ValueKindFact::Unknown));
+}
+
+#[test]
+fn unknown_option_class_is_not_rejected_by_character_count() {
+    let name = ValueFact::proven(
+        ValueKindFact::Unknown,
+        ShapeFact::from(vec![Some(1), Some(5)]),
+        StorageFact::Dense,
+    );
+    let result = infer(
+        vec![real(3, 1), real(3, 1), name, real(1, 1)],
+        vec![LiteralValue::Unknown; 4],
+        1,
+    );
+    assert!(result.diagnostics.is_empty());
+    assert!(matches!(result.outputs[0].kind, ValueKindFact::Unknown));
+}

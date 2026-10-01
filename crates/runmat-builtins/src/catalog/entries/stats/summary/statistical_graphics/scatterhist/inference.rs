@@ -53,6 +53,21 @@ fn numeric_control(fact: &ValueFact) -> bool {
         || matches!(fact.kind, ValueKindFact::Logical | ValueKindFact::Unknown)
 }
 
+fn bad_option_name(fact: &ValueFact) -> bool {
+    match fact.kind {
+        ValueKindFact::String => fact.shape.element_count().is_some_and(|n| n != 1),
+        ValueKindFact::Character => match &fact.shape {
+            ShapeFact::Shaped { dims } => matches!(
+                dims.first(),
+                Some(runmat_types::DimensionFact::Known(rows)) if *rows != 1
+            ),
+            _ => false,
+        },
+        ValueKindFact::Unknown => false,
+        _ => true,
+    }
+}
+
 fn literal_numeric(literal: Option<&LiteralValue>) -> Option<f64> {
     literal.and_then(LiteralContext::numeric_from_literal)
 }
@@ -153,11 +168,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
         for index in (2..args.len()).step_by(2) {
             let name = &args[index];
-            if !matches!(
-                name.kind,
-                ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
-            ) || name.shape.element_count().is_some_and(|n| n != 1)
-            {
+            if bad_option_name(name) {
                 diagnostics.push(InferenceDiagnostic::error(
                     "OPTION",
                     "scatterhist option names must be scalar text",
