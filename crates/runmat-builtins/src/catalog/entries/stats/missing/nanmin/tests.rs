@@ -160,3 +160,68 @@ fn reduction_indices_are_double_with_reduced_shape() {
     );
     assert_eq!(inferred.outputs[1].shape, inferred.outputs[0].shape);
 }
+
+#[test]
+fn all_selector_and_dimension_do_not_prove_a_reduction() {
+    let input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    let inferred = inference::infer(
+        &CallRequest {
+            arguments: vec![
+                input,
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("all".into()),
+                LiteralValue::Number(2.0),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+        },
+        &NANMIN_CATALOG_ENTRY,
+    );
+    assert!(inferred.outputs.iter().all(|output| {
+        output.kind == ValueKindFact::Unknown && output.shape == ShapeFact::Unknown
+    }));
+}
+
+#[test]
+fn resident_or_complex_second_argument_does_not_claim_pairwise_min() {
+    let operand = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(1), Some(3)]),
+        StorageFact::Dense,
+    );
+    let mut resident = operand.clone();
+    resident.residency = ResidencyFact::Device { provider: None };
+    let mut complex = operand.clone();
+    complex.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::UInt64,
+        domain: NumericDomain::Complex,
+    });
+    for second in [resident, complex] {
+        let inferred = inference::infer(
+            &CallRequest {
+                arguments: vec![operand.clone(), second],
+                literals: LiteralContext::new(vec![LiteralValue::Unknown; 2]),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+            },
+            &NANMIN_CATALOG_ENTRY,
+        );
+        assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+        assert_eq!(inferred.outputs[0].shape, ShapeFact::Unknown);
+    }
+}

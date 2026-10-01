@@ -145,3 +145,63 @@ fn integer_output_class_obeys_native_and_default_options() {
     );
     assert_eq!(like.outputs[0].kind, ValueKindFact::Unknown);
 }
+
+#[test]
+fn conflicting_native_and_double_options_do_not_prove_an_output_class() {
+    let input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    let inferred = inference::infer(
+        &CallRequest {
+            arguments: vec![
+                input,
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::String),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("native".into()),
+                LiteralValue::String("double".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+        &NANMEAN_CATALOG_ENTRY,
+    );
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(inferred.outputs[0].shape, ShapeFact::Unknown);
+}
+
+#[test]
+fn duplicate_all_selector_does_not_prove_scalar_shape() {
+    let input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    let inferred = inference::infer(
+        &CallRequest {
+            arguments: vec![
+                input,
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::String),
+            ],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("all".into()),
+                LiteralValue::String("all".into()),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        },
+        &NANMEAN_CATALOG_ENTRY,
+    );
+    assert_eq!(inferred.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(inferred.outputs[0].shape, ShapeFact::Unknown);
+}

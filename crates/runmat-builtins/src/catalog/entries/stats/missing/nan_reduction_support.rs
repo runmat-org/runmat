@@ -1,8 +1,8 @@
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, reduction_shape, CallContract, CallInference, CallRequest, DynamicReason,
-    InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain, NumericFact, ShapeFact,
-    StorageFact, ValueFact, ValueKindFact,
+    InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain, NumericFact, ResidencyFact,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 #[derive(Clone, Copy)]
@@ -29,13 +29,8 @@ fn keyword(value: &LiteralValue) -> Option<&str> {
     }
 }
 
-fn has_keyword(request: &CallRequest, searched: &str) -> bool {
-    request
-        .literals
-        .literal_args
-        .iter()
-        .filter_map(keyword)
-        .any(|value| value.eq_ignore_ascii_case(searched))
+fn literal_is(value: &LiteralValue, searched: &str) -> bool {
+    keyword(value).is_some_and(|value| value.eq_ignore_ascii_case(searched))
 }
 
 fn dimension(value: &LiteralValue) -> Option<usize> {
@@ -54,12 +49,6 @@ fn dimension(value: &LiteralValue) -> Option<usize> {
     }
 }
 
-fn unknown_reduction_shape(input: &ShapeFact) -> ShapeFact {
-    input
-        .rank()
-        .map_or(ShapeFact::Unknown, |rank| ShapeFact::Ranked { rank })
-}
-
 fn default_reduction_shape(input: &ShapeFact) -> ShapeFact {
     if matches!(input, ShapeFact::Ranked { .. }) {
         return input.clone();
@@ -71,66 +60,99 @@ fn default_reduction_shape(input: &ShapeFact) -> ShapeFact {
         return ShapeFact::Scalar;
     };
     if dims[index].is_none() {
-        return unknown_reduction_shape(input);
+        return input
+            .rank()
+            .map_or(ShapeFact::Unknown, |rank| ShapeFact::Ranked { rank });
     }
     reduction_shape(input, Some(index + 1))
 }
 
-fn selected_reduction_shape(request: &CallRequest, input: &ShapeFact, alias: Alias) -> ShapeFact {
-    if has_keyword(request, "all") {
-        return ShapeFact::Scalar;
+fn normalization(value: &LiteralValue) -> bool {
+    matches!(value, LiteralValue::Empty)
+        || matches!(dimension(value), Some(1))
+        || matches!(value, LiteralValue::Number(0.0))
+        || matches!(value, LiteralValue::Integer { text, .. } if text == "0")
+        || matches!(value, LiteralValue::Real { text, .. } if text.parse::<f64>() == Ok(0.0))
+}
+
+// This is a proof boundary, not a second implementation of the reductions'
+// option grammar. Only complete, positionally unambiguous literal forms are
+// established here. The owning reductions must eventually expose typed
+// options to both runtime admission and catalog inference.
+fn simple_reduction_proof(
+    request: &CallRequest,
+    input: &ShapeFact,
+    input_class: NumericClass,
+    alias: Alias,
+) -> Option<(ShapeFact, Option<NumericClass>)> {
+    let args = &request.arguments;
+    let literals = &request.literals.literal_args;
+    if args.len() != literals.len() {
+        return None;
     }
-    // std and var place normalization before the optional dimension. Other
-    // aliases may take a dimension immediately after the data.
-    let dimension_index = if alias.normalization_before_dimension
-        || (alias.pairwise_min
-            && matches!(
-                request.literals.literal_args.get(1),
-                Some(LiteralValue::Empty)
-            )) {
-        2
-    } else {
-        1
-    };
-    if let Some(literal) = request.literals.literal_args.get(dimension_index) {
-        if let Some(dim) = dimension(literal) {
-            if matches!(input, ShapeFact::Ranked { .. })
-                || input.rank().is_some_and(|rank| dim > rank)
-            {
-                return input.clone();
+    match literals.get(1..)? {
+        [] => Some((default_reduction_shape(input), None)),
+        [option] if alias.normalization_before_dimension => {
+            normalization(option).then(|| (default_reduction_shape(input), None))
+        }
+        [option] if literal_is(option, "all") => Some((ShapeFact::Scalar, None)),
+        [option] if alias.output_class_control && literal_is(option, "native") => {
+            Some((default_reduction_shape(input), Some(input_class)))
+        }
+        [option] if alias.output_class_control && literal_is(option, "double") => {
+            Some((default_reduction_shape(input), Some(NumericClass::Double)))
+        }
+        [LiteralValue::Empty] if alias.pairwise_min => Some((default_reduction_shape(input), None)),
+        [option] if !alias.pairwise_min => {
+            dimension(option).map(|dim| (axis_reduction_shape(input, dim), None))
+        }
+        [norm, axis] if alias.normalization_before_dimension && normalization(norm) => {
+            if literal_is(axis, "all") {
+                Some((ShapeFact::Scalar, None))
+            } else {
+                dimension(axis).map(|dim| (axis_reduction_shape(input, dim), None))
             }
-            return reduction_shape(input, Some(dim));
         }
-        if keyword(literal).is_none() {
-            return unknown_reduction_shape(input);
+        [LiteralValue::Empty, axis] if alias.pairwise_min => {
+            dimension(axis).map(|dim| (axis_reduction_shape(input, dim), None))
         }
+        _ => None,
     }
-    default_reduction_shape(input)
+}
+
+fn axis_reduction_shape(input: &ShapeFact, dim: usize) -> ShapeFact {
+    if matches!(input, ShapeFact::Ranked { .. }) || input.rank().is_some_and(|rank| dim > rank) {
+        input.clone()
+    } else {
+        reduction_shape(input, Some(dim))
+    }
 }
 
 fn pairwise_min_fact(request: &CallRequest, left: &ValueFact) -> Option<ValueFact> {
     let right = request.arguments.get(1)?;
+    if !matches!(left.residency, ResidencyFact::Host)
+        || !matches!(right.residency, ResidencyFact::Host)
+    {
+        return None;
+    }
     let (Some(a), Some(b)) = (left.numeric(), right.numeric()) else {
         return None;
     };
     if a.domain != NumericDomain::Real || b.domain != NumericDomain::Real {
-        return Some(ValueFact::unknown(DynamicReason::UnsupportedRepresentation));
+        return None;
     }
-    let class = if a.class == b.class {
-        a.class
-    } else if left.is_scalar() && a.class == NumericClass::Double {
-        b.class
-    } else if right.is_scalar() && b.class == NumericClass::Double {
-        a.class
-    } else {
-        return Some(ValueFact::unknown(DynamicReason::RuntimeValue));
-    };
+    // Mixed integer/floating operands need a value-level exactness check, and
+    // floating scalar pairs use a scalar-double path. Neither has a proven
+    // class solely from these argument facts.
+    if a.class != b.class || (left.is_scalar() && right.is_scalar() && !is_integer(a.class)) {
+        return None;
+    }
     let shape = if left.is_scalar() {
         right.shape.clone()
     } else if right.is_scalar() || left.shape.is_proven_equivalent(&right.shape) {
         left.shape.clone()
     } else {
-        ShapeFact::Unknown
+        return None;
     };
     let storage = match shape.element_count() {
         Some(1) => StorageFact::Scalar,
@@ -139,7 +161,7 @@ fn pairwise_min_fact(request: &CallRequest, left: &ValueFact) -> Option<ValueFac
     };
     let mut result = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
-            class,
+            class: a.class,
             domain: NumericDomain::Real,
         }),
         shape,
@@ -161,6 +183,11 @@ fn pairwise_min_form(request: &CallRequest, alias: Alias) -> Option<bool> {
         )
     {
         return Some(false);
+    }
+    if second.numeric()?.domain != NumericDomain::Real
+        || !matches!(second.residency, ResidencyFact::Host)
+    {
+        return None;
     }
     second.shape.element_count().map(|count| count > 0)
 }
@@ -201,51 +228,49 @@ pub(super) fn infer(
                         format!("{} rejects complex data", entry.identity.name),
                     ));
                     ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
-                } else if has_keyword(request, "like") {
-                    // A runtime prototype can select an output class not implied
-                    // by the data class. Keep that class dynamic.
-                    ValueFact::unknown(DynamicReason::RuntimeValue)
-                } else if numeric.class == NumericClass::Single
-                    && alias.single_output_dynamic
-                    && (!alias.output_class_control
-                        || (!has_keyword(request, "native") && !has_keyword(request, "double")))
+                } else if let Some((shape, output_class)) =
+                    simple_reduction_proof(request, &input.shape, numeric.class, alias)
                 {
-                    // The owning host reduction and some resident routes do
-                    // not currently agree on every Single result class.
-                    // Preserve the provable geometry without claiming a class.
-                    let mut result = ValueFact::unknown(DynamicReason::RuntimeValue);
-                    result.shape = selected_reduction_shape(request, &input.shape, alias);
-                    result
-                } else {
-                    let class = if has_keyword(request, "double")
-                        || (alias.defaults_integer_to_double
-                            && is_integer(numeric.class)
-                            && !has_keyword(request, "native"))
+                    let explicit_output_class = output_class.is_some();
+                    let class = match output_class {
+                        Some(class) => class,
+                        None if alias.defaults_integer_to_double && is_integer(numeric.class) => {
+                            NumericClass::Double
+                        }
+                        None => numeric.class,
+                    };
+                    if numeric.class == NumericClass::Single
+                        && alias.single_output_dynamic
+                        && (!alias.output_class_control || !explicit_output_class)
                     {
-                        NumericClass::Double
+                        // The owning host reduction and some resident routes do
+                        // not currently agree on every Single result class.
+                        let mut result = ValueFact::unknown(DynamicReason::RuntimeValue);
+                        result.shape = shape;
+                        result
                     } else {
-                        numeric.class
-                    };
-                    let shape = selected_reduction_shape(request, &input.shape, alias);
-                    let storage = match shape.element_count() {
-                        Some(1) => StorageFact::Scalar,
-                        Some(_) => StorageFact::Dense,
-                        None => StorageFact::Unknown,
-                    };
-                    let mut result = ValueFact::proven(
-                        ValueKindFact::Numeric(NumericFact {
-                            class,
-                            domain: if alias.complex_error_code.is_some() {
-                                NumericDomain::Real
-                            } else {
-                                numeric.domain
-                            },
-                        }),
-                        shape,
-                        storage,
-                    );
-                    result.residency = runmat_types::ResidencyFact::Unknown;
-                    result
+                        let storage = match shape.element_count() {
+                            Some(1) => StorageFact::Scalar,
+                            Some(_) => StorageFact::Dense,
+                            None => StorageFact::Unknown,
+                        };
+                        let mut result = ValueFact::proven(
+                            ValueKindFact::Numeric(NumericFact {
+                                class,
+                                domain: if alias.complex_error_code.is_some() {
+                                    NumericDomain::Real
+                                } else {
+                                    numeric.domain
+                                },
+                            }),
+                            shape,
+                            storage,
+                        );
+                        result.residency = ResidencyFact::Unknown;
+                        result
+                    }
+                } else {
+                    ValueFact::unknown(DynamicReason::RuntimeValue)
                 }
             } else {
                 if !matches!(input.kind, ValueKindFact::Unknown) {
