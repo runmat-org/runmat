@@ -1,0 +1,81 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("interp1"),
+    slug: Some("interp1"),
+    summary: "Interpolate one-dimensional sampled data.",
+    description: "`interp1(X,Y,Xq)` estimates sampled values at query locations. `interp1(Y,Xq)` uses implicit sample locations `1:numel(Y)`. The default method is linear; nearest, spline, and pchip are also available.",
+    keywords: &["interp1", "interpolation", "linear", "nearest", "spline", "pchip"],
+    related: &["spline", "pchip", "interp2"],
+    sections: &[
+        BuiltinDocumentationSection {
+            heading: "Syntax and geometry",
+            paragraphs: &[
+                "`Vq = interp1(Y,Xq)` uses implicit sample points. `Vq = interp1(X,Y,Xq)` uses a strictly increasing sample-location vector X. Optional method and extrapolation arguments follow Xq.",
+                "Vector Y follows X and preserves the shape of Xq. Matrix or N-D Y is interpolated along its first sample dimension; the output places the query dimensions before the remaining component dimensions. A scalar query produces a scalar for vector Y.",
+                "The supported methods are `linear`, `nearest`, `spline`, and `pchip`; `linear` is the default. Out-of-range queries return NaN unless `extrap` or a scalar fill value is supplied. Cubic methods use the shared spline and shape-preserving piecewise-polynomial implementations.",
+            ],
+        },
+        BuiltinDocumentationSection {
+            heading: "Classes and device execution",
+            paragraphs: &[
+                "Host interpolation currently computes real double values. Typed integer sample locations, values, query coordinates, or scalar fills use a RunMat-only checked conversion to binary64; logical numeric inputs are also RunMat-only extensions. Values that cannot cross the exact integer boundary are rejected.",
+                "For real resident Y and resident or host Xq, linear and nearest interpolation may execute on the owning provider and return a resident output when X is implicit or host-validated. Provider precision can be single or double. The host path handles spline and pchip, unavailable provider hooks, and resident-X breakpoint validation. A provider failure is not silently treated as an unsupported hook.",
+                "Interpolation is a fusion boundary. Provider ownership, input/output aliasing, storage class, shape, and precision are validated around the resident call. Static class and residency facts remain dynamic when the selected device route is not known ahead of time.",
+            ],
+        },
+    ],
+    examples: &[
+        BuiltinExample {
+            id: "linear-samples",
+            title: "Interpolate between three samples",
+            program: "x = [1 2 3]; y = [10 20 40]; yq = interp1(x,y,[1.5 2.5])",
+            display_output: Some("yq = [15 30]"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(numel(yq)==2); assert(abs(yq(1)-15)<1e-12); assert(abs(yq(2)-30)<1e-12);" },
+        },
+        BuiltinExample {
+            id: "spline-samples",
+            title: "Interpolate with a spline",
+            program: "x = [1 2 3]; y = [1 4 9]; yq = interp1(x,y,[1.5 2.5],'spline')",
+            display_output: Some("yq = [2.25 6.25]"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(numel(yq)==2); assert(abs(yq(1)-2.25)<1e-12); assert(abs(yq(2)-6.25)<1e-12);" },
+        },
+        BuiltinExample {
+            id: "resident-linear",
+            title: "Interpolate real resident samples",
+            program: "Y = gpuArray([10 20 40]); Vq = interp1(Y,gpuArray([1.5 2.5]))",
+            display_output: Some("Vq = gpuArray([15 30])"),
+            compatibility: BuiltinExampleCompatibility::RunMat,
+            harness: BuiltinExampleHarness::Wgpu,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(isa(Vq,'gpuArray')); assert(all(abs(gather(Vq)-[15 30])<1e-12));" },
+        },
+    ],
+    example_exemption: None,
+    faqs: &[],
+    links: &[
+        BuiltinDocumentationLink { label: "spline", target: BuiltinDocumentationLinkTarget::Builtin("spline") },
+        BuiltinDocumentationLink { label: "pchip", target: BuiltinDocumentationLinkTarget::Builtin("pchip") },
+        BuiltinDocumentationLink { label: "interp2", target: BuiltinDocumentationLinkTarget::Builtin("interp2") },
+        BuiltinDocumentationLink { label: "MATLAB interp1 reference", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/interp1.html") },
+        BuiltinDocumentationLink { label: "Open an issue", target: BuiltinDocumentationLinkTarget::External("https://github.com/runmat-org/runmat/issues/new/choose") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "interp1 runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/interpolation/interp1.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "interp1 host and resident interpolation", location: "builtins::math::interpolation::interp1::tests" }],
+        notes: &["The legacy sidecar's precision, broadcasting, fusion, and GPU-residency fields are represented by the catalog placement and execution sections. No device kernel is claimed for cubic forms."],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Stable),
+};
