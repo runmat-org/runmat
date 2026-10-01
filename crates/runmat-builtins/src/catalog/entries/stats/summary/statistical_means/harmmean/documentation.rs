@@ -4,7 +4,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("harmmean"), slug: Some("harmmean"),
     summary: "Compute the harmonic mean of real observations.",
-    description: "`harmmean(X)` reduces the first non-singleton dimension. A dimension, dimension vector, or `\"all\"` selects other axes; `\"omitnan\"` ignores missing observations.",
+    description: "`harmmean(X)` reduces the first non-singleton dimension. A dimension, dimension vector, or `\"all\"` selects other axes. `\"includenan\"` is the default; `\"omitnan\"` ignores NaNs in each slice.",
     keywords: &["harmmean", "harmonic mean", "statistics", "summary"],
     related: &["geomean", "mean"],
     sections: &[
@@ -20,7 +20,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[BuiltinExample {
         id: "all-elements", title: "Harmonic mean across all values",
         program: "m = harmmean([1 2 4], \"all\")",
-        display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+        display_output: Some("m = 12/7"), compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(abs(m-12/7) < 1e-12);" },

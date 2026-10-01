@@ -10,7 +10,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     sections: &[
         BuiltinDocumentationSection { heading: "Numerical contract", paragraphs: &[
             "Real and complex single/double forecast and actual inputs are supported. The output is real. Typed real or complex integer data and typed integer weights are separately mode-gated RunMat extensions.",
-            "Weighted RMSE computes `sqrt(sum(W.*abs(F-A).^2)/sum(W))` in each selected slice. Zero total weight and all-omitted slices produce NaN. Weights cannot accompany `\"all\"` or a dimension vector.",
+            "Weighted RMSE computes `sqrt(sum(W.*abs(F-A).^2)/sum(W))` in each selected slice. Weights may be a scalar, a full-size array, or a vector along the operating dimension. Zero total weight and all-omitted slices produce NaN. Weights cannot accompany `\"all\"` or a dimension vector.",
             "Missing flags `\"includenan\"`/`\"includemissing\"` and `\"omitnan\"`/`\"omitmissing\"` have paired behavior.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
@@ -21,7 +21,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "basic-error", title: "Root mean squared error",
             program: "predicted = [2 4 6]; actual = [1 4 8]; e = rmse(predicted, actual)",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("e = sqrt(5/3)"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(abs(e-sqrt(5/3)) < 1e-12);" },
@@ -29,7 +29,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample {
             id: "weighted-columns", title: "Weighted column-wise error",
             program: "F = [2 4; 4 8]; A = [1 4; 2 6]; W = [1; 3]; e = rmse(F, A, 1, \"Weights\", W)",
-            display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+            display_output: Some("e = [sqrt(13/4) sqrt(3)]"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(max(abs(e-[sqrt(13/4) sqrt(3)])) < 1e-12);" },

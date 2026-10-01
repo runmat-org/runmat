@@ -4,7 +4,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("rms"), slug: Some("rms"),
     summary: "Compute the root mean square magnitude of an array.",
-    description: "`rms(X)` computes the root mean square magnitude along the first non-singleton dimension. Use `\"all\"`, a dimension, or a dimension vector for another reduction, and a missing-value flag to include or omit NaNs.",
+    description: "`rms(X)` computes the root mean square magnitude along the first non-singleton dimension. Use `\"all\"`, a dimension, or a dimension vector for another reduction. `\"includenan\"`/`\"includemissing\"` include NaNs (the default); `\"omitnan\"`/`\"omitmissing\"` exclude them from each slice.",
     keywords: &["rms", "root mean square", "reduction", "signal"],
     related: &["rmse", "mean"],
     sections: &[
@@ -19,7 +19,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[BuiltinExample {
         id: "vector-rms", title: "Root mean square of a vector",
         program: "r = rms([1 2 4], \"all\")",
-        display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+        display_output: Some("r = sqrt(7)"), compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(abs(r-sqrt(7)) < 1e-12);" },

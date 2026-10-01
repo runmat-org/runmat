@@ -4,14 +4,14 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("geomean"), slug: Some("geomean"),
     summary: "Compute the geometric mean of nonnegative observations.",
-    description: "`geomean(X)` reduces the first non-singleton dimension. Use a dimension, a dimension vector, or `\"all\"` to select other axes. `\"omitnan\"` excludes missing observations; the default includes them.",
+    description: "`geomean(X)` reduces the first non-singleton dimension. Use a dimension, a dimension vector, or `\"all\"` to select other axes. `\"includenan\"` is the default; `\"omitnan\"` excludes NaNs from each slice.",
     keywords: &["geomean", "geometric mean", "statistics", "summary"],
     related: &["harmmean", "mean"],
     sections: &[
         BuiltinDocumentationSection { heading: "Input and result class", paragraphs: &[
             "The documented data domain is real, nonnegative single or double. Typed integer data is a RunMat-mode extension; the result is double for integer data and retains single or double for floating data.",
             "The selected dimensions become singleton dimensions. An empty reduction slice produces NaN; `\"omitnan\"` produces NaN when no observations remain.",
-            "A negative observation produces NaN in its affected output slice. A slice containing both zero and infinity also produces NaN.",
+            "A zero produces a zero result for its slice unless infinity is also present, in which case the result is NaN. A negative observation produces NaN only in its affected output slice.",
             "Selecting only singleton or trailing dimensions leaves nonnegative input values unchanged; negative observations still produce NaN.",
         ]},
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
@@ -21,7 +21,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     examples: &[BuiltinExample {
         id: "column-geometric-means", title: "Column geometric means",
         program: "m = geomean([1 9; 4 16])",
-        display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+        display_output: Some("m = [2 12]"), compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions { source: "assert(max(abs(m-[2 12])) < 1e-12);" },
