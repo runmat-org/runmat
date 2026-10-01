@@ -7,7 +7,7 @@ fn numeric(class: NumericClass, dims: &[usize]) -> ValueFact {
             class,
             domain: NumericDomain::Real,
         }),
-        ShapeFact::from(dims.iter().copied().map(Some).collect()),
+        ShapeFact::from(dims.iter().copied().map(Some).collect::<Vec<_>>()),
         StorageFact::Dense,
     )
 }

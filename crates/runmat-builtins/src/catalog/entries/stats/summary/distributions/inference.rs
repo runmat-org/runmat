@@ -148,11 +148,15 @@ fn validate_family(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnos
         return;
     }
     match &arguments[0].kind {
-        ValueKindFact::Object(_) if arguments.len() != 2 => diagnostics.push(error(
-            "ARITY",
-            "the fitted-distribution form accepts exactly two inputs",
-            arguments.len() - 1,
-        )),
+        ValueKindFact::Object(_) => {
+            if arguments.len() != 2 {
+                diagnostics.push(error(
+                    "ARITY",
+                    "the fitted-distribution form accepts exactly two inputs",
+                    arguments.len() - 1,
+                ));
+            }
+        }
         ValueKindFact::String | ValueKindFact::Character => {
             if let Some(name) = request.literals.literal_string_at(0) {
                 match InverseDistributionFamily::from_keyword(&name) {
