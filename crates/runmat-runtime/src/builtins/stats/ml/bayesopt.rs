@@ -85,10 +85,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "bayesopt",
-    execution_stack = "process",
     context = true,
     requested_outputs = true,
-    accel = "cpu",
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::bayesopt"
 )]

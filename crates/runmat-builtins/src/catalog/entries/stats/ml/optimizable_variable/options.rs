@@ -7,6 +7,14 @@ pub enum OptimizableVariableOption {
 }
 
 impl OptimizableVariableOption {
+    pub const fn public_name(self) -> &'static str {
+        match self {
+            Self::Optimize => "Optimize",
+            Self::Transform => "Transform",
+            Self::Type => "Type",
+        }
+    }
+
     pub fn from_public_name(name: &str) -> Option<Self> {
         Some(match name.trim().to_ascii_lowercase().as_str() {
             "type" => Self::Type,

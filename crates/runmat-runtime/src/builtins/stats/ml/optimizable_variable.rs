@@ -75,7 +75,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "optimizableVariable",
-    accel = "cpu",
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::optimizable_variable"
 )]

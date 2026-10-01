@@ -137,7 +137,7 @@ impl BayesoptOptions {
                 | ParsedOption::EmptyCallback
                 | ParsedOption::EmptyConditional => {}
             }
-            raw_options.insert(&canonical, value);
+            raw_options.insert(canonical, value);
         }
         if num_seed_points > max_evals {
             num_seed_points = max_evals;

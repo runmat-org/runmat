@@ -32,6 +32,16 @@ fn valid_arguments() -> Vec<ValueFact> {
 
 #[test]
 fn public_variable_identities_are_closed_and_case_insensitive() {
+    for option in [
+        OptimizableVariableOption::Optimize,
+        OptimizableVariableOption::Transform,
+        OptimizableVariableOption::Type,
+    ] {
+        assert_eq!(
+            OptimizableVariableOption::from_public_name(option.public_name()),
+            Some(option)
+        );
+    }
     assert_eq!(
         OptimizableVariableOption::from_public_name(" TRANSFORM "),
         Some(OptimizableVariableOption::Transform)
