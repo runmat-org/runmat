@@ -131,6 +131,55 @@ fn finite_large_priors_normalize_without_overflow() {
     assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
 }
 
+#[test]
+fn finite_large_observation_weights_have_explicit_empirical_boundary_and_stable_prior() {
+    let input = || {
+        (
+            tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
+            tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
+            Value::Num(1.0),
+        )
+    };
+    let weights = || vec![Value::from("Weights"), tensor(&[1.0e308; 4], &[4, 1])];
+    let (labels, scores, positive) = input();
+    let error = block_on(perfcurve_builtin(labels, scores, positive, weights()))
+        .expect_err("empirical count total cannot fit in double");
+    assert!(error
+        .message()
+        .contains("weight exceeds finite double range"));
+
+    let _outputs = output_count::push_output_count(Some(4));
+    let (labels, scores, positive) = input();
+    let mut controls = weights();
+    controls.extend([Value::from("Prior"), Value::from("uniform")]);
+    let result = block_on(perfcurve_builtin(labels, scores, positive, controls))
+        .expect("normalized prior keeps finite class masses");
+    assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
+}
+
+#[test]
+fn empirical_and_uniform_priors_select_different_roc_operating_points() {
+    let _outputs = output_count::push_output_count(Some(5));
+    let run = |controls| {
+        block_on(perfcurve_builtin(
+            tensor(&[1.0, 0.0, 0.0, 0.0], &[4, 1]),
+            tensor(&[0.8, 0.9, 0.7, 0.1], &[4, 1]),
+            Value::Num(1.0),
+            controls,
+        ))
+        .expect("imbalanced ROC curve")
+    };
+    let empirical = run(vec![]);
+    let uniform = run(vec![Value::from("Prior"), Value::from("uniform")]);
+    assert_eq!(
+        output_tensor(&empirical, 4).materialize_f64(),
+        vec![0.0, 0.0]
+    );
+    let optimal = output_tensor(&uniform, 4).materialize_f64();
+    assert!((optimal[0] - 1.0 / 3.0).abs() < 1.0e-12);
+    assert_eq!(optimal[1], 1.0);
+}
+
 fn tensor(data: &[f64], shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new(data.to_vec(), shape.to_vec()).unwrap())
 }

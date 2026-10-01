@@ -119,36 +119,55 @@ fn apply_prior_weights(
     mut observations: Vec<Observation>,
     prior: &PriorOption,
 ) -> BuiltinResult<Vec<Observation>> {
-    let pos_total: f64 = observations
-        .iter()
-        .filter(|obs| obs.is_positive)
-        .map(|obs| obs.weight)
-        .sum();
-    let neg_total: f64 = observations
-        .iter()
-        .filter(|obs| !obs.is_positive)
-        .map(|obs| obs.weight)
-        .sum();
-    if pos_total <= 0.0 || neg_total <= 0.0 {
-        return Ok(observations);
-    }
     let (pos_prior, neg_prior) = match prior {
-        PriorOption::Empirical => return Ok(observations),
+        PriorOption::Empirical => {
+            let mut total = 0.0_f64;
+            for observation in &observations {
+                total += observation.weight;
+                if !total.is_finite() {
+                    return Err(invalid(
+                        "perfcurve: total observation weight exceeds finite double range",
+                    ));
+                }
+            }
+            return Ok(observations);
+        }
         PriorOption::Uniform => (0.5, 0.5),
         PriorOption::Values(pos, neg) => (*pos, *neg),
     };
+    let pos_max = observations
+        .iter()
+        .filter(|obs| obs.is_positive)
+        .map(|obs| obs.weight)
+        .fold(0.0_f64, f64::max);
+    let neg_max = observations
+        .iter()
+        .filter(|obs| !obs.is_positive)
+        .map(|obs| obs.weight)
+        .fold(0.0_f64, f64::max);
+    if pos_max == 0.0 || neg_max == 0.0 {
+        return Ok(observations);
+    }
     if pos_prior <= 0.0 || neg_prior <= 0.0 {
         return Err(invalid(
             "perfcurve: positive and negative prior probabilities must be nonzero",
         ));
     }
-    let pos_scale = pos_prior / pos_total;
-    let neg_scale = neg_prior / neg_total;
+    let pos_scaled_total: f64 = observations
+        .iter()
+        .filter(|obs| obs.is_positive)
+        .map(|obs| obs.weight / pos_max)
+        .sum();
+    let neg_scaled_total: f64 = observations
+        .iter()
+        .filter(|obs| !obs.is_positive)
+        .map(|obs| obs.weight / neg_max)
+        .sum();
     for obs in &mut observations {
-        obs.weight *= if obs.is_positive {
-            pos_scale
+        obs.weight = if obs.is_positive {
+            (obs.weight / pos_max) * (pos_prior / pos_scaled_total)
         } else {
-            neg_scale
+            (obs.weight / neg_max) * (neg_prior / neg_scaled_total)
         };
     }
     Ok(observations)
@@ -339,13 +358,13 @@ pub(super) fn auc_interval(x: &[f64], y: &[f64], xvals: &[f64]) -> f64 {
         .zip(y.iter().copied())
         .filter(|(x, y)| x.is_finite() && y.is_finite() && *x >= lo && *x <= hi)
         .collect();
-    if !points.iter().any(|(x, _)| (*x - lo).abs() <= f64::EPSILON) {
+    if !points.iter().any(|(x, _)| *x == lo) {
         let (_, yi, _, _) = interpolate_from_xy(x, y, lo);
         if yi.is_finite() {
             points.push((lo, yi));
         }
     }
-    if !points.iter().any(|(x, _)| (*x - hi).abs() <= f64::EPSILON) {
+    if !points.iter().any(|(x, _)| *x == hi) {
         let (_, yi, _, _) = interpolate_from_xy(x, y, hi);
         if yi.is_finite() {
             points.push((hi, yi));
@@ -360,7 +379,7 @@ pub(super) fn optimal_point(curve: &Curve, options: &Options) -> (f64, f64) {
     if options.xcrit != Criterion::Fpr || options.ycrit != Criterion::Tpr {
         return (f64::NAN, f64::NAN);
     }
-    let slope = roc_slope(options);
+    let slope = roc_slope(curve, options);
     let mut best = (f64::NAN, f64::NAN);
     let mut best_score = f64::NEG_INFINITY;
     for ((x, y), counts) in curve.x.iter().zip(&curve.y).zip(&curve.counts) {
@@ -378,12 +397,14 @@ pub(super) fn optimal_point(curve: &Curve, options: &Options) -> (f64, f64) {
     best
 }
 
-fn roc_slope(options: &Options) -> f64 {
-    let (pos_prior, neg_prior) = match options.prior {
-        PriorOption::Empirical => (0.5, 0.5),
-        PriorOption::Uniform => (0.5, 0.5),
-        PriorOption::Values(pos, neg) => (pos, neg),
+fn roc_slope(curve: &Curve, options: &Options) -> f64 {
+    let Some(counts) = curve.counts.first().copied() else {
+        return f64::NAN;
     };
+    // Counts carry the effective class mass after empirical, uniform, or
+    // explicit-prior weighting; the slope must use that same mass.
+    let pos_prior = counts.tp + counts.fn_;
+    let neg_prior = counts.fp + counts.tn;
     let false_positive_cost = options.cost[0][1] - options.cost[0][0];
     let false_negative_cost = options.cost[1][0] - options.cost[1][1];
     if false_positive_cost <= 0.0 || false_negative_cost <= 0.0 || pos_prior <= 0.0 {
@@ -501,7 +522,7 @@ fn interpolate_from_points(
         let (x0, y0, t0, c0) = pair[0];
         let (x1, y1, t1, c1) = pair[1];
         if target <= x1 {
-            if (x1 - x0).abs() <= f64::EPSILON {
+            if x1 == x0 {
                 return (target, y1, t1, c1);
             }
             let alpha = (target - x0) / (x1 - x0);
@@ -561,4 +582,53 @@ pub(super) fn suby_output(
     Ok(Value::Tensor(
         Tensor::new(data, vec![rows, cols]).map_err(|err| internal(format!("perfcurve: {err}")))?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distinct_small_abscissae_interpolate_and_bound_auc_exactly() {
+        let (_, y, _, _) = interpolate_from_xy(&[0.0, 1.0e-16], &[0.0, 1.0], 5.0e-17);
+        assert!((y - 0.5).abs() < 1.0e-12);
+        let area = auc_interval(&[0.0, 1.0e-16], &[0.0, 1.0], &[5.0e-17, 1.0e-16]);
+        assert!((area - 3.75e-17).abs() < 1.0e-28);
+    }
+
+    #[test]
+    fn optimal_roc_slope_uses_effective_empirical_class_mass() {
+        let options = Options {
+            xcrit: Criterion::Fpr,
+            ycrit: Criterion::Tpr,
+            neg_class: None,
+            weights: None,
+            prior: PriorOption::Empirical,
+            cost: [[0.0, 1.0], [1.0, 0.0]],
+            tvals: None,
+            xvals: None,
+            use_nearest: true,
+            process_nan: ProcessNaN::Ignore,
+        };
+        let mut curve = Curve {
+            x: vec![0.0],
+            y: vec![0.0],
+            thresholds: vec![1.0],
+            counts: vec![Counts {
+                tp: 0.0,
+                fp: 0.0,
+                tn: 3.0,
+                fn_: 1.0,
+            }],
+            auc: 0.0,
+        };
+        assert_eq!(roc_slope(&curve, &options), 3.0);
+        curve.counts[0] = Counts {
+            tp: 0.0,
+            fp: 0.0,
+            tn: 0.5,
+            fn_: 0.5,
+        };
+        assert_eq!(roc_slope(&curve, &options), 1.0);
+    }
 }
