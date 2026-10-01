@@ -1,7 +1,7 @@
 //! Numerical kernels for real floating resident inputs. The RMS route scales
 //! each output slice before squaring, avoiding finite-input overflow.
 use super::{
-    contract_failure, expected_shape, provider_failure, reduction, scalar_summary, validate_output,
+    admitted_real, contract_failure, expected_shape, provider_failure, reduction, scalar_summary,
     Failure,
 };
 use crate::builtins::stats::summary::statistical_means::options::{Options, ReductionKind};
@@ -30,13 +30,19 @@ pub(super) async fn run(
             let cleaned = provider
                 .map_nan_to_zero(input)
                 .map_err(|source| provider_failure(kind, source))?;
+            let cleaned = admitted_real(kind, provider, input, cleaned, input.shape(), precision)?;
             let mut minimum = cleaned;
             for axis in 0..input.shape().len() {
-                minimum = provider
+                let next = provider
                     .reduce_min_dim(&minimum, axis)
                     .await
                     .map_err(|source| provider_failure(kind, source))?
                     .values;
+                let expected = expected_shape(
+                    minimum.shape(),
+                    &super::super::options::Axes::Dims(vec![axis + 1]),
+                );
+                minimum = admitted_real(kind, provider, input, next, &expected, precision)?;
             }
             let minimum = scalar_summary(kind, provider, &minimum).await?;
             if minimum < 0.0 {
@@ -49,7 +55,8 @@ pub(super) async fn run(
                 .unary_log(input)
                 .await
                 .map_err(|source| provider_failure(kind, source))?;
-            validate_output(kind, provider, input, &logarithms, input.shape(), precision)?;
+            let logarithms =
+                admitted_real(kind, provider, input, logarithms, input.shape(), precision)?;
             let average = reduction::mean(
                 kind,
                 provider,
@@ -59,6 +66,14 @@ pub(super) async fn run(
                 options.missing,
             )
             .await?;
+            let average = admitted_real(
+                kind,
+                provider,
+                input,
+                average,
+                &expected_shape(input.shape(), &options.axes),
+                precision,
+            )?;
             provider
                 .unary_exp(&average)
                 .await
@@ -72,17 +87,23 @@ pub(super) async fn run(
                 .unary_abs(input)
                 .await
                 .map_err(|source| provider_failure(kind, source))?;
-            validate_output(kind, provider, input, &absolute, input.shape(), precision)?;
+            let absolute =
+                admitted_real(kind, provider, input, absolute, input.shape(), precision)?;
             let mut scale = if options.missing == super::super::options::MissingMode::Omit {
                 let cleaned = provider
                     .map_nan_to_zero(&absolute)
                     .map_err(|source| provider_failure(kind, source))?;
+                let cleaned =
+                    admitted_real(kind, provider, input, cleaned, input.shape(), precision)?;
                 let valid = provider
                     .not_nan_mask(input)
                     .map_err(|source| provider_failure(kind, source))?;
+                let valid = admitted_real(kind, provider, input, valid, input.shape(), precision)?;
                 let missing = provider
                     .scalar_rsub(&valid, 1.0)
                     .map_err(|source| provider_failure(kind, source))?;
+                let missing =
+                    admitted_real(kind, provider, input, missing, input.shape(), precision)?;
                 let maximum = match precision {
                     runmat_accelerate_api::ProviderPrecision::F32 => f64::from(f32::MAX),
                     runmat_accelerate_api::ProviderPrecision::F64 => f64::MAX,
@@ -90,26 +111,34 @@ pub(super) async fn run(
                 let replacement = provider
                     .scalar_mul(&missing, maximum)
                     .map_err(|source| provider_failure(kind, source))?;
-                provider
+                let replacement =
+                    admitted_real(kind, provider, input, replacement, input.shape(), precision)?;
+                let filled = provider
                     .elem_add(&cleaned, &replacement)
                     .await
-                    .map_err(|source| provider_failure(kind, source))?
+                    .map_err(|source| provider_failure(kind, source))?;
+                admitted_real(kind, provider, input, filled, input.shape(), precision)?
             } else {
                 absolute
             };
             for axis in reduction::selected_axes(input.shape(), &options.axes) {
-                scale = provider
+                let next = provider
                     .reduce_min_dim(&scale, axis)
                     .await
                     .map_err(|source| provider_failure(kind, source))?
                     .values;
+                let expected = expected_shape(
+                    scale.shape(),
+                    &super::super::options::Axes::Dims(vec![axis + 1]),
+                );
+                scale = admitted_real(kind, provider, input, next, &expected, precision)?;
             }
             let scale = super::usable_scale(kind, provider, input, scale).await?;
-            validate_output(
+            let scale = admitted_real(
                 kind,
                 provider,
                 input,
-                &scale,
+                scale,
                 &expected_shape(input.shape(), &options.axes),
                 precision,
             )?;
@@ -117,11 +146,11 @@ pub(super) async fn run(
                 .elem_div(&scale, input)
                 .await
                 .map_err(|source| provider_failure(kind, source))?;
-            validate_output(
+            let normalized_reciprocals = admitted_real(
                 kind,
                 provider,
                 input,
-                &normalized_reciprocals,
+                normalized_reciprocals,
                 input.shape(),
                 precision,
             )?;
@@ -134,6 +163,14 @@ pub(super) async fn run(
                 options.missing,
             )
             .await?;
+            let average = admitted_real(
+                kind,
+                provider,
+                input,
+                average,
+                &expected_shape(input.shape(), &options.axes),
+                precision,
+            )?;
             provider
                 .elem_div(&scale, &average)
                 .await
@@ -151,8 +188,9 @@ pub(super) async fn run(
                     .unary_imag(input)
                     .await
                     .map_err(|source| provider_failure(kind, source))?;
-                validate_output(kind, provider, input, &real, input.shape(), precision)?;
-                validate_output(kind, provider, input, &imaginary, input.shape(), precision)?;
+                let real = admitted_real(kind, provider, input, real, input.shape(), precision)?;
+                let imaginary =
+                    admitted_real(kind, provider, input, imaginary, input.shape(), precision)?;
                 Some((real, imaginary))
             } else {
                 None
@@ -166,6 +204,16 @@ pub(super) async fn run(
                     .unary_abs(imaginary)
                     .await
                     .map_err(|source| provider_failure(kind, source))?;
+                let abs_real =
+                    admitted_real(kind, provider, input, abs_real, input.shape(), precision)?;
+                let abs_imaginary = admitted_real(
+                    kind,
+                    provider,
+                    input,
+                    abs_imaginary,
+                    input.shape(),
+                    precision,
+                )?;
                 provider
                     .elem_max(&abs_real, &abs_imaginary)
                     .await
@@ -176,12 +224,14 @@ pub(super) async fn run(
                     .await
                     .map_err(|source| provider_failure(kind, source))?
             };
-            validate_output(kind, provider, input, &absolute, input.shape(), precision)?;
+            let absolute =
+                admitted_real(kind, provider, input, absolute, input.shape(), precision)?;
             let selected = reduction::selected_axes(input.shape(), &options.axes);
             let mut scale = if options.missing == super::super::options::MissingMode::Omit {
-                provider
+                let cleaned = provider
                     .map_nan_to_zero(&absolute)
-                    .map_err(|source| provider_failure(kind, source))?
+                    .map_err(|source| provider_failure(kind, source))?;
+                admitted_real(kind, provider, input, cleaned, input.shape(), precision)?
             } else {
                 absolute.clone()
             };
@@ -190,14 +240,18 @@ pub(super) async fn run(
                     .reduce_max_dim(&scale, axis)
                     .await
                     .map_err(|source| provider_failure(kind, source))?;
-                scale = result.values;
+                let expected = expected_shape(
+                    scale.shape(),
+                    &super::super::options::Axes::Dims(vec![axis + 1]),
+                );
+                scale = admitted_real(kind, provider, input, result.values, &expected, precision)?;
             }
             let scale = super::usable_scale(kind, provider, input, scale).await?;
-            validate_output(
+            let scale = admitted_real(
                 kind,
                 provider,
                 input,
-                &scale,
+                scale,
                 &expected_shape(input.shape(), &options.axes),
                 precision,
             )?;
@@ -210,19 +264,19 @@ pub(super) async fn run(
                     .elem_div(imaginary, &scale)
                     .await
                     .map_err(|source| provider_failure(kind, source))?;
-                validate_output(
+                let normalized_real = admitted_real(
                     kind,
                     provider,
                     input,
-                    &normalized_real,
+                    normalized_real,
                     input.shape(),
                     precision,
                 )?;
-                validate_output(
+                let normalized_imaginary = admitted_real(
                     kind,
                     provider,
                     input,
-                    &normalized_imaginary,
+                    normalized_imaginary,
                     input.shape(),
                     precision,
                 )?;
@@ -234,6 +288,22 @@ pub(super) async fn run(
                     .elem_mul(&normalized_imaginary, &normalized_imaginary)
                     .await
                     .map_err(|source| provider_failure(kind, source))?;
+                let real_squared = admitted_real(
+                    kind,
+                    provider,
+                    input,
+                    real_squared,
+                    input.shape(),
+                    precision,
+                )?;
+                let imaginary_squared = admitted_real(
+                    kind,
+                    provider,
+                    input,
+                    imaginary_squared,
+                    input.shape(),
+                    precision,
+                )?;
                 provider
                     .elem_add(&real_squared, &imaginary_squared)
                     .await
@@ -243,26 +313,43 @@ pub(super) async fn run(
                     .elem_div(&absolute, &scale)
                     .await
                     .map_err(|source| provider_failure(kind, source))?;
-                validate_output(kind, provider, input, &normalized, input.shape(), precision)?;
+                let normalized =
+                    admitted_real(kind, provider, input, normalized, input.shape(), precision)?;
                 provider
                     .elem_mul(&normalized, &normalized)
                     .await
                     .map_err(|source| provider_failure(kind, source))?
             };
-            validate_output(kind, provider, input, &squared, input.shape(), precision)?;
+            let squared = admitted_real(kind, provider, input, squared, input.shape(), precision)?;
             let average = reduction::mean(
                 kind,
                 provider,
-                input,
+                &squared,
                 &squared,
                 &options.axes,
                 options.missing,
             )
             .await?;
+            let average = admitted_real(
+                kind,
+                provider,
+                input,
+                average,
+                &expected_shape(input.shape(), &options.axes),
+                precision,
+            )?;
             let rooted = provider
                 .unary_sqrt(&average)
                 .await
                 .map_err(|source| provider_failure(kind, source))?;
+            let rooted = admitted_real(
+                kind,
+                provider,
+                input,
+                rooted,
+                &expected_shape(input.shape(), &options.axes),
+                precision,
+            )?;
             provider
                 .elem_mul(&rooted, &scale)
                 .await

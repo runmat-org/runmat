@@ -12,7 +12,7 @@ use super::options::{Axes, Options, ReductionKind};
 use crate::builtins::common::gpu_helpers;
 use crate::{BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
-use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
+use runmat_value::{NumericScalar, Value};
 
 #[derive(Debug)]
 enum Failure {
@@ -35,6 +35,16 @@ fn contract_failure(kind: ReductionKind, message: impl Into<String>) -> Failure 
     let mut error = super::options::invalid(kind, &message);
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     Failure::Execution(Box::new(error))
+}
+
+fn reject_output(
+    kind: ReductionKind,
+    output: GpuTensorHandle,
+    message: impl Into<String>,
+) -> Failure {
+    let mut error = super::options::invalid(kind, &message.into());
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    Failure::Execution(Box::new(gpu_helpers::reject_gpu_output(output, error)))
 }
 
 fn expected_shape(input: &[usize], axes: &Axes) -> Vec<usize> {
@@ -84,6 +94,62 @@ fn validate_output(
     Ok(())
 }
 
+fn validate_mask(
+    kind: ReductionKind,
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    mask: &GpuTensorHandle,
+    expected: &[usize],
+) -> Result<(), Failure> {
+    if mask.allocation_lease().validate_live().is_err()
+        || mask.device_id() != input.device_id()
+        || gpu_helpers::exact_provider_for_handle(mask)
+            .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
+        || !equivalent_shape(mask.shape(), expected)
+        || !runmat_accelerate_api::handle_is_logical(mask)
+        || mask.shares_allocation_with(input)
+    {
+        return Err(contract_failure(
+            kind,
+            "resident provider returned an invalid logical mask",
+        ));
+    }
+    Ok(())
+}
+
+fn admitted_real(
+    kind: ReductionKind,
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    output: GpuTensorHandle,
+    expected: &[usize],
+    precision: ProviderPrecision,
+) -> Result<GpuTensorHandle, Failure> {
+    match validate_output(kind, provider, input, &output, expected, precision) {
+        Ok(()) => Ok(output),
+        Err(Failure::Execution(error)) => Err(Failure::Execution(Box::new(
+            gpu_helpers::reject_gpu_output(output, *error),
+        ))),
+        Err(Failure::Unsupported) => Err(Failure::Unsupported),
+    }
+}
+
+fn admitted_mask(
+    kind: ReductionKind,
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    output: GpuTensorHandle,
+    expected: &[usize],
+) -> Result<GpuTensorHandle, Failure> {
+    match validate_mask(kind, provider, input, &output, expected) {
+        Ok(()) => Ok(output),
+        Err(Failure::Execution(error)) => Err(Failure::Execution(Box::new(
+            gpu_helpers::reject_gpu_output(output, *error),
+        ))),
+        Err(Failure::Unsupported) => Err(Failure::Unsupported),
+    }
+}
+
 async fn scalar_summary(
     kind: ReductionKind,
     provider: &'static dyn AccelProvider,
@@ -91,6 +157,10 @@ async fn scalar_summary(
 ) -> Result<f64, Failure> {
     if !input.shape().iter().all(|extent| *extent == 1)
         || input.allocation_lease().validate_live().is_err()
+        || runmat_accelerate_api::handle_storage(input) != GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_precision(input).is_none()
+        || runmat_accelerate_api::handle_integer_type(input).is_some()
+        || runmat_accelerate_api::handle_is_logical(input)
         || gpu_helpers::exact_provider_for_handle(input)
             .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
     {
@@ -113,9 +183,12 @@ async fn scalar_summary(
         ));
     }
     Ok(
-        match summary.numeric_value_at(0).expect("one summary element") {
-            NumericScalar::F64(value) => value,
-            NumericScalar::F32(value) => f64::from(value),
+        match (
+            runmat_accelerate_api::handle_precision(input),
+            summary.numeric_value_at(0),
+        ) {
+            (Some(ProviderPrecision::F64), Some(NumericScalar::F64(value))) => value,
+            (Some(ProviderPrecision::F32), Some(NumericScalar::F32(value))) => f64::from(value),
             _ => {
                 return Err(contract_failure(
                     kind,
@@ -132,45 +205,42 @@ async fn usable_scale(
     input: &GpuTensorHandle,
     scale: GpuTensorHandle,
 ) -> Result<GpuTensorHandle, Failure> {
-    let owner = gpu_helpers::exact_provider_for_handle(&scale);
-    if owner.is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
-        || scale.allocation_lease().validate_live().is_err()
-        || scale.device_id() != input.device_id()
-        || runmat_accelerate_api::handle_storage(&scale) != GpuTensorStorage::Real
-        || runmat_accelerate_api::handle_precision(&scale)
-            != runmat_accelerate_api::handle_precision(input)
-    {
-        return Err(contract_failure(
+    let precision = runmat_accelerate_api::handle_precision(input).ok_or(Failure::Unsupported)?;
+    let scale_shape = scale.shape().to_vec();
+    let scale = admitted_real(kind, provider, input, scale, &scale_shape, precision)?;
+    let finite = provider
+        .logical_isfinite(&scale)
+        .map_err(|source| provider_failure(kind, source))?;
+    let finite = admitted_mask(kind, provider, input, finite, scale.shape())?;
+    let zero = provider
+        .zeros_like(&scale, scale.shape())
+        .map_err(|source| provider_failure(kind, source))?;
+    let zero = admitted_real(kind, provider, input, zero, scale.shape(), precision)?;
+    let nonzero = provider
+        .elem_ne(&scale, &zero)
+        .await
+        .map_err(|source| provider_failure(kind, source))?;
+    let nonzero = admitted_mask(kind, provider, input, nonzero, scale.shape())?;
+    let usable = provider
+        .logical_and(&finite, &nonzero)
+        .map_err(|source| provider_failure(kind, source))?;
+    let usable = admitted_mask(kind, provider, input, usable, scale.shape())?;
+    let one = provider
+        .ones_like(&scale)
+        .map_err(|source| provider_failure(kind, source))?;
+    let one = admitted_real(kind, provider, input, one, scale.shape(), precision)?;
+    let result = provider
+        .select(&usable, &scale, &one)
+        .await
+        .map_err(|source| provider_failure(kind, source))?;
+    if result.shares_allocation_with(&scale) || result.shares_allocation_with(&one) {
+        return Err(reject_output(
             kind,
-            "resident scale has an invalid class or owner",
+            result,
+            "resident selection aliased a scale operand",
         ));
     }
-    let summary = gpu_helpers::gather_tensor_async(&scale)
-        .await
-        .map_err(|error| Failure::Execution(Box::new(error)))?;
-    let mut values = summary.materialize_f64();
-    if values.is_empty() {
-        return Err(Failure::Unsupported);
-    }
-    let mut changed = false;
-    for value in &mut values {
-        if !value.is_finite() || *value == 0.0 {
-            *value = 1.0;
-            changed = true;
-        }
-    }
-    if !changed {
-        return Ok(scale);
-    }
-    let dtype = match runmat_accelerate_api::handle_precision(input) {
-        Some(ProviderPrecision::F32) => NumericDType::F32,
-        Some(ProviderPrecision::F64) => NumericDType::F64,
-        None => return Err(Failure::Unsupported),
-    };
-    let replacement = Tensor::new_with_dtype(values, summary.shape, dtype)
-        .map_err(|source| contract_failure(kind, source))?;
-    gpu_helpers::upload_tensor_protecting(provider, &replacement, &[input, &scale])
-        .map_err(|error| Failure::Execution(Box::new(error)))
+    admitted_real(kind, provider, input, result, scale.shape(), precision)
 }
 
 pub(super) async fn try_reduce(

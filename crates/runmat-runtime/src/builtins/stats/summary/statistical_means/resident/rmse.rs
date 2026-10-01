@@ -1,8 +1,8 @@
 //! Resident RMSE scales both operands before subtraction. Forming a raw
 //! residual first can overflow even when the final root mean square is finite.
 use super::{
-    contract_failure, equivalent_shape, expected_shape, numerics, provider_failure, reduction,
-    usable_scale, validate_output, Failure,
+    admitted_real, contract_failure, equivalent_shape, expected_shape, numerics, provider_failure,
+    reduction, reject_output, usable_scale, Failure,
 };
 use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers};
 use crate::builtins::stats::summary::statistical_means::options::{
@@ -16,7 +16,7 @@ async fn absolute_components(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
     precision: ProviderPrecision,
-) -> Result<(GpuTensorHandle, Option<GpuTensorHandle>), Failure> {
+) -> Result<(GpuTensorHandle, GpuTensorHandle, Option<GpuTensorHandle>), Failure> {
     let kind = ReductionKind::RootMeanSquaredError;
     let (real, imaginary) = match runmat_accelerate_api::handle_storage(input) {
         GpuTensorStorage::Real => (input.clone(), None),
@@ -29,8 +29,9 @@ async fn absolute_components(
                 .unary_imag(input)
                 .await
                 .map_err(|e| provider_failure(kind, e))?;
-            validate_output(kind, provider, input, &real, input.shape(), precision)?;
-            validate_output(kind, provider, input, &imaginary, input.shape(), precision)?;
+            let real = admitted_real(kind, provider, input, real, input.shape(), precision)?;
+            let imaginary =
+                admitted_real(kind, provider, input, imaginary, input.shape(), precision)?;
             (real, Some(imaginary))
         }
     };
@@ -38,11 +39,11 @@ async fn absolute_components(
         .unary_abs(&real)
         .await
         .map_err(|e| provider_failure(kind, e))?;
-    validate_output(
+    let absolute_real = admitted_real(
         kind,
         provider,
         input,
-        &absolute_real,
+        absolute_real,
         input.shape(),
         precision,
     )?;
@@ -51,11 +52,11 @@ async fn absolute_components(
             .unary_abs(imaginary)
             .await
             .map_err(|e| provider_failure(kind, e))?;
-        validate_output(
+        let absolute_imaginary = admitted_real(
             kind,
             provider,
             input,
-            &absolute_imaginary,
+            absolute_imaginary,
             input.shape(),
             precision,
         )?;
@@ -66,8 +67,8 @@ async fn absolute_components(
     } else {
         absolute_real
     };
-    validate_output(kind, provider, input, &absolute, input.shape(), precision)?;
-    Ok((absolute, imaginary))
+    let absolute = admitted_real(kind, provider, input, absolute, input.shape(), precision)?;
+    Ok((absolute, real, imaginary))
 }
 
 async fn normalized_component(
@@ -91,19 +92,19 @@ async fn normalized_component(
         .map_err(|source| contract_failure(kind, source.to_string()))?;
     let right_shape = BroadcastPlan::new(right.shape(), scale.shape())
         .map_err(|source| contract_failure(kind, source.to_string()))?;
-    validate_output(
+    let left_normalized = admitted_real(
         kind,
         provider,
         left,
-        &left_normalized,
+        left_normalized,
         left_shape.output_shape(),
         precision,
     )?;
-    validate_output(
+    let right_normalized = admitted_real(
         kind,
         provider,
         left,
-        &right_normalized,
+        right_normalized,
         right_shape.output_shape(),
         precision,
     )?;
@@ -111,8 +112,7 @@ async fn normalized_component(
         .elem_sub(&left_normalized, &right_normalized)
         .await
         .map_err(|e| provider_failure(kind, e))?;
-    validate_output(kind, provider, left, &residual, output_shape, precision)?;
-    Ok(residual)
+    admitted_real(kind, provider, left, residual, output_shape, precision)
 }
 
 async fn run(
@@ -125,53 +125,42 @@ async fn run(
 ) -> Result<GpuTensorHandle, Failure> {
     let kind = ReductionKind::RootMeanSquaredError;
     let output_shape = plan.output_shape();
-    let (forecast_abs, forecast_imaginary) =
+    let (forecast_abs, forecast_real, forecast_imaginary) =
         absolute_components(provider, forecast, precision).await?;
-    let (actual_abs, actual_imaginary) = absolute_components(provider, actual, precision).await?;
-    let mut scale = provider
+    let (actual_abs, actual_real, actual_imaginary) =
+        absolute_components(provider, actual, precision).await?;
+    let scale = provider
         .elem_max(&forecast_abs, &actual_abs)
         .await
         .map_err(|e| provider_failure(kind, e))?;
-    validate_output(kind, provider, forecast, &scale, output_shape, precision)?;
+    let mut scale = admitted_real(kind, provider, forecast, scale, output_shape, precision)?;
     if options.missing == super::super::options::MissingMode::Omit {
         scale = provider
             .map_nan_to_zero(&scale)
             .map_err(|e| provider_failure(kind, e))?;
-        validate_output(kind, provider, forecast, &scale, output_shape, precision)?;
+        scale = admitted_real(kind, provider, forecast, scale, output_shape, precision)?;
     }
     for axis in reduction::selected_axes(output_shape, &options.axes) {
-        scale = provider
+        let next = provider
             .reduce_max_dim(&scale, axis)
             .await
             .map_err(|e| provider_failure(kind, e))?
             .values;
+        let expected = expected_shape(
+            scale.shape(),
+            &super::super::options::Axes::Dims(vec![axis + 1]),
+        );
+        scale = admitted_real(kind, provider, forecast, next, &expected, precision)?;
     }
     let scale = usable_scale(kind, provider, forecast, scale).await?;
-    validate_output(
+    let scale = admitted_real(
         kind,
         provider,
         forecast,
-        &scale,
+        scale,
         &expected_shape(output_shape, &options.axes),
         precision,
     )?;
-
-    let forecast_real = if forecast_imaginary.is_some() {
-        provider
-            .unary_real(forecast)
-            .await
-            .map_err(|e| provider_failure(kind, e))?
-    } else {
-        forecast.clone()
-    };
-    let actual_real = if actual_imaginary.is_some() {
-        provider
-            .unary_real(actual)
-            .await
-            .map_err(|e| provider_failure(kind, e))?
-    } else {
-        actual.clone()
-    };
     let real = normalized_component(
         provider,
         &forecast_real,
@@ -198,6 +187,7 @@ async fn run(
             .await
             .map_err(|e| provider_failure(kind, e))?;
         if !equivalent_shape(complex.shape(), output_shape)
+            || complex.allocation_lease().validate_live().is_err()
             || runmat_accelerate_api::handle_storage(&complex)
                 != GpuTensorStorage::ComplexInterleaved
             || runmat_accelerate_api::handle_precision(&complex) != Some(precision)
@@ -205,8 +195,9 @@ async fn run(
             || gpu_helpers::exact_provider_for_handle(&complex)
                 .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
         {
-            return Err(contract_failure(
+            return Err(reject_output(
                 kind,
+                complex,
                 "resident complex residual has an invalid class, shape, or owner",
             ));
         }
@@ -215,11 +206,11 @@ async fn run(
         real
     };
     let rooted = numerics::run(kind, provider, &normalized, options).await?;
-    validate_output(
+    let rooted = admitted_real(
         kind,
         provider,
         forecast,
-        &rooted,
+        rooted,
         &expected_shape(output_shape, &options.axes),
         precision,
     )?;
@@ -227,15 +218,14 @@ async fn run(
         .elem_mul(&rooted, &scale)
         .await
         .map_err(|e| provider_failure(kind, e))?;
-    validate_output(
+    admitted_real(
         kind,
         provider,
         forecast,
-        &result,
+        result,
         &expected_shape(output_shape, &options.axes),
         precision,
-    )?;
-    Ok(result)
+    )
 }
 
 pub(in crate::builtins::stats::summary::statistical_means) async fn try_rmse(

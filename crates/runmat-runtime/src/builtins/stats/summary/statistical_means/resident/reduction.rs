@@ -1,5 +1,5 @@
 //! Dimension selection and NaN-aware mean on one provider.
-use super::{provider_failure, Failure};
+use super::{admitted_real, expected_shape, provider_failure, Failure};
 use crate::builtins::stats::summary::statistical_means::options::{
     Axes, MissingMode, ReductionKind,
 };
@@ -26,11 +26,14 @@ async fn sum(
     axes: &[usize],
 ) -> Result<GpuTensorHandle, Failure> {
     let mut current = input.clone();
+    let precision = runmat_accelerate_api::handle_precision(input).ok_or(Failure::Unsupported)?;
     for axis in axes {
-        current = provider
+        let next = provider
             .reduce_sum_dim(&current, *axis)
             .await
             .map_err(|source| provider_failure(kind, source))?;
+        let expected = expected_shape(current.shape(), &Axes::Dims(vec![axis + 1]));
+        current = admitted_real(kind, provider, input, next, &expected, precision)?;
     }
     Ok(current)
 }
@@ -44,29 +47,50 @@ pub(super) async fn mean(
     missing: MissingMode,
 ) -> Result<GpuTensorHandle, Failure> {
     let selected = selected_axes(original.shape(), axes);
+    let precision =
+        runmat_accelerate_api::handle_precision(original).ok_or(Failure::Unsupported)?;
     if selected.is_empty() {
         return Ok(transformed.clone());
     }
     if missing == MissingMode::Include {
         let mut current = transformed.clone();
         for axis in &selected {
-            current = provider
+            let next = provider
                 .reduce_mean_dim(&current, *axis)
                 .await
                 .map_err(|source| provider_failure(kind, source))?;
+            let expected = expected_shape(current.shape(), &Axes::Dims(vec![axis + 1]));
+            current = admitted_real(kind, provider, original, next, &expected, precision)?;
         }
         return Ok(current);
     }
     let cleaned = provider
         .map_nan_to_zero(transformed)
         .map_err(|source| provider_failure(kind, source))?;
+    let cleaned = admitted_real(
+        kind,
+        provider,
+        original,
+        cleaned,
+        transformed.shape(),
+        precision,
+    )?;
     let mask = provider
         .not_nan_mask(original)
         .map_err(|source| provider_failure(kind, source))?;
+    let mask = admitted_real(kind, provider, original, mask, original.shape(), precision)?;
     let numerator = sum(kind, provider, &cleaned, &selected).await?;
     let denominator = sum(kind, provider, &mask, &selected).await?;
-    provider
+    let result = provider
         .elem_div(&numerator, &denominator)
         .await
-        .map_err(|source| provider_failure(kind, source))
+        .map_err(|source| provider_failure(kind, source))?;
+    admitted_real(
+        kind,
+        provider,
+        original,
+        result,
+        &expected_shape(original.shape(), axes),
+        precision,
+    )
 }
