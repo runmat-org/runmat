@@ -8,12 +8,12 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    DispersionControl, DispersionNormalization as VarNormalization, Type,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -301,12 +301,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion currently gathers to the host; future kernels can reuse the variance accumulator directly.",
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VarNormalization {
-    Sample,
-    Population,
-}
-
 #[derive(Clone, Debug)]
 enum VarAxes {
     Default,
@@ -388,52 +382,18 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut normalization = VarNormalization::Sample;
     let mut normalization_consumed = false;
     let mut nan_mode = ReductionNaN::Include;
-    let tokens = tokens_from_values(args);
-
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
 
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            match text.as_str() {
-                "omitmissing" | "omitnan" => {
-                    nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includemissing" | "includenan" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
-                    if axes_set && !matches!(axes, VarAxes::Default) {
-                        return Err(var_invalid_argument(
-                            "var: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                    axes = VarAxes::All;
-                    axes_set = true;
-                    idx += 1;
-                    continue;
-                }
-                _ => {}
-            }
-        }
-
         if let Some(keyword) = keyword_of(arg) {
-            match keyword.as_str() {
-                "omitmissing" | "omitnan" => {
-                    nan_mode = ReductionNaN::Omit;
+            match DispersionControl::from_var_public_option(&keyword) {
+                Some(DispersionControl::Missing(mode)) => {
+                    nan_mode = mode;
                     idx += 1;
                     continue;
                 }
-                "includemissing" | "includenan" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
+                Some(DispersionControl::All) => {
                     if axes_set && !matches!(axes, VarAxes::Default) {
                         return Err(var_invalid_argument(
                             "var: 'all' cannot be combined with an explicit dimension",
@@ -444,7 +404,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 1;
                     continue;
                 }
-                _ => {
+                None => {
                     return Err(var_invalid_argument(format!(
                         "var: unrecognised option '{keyword}'"
                     )));
@@ -573,7 +533,10 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
     if let Some(keyword) = keyword_of(value) {
-        if keyword == "all" {
+        if matches!(
+            DispersionControl::from_var_public_option(&keyword),
+            Some(DispersionControl::All)
+        ) {
             return Ok(Some(VarAxes::All));
         }
         return Ok(None);
@@ -1257,6 +1220,29 @@ pub(crate) mod tests {
             var_builtin(Value::Tensor(tensor), vec![Value::from("includemissing")]).unwrap();
         assert!(matches!(include_nan, Value::Num(value) if value.is_nan()));
         assert!(matches!(include_missing, Value::Num(value) if value.is_nan()));
+    }
+
+    #[test]
+    fn var_typed_text_controls_preserve_owner_specific_invalid_option() {
+        let parsed = block_on(parse_arguments(&[Value::from("ALL")]))
+            .expect("case-insensitive all remains valid");
+        assert!(matches!(parsed.axes, VarAxes::All));
+
+        let spaced = block_on(parse_arguments(&[Value::from(" all ")]))
+            .err()
+            .expect("var does not accept spaces around all");
+        assert_eq!(spaced.identifier(), VAR_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(spaced.message().contains("unrecognised option"));
+
+        let conflict = block_on(parse_arguments(&[
+            Value::Num(0.0),
+            Value::Num(2.0),
+            Value::from("all"),
+        ]))
+        .err()
+        .expect("all after an explicit axis must conflict");
+        assert_eq!(conflict.identifier(), VAR_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(conflict.message().contains("'all' cannot be combined"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

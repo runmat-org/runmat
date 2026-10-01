@@ -8,7 +8,8 @@ use runmat_builtins::{
     BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
     BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
     BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    DispersionControl, DispersionNormalization as StdNormalization, Type,
 };
 use runmat_value::{Tensor, Value};
 const NAME: &str = "std";
@@ -218,7 +219,6 @@ pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
 
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -295,12 +295,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: true,
     notes: "Fusion currently gathers to the host; future kernels can reuse the variance accumulator directly.",
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StdNormalization {
-    Sample,
-    Population,
-}
 
 #[derive(Clone, Debug)]
 enum StdAxes {
@@ -384,24 +378,17 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     let mut normalization = StdNormalization::Sample;
     let mut normalization_consumed = false;
     let mut nan_mode = ReductionNaN::Include;
-    let tokens = tokens_from_values(args);
-
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
-        if let Some(crate::builtins::common::arg_tokens::ArgToken::String(text)) = tokens.get(idx) {
-            match text.as_str() {
-                "omitmissing" | "omitnan" => {
-                    nan_mode = ReductionNaN::Omit;
+        if let Some(keyword) = keyword_of(arg) {
+            match DispersionControl::from_std_public_option(&keyword) {
+                Some(DispersionControl::Missing(mode)) => {
+                    nan_mode = mode;
                     idx += 1;
                     continue;
                 }
-                "includemissing" | "includenan" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
+                Some(DispersionControl::All) => {
                     if axes_set && !matches!(axes, StdAxes::Default) {
                         return Err(std_invalid_argument(
                             "std: 'all' cannot be combined with an explicit dimension",
@@ -412,29 +399,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     idx += 1;
                     continue;
                 }
-                _ => {}
-            }
-        }
-        if let Some(keyword) = keyword_of(arg) {
-            match keyword.as_str() {
-                "omitmissing" | "omitnan" => {
-                    nan_mode = ReductionNaN::Omit;
-                    idx += 1;
-                    continue;
-                }
-                "includemissing" | "includenan" => {
-                    nan_mode = ReductionNaN::Include;
-                    idx += 1;
-                    continue;
-                }
-                "all" => {
-                    if axes_set && !matches!(axes, StdAxes::Default) {
-                        return Err(std_invalid_argument(
-                            "std: 'all' cannot be combined with an explicit dimension",
-                        ));
-                    }
-                }
-                _ => {}
+                None => {}
             }
         }
 
@@ -549,16 +514,16 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
     if let Some(text) = value_as_str(value) {
-        let lowered = text.trim().to_ascii_lowercase();
-        return match lowered.as_str() {
-            "all" => Ok(Some(StdAxes::All)),
-            "omitmissing" | "omitnan" | "includemissing" | "includenan" | "double" | "native"
-            | "default" | "like" => Ok(None),
-            "" => Err(std_invalid_argument(
+        if text.trim().is_empty() {
+            return Err(std_invalid_argument(
                 "std: dimension string must not be empty",
-            )),
-            _ => Ok(None),
-        };
+            ));
+        }
+        return Ok(matches!(
+            DispersionControl::from_std_public_option(&text),
+            Some(DispersionControl::All)
+        )
+        .then_some(StdAxes::All));
     }
 
     let (scalar_hint, is_empty) = match value {
@@ -1273,6 +1238,19 @@ pub(crate) mod tests {
             std_builtin(Value::Tensor(tensor), vec![Value::from("includemissing")]).unwrap();
         assert!(matches!(include_nan, Value::Num(value) if value.is_nan()));
         assert!(matches!(include_missing, Value::Num(value) if value.is_nan()));
+    }
+
+    #[test]
+    fn std_typed_text_controls_preserve_axis_and_whitespace_admission() {
+        let parsed = block_on(parse_arguments(&[Value::from(" all ")]))
+            .expect("std has historically admitted spaces around all");
+        assert!(matches!(parsed.axes, StdAxes::All));
+
+        let conflict = block_on(parse_arguments(&[Value::Num(2.0), Value::from("all")]))
+            .err()
+            .expect("all after an axis must conflict");
+        assert_eq!(conflict.identifier(), STD_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(conflict.message().contains("'all' cannot be combined"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
