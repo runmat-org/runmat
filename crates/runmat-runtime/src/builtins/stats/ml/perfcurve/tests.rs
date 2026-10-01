@@ -112,10 +112,12 @@ fn wide_integer_class_identity_and_exact_score_boundary() {
         vec![],
     ))
     .expect_err("nonrepresentable wide score must reject");
+    assert_eq!(error.identifier(), None);
     assert_eq!(
-        error.identifier(),
-        PERFCURVE_INTEGER_SCORES_EXTENSION.error_identifier
+        error.message(),
+        "perfcurve: integer score values must be exactly representable as double"
     );
+    assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
 }
 
 #[test]
