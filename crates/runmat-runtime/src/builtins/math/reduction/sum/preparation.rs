@@ -13,6 +13,7 @@ use runmat_types::{NumericClass, NumericDomain};
 use runmat_value::Value;
 
 #[cfg(test)]
+#[path = "preparation/tests.rs"]
 mod tests;
 
 pub(super) fn eligible(value: &Value) -> bool {
