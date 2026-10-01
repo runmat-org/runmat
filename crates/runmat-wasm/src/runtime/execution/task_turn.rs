@@ -159,10 +159,18 @@ mod tests {
         let turns_before = TEST_POSTED_TURNS.with(std::cell::Cell::get);
         let mut execution = Box::pin(runtime.execute_request_js(request));
         let waker = noop_waker();
-        assert!(execution
-            .as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending());
+        match execution.as_mut().poll(&mut Context::from_waker(&waker)) {
+            Poll::Pending => {}
+            Poll::Ready(Ok(payload)) => {
+                let diagnostic = js_sys::JSON::stringify(&payload)
+                    .ok()
+                    .and_then(|value| value.as_string());
+                panic!("execution completed before the fit's cooperative turn: {diagnostic:?}");
+            }
+            Poll::Ready(Err(error)) => {
+                panic!("execution failed before the fit's cooperative turn: {error:?}");
+            }
+        }
         assert!(
             TEST_POSTED_TURNS.with(std::cell::Cell::get) > turns_before,
             "the fit must post a browser task turn before cancellation"
