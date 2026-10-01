@@ -1,4 +1,5 @@
 use super::*;
+use super::super::{cdf::finish_cdf, pdf::finish_pdf};
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, GpuTensorStorage,
     HostNumericTensorView, HostTensorView, NumericElementType, ThreadProviderGuard,
