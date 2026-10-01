@@ -211,7 +211,7 @@ fn diagnose_prior(
                 .or_else(|| structure.fields.get("Prob"));
             (structure.fields_complete && (groups.is_none() || probabilities.is_none()))
                 || groups.is_some_and(|value| definitely_invalid_prior_groups(&value.kind))
-                || probabilities.is_some_and(|value| definitely_invalid_prior_values(value))
+                || probabilities.is_some_and(definitely_invalid_prior_values)
         }
         _ => true,
     };

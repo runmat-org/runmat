@@ -97,7 +97,7 @@ fn propagate_callback_facts(request: &CallRequest, result: &mut CallInference) {
                 .filter(|option| *option == BayesoptOption::XConstraintFcn)
                 .and_then(|_| request.arguments.get(index + 1))
         })
-        .last();
+        .next_back();
     for callable in [objective, constraint]
         .into_iter()
         .flatten()

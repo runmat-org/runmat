@@ -50,7 +50,7 @@ fn diagnose_sample(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnos
             ));
         }
         if dims.iter().all(|extent| extent.is_some())
-            && dims.iter().any(|extent| *extent == Some(0))
+            && dims.contains(&Some(0))
         {
             diagnostics.push(InferenceDiagnostic::error(
                 "EMPTY",
