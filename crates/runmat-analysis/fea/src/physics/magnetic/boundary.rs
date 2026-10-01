@@ -140,15 +140,13 @@ impl MagneticBoundarySpace {
                 "magnetic cohomology is not a tetrahedral ball".into(),
             ));
         }
-        let free_edges = edges
-            .edges()
-            .iter()
-            .enumerate()
-            .filter_map(|(i, edge)| {
-                let mut nodes = edge.node_indices;
-                nodes.sort_unstable();
-                (!boundary_edges.contains_key(&nodes)).then_some(i)
-            })
+        let grounded: BTreeSet<_> = edges
+            .exterior_edge_indices(projection)
+            .map_err(|error| MagnetostaticError::Topology(error.to_string()))?
+            .into_iter()
+            .collect();
+        let free_edges = (0..edges.edges().len())
+            .filter(|index| !grounded.contains(index))
             .collect();
         let gauge_nodes = corner_nodes.difference(&boundary_nodes).copied().collect();
         Ok(Self {

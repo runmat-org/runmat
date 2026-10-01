@@ -12,6 +12,8 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{ElementOrder, StableDigest};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod boundary;
+
 const EDGES: [[usize; 2]; 6] = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
 
 /// Orientation is from the lesser persistent node identity to the greater one.
@@ -157,6 +159,15 @@ impl TetrahedralEdgeSpace {
 
     pub fn edges(&self) -> &[OrientedEdge] {
         &self.edges
+    }
+
+    /// Canonical edge rows on the exact declared exterior tetrahedral faces.
+    /// This imposes no connected-ball, gauge or physical boundary policy.
+    pub fn exterior_edge_indices(
+        &self,
+        projection: &AnalysisProjection,
+    ) -> Result<Vec<usize>, AnalysisProjectionError> {
+        boundary::exterior_edge_indices(self, projection)
     }
 
     pub fn element_edge_indices(&self, element_index: usize) -> Option<[usize; 6]> {
