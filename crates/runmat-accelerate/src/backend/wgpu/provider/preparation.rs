@@ -102,6 +102,7 @@ impl WgpuProvider {
     ) -> Option<ProviderPreparationSnapshot> {
         let work = crate::placement::sum_physical_work(self, query)?;
         let initialized = match work.kernel {
+            crate::placement::SumKernelRoute::Host => return None,
             crate::placement::SumKernelRoute::Global => {
                 self.pipelines.reduce_global.is_initialized()
             }

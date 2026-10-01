@@ -26,6 +26,7 @@ pub(crate) struct SumWork {
 #[cfg(feature = "wgpu")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub(crate) enum SumKernelRoute {
+    Host,
     Global,
     Dimension2,
     DimensionN,
@@ -174,6 +175,8 @@ fn work(
                 transient_bytes: None,
                 dispatches: Some(0),
             },
+            #[cfg(feature = "wgpu")]
+            kernel: SumKernelRoute::Host,
             #[cfg(feature = "wgpu")]
             scalar_visits: elements,
             #[cfg(feature = "wgpu")]
