@@ -18,6 +18,7 @@ mod linkage;
 mod lscov;
 mod optimizable_variable;
 mod pairwise_distance;
+mod perfcurve;
 mod predict;
 mod regress;
 mod ridge;
@@ -41,6 +42,7 @@ pub use self::linkage::*;
 pub use self::lscov::*;
 pub use self::optimizable_variable::*;
 pub use self::pairwise_distance::*;
+pub use self::perfcurve::*;
 pub use self::predict::*;
 pub use self::regress::*;
 pub use self::ridge::*;
@@ -68,4 +70,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(bayesopt::ENTRIES.iter().copied());
     values.extend(optimizable_variable::ENTRIES.iter().copied());
     values.extend(classify::ENTRIES.iter().copied());
+    values.extend(perfcurve::ENTRIES.iter().copied());
 }

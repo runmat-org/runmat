@@ -20,8 +20,8 @@ use super::engine::render_figure;
 pub(crate) use super::error::{
     presentation_failure_kind, presentation_unavailable, with_render_cause,
 };
-use super::web::current_plot_theme_config;
 use super::plotting_error_with_source;
+use super::web::current_plot_theme_config;
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{BuiltinResult, RuntimeError};
