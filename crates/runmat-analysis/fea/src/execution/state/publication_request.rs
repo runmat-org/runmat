@@ -21,6 +21,7 @@ pub enum SemanticStatePublicationSource {
     StructuralPrimaryFields,
     ThermalPrimaryField,
     AcousticNativeFields,
+    StaticElectricalNativeFields,
     StructuralLinearization,
     ModalBasis,
     StructuralResponseEnvelope,
@@ -63,6 +64,9 @@ impl SemanticStatePublicationRequest {
                 ) | (
                     SemanticStatePublicationSource::AcousticNativeFields,
                     StateKind::AcousticComplex
+                ) | (
+                    SemanticStatePublicationSource::StaticElectricalNativeFields,
+                    StateKind::ElectromagneticStatic
                 ) | (
                     SemanticStatePublicationSource::StructuralLinearization,
                     StateKind::GeometricStiffness

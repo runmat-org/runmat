@@ -3,6 +3,8 @@
 mod acoustic_planning;
 mod acoustic_product;
 mod compilation;
+mod electrical_planning;
+mod electrical_product;
 mod identity;
 mod planning;
 mod product;
@@ -20,6 +22,13 @@ pub use acoustic_product::{
 pub use compilation::{
     compile_analysis_study, AnalysisStudyCompilationError, AnalysisStudyCompilationInput,
     CompiledAnalysisStudy,
+};
+pub use electrical_planning::{
+    plan_electrical_study, ElectricalStudyPlanningError, ElectricalStudyPlanningPolicy,
+};
+pub use electrical_product::{
+    build_electrical_study_product, ElectricalStudyProduct, ElectricalStudyProductError,
+    ElectricalStudyProductInput,
 };
 pub use identity::{
     structural_study_source_digest, StructuralStudyMaterialBinding,

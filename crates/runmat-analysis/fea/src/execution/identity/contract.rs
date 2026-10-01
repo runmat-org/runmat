@@ -104,6 +104,7 @@ identity_type!(StructuralBucklingWorkloadIdentity);
 pub enum AnalysisWorkKind {
     SolveThermal,
     SolveAcousticHarmonic,
+    SolveElectricalStatic,
     MaterializeSignal,
     CompileConstraints,
     AssembleOperator,

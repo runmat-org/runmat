@@ -5,6 +5,10 @@ use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 use super::StructuralStudyNumericalResult;
 
 mod acoustic;
+mod electrical;
+pub use electrical::{
+    ElectricalStudyCompletion, ElectricalStudyObjectSource, ElectricalStudySource,
+};
 pub(super) mod thermal;
 pub use acoustic::{AcousticStudyCompletion, AcousticStudyObjectSource, AcousticStudySource};
 mod thermal_completion;

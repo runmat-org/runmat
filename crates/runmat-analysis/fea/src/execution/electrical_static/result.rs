@@ -23,6 +23,7 @@ pub struct ElectricalStaticSolverResult {
 struct ResultData {
     source_workload: AnalysisWorkloadIdentity,
     producer: StepIdentity,
+    publication_declaration: Option<runmat_analysis_core::StateOutput>,
     formulation: AnalysisRunIdentity,
     projection_digest: Digest,
     element_order: runmat_meshing_core::ElementOrder,
@@ -52,6 +53,7 @@ impl ElectricalStaticSolverResult {
             data: ResultData {
                 source_workload: workload.identity()?,
                 producer: workload.producer_identity()?,
+                publication_declaration: workload.publication_declaration()?.cloned(),
                 formulation,
                 projection_digest: projection.projection_digest,
                 element_order: mesh.resolved_request.element_order,
@@ -67,6 +69,15 @@ impl ElectricalStaticSolverResult {
         let d = &self.data;
         let r = &d.response;
         let tolerance = d.relative_residual_target;
+        if let Some(declaration) = &d.publication_declaration {
+            crate::execution::SemanticStatePublicationRequest::new(
+                crate::execution::SemanticStatePublicationSource::StaticElectricalNativeFields,
+                d.producer,
+                declaration.clone(),
+                Digest::from_bytes(*r.mesh_digest.bytes()),
+                SolverResultIdentity::from_step_result(d.producer, Digest::sha256([]))?,
+            )?;
+        }
         if d.formulation.family() != PhysicsFamily::Electromagnetic
             || d.formulation.realization()
                 != &crate::admission::canonical_electrical_realization(r.equation, d.element_order)
@@ -168,6 +179,7 @@ impl ElectricalStaticSolverResult {
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
         if d.source_workload != workload.identity()?
             || d.producer != workload.producer_identity()?
+            || d.publication_declaration.as_ref() != workload.publication_declaration()?
             || d.formulation != workload.formulation(mesh)?
             || r.equation != workload.equation()?
             || d.relative_residual_target != workload.relative_residual_target
@@ -234,6 +246,15 @@ impl ElectricalStaticSolverResult {
     /// Immutable retained numerical fields in SI. No recovery solve occurs on access.
     pub fn response(&self) -> &CanonicalElectricalResponse {
         &self.data.response
+    }
+    pub fn mesh_digest(&self) -> runmat_meshing_core::StableDigest {
+        self.data.response.mesh_digest
+    }
+    pub fn element_order(&self) -> runmat_meshing_core::ElementOrder {
+        self.data.element_order
+    }
+    pub(super) fn publication_declaration(&self) -> Option<&runmat_analysis_core::StateOutput> {
+        self.data.publication_declaration.as_ref()
     }
 }
 

@@ -6,6 +6,7 @@ fn model() -> AuthoredModel {
     AuthoredModel {
         module_path: "project/model.fea".into(),
         model_id: "bracket".into(),
+        electromagnetic: None,
         thermal: None,
         thermo_mechanical: None,
         inputs: vec![AuthoredInputDefinition {

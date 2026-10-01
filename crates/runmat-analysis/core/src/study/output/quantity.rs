@@ -34,6 +34,12 @@ pub enum ObservationQuantity {
     ThermalEnergyStorageRateDensity,
     ElectricPotential,
     ElectricField,
+    /// Physical volume-averaged dielectric displacement, C/m².
+    ElectricDisplacement,
+    /// Physical volume average of electrostatic energy, J/m³ (not energy of mean E).
+    ElectricEnergyDensity,
+    /// Physical volume average of conduction heating, W/m³.
+    JoulePowerDensity,
     ElectricCurrent,
     ElectricCurrentDensity,
     ElectricCharge,
@@ -98,6 +104,13 @@ impl ObservationQuantity {
                 D::POWER.divide(D::VOLUME).expect("static dimension")
             }
             Self::ElectricPotential => D::ELECTRIC_POTENTIAL,
+            Self::ElectricDisplacement => D::ELECTRIC_CURRENT
+                .multiply(D::TIME)
+                .expect("static dimension")
+                .divide(D::AREA)
+                .expect("static dimension"),
+            Self::ElectricEnergyDensity => D::ENERGY.divide(D::VOLUME).expect("static dimension"),
+            Self::JoulePowerDensity => D::POWER.divide(D::VOLUME).expect("static dimension"),
             Self::ElectricField => D::ELECTRIC_POTENTIAL
                 .divide(D::LENGTH)
                 .expect("static dimension"),
@@ -154,6 +167,9 @@ impl ObservationQuantity {
             "thermal_energy_storage_rate_density" => Self::ThermalEnergyStorageRateDensity,
             "electric_potential" => Self::ElectricPotential,
             "electric_field" => Self::ElectricField,
+            "electric_displacement" => Self::ElectricDisplacement,
+            "electric_energy_density" => Self::ElectricEnergyDensity,
+            "joule_power_density" => Self::JoulePowerDensity,
             "electric_current" => Self::ElectricCurrent,
             "electric_current_density" => Self::ElectricCurrentDensity,
             "electric_charge" => Self::ElectricCharge,
@@ -196,6 +212,7 @@ impl ObservationQuantity {
             | Self::TemperatureGradient
             | Self::HeatFlux
             | Self::ElectricField
+            | Self::ElectricDisplacement
             | Self::ElectricCurrentDensity
             | Self::MagneticVectorPotential
             | Self::MagneticFluxDensity
@@ -213,6 +230,53 @@ impl ObservationQuantity {
                 ObservationValueShape::Tensor { extents: vec![3] }
             }
             _ => ObservationValueShape::Scalar,
+        }
+    }
+}
+
+#[cfg(test)]
+mod electrical_native_quantity_tests {
+    use super::*;
+
+    #[test]
+    fn native_electrical_volume_means_have_honest_closed_quantity_semantics() {
+        let charge_per_area = PhysicalDimension::ELECTRIC_CURRENT
+            .multiply(PhysicalDimension::TIME)
+            .unwrap()
+            .divide(PhysicalDimension::AREA)
+            .unwrap();
+        for (name, quantity, dimension, shape) in [
+            (
+                "electric_displacement",
+                ObservationQuantity::ElectricDisplacement,
+                charge_per_area,
+                ObservationValueShape::Vector3,
+            ),
+            (
+                "electric_energy_density",
+                ObservationQuantity::ElectricEnergyDensity,
+                PhysicalDimension::ENERGY
+                    .divide(PhysicalDimension::VOLUME)
+                    .unwrap(),
+                ObservationValueShape::Scalar,
+            ),
+            (
+                "joule_power_density",
+                ObservationQuantity::JoulePowerDensity,
+                PhysicalDimension::POWER
+                    .divide(PhysicalDimension::VOLUME)
+                    .unwrap(),
+                ObservationValueShape::Scalar,
+            ),
+        ] {
+            assert_eq!(ObservationQuantity::from_source_name(name), Some(quantity));
+            assert_eq!(quantity.physical_dimension(), dimension);
+            assert_eq!(quantity.canonical_value_shape(), shape);
+            let bytes = serde_json::to_vec(&quantity).unwrap();
+            assert_eq!(
+                serde_json::from_slice::<ObservationQuantity>(&bytes).unwrap(),
+                quantity
+            );
         }
     }
 }

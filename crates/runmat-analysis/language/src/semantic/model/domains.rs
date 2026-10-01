@@ -1,15 +1,23 @@
 //! Explicit model-domain constants; no material or procedure-derived defaults.
 use super::{diagnostic, properties};
 use crate::{CheckedFeaDeclaration, CheckedFeaStatementKind, FeaDiagnostic, PhysicalDimension};
-use runmat_analysis_core::{Temperature, ThermalDomain, ThermoMechanicalDomain};
+use runmat_analysis_core::{
+    ElectromagneticDomain, StaticElectricalEquation, Temperature, ThermalDomain,
+    ThermoMechanicalDomain,
+};
 use std::collections::BTreeSet;
 
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> (Option<ThermalDomain>, Option<ThermoMechanicalDomain>) {
+) -> (
+    Option<ThermalDomain>,
+    Option<ThermoMechanicalDomain>,
+    Option<ElectromagneticDomain>,
+) {
     let mut thermal = None;
     let mut thermo_mechanical = None;
+    let mut electromagnetic = None;
     let mut seen = BTreeSet::new();
     for statement in &declaration.statements {
         let CheckedFeaStatementKind::Block {
@@ -20,7 +28,8 @@ pub(super) fn lower(
         else {
             continue;
         };
-        let Some(family @ ("thermal" | "thermomechanical")) = header.split_whitespace().next()
+        let Some(family @ ("thermal" | "thermomechanical" | "electromagnetic")) =
+            header.split_whitespace().next()
         else {
             continue;
         };
@@ -28,7 +37,7 @@ pub(super) fn lower(
             diagnostic(
                 declaration,
                 *header_span,
-                "model thermal domains require an unqualified domain block",
+                "model domains require an unqualified domain block",
                 diagnostics,
             );
             continue;
@@ -40,6 +49,29 @@ pub(super) fn lower(
                 format!("duplicate model domain `{family}`"),
                 diagnostics,
             );
+            continue;
+        }
+        if family == "electromagnetic" {
+            properties::validate_assignments(declaration, statements, &["equation"], diagnostics);
+            let Some(value) =
+                properties::required_enum(declaration, statements, "equation", diagnostics)
+            else {
+                continue;
+            };
+            let equation = match value {
+                "electrostatics" => StaticElectricalEquation::Electrostatics,
+                "steady_conduction" => StaticElectricalEquation::SteadyConduction,
+                _ => {
+                    diagnostic(
+                        declaration,
+                        *header_span,
+                        "electromagnetic equation must be electrostatics or steady_conduction",
+                        diagnostics,
+                    );
+                    continue;
+                }
+            };
+            electromagnetic = Some(ElectromagneticDomain::Static { equation });
             continue;
         }
         properties::validate_assignments(
@@ -81,5 +113,5 @@ pub(super) fn lower(
             _ => unreachable!(),
         }
     }
-    (thermal, thermo_mechanical)
+    (thermal, thermo_mechanical, electromagnetic)
 }

@@ -29,7 +29,8 @@ pub struct AccuracyPreparation {
     pub source_observations: Option<ObservationPublicationCatalog>,
     /// Original numerical intent and topology, not copies reconstructed from a result catalog.
     /// Thermal evaluations require ThermalWorkload and Mesh. Acoustic evaluations require
-    /// AcousticHarmonicWorkload, Mesh and the retained SolverResult. Structural evaluations require
+    /// AcousticHarmonicWorkload, Mesh and the retained SolverResult. Electrical evaluations require
+    /// ElectricalStaticWorkload, Mesh and the retained SolverResult. Structural evaluations require
     /// the original solver/assembly workload and its Mesh input when present. Preparation adds
     /// the producing host contract, which the worker authenticates against the receipt.
     pub source_context_inputs: Vec<PreparedAnalysisObjects>,
@@ -60,6 +61,7 @@ pub fn prepare_accuracy(
 ) -> AnalysisBridgeResult<PreparedAccuracy> {
     preparation.solve_host.validate()?;
     let expected_work_kind = match preparation.source_kind {
+        AccuracySourceKind::ElectricalStatic => AnalysisWorkKind::SolveElectricalStatic,
         AccuracySourceKind::Thermal => AnalysisWorkKind::SolveThermal,
         AccuracySourceKind::AcousticHarmonic => AnalysisWorkKind::SolveAcousticHarmonic,
         AccuracySourceKind::StructuralLinear => AnalysisWorkKind::Solve,
@@ -121,7 +123,9 @@ pub fn prepare_accuracy(
     )?;
     if !matches!(
         preparation.source_kind,
-        AccuracySourceKind::Thermal | AccuracySourceKind::AcousticHarmonic
+        AccuracySourceKind::Thermal
+            | AccuracySourceKind::AcousticHarmonic
+            | AccuracySourceKind::ElectricalStatic
     ) {
         preparation.source_context_inputs.push(
             crate::accuracy_source_context::prepare_accuracy_source_contract(
@@ -241,6 +245,21 @@ pub fn prepare_accuracy(
 
 fn receipt_matches_solve(receipt: &AccuracySourceReceipt, host: &AnalysisHostWorkload) -> bool {
     match receipt {
+        AccuracySourceReceipt::ElectricalStatic(electrical) => {
+            let mut workloads = host.workload.inputs.iter().filter(|input| {
+                input.kind == AnalysisNumericalObjectKind::ElectricalStaticWorkload
+            });
+            let mut meshes = host
+                .workload
+                .inputs
+                .iter()
+                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
+            matches!(workloads.next(), Some(input) if input.logical_identity == electrical.source_workload().digest())
+                && workloads.next().is_none()
+                && matches!(meshes.next(), Some(input) if input.logical_identity == electrical.receipt().topology_digest)
+                && meshes.next().is_none()
+                && electrical.receipt().producer == host.workload.step
+        }
         AccuracySourceReceipt::AcousticHarmonic(acoustic) => {
             let mut workloads = host.workload.inputs.iter().filter(|input| {
                 input.kind == AnalysisNumericalObjectKind::AcousticHarmonicWorkload

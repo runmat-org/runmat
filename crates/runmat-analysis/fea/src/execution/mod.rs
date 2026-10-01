@@ -17,7 +17,10 @@ mod buckling_result;
 mod buckling_workload;
 mod electrical_static;
 mod error;
-pub use electrical_static::{ElectricalStaticSolverResult, ElectricalStaticWorkload};
+pub use electrical_static::{
+    ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,
+    ElectricalStaticWorkload, ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod field;
 mod field_plan;
 mod field_topology;
@@ -220,10 +223,11 @@ pub use solve::{
 };
 pub use state::{
     AcousticPhasorConvention, BoundThermalStateTransfer, CanonicalAcousticStatePayload,
-    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
-    CanonicalStateTransition, CanonicalStateTransitionInput, SemanticStatePublicationProfileSource,
-    SemanticStatePublicationRequest, SemanticStatePublicationSource, StatePublicationProfileEntry,
-    StatePublicationProfiles, STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
+    CanonicalElectricalStaticStatePayload, CanonicalSemanticState, CanonicalSemanticStateInput,
+    CanonicalSemanticStatePayload, CanonicalStateTransition, CanonicalStateTransitionInput,
+    SemanticStatePublicationProfileSource, SemanticStatePublicationRequest,
+    SemanticStatePublicationSource, StatePublicationProfileEntry, StatePublicationProfiles,
+    STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
 };
 mod structural_state_profiles;
 pub use structural_state_profiles::{

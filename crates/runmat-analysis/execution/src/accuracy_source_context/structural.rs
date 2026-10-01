@@ -76,7 +76,9 @@ pub(super) fn validate(
             AnalysisWorkKind::AssembleStructuralRandomResponseResult,
             Kind::StructuralRandomResponseWorkload,
         ),
-        AccuracySourceKind::Thermal | AccuracySourceKind::AcousticHarmonic => {
+        AccuracySourceKind::Thermal
+        | AccuracySourceKind::AcousticHarmonic
+        | AccuracySourceKind::ElectricalStatic => {
             return Err(AnalysisBridgeError::Identity(
                 "nonstructural source used structural context",
             ))
@@ -166,7 +168,9 @@ pub(super) fn validate(
                 mesh.as_ref(),
             )
         }
-        AccuracySourceKind::Thermal | AccuracySourceKind::AcousticHarmonic => {
+        AccuracySourceKind::Thermal
+        | AccuracySourceKind::AcousticHarmonic
+        | AccuracySourceKind::ElectricalStatic => {
             unreachable!("rejected above")
         }
     }

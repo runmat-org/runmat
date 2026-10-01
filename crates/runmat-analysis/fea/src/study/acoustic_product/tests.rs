@@ -168,6 +168,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
     let model = AuthoredModel {
         module_path: MODULE.into(),
         model_id: "acoustic_cell".into(),
+        electromagnetic: None,
         thermal: None,
         thermo_mechanical: None,
         inputs: Vec::new(),

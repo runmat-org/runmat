@@ -359,6 +359,14 @@ impl AccuracyIdentity {
 }
 
 impl NumericalPlanIdentity {
+    /// Static electrical equation and canonical topology, independent of placement.
+    pub fn from_electrical_static_workload(
+        workload: AnalysisWorkloadIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("electrical-static-numerical-plan", &(workload, topology))
+    }
+
     /// Canonical acoustic workload and topology, independent of placement and transport.
     pub fn from_acoustic_workload(
         workload: AnalysisWorkloadIdentity,

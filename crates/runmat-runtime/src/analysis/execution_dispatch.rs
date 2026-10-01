@@ -281,7 +281,7 @@ fn run_operation_for_procedure(
         | (Coupled(CoupledPhysicsFamily::Thermomechanical), Nonlinear, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Nonlinear)
         }
-        (Electromagnetic, HarmonicResponse, SolutionSpace::Direct) => {
+        (Electromagnetic, Static | HarmonicResponse, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Electromagnetic)
         }
         _ => None,
@@ -388,6 +388,11 @@ mod tests {
                 AnalysisOperation::Electromagnetic,
             ),
             (
+                PhysicsFamily::Electromagnetic,
+                AnalysisProcedure::Static,
+                AnalysisOperation::Electromagnetic,
+            ),
+            (
                 PhysicsFamily::Fluid,
                 AnalysisProcedure::Static,
                 AnalysisOperation::Cfd,
@@ -452,7 +457,7 @@ mod tests {
         assert_eq!(
             run_operation_for_procedure(
                 PhysicsFamily::Electromagnetic,
-                AnalysisProcedure::Static,
+                AnalysisProcedure::ModalExtraction,
                 SolutionSpace::Direct,
             ),
             None

@@ -47,6 +47,46 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
         .iter()
         .position(|input| input.manifest.kind == AnalysisNumericalObjectKind::ObservationCatalog)
         .unwrap();
+    // The worker must forward unknown non-phase inputs to the shared closed
+    // source-inventory validator, not silently omit them via a physics whitelist.
+    let mut foreign_context_inputs = accuracy_inputs.clone();
+    let foreign_payload = runmat_canonical_codec::encode_contract(
+        b"foreign-accuracy-context/v1\0",
+        "foreign-context-fixture",
+        &vec![17_u8],
+        runmat_canonical_codec::CanonicalLimits::new(4096, 128, 128, 8),
+    )
+    .unwrap();
+    foreign_context_inputs.push(
+        runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::Field,
+            digest("foreign-accuracy-context"),
+            &foreign_payload,
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+    );
+    replan_accuracy(&mut foreign_context_inputs);
+    let foreign_context_host = test_host_for_inputs(
+        host,
+        AnalysisWorkKind::EvaluateAccuracy,
+        &foreign_context_inputs,
+        vec![AnalysisNumericalObjectKind::AccuracyReport],
+        Some(1),
+    );
+    let error = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
+            kind: AnalysisWorkKind::EvaluateAccuracy,
+            host: &foreign_context_host,
+            inputs: &foreign_context_inputs,
+        })
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("structural accuracy context inventory differs"));
     let mut exact_ceiling = plan.input.clone();
     exact_ceiling.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
     runmat_analysis_fea::planning::resource::build_resource_plan(exact_ceiling.clone()).unwrap();

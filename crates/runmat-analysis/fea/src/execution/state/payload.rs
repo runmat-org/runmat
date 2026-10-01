@@ -3,7 +3,10 @@
 use runmat_analysis_core::AnalysisField;
 use serde::{Deserialize, Serialize};
 
-use super::{CanonicalAcousticStatePayload, CanonicalThermalStatePayload};
+use super::{
+    CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,
+    CanonicalThermalStatePayload,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
@@ -16,6 +19,9 @@ pub enum CanonicalSemanticStatePayload {
     },
     Acoustic {
         state: Box<CanonicalAcousticStatePayload>,
+    },
+    ElectricalStatic {
+        state: Box<CanonicalElectricalStaticStatePayload>,
     },
     StructuralFrequency {
         publication: Box<crate::execution::StructuralFrequencyPublicationManifest>,
@@ -36,6 +42,12 @@ pub enum CanonicalSemanticStatePayload {
 }
 
 impl CanonicalSemanticStatePayload {
+    pub fn electrical_static(&self) -> Option<&CanonicalElectricalStaticStatePayload> {
+        match self {
+            Self::ElectricalStatic { state } => Some(state.as_ref()),
+            _ => None,
+        }
+    }
     pub fn fields(&self) -> Option<&[AnalysisField]> {
         match self {
             Self::Fields { fields } => Some(fields),

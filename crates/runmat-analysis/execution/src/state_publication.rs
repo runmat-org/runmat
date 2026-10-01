@@ -57,6 +57,9 @@ pub fn prepare_semantic_state_publication(
             SemanticStatePublicationSource::AcousticNativeFields,
             AnalysisWorkKind::SolveAcousticHarmonic
         ) | (
+            SemanticStatePublicationSource::StaticElectricalNativeFields,
+            AnalysisWorkKind::SolveElectricalStatic
+        ) | (
             SemanticStatePublicationSource::ThermalPrimaryField,
             AnalysisWorkKind::SolveThermal
         ) | (
@@ -89,6 +92,12 @@ pub fn prepare_semantic_state_publication(
         == SemanticStatePublicationSource::AcousticNativeFields)
         .then(|| crate::acoustic_state_profiles::decode_acoustic_source(&preparation.source_result))
         .transpose()?;
+    let electrical_source = (preparation.source
+        == SemanticStatePublicationSource::StaticElectricalNativeFields)
+        .then(|| {
+            crate::electrical_state_profiles::decode_electrical_source(&preparation.source_result)
+        })
+        .transpose()?;
     let source_result = if preparation.source == SemanticStatePublicationSource::ThermalPrimaryField
     {
         let manifest = crate::decode_prepared_thermal_manifest(&preparation.source_result)?;
@@ -104,6 +113,23 @@ pub fn prepare_semantic_state_publication(
             ));
         }
         manifest.identity()
+    } else if let Some(result) = &electrical_source {
+        if result.producer() != preparation.source_host.workload.step
+            || Digest::from_bytes(*result.mesh_digest().bytes()) != preparation.topology_digest
+            || !preparation.source_host.workload.inputs.iter().any(|input| {
+                input.kind == AnalysisNumericalObjectKind::ElectricalStaticWorkload
+                    && input.logical_identity == result.source_workload().digest()
+            })
+            || !preparation.source_host.workload.inputs.iter().any(|input| {
+                input.kind == AnalysisNumericalObjectKind::Mesh
+                    && input.logical_identity == preparation.topology_digest
+            })
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "electrical state source differs from workload or topology",
+            ));
+        }
+        result.source_result_identity()?
     } else if let Some(result) = &acoustic_source {
         if result.producer() != preparation.source_host.workload.step
             || Digest::from_bytes(*result.mesh_digest().bytes()) != preparation.topology_digest
@@ -150,6 +176,22 @@ pub fn prepare_semantic_state_publication(
         source_result,
     )?;
     let request_bytes = request.canonical_bytes()?;
+    if let Some(result) = &electrical_source {
+        result.validate_publication_request(&request)?;
+        let catalog =
+            StatePublicationProfiles::from_canonical_bytes(&preparation.source_profiles.payload())?;
+        if preparation.source_profiles.manifest.kind
+            != AnalysisNumericalObjectKind::StatePublicationProfiles
+            || preparation.source_profiles.manifest.logical_identity != catalog.identity()
+            || catalog
+                != result
+                    .state_publication_profiles(preparation.source_result.manifest.payload_digest)?
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "electrical publication profiles differ from completed source",
+            ));
+        }
+    }
     if let Some(result) = &acoustic_source {
         result.validate_publication_request(&request)?;
         let catalog =

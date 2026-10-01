@@ -5,13 +5,14 @@ use crate::results::accuracy::{AccuracyEvidence, AccuracyEvidenceScope, Accuracy
 use super::{
     AccuracyEvaluationRequest, AccuracySourceKind, AcousticNumericalReceiptArtifact,
     AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity,
-    SolverResultIdentity, StructuralLinearNumericalReceiptArtifact,
-    StructuralModalResponseSpectrumNumericalReceipt, StructuralRandomResponseNumericalReceipt,
-    ThermalNumericalReceiptArtifact,
+    ElectricalNumericalReceiptArtifact, SolverResultIdentity,
+    StructuralLinearNumericalReceiptArtifact, StructuralModalResponseSpectrumNumericalReceipt,
+    StructuralRandomResponseNumericalReceipt, ThermalNumericalReceiptArtifact,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccuracySourceReceipt {
+    ElectricalStatic(ElectricalNumericalReceiptArtifact),
     AcousticHarmonic(AcousticNumericalReceiptArtifact),
     Thermal(ThermalNumericalReceiptArtifact),
     StructuralLinear(StructuralLinearNumericalReceiptArtifact),
@@ -25,6 +26,9 @@ impl AccuracySourceReceipt {
         bytes: &[u8],
     ) -> AnalysisExecutionResult<Self> {
         let receipt = match kind {
+            AccuracySourceKind::ElectricalStatic => Self::ElectricalStatic(
+                ElectricalNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
+            ),
             AccuracySourceKind::AcousticHarmonic => Self::AcousticHarmonic(
                 AcousticNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
             ),
@@ -49,6 +53,7 @@ impl AccuracySourceReceipt {
 
     pub const fn kind(&self) -> AccuracySourceKind {
         match self {
+            Self::ElectricalStatic(_) => AccuracySourceKind::ElectricalStatic,
             Self::AcousticHarmonic(_) => AccuracySourceKind::AcousticHarmonic,
             Self::Thermal(_) => AccuracySourceKind::Thermal,
             Self::StructuralLinear(_) => AccuracySourceKind::StructuralLinear,
@@ -61,6 +66,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
         match self {
+            Self::ElectricalStatic(receipt) => receipt.source_workload(),
             Self::AcousticHarmonic(receipt) => receipt.source_workload(),
             Self::Thermal(receipt) => receipt.source_workload,
             Self::StructuralLinear(receipt) => receipt.source_workload,
@@ -71,6 +77,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_result(&self) -> SolverResultIdentity {
         match self {
+            Self::ElectricalStatic(receipt) => receipt.source_result(),
             Self::AcousticHarmonic(receipt) => receipt.source_result(),
             Self::Thermal(receipt) => receipt.source_result(),
             Self::StructuralLinear(receipt) => receipt.source_result(),
@@ -81,6 +88,7 @@ impl AccuracySourceReceipt {
 
     pub const fn identity(&self) -> super::NumericalReceiptIdentity {
         match self {
+            Self::ElectricalStatic(receipt) => receipt.identity(),
             Self::AcousticHarmonic(receipt) => receipt.identity(),
             Self::Thermal(receipt) => receipt.identity(),
             Self::StructuralLinear(receipt) => receipt.identity(),
@@ -113,9 +121,30 @@ impl AccuracySourceReceipt {
                 ));
             }
         }
+        if let Self::ElectricalStatic(receipt) = self {
+            if receipt.receipt().producer != request.producer {
+                return Err(AnalysisExecutionError::Identity(
+                    "electrical accuracy receipt differs from requested producer",
+                ));
+            }
+        }
         let mut evidence = Vec::new();
         for criterion in &request.plan.criteria {
             let measured = match self {
+                Self::ElectricalStatic(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound => {
+                    Some((receipt.receipt().linear_relative_residual,
+                        "accepted original dimensionless Dirichlet-lifted linear-system residual Euclidean norm divided by its right-hand-side Euclidean norm; exactly zero right-hand side requires zero residual; algebraic equation satisfaction only, not spatial convergence or field accuracy"))
+                }
+                Self::ElectricalStatic(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ConservationBalance => {
+                    Some((receipt.receipt().relative_flux_imbalance.max(receipt.receipt().relative_energy_identity_error),
+                        "maximum of absolute signed terminal outward-flux sum divided by sum of absolute terminal fluxes, and absolute constitutive-integral minus physical weak-operator energy divided by the larger absolute integral; each denominator is guarded by f64::MIN_POSITIVE; retained equation-based flux and energy closure only, not independent spatial accuracy"))
+                }
                 Self::AcousticHarmonic(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic
@@ -203,6 +232,7 @@ impl AccuracySourceReceipt {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
+            Self::ElectricalStatic(receipt) => receipt.validate(),
             Self::AcousticHarmonic(receipt) => receipt.validate(),
             Self::Thermal(receipt) => receipt.validate(),
             Self::StructuralLinear(receipt) => receipt.validate(),
@@ -214,3 +244,6 @@ impl AccuracySourceReceipt {
 
 #[cfg(test)]
 mod thermal_tests;
+
+#[cfg(test)]
+mod electrical_tests;

@@ -89,7 +89,7 @@ fn model(
         .collect();
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
     let lowered_physics = physics::lower(declaration, bound, diagnostics);
-    let (thermal, thermo_mechanical) = domains::lower(declaration, diagnostics);
+    let (thermal, thermo_mechanical, electromagnetic) = domains::lower(declaration, diagnostics);
     let mut signals = signals::lower(declaration, bound, diagnostics);
     let constraints = constraints::lower(declaration, bound, &signals, diagnostics);
     let lowered_excitations = excitations::lower(declaration, bound, &signals, diagnostics);
@@ -118,6 +118,7 @@ fn model(
         random_excitations: spectral_inputs.random_excitations,
         initial_conditions,
         thermal,
+        electromagnetic,
         thermo_mechanical,
     }
 }

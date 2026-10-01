@@ -100,6 +100,7 @@ pub struct AuthoredModel {
     pub model_id: String,
     pub thermal: Option<super::domains::ThermalDomain>,
     pub thermo_mechanical: Option<super::domains::ThermoMechanicalDomain>,
+    pub electromagnetic: Option<super::domains::ElectromagneticDomain>,
     pub inputs: Vec<AuthoredInputDefinition>,
     pub includes: Vec<AuthoredModelInclude>,
     pub sections: Vec<AuthoredSectionDefinition>,
@@ -131,6 +132,17 @@ impl AuthoredModel {
     pub fn validate(&self) -> Result<(), AuthoredModelError> {
         token("model module path", &self.module_path)?;
         token("model id", &self.model_id)?;
+        if matches!(
+            self.electromagnetic,
+            Some(super::domains::ElectromagneticDomain::Harmonic { .. })
+        ) {
+            return Err(AuthoredModelError::InvalidPhysics {
+                kind: "electromagnetic domain",
+                detail:
+                    "authored electromagnetic domains currently require an explicit static equation"
+                        .into(),
+            });
+        }
         for (domain, temperature) in [
             (
                 "thermal",

@@ -6,6 +6,7 @@
 
 mod acoustic_execution;
 mod callable;
+mod electrical_execution;
 mod geometry;
 mod input;
 mod preparation;
@@ -19,10 +20,11 @@ mod tests;
 mod thermal_signals;
 
 pub use acoustic_execution::CompletedAuthoredAcousticStudy;
+pub use electrical_execution::CompletedAuthoredElectricalStudy;
 pub use geometry::MaterializedFeaGeometry;
 pub use preparation::{
-    checked_fea_artifact_access, PreparedAuthoredAcousticStudy, PreparedAuthoredThermalStudy,
-    PreparedFeaStudy, PreparedFeaStudyRoot,
+    checked_fea_artifact_access, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
+    PreparedAuthoredThermalStudy, PreparedFeaStudy, PreparedFeaStudyRoot,
 };
 pub use thermal_execution::CompletedAuthoredThermalStudy;
 
@@ -116,6 +118,7 @@ pub struct CompletedLocalFeaCase {
 #[derive(Debug)]
 pub enum CompletedFeaStudyResult {
     Acoustic(Box<CompletedAuthoredAcousticStudy>),
+    Electrical(Box<CompletedAuthoredElectricalStudy>),
     Structural(Box<StructuralStudyResult>),
     Thermal(Box<CompletedAuthoredThermalStudy>),
 }
@@ -124,6 +127,7 @@ impl CompletedFeaStudyResult {
     pub fn mesh(&self) -> &runmat_meshing_core::SolverMeshArtifact {
         match self {
             Self::Acoustic(result) => &result.mesh,
+            Self::Electrical(result) => &result.mesh,
             Self::Structural(result) => result.mesh(),
             Self::Thermal(result) => &result.mesh,
         }
@@ -240,6 +244,42 @@ async fn execute_case(
     let prepared = prepare_checked_fea_study(source, study, &inputs, &authority, options).await?;
     let workers = options.workers.unwrap_or(prepared.workers).max(1);
     let (result, publication) = match prepared.root {
+        PreparedFeaStudyRoot::Electrical(root) => {
+            let result = electrical_execution::execute(root, workers, options).await?;
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            let publication_options = runmat_runtime::analysis::AnalysisElectricalRunOptions {
+                deterministic_mode: true,
+                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
+                quality_policy: runmat_runtime::analysis::QualityPolicy::Strict,
+                residual_target: result.completion.workload.relative_residual_target,
+            };
+            let identity =
+                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
+                    "typed-local:{}:{}",
+                    digest.to_string().trim_start_matches("sha256:"),
+                    result.completion.root.logical_digest,
+                ))?;
+            let publication = runmat_runtime::analysis::publish_electrical_study_result(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &publication_options,
+                digest,
+                runmat_runtime::operations::OperationContext::new(None, None),
+                identity,
+            )
+            .map_err(|e| e.message)?
+            .data;
+            (
+                CompletedFeaStudyResult::Electrical(Box::new(result)),
+                publication,
+            )
+        }
         PreparedFeaStudyRoot::Acoustic(root) => {
             let result = acoustic_execution::execute(root, workers, options).await?;
             let digest = result

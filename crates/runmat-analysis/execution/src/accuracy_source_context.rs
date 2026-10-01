@@ -1,6 +1,7 @@
 //! Reprojection shared by admission and workers. Context is bound to the producing receipt,
 //! independently of the observation catalog's own declarations and hashes.
 mod acoustic;
+mod electrical;
 mod structural;
 use runmat_analysis_fea::{
     execution::{
@@ -33,6 +34,9 @@ pub fn validate_accuracy_source_context(
     }
     if let AccuracySourceReceipt::AcousticHarmonic(receipt) = receipt {
         return acoustic::validate(request, receipt, observations, inputs);
+    }
+    if let AccuracySourceReceipt::ElectricalStatic(receipt) = receipt {
+        return electrical::validate(request, receipt, observations, inputs);
     }
     let AccuracySourceReceipt::Thermal(receipt) = receipt else {
         return structural::validate(request, receipt, observations, inputs);

@@ -3,6 +3,8 @@
 mod accelerator_placement;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
+mod analysis_electrical;
+pub use analysis_electrical::source::electrical_study_completion_from_source;
 mod analysis_buckling;
 mod analysis_frequency;
 mod analysis_frequency_observations;
@@ -220,12 +222,12 @@ pub use structural_study_root::{
 pub use test_workload::{execute_host_program_request, execute_host_program_request_with_project};
 pub use typed_fea::{
     checked_fea_artifact_access, materialize_checked_fea_study_geometry, prepare_checked_fea_study,
-    MaterializedFeaGeometry, PreparedAuthoredAcousticStudy, PreparedAuthoredThermalStudy,
-    PreparedFeaStudy, PreparedFeaStudyRoot,
+    MaterializedFeaGeometry, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
+    PreparedAuthoredThermalStudy, PreparedFeaStudy, PreparedFeaStudyRoot,
 };
 pub use typed_fea::{
-    execute_checked_fea_locally, CompletedAuthoredAcousticStudy, CompletedAuthoredThermalStudy,
-    CompletedFeaStudyResult, CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions,
-    LocalFeaMeshObserver, LocalFeaProgressObserver,
+    execute_checked_fea_locally, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy,
+    CompletedAuthoredThermalStudy, CompletedFeaStudyResult, CompletedLocalFeaCase,
+    LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver, LocalFeaProgressObserver,
 };
 pub use worker::run_worker_stdio;

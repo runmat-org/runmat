@@ -20,6 +20,8 @@ pub(super) mod field_validation;
 mod resource_profile;
 pub use resource_profile::SemanticStatePublicationProfileSource;
 mod acoustic;
+mod electrical;
+pub use electrical::CanonicalElectricalStaticStatePayload;
 mod payload;
 mod thermal;
 mod thermal_transfer;
@@ -107,6 +109,7 @@ impl CanonicalSemanticState {
                 if matches!(
                     self.kind,
                     StateKind::Thermal
+                        | StateKind::ElectromagneticStatic
                         | StateKind::AcousticComplex
                         | StateKind::ModalBasis
                         | StateKind::StructuralComplex
@@ -135,6 +138,17 @@ impl CanonicalSemanticState {
                 {
                     return Err(AnalysisExecutionError::Invalid(
                         "acoustic semantic-state payload requires acoustic-complex state kind"
+                            .into(),
+                    ));
+                }
+                state.validate_for(self.topology_digest, self.source_result, self.producer)?;
+            }
+            CanonicalSemanticStatePayload::ElectricalStatic { state } => {
+                if self.kind != StateKind::ElectromagneticStatic
+                    || self.completeness != StateCompleteness::Complete
+                {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "electrical static payload requires complete electromagnetic-static state"
                             .into(),
                     ));
                 }

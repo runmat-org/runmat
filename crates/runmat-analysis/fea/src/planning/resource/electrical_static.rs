@@ -19,6 +19,8 @@ mod tests;
 pub struct PreparedElectricalStaticResourceFacts {
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
+    pub receipt_output: PreparedOutputResourceFacts,
+    pub state_profiles_output: PreparedOutputResourceFacts,
     pub output_set: PreparedOutputSetResourceFacts,
 }
 
@@ -77,7 +79,7 @@ fn require_support_preparation_ceiling(
 }
 
 /// Source-bound canonical result payload bound, including arbitrary terminal identifiers.
-/// It does not include a receipt or state profile: neither exists in this numerical envelope.
+/// Receipt and publication-profile payloads are reserved separately.
 pub fn electrical_static_result_payload_bytes_upper_bound(
     workload: &ElectricalStaticWorkload,
     mesh: &SolverMeshArtifact,
@@ -94,6 +96,8 @@ pub fn electrical_static_result_payload_bytes_upper_bound(
     let terminal_fields = mul(terminals, add(128, mul(nodes, 16)?)?)?;
     let formulation = profile_serialized(&formulation, LIMITS).map_err(invalid)?;
     let constraints = profile_serialized(&workload.model.constraints, LIMITS).map_err(invalid)?;
+    let declarations = profile_serialized(&workload.model.sequence.steps[0].state_outputs, LIMITS)
+        .map_err(invalid)?;
     // Closed schema keys, fixed-width producer/source/projection/mesh identities, order,
     // residual/iteration/energy/conservation summaries and framing (not authored strings).
     [
@@ -102,6 +106,7 @@ pub fn electrical_static_result_payload_bytes_upper_bound(
         terminal_fields,
         formulation.encoded_bytes_upper_bound,
         constraints.encoded_bytes_upper_bound,
+        declarations.encoded_bytes_upper_bound,
     ]
     .into_iter()
     .try_fold(0, add)
@@ -166,12 +171,24 @@ pub fn build_electrical_static_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     require_support_preparation_ceiling(workload, mesh)?;
     let payload = electrical_static_result_payload_bytes_upper_bound(workload, mesh)?;
+    let state_profiles = workload
+        .state_publication_profiles_encoding_profile(Digest::from_bytes(
+            *mesh.canonical_digest.bytes(),
+        ))
+        .map_err(invalid)?;
     let inputs = add(
         count(workload.canonical_bytes().map_err(invalid)?.len())?,
         count(mesh.canonical_encode().map_err(invalid)?.len())?,
     )?;
     if prepared.inputs.encoded_payload_bytes.0 != inputs
         || prepared.result_output.encoded_payload_bytes_upper_bound.0 != payload
+        || prepared.receipt_output.encoded_payload_bytes_upper_bound.0
+            != crate::execution::ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES
+        || prepared
+            .state_profiles_output
+            .encoded_payload_bytes_upper_bound
+            .0
+            != state_profiles.encoded_bytes_upper_bound
     {
         return Err(invalid(
             "electrical canonical input or projected result bytes disagree",
@@ -250,6 +267,11 @@ pub fn build_electrical_static_resource_plan(
             solver_admission: admission,
             inputs: prepared.inputs,
             result_output: prepared.result_output,
+            receipt_output: prepared.receipt_output,
+            state_profiles_output: prepared.state_profiles_output,
+            state_profiles_resident_bytes: ByteCount(
+                state_profiles.materialization_resident_bytes_estimate,
+            ),
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {

@@ -1,0 +1,144 @@
+//! Closed solver-option selection; numerical execution remains with each physics owner.
+use super::*;
+
+impl AnalysisSolverOptions {
+    pub(in crate::analysis) fn clear_solver_mesh_artifact_path(&mut self) {
+        match self {
+            Self::ElectricalStatic(_) => {}
+            Self::StructuralLinear(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralFrequency(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralModes(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralResponseSpectrum(options) => {
+                options.solver_mesh_artifact_path = None;
+            }
+            Self::StructuralRandomResponse(options) => {
+                options.solver_mesh_artifact_path = None;
+            }
+            Self::StructuralBuckling(options) => options.solver_mesh_artifact_path = None,
+            Self::AcousticHelmholtz(_) => {}
+            Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
+            Self::StructuralTransient(options) => options.solver_mesh_artifact_path = None,
+            Self::IncompressibleFlow(options) => options.solver_mesh_artifact_path = None,
+            Self::ConjugateHeatTransfer(options) => options.solver_mesh_artifact_path = None,
+            Self::FluidStructureInteraction(options) => {
+                options.solver_mesh_artifact_path = None;
+            }
+            Self::StructuralNonlinear(options) => options.solver_mesh_artifact_path = None,
+            Self::ElectromagneticPotential(options) => {
+                options.solver_mesh_artifact_path = None;
+            }
+        }
+    }
+
+    pub fn defaults_for(step: &ProcedureStep) -> Result<Self, String> {
+        use AnalysisProcedure::{
+            EigenvalueBuckling, HarmonicResponse, ModalExtraction, ModalResponseSpectrum,
+            Nonlinear, PrestressedHarmonicResponse, PrestressedModalExtraction, RandomResponse,
+            Static, TransientResponse,
+        };
+        use PhysicsFamily::{Acoustic, Coupled, Electromagnetic, Fluid, Structural, Thermal};
+
+        match (step.family, step.procedure, step.solution_space) {
+            (Electromagnetic, Static, SolutionSpace::Direct) => Ok(Self::ElectricalStatic(
+                super::AnalysisElectricalRunOptions::default(),
+            )),
+            (Structural, Static, SolutionSpace::Direct)
+            | (
+                Coupled(CoupledPhysicsFamily::Thermomechanical),
+                Static,
+                SolutionSpace::Direct,
+            ) => {
+                Ok(Self::StructuralLinear(AnalysisRunOptions::default()))
+            }
+            (
+                Structural,
+                ModalExtraction | PrestressedModalExtraction,
+                SolutionSpace::Direct,
+            ) => {
+                let runmat_analysis_core::IndependentDomain::Eigenvalue { requested_count } =
+                    &step.independent_domain
+                else {
+                    return Err(format!(
+                        "modal procedure step `{}` requires an eigenvalue domain",
+                        step.step_id.as_str()
+                    ));
+                };
+                let options = AnalysisModalRunOptions {
+                    truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
+                        *requested_count,
+                    ),
+                    ..AnalysisModalRunOptions::default()
+                };
+                Ok(Self::StructuralModes(options))
+            }
+            (Structural, ModalResponseSpectrum, SolutionSpace::ModalReduced) => Ok(
+                Self::StructuralResponseSpectrum(AnalysisResponseSpectrumRunOptions::default()),
+            ),
+            (Structural, RandomResponse, SolutionSpace::ModalReduced) => Ok(
+                Self::StructuralRandomResponse(AnalysisRandomResponseRunOptions::default()),
+            ),
+            (Structural, EigenvalueBuckling, SolutionSpace::Direct) => Ok(
+                Self::StructuralBuckling(AnalysisBucklingRunOptions::default()),
+            ),
+            (
+                Structural,
+                PrestressedHarmonicResponse,
+                SolutionSpace::Direct | SolutionSpace::ModalReduced,
+            ) => Ok(Self::StructuralFrequency(
+                AnalysisStructuralFrequencyRunOptions::default(),
+            )),
+            (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(
+                Self::StructuralFrequency(AnalysisStructuralFrequencyRunOptions::default()),
+            ),
+            (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::AcousticHelmholtz(
+                AnalysisAcousticRunOptions::default(),
+            )),
+            (Thermal, Static | TransientResponse, SolutionSpace::Direct) => Ok(Self::ThermalDiffusion(
+                AnalysisThermalRunOptions::default(),
+            )),
+            (
+                Structural,
+                TransientResponse,
+                SolutionSpace::Direct | SolutionSpace::ModalReduced,
+            ) => Ok(Self::StructuralTransient(AnalysisTransientRunOptions::default())),
+            (Fluid, Static | TransientResponse, SolutionSpace::Direct) => Ok(Self::IncompressibleFlow(
+                AnalysisCfdRunOptions::default(),
+            )),
+            (
+                Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+                Static | TransientResponse,
+                SolutionSpace::Direct,
+            ) => Ok(Self::ConjugateHeatTransfer(
+                AnalysisChtRunOptions::default(),
+            )),
+            (
+                Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+                TransientResponse,
+                SolutionSpace::Direct,
+            ) => Ok(Self::FluidStructureInteraction(
+                AnalysisFsiRunOptions::default(),
+            )),
+            (Structural, Nonlinear, SolutionSpace::Direct)
+            | (
+                Coupled(CoupledPhysicsFamily::Thermomechanical),
+                Nonlinear,
+                SolutionSpace::Direct,
+            ) => Ok(Self::StructuralNonlinear(
+                AnalysisNonlinearRunOptions::default(),
+            )),
+            (Electromagnetic, HarmonicResponse, SolutionSpace::Direct) => Ok(
+                Self::ElectromagneticPotential(AnalysisElectromagneticRunOptions::default()),
+            ),
+            (family, procedure, solution_space) => Err(format!(
+                "procedure step `{}` selects unsupported execution combination {family:?}/{procedure:?}/{solution_space:?}",
+                step.step_id.as_str()
+            )),
+        }
+    }
+
+    pub fn supports(&self, step: &ProcedureStep) -> bool {
+        Self::defaults_for(step)
+            .map(|expected| std::mem::discriminant(&expected) == std::mem::discriminant(self))
+            .unwrap_or(false)
+    }
+}

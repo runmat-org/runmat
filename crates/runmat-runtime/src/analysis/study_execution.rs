@@ -25,6 +25,19 @@ pub(super) fn execute_study_step(
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
     let model = solver_model(model, procedure_step);
     match &execution.solver_options {
+        AnalysisSolverOptions::ElectricalStatic(_) => Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ELECTRICAL_TYPED_EXECUTION_REQUIRED",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "static electrical studies require the governed typed electrical execution path",
+            std::collections::BTreeMap::new(),
+        )),
         AnalysisSolverOptions::StructuralLinear(authored_options) => {
             let mut options = authored_options.clone();
             attach_solver_mesh_artifact_path(

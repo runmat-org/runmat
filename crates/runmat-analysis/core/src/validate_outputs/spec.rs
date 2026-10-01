@@ -177,6 +177,9 @@ fn is_electromagnetic(quantity: ObservationQuantity) -> bool {
         quantity,
         ObservationQuantity::ElectricPotential
             | ObservationQuantity::ElectricField
+            | ObservationQuantity::ElectricDisplacement
+            | ObservationQuantity::ElectricEnergyDensity
+            | ObservationQuantity::JoulePowerDensity
             | ObservationQuantity::ElectricCurrent
             | ObservationQuantity::ElectricCurrentDensity
             | ObservationQuantity::ElectricCharge

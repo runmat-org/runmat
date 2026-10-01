@@ -5,6 +5,7 @@ use runmat_analysis_core::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PreparedFamily {
     Acoustic,
+    Electrical,
     Structural,
     Thermal,
 }
@@ -22,6 +23,18 @@ pub(super) fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamil
     let [step] = sequence.steps.as_slice() else {
         return Err(unsupported());
     };
+    if step.family == PhysicsFamily::Electromagnetic
+        && step.procedure == AnalysisProcedure::Static
+        && step.solution_space == SolutionSpace::Direct
+        && step.restart == RestartPolicy::Fresh
+        && step.state_inputs.is_empty()
+        && step.activations.is_empty()
+        && sequence.dependencies.is_empty()
+        && sequence.transitions.is_empty()
+        && sequence.branches.is_empty()
+    {
+        return Ok(PreparedFamily::Electrical);
+    }
     if step.family == PhysicsFamily::Acoustic
         && step.procedure == AnalysisProcedure::HarmonicResponse
         && step.solution_space == SolutionSpace::Direct
@@ -52,13 +65,38 @@ pub(super) fn select_family(sequence: &AnalysisSequence) -> Result<PreparedFamil
 }
 
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient or acoustic harmonic step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, static electrical, or acoustic harmonic step".into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_analysis_core::ProcedureStep;
+
+    #[test]
+    fn static_electrical_family_selection_keeps_restart_and_mixed_sequences_closed() {
+        let step = ProcedureStep::electromagnetic_static("potential");
+        assert_eq!(
+            select_family(&AnalysisSequence::from_steps(
+                "potential",
+                vec![step.clone()]
+            ))
+            .unwrap(),
+            PreparedFamily::Electrical
+        );
+        let mut resumed = step.clone();
+        resumed.restart = RestartPolicy::ResumeCheckpoint {
+            checkpoint_id: "checkpoint".into(),
+            required_state_digest: "digest".into(),
+        };
+        for steps in [
+            vec![resumed],
+            vec![step.clone(), step],
+            vec![ProcedureStep::electromagnetic_harmonic("field")],
+        ] {
+            assert!(select_family(&AnalysisSequence::from_steps("unsupported", steps)).is_err());
+        }
+    }
 
     #[test]
     fn fresh_acoustic_harmonic_selects_without_admitting_restart_or_cross_physics() {

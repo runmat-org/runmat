@@ -52,6 +52,12 @@ pub fn prepare_electrical_static_inputs(
         PreparedElectricalStaticResourceFacts {
             inputs: prepared_input_resource_facts(&inputs)?,
             result_output,
+            receipt_output: projected_output(
+                AnalysisNumericalObjectKind::NumericalReceipt,
+                runmat_analysis_fea::execution::ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES,
+                policy,
+            )?,
+            state_profiles_output: projected_state_profiles(workload, mesh, policy)?,
             output_set: projected_output_set_resource_facts(),
         },
     )?;
@@ -121,6 +127,12 @@ pub fn rederive_electrical_static_resource_plan(
         PreparedElectricalStaticResourceFacts {
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
             result_output: projected_result(workload, mesh, policy)?,
+            receipt_output: projected_output(
+                AnalysisNumericalObjectKind::NumericalReceipt,
+                runmat_analysis_fea::execution::ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES,
+                policy,
+            )?,
+            state_profiles_output: projected_state_profiles(workload, mesh, policy)?,
             output_set: projected_output_set_resource_facts(),
         },
     )?;
@@ -155,11 +167,37 @@ fn projected_result(
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts> {
+    projected_output(
+        AnalysisNumericalObjectKind::SolverResult,
+        electrical_static_result_payload_bytes_upper_bound(workload, mesh)?,
+        policy,
+    )
+}
+
+fn projected_state_profiles(
+    workload: &ElectricalStaticWorkload,
+    mesh: &SolverMeshArtifact,
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts> {
+    projected_output(
+        AnalysisNumericalObjectKind::StatePublicationProfiles,
+        workload
+            .state_publication_profiles_encoding_profile(Digest::from_bytes(
+                *mesh.canonical_digest.bytes(),
+            ))?
+            .encoded_bytes_upper_bound,
+        policy,
+    )
+}
+
+fn projected_output(
+    kind: AnalysisNumericalObjectKind,
+    bytes: u64,
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts> {
     let mut profiler = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
-    profiler.push(electrical_static_result_payload_bytes_upper_bound(
-        workload, mesh,
-    )?)?;
-    let profile = profiler.finish(AnalysisNumericalObjectKind::SolverResult)?;
+    profiler.push(bytes)?;
+    let profile = profiler.finish(kind)?;
     crate::thermal_execution::require_inventory(&profile, policy.inventory_limits())?;
     projected_transport_output_resource_facts(&profile)
 }

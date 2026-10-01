@@ -11,6 +11,13 @@ impl FeaResourceDemand {
             (Self::ElectricalStatic(demand), AnalysisNumericalObjectKind::SolverResult) => {
                 Some(&demand.result_output)
             }
+            (Self::ElectricalStatic(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
+                Some(&demand.receipt_output)
+            }
+            (
+                Self::ElectricalStatic(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
             (Self::AcousticHarmonic(demand), AnalysisNumericalObjectKind::SolverResult) => {
                 Some(&demand.result_output)
             }

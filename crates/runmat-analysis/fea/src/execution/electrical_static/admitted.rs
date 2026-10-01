@@ -28,6 +28,8 @@ impl ElectricalStaticWorkload {
             PreparedElectricalStaticResourceFacts {
                 inputs: demand.inputs.clone(),
                 result_output: demand.result_output.clone(),
+                receipt_output: demand.receipt_output.clone(),
+                state_profiles_output: demand.state_profiles_output.clone(),
                 output_set,
             },
         )

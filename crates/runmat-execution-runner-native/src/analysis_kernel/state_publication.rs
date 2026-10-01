@@ -55,6 +55,17 @@ pub(super) fn execute(
         Ok(())
     };
     let state = match publication.source {
+        SemanticStatePublicationSource::StaticElectricalNativeFields => {
+            let result =
+                runmat_analysis_fea::execution::ElectricalStaticSolverResult::from_canonical_bytes(
+                    &solver_result.payload(),
+                )?;
+            result.validate_publication_request(&publication)?;
+            check_profile(
+                SemanticStatePublicationProfileSource::StaticElectricalNativeFields(&result),
+            )?;
+            CanonicalSemanticState::from_electrical_static_publication(&publication, &result)?
+        }
         SemanticStatePublicationSource::AcousticNativeFields => {
             let result =
                 runmat_analysis_fea::execution::AcousticHarmonicSolverResult::from_canonical_bytes(

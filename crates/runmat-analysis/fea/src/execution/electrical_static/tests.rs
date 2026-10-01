@@ -3,6 +3,8 @@ use crate::physics::electrical::tests::{mesh, model, prescribe};
 use runmat_analysis_core::{RegionTarget, RestartPolicy};
 use runmat_meshing_core::ElementOrder;
 
+mod publication;
+
 fn workload(equation: StaticElectricalEquation) -> ElectricalStaticWorkload {
     let mut model = model(equation);
     prescribe(

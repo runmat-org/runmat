@@ -69,7 +69,7 @@ pub fn realize_analysis_model(
     let material_resolution =
         targets::MaterialResolution::new(materials, &models, &target_resolver)?;
     let properties = properties::realize_model_properties(&models, &target_resolver)?;
-    let (thermal, thermo_mechanical) = domains::realize(&models)?;
+    let (thermal, thermo_mechanical, electromagnetic) = domains::realize(&models)?;
     let mut sequence = study.sequence.clone();
     for step in &mut sequence.steps {
         for observation in &mut step.observations {
@@ -95,7 +95,7 @@ pub fn realize_analysis_model(
         thermal,
         thermo_mechanical,
         electro_thermal: None,
-        electromagnetic: None,
+        electromagnetic,
         cfd: None,
         interfaces: Vec::new(),
         constraints: Vec::new(),

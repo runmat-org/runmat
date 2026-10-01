@@ -1,4 +1,5 @@
 //! Typed publication facade; each physics owner authenticates its own retained completion.
+pub use super::contracts::AnalysisElectricalRunOptions;
 use super::{
     complete_study_run, execution_operation, meshing, structural_study, study_result,
     study_result_manifest, AcousticStudyCompletion, AcousticStudyObjectSource,
@@ -7,14 +8,18 @@ use super::{
     AnalysisRunOptions, AnalysisSolverOptions, AnalysisStructuralFrequencyRunOptions,
     AnalysisStructuralFrequencySolver, AnalysisStructuralTimeStepPolicy,
     AnalysisStudyCompletionIdentity, AnalysisStudyRunData, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
-    StructuralStudyNumericalResult, StructuralStudyPrestressedFrequencyReductionResult,
-    StructuralStudyResult, ThermalStudyCompletion, ThermalStudyObjectSource,
-    ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
+    AnalysisTransientRunOptions, ElectricalStudyCompletion, ElectricalStudyObjectSource,
+    PrecisionMode, PreconditionerMode, QualityPolicy, StructuralStudyNumericalResult,
+    StructuralStudyPrestressedFrequencyReductionResult, StructuralStudyResult,
+    ThermalStudyCompletion, ThermalStudyObjectSource, ANALYSIS_RUN_STUDY_OPERATION,
+    ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
 #[path = "acoustic_study_publication.rs"]
 mod acoustic;
+#[path = "electrical_study_publication.rs"]
+mod electrical;
+pub use electrical::publish_electrical_study_result;
 #[path = "typed_study_publication.rs"]
 mod structural;
 #[path = "thermal_study_publication.rs"]

@@ -1,11 +1,16 @@
 //! Domain declarations are explicit model intent, shared by root and included models.
 use super::AnalysisModelRealizationError;
-use crate::{AuthoredModel, ThermalDomain, ThermoMechanicalDomain};
+use crate::{AuthoredModel, ElectromagneticDomain, ThermalDomain, ThermoMechanicalDomain};
+
+type RealizedDomains = (
+    Option<ThermalDomain>,
+    Option<ThermoMechanicalDomain>,
+    Option<ElectromagneticDomain>,
+);
 
 pub(super) fn realize(
     models: &[&AuthoredModel],
-) -> Result<(Option<ThermalDomain>, Option<ThermoMechanicalDomain>), AnalysisModelRealizationError>
-{
+) -> Result<RealizedDomains, AnalysisModelRealizationError> {
     let mut thermal = coalesce(
         models.iter().filter_map(|model| model.thermal.as_ref()),
         "thermal",
@@ -31,7 +36,13 @@ pub(super) fn realize(
             reference.kelvin = 0.0;
         }
     }
-    Ok((thermal, thermo_mechanical))
+    let electromagnetic = coalesce(
+        models
+            .iter()
+            .filter_map(|model| model.electromagnetic.as_ref()),
+        "electromagnetic",
+    )?;
+    Ok((thermal, thermo_mechanical, electromagnetic))
 }
 
 fn coalesce<'a, T: Clone + PartialEq + 'a>(
@@ -107,6 +118,7 @@ mod tests {
             model_id: id.into(),
             thermal: None,
             thermo_mechanical: None,
+            electromagnetic: None,
             inputs: vec![],
             includes: vec![],
             sections: vec![],
@@ -141,7 +153,7 @@ mod tests {
         });
         assert_eq!(
             realize(&[&included, &root]).unwrap(),
-            (root.thermal.clone(), root.thermo_mechanical.clone())
+            (root.thermal.clone(), root.thermo_mechanical.clone(), None)
         );
         root.thermal = None;
         assert_eq!(realize(&[&included, &root]).unwrap().0, included.thermal);
@@ -183,5 +195,36 @@ mod tests {
         let expected = Err(AnalysisModelRealizationError::ConflictingDomain("thermal"));
         assert_eq!(coalesce([&a, &b].into_iter(), "thermal"), expected);
         assert_eq!(coalesce([&b, &a].into_iter(), "thermal"), expected);
+    }
+
+    #[test]
+    fn explicit_electrical_equations_coalesce_and_conflicts_fail_closed() {
+        use crate::StaticElectricalEquation;
+        let mut a = authored("a");
+        let mut b = authored("b");
+        assert_eq!(realize(&[&a, &b]).unwrap().2, None);
+        a.electromagnetic = Some(ElectromagneticDomain::Static {
+            equation: StaticElectricalEquation::Electrostatics,
+        });
+        a.validate().unwrap();
+        assert_eq!(realize(&[&a, &b]).unwrap().2, a.electromagnetic);
+        b.electromagnetic = a.electromagnetic.clone();
+        assert_eq!(realize(&[&a, &b]).unwrap(), realize(&[&b, &a]).unwrap());
+        b.electromagnetic = Some(ElectromagneticDomain::Static {
+            equation: StaticElectricalEquation::SteadyConduction,
+        });
+        b.validate().unwrap();
+        for models in [[&a, &b], [&b, &a]] {
+            assert_eq!(
+                realize(&models),
+                Err(AnalysisModelRealizationError::ConflictingDomain(
+                    "electromagnetic"
+                ))
+            );
+        }
+        b.electromagnetic = Some(ElectromagneticDomain::Harmonic {
+            reference_frequency: crate::Frequency::new(60.0),
+        });
+        assert!(b.validate().is_err());
     }
 }

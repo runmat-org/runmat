@@ -24,6 +24,9 @@ fn fixture(
         SemanticStatePublicationSource::StructuralPrimaryFields => StateKind::StructuralPrimary,
         SemanticStatePublicationSource::ThermalPrimaryField => StateKind::Thermal,
         SemanticStatePublicationSource::AcousticNativeFields => StateKind::AcousticComplex,
+        SemanticStatePublicationSource::StaticElectricalNativeFields => {
+            StateKind::ElectromagneticStatic
+        }
         SemanticStatePublicationSource::StructuralLinearization => StateKind::GeometricStiffness,
         SemanticStatePublicationSource::ModalBasis => StateKind::ModalBasis,
         SemanticStatePublicationSource::StructuralResponseEnvelope => {
@@ -81,6 +84,7 @@ fn all_sources_bind_canonical_request_and_account_owned_state_and_verification()
         SemanticStatePublicationSource::StructuralPrimaryFields,
         SemanticStatePublicationSource::ThermalPrimaryField,
         SemanticStatePublicationSource::AcousticNativeFields,
+        SemanticStatePublicationSource::StaticElectricalNativeFields,
         SemanticStatePublicationSource::StructuralLinearization,
         SemanticStatePublicationSource::ModalBasis,
         SemanticStatePublicationSource::StructuralResponseEnvelope,

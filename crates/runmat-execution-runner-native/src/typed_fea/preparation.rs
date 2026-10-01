@@ -10,12 +10,15 @@ use super::LocalFeaExecutionOptions;
 
 mod acoustic;
 mod admission;
+mod electrical;
 mod thermal;
 pub use acoustic::PreparedAuthoredAcousticStudy;
+pub use electrical::PreparedAuthoredElectricalStudy;
 pub use thermal::PreparedAuthoredThermalStudy;
 
 pub enum PreparedFeaStudyRoot {
     Acoustic(PreparedAuthoredAcousticStudy),
+    Electrical(PreparedAuthoredElectricalStudy),
     Structural(crate::PreparedStructuralStudyRoot),
     Thermal(PreparedAuthoredThermalStudy),
 }
@@ -119,6 +122,32 @@ pub async fn prepare_study(
         .frozen_project()
         .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
     let root = match family {
+        admission::PreparedFamily::Electrical => {
+            if options.backend != runmat_analysis_fea::ComputeBackend::Cpu
+                || !options.accelerators.is_empty()
+                || !input_materializations.is_empty()
+            {
+                return Err(
+                    "authored electrical execution admits only CPU with no source materializations"
+                        .into(),
+                );
+            }
+            PreparedFeaStudyRoot::Electrical(PreparedAuthoredElectricalStudy {
+                geometry_meshing,
+                authored_study_digest,
+                frozen_project_digest,
+                study: realized.clone(),
+                materials: resolved.material_catalog,
+                program_revision: revision.clone(),
+                artifact_access: access,
+                input_materializations,
+                planning: runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
+                    formulation_requirement: resolved.study.formulation_requirement,
+                },
+                local_execution,
+                analysis_accelerator_requests: options.accelerators.clone(),
+            })
+        }
         admission::PreparedFamily::Acoustic => {
             let input_materializations = input_materializations
                 .into_iter()

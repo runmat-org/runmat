@@ -1,5 +1,5 @@
 //! Portable static scalar FEM contracts. Numerical execution only: no scheduler allocation,
-//! native authored dispatch, state publication, restart or independent accuracy promotion.
+//! Native retained-field/state contracts do not imply restart or independent accuracy promotion.
 use super::{
     AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity, SequenceIdentity,
     StepIdentity,
@@ -17,6 +17,17 @@ use serde::{Deserialize, Serialize};
 mod admitted;
 mod result;
 pub use result::ElectricalStaticSolverResult;
+pub(in crate::execution) mod fields;
+pub(in crate::execution) use fields::{
+    native_electrical_entity_counts, native_electrical_field_definition,
+    native_electrical_field_plan,
+};
+mod publication;
+mod receipt;
+pub use receipt::{
+    ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact,
+    ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES,
+};
 #[cfg(test)]
 mod tests;
 

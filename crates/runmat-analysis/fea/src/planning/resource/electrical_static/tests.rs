@@ -45,9 +45,72 @@ fn facts(
             transport_closure_bytes_upper_bound: ByteCount(output + 2048),
             construction_resident_bytes_admission_budget: ByteCount(output * 16),
         },
+        receipt_output: output_facts(crate::execution::ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES),
+        state_profiles_output: output_facts(
+            workload
+                .state_publication_profiles_encoding_profile(Digest::from_bytes(
+                    *mesh.canonical_digest.bytes(),
+                ))
+                .unwrap()
+                .encoded_bytes_upper_bound,
+        ),
         output_set: PreparedOutputSetResourceFacts {
             encoded_bytes_upper_bound: ByteCount(2048),
         },
+    }
+}
+
+fn output_facts(bytes: u64) -> PreparedOutputResourceFacts {
+    PreparedOutputResourceFacts {
+        encoded_payload_bytes_upper_bound: ByteCount(bytes),
+        transport_closure_bytes_upper_bound: ByteCount(bytes + 2048),
+        construction_resident_bytes_admission_budget: ByteCount((bytes + 2048) * 16),
+    }
+}
+
+#[test]
+fn electrical_solve_declares_exact_three_distinct_output_envelopes() {
+    use crate::execution::AnalysisNumericalObjectKind;
+    for equation in [
+        StaticElectricalEquation::Electrostatics,
+        StaticElectricalEquation::SteadyConduction,
+    ] {
+        for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+            let workload = workload(equation);
+            let mesh = mesh(order, 1);
+            let prepared = facts(&workload, &mesh);
+            let plan =
+                build_electrical_static_resource_plan(&workload, &mesh, prepared.clone()).unwrap();
+            let demand = &plan.input.demand;
+            assert!(demand.governs_prepared_outputs());
+            for (kind, expected) in [
+                (
+                    AnalysisNumericalObjectKind::SolverResult,
+                    &prepared.result_output,
+                ),
+                (
+                    AnalysisNumericalObjectKind::NumericalReceipt,
+                    &prepared.receipt_output,
+                ),
+                (
+                    AnalysisNumericalObjectKind::StatePublicationProfiles,
+                    &prepared.state_profiles_output,
+                ),
+            ] {
+                assert_eq!(demand.output_facts(kind), Some(expected));
+            }
+            for kind in [
+                AnalysisNumericalObjectKind::SemanticState,
+                AnalysisNumericalObjectKind::Field,
+                AnalysisNumericalObjectKind::AccuracyReport,
+                AnalysisNumericalObjectKind::PublishedResult,
+            ] {
+                assert_eq!(demand.output_facts(kind), None);
+            }
+            let cold =
+                FeaResourcePlan::from_canonical_bytes(&plan.canonical_bytes().unwrap()).unwrap();
+            assert_eq!(cold, plan);
+        }
     }
 }
 
@@ -113,11 +176,19 @@ fn both_equations_orders_results_fit_source_bound_admission() {
             let mut exact = plan.input.clone();
             exact.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
             assert!(build_resource_plan(exact).is_ok());
-            assert!(plan
+            let receipt = crate::execution::ElectricalNumericalReceiptArtifact::new(
+                &workload, &result, &mesh,
+            )
+            .unwrap();
+            let receipt_output = plan
                 .input
                 .demand
                 .output_facts(crate::execution::AnalysisNumericalObjectKind::NumericalReceipt)
-                .is_none());
+                .unwrap();
+            assert!(
+                receipt.canonical_bytes().unwrap().len() as u64
+                    <= receipt_output.encoded_payload_bytes_upper_bound.0
+            );
         }
     }
 }

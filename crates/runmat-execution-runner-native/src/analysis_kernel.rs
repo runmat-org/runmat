@@ -97,6 +97,7 @@ mod acoustic_harmonic;
 mod buckling;
 #[cfg(test)]
 mod buckling_tests;
+mod electrical_static;
 mod field_recovery;
 mod frequency;
 mod history_finalization;
@@ -125,6 +126,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::Solve => structural_linear::execute(invocation),
             AnalysisWorkKind::SolveThermal => thermal::execute(invocation),
             AnalysisWorkKind::SolveAcousticHarmonic => acoustic_harmonic::execute(invocation),
+            AnalysisWorkKind::SolveElectricalStatic => electrical_static::execute(invocation),
             AnalysisWorkKind::RecoverField => field_recovery::execute_field_recovery(invocation),
             AnalysisWorkKind::EvaluateObservationPartition => {
                 observation::execute_observation_partition(invocation)
@@ -594,16 +596,15 @@ fn execute_accuracy_evaluation(
         .inputs
         .iter()
         .filter(|input| {
-            matches!(
+            // Phase-owned inputs are authenticated above. Pass every remaining
+            // object to the shared source validator, which owns each physics
+            // family's exact closed inventory; do not duplicate its solver list.
+            !matches!(
                 input.manifest.kind,
-                AnalysisNumericalObjectKind::ThermalWorkload
-                    | AnalysisNumericalObjectKind::AcousticHarmonicWorkload
-                    | AnalysisNumericalObjectKind::SolverResult
-                    | AnalysisNumericalObjectKind::Mesh
-                    | AnalysisNumericalObjectKind::AccuracySourceContext
-                    | AnalysisNumericalObjectKind::SolverInvocation
-                    | AnalysisNumericalObjectKind::StructuralModalResponseSpectrumWorkload
-                    | AnalysisNumericalObjectKind::StructuralRandomResponseWorkload
+                AnalysisNumericalObjectKind::AccuracyEvaluationRequest
+                    | AnalysisNumericalObjectKind::NumericalReceipt
+                    | AnalysisNumericalObjectKind::ObservationCatalog
+                    | AnalysisNumericalObjectKind::ResourcePlan
             )
         })
         .collect();
