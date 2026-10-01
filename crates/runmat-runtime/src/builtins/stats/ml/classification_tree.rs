@@ -35,7 +35,6 @@ use training::fit_tree;
 mod header;
 use header::{
     preflight_matrix_rank, preflight_response_shape, FitctreeArguments, HeaderInspection,
-    NamedOption, PreparedOption,
 };
 mod admission;
 mod options;

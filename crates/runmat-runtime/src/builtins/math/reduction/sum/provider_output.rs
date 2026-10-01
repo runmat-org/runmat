@@ -188,7 +188,7 @@ pub(super) fn fail_stage(
 }
 
 pub(super) fn retire_before_fallback(current: GpuTensorHandle) -> BuiltinResult<()> {
-    current.release().map_err(|source| {
+    current.release().map(|_| ()).map_err(|source| {
         let mut error = sum_internal_error("sum: failed to retire reduction intermediate");
         error.source = Some(Box::new(source));
         error.gpu_gather_retry = GpuGatherRetry::Never;
