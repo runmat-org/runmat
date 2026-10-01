@@ -119,9 +119,6 @@ async fn classify_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
-    if let Some(0) = requested_outputs {
-        return Ok(Value::OutputList(Vec::new()));
-    }
     if matches!(requested_outputs, Some(count) if count > 5) {
         return Err(invalid_argument("classify: too many output arguments"));
     }
@@ -132,6 +129,9 @@ async fn classify_builtin(
     }
     ensure_compatibility_extensions(&sample, &training, &group, &rest)?;
     let admitted = header::admit(&sample, &training, group, &rest)?;
+    if requested_outputs == Some(0) {
+        return Ok(Value::OutputList(Vec::new()));
+    }
     let sample = gathered(sample).await?;
     let training = gathered(training).await?;
     let group = admitted.group.materialize().await?;

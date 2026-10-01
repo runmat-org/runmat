@@ -8,19 +8,6 @@ use runmat_types::{
 };
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    if request.outputs.requested.known_count() == Some(0) {
-        let mut contract = CallContract::fixed(Vec::new());
-        contract.effects = entry.contract.effect_set();
-        contract.capabilities = entry.contract.capability_set();
-        let mut result = infer_call(&contract, request);
-        if request.arguments.len() < 3 || request.arguments.len() > 5 {
-            result.diagnostics.push(InferenceDiagnostic::error(
-                "RM.CLASSIFY.ARITY",
-                "classify requires sample, training, group, and at most type and prior",
-            ));
-        }
-        return result;
-    }
     let mut diagnostics = Vec::new();
     if request.arguments.len() < 3 || request.arguments.len() > 5 {
         diagnostics.push(InferenceDiagnostic::error(

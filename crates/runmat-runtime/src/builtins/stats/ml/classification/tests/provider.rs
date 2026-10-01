@@ -12,6 +12,61 @@ struct RejectingDownloadProvider {
     downloads: AtomicUsize,
 }
 
+#[tokio::test]
+async fn discarded_classify_admits_before_provider_access() {
+    let provider = Box::leak(Box::new(RejectingDownloadProvider {
+        owner: TestAllocationOwner::new(),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    let resident = provider
+        .owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let (_, training, group) = valid_floating_inputs();
+
+    let err = classify_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        training.clone(),
+        group.clone(),
+        vec![Value::from("bogus")],
+    )
+    .await
+    .expect_err("discarding outputs must not bypass type admission");
+    assert!(err.message().contains("type"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+
+    let err = classify_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        training.clone(),
+        group.clone(),
+        vec![
+            Value::from("linear"),
+            tensor(vec![f64::NAN, 1.0], vec![1, 2]),
+        ],
+    )
+    .await
+    .expect_err("discarding outputs must not bypass host prior admission");
+    assert!(err.message().contains("prior probabilities"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+
+    let result = classify_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        training,
+        group,
+        Vec::new(),
+    )
+    .await
+    .expect("valid discarded call needs no download or prediction buffers");
+    assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(resident.probe.retirements(), 0);
+    drop(resident.handle);
+    assert_eq!(resident.probe.retirements(), 1);
+}
+
 impl AccelProvider for RejectingDownloadProvider {
     fn device_id(&self) -> u32 {
         self.owner.device_id()

@@ -208,8 +208,20 @@ fn unknown_labels_and_excess_outputs_remain_conservative() {
 }
 
 #[test]
-fn zero_requested_outputs_take_the_runtime_noop_path() {
-    let result = inference::infer(
+fn discarded_outputs_still_admit_predictors_and_controls() {
+    let valid = inference::infer(
+        &request(
+            numeric(NumericClass::Double, 2, 1),
+            numeric(NumericClass::Double, 4, 1),
+            numeric(NumericClass::Double, 4, 1),
+            0,
+        ),
+        &CLASSIFY_CATALOG_ENTRY,
+    );
+    assert!(valid.outputs.is_empty());
+    assert!(valid.diagnostics.is_empty());
+
+    let invalid = inference::infer(
         &request(
             ValueFact::scalar(ValueKindFact::Symbolic),
             numeric(NumericClass::Double, 4, 1),
@@ -218,8 +230,34 @@ fn zero_requested_outputs_take_the_runtime_noop_path() {
         ),
         &CLASSIFY_CATALOG_ENTRY,
     );
-    assert!(result.outputs.is_empty());
-    assert!(result.diagnostics.is_empty());
+    assert!(invalid.outputs.is_empty());
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM.CLASSIFY.INPUT"));
+
+    let mut malformed_control = request(
+        numeric(NumericClass::Double, 2, 1),
+        numeric(NumericClass::Double, 4, 1),
+        numeric(NumericClass::Double, 4, 1),
+        0,
+    );
+    malformed_control
+        .arguments
+        .push(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })));
+    malformed_control
+        .literals
+        .literal_args
+        .push(LiteralValue::Number(42.0));
+    let invalid = inference::infer(&malformed_control, &CLASSIFY_CATALOG_ENTRY);
+    assert!(invalid.outputs.is_empty());
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM.CLASSIFY.TYPE"));
 }
 
 #[test]
