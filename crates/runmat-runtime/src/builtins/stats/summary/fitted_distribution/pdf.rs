@@ -5,8 +5,7 @@ pub(super) async fn evaluate_pdf_entry(
     x: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let selection = DistributionSelection::from_value(FittedOperation::Density, &distribution)?;
-    admission::evaluation(PDF_NAME, &selection, &x, &rest)?;
+    let selection = admission::evaluation(FittedOperation::Density, &distribution, &x, &rest)?;
     ensure_pdf_integer_extensions(&selection, &x, &rest).await?;
     evaluate_pdf(selection, x, rest).await
 }

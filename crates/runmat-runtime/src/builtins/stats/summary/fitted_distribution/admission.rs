@@ -3,13 +3,15 @@
 use super::*;
 
 pub(super) fn evaluation(
-    builtin: &'static str,
-    selection: &DistributionSelection,
+    operation: FittedOperation,
+    distribution: &Value,
     input: &Value,
     parameters: &[Value],
-) -> BuiltinResult<()> {
+) -> BuiltinResult<DistributionSelection> {
+    let builtin = operation.name();
     let mut shapes = vec![numeric_shape(builtin, input)?];
-    match selection {
+    let selection = DistributionSelection::from_value(operation, distribution)?;
+    match &selection {
         DistributionSelection::Fitted(_) if !parameters.is_empty() => {
             return Err(invalid_for(
                 builtin,
@@ -48,7 +50,7 @@ pub(super) fn evaluation(
             format!("{builtin}: output shape exceeds structural range"),
         ));
     }
-    Ok(())
+    Ok(selection)
 }
 
 pub(super) struct FitAdmission<'a> {

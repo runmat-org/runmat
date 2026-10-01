@@ -25,15 +25,16 @@ fn fitted_gamma_inverse_polls_during_search() {
 #[test]
 fn malformed_calls_fail_at_host_visible_admission() {
     let wrong_class = Value::Object(ObjectInstance::new("UnrelatedClass"));
-    assert!(DistributionSelection::from_value(FittedOperation::Density, &wrong_class).is_err());
-    let normal = DistributionSelection::from_value(
+    assert!(admission::evaluation(
+        FittedOperation::Density,
+        &wrong_class,
+        &Value::Num(0.0),
+        &[]
+    )
+    .is_err());
+    assert!(admission::evaluation(
         FittedOperation::Cumulative,
         &Value::String("Normal".into()),
-    )
-    .unwrap();
-    assert!(admission::evaluation(
-        CDF_NAME,
-        &normal,
         &Value::Num(0.0),
         &[Value::Num(0.0), Value::Num(1.0), Value::Num(2.0)],
     )
@@ -57,13 +58,18 @@ fn malformed_fitted_object_errors_use_the_invoked_public_operation() {
     let malformed = Value::Object(ObjectInstance::new(
         runmat_types::standard::PROBABILITY_DISTRIBUTION.to_string(),
     ));
-    let pdf = DistributionSelection::from_value(FittedOperation::Density, &malformed)
+    let pdf = admission::evaluation(FittedOperation::Density, &malformed, &Value::Num(0.0), &[])
         .err()
         .unwrap();
     assert_eq!(pdf.identifier(), Some("RunMat:pdf:InvalidArgument"));
-    let cdf = DistributionSelection::from_value(FittedOperation::Cumulative, &malformed)
-        .err()
-        .unwrap();
+    let cdf = admission::evaluation(
+        FittedOperation::Cumulative,
+        &malformed,
+        &Value::Num(0.0),
+        &[],
+    )
+    .err()
+    .unwrap();
     assert_eq!(cdf.identifier(), Some("RunMat:cdf:InvalidArgument"));
     let random = DistributionSelection::from_value(FittedOperation::Sampling, &malformed)
         .err()

@@ -15,8 +15,7 @@ pub(super) async fn evaluate_cdf_entry(
     } else {
         CdfTail::Lower
     };
-    let selection = DistributionSelection::from_value(FittedOperation::Cumulative, &distribution)?;
-    admission::evaluation(CDF_NAME, &selection, &x, &rest)?;
+    let selection = admission::evaluation(FittedOperation::Cumulative, &distribution, &x, &rest)?;
     evaluate_cdf(selection, x, rest, tail).await
 }
 
