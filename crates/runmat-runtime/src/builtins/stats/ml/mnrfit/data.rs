@@ -11,8 +11,6 @@ pub(super) use self::response::ResponseExactness;
 #[cfg(test)]
 use self::response::{count_outcomes, numeric_outcomes};
 #[cfg(test)]
-use crate::builtins::common::tensor;
-#[cfg(test)]
 use runmat_value::Tensor;
 
 #[derive(Clone, Debug)]

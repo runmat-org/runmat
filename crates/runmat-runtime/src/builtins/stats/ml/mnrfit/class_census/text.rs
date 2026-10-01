@@ -77,21 +77,55 @@ async fn compare_text(
     let left = left.as_bytes();
     let right = right.as_bytes();
     let common = left.len().min(right.len());
-    let mut pending = 0u64;
-    for index in 0..common {
-        pending += 1;
-        let order = left[index].cmp(&right[index]);
+    let mut start = 0;
+    while start < common {
+        let end = start.saturating_add(16_384).min(common);
+        let order = left[start..end].cmp(&right[start..end]);
+        cooperation.completed((end - start) as u64).await?;
         if order != Ordering::Equal {
-            cooperation.completed(pending).await?;
             return Ok(order);
         }
-        if pending == 16_384 {
-            cooperation.completed(pending).await?;
-            pending = 0;
+        start = end;
+    }
+    cooperation.completed(1).await?;
+    Ok(left.len().cmp(&right.len()))
+}
+
+pub(in super::super) async fn find_text_class(
+    classes: &[String],
+    value: &str,
+    cooperation: &mut FitCooperation,
+) -> BuiltinResult<Option<usize>> {
+    let (mut start, mut end) = (0, classes.len());
+    while start < end {
+        let middle = start + (end - start) / 2;
+        match compare_text(classes[middle].as_str(), value, cooperation).await? {
+            Ordering::Less => start = middle + 1,
+            Ordering::Equal => return Ok(Some(middle)),
+            Ordering::Greater => end = middle,
         }
     }
-    cooperation.completed(pending + 1).await?;
-    Ok(left.len().cmp(&right.len()))
+    Ok(None)
+}
+
+pub(in super::super) async fn clone_text(
+    value: &str,
+    cooperation: &mut FitCooperation,
+) -> BuiltinResult<String> {
+    let mut copy = String::new();
+    copy.try_reserve_exact(value.len())
+        .map_err(|_| invalid("mnrfit: text class census exceeds available host resources"))?;
+    let mut start = 0;
+    while start < value.len() {
+        let mut end = start.saturating_add(16_384).min(value.len());
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        copy.push_str(&value[start..end]);
+        cooperation.completed((end - start) as u64).await?;
+        start = end;
+    }
+    Ok(copy)
 }
 
 #[cfg(test)]
@@ -122,6 +156,30 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(unicode, vec!["a".to_string(), "z".into(), "é".into()]);
+        let copied = block_on(clone_text(
+            &"é".repeat(16_385),
+            &mut FitCooperation::new(None),
+        ))
+        .unwrap();
+        assert_eq!(copied, "é".repeat(16_385));
+        assert_eq!(
+            block_on(find_text_class(
+                &unicode,
+                "z",
+                &mut FitCooperation::new(None),
+            ))
+            .unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            block_on(find_text_class(
+                &unicode,
+                "zz",
+                &mut FitCooperation::new(None),
+            ))
+            .unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -132,7 +190,7 @@ mod tests {
             source.token(),
         );
         let budget = crate::execution::CpuCooperationBudget::with_test_turn(
-            crate::execution::CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+            crate::execution::CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(16_384).unwrap()),
             source.token(),
             || Box::pin(std::future::pending()),
         );
@@ -143,6 +201,7 @@ mod tests {
             &mut cooperation,
         ));
         let waker = noop_waker();
+        // The first turn is due inside the shared prefix, not before comparison.
         assert!(ordering
             .as_mut()
             .poll(&mut Context::from_waker(&waker))

@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use super::{invalid, BuiltinResult, FitCooperation};
 
 mod text;
-pub(super) use self::text::sort_unique_text;
+pub(super) use self::text::{clone_text, find_text_class, sort_unique_text};
 
 const RUN: usize = 4_096;
 

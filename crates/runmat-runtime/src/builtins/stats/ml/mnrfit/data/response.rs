@@ -236,7 +236,7 @@ async fn text_outcomes(
         .try_reserve_exact(values.len())
         .map_err(|_| invalid("mnrfit: text class census exceeds available host resources"))?;
     for (index, value) in values.iter().enumerate() {
-        classes.push(value.clone());
+        classes.push(class_census::clone_text(value, cooperation).await?);
         if (index + 1).is_multiple_of(16_384) {
             cooperation.completed(16_384).await?;
         }
@@ -251,9 +251,9 @@ async fn text_outcomes(
     let logits = classes.len() - 1;
     let mut outcomes = columns(logits, rows, "text outcomes", &|| Ok(()), cooperation).await?;
     for (row, value) in values.iter().enumerate() {
-        let class_idx = classes
-            .binary_search(value)
-            .map_err(|_| internal("mnrfit: failed to map response class"))?;
+        let class_idx = class_census::find_text_class(&classes, value, cooperation)
+            .await?
+            .ok_or_else(|| internal("mnrfit: failed to map response class"))?;
         if class_idx < logits {
             outcomes[class_idx][row] = 1.0;
         }
@@ -279,9 +279,17 @@ async fn cellstr_outcomes(
         .try_reserve_exact(cell.data.len())
         .map_err(|_| invalid("mnrfit: text response labels exceed available host resources"))?;
     for (index, value) in cell.data.iter().enumerate() {
-        labels.push(
-            scalar_text(value).ok_or_else(|| invalid("mnrfit: Y cell entries must be text"))?,
-        );
+        let label = match value {
+            Value::String(text) => class_census::clone_text(text, cooperation).await?,
+            Value::CharArray(chars) if chars.rows == 1 => {
+                char_rows_cooperatively(chars, cooperation)
+                    .await?
+                    .pop()
+                    .ok_or_else(|| internal("mnrfit: missing character row"))?
+            }
+            _ => return Err(invalid("mnrfit: Y cell entries must be text")),
+        };
+        labels.push(label);
         if (index + 1).is_multiple_of(16_384) {
             cooperation.completed(16_384).await?;
         }
