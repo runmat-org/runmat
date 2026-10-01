@@ -6,12 +6,14 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
     ThreadProviderGuard,
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Default)]
 struct RejectDownloads {
     owner: TestAllocationOwner,
     downloads: AtomicUsize,
+    pending: AtomicBool,
 }
 
 impl AccelProvider for RejectDownloads {
@@ -26,12 +28,48 @@ impl AccelProvider for RejectDownloads {
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
+        if self.pending.load(Ordering::SeqCst) {
+            return Box::pin(futures::future::pending());
+        }
         Box::pin(async { Err(std::io::Error::other("qqplot fixture rejected download").into()) })
     }
     fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         self.downloads.fetch_add(1, Ordering::SeqCst);
+        if self.pending.load(Ordering::SeqCst) {
+            return Box::pin(futures::future::pending());
+        }
         Box::pin(async { Err(std::io::Error::other("qqplot fixture rejected download").into()) })
     }
+}
+
+#[test]
+fn unpolled_and_cancelled_gather_keep_caller_lease_live() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Box::leak(Box::new(RejectDownloads::default()));
+    provider.pending.store(true, Ordering::SeqCst);
+    unsafe { runmat_accelerate_api::register_provider(provider) };
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let sample = provider
+        .owner
+        .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let value = || Value::GpuTensor(sample.handle.clone());
+
+    drop(qqplot_builtin(vec![value()]));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    sample.handle.allocation_lease().validate_live().unwrap();
+
+    let mut pending = Box::pin(qqplot_builtin(vec![value()]));
+    let waker = futures::task::noop_waker();
+    let mut context = std::task::Context::from_waker(&waker);
+    assert!(matches!(
+        pending.as_mut().poll(&mut context),
+        std::task::Poll::Pending
+    ));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    drop(pending);
+    sample.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(sample.probe.retirements(), 0);
 }
 
 #[test]
