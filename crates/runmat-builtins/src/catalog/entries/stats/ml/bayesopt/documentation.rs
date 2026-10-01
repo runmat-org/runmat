@@ -22,7 +22,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "Supported controls include MaxObjectiveEvaluations (1 through 2048), NumSeedPoints, AcquisitionFunctionName, ExplorationRatio, IsObjectiveDeterministic, Verbose, UseParallel=false, empty PlotFcn/OutputFcn and XConstraintFcn. Warm starts, conditional variables, nonempty plotting/output callbacks and parallel evaluation return explicit unsupported errors.",
                 "The result exposes XTrace, ObjectiveTrace, ObjectiveMinimumTrace, ObjectiveEvaluationTimeTrace, FeasibilityTrace, OptimizationTrace, XAtMinObjective, MinObjective, BestPoint, BestObjective, VariableDescriptions, Options, Output, ExitFlag and surrogate metadata. Only the single-result form is currently implemented.",
-                "This is a host control-flow solver. It materializes resident variable metadata and option inputs, invokes callbacks on the host, and returns a host result. It does not schedule surrogate updates or objective callbacks on a GPU provider; datastore-backed objective forms are not implemented.",
+                "This is a host control-flow solver. It validates host-visible controls before downloading resident option values and variable metadata, invokes callbacks on the host, and returns a host result. It does not schedule surrogate updates or objective callbacks on a GPU provider; datastore-backed objective forms are not implemented.",
             ],
         },
     ],

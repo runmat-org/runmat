@@ -37,6 +37,11 @@ const NAME: &str = "optimizableVariable";
 const CLASS_IDENTITY: runmat_types::StaticClassIdentity =
     runmat_types::standard::OPTIMIZABLE_VARIABLE;
 
+enum AdmittedRange {
+    Parsed(OptimizableRange),
+    Deferred(Value),
+}
+
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::stats::ml::optimizable_variable"
 )]
@@ -90,26 +95,42 @@ async fn optimizable_variable_builtin(
             &ERROR_INVALID_ARGUMENT,
         ));
     }
+    let admitted_options = Options::admit(headers)?;
+    let host_options = Options::host_facts(&admitted_options);
     if value_has_native_integer_class(&range) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &OPTIMIZABLE_VARIABLE_INTEGER_RANGE_EXTENSION,
             NAME,
         )?;
     }
-    let range = gather_if_needed_async(&range)
-        .await
-        .map_err(|err| remap_flow(err, "range"))?;
-    let mut gathered = Vec::with_capacity(headers.len());
-    for (kind, value) in headers {
-        gathered.push((
-            kind,
-            gather_if_needed_async(&value)
+    // A known host range must not be masked by a failing download of an
+    // unrelated deferred option. Scalar text needs a deferred Type before its
+    // categorical meaning can be established.
+    let admitted_range = if !matches!(&range, Value::GpuTensor(_))
+        && !(host_options.type_deferred && matches!(&range, Value::String(_) | Value::CharArray(_)))
+    {
+        let parsed = OptimizableRange::parse(range.clone(), host_options.var_type)?;
+        if !host_options.type_deferred {
+            let var_type = host_options.var_type.unwrap_or(parsed.inferred_type());
+            parsed.validate_for(var_type, host_options.transform.unwrap_or(Transform::None))?;
+        }
+        AdmittedRange::Parsed(parsed)
+    } else {
+        AdmittedRange::Deferred(range)
+    };
+    let admitted_range = match admitted_range {
+        AdmittedRange::Parsed(range) => AdmittedRange::Parsed(range),
+        AdmittedRange::Deferred(range) => AdmittedRange::Deferred(
+            gather_if_needed_async(&range)
                 .await
-                .map_err(|err| remap_flow(err, "name-value argument"))?,
-        ));
-    }
-    let options = Options::parse(gathered)?;
-    let range = OptimizableRange::parse(range, options.var_type)?;
+                .map_err(|err| remap_flow(err, "range"))?,
+        ),
+    };
+    let options = Options::materialize(admitted_options).await?;
+    let range = match admitted_range {
+        AdmittedRange::Parsed(parsed) => parsed,
+        AdmittedRange::Deferred(range) => OptimizableRange::parse(range, options.var_type)?,
+    };
     let var_type = options.var_type.unwrap_or(range.inferred_type());
     range.validate_for(var_type, options.transform)?;
 

@@ -1,5 +1,28 @@
 use super::*;
 
+pub(super) struct PreparedOption {
+    kind: BayesoptOption,
+    value: PreparedValue,
+}
+
+enum PreparedValue {
+    Host { raw: Value, parsed: ParsedOption },
+    Resident(Value),
+}
+
+enum ParsedOption {
+    MaxEvaluations(usize),
+    SeedPoints(usize),
+    Acquisition(Acquisition),
+    ExplorationRatio(f64),
+    Deterministic(bool),
+    Verbose(bool),
+    UseParallel,
+    Constraint(Option<Value>),
+    EmptyCallback,
+    EmptyConditional,
+}
+
 #[derive(Clone)]
 pub(super) struct BayesoptOptions {
     pub(super) max_evals: usize,
@@ -50,7 +73,38 @@ impl BayesoptOptions {
         Ok(headers)
     }
 
-    pub(super) fn parse(args: Vec<(BayesoptOption, Value)>) -> BuiltinResult<Self> {
+    pub(super) fn admit(args: Vec<(BayesoptOption, Value)>) -> BuiltinResult<Vec<PreparedOption>> {
+        args.into_iter()
+            .map(|(kind, value)| {
+                let value = if matches!(&value, Value::GpuTensor(_)) {
+                    PreparedValue::Resident(value)
+                } else {
+                    let parsed = parse_option(kind, &value)?;
+                    PreparedValue::Host { raw: value, parsed }
+                };
+                Ok(PreparedOption { kind, value })
+            })
+            .collect()
+    }
+
+    pub(super) async fn materialize(args: Vec<PreparedOption>) -> BuiltinResult<Self> {
+        let mut resolved = Vec::with_capacity(args.len());
+        for PreparedOption { kind, value } in args {
+            match value {
+                PreparedValue::Host { raw, parsed } => resolved.push((kind, raw, parsed)),
+                PreparedValue::Resident(value) => {
+                    let raw = gather_if_needed_async(&value)
+                        .await
+                        .map_err(|err| map_flow(err, "name-value option"))?;
+                    let parsed = parse_option(kind, &raw)?;
+                    resolved.push((kind, raw, parsed));
+                }
+            }
+        }
+        Self::parse(resolved)
+    }
+
+    fn parse(args: Vec<(BayesoptOption, Value, ParsedOption)>) -> BuiltinResult<Self> {
         let mut raw_options = StructValue::new();
         let mut max_evals = DEFAULT_MAX_EVALS;
         let mut num_seed_points = DEFAULT_SEED_POINTS;
@@ -60,71 +114,19 @@ impl BayesoptOptions {
         let mut verbose = false;
         let mut x_constraint = None;
 
-        for (option, value) in args {
+        for (option, value, parsed) in args {
             let canonical = option.public_name();
-            match option {
-                BayesoptOption::MaxObjectiveEvaluations => {
-                    max_evals = option_usize(&value, &canonical, 1, MAX_EVALS_LIMIT)?
-                }
-                BayesoptOption::NumSeedPoints => {
-                    num_seed_points = option_usize(&value, &canonical, 0, MAX_EVALS_LIMIT)?
-                }
-                BayesoptOption::AcquisitionFunctionName => {
-                    acquisition = parse_acquisition(&value)?;
-                }
-                BayesoptOption::ExplorationRatio => {
-                    exploration_ratio = option_unit_f64(&value, &canonical)?;
-                }
-                BayesoptOption::IsObjectiveDeterministic => {
-                    deterministic = option_bool(&value, &canonical)?;
-                }
-                BayesoptOption::Verbose => {
-                    verbose = option_bool(&value, &canonical)?;
-                }
-                BayesoptOption::UseParallel => {
-                    if option_bool(&value, &canonical)? {
-                        return Err(bayesopt_error(
-                            "bayesopt: UseParallel=true requires the parallel execution infrastructure",
-                            &ERROR_UNSUPPORTED,
-                        ));
-                    }
-                }
-                BayesoptOption::XConstraintFcn => {
-                    if is_empty_option(&value) {
-                        x_constraint = None;
-                    } else if is_callable(&value) {
-                        x_constraint = Some(value.clone());
-                    } else {
-                        return Err(bayesopt_error(
-                            "bayesopt: XConstraintFcn must be empty or a function handle",
-                            &ERROR_INVALID_ARGUMENT,
-                        ));
-                    }
-                }
-                BayesoptOption::PlotFcn | BayesoptOption::OutputFcn => {
-                    if !is_empty_option(&value) {
-                        return Err(bayesopt_error(
-                            format!("bayesopt: {canonical} callbacks are not supported in this headless runtime slice"),
-                            &ERROR_UNSUPPORTED,
-                        ));
-                    }
-                }
-                BayesoptOption::ConditionalVariableFcn => {
-                    if !is_empty_option(&value) {
-                        return Err(bayesopt_error(
-                            "bayesopt: ConditionalVariableFcn requires dynamic variable activation support",
-                            &ERROR_UNSUPPORTED,
-                        ));
-                    }
-                }
-                BayesoptOption::InitialX
-                | BayesoptOption::InitialObjective
-                | BayesoptOption::InitialConstraintViolations => {
-                    return Err(bayesopt_error(
-                        format!("bayesopt: {canonical} warm starts are not supported yet"),
-                        &ERROR_UNSUPPORTED,
-                    ));
-                }
+            match parsed {
+                ParsedOption::MaxEvaluations(n) => max_evals = n,
+                ParsedOption::SeedPoints(n) => num_seed_points = n,
+                ParsedOption::Acquisition(name) => acquisition = name,
+                ParsedOption::ExplorationRatio(ratio) => exploration_ratio = ratio,
+                ParsedOption::Deterministic(value) => deterministic = value,
+                ParsedOption::Verbose(value) => verbose = value,
+                ParsedOption::Constraint(value) => x_constraint = value,
+                ParsedOption::UseParallel
+                | ParsedOption::EmptyCallback
+                | ParsedOption::EmptyConditional => {}
             }
             raw_options.insert(&canonical, value);
         }
@@ -153,6 +155,75 @@ impl BayesoptOptions {
             raw_options,
         })
     }
+}
+
+fn parse_option(kind: BayesoptOption, value: &Value) -> BuiltinResult<ParsedOption> {
+    let canonical = kind.public_name();
+    Ok(match kind {
+        BayesoptOption::MaxObjectiveEvaluations => {
+            ParsedOption::MaxEvaluations(option_usize(value, canonical, 1, MAX_EVALS_LIMIT)?)
+        }
+        BayesoptOption::NumSeedPoints => {
+            ParsedOption::SeedPoints(option_usize(value, canonical, 0, MAX_EVALS_LIMIT)?)
+        }
+        BayesoptOption::AcquisitionFunctionName => {
+            ParsedOption::Acquisition(parse_acquisition(value)?)
+        }
+        BayesoptOption::ExplorationRatio => {
+            ParsedOption::ExplorationRatio(option_unit_f64(value, canonical)?)
+        }
+        BayesoptOption::IsObjectiveDeterministic => {
+            ParsedOption::Deterministic(option_bool(value, canonical)?)
+        }
+        BayesoptOption::Verbose => ParsedOption::Verbose(option_bool(value, canonical)?),
+        BayesoptOption::UseParallel => {
+            if option_bool(value, canonical)? {
+                return Err(bayesopt_error(
+                    "bayesopt: UseParallel=true requires the parallel execution infrastructure",
+                    &ERROR_UNSUPPORTED,
+                ));
+            }
+            ParsedOption::UseParallel
+        }
+        BayesoptOption::XConstraintFcn => {
+            if is_empty_option(value) {
+                ParsedOption::Constraint(None)
+            } else if is_callable(value) {
+                ParsedOption::Constraint(Some(value.clone()))
+            } else {
+                return Err(bayesopt_error(
+                    "bayesopt: XConstraintFcn must be empty or a function handle",
+                    &ERROR_INVALID_ARGUMENT,
+                ));
+            }
+        }
+        BayesoptOption::PlotFcn | BayesoptOption::OutputFcn => {
+            if !is_empty_option(value) {
+                return Err(bayesopt_error(
+                    format!("bayesopt: {canonical} callbacks are not supported in this headless runtime slice"),
+                    &ERROR_UNSUPPORTED,
+                ));
+            }
+            ParsedOption::EmptyCallback
+        }
+        BayesoptOption::ConditionalVariableFcn => {
+            if !is_empty_option(value) {
+                return Err(bayesopt_error(
+                    "bayesopt: ConditionalVariableFcn requires dynamic variable activation support",
+                    &ERROR_UNSUPPORTED,
+                ));
+            }
+            ParsedOption::EmptyConditional
+        }
+        BayesoptOption::InitialX
+        | BayesoptOption::InitialObjective
+        | BayesoptOption::InitialConstraintViolations => {
+            return Err(bayesopt_error(
+                format!("bayesopt: {canonical} warm starts are not supported yet"),
+                &ERROR_UNSUPPORTED,
+            ));
+        }
+    })
 }
 
 fn parse_acquisition(value: &Value) -> BuiltinResult<Acquisition> {

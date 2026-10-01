@@ -2,6 +2,9 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
+#[path = "../bayesian_test_provider.rs"]
+mod provider_fixture;
+
 fn object(value: Value) -> ObjectInstance {
     let Value::Object(object) = value else {
         panic!("expected object");
@@ -38,6 +41,128 @@ fn builds_real_variable_with_defaults() {
         Some(&Value::String("none".into()))
     );
     assert_eq!(object.properties.get("Optimize"), Some(&Value::Bool(true)));
+}
+
+#[test]
+fn last_effective_option_value_retains_previous_override_semantics() {
+    let result = block_on(optimizable_variable_builtin(
+        Value::String("depth".into()),
+        Value::Tensor(Tensor::new(vec![1.0, 10.0], vec![1, 2]).unwrap()),
+        vec![
+            Value::String("Type".into()),
+            Value::String("invalid-but-overridden".into()),
+            Value::String("Type".into()),
+            Value::String("real".into()),
+        ],
+    ))
+    .expect("only the last effective Type is validated");
+    assert_eq!(
+        object(result).properties.get("Type"),
+        Some(&Value::String("real".into()))
+    );
+}
+
+#[test]
+fn invalid_host_type_precedes_resident_range_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    let arguments = vec![
+        Value::String("depth".into()),
+        Value::GpuTensor(resident.handle.clone()),
+        Value::String("Type".into()),
+        Value::String("invalid".into()),
+    ];
+    let error = block_on(crate::call_builtin_async("optimizableVariable", &arguments))
+        .expect_err("invalid host Type before Range download");
+    assert_eq!(error.identifier(), ERROR_INVALID_OPTION.identifier);
+    assert_eq!(provider.downloads(), 0);
+    resident
+        .probe
+        .with_data(&resident.handle, |_| ())
+        .expect("borrowed Range remains live");
+}
+
+#[test]
+fn invalid_host_control_precedes_another_deferred_control() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    let arguments = vec![
+        Value::String("depth".into()),
+        Value::Tensor(Tensor::new(vec![1.0, 10.0], vec![1, 2]).unwrap()),
+        Value::String("Optimize".into()),
+        Value::GpuTensor(resident.handle.clone()),
+        Value::String("Type".into()),
+        Value::String("invalid".into()),
+    ];
+    let error = block_on(crate::call_builtin_async("optimizableVariable", &arguments))
+        .expect_err("invalid host Type before resident Optimize download");
+    assert_eq!(error.identifier(), ERROR_INVALID_OPTION.identifier);
+    assert_eq!(provider.downloads(), 0);
+    resident
+        .probe
+        .with_data(&resident.handle, |_| ())
+        .expect("borrowed option remains live");
+}
+
+#[test]
+fn invalid_host_range_precedes_resident_option_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    let arguments = vec![
+        Value::String("depth".into()),
+        Value::Tensor(Tensor::new(vec![10.0, 1.0], vec![1, 2]).unwrap()),
+        Value::String("Optimize".into()),
+        Value::GpuTensor(resident.handle.clone()),
+    ];
+    let error = block_on(crate::call_builtin_async("optimizableVariable", &arguments))
+        .expect_err("host-invalid Range before resident Optimize download");
+    assert_eq!(error.identifier(), ERROR_INVALID_RANGE.identifier);
+    assert_eq!(provider.downloads(), 0);
+    resident
+        .probe
+        .with_data(&resident.handle, |_| ())
+        .expect("borrowed option remains live");
+}
+
+#[test]
+fn failed_range_download_keeps_nested_cause_and_borrowed_allocation() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    let error = block_on(optimizable_variable_builtin(
+        Value::String("depth".into()),
+        Value::GpuTensor(resident.handle.clone()),
+        vec![],
+    ))
+    .expect_err("fixture download failure");
+    assert_eq!(error.identifier(), ERROR_FLOW.identifier);
+    let source = error.source.as_ref().expect("retained gather error");
+    let mut found = source
+        .to_string()
+        .contains("Bayesian fixture download rejected");
+    let mut cause = source.source();
+    while let Some(next) = cause {
+        found |= next
+            .to_string()
+            .contains("Bayesian fixture download rejected");
+        cause = next.source();
+    }
+    assert!(
+        found,
+        "original provider cause must remain in the source chain"
+    );
+    assert_eq!(provider.downloads(), 1);
+    resident
+        .probe
+        .with_data(&resident.handle, |_| ())
+        .expect("failed gather must not retire caller allocation");
 }
 
 #[test]

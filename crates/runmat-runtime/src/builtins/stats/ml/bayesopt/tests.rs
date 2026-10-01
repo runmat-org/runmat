@@ -5,6 +5,9 @@ use runmat_execution::CancellationReason;
 use runmat_value::IntegerStorage;
 use std::sync::Arc;
 
+#[path = "../bayesian_test_provider.rs"]
+mod provider_fixture;
+
 fn variable(name: &str, range: Vec<f64>, var_type: Option<&str>) -> Value {
     let mut object = ObjectInstance::new("optimizableVariable");
     object
@@ -64,6 +67,65 @@ fn output_count_and_bad_variable_identity_are_rejected_before_callbacks() {
         .insert("Name".into(), Value::String("x".into()));
     let error = parse_variables(Value::Object(unrelated)).expect_err("wrong object class");
     assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+}
+
+#[test]
+fn later_invalid_host_control_precedes_earlier_resident_control_download() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    let arguments = vec![
+        Value::FunctionHandle("objective".into()),
+        variable("x", vec![0.0, 1.0], None),
+        Value::String("MaxObjectiveEvaluations".into()),
+        Value::GpuTensor(resident.handle.clone()),
+        Value::String("UseParallel".into()),
+        Value::Bool(true),
+    ];
+    let error = block_on(crate::call_builtin_async("bayesopt", &arguments))
+        .expect_err("host-invalid control must win before resident control download");
+    assert_eq!(error.identifier(), ERROR_UNSUPPORTED.identifier);
+    assert_eq!(provider.downloads(), 0);
+    resident
+        .probe
+        .with_data(&resident.handle, |_| ())
+        .expect("borrowed resident operand remains live");
+}
+
+#[test]
+fn failed_variable_download_keeps_nested_cause_and_borrowed_allocation() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider_fixture::RejectDownloadProvider::new();
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let resident = provider.allocation();
+    let error = block_on(bayesopt_builtin(
+        Value::FunctionHandle("objective".into()),
+        Value::GpuTensor(resident.handle.clone()),
+        vec![],
+    ))
+    .expect_err("fixture download failure");
+    assert_eq!(error.identifier(), ERROR_FLOW.identifier);
+    let source = error.source.as_ref().expect("retained gather error");
+    let mut found = source
+        .to_string()
+        .contains("Bayesian fixture download rejected");
+    let mut cause = source.source();
+    while let Some(next) = cause {
+        found |= next
+            .to_string()
+            .contains("Bayesian fixture download rejected");
+        cause = next.source();
+    }
+    assert!(
+        found,
+        "original provider cause must remain in the source chain"
+    );
+    assert_eq!(provider.downloads(), 1);
+    resident
+        .probe
+        .with_data(&resident.handle, |_| ())
+        .expect("failed gather must not retire caller allocation");
 }
 
 #[test]

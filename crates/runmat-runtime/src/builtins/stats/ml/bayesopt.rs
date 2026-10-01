@@ -149,16 +149,8 @@ async fn bayesopt_in_runtime(
         ));
     }
     let headers = BayesoptOptions::headers(rest)?;
-    let mut gathered_rest = Vec::with_capacity(headers.len());
-    for (kind, value) in headers {
-        gathered_rest.push((
-            kind,
-            gather_if_needed_async(&value)
-                .await
-                .map_err(|err| map_flow(err, "name-value option"))?,
-        ));
-    }
-    let options = BayesoptOptions::parse(gathered_rest)?;
+    let admitted_options = BayesoptOptions::admit(headers)?;
+    let options = BayesoptOptions::materialize(admitted_options).await?;
     let variables = gather_if_needed_async(&variables)
         .await
         .map_err(|err| map_flow(err, "variables"))?;

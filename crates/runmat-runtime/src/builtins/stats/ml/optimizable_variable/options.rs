@@ -1,5 +1,27 @@
 use super::*;
 
+pub(super) struct PreparedOption {
+    kind: OptimizableVariableOption,
+    value: PreparedValue,
+}
+
+pub(super) struct HostOptionFacts {
+    pub(super) var_type: Option<VariableType>,
+    pub(super) type_deferred: bool,
+    pub(super) transform: Option<Transform>,
+}
+
+enum PreparedValue {
+    Host(ParsedOption),
+    Resident(Value),
+}
+
+enum ParsedOption {
+    Type(VariableType),
+    Transform(Transform),
+    Optimize(bool),
+}
+
 fn variable_type(value: &Value) -> BuiltinResult<VariableType> {
     let text = parse_text_scalar(value, "Type", &ERROR_INVALID_OPTION)?;
     VariableType::from_public_name(&text).ok_or_else(|| {
@@ -28,6 +50,33 @@ pub(super) struct Options {
 }
 
 impl Options {
+    pub(super) fn host_facts(args: &[PreparedOption]) -> HostOptionFacts {
+        let mut facts = HostOptionFacts {
+            var_type: None,
+            type_deferred: false,
+            transform: None,
+        };
+        for option in args {
+            match (option.kind, &option.value) {
+                (
+                    OptimizableVariableOption::Type,
+                    PreparedValue::Host(ParsedOption::Type(value)),
+                ) => {
+                    facts.var_type = Some(*value);
+                }
+                (OptimizableVariableOption::Type, PreparedValue::Resident(_)) => {
+                    facts.type_deferred = true;
+                }
+                (
+                    OptimizableVariableOption::Transform,
+                    PreparedValue::Host(ParsedOption::Transform(value)),
+                ) => facts.transform = Some(*value),
+                _ => {}
+            }
+        }
+        facts
+    }
+
     pub(super) fn headers(
         args: Vec<Value>,
     ) -> BuiltinResult<Vec<(OptimizableVariableOption, Value)>> {
@@ -58,25 +107,58 @@ impl Options {
         Ok(headers)
     }
 
-    pub(super) fn parse(args: Vec<(OptimizableVariableOption, Value)>) -> BuiltinResult<Self> {
+    pub(super) fn admit(
+        args: Vec<(OptimizableVariableOption, Value)>,
+    ) -> BuiltinResult<Vec<PreparedOption>> {
+        let mut effective = BTreeMap::new();
+        for (kind, value) in args {
+            effective.insert(kind, value);
+        }
+        effective
+            .into_iter()
+            .map(|(kind, value)| {
+                let value = if matches!(&value, Value::GpuTensor(_)) {
+                    PreparedValue::Resident(value)
+                } else {
+                    PreparedValue::Host(parse_option(kind, &value)?)
+                };
+                Ok(PreparedOption { kind, value })
+            })
+            .collect()
+    }
+
+    pub(super) async fn materialize(args: Vec<PreparedOption>) -> BuiltinResult<Self> {
         let mut options = Self {
             var_type: None,
             transform: Transform::None,
             optimize: true,
         };
-        let mut pairs = BTreeMap::new();
-        for (kind, value) in args {
-            pairs.insert(kind, value);
-        }
-        for (option, value) in pairs {
-            match option {
-                OptimizableVariableOption::Type => options.var_type = Some(variable_type(&value)?),
-                OptimizableVariableOption::Transform => options.transform = transform(&value)?,
-                OptimizableVariableOption::Optimize => {
-                    options.optimize = parse_bool(&value, "Optimize")?
+        for PreparedOption { kind, value } in args {
+            let parsed = match value {
+                PreparedValue::Host(parsed) => parsed,
+                PreparedValue::Resident(value) => {
+                    let value = gather_if_needed_async(&value)
+                        .await
+                        .map_err(|err| remap_flow(err, "name-value argument"))?;
+                    parse_option(kind, &value)?
                 }
+            };
+            match parsed {
+                ParsedOption::Type(var_type) => options.var_type = Some(var_type),
+                ParsedOption::Transform(transform) => options.transform = transform,
+                ParsedOption::Optimize(optimize) => options.optimize = optimize,
             }
         }
         Ok(options)
     }
+}
+
+fn parse_option(kind: OptimizableVariableOption, value: &Value) -> BuiltinResult<ParsedOption> {
+    Ok(match kind {
+        OptimizableVariableOption::Type => ParsedOption::Type(variable_type(value)?),
+        OptimizableVariableOption::Transform => ParsedOption::Transform(transform(value)?),
+        OptimizableVariableOption::Optimize => {
+            ParsedOption::Optimize(parse_bool(value, "Optimize")?)
+        }
+    })
 }

@@ -1,8 +1,8 @@
 use super::{OptimizableVariableOption, OptimizationVariableTransform, OptimizationVariableType};
 use crate::{catalog::inference::argument_error, BuiltinCatalogEntry};
 use runmat_types::{
-    infer_call, standard, CallContract, CallInference, CallRequest, InferenceDiagnostic,
-    ObjectFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    infer_call, standard, CallContract, CallInference, CallRequest, DynamicReason,
+    InferenceDiagnostic, ObjectFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -71,6 +71,19 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     contract.capabilities = entry.contract.capability_set();
     let mut result = infer_call(&contract, request);
     result.diagnostics.extend(diagnostics);
+    if !result.diagnostics.is_empty()
+        || (2..request.arguments.len())
+            .step_by(2)
+            .any(|index| request.literals.literal_string_at(index).is_none())
+        || request
+            .arguments
+            .iter()
+            .any(|argument| matches!(argument.kind, ValueKindFact::Unknown))
+    {
+        for output in &mut result.outputs {
+            *output = ValueFact::unknown(DynamicReason::RuntimeValue);
+        }
+    }
     result
 }
 
@@ -87,19 +100,32 @@ fn diagnose_options(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagno
             ));
             continue;
         };
-        let Some(value) = request.literals.literal_string_at(index + 1) else {
-            continue;
-        };
-        let valid = match option {
-            OptimizableVariableOption::Type => {
-                OptimizationVariableType::from_public_name(&value).is_some()
+        let value = request.arguments.get(index + 1);
+        let known_invalid_class = value.is_some_and(|value| match option {
+            OptimizableVariableOption::Type | OptimizableVariableOption::Transform => !matches!(
+                value.kind,
+                ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
+            ),
+            OptimizableVariableOption::Optimize => {
+                matches!(
+                    value.kind,
+                    ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Object(_)
+                ) || value.shape.element_count().is_some_and(|count| count != 1)
             }
-            OptimizableVariableOption::Transform => {
-                OptimizationVariableTransform::from_public_name(&value).is_some()
-            }
-            OptimizableVariableOption::Optimize => true,
-        };
-        if !valid {
+        });
+        let invalid_literal = request
+            .literals
+            .literal_string_at(index + 1)
+            .is_some_and(|value| match option {
+                OptimizableVariableOption::Type => {
+                    OptimizationVariableType::from_public_name(&value).is_none()
+                }
+                OptimizableVariableOption::Transform => {
+                    OptimizationVariableTransform::from_public_name(&value).is_none()
+                }
+                OptimizableVariableOption::Optimize => true,
+            });
+        if known_invalid_class || invalid_literal {
             diagnostics.push(argument_error(
                 "RM-CATALOG-OPTIMIZABLE-VARIABLE-OPTION-VALUE",
                 "unsupported Type or Transform value",
