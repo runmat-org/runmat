@@ -5,7 +5,7 @@ pub(super) fn prepare_model(
     training: &FloatingMatrix,
     labels: LabelVector,
     discriminant: DiscriminantType,
-    prior_value: Option<&Value>,
+    prior_value: prior::PriorSpec,
 ) -> BuiltinResult<PreparedModel> {
     let unique = unique_labels(&labels.labels, labels.kind);
     if unique.len() < 2 {
@@ -28,7 +28,7 @@ pub(super) fn prepare_model(
             "classify: every class must contain at least one training row",
         ));
     }
-    let priors = parse_prior(prior_value, &unique, labels.kind, &rows_by_class)?;
+    let priors = prior_value.resolve(&unique, labels.kind, &rows_by_class)?;
     let cols = training.cols;
     let mut classes = Vec::with_capacity(unique.len());
     for (class_index, rows) in rows_by_class.iter().enumerate() {

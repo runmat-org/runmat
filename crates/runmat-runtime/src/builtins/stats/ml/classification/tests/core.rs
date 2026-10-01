@@ -52,7 +52,13 @@ fn classify_materializes_only_requested_prediction_outputs() {
     let sample = numeric_matrix(sample, "sample").unwrap();
     let training = numeric_matrix(training, "training").unwrap();
     let labels = labels_from_value(group, "group").unwrap();
-    let model = prepare_model(&training, labels, DiscriminantType::Linear, None).unwrap();
+    let model = prepare_model(
+        &training,
+        labels,
+        DiscriminantType::Linear,
+        prior::PriorSpec::Uniform,
+    )
+    .unwrap();
 
     let labels_only = predict_rows(&model, &sample, false, false).unwrap();
     assert_eq!(labels_only.labels, vec![0, 1]);

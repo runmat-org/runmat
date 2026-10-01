@@ -131,21 +131,18 @@ async fn classify_builtin(
         ));
     }
     ensure_compatibility_extensions(&sample, &training, &group, &rest)?;
-    let discriminant = header::admit(&sample, &training, &group, &rest)?;
+    let admitted = header::admit(&sample, &training, &group, &rest)?;
     let sample = gathered(sample).await?;
     let training = gathered(training).await?;
     let group = gathered(group).await?;
-    let prior = match rest.into_iter().nth(1) {
-        Some(value) => Some(gathered(value).await?),
-        None => None,
-    };
+    let prior = admitted.prior.materialize().await?;
     let output_limit = requested_outputs.unwrap_or(1).max(1);
     let result = classify_compute(
         sample,
         training,
         group,
-        discriminant,
-        prior.as_ref(),
+        admitted.discriminant,
+        prior,
         output_limit,
     )?;
     match requested_outputs {
@@ -240,7 +237,7 @@ fn classify_compute(
     training: Value,
     group: Value,
     discriminant: DiscriminantType,
-    prior: Option<&Value>,
+    prior: prior::PriorSpec,
     output_limit: usize,
 ) -> BuiltinResult<Vec<Value>> {
     let sample = numeric_matrix(sample, "sample")?;

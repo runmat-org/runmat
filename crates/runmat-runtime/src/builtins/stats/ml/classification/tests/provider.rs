@@ -64,6 +64,49 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         .contains("prior struct must contain prob field"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
+    for probabilities in [
+        tensor(vec![f64::NAN, 1.0], vec![1, 2]),
+        tensor(vec![-1.0, 2.0], vec![1, 2]),
+        tensor(vec![0.0, 0.0], vec![1, 2]),
+    ] {
+        let err = classify_builtin(
+            Value::GpuTensor(resident.handle.clone()),
+            training.clone(),
+            group.clone(),
+            vec![Value::from("linear"), probabilities],
+        )
+        .await
+        .expect_err("invalid host prior must reject before resident sample download");
+        assert!(err.message().contains("prior probabilities"));
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    }
+
+    let mut mismatched = StructValue::new();
+    mismatched.insert("group", tensor(vec![1.0, 2.0], vec![1, 2]));
+    mismatched.insert("prob", tensor(vec![1.0], vec![1, 1]));
+    let err = classify_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        training.clone(),
+        group.clone(),
+        vec![Value::from("linear"), Value::Struct(mismatched)],
+    )
+    .await
+    .expect_err("known prior group/prob length mismatch must reject before download");
+    assert!(err.message().contains("group and prob lengths"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+
+    let valid_prior = tensor(vec![0.25, 0.75], vec![1, 2]);
+    let err = classify_builtin(
+        Value::GpuTensor(resident.handle.clone()),
+        training.clone(),
+        group.clone(),
+        vec![Value::from("linear"), valid_prior],
+    )
+    .await
+    .expect_err("valid host prior must not mask the deferred sample provider error");
+    assert!(err.message().contains("classify fixture"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+
     let err = classify_builtin(
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
@@ -72,7 +115,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
     )
     .await
     .expect_err("provider must reject resident sample download");
-    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 2);
     assert_eq!(err.context.builtin.as_deref(), Some("classify"));
     assert!(err.source.is_some());
     assert!(err.message().contains("classify fixture"));
@@ -95,7 +138,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
     .await
     .expect_err("complex predictors must reject before download");
     assert!(err.message().contains("2-D numeric matrix"));
-    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 2);
     assert_eq!(complex.probe.retirements(), 0);
     drop(complex.handle);
     drop(resident.handle);

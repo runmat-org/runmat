@@ -1,5 +1,5 @@
 //! Metadata admission before any resident input is downloaded.
-use super::{invalid_argument, parse_type, string_matches};
+use super::{invalid_argument, parse_type, prior::PriorSpec};
 use crate::BuiltinResult;
 use runmat_builtins::DiscriminantType;
 use runmat_value::Value;
@@ -9,7 +9,7 @@ pub(super) fn admit(
     training: &Value,
     group: &Value,
     rest: &[Value],
-) -> BuiltinResult<DiscriminantType> {
+) -> BuiltinResult<AdmittedHeader> {
     let sample_geometry = predictor_geometry(sample, "sample")?;
     let training_geometry = predictor_geometry(training, "training")?;
     if let (Some((_, sample_columns)), Some((_, training_columns))) =
@@ -39,42 +39,19 @@ pub(super) fn admit(
     let discriminant = rest
         .first()
         .map_or(Ok(DiscriminantType::Linear), parse_type)?;
-    if let Some(prior) = rest.get(1) {
-        preflight_prior(prior)?;
-    }
-    Ok(discriminant)
+    let prior = PriorSpec::prepare(rest.get(1))?;
+    Ok(AdmittedHeader {
+        discriminant,
+        prior,
+    })
 }
 
-fn preflight_prior(value: &Value) -> BuiltinResult<()> {
-    if string_matches(value, "empirical") {
-        return Ok(());
-    }
-    match value {
-        Value::Struct(structure) => {
-            let group = structure
-                .fields
-                .get("group")
-                .or_else(|| structure.fields.get("Group"))
-                .ok_or_else(|| {
-                    invalid_argument("classify: prior struct must contain group field")
-                })?;
-            let probability = structure
-                .fields
-                .get("prob")
-                .or_else(|| structure.fields.get("Prob"))
-                .ok_or_else(|| {
-                    invalid_argument("classify: prior struct must contain prob field")
-                })?;
-            if group_count(group)?.is_none() {
-                return Err(invalid_argument("classify: prior.group must be numeric, logical, string, character, or cellstr labels"));
-            }
-            preflight_numeric_vector(probability, "prior.prob")
-        }
-        other => preflight_numeric_vector(other, "prior"),
-    }
+pub(super) struct AdmittedHeader {
+    pub(super) discriminant: DiscriminantType,
+    pub(super) prior: PriorSpec,
 }
 
-fn preflight_numeric_vector(value: &Value, role: &str) -> BuiltinResult<()> {
+pub(super) fn preflight_numeric_vector(value: &Value, role: &str) -> BuiltinResult<()> {
     let shape = match value {
         Value::Tensor(tensor) => tensor.shape.as_slice(),
         Value::GpuTensor(handle) => {
@@ -131,7 +108,7 @@ fn predictor_geometry(value: &Value, role: &str) -> BuiltinResult<Option<(usize,
     )))
 }
 
-fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
+pub(super) fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
     let count = match value {
         Value::Tensor(tensor) => {
             if tensor
