@@ -52,7 +52,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[SOURCE],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Matrix, table/timetable, integer-boundary, compatibility, and output-count tests", location: "crates/runmat-runtime/src/builtins/finance/macd.rs" }],
-        notes: &["The seven legacy behavior bullets, both tabular links, source, and the MACD/signal example are retained. The example now supplies the missing priceData fixture and checks the recurrence. The former blanket double-table-output claim is corrected to match the existing native-single Close test. Native/browser/provider qualification remains an integrated gate."],
+        notes: &[],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),
