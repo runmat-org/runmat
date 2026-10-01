@@ -12,6 +12,10 @@ fn invalid_distribution_calls_fail_before_resident_provider_access() {
     // This descriptor has no registered provider. An accidental download or
     // owner selection would report ownership instead of the intended error.
     let input = Value::GpuTensor(resident.handle.clone());
+    assert_invalid_calls(input);
+}
+
+pub(super) fn assert_invalid_calls(input: Value) {
     let bad_normal = block_on(normpdf::normpdf_builtin(
         input.clone(),
         vec![Value::from("bad")],

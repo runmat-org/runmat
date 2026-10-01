@@ -3,6 +3,8 @@ use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
+mod provider_preflight;
+
 fn assert_close(actual: f64, expected: f64, tol: f64) {
     assert!(
         (actual - expected).abs() <= tol,
