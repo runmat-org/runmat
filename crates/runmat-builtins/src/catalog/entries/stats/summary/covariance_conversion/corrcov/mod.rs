@@ -5,6 +5,8 @@ mod tests;
 
 pub use entry::CORRCOV_CATALOG_ENTRY;
 
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&CORRCOV_CATALOG_ENTRY];
+
 pub(super) fn infer(
     request: &runmat_types::CallRequest,
     entry: &crate::BuiltinCatalogEntry,

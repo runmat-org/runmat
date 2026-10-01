@@ -4,12 +4,14 @@
 mod hist;
 mod missing;
 mod ml;
+mod options;
 mod random;
 mod summary;
 
 pub use self::hist::*;
 pub use self::missing::*;
 pub use self::ml::*;
+pub use self::options::*;
 pub use self::random::*;
 pub use self::summary::*;
 
@@ -17,6 +19,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     hist::extend_entries(values);
     missing::extend_entries(values);
     ml::extend_entries(values);
+    options::extend_entries(values);
     random::extend_entries(values);
     summary::extend_entries(values);
 }

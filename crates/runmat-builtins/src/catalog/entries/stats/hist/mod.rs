@@ -2,9 +2,15 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod histc;
+mod histcounts;
+mod histcounts2;
 
-pub use histc::*;
+pub use self::histc::*;
+pub use self::histcounts::*;
+pub use self::histcounts2::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(histc::ENTRIES.iter().copied());
+    values.extend(histcounts::ENTRIES.iter().copied());
+    values.extend(histcounts2::ENTRIES.iter().copied());
 }

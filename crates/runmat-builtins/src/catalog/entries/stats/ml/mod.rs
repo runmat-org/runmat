@@ -2,12 +2,34 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod confusionmat;
+mod distance_errors;
+mod distance_geometry;
+mod kmeans;
+mod knnsearch;
+mod linkage;
+mod pairwise_distance;
 mod predict;
+mod squareform;
+mod tsne;
 
-pub use confusionmat::*;
-pub use predict::*;
+pub use self::confusionmat::*;
+pub use self::distance_errors::*;
+pub use self::distance_geometry::*;
+pub use self::kmeans::*;
+pub use self::knnsearch::*;
+pub use self::linkage::*;
+pub use self::pairwise_distance::*;
+pub use self::predict::*;
+pub use self::squareform::*;
+pub use self::tsne::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(confusionmat::ENTRIES.iter().copied());
+    values.extend(kmeans::ENTRIES.iter().copied());
+    values.extend(knnsearch::ENTRIES.iter().copied());
+    values.extend(linkage::ENTRIES.iter().copied());
+    pairwise_distance::extend_entries(values);
     values.extend(predict::ENTRIES.iter().copied());
+    values.extend(squareform::ENTRIES.iter().copied());
+    values.extend(tsne::ENTRIES.iter().copied());
 }
