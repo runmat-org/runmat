@@ -1,13 +1,8 @@
 //! Evaluate piecewise-polynomial structs produced by `spline` and `pchip`.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    BuiltinErrorDescriptor, PPVAL_DESCRIPTOR, PPVAL_ERROR_INTERNAL, PPVAL_ERROR_INVALID_ARGUMENT,
+    PPVAL_ERROR_INVALID_INPUT, PPVAL_INTEGER_QUERY_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -21,98 +16,6 @@ use super::pp::{evaluate_pp, pp_from_value, query_points, Extrapolation};
 use crate::{build_runtime_error, RuntimeError};
 
 const NAME: &str = "ppval";
-
-const PPVAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Vq",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Evaluated piecewise-polynomial values at query points.",
-}];
-
-const PPVAL_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "pp",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Piecewise-polynomial struct with form/breaks/coefs fields.",
-    },
-    BuiltinParamDescriptor {
-        name: "Xq",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Query points.",
-    },
-];
-
-const PPVAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Vq = ppval(pp, Xq)",
-    inputs: &PPVAL_INPUTS,
-    outputs: &PPVAL_OUTPUT,
-}];
-
-const PPVAL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PPVAL.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ppval:InvalidArgument"),
-    when: "The piecewise-polynomial struct shape or field grammar is invalid.",
-    message: "ppval: invalid argument",
-};
-
-const PPVAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PPVAL.INVALID_INPUT",
-    identifier: Some("RunMat:ppval:InvalidInput"),
-    when: "Query points or polynomial coefficients are invalid for evaluation.",
-    message: "ppval: invalid input",
-};
-
-const PPVAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PPVAL.INTERNAL",
-    identifier: Some("RunMat:ppval:Internal"),
-    when: "Piecewise-polynomial output assembly fails due to internal tensor construction paths.",
-    message: "ppval: internal interpolation failure",
-};
-
-const PPVAL_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    PPVAL_ERROR_INVALID_ARGUMENT,
-    PPVAL_ERROR_INVALID_INPUT,
-    PPVAL_ERROR_INTERNAL,
-];
-
-pub const PPVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PPVAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PPVAL_ERRORS,
-};
-
-const PPVAL_INTEGER_QUERY_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ppval-integer-query-points",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ppval accepts typed-integer query points as a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PpvalIntegerQueryPointsExtension"),
-};
-pub const PPVAL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PPVAL_INTEGER_QUERY_EXTENSION];
-const PPVAL_INTEGER_QUERY_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Xq",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single and double query points. RunMat admits typed integers only when every value is exactly representable at the floating piecewise-polynomial boundary.",
-    }];
-pub const PPVAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Vq = ppval(pp,integer_Xq)",
-        inputs: &PPVAL_INTEGER_QUERY_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer query points are gated before gather and cross once into the polynomial evaluation domain.",
-    }];
 
 fn ppval_error_with_message(
     message: impl Into<String>,
@@ -153,27 +56,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "ppval is currently a runtime sink.",
 };
 
-fn ppval_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    match args.get(1) {
-        Some(Type::Num | Type::Int | Type::Bool) => Type::Num,
-        Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        _ => Type::tensor(),
-    }
-}
-
 #[runtime_builtin(
     name = "ppval",
-    category = "math/interpolation",
-    summary = "Evaluate a piecewise-polynomial structure at query points.",
-    keywords = "ppval,piecewise polynomial,spline,pchip",
-    accel = "sink",
-    sink = true,
-    type_resolver(ppval_type),
-    descriptor(crate::builtins::math::interpolation::ppval::PPVAL_DESCRIPTOR),
-    extensions(crate::builtins::math::interpolation::ppval::PPVAL_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::interpolation::ppval::PPVAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::interpolation::ppval"
 )]
 async fn ppval_builtin(pp: Value, xq: Value) -> crate::BuiltinResult<Value> {
