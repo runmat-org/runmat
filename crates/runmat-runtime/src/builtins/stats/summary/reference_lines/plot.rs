@@ -133,6 +133,25 @@ mod tests {
         });
         assert_eq!(y, (1.0e308, 1.5e308));
     }
+
+    #[test]
+    fn opposite_signed_extreme_fit_has_finite_line_endpoints() {
+        let (slope, intercept) = super::super::fit::least_squares_coefficients(
+            &[-f64::MAX, f64::MAX],
+            &[f64::MAX, -f64::MAX],
+            ReferenceLineOwner::Lsline,
+        )
+        .unwrap()
+        .unwrap();
+        let endpoints = line_endpoints(ReflineLineSpec {
+            slope,
+            intercept,
+            x_span: (-f64::MAX, f64::MAX),
+        });
+        assert!(endpoints.0.is_finite() && endpoints.1.is_finite());
+        assert!((endpoints.0 / f64::MAX - 1.0).abs() < 1.0e-12);
+        assert!((endpoints.1 / -f64::MAX - 1.0).abs() < 1.0e-12);
+    }
 }
 
 fn finite_or_padded_span(min: f64, max: f64) -> Option<(f64, f64)> {

@@ -185,6 +185,19 @@ mod tests {
     }
 
     #[test]
+    fn opposite_signed_extrema_use_finite_absolute_scale_fallback() {
+        let (slope, intercept) = least_squares_coefficients(
+            &[-f64::MAX, f64::MAX],
+            &[f64::MAX, -f64::MAX],
+            ReferenceLineOwner::Lsline,
+        )
+        .unwrap()
+        .unwrap();
+        assert!((slope + 1.0).abs() < 1.0e-12);
+        assert!(intercept.abs() < 1.0e292);
+    }
+
+    #[test]
     fn mismatched_plot_coordinates_are_not_silently_truncated() {
         let error = least_squares_coefficients(&[1.0, 2.0], &[1.0], ReferenceLineOwner::Lsline)
             .expect_err("partial XY sources are invalid");
